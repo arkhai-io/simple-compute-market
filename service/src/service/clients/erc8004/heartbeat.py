@@ -30,6 +30,7 @@ async def send_heartbeat(
     agent_id: str,
     indexer_url: str,
     private_key: Optional[str] = None,
+    bearer_token: Optional[str] = None,
 ) -> bool:
     """
     Send heartbeat to Indexer to indicate agent is alive.
@@ -40,6 +41,8 @@ async def send_heartbeat(
         agent_id: Agent ID (from Indexer registration)
         indexer_url: Indexer API URL
         private_key: Private key for signing heartbeat (optional if agent has no owner)
+        bearer_token: Optional shared-secret token sent as Authorization: Bearer.
+            Required by private registries that gate writes behind a token.
 
     Returns:
         True if successful, False otherwise
@@ -60,12 +63,17 @@ async def send_heartbeat(
         # URL-encode the agent_id for use in path parameter (handles canonical IDs with colons)
         encoded_agent_id = urllib.parse.quote(agent_id, safe='')
 
+        headers: dict[str, str] = {}
+        if bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
+
         if HAS_AIOHTTP:
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.post(
                         f"{indexer_url.rstrip('/')}/agents/{encoded_agent_id}/heartbeat",
                         json=body,
+                        headers=headers or None,
                         timeout=aiohttp.ClientTimeout(total=5)
                     ) as response:
                         if response.status == 200:
@@ -91,10 +99,13 @@ async def send_heartbeat(
                 logger.warning(f"[HEARTBEAT] Timeout sending heartbeat to {indexer_url} for agent {agent_id}")
                 return False
         else:
+            urllib_headers = {'Content-Type': 'application/json'}
+            if bearer_token:
+                urllib_headers['Authorization'] = f"Bearer {bearer_token}"
             req = urllib.request.Request(
                 f"{indexer_url.rstrip('/')}/agents/{encoded_agent_id}/heartbeat",
                 data=json.dumps(body).encode('utf-8'),
-                headers={'Content-Type': 'application/json'},
+                headers=urllib_headers,
                 method='POST'
             )
             try:
@@ -127,6 +138,7 @@ async def heartbeat_loop(
     agent_id: Optional[str],
     indexer_url: str,
     private_key: Optional[str] = None,
+    bearer_token: Optional[str] = None,
 ):
     """
     Background task to periodically send heartbeats to Indexer.
@@ -135,6 +147,7 @@ async def heartbeat_loop(
         agent_id: Agent ID from registration (None if not registered)
         indexer_url: Indexer API URL
         private_key: Private key for signing heartbeats (optional)
+        bearer_token: Optional shared-secret token for the Authorization header.
     """
     if agent_id is None:
         logger.debug("[HEARTBEAT] No agent ID, skipping heartbeat loop")
@@ -152,7 +165,7 @@ async def heartbeat_loop(
     # heartbeat, anything the seller does in the first minute after a
     # fresh restart hits a 404 from the registry's HTTP API.
     try:
-        success = await send_heartbeat(agent_id, indexer_url, private_key)
+        success = await send_heartbeat(agent_id, indexer_url, private_key, bearer_token)
         if success:
             logger.info(f"[HEARTBEAT] Initial heartbeat sent for agent {agent_id}")
     except Exception as e:
@@ -161,7 +174,7 @@ async def heartbeat_loop(
     while True:
         try:
             await asyncio.sleep(HEARTBEAT_INTERVAL)
-            success = await send_heartbeat(agent_id, indexer_url, private_key)
+            success = await send_heartbeat(agent_id, indexer_url, private_key, bearer_token)
             if success:
                 logger.info(f"[HEARTBEAT] Heartbeat sent successfully for agent {agent_id}")
         except asyncio.CancelledError:
@@ -180,9 +193,11 @@ async def start_agent_heartbeat(config: dict) -> Optional[str]:
         config: dict with keys: indexer_urls (list[str]) or legacy
                 indexer_url (str), identity_registry_address,
                 agent_wallet_address, onchain_agent_id, chain_rpc_url,
-                agent_priv_key. With multiple URLs, one independent
-                heartbeat task is spawned per registry so a slow
-                registry can't gate heartbeats to the others.
+                agent_priv_key, indexer_auth (dict[str, str] mapping
+                indexer URL -> bearer token for private registries).
+                With multiple URLs, one independent heartbeat task is
+                spawned per registry so a slow registry can't gate
+                heartbeats to the others.
     """
     indexer_urls = config.get("indexer_urls")
     if not indexer_urls:
@@ -198,6 +213,7 @@ async def start_agent_heartbeat(config: dict) -> Optional[str]:
     onchain_agent_id = config.get("onchain_agent_id")
     chain_rpc_url = config.get("chain_rpc_url")
     agent_priv_key = config.get("agent_priv_key")
+    indexer_auth = config.get("indexer_auth") or {}
 
     if not indexer_urls or not identity_registry_address:
         return None
@@ -238,7 +254,8 @@ async def start_agent_heartbeat(config: dict) -> Optional[str]:
     )
 
     for url in indexer_urls:
-        asyncio.create_task(heartbeat_loop(canonical_id, url, agent_priv_key))
+        token = indexer_auth.get(url) if isinstance(indexer_auth, dict) else None
+        asyncio.create_task(heartbeat_loop(canonical_id, url, agent_priv_key, token))
     logger.info(
         "[HEARTBEAT] Started heartbeat for %s across %d registry/registries: %s",
         canonical_id, len(indexer_urls), indexer_urls,

@@ -37,7 +37,7 @@ template:
 ## Verify structural invariants of the rendered chart without needing
 ## a real cluster. Runs `helm template` against the umbrella chart and
 ## asserts the storefront ConfigMap/Secret split layout — per-agent
-## ConfigMap holds config.toml, Secret holds config.secrets.toml,
+## ConfigMap holds storefront.toml, Secret holds storefront.secrets.toml,
 ## Deployment mounts both at /etc/arkhai/ with independent checksums,
 ## and no sensitive keys leak across the boundary. Stable across
 ## cosmetic chart edits (no byte-level snapshots).

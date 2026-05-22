@@ -1,138 +1,79 @@
 # Buyer quickstart
 
-How to install the `market` CLI, configure it to talk to one or more
-indexer registries, find listings, buy compute on Base Sepolia, and SSH
-into the leased VM.
+Install the `market` CLI, point it at an indexer, find a listing, buy
+compute on Base Sepolia, and SSH into the leased VM.
 
-This assumes someone (you, a friend, or a public operator) has already
-deployed a seller stack — see [`seller-quickstart.md`](./seller-quickstart.md)
-if not.
-
----
-
-## What you'll have at the end
-
-- The `market` console script on your `PATH`.
-- A `~/.config/arkhai/config.toml` with your Base Sepolia wallet, your SSH
-  key, and the URL(s) of one or more indexer registries you want to
-  search.
-- A working `market buy --gpu-model H200 --duration-hours 1` flow that
-  ends with you SSH'd into a fresh Ubuntu VM, billed in USDC on chain.
+For the seller side see [`seller-quickstart.md`](./seller-quickstart.md).
 
 ## Prerequisites
 
 - Linux or macOS (Windows: WSL).
 - Python 3.12+.
-- Ethereum wallet on Base Sepolia with **test ETH** (for gas) and
-  **whatever token the seller accepts** (typically USDC test funds from
+- A Base Sepolia wallet with test ETH (for gas) and whatever ERC-20 the
+  seller accepts (USDC test funds from
   [faucet.circle.com](https://faucet.circle.com)).
-- A Base Sepolia RPC URL. `https://sepolia.base.org` works for one-off
-  buys; for sustained use get an Infura or Alchemy key.
-- An SSH keypair you'll use to log into leased VMs. If you don't have
-  one yet:
+- A Base Sepolia RPC URL (`https://sepolia.base.org` works for one-offs;
+  Infura/Alchemy otherwise).
+- An SSH keypair for leased VMs:
 
   ```bash
   ssh-keygen -t ed25519 -N "" -f ~/.ssh/mms_buyer_id_ed25519
   ```
 
-  Treat this like any other personal SSH key. The pubkey gets injected
-  into every VM you lease via cloud-init.
+  The pubkey gets injected into every VM you lease via cloud-init.
 
-## 1. Install the CLI
+## 1. Install
 
-Three options:
-
-### a) From the install script (release builds, recommended)
+From a release build:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/.../market-installer.sh | bash
 ```
 
-Details in [`buyer/INSTALLER.md`](../buyer/INSTALLER.md). Drops a `market`
-binary in `~/.local/bin` (or `/usr/local/bin` with `sudo`).
+Details in [`buyer/INSTALLER.md`](../buyer/INSTALLER.md).
 
-### b) Development install from the repo
+Or from the repo:
 
 ```bash
 git clone https://github.com/arkhai-io/simple-compute-market.git
 cd simple-compute-market
 make build-buyer
-# the wrapper at ./buyer/.venv/bin/market is what `make install-buyer` symlinks
-```
-
-If you skip `make install-buyer`, add the venv directly:
-
-```bash
 export PATH="$PWD/buyer/.venv/bin:$PATH"
 market --version
 ```
 
-### c) Inside an existing Python project
-
-```bash
-uv pip install -e ./buyer  # path to the buyer subtree
-```
-
 ## 2. Configure
 
-`market` reads `$XDG_CONFIG_HOME/arkhai/config.toml` — that's
-`~/.config/arkhai/config.toml` on Linux/macOS. Scaffold a starter:
-
-```bash
-market config init-user
-```
-
-Or just create it directly. Minimal working config:
+`market` reads `~/.config/arkhai/buyer.toml`. Scaffold with
+`market config init-user` or write directly:
 
 ```toml
 [wallet]
-address     = "0xYourBuyerAddress"
-private_key = "0xYourBuyerPrivateKey"
-# The pubkey you generated above. Gets injected into VMs you lease.
-ssh_public_key = "ssh-ed25519 AAAA…buyer@host"
+private_key    = "0x<YOUR_BUYER_PRIVATE_KEY>"
+ssh_public_key = "ssh-ed25519 AAAA...your-key buyer@host"
 
 [chain]
-name     = "base_sepolia"
 chain_id = 84532
 rpc_url  = "https://base-sepolia.infura.io/v3/<YOUR_KEY>"
 
 [registry]
-# One or more indexer URLs. The CLI discovers listings by fanning out
-# queries to every URL listed here.
 urls = ["http://<INDEXER_HOST>:8080"]
-# identity_registry_address — defaults to the canonical CREATE2 vanity
-# address for the chain.name above. Set this only if you deployed the
-# ERC-8004 registry to a non-canonical address.
 
 [registry.auth]
-# Only needed for indexers running with REGISTRY_REQUIRE_API_KEY=true.
-# The seller operating that indexer hands you a bearer token. Omit
-# entirely for fully public indexers. Keys must match URLs in
-# [registry] urls verbatim (scheme, host, port, no trailing slash).
-"http://<INDEXER_HOST>:8080" = "shared-bootstrap-token"
+# Required when the indexer runs with REGISTRY_REQUIRE_API_KEY=true.
+# Keys must match the URLs in [registry] urls exactly (scheme, host,
+# port, no trailing slash).
+"http://<INDEXER_HOST>:8080" = "<your-token>"
 
 [buyer]
-# 0x ERC-20 address used when `market buy` has no --token-contract.
-# Decimals + symbol are resolved on chain via [chain].rpc_url and
-# cached at $XDG_CACHE_HOME/arkhai/tokens/<chain_id>.json.
 default_token_address = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 
 [buyer.negotiation]
-# "bisection" doesn't need torch installed. The default is "rl" which
-# pulls in torch ~ 1GB.
-policy_mode   = "bisection"
+# Bisection avoids a ~1GB torch download. Switch to "rl" if you want it.
+policy_mode = "bisection"
 ```
 
-Two things that will bite you if you skip them:
-
-- **`ssh_public_key`** — without it, `market settle` fails before
-  reaching the seller because the cloud-init injection has no key to
-  send.
-- **`[registry.auth]` keys exactly matching `[registry] urls`** — case,
-  scheme, port, no trailing slash. A mismatch silently sends
-  unauthenticated requests and you get 401s.
-
-## 3. Browse what's for sale
+## 3. Browse
 
 ```bash
 market listing list
@@ -140,12 +81,7 @@ market listing list --gpu-model H200
 market listing show <listing_id>
 ```
 
-`list` queries every URL in `[registry] urls` in parallel, dedupes, and
-prints the union. `show` digs into one listing — what's offered, what
-escrows are accepted, the seller URL, max duration.
-
-If the registry is private and you forgot `[registry.auth]`, you'll see
-`401 Unauthorized` here.
+`list` queries every URL in `[registry] urls` in parallel and dedupes.
 
 ## 4. Buy
 
@@ -154,109 +90,74 @@ market buy \
   --gpu-model H200 \
   --duration-hours 1 \
   --price-markup 1.5 \
-  --yes \
   --settlement-timeout 1800 \
-  --poll-interval 10
+  --yes
 ```
 
-What that does:
+The CLI discovers a matching listing, negotiates via bisection, locks
+escrow on chain, and polls until the seller returns
+`status: ready` with VM credentials.
 
-1. **Discover** — query all indexers, filter for `gpu_model=H200`.
-2. **Aggregate** — pick the best match per `best_price` policy.
-3. **Negotiate** — open a bid against the seller; bisection-converge to
-   an agreed price.
-4. **Escrow** — create an on-chain ERC-20 escrow attestation locking
-   `agreed_price × duration_seconds / 3600` raw token units to the
-   seller.
-5. **Settle** — POST the escrow uid to the seller, who validates it on
-   chain and (in live mode) drives the provisioning ansible playbook.
-6. **Poll** — wait for the seller to return `status: ready` with VM
-   credentials.
+Useful flags:
 
-Output ends with a "Settlement complete" table including a `Connection`
-field. The juicy bit:
+- `--initial-price` / `--max-price` — both required if either given;
+  bid range in human / whole-token units per hour (USDC: `--max-price 2`
+  = $2/hr; the CLI scales by the token's on-chain `decimals()`).
+- `--gpu-count-min`, `--region`, `--vcpu-min`, `--ram-gb-min`,
+  `--disk-gb-min` — additional listing filters.
+- `--settlement-timeout` — default 600s. Real cloud-init can take 5-10
+  min; bump to 1800 if you see timeouts before progress.
+- `--token-contract` + `--token-decimals` — override config and skip
+  the on-chain `decimals()` lookup.
 
-```
-"ssh_command": "ssh -i <your_private_key> -p 27978 tenant1ef9@btc1"
-```
-
-The `tenant1ef9@btc1` part is mostly cosmetic — `btc1` is the seller's
-inventory alias for the host, not its DNS name. Use the
-`vm_host_ip` field from the same response, or substitute the seller's
-public IP yourself:
+The terminal output includes a `Connection` block. Use the `vm_host_ip`
+field (the printed `ssh_command` references the inventory alias, not the
+DNS name):
 
 ```bash
-ssh -i ~/.ssh/mms_buyer_id_ed25519 -p 27978 tenant1ef9@<seller_public_ip>
+ssh -i ~/.ssh/mms_buyer_id_ed25519 -p <port> tenant<id>@<vm_host_ip>
 ```
-
-You should land in a fresh Ubuntu 24.04 VM. Welcome.
-
-### Useful flags
-
-- `--initial-price` / `--max-price` — paired; explicit bid range in raw
-  token base units per hour. Omit both to derive from the seller's
-  advertised min_price (`× --price-markup`, default 1.5).
-- `--gpu-model`, `--gpu-count-min`, `--region`, `--vcpu-min`, `--ram-gb-min`,
-  `--disk-gb-min` — `market listing list` filters.
-- `--settlement-timeout` (default 600s) — provisioning timeout. Fresh
-  Ubuntu cloud-init + apt installs can take 5-10 min on a slow link;
-  bump to 1800 if you're seeing timeouts before any progress.
-- `--token-contract` + `--token-decimals` — override
-  `[buyer].default_token_address` and skip the chain `decimals()`
-  lookup. Useful for one-off buys against a token you haven't put in
-  config.
 
 ## 5. Resume an interrupted buy
 
-Every `market buy` writes a JSONL run log to
-`$XDG_STATE_HOME/arkhai/buy-runs/<run_id>.jsonl`. If `buy` crashes after
-escrow creation but before settle completes, you can resume:
+Every `market buy` writes a JSONL run log at
+`~/.local/state/arkhai/buy-runs/<run_id>.jsonl`:
 
 ```bash
-market logs runs                  # list past runs and their last status
-market logs show <run_id>         # show full event log for one run
-market settle --from <run_id>     # resume from where it died
+market logs runs                  # list past runs + last status
+market logs show <run_id>         # full event log for one run
+market settle --from <run_id>     # resume after a crash
 ```
 
-`settle --from` re-reads the run log, finds the escrow uid that was
-already created on chain, and re-POSTs to the seller. Use this whenever
-the buy timed out on the buyer side but the seller is still
-provisioning.
+If `buy` crashed after escrow creation but before settle, **always**
+`settle --from` — re-running `buy` against the same listing creates a
+second escrow and locks more funds.
 
 ## 6. Tear down
 
 Leases auto-expire at `agreed_duration_seconds`. The seller's lease
-watchdog will shut down the VM, release the resource, and either claim
-the escrow (if the buyer's escrow is claimable) or refund.
+watchdog releases the resource and either claims or refunds the escrow
+once the timeout passes.
 
-To exit early:
+To exit early after `expiration_unix`:
 
 ```bash
 market escrow reclaim <escrow_uid>
 ```
 
-(Only works after the escrow's `expiration_unix` has passed — the
-escrow contract enforces a timeout, not buyer-driven cancel.)
+## Common pitfalls
 
-## Common sharp edges
-
-- **`--initial-price` xor `--max-price`** is rejected. Pass both or
-  neither (defaults derive from seller min_price).
-- **Prices are raw token base units, per hour.** For USDC (6 decimals),
-  2 USDC/hr = `--max-price 2000000`, not `--max-price 2`. The buyer
-  CLI's help text says "raw token units" but it's easy to miss.
-- **`market buy` and `market settle` are not idempotent on chain.** A
-  buy that fails after escrow creation but before settle locks your
-  funds in the escrow until the expiration timestamp. Always
-  `market settle --from <run_id>` rather than re-running `market buy`
-  on the same listing if you've already created an escrow.
-- **VM SSH is direct on the host's public IP, not via the inventory
-  alias** the seller's response printed. The `vm_host_ip` field has the
-  real IP.
-- **VM tenant user does not have a sudo password.** Cloud-init only
-  injects your SSH pubkey; root sudo is configured for a separate root
-  user. If you need `sudo` you'll have to negotiate that with the
-  seller out-of-band or wait for the role-aware provisioning flow.
-- **Switching policy from `rl` to `bisection`** (in `[buyer.negotiation]`)
-  saves ~1GB of torch download on `make build-buyer`. Bisection is also
-  more predictable for testing.
+- **Prices on the CLI are human / whole-token units per hour.** `2`
+  with 6-decimal USDC = $2/hr. Run-log entries record post-scaling
+  base units.
+- **`market buy` and `settle` are not idempotent on chain.** A buy
+  that fails after escrow creation locks funds until `expiration_unix`.
+  Resume with `settle --from <run_id>`, don't re-`buy`.
+- **VM SSH uses `vm_host_ip`, not the alias** the `ssh_command` field
+  prints (`tenant<id>@btc1` etc. — the host name is the seller's
+  inventory alias, not DNS).
+- **The tenant user has no sudo password.** Cloud-init only injects
+  your SSH pubkey.
+- **`[registry.auth]` keys must match `[registry] urls` exactly** —
+  scheme, host, port, no trailing slash. Mismatch silently sends
+  unauthenticated requests, you get 401s.

@@ -110,20 +110,39 @@ def _run_resume_from(
             )
             raise typer.Exit(2)
 
-        addr = resolve_config_value(
-            override=buyer_address, toml_path="wallet.address",
-        )
-        pk = resolve_config_value(
-            override=buyer_private_key, toml_path="wallet.private_key",
+        from ..common import resolve_buyer_wallet
+        addr, pk = resolve_buyer_wallet(
+            override_addr=buyer_address, override_pk=buyer_private_key,
         )
         if not addr or not pk:
             typer.secho(
-                "Missing buyer wallet config. Pass --buyer-address + "
-                "--buyer-priv-key or set wallet.address + "
-                "wallet.private_key in config.toml.",
+                "Missing buyer wallet config. Pass --buyer-priv-key or set "
+                "wallet.private_key in config.toml; the address is derived "
+                "from the key.",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(2)
+
+        # Scale --max-price from human / whole-token units to base units.
+        # Sellers publish ``price_per_hour`` already in base units, so a
+        # buyer ceiling of "2" against 6-decimal USDC means $2/hr → 2_000_000.
+        # Resolve token_decimals via the user override or on-chain decimals().
+        if token_decimals is None:
+            from ..common import resolve_default_token_address, resolve_chain_id
+            from service.clients.token import resolve_token, TokenResolutionError
+            tc_for_decimals = token_contract or resolve_default_token_address()
+            if tc_for_decimals:
+                try:
+                    meta = resolve_token(
+                        tc_for_decimals,
+                        rpc_url=rpc_url,
+                        chain_id=resolve_chain_id(rpc_url),
+                    )
+                    token_decimals = meta.decimals
+                except (TokenResolutionError, RuntimeError):
+                    token_decimals = None
+        if token_decimals is not None:
+            max_price = max_price * (10 ** int(token_decimals))
 
         resume_point = load_negotiation_resume_point(from_run)
         run_log = open_run_log(from_run)
@@ -239,17 +258,20 @@ def register(app: typer.Typer) -> None:
     def buy(
         initial_price: Optional[float] = typer.Option(
             None, "--initial-price",
-            help="Opening bid per negotiation (raw token units, per-hour rate). "
-                 "Optional — when omitted, prices are derived from the "
-                 "seller's advertised min_price (interactively confirmed "
-                 "in TTY runs, derived silently with --yes).",
+            help="Opening bid per negotiation in human / whole-token units, "
+                 "per-hour rate. Scaled by the token's on-chain decimals "
+                 "before being sent (so --initial-price 2 against 6-decimal "
+                 "USDC means $2/hr). Optional — when omitted, prices are "
+                 "derived from the seller's advertised min_price (interactively "
+                 "confirmed in TTY runs, derived silently with --yes).",
         ),
         max_price: Optional[float] = typer.Option(
             None, "--max-price",
-            help="Ceiling per negotiation (raw token units, per-hour rate). "
-                 "Optional — when omitted, derived as min_price × "
-                 "--price-markup (interactively confirmed in TTY runs, "
-                 "derived silently with --yes).",
+            help="Ceiling per negotiation in human / whole-token units, "
+                 "per-hour rate. Scaled by the token's on-chain decimals "
+                 "before being sent. Optional — when omitted, derived as "
+                 "min_price × --price-markup (interactively confirmed in TTY "
+                 "runs, derived silently with --yes).",
         ),
         price_markup: float = typer.Option(
             1.5, "--price-markup",
@@ -434,16 +456,14 @@ def register(app: typer.Typer) -> None:
             typer.secho("--price-markup must be positive.", err=True, fg=typer.colors.RED)
             raise typer.Exit(2)
 
-        # Resolution: CLI flag > config.toml > default.
-        addr = resolve_config_value(
-            override=buyer_address, toml_path="wallet.address",
-        )
-        pk = resolve_config_value(
-            override=buyer_private_key, toml_path="wallet.private_key",
-        )
+        # Resolution: CLI flag > config.toml > derivation > default.
         from ..common import (
+            resolve_buyer_wallet, resolve_chain_name,
             resolve_ssh_public_key, resolve_indexer_urls,
             resolve_discovery_timeout, resolve_indexer_auth,
+        )
+        addr, pk = resolve_buyer_wallet(
+            override_addr=buyer_address, override_pk=buyer_private_key,
         )
         ssh = resolve_ssh_public_key(override=ssh_public_key)
         reg_urls = resolve_indexer_urls(override=registry_urls)
@@ -452,24 +472,20 @@ def register(app: typer.Typer) -> None:
         rpc = resolve_config_value(
             override=rpc_url, toml_path="chain.rpc_url",
         )
-        chain = resolve_config_value(
-            override=chain_name, toml_path="chain.name",
-            default="ethereum_sepolia",
-        )
+        chain = resolve_chain_name(override=chain_name, rpc_url=rpc)
         addr_cfg = resolve_config_value(
             override=alkahest_addr_config,
             toml_path="chain.alkahest_address_config_path",
         )
 
         _key_for = {
-            "buyer_address": "wallet.address",
             "buyer_priv_key": "wallet.private_key",
             "ssh_public_key": "wallet.ssh_public_key",
             "registry_urls": "registry.urls",
             "rpc_url": "chain.rpc_url",
         }
         missing = [n for n, v in (
-            ("buyer_address", addr), ("buyer_priv_key", pk),
+            ("buyer_priv_key", pk),
             ("ssh_public_key", ssh), ("registry_urls", reg_urls),
             ("rpc_url", rpc),
         ) if not v]
@@ -514,6 +530,18 @@ def register(app: typer.Typer) -> None:
                     err=True, fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
+
+        # Scale user-provided --initial-price / --max-price from human /
+        # whole-token units to on-chain base units. Sellers publish
+        # ``price_per_hour`` already in base units (see
+        # storefront's cli_publish scaling), so explicit buyer prices
+        # need the same scaling to compare apples-to-apples. Auto-derived
+        # prices (when not explicit) come straight from the seller's
+        # listing and are already in base units — no scaling needed.
+        if explicit_prices:
+            scale = 10 ** int(token_decimals)
+            initial_price = initial_price * scale
+            max_price = max_price * scale
 
         # Build the escrow-terms builder + on-chain submit hook. The
         # builder materializes the negotiation outcome into EscrowTerms

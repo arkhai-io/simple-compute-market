@@ -39,6 +39,21 @@ def rpc_url_for_http_provider(rpc_url: str) -> str:
     return urlunparse(parsed)
 
 
+def get_identity_registry_contract(w3, identity_registry_address: str):
+    """Return a web3 Contract bound to the IdentityRegistry at the given address.
+
+    Uses the vendored FULL_IDENTITY_REGISTRY_ABI so callers can invoke
+    standard ERC-721-ish views (ownerOf, balanceOf, tokenURI) plus the
+    ERC-8004 extensions.
+    """
+    from .abi import FULL_IDENTITY_REGISTRY_ABI
+    from web3 import Web3
+    return w3.eth.contract(
+        address=Web3.to_checksum_address(identity_registry_address),
+        abi=FULL_IDENTITY_REGISTRY_ABI,
+    )
+
+
 def build_erc8004_canonical_id(chain_id: int, identity_registry: str, agent_id: int) -> str:
     """
     Build ERC-8004 canonical ID from components.

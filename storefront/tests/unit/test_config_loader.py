@@ -27,7 +27,11 @@ def test_settings_toml_provides_baseline_defaults():
     s = agent_config.settings
     assert s.port == 8000
     assert s.chain.name == "ethereum_sepolia"
-    assert s.registry.urls == ["http://localhost:8080"]
+    # registry.urls intentionally defaults to [] — see settings.toml. Shipping
+    # a non-empty default would cause dynaconf's merge_enabled=True to *append*
+    # any user-supplied list rather than replace it, leaving the storefront
+    # heartbeating to both the default and the user's registry.
+    assert s.registry.urls == []
     assert s.registry.discovery_timeout == 5.0
     assert s.provisioning.service_url == "http://localhost:8085"
     assert s.provisioning.timeout == 3600
@@ -192,3 +196,118 @@ def test_nested_env_var_via_double_underscore(tmp_path, monkeypatch):
     monkeypatch.setenv("STOREFRONT_CHAIN__RPC_URL", "http://env-host:8545")
     cfg = _build_isolated(tmp_path, [])
     assert cfg.chain.rpc_url == "http://env-host:8545"
+
+
+# ---------------------------------------------------------------------------
+# _build_settings derivation: wallet.address from private_key, chain.name
+# from rpc_url. These run the production builder so the post-process logic
+# is covered end-to-end.
+# ---------------------------------------------------------------------------
+
+
+_ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+_ANVIL_ADDR = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+
+
+def test_build_settings_derives_wallet_address_from_private_key(tmp_path, monkeypatch):
+    """When wallet.private_key is set but wallet.address is empty, the
+    builder fills wallet.address with the derived value. No RPC needed."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text(f"""
+[wallet]
+private_key = "{_ANVIL_KEY}"
+""")
+    cfg = agent_config._build_settings()
+    assert cfg.wallet.address == _ANVIL_ADDR
+    assert cfg.wallet.private_key == _ANVIL_KEY
+
+
+def test_build_settings_preserves_explicit_wallet_address(tmp_path, monkeypatch, caplog):
+    """When both wallet.address and wallet.private_key are set and they
+    disagree, the configured address wins but a warning is logged."""
+    import logging
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text(f"""
+[wallet]
+private_key = "{_ANVIL_KEY}"
+address     = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+""")
+    with caplog.at_level(logging.WARNING, logger="market_storefront.utils.config"):
+        cfg = agent_config._build_settings()
+    assert cfg.wallet.address == "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+    assert any("does not match" in rec.message for rec in caplog.records)
+
+
+def test_build_settings_skips_derivation_when_both_unset(tmp_path, monkeypatch):
+    """Empty wallet.private_key → no derivation; wallet.address stays empty."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    # No overlay file at all.
+    cfg = agent_config._build_settings()
+    assert cfg.wallet.address == ""
+    assert cfg.wallet.private_key == ""
+
+
+def test_build_settings_derives_chain_name_from_rpc(tmp_path, monkeypatch):
+    """When chain.name is empty but chain.rpc_url is set, the builder
+    asks the RPC for chain_id and reverse-maps to the canonical name."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text("""
+[chain]
+rpc_url = "http://localhost:8545"
+""")
+
+    def _urlopen(req, timeout=None):
+        import json
+        payload = json.dumps({"jsonrpc": "2.0", "id": 1, "result": "0x14a34"}).encode()  # 84532
+
+        class _R:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return payload
+
+        return _R()
+
+    monkeypatch.setattr("urllib.request.urlopen", _urlopen)
+    cfg = agent_config._build_settings()
+    assert cfg.chain.name == "base_sepolia"
+
+
+def test_build_settings_chain_name_falls_back_when_rpc_unreachable(
+    tmp_path, monkeypatch,
+):
+    """If chain.name is empty and the eth_chainId call fails, the
+    builder uses 'ethereum_sepolia' as the legacy default rather than
+    leaving chain.name empty (which would break downstream switches)."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text("""
+[chain]
+rpc_url = "http://broken.example"
+""")
+
+    def _raise(*a, **kw):
+        raise OSError("network down")
+
+    monkeypatch.setattr("urllib.request.urlopen", _raise)
+    cfg = agent_config._build_settings()
+    assert cfg.chain.name == "ethereum_sepolia"
+
+
+def test_build_settings_chain_name_no_rpc_uses_default(tmp_path, monkeypatch):
+    """No rpc_url, no explicit chain.name → fall back to 'ethereum_sepolia'."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg = agent_config._build_settings()
+    assert cfg.chain.name == "ethereum_sepolia"

@@ -19,7 +19,7 @@ config_app = typer.Typer(no_args_is_help=True)
 
 @config_app.command("path")
 def config_path() -> None:
-    """Print the path of the user config.toml (whether or not it exists)."""
+    """Print the path of the buyer.toml (whether or not it exists)."""
     p = user_config_file()
     typer.echo(str(p))
     if not p.exists():
@@ -53,7 +53,7 @@ def config_set(
     key: str = typer.Argument(..., help="Dotted config key, e.g. 'chain.rpc_url'."),
     value: str = typer.Argument(..., help="Value to assign (coerced to int/float/bool when possible)."),
 ) -> None:
-    """Set a single value in the user config.toml.
+    """Set a single value in the buyer.toml.
 
     Values are coerced: 'true' / 'false' → bool, integer-looking strings → int,
     float-looking strings → float, otherwise left as strings. Use quotes around
@@ -83,7 +83,7 @@ def config_set(
 def config_get(
     key: str = typer.Argument(..., help="Dotted config key, e.g. 'chain.rpc_url'."),
 ) -> None:
-    """Print the value of a single config key from the user config.toml."""
+    """Print the value of a single config key from the buyer.toml."""
     doc = load_user_config()
     val = get_dotted(doc, key)
     if val is None:
@@ -99,40 +99,39 @@ def config_get(
 
 
 _INIT_USER_TEMPLATE = """\
-# arkhai user config — see `market config path` for this file's location.
-# Every key here is optional and the resolver falls back to built-in
-# defaults when a key is missing. Buyers only need [wallet], [chain],
-# and [registry]; seller-only keys are commented out below.
-
-# ---------------------------------------------------------------------------
-# Shared (buyer + seller read these)
-# ---------------------------------------------------------------------------
+# arkhai buyer config — see `market config path` for this file's location
+# ($XDG_CONFIG_HOME/arkhai/buyer.toml). Every key is optional; the resolver
+# falls back to built-in defaults when a key is missing. The storefront
+# server and `market-storefront` CLI read a separate `storefront.toml` in
+# the same dir.
 
 [wallet]
-# address = "0x0000000000000000000000000000000000000000"
+# address = "0x0000000000000000000000000000000000000000"  # auto-derived from private_key when omitted
 # private_key = "0x..."
 # ssh_public_key = "ssh-ed25519 AAAA... user@host"
 
 [chain]
-# name = "ethereum_sepolia"                    # ethereum_sepolia | base_sepolia | anvil
+# name = "ethereum_sepolia"                    # auto-derived from rpc_url via eth_chainId when omitted
+                                                # (anvil | base_sepolia | ethereum_sepolia | ethereum_mainnet
+                                                # | filecoin_calibration). Set explicitly for unknown chain IDs.
 # rpc_url = "https://sepolia.base.org"
 # alkahest_address_config_path = "/path/to/alkahest.json"  # required for anvil
 
 [registry]
-# url = "http://localhost:8080"
+# urls = ["http://localhost:8080"]             # one or more indexer URLs to discover listings from.
 # identity_registry_address = "0x..."          # ERC-8004 IdentityRegistry. Auto-defaults from chain.name
                                                 # to the canonical CREATE2 vanity address; set only for
                                                 # non-canonical deployments.
 
-# ---------------------------------------------------------------------------
-# Buyer-only (read by `market buy` / `market negotiate` / `market settle`)
-# ---------------------------------------------------------------------------
+[registry.auth]
+# Free-form table of {url = "bearer-token"}. Keys must match `urls` above
+# verbatim (scheme, host, port, no trailing slash). Empty = public.
 
-# [buyer]
+[buyer]
 # default_token_address = "0x..."              # 0x ERC-20 address used when --token-contract is omitted.
                                                 # Decimals + symbol are resolved on chain via [chain].rpc_url.
 
-# [buyer.aggregation]
+[buyer.aggregation]
 # policy = "best_price"                        # across-seller match policy: best_price (default) |
                                                 # fastest_agreed | cheapest_first | registry_order |
                                                 # random_shuffle | priceless_last | any custom name registered
@@ -148,23 +147,7 @@ _INIT_USER_TEMPLATE = """\
                                                 # deadline are cancelled and the lowest agreed price among
                                                 # those that completed wins. Unset = wait for all.
 
-# ---------------------------------------------------------------------------
-# Seller-only — uncomment the [seller] sections only on a host that runs
-# `market-storefront serve`. The `market` CLI ignores them.
-# ---------------------------------------------------------------------------
-
-# [seller]
-# agent_id = "alice"                           # must be a valid Python identifier
-# port = 8000
-# base_url = "http://alice:8000"
-# db_path = "/var/lib/arkhai/agent.db"
-# log_file_path = "/var/log/arkhai/agent.log"
-# zerotier_network = ""
-
-# [seller.provisioning]
-# service_url = "http://localhost:8085"
-
-# [seller.negotiation]
+[buyer.negotiation]
 # policy_mode = "bisection"                    # "bisection" (default; no ML deps) | "rl" (requires torch)
 """
 
@@ -173,10 +156,10 @@ _INIT_USER_TEMPLATE = """\
 def config_init_user(
     overwrite: bool = typer.Option(
         False, "--overwrite",
-        help="Replace an existing config.toml instead of refusing.",
+        help="Replace an existing buyer.toml instead of refusing.",
     ),
 ) -> None:
-    """Scaffold the user config.toml with placeholders for every known key.
+    """Scaffold the buyer.toml with placeholders for every known key.
 
     Writes only the commented-out skeleton so nothing breaks on first
     load. Fill in the values you need; the resolver treats missing keys

@@ -1,5 +1,9 @@
 .vscode/
 
+# Local rehearsal params (private keys, RPC URLs, etc.)
+.rehearsal-params.local.md
+.rehearsal-params.local.*
+
 ### Python ###
 # Byte-compiled / optimized / DLL files
 __pycache__/

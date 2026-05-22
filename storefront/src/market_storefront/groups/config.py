@@ -59,7 +59,7 @@ def config_show(
 
 @config_app.command("set")
 def config_set(
-    key: str = typer.Argument(..., help="Dotted config key, e.g. 'seller.port'."),
+    key: str = typer.Argument(..., help="Dotted config key, e.g. 'port' or 'pricing.default_min_price'."),
     value: str = typer.Argument(..., help="Value to assign (coerced to int/float/bool when possible)."),
 ) -> None:
     """Set a single value in the storefront's storefront.toml.
@@ -90,7 +90,7 @@ def config_set(
 
 @config_app.command("get")
 def config_get(
-    key: str = typer.Argument(..., help="Dotted config key, e.g. 'seller.port'."),
+    key: str = typer.Argument(..., help="Dotted config key, e.g. 'port' or 'pricing.default_min_price'."),
 ) -> None:
     """Print the value of a single config key from the storefront's storefront.toml."""
     doc = load_storefront_config()
@@ -108,45 +108,48 @@ def config_get(
 
 
 _INIT_USER_TEMPLATE = """\
-# arkhai seller config — see `market-storefront config path` for this
+# arkhai storefront config — see `market-storefront config path` for this
 # file's location. Every key is optional; the resolver falls back to
-# built-in defaults when a key is missing.
+# built-in defaults when a key is missing. Schema matches
+# storefront/src/market_storefront/settings.toml (top-level keys + named
+# sections; no [seller] prefix).
 
 # ---------------------------------------------------------------------------
-# Shared (buyer + seller read these)
+# Identity / on-chain
 # ---------------------------------------------------------------------------
 
-[wallet]
-# address = "0x0000000000000000000000000000000000000000"
-# private_key = "0x..."
-# ssh_public_key = "ssh-ed25519 AAAA... user@host"
-
-[chain]
-# name = "ethereum_sepolia"                    # ethereum_sepolia | base_sepolia | anvil
-# rpc_url = "https://sepolia.base.org"
-# alkahest_address_config_path = "/path/to/alkahest.json"  # required for anvil
-
-[registry]
-# url = "http://localhost:8080"
-# identity_registry_address = "0x..."          # ERC-8004 IdentityRegistry. Auto-defaults from chain.name
-                                                # to the canonical CREATE2 vanity address; set only for
-                                                # non-canonical deployments.
-
-# ---------------------------------------------------------------------------
-# Seller — required to run `market-storefront serve`.
-# ---------------------------------------------------------------------------
-
-[seller]
 # agent_id = "alice"                           # must be a valid Python identifier
 # agent_name = "Alice"                         # display name (any string)
+# onchain_agent_id = ""                        # pin after first successful registration; otherwise the
+                                                # storefront auto-registers a fresh agent on every boot (gas).
+# auto_register = true                         # set false to refuse to start without a pinned onchain_agent_id
+
+# ---------------------------------------------------------------------------
+# HTTP server
+# ---------------------------------------------------------------------------
+
 # port = 8000
 # base_url = "http://alice:8000"               # what peers dial; auto-resolved with ZeroTier if set
+# zerotier_network = ""
+
+# ---------------------------------------------------------------------------
+# Storage / logging
+# ---------------------------------------------------------------------------
+
 # db_path = "/var/lib/arkhai/agent.db"
 # log_level = "INFO"                           # DEBUG | INFO | WARNING | ERROR
 # log_file_path = "/var/log/arkhai/agent.log"
-# onchain_agent_id = ""                        # populated by `market-storefront register`
-# default_vm_host = "ww1"                      # KVM host name from ansible inventory
-# zerotier_network = ""
+
+# resources_csv_path = "/app/resources.csv"    # auto-seed inventory on first boot from this CSV.
+                                                # Mutually exclusive with resources_csv_inline.
+
+# admin_api_key = ""                           # protects /admin/* routes; must match the provisioning
+                                                # service's PROVISIONING_STOREFRONT_ADMIN_KEY env.
+
+# ---------------------------------------------------------------------------
+# Discovery / lifecycle
+# ---------------------------------------------------------------------------
+
 # enable_registry_discovery = true
 # max_discovery_agents = 10
 # enable_order_retry = true
@@ -155,9 +158,41 @@ _INIT_USER_TEMPLATE = """\
 # resource_lease_grace_seconds = 1800
 # negotiation_timeout_seconds = 1800
 # negotiation_watchdog_interval = 60
+# default_vm_host = "ww1"                      # KVM host name from ansible inventory
 
-[seller.provisioning]
+# ---------------------------------------------------------------------------
+# Shared sections (also used by the buyer-side `market` CLI)
+# ---------------------------------------------------------------------------
+
+[wallet]
+# address = "0x0000000000000000000000000000000000000000"  # auto-derived from private_key when omitted
+# private_key = "0x..."
+# ssh_public_key = "ssh-ed25519 AAAA... user@host"
+
+[chain]
+# name = "ethereum_sepolia"                    # auto-derived from rpc_url via eth_chainId when omitted
+                                                # (anvil | base_sepolia | ethereum_sepolia | ethereum_mainnet
+                                                # | filecoin_calibration). Set explicitly for unknown chain IDs.
+# rpc_url = "https://sepolia.base.org"
+# alkahest_address_config_path = "/path/to/alkahest.json"  # required for anvil
+
+[registry]
+# urls = ["http://localhost:8080"]             # one or more indexer URLs; publishes fan out to each.
+# identity_registry_address = "0x..."          # ERC-8004 IdentityRegistry. Auto-defaults from chain.name
+                                                # to the canonical CREATE2 vanity address; set only for
+                                                # non-canonical deployments.
+
+[registry.auth]
+# Free-form table of {url = "bearer-token"}. Keys must match urls above
+# verbatim (scheme, host, port, no trailing slash). Empty = public.
+
+# ---------------------------------------------------------------------------
+# Storefront server-only sections
+# ---------------------------------------------------------------------------
+
+[provisioning]
 # service_url = "http://localhost:8085"
+# mode = ""                                    # "mock" for dry runs | "" (= http) for real KVM/libvirt
 # timeout = 3600
 # poll_interval = 15
 # preflight_timeout = 30                        # how long startup waits for /health to come up
@@ -166,14 +201,17 @@ _INIT_USER_TEMPLATE = """\
 # frp_domain = ""
 # frp_dashboard_password = ""
 
-[seller.negotiation]
+[negotiation]
 # policy_mode = "bisection"                    # "bisection" (default; no ML deps) | "rl" (requires torch)
 # seller_model_path = "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt"
 # buyer_model_path  = "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt"
 
-[seller.pricing]
-# default_min_price = "1000000"                # raw token base units (per-hour rate); fallback for blank min_price.
-                                                # Also the negotiation floor for hidden-reserve listings.
+[pricing]
+# default_min_price = "1"                      # human / whole-token units (per-hour rate). The publish CLI
+                                                # scales by the token's on-chain decimals: "1" with USDC
+                                                # (6 decimals) = 1_000_000 base units = $1/hr. Fallback for
+                                                # blank `min_price` columns in resources.csv; also the
+                                                # negotiation floor for hidden-reserve listings.
 # default_token_address = "0x..."              # 0x ERC-20 address used when CSV row has no token column;
                                                 # also the demand-side token for the resource-imbalance policy
 # default_max_duration_seconds = 86400         # advertised lease ceiling; 0/unset = unlimited

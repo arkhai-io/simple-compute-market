@@ -54,8 +54,8 @@ def main(
         "--config",
         callback=_config_path_callback,
         is_eager=True,
-        help="Path to an explicit config.toml. Defaults to "
-             "$XDG_CONFIG_HOME/arkhai/config.toml.",
+        help="Path to an explicit buyer.toml. Defaults to "
+             "$XDG_CONFIG_HOME/arkhai/buyer.toml.",
     ),
 ) -> None:
     """market — buyer-side CLI for Arkhai market operations.
@@ -78,7 +78,7 @@ app.add_typer(listing_app, name="listing", help="Browse marketplace listings (li
 app.add_typer(
     config_app,
     name="config",
-    help="Inspect or edit the user config.toml (path/show/get/set/init-user).",
+    help="Inspect or edit the buyer.toml (path/show/get/set/init-user).",
 )
 app.add_typer(logs_app, name="logs", help="Inspect past buy/negotiate runs (run-log JSONL files).")
 app.add_typer(escrow_app, name="escrow", help="Buyer-side escrow lifecycle (create, reclaim).")

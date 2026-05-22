@@ -198,7 +198,7 @@ provisioning service call. Runs as `market-storefront serve` (uvicorn,
 FastAPI/Starlette). Internally it uses Alkahest for on-chain escrow
 operations.
 
-**Ports:** `8001` (default seller port; `seller.port` in config.toml).
+**Ports:** `8001` (default seller port; `port` in storefront.toml).
 
 **Startup sequence:** `entrypoint.sh` starts the ZeroTier daemon,
 then `exec market-storefront serve`. On `@app.on_event("startup")` the
@@ -702,15 +702,16 @@ POST  /api/v1/admin/portfolio/release-reservations
 #### Admin API Key
 
 A global admin API key gates all admin-only endpoints. Read from
-`CONFIG.admin_api_key` (`[seller].admin_api_key` in config.toml, or injected
-via the Helm secrets profile as a `config-storefront-secrets.yml` entry).
-Enforced by `AdminAuthMiddleware` via the `X-Admin-Key` header. When
-`admin_api_key` is `None` (local dev default), the middleware is a no-op.
+`CONFIG.admin_api_key` (`admin_api_key` top-level in storefront.toml, or
+injected via the Helm secrets profile as a `config-storefront-secrets.yml`
+entry). Enforced by `AdminAuthMiddleware` via the `X-Admin-Key` header.
+When `admin_api_key` is `None` (local dev default), the middleware is a
+no-op.
 
 Protected paths: any route under `/admin/`, and any route ending in `/pause`,
 `/resume`, `/advance`, or `/force-accept`.
 
-**`global.adminApiKey`:** `values.yaml` carries `global.adminApiKey` (default `"test-api-key"` for the test cluster). The `agentConfigToml` helper renders it as `[seller] admin_api_key` in the mounted `config.toml`. The per-agent secret profile (`config-{component}-secret.yml`) also carries it under `{component}.admin_api_key` so the e2e test pod can read it via dynaconf without a separate secret mount.
+**`global.adminApiKey`:** `values.yaml` carries `global.adminApiKey` (default `"test-api-key"` for the test cluster). The `agentConfigToml` helper renders it as `admin_api_key` (top-level) in the mounted `storefront.toml`. The per-agent secret profile (`config-{component}-secret.yml`) also carries it under `{component}.admin_api_key` so the e2e test pod can read it via dynaconf without a separate secret mount.
 
 #### Global Pause and Per-Order Pause
 
@@ -1432,9 +1433,10 @@ The `provisioning_job_id` is surfaced in `GET /settle/{escrow_uid}/status` on th
 
 There are four console scripts, each a separate distributable. They
 split by concern (runtime vs. tooling vs. operator infra) rather than
-by buyer-vs-seller role. Built with Typer; config is read from a
-single TOML file at `$XDG_CONFIG_HOME/arkhai/config.toml` (override
-with `--config <path>`).
+by buyer-vs-seller role. Built with Typer; config is read from a TOML
+file under `$XDG_CONFIG_HOME/arkhai/` — `buyer.toml` for the buyer's
+`market` CLI, `storefront.toml` for `market-storefront` and the
+storefront server (override either with `--config <path>`).
 
 | CLI | Package | Role | Top-level groups |
 |---|---|---|---|
@@ -1483,7 +1485,7 @@ compose/seller.yml   — storefront server + provisioning service (unified)
 There is no `compose/buyer.yml` — the buyer is the `market`
 CLI invoked from the host or another container, not a long-running
 service. The seller container reads its config from a TOML file
-mounted at `/etc/arkhai/config.toml` (set via `XDG_CONFIG_HOME=/etc`);
+mounted at `/etc/arkhai/storefront.toml` (set via `XDG_CONFIG_HOME=/etc`);
 the `.env` flow used by the previous symmetric topology has been
 retired.
 
@@ -1591,11 +1593,11 @@ and `BASE_URL_OVERRIDE` (ZeroTier placeholder resolution applied to
 it falls back to a live `eth_chainId` RPC when `[chain] chain_id` is unset.
 
 The storefront's TOML file pair is **role-scoped** — buyer and seller no
-longer share `~/.config/arkhai/config.toml`. The buyer CLI continues to
-read `config.toml`; the storefront reads `storefront.toml` +
-`storefront.secrets.toml` only. When the same operator runs both buyer and
-seller on one machine (e.g. a seller-also-buyer setup), each process has
-its own wallet and own file pair.
+longer share a single config file. The buyer CLI reads `buyer.toml` +
+`buyer.secrets.toml`; the storefront server *and* `market-storefront`
+CLI both read `storefront.toml` + `storefront.secrets.toml`. When the
+same operator runs both buyer and seller on one machine (e.g. a
+seller-also-buyer setup), each role has its own wallet and own file pair.
 
 Independent `checksum/config` and `checksum/secrets` annotations on the
 Deployment isolate rollouts to whichever source changed — flipping a log
@@ -1623,7 +1625,7 @@ must be disabled for all GKE-hosted deployments:
    ZeroTier daemon. Autopilot forbids both cluster-wide. The storefront chart
    exposes `zerotierEnabled` (default `true`); set `storefront.zerotierEnabled:
    false` in the GKE values overlay. The application runtime is unaffected when
-   `seller.zerotier_network` is absent from `config.toml` — `entrypoint.sh` is
+   `zerotier_network` is absent from `storefront.toml` — `entrypoint.sh` is
    fail-soft on daemon startup and all ZeroTier code paths are conditional.
    In GKE deployments the storefront is reachable via the API gateway instead.
 

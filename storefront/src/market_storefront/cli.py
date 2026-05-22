@@ -67,8 +67,8 @@ def main(
         "--config",
         callback=_config_path_callback,
         is_eager=True,
-        help="Path to an explicit config.toml. Defaults to "
-             "$XDG_CONFIG_HOME/arkhai/config.toml.",
+        help="Path to an explicit storefront.toml. Defaults to "
+             "$XDG_CONFIG_HOME/arkhai/storefront.toml.",
     ),
 ) -> None:
     """market-storefront — provider-side admin CLI."""
@@ -91,7 +91,7 @@ def register_cmd(
 ) -> None:
     """Register the storefront on-chain via ERC-8004.
 
-    Inputs come from config.toml (TOML-only — no env vars or .env
+    Inputs come from storefront.toml (TOML-only — no env vars or .env
     files). Run this before `market-storefront serve` on a fresh
     deployment; idempotent on subsequent runs.
     """
@@ -107,44 +107,20 @@ def register_cmd(
 
 
 def _query_chain_id(rpc_url: str | None) -> int | None:
-    """Query eth_chainId against the configured RPC.
+    """Thin wrapper around ``service.config_loader.query_chain_id_via_rpc``.
 
-    Returns None on any failure (network, malformed reply, no rpc_url).
-    The caller falls back to a default — `register` accepts a wrong
-    chain_id more gracefully than a stuck startup, so we prefer "fall
-    through with default" over "crash".
-
-    Translates ``ws://`` / ``wss://`` URLs to ``http://`` / ``https://``
-    for this one-shot RPC call: urllib doesn't speak websocket, but the
-    eth_chainId method is identical over either transport. The seller's
-    runtime keeps using the configured ws:// URL for event subscriptions.
+    Kept as a local helper for backward compat with callers in this
+    module; the underlying RPC and ws→http translation lives in the
+    shared service helper.
     """
-    if not rpc_url or not rpc_url.strip():
-        return None
-    http_url = rpc_url.strip()
-    if http_url.startswith("ws://"):
-        http_url = "http://" + http_url[len("ws://"):]
-    elif http_url.startswith("wss://"):
-        http_url = "https://" + http_url[len("wss://"):]
-    try:
-        import json as _json
-        from urllib.request import Request, urlopen
-        req = Request(
-            http_url,
-            data=_json.dumps({
-                "jsonrpc": "2.0", "id": 1, "method": "eth_chainId", "params": [],
-            }).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-        )
-        with urlopen(req, timeout=5) as resp:
-            body = _json.loads(resp.read())
-        return int(body.get("result", "0x0"), 16) or None
-    except Exception as exc:
+    from service.config_loader import query_chain_id_via_rpc
+    cid = query_chain_id_via_rpc(rpc_url)
+    if cid is None and rpc_url and rpc_url.strip():
         typer.secho(
-            f"[register] eth_chainId lookup against {rpc_url!r} failed: {exc}",
+            f"[register] eth_chainId lookup against {rpc_url!r} failed.",
             err=True, fg=typer.colors.YELLOW,
         )
-        return None
+    return cid
 
 
 # ---------------------------------------------------------------------------

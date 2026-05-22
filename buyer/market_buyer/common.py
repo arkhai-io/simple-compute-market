@@ -30,6 +30,69 @@ def resolve_config_value(
     return default
 
 
+def resolve_buyer_wallet(
+    *,
+    override_addr: str | None = None,
+    override_pk: str | None = None,
+) -> tuple[str, str]:
+    """Resolve ``(wallet.address, wallet.private_key)`` with derivation.
+
+    Both default to the user config when overrides aren't given. If the
+    address is empty but the private key is set, the address is derived
+    from the key — addresses are a deterministic function of the key, so
+    there's no reason to require both in config. If both are set and
+    disagree, a warning is emitted but the configured address is kept
+    (lets a user delegate signing for an alternate address while
+    surfacing the mismatch loudly).
+    """
+    addr = resolve_config_value(override=override_addr, toml_path="wallet.address")
+    pk = resolve_config_value(override=override_pk, toml_path="wallet.private_key")
+    if pk:
+        from service.config_loader import derive_wallet_address
+        derived = derive_wallet_address(pk)
+        if derived:
+            if not addr:
+                addr = derived
+            elif addr.lower() != derived.lower():
+                typer.secho(
+                    f"warning: wallet.address ({addr}) does not match address "
+                    f"derived from wallet.private_key ({derived}); using the "
+                    f"configured address.",
+                    err=True, fg=typer.colors.YELLOW,
+                )
+    return addr, pk
+
+
+def resolve_chain_name(
+    *,
+    override: str | None = None,
+    rpc_url: str | None = None,
+    default: str = "ethereum_sepolia",
+) -> str:
+    """Resolve ``chain.name`` with optional RPC-derived fallback.
+
+    Precedence: override > ``chain.name`` in TOML > eth_chainId lookup
+    against ``rpc_url`` > ``default``. The RPC lookup is best-effort —
+    a transient failure falls through to the static default rather than
+    raising.
+    """
+    if override:
+        return override
+    from service.config_loader import (
+        chain_name_for_rpc,
+        get_dotted,
+        load_user_config,
+    )
+    cfg_name = get_dotted(load_user_config(), "chain.name")
+    if isinstance(cfg_name, str) and cfg_name.strip():
+        return cfg_name.strip()
+    if rpc_url:
+        derived = chain_name_for_rpc(rpc_url)
+        if derived:
+            return derived
+    return default
+
+
 def resolve_ssh_public_key(*, override: str | None = None) -> str:
     """Resolve the buyer's SSH public key for provisioning.
 

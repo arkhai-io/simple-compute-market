@@ -15,9 +15,9 @@ infrastructure is included in the pod spec. Set to false for environments
 where ZeroTier is unnecessary (e.g. GKE Autopilot, API-gateway-fronted
 deployments) or where the required Linux capabilities (NET_ADMIN, SYS_MODULE)
 and hostPath volumes are not permitted. The application runtime is unaffected
-when zerotier_network is unset in config.toml — entrypoint.sh is already
+when zerotier_network is unset in storefront.toml — entrypoint.sh is already
 fail-soft on daemon startup and the Python runtime skips all ZeroTier paths
-when seller.zerotier_network is absent.
+when zerotier_network is absent.
 */}}
 {{- range $agent := .Values.agents }}
 apiVersion: apps/v1

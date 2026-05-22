@@ -138,25 +138,24 @@ else auto-generates from the agent fullname.
 {{- end }}
 
 {{/*
-Render the per-agent non-sensitive config.toml. The output is a single
-string the ConfigMap template embeds under `config.toml`.
+Render the per-agent non-sensitive storefront.toml. The output is a single
+string the ConfigMap template embeds under `storefront.toml`.
 
 Argument: dict with `root` (chart root) and `agent`.
 
 Pairs with `storefront.agentSecretsToml` — together they form the
 complete config the runtime loader (`service.config_loader`) merges
 at startup. Sensitive values (wallet.address, wallet.private_key,
-seller.admin_api_key, seller.resources_csv_inline,
-seller.integrations.gemini_api_key) live in the Secret-rendered
-overlay and are not duplicated here.
+admin_api_key, resources_csv_inline, integrations.gemini_api_key)
+live in the Secret-rendered overlay and are not duplicated here.
 
-Topology-derived values (base_url, registry.url, chain.rpc_url,
-seller.provisioning.service_url) are composed from the chart's view of
+Topology-derived values (base_url, registry.urls, chain.rpc_url,
+provisioning.service_url) are composed from the chart's view of
 the cluster — never authored as hardcoded strings in values.yaml.
 
 Anything that isn't here (image, replicas, probes, Service objects,
 resources, autoRegister) is k8s-only and never ends up in the agent's
-config.toml.
+storefront.toml.
 */}}
 {{- define "storefront.agentConfigToml" -}}
 {{- $root := .root -}}
@@ -220,8 +219,8 @@ policy_mode = {{ $neg.policyMode | default "" | quote }}
 {{- end }}
 
 {{/*
-Render the per-agent sensitive config.secrets.toml. The output is a
-single string the Secret template embeds under `config.secrets.toml`.
+Render the per-agent sensitive storefront.secrets.toml. The output is a
+single string the Secret template embeds under `storefront.secrets.toml`.
 
 Argument: dict with `root` (chart root) and `agent`.
 

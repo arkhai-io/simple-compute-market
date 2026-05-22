@@ -55,12 +55,15 @@ def register(app: typer.Typer) -> None:
         ),
         initial_price: Optional[float] = typer.Option(
             None, "--initial-price",
-            help="Opening bid in raw token units. Optional — when omitted, "
-                 "anchored on the listing's advertised min_price.",
+            help="Opening bid in human / whole-token units, per-hour rate. "
+                 "Scaled by the token's on-chain decimals before being sent "
+                 "(--initial-price 2 against 6-decimal USDC = $2/hr). "
+                 "Optional — when omitted, anchored on the listing's advertised min_price.",
         ),
         max_price: Optional[float] = typer.Option(
             None, "--max-price",
-            help="Ceiling — accept any seller counter at or under this. "
+            help="Ceiling in human / whole-token units, per-hour rate. "
+                 "Scaled by the token's on-chain decimals before being sent. "
                  "Optional — when omitted, derived as min_price * --price-markup. "
                  "Resumed runs reuse the original ceiling.",
         ),
@@ -120,17 +123,22 @@ def register(app: typer.Typer) -> None:
         """
         console = Console()
 
-        # Resolution: CLI flag > config.toml.
-        addr = resolve_config_value(
-            override=buyer_address, toml_path="wallet.address",
-        )
-        pk = resolve_config_value(
-            override=buyer_private_key, toml_path="wallet.private_key",
+        # Capture which prices the user passed explicitly — auto-derived
+        # values (from the listing's advertised min_price) are already
+        # in base units and must not be scaled again below.
+        _initial_explicit = initial_price is not None
+        _max_explicit = max_price is not None
+
+        # Resolution: CLI flag > config.toml > derivation.
+        from ..common import resolve_buyer_wallet
+        addr, pk = resolve_buyer_wallet(
+            override_addr=buyer_address, override_pk=buyer_private_key,
         )
         if not addr or not pk:
             typer.secho(
-                "Missing buyer wallet config. Pass --buyer-address + --buyer-priv-key "
-                "or set wallet.address + wallet.private_key in config.toml.",
+                "Missing buyer wallet config. Pass --buyer-priv-key or set "
+                "wallet.private_key in config.toml; the address is derived "
+                "from the key.",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(2)
@@ -228,6 +236,46 @@ def register(app: typer.Typer) -> None:
         duration_seconds = (
             int(round(duration_hours * 3600)) if duration_hours is not None else None
         )
+
+        # Scale explicit --initial-price / --max-price from human /
+        # whole-token units to base units. Sellers publish
+        # ``price_per_hour`` in base units; buyer ceilings need the
+        # same scale to compare apples-to-apples. Use --token-decimals
+        # when supplied, otherwise resolve via on-chain ``decimals()``.
+        if _initial_explicit or _max_explicit:
+            decimals: Optional[int] = (
+                int(token_decimals) if token_decimals is not None else None
+            )
+            if decimals is None:
+                from ..common import (
+                    resolve_chain_id, resolve_default_token_address,
+                )
+                from service.clients.token import (
+                    resolve_token, TokenResolutionError,
+                )
+                rpc = resolve_config_value(toml_path="chain.rpc_url")
+                tc = token_contract or resolve_default_token_address()
+                if tc and rpc:
+                    try:
+                        meta = resolve_token(
+                            tc, rpc_url=rpc, chain_id=resolve_chain_id(rpc),
+                        )
+                        decimals = meta.decimals
+                    except (TokenResolutionError, RuntimeError):
+                        decimals = None
+            if decimals is None:
+                typer.secho(
+                    "Could not resolve token decimals to scale prices. "
+                    "Pass --token-decimals or set chain.rpc_url + a token "
+                    "contract.",
+                    err=True, fg=typer.colors.RED,
+                )
+                raise typer.Exit(2)
+            scale = 10 ** int(decimals)
+            if _initial_explicit and initial_price is not None:
+                initial_price = initial_price * scale
+            if _max_explicit and max_price is not None:
+                max_price = max_price * scale
 
         # Best-effort: fetch the seller's on-chain wallet from the
         # /.well-known/agent-wallet.json endpoint and log it. Failure

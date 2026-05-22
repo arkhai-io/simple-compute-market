@@ -6,6 +6,7 @@ standard well-known paths defined by the ERC-8004 spec.
 Endpoints
 ---------
 GET /.well-known/erc-8004-registration.json   — ERC-8004 registration file
+GET /.well-known/agent-card.json              — A2A AgentCard
 GET /.well-known/agent-wallet.json            — on-chain wallet address
 """
 from __future__ import annotations
@@ -40,6 +41,14 @@ class IdentityController:
             supported_trust=[],
         )
         return registration_file
+
+    @router.get(
+        "/.well-known/agent-card.json",
+        summary="A2A AgentCard",
+    )
+    async def agent_card(self) -> dict[str, Any]:
+        from market_storefront.agent import agent_card_data
+        return agent_card_data
 
     @router.get(
         "/.well-known/agent-wallet.json",

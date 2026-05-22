@@ -2,7 +2,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-runtime-images dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra dist-clean init init-prerequisites init-submodules init-dependencies init-zero-tier init-buyer init-storefront init-registry-service push-runtime-artifacts push-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: build build-runtime-images build-seller dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra dist-clean init init-prerequisites init-submodules init-dependencies init-zero-tier init-buyer init-storefront init-registry-service push-runtime-artifacts push-images push-helm push-wheels push-cli clobber-wheels
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -84,8 +84,16 @@ test-storefront:
 # build-runtime-images parallelizes the three independent service images.
 build: build-buyer build-market-contract-deployer build-test-env build-runtime-images build-test-image
 
-build-runtime-images: dist
+build-runtime-images: init-prerequisites dist
 	$(MAKE) -j3 build-registry build-storefront build-provisioning
+
+# Seller-only build: the two runtime images a seller actually needs
+# (`arkhai:storefront`, `arkhai:provisioning`) and just the wheels they
+# consume via --find-links. Skips `dist-infra` (operator-side CLI; not
+# consumed by either image) and `build-registry` (sellers point at someone
+# else's registry).
+build-seller: init-prerequisites dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service ## Build only what a seller needs: storefront + provisioning images.
+	$(MAKE) -j2 build-storefront build-provisioning
 
 build-buyer: init-prerequisites init-dependencies
 	cd buyer && make build
