@@ -1,30 +1,53 @@
-# Seller layer: what a seller (someone with compute to sell) runs on their machine.
+# Seller stack — services a seller (someone with compute to sell) runs in production.
 #
-# A seller runs:
-#   1. The seller agent — the process that publishes offers, negotiates,
-#      accepts matches, and coordinates provisioning on their hardware.
-#   2. A provisioning service — the process that actually turns escrows
-#      into running VMs on the seller's hardware (or mock hardware for dev).
-#   3. Redis — job queue used by the provisioning service.
+# Three services:
+#   1. seller-agent          — storefront HTTP server (arkhai:storefront).
+#                              Publishes offers, negotiates with buyers,
+#                              settles deals on chain.
+#   2. seller-redis          — job queue for the provisioning service.
+#   3. seller-provisioning   — runs ansible to create/destroy VMs on the
+#                              seller's KVM host (arkhai:provisioning).
 #
-# Depends on:
-#   - An external chain with contracts deployed
-#   - A marketplace registry (from compose/market.yml) reachable via INDEXER_URL
+# Operator-provided files (paths overridable via env):
+#   ./config.seller.toml     — seller config; see docs/seller-quickstart.md.
+#                              A starter is `market-storefront config init-user`,
+#                              though its template is Anvil-flavored — the
+#                              quickstart's TOML is more directly useful.
+#   ./resources.csv          — inventory CSV. Starter:
+#                              storefront/src/market_storefront/data/resources.sample.csv
+#   ./keys/id_ed25519        — SSH key the provisioning service uses to reach
+#                              the KVM host. Pubkey must be authorized on the
+#                              host for the ansible user.
+#
+# Required images (run `make build-runtime-images` from the repo root):
+#   arkhai:storefront
+#   arkhai:provisioning
+#
+# Registry: not included. Either run your own (see seller-quickstart.md
+# Addendum A) or point [registry] urls in the seller TOML at an external
+# indexer.
 #
 # Usage:
-#   docker compose -f compose/seller.yml up
+#   STOREFRONT_ADMIN_KEY=$(uuidgen) docker compose -f compose/seller.yml up -d
+#   docker compose -f compose/seller.yml logs -f seller-agent
 #
-# Environment:
-#   PROVISIONING_MODE        — mock | ansible | http (default: http)
-#   MOCK_PROVISIONING_SUCCESS — true | false (when mock mode)
+# Environment overrides:
+#   STOREFRONT_ADMIN_KEY     — REQUIRED. Must match [seller].admin_api_key in
+#                              the seller TOML. The provisioning service uses
+#                              it to call back on lease expiry.
+#   SELLER_CONFIG_PATH       — path to seller TOML (default: ./config.seller.toml)
+#   SELLER_RESOURCES_CSV     — path to inventory CSV (default: ./resources.csv)
+#   SELLER_SSH_PRIVKEY       — path to KVM-host SSH privkey (default: ./keys/id_ed25519)
+#   PROVISIONING_MODE        — "mock" for dry runs, "http" for live KVM (default: http)
 
 services:
   seller-agent:
-    image: arkhai:core
-    platform: linux/amd64
-    container_name: market-agent-sell
+    image: arkhai:storefront
     ports:
       - "8001:8001"
+    # cap_add / devices / zerotier-sell volume below are for optional
+    # ZeroTier overlay networking. Harmless when [seller].zerotier_network
+    # is unset — the entrypoint fail-softs and continues.
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
@@ -32,59 +55,50 @@ services:
       - /dev/net/tun:/dev/net/tun
     environment:
       - XDG_CONFIG_HOME=/etc
-      - PROVISIONING_MODE=${PROVISIONING_MODE:-http}
-      - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
+      - ARKHAI_PROVISIONING_MODE=${PROVISIONING_MODE:-http}
     volumes:
-      - ../storefront/storefront.bob.toml:/etc/arkhai/storefront.toml:ro
+      - ${SELLER_CONFIG_PATH:-./config.seller.toml}:/etc/arkhai/storefront.toml:ro
+      - ${SELLER_RESOURCES_CSV:-./resources.csv}:/app/resources.csv:ro
+      - seller-agent-data:/app/src/market_storefront/data/sell-agent
       - zerotier-sell:/var/lib/zerotier-one
-      - ../storefront/src/market_storefront/data/sell-agent:/app/src/market_storefront/data/sell-agent
     networks:
-      - market-network
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-    command:
-      - ./entrypoint.sh
+      - seller
+    restart: unless-stopped
 
   seller-redis:
     image: redis:7-alpine
-    container_name: market-redis
-    ports:
-      - "6379:6379"
     networks:
-      - market-network
+      - seller
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
       retries: 3
+    restart: unless-stopped
 
   seller-provisioning:
     image: arkhai:provisioning
-    container_name: market-provisioning
     depends_on:
       seller-redis:
         condition: service_healthy
     ports:
       - "8081:8081"
-    env_file:
-      - ../async-provisioning-service/.env.docker-compose
+    environment:
+      - DATABASE_URL=sqlite:////app/data/provisioning.db
+      - REDIS_URL=redis://seller-redis:6379
+      - PROVISIONING_STOREFRONT_URL=http://seller-agent:8001
+      - PROVISIONING_STOREFRONT_ADMIN_KEY=${STOREFRONT_ADMIN_KEY:?STOREFRONT_ADMIN_KEY must be set (matches [seller].admin_api_key in the TOML)}
     volumes:
-      - ../compute-provisioning-iac:/app/compute-provisioning-iac
-      - ${HOME}/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro
+      - ${SELLER_SSH_PRIVKEY:-./keys/id_ed25519}:/home/appuser/.ssh/id_ed25519:ro
+      - seller-provisioning-data:/app/data
     networks:
-      - market-network
+      - seller
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 384m
 
 networks:
-  market-network:
-    external: true
-    name: market-network
+  seller:
 
 volumes:
+  seller-agent-data:
+  seller-provisioning-data:
   zerotier-sell:
