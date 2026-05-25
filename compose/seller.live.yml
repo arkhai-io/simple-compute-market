@@ -6,10 +6,18 @@
 # authorized on the KVM host(s) you list under [kvm_hosts] in the ansible
 # inventory baked into the image.
 #
+# Also exposes `host.docker.internal` as a route to the docker host, so
+# ansible inventories can use it as `ansible_host` when the storefront
+# box is itself the KVM host (single-machine deployments). For multi-host
+# setups the inventory uses real IPs/DNS and host.docker.internal is
+# unused.
+#
 # Environment override:
 #   SELLER_SSH_PRIVKEY       — path to KVM-host SSH privkey (default: ./keys/id_ed25519)
 
 services:
   seller-provisioning:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ${SELLER_SSH_PRIVKEY:-./keys/id_ed25519}:/home/appuser/.ssh/id_ed25519:ro
