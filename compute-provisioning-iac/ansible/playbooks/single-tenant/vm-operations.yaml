@@ -2,6 +2,14 @@
 - name: VM Management Operations
   hosts: kvm_hosts
   gather_facts: no
+  # Pin every libvirt-client invocation in this play (bare `virsh`,
+  # `virt-install`, etc.) to the system-wide libvirtd socket. Without
+  # this, ansible's non-login SSH session inherits the target user's
+  # default URI — which on Debian/Ubuntu is `qemu:///session` for any
+  # non-root user, surfacing as "network 'default' not found" and other
+  # session-vs-system scope drift.
+  environment:
+    LIBVIRT_DEFAULT_URI: qemu:///system
   vars:
     target_host: "{{ vm_host | default('localhost') }}"
     vm_name: "{{ vm_target | default('ubuntu-vm') }}"
