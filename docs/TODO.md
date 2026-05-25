@@ -98,6 +98,34 @@ Until then: the `indexed: bool` field stays as a no-op in the loader so the YAML
 
 ---
 
+### EVM-Level Registration Test
+
+**Status:** Planned. No EVM-level test for the `register_onchain_from_config` logic — detecting existing agents, idempotent updates, event parsing — beyond what the storefront integration tests cover indirectly.
+
+**Planned fix:** add `eth-tester[py-evm]` to `service` dev deps; fixture that deploys the IdentityRegistry bytecode into `EthereumTesterProvider`; tests for `register_onchain_from_config` against the local EVM. Requires bytecode in the repo (currently only ABI is vendored). Evaluate after `erc-8004-contracts` compilation artifacts are stable.
+
+---
+
+### Move e2e Tests to a Separate Project
+
+**Status:** Planned, no timeline.
+
+**Problem:** `integration-tests/tests/e2e/` is currently part of this repo. As the stack matures, the e2e suite should move to its own project so it can be run against arbitrary deployments without dragging in the simple-compute-market repo.
+
+**Planned fix:** extract `integration-tests/` (or just the `e2e/` subtree) to a separate repo. No urgency until external operators want to run the test suite.
+
+---
+
+### Smoke-Test Client Re-Export Shim Cleanup
+
+**Status:** Planned. Cleanup, low priority.
+
+**Problem:** `integration-tests/src/registry_client.py` re-exports `SyncRegistryClient as RegistryClient` from the canonical wheel, preserved for the smoke-test import path `from src.registry_client import RegistryClient`. A similar `agent_client.py` adapter wraps `SyncStorefrontClient` with a constructor-level `agent_wallet_address` and single-arg `create_order()` to match the older shape the smoke tests expect.
+
+**Planned fix:** update the smoke-test imports to use the canonical clients directly and delete both shims. The `agent_client.py` docstring lists the removal steps.
+
+---
+
 ## Latent Bug Fixes
 
 Genuine pending fixes — distinct from the operational gotchas in the [Known Issues](#known-issues--areas-of-concern) section below, which the current code lives with.
@@ -333,3 +361,67 @@ provider without mock provisioning:
 
 This scenario validates the watchdog pause/resume admin endpoints, that GCPComputeProvider
 creates real VMs, and that teardown is Compute-API-based (no SSH key required on the VM).
+
+---
+
+### Flat `client.*` Package Namespace
+
+**Status:** Planned. Refactor.
+
+**Problem:** The provisioning-service package exposes its modules at the flat `client.*` level (e.g. `from client.provisioning_client import ...`) because setuptools maps `src/` directly as the package root. To expose a clean `provisioning_service.*` namespace, all internal imports within the package would need to be converted from bare names (e.g. `from models.jobs_model import ...`) to relative imports (e.g. `from .models.jobs_model import ...`).
+
+**Planned fix:** do the relative-imports refactor; switch `service/clients/provisioning.py` to import from `provisioning_service.client.provisioning_client`.
+
+---
+
+### Provisioning Smoke Tests Use Raw `httpx`
+
+**Status:** Planned.
+
+**Problem:** The provisioning smoke tests in `integration-tests/tests/smoke/test_provisioning_smoke.py` call raw `httpx` rather than going through `SyncProvisioningClient`. The integration tests already established the pattern of routing all calls through the canonical client.
+
+**Planned fix:** update the smoke tests to use `SyncProvisioningClient` for every endpoint they hit.
+
+---
+
+### `StorefrontCallbackClient` Extraction (Conditional)
+
+**Status:** Conditional — only do this if the dependency direction becomes a maintenance problem.
+
+**Problem:** The provisioning service depends on `arkhai-storefront-client` for two call sites — `lease_lifecycle_service._patch_storefront_resource()` and `system_service.get_status()`. This inverts the conceptual layer (provisioning is infrastructure; storefront is a consumer). Not a circular import — `storefront-client` doesn't depend on `provisioning-service` — but the direction is inverted.
+
+**Planned fix (if triggered):** extract the two call sites into a thin `StorefrontCallbackClient` inside `provisioning-service/src/client/storefront_callback_client.py` wrapping `httpx` directly for `GET /health` and `PATCH /api/v1/admin/portfolio/resources/{id}`. Keeps `provisioning-service` self-contained without a wheel dependency on the storefront layer.
+
+---
+
+## Documentation Gaps
+
+Items where `ARCHITECTURE.md` has a "TODO: Document X" placeholder. Fill in as part of the next pass on the respective component.
+
+### Alkahest Contracts in the Baked State
+
+The exact set of Alkahest contracts deployed in the `test-env` baked state and their addresses — so operators can wire integrations without reading the deploy scripts.
+
+### Event Sync Polling Interval and Missed-Event Behavior
+
+The registry's event-sync polling cadence and any known lag or missed-event scenarios. Relevant when investigating why an agent is slow to appear in `/agents`.
+
+### Symmetric Order Concept
+
+`integration-tests/.../test_symmetric_orders.py` exercises a "symmetric order" pattern that isn't documented in ARCHITECTURE.md. Document what it is and why it exists.
+
+### Alkahest Escrow Mechanics
+
+What on-chain calls Alkahest makes at each point in the negotiation lifecycle: escrow lock, attestation submission, release. Currently the doc only points at the function names.
+
+### SQLite Schema
+
+Storefront table definitions, indexes, statefulness/concurrency constraints (single-writer SQLite, negotiation message ordering). The "Storefront DB Pruning" entry assumes a future writer already knows the current layout.
+
+### `negotiation_watchdog`
+
+Trigger conditions (staleness threshold), what it writes to the DB, how it interacts with in-flight `/advance` calls. The watchdog's existence is noted but its semantics are not.
+
+### GPU Passthrough Setup
+
+Host-hardware constraints, BIOS / kernel module / `iommu` requirements, and the IaC role responsibilities for getting GPU passthrough working on a KVM host.
