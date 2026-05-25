@@ -57,7 +57,7 @@ proxy-dev ansible_host=<your-frp-server-ip> ansible_user=<user> ansible_ssh_priv
 provisioning-dev ansible_host=<your-provisioning-server-ip> ansible_user=<user> ansible_ssh_private_key_file=<key-path>
 
 [kvm_hosts]
-ww1 ansible_host=<kvm-host-ip> ansible_user=<user> ansible_ssh_private_key_file=<key-path>
+kvm1 ansible_host=<kvm-host-ip> ansible_user=<user> ansible_ssh_private_key_file=<key-path>
 # Add more KVM hosts as needed
 ```
 
@@ -146,7 +146,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 **Parameter notes**:
 - `SSH_PRIVATE_KEY`: base64-encoded private key (no newlines). The container decodes it to `~/.ssh/id_ed25519` on startup.
 - `MANAGEMENT_VARS_YAML`: base64-encoded `management-vars.yaml` (no newlines). The container decodes it to `/app/compute-provisioning-iac/ansible/inventory/management-vars.yaml` on startup. Required when using Golden Images (`vm_action=create` or `vm_action=undefine`).
-- `DEFAULT_VM_HOST`: alias of the KVM host from the Ansible inventory (e.g. `ww1`) that the service will SSH into for provisioning operations.
+- `DEFAULT_VM_HOST`: alias of the KVM host from the Ansible inventory (e.g. `kvm1`) that the service will SSH into for provisioning operations.
 - `ANSIBLE_BECOME_PASS`: sudo password on the target KVM host.
 - Store the generated FRP credentials JSON outside version control. The FRP setup role writes it to `credentials/frp-server-credentials-<host>-<timestamp>.json` at the repo root on the Ansible control machine.
 
@@ -225,8 +225,8 @@ For real host-kit and libvirt validation on a live KVM host, use the optional
 acceptance runner:
 
 ```bash
-make validate-acceptance KVM_HOST=ww1
-./scripts/run_acceptance_validation.sh --kvm-host ww1 --vm-name iac-acceptance-ww1
+make validate-acceptance KVM_HOST=kvm1
+./scripts/run_acceptance_validation.sh --kvm-host kvm1 --vm-name iac-acceptance-kvm1
 ```
 
 This path is intentionally not part of the default CI or `make validate`
@@ -308,8 +308,8 @@ The FRP server acts as a secure bridge for buyers to access their leased VM reso
 
 ```bash
 ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
-  -e "frp_domain=arkhainet.arkhai.io" \
-  -e "certbot_email=admin@arkhainet.arkhai.io" \
+  -e "frp_domain=vm.arkhai.io" \
+  -e "certbot_email=admin@vm.arkhai.io" \
   --limit proxy-dev
 ```
 
@@ -327,7 +327,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
   -e "frp_server_port=7000" \
   -e "frp_auth_token=<frp-token>" \
   -e "image_setup_type=golden" \
-  --limit ww1
+  --limit kvm1
 ```
 
 **Parameter Explanations**:
@@ -346,7 +346,7 @@ Create a variables file with your VM configuration and run the playbook:
 
 ```bash
 cat > /tmp/vm_vars.yml << 'EOF'
-vm_host: ww1
+vm_host: kvm1
 vm_target: vm-base-gpu  
 vm_action: create
 vm_ram: 4096
@@ -356,7 +356,7 @@ vm_tenant_pubkey: "<tenant-ssh-key-from-local-machine>"
 vm_gpu_provisioned: true
 vm_gpu_count: 2
 image_setup_type: scratch
-frp_domain: "arkhainet.arkhai.io"
+frp_domain: "vm.arkhai.io"
 frp_server_addr: "<frp-server-vm-ip-address>"
 frp_dashboard_password: "<some-random-dashboard-api-password>"                        
 EOF                                 
@@ -364,7 +364,7 @@ EOF
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
     --extra-vars @inventory/management-vars.yaml \
     --extra-vars @/tmp/vm_vars.yml \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Parameter Explanations**:
@@ -397,10 +397,10 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 ### 4. Monitor VM Performance
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=monitor \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Parameter Explanations**:
@@ -413,48 +413,48 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Shutdown VM Gracefully**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=shutdown \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Reboot VM**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=reboot \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Force Shutdown/Destroy VM**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=destroy \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Delete/Remove VM Completely**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
     -e "@inventory/management-vars.yaml" \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=undefine \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Schedule VM Lease End** (set when the lease will expire and VM will be destroyed):
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=lease_end \
     -e '{"vm_lease_end":"2026-02-23 10:45"}' \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Parameter Explanations** (applies to all Additional VM operation commands above):
@@ -608,7 +608,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
   -e "frp_server_port=7000" \
   -e "frp_auth_token=your-frp-token-here" \
   -e "image_setup_type=scratch" \
-  --limit ww1
+  --limit kvm1
 ```
 
 **Host Setup with Libvirt Security Skip** (when BIOS/OS doesn't support SELinux):
@@ -620,7 +620,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
   -e "frp_auth_token=your-frp-token-here" \
   -e "skip_libvirt_security=true" \
   -e "image_setup_type=scratch" \
-  --limit ww1
+  --limit kvm1
 ```
 
 **Golden Image Build Setup**:
@@ -635,7 +635,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
   -e "packer_build_version=1.0.0" \
   -e "gcp_project_id=your-gcp-project" \
   -e "gcs_bucket_url=gs://your-bucket-name" \
-  --limit ww1
+  --limit kvm1
 ```
 
 **Minimal Setup (No FRP, Base Image Only)**:
@@ -643,7 +643,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
   -e "image_setup_type=scratch" \
   -e "skip_libvirt_security=true" \
-  --limit ww1
+  --limit kvm1
 ```
 
 **Inject a Single SSH Public Key into authorized_keys**:
@@ -651,7 +651,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
   -e "image_setup_type=scratch" \
   -e "vm_ssh_authorized_key='ssh-ed25519 AAAA... user@host'" \
-  --limit ww1
+  --limit kvm1
 ```
 
 **Inject Multiple SSH Public Keys into authorized_keys**:
@@ -659,7 +659,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
   -e "image_setup_type=scratch" \
   -e '{"vm_ssh_authorized_keys": ["ssh-ed25519 AAAA... user@host", "ssh-rsa BBBB... other@host"]}' \
-  --limit ww1
+  --limit kvm1
 ```
 
 **Inject SSH Key for a Specific User**:
@@ -668,7 +668,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
   -e "image_setup_type=scratch" \
   -e "vm_ssh_key_user=ubuntu" \
   -e "vm_ssh_authorized_key='ssh-ed25519 AAAA... user@host'" \
-  --limit ww1
+  --limit kvm1
 ```
 
 **Only Inject SSH Keys (skip everything else)**:
@@ -676,7 +676,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
   -e "vm_ssh_authorized_key='ssh-ed25519 AAAA... user@host'" \
   --tags "ssh_keys" \
-  --limit ww1
+  --limit kvm1
 ```
 
 **Setup with Specific Tags** (selective installation):
@@ -685,12 +685,12 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
   -e "image_setup_type=scratch" \
   --tags "system_setup,kvm_config" \
-  --limit ww1
+  --limit kvm1
 
 # Only configure GPU passthrough
 ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
   --tags "gpu_passthrough" \
-  --limit ww1
+  --limit kvm1
 
 # Only setup FRP client
 ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
@@ -698,7 +698,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
   -e "frp_server_port=7000" \
   -e "frp_auth_token=your-frp-token-here" \
   --tags "frp_client" \
-  --limit ww1
+  --limit kvm1
 
 # Only build golden image (requires prior host setup)
 ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
@@ -707,7 +707,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
   -e "packer_build_name=ubuntu_noble" \
   -e "packer_build_version=1.0.0" \
   --tags "golden_image" \
-  --limit ww1
+  --limit kvm1
 ```
 
 **Parameter Reference**:
@@ -757,16 +757,16 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 **Standard FRP Server Setup with SSL**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
-  -e "frp_domain=arkhainet.arkhai.io" \
-  -e "certbot_email=admin@arkhainet.arkhai.io" \
+  -e "frp_domain=vm.arkhai.io" \
+  -e "certbot_email=admin@vm.arkhai.io" \
   --limit proxy-dev
 ```
 
 **FRP Server Setup with Custom Credentials**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
-  -e "frp_domain=arkhainet.arkhai.io" \
-  -e "certbot_email=admin@arkhainet.arkhai.io" \
+  -e "frp_domain=vm.arkhai.io" \
+  -e "certbot_email=admin@vm.arkhai.io" \
   -e "frp_auth_token=your-custom-64-char-token-here-make-it-secure-and-random" \
   -e "frp_dashboard_password=your-custom-32-char-password" \
   --limit proxy-dev
@@ -775,15 +775,15 @@ ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
 **FRP Server Setup with Subdomain Host** (alternative parameter):
 ```bash
 ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
-  -e "frp_subdomain_host=arkhainet.arkhai.io" \
-  -e "certbot_email=admin@arkhainet.arkhai.io" \
+  -e "frp_subdomain_host=vm.arkhai.io" \
+  -e "certbot_email=admin@vm.arkhai.io" \
   --limit proxy-dev
 ```
 
 **Parameter Reference**:
-- `frp_domain`: Primary domain/subdomain for FRP services (e.g., `arkhainet.arkhai.io`)
+- `frp_domain`: Primary domain/subdomain for FRP services (e.g., `vm.arkhai.io`)
 - `frp_subdomain_host`: Alternative parameter for domain (same as `frp_domain`, used internally)
-- `certbot_email`: Email for Let's Encrypt SSL certificate notifications (e.g., `admin@arkhainet.arkhai.io`)
+- `certbot_email`: Email for Let's Encrypt SSL certificate notifications (e.g., `admin@vm.arkhai.io`)
 - `frp_auth_token`: Custom 64-character authentication token (auto-generated if not provided)
 - `frp_dashboard_password`: Custom 32-character dashboard password (auto-generated if not provided)
 
@@ -809,7 +809,7 @@ ssh -L 7001:localhost:7001 user@<frp-server-ip>
 # Then visit: http://localhost:7001
 
 # Direct HTTPS access (after SSL setup)
-# Visit: https://frp-admin.arkhainet.arkhai.io
+# Visit: https://frp-admin.vm.arkhai.io
 ```
 
 #### FRP Dashboard API Examples
@@ -823,7 +823,7 @@ FRP_USER="admin"
 FRP_PASSWORD="<dashboard-password-from-credentials-file>"
 FRP_API_URL="http://localhost:7001/api"  # Via SSH tunnel
 # OR
-FRP_API_URL="https://frp-admin.arkhainet.arkhai.io/api"  # Direct HTTPS
+FRP_API_URL="https://frp-admin.vm.arkhai.io/api"  # Direct HTTPS
 ```
 
 **Get Server Information**:
@@ -842,7 +842,7 @@ curl -u "${FRP_USER}:${FRP_PASSWORD}" \
     "tcpmuxHTTPConnectPort": 0,
     "kcpBindPort": 0,
     "quicBindPort": 0,
-    "subdomainHost": "arkhainet.arkhai.io",
+    "subdomainHost": "vm.arkhai.io",
     "maxPoolCount": 50,
     "maxPortsPerClient": 0,
     "heartbeatTimeout": 90,
@@ -1040,7 +1040,7 @@ The modular architecture orchestrates VM operations in the following flow:
 **Create VM with GPU Passthrough** (recommended method using variables file):
 ```bash
 cat > /tmp/vm_vars.yml << 'EOF'
-vm_host: ww1
+vm_host: kvm1
 vm_target: vm-base-gpu
 vm_action: create
 vm_ram: 8192
@@ -1050,7 +1050,7 @@ vm_tenant_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjmOBBEpr7KvLbsmjLOaqmPa
 vm_gpu_provisioned: true
 vm_gpu_count: 2
 image_setup_type: scratch
-frp_domain: arkhainet.arkhai.io
+frp_domain: vm.arkhai.io
 frp_server_addr: 192.168.100.61
 frp_dashboard_password: "prFHMe8bsiOgTOM8I39udN0lD9h4Nt2W"
 EOF
@@ -1058,13 +1058,13 @@ EOF
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
     --extra-vars @inventory/management-vars.yaml \
     --extra-vars @/tmp/vm_vars.yml \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Create VM without GPU**:
 ```bash
 cat > /tmp/vm_vars.yml << 'EOF'
-vm_host: ww1
+vm_host: kvm1
 vm_target: vm-base-gpu
 vm_action: create
 vm_ram: 4096
@@ -1073,7 +1073,7 @@ vm_disk_size: 10G
 vm_tenant_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjmOBBEpr7KvLbsmjLOaqmPahELCroCiTYEjQ+p6yRM buyer@example.com"
 vm_gpu_provisioned: false
 image_setup_type: scratch
-frp_domain: arkhainet.arkhai.io
+frp_domain: vm.arkhai.io
 frp_server_addr: 192.168.100.61
 frp_dashboard_password: "prFHMe8bsiOgTOM8I39udN0lD9h4Nt2W"
 EOF
@@ -1081,111 +1081,111 @@ EOF
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
     --extra-vars @inventory/management-vars.yaml \
     --extra-vars @/tmp/vm_vars.yml \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Start VM**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=start \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Shutdown VM Gracefully**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=shutdown \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Reboot VM**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=reboot \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Force Destroy VM** (immediate shutdown):
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=destroy \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Undefine VM** (delete VM and all resources):
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
     -e "@inventory/management-vars.yaml" \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=undefine \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Monitor VM Performance**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=monitor \
-    --limit ww1
+    --limit kvm1
 ```
 
 **List All VMs on Host**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_action=list \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Check Host Resources and Status**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_action=check \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Reset VM Tenant Password**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=reset_password \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Schedule VM Lease End** (set when lease expires and VM will be automatically destroyed and cleaned up):
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=lease_end \
     -e '{"vm_lease_end":"2026-02-23 10:45"}' \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Note**: The lease end action schedules an automatic VM destruction and complete cleanup at the specified UTC time. All execution details (VM destroy, network cleanup, SSH key removal, storage deletion) are logged to a single file at `/var/log/vm-lease-end/<vm-name>/lease_end_*.log` on the target host. To check execution status after the lease expires:
 ```bash
-ssh ww1 'cat /var/log/vm-lease-end/vm-base-gpu/lease_end_*.log'
+ssh kvm1 'cat /var/log/vm-lease-end/vm-base-gpu/lease_end_*.log'
 ```
 
 **Cancel Scheduled Lease End** (remove scheduled lease termination):
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=lease_remove \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Create VM with Specific Tags**:
@@ -1194,19 +1194,19 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
     --extra-vars @/tmp/vm_vars.yml \
     --tags vm_create \
-    --limit ww1
+    --limit kvm1
 
 # Only run monitoring tasks
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=ww1 \
+    -e vm_host=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=monitor \
     --tags vm_monitor \
-    --limit ww1
+    --limit kvm1
 ```
 
 **Parameter Reference for VM Creation**:
-- `vm_host`: KVM host where VM will be created (from inventory, e.g., `ww1`)
+- `vm_host`: KVM host where VM will be created (from inventory, e.g., `kvm1`)
 - `vm_target`: Name/identifier for the VM (e.g., `vm-base-gpu`, `customer-vm-001`)
 - `vm_action`: Operation to perform (`create`, `start`, `shutdown`, `reboot`, `destroy`, `undefine`, `monitor`, `list`, `check`, `reset_password`, `lease_end`, `lease_remove`)
 - `vm_ram`: RAM allocation in MB (e.g., `4096` = 4GB, `8192` = 8GB)
@@ -1216,7 +1216,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 - `vm_gpu_provisioned`: Enable GPU passthrough (`true` or `false`)
 - `vm_gpu_count`: Number of GPUs to allocate (only when `vm_gpu_provisioned: true`)
 - `image_setup_type`: Base image type (`scratch` for Ubuntu cloud image, `golden` for custom image)
-- `frp_domain`: FRP domain for remote access (e.g., `arkhainet.arkhai.io`)
+- `frp_domain`: FRP domain for remote access (e.g., `vm.arkhai.io`)
 - `frp_server_addr`: IP address of FRP server (e.g., `192.168.100.61`)
 - `frp_dashboard_password`: FRP dashboard API password for proxy registration
 - `vm_lease_end`: Lease expiration datetime in UTC format `YYYY-MM-DD HH:MM` (e.g., `2026-02-23 10:45`) - use JSON format in command: `-e '{"vm_lease_end":"2026-02-23 10:45"}'`
@@ -1255,7 +1255,7 @@ All VM operations provide JSON-formatted output for API integration. Example cre
 ```json
 {
   "vm_name": "vm-base-gpu",
-  "vm_host": "ww1",
+  "vm_host": "kvm1",
   "status": "running",
   "resources": {
     "ram_mb": 8192,
@@ -1398,13 +1398,13 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
   -e "app_container_port=8002" \
   -e "app_nginx_port=8888" \
   -e "app_nginx_site_name=erc-registry" \
-  -e "frp_subdomain_host=arkhainet.arkhai.io" \
+  -e "frp_subdomain_host=vm.arkhai.io" \
   -e "enable_ssl=true" \
   -e "certbot_email=admin@example.com" \
   --limit proxy-dev
 ```
 
-Access: `https://erc-registry.arkhainet.arkhai.io/` (with SSL) or `http://erc-registry.arkhainet.arkhai.io:8888/` (without SSL)
+Access: `https://erc-registry.vm.arkhai.io/` (with SSL) or `http://erc-registry.vm.arkhai.io:8888/` (without SSL)
 
 #### Required Variables
 
@@ -1476,7 +1476,7 @@ app_nginx_path: "/"                  # Default, or "/api" for subpath
 docker_network_mode: "bridge"        # Default: bridge (port-mapped). Set to "host" to use host networking (e.g. for ZeroTier access)
 
 # FRP Subdomain Support (if frp-setup role configured)
-frp_subdomain_host: "example.com"    # Wildcard DNS domain (e.g., arkhainet.arkhai.io)
+frp_subdomain_host: "example.com"    # Wildcard DNS domain (e.g., vm.arkhai.io)
 # Results in: app_nginx_site_name.frp_subdomain_host
 # Example: my-app.example.com
 
@@ -1651,7 +1651,7 @@ The role returns JSON deployment information via `ansible_stats`:
   "nginx_port": 8888,
   "container_port": 8002,
   "internal_port": 8080,
-  "nginx_url": "http://erc-registry.arkhainet.arkhai.io:8888/",
+  "nginx_url": "http://erc-registry.vm.arkhai.io:8888/",
   "image": "asia-southeast1-docker.pkg.dev/principia-infrastructure-dev/erc-8004-registry/erc-8004-registry:latest"
 }
 ```
@@ -1660,7 +1660,7 @@ The role returns JSON deployment information via `ansible_stats`:
 ```json
 {
   "app_name": "erc-registry",
-  "nginx_url": "https://erc-registry.arkhainet.arkhai.io/",
+  "nginx_url": "https://erc-registry.vm.arkhai.io/",
   "ssl_enabled": true
 }
 ```
@@ -1675,8 +1675,8 @@ The role returns JSON deployment information via `ansible_stats`:
 ```
 
 **Note**:
-- Without SSL: URL includes port (e.g., `http://erc-registry.arkhainet.arkhai.io:8888/`)
-- With SSL: Certbot configures nginx for standard HTTPS port 443 with redirect (e.g., `https://erc-registry.arkhainet.arkhai.io/`)
+- Without SSL: URL includes port (e.g., `http://erc-registry.vm.arkhai.io:8888/`)
+- With SSL: Certbot configures nginx for standard HTTPS port 443 with redirect (e.g., `https://erc-registry.vm.arkhai.io/`)
 - FRP subdomain uses wildcard DNS from Cloudflare, nginx handles the actual port routing
 
 #### Docker Application Deployment Command Examples
@@ -1695,9 +1695,9 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
   -e "app_container_internal_port=8080" \
   -e "app_container_port=8001" \
   -e "app_nginx_port=8888" \
-  -e "frp_subdomain_host=arkhainet.arkhai.io" \
+  -e "frp_subdomain_host=vm.arkhai.io" \
   -e "enable_ssl=true" \
-  -e "certbot_email=admin@arkhainet.arkhai.io" \
+  -e "certbot_email=admin@vm.arkhai.io" \
   -e "app_nginx_site_name=my-app" \
   -e '{"app_container_env":{"DATABASE_URL":"postgresql://user:pass@db.example.com/mydb?sslmode=require","API_KEY":"your-api-key-here","PORT":"8080","HOST":"0.0.0.0","LOG_LEVEL":"info"}}' \
   --limit proxy-dev
@@ -1716,15 +1716,15 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 - `app_container_internal_port`: Container's internal port (e.g., `8080`, `3000`)
 - `app_nginx_port`: Nginx listening port (e.g., `8888`, `8080`)
 - `app_nginx_site_name`: Nginx site configuration name and subdomain prefix
-- `frp_subdomain_host`: FRP domain for subdomain routing (e.g., `arkhainet.arkhai.io`)
+- `frp_subdomain_host`: FRP domain for subdomain routing (e.g., `vm.arkhai.io`)
 - `enable_ssl`: Enable Let's Encrypt SSL certificates (`true` or `false`)
 - `certbot_email`: Email for Let's Encrypt notifications
 - `app_container_env`: JSON dictionary of environment variables for the container
 - `app_container_volumes`: List of volume mounts in `host:container` format (optional)
 
 **Access URLs**:
-- HTTP: `http://my-app.arkhainet.arkhai.io:8888` (via FRP tunnel)
-- HTTPS: `https://my-app.arkhainet.arkhai.io` (with SSL enabled)
+- HTTP: `http://my-app.vm.arkhai.io:8888` (via FRP tunnel)
+- HTTPS: `https://my-app.vm.arkhai.io` (with SSL enabled)
 
 **Note**: This role is optional and typically deployed on the FRP server to run additional services alongside the proxy. The example shows GCP Artifact Registry deployment - for Docker Hub or other registries, adjust `docker_registry_type` and authentication parameters accordingly.
 
@@ -1748,9 +1748,9 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
   -e "app_container_internal_port=8080" \
   -e "app_container_port=8001" \
   -e "app_nginx_port=8888" \
-  -e "frp_subdomain_host=arkhainet.arkhai.io" \
+  -e "frp_subdomain_host=vm.arkhai.io" \
   -e "enable_ssl=true" \
-  -e "certbot_email=admin@arkhainet.arkhai.io" \
+  -e "certbot_email=admin@vm.arkhai.io" \
   -e "app_nginx_site_name=erc-registry" \
   -e '{"app_container_env":{"DATABASE_URL":"postgresql://neondb_owner:password@us-east-1.aws.neon.tech/erc-8004-registry?sslmode=require&channel_binding=require","CHAIN_ID":"84532","RPC_URL":"https://base-sepolia.infura.io/v3/<infura-project-id>","IDENTITY_REGISTRY_ADDRESS":"0x<identity-registry-address>","REPUTATION_REGISTRY_ADDRESS":"0x<reputation-registry-address>","VALIDATION_REGISTRY_ADDRESS":"","PORT":"8080","HOST":"0.0.0.0","ENABLE_HEALTH_CHECKS":"false","HEALTH_CHECK_INTERVAL":"60","ENDPOINT_CHECK_TIMEOUT":"10","HEARTBEAT_TTL_SECS":"60","LOG_LEVEL":"info"}}' \
   --limit proxy-dev
@@ -1770,7 +1770,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 - `app_container_internal_port`: Port the application listens on inside the container (`8080`)
 - `app_container_port`: Host port mapped to container (`8001` - direct access port)
 - `app_nginx_port`: Nginx reverse proxy port (`8888` - HTTP access port)
-- `frp_subdomain_host`: Base domain for FRP subdomain routing (`arkhainet.arkhai.io`)
+- `frp_subdomain_host`: Base domain for FRP subdomain routing (`vm.arkhai.io`)
 - `enable_ssl`: Enable HTTPS with Let's Encrypt (`true`)
 - `certbot_email`: Email for SSL certificate notifications
 - `app_nginx_site_name`: Nginx site config name and subdomain prefix (`erc-registry`)
@@ -1792,8 +1792,8 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 - `LOG_LEVEL`: Logging verbosity level (`info`, `debug`, `warn`, `error`)
 
 **Access URLs**:
-- HTTP: `http://erc-registry.arkhainet-staging.arkhai.io:8888` (via FRP tunnel)
-- HTTPS: `https://erc-registry.arkhainet-staging.arkhai.io` (with SSL enabled)
+- HTTP: `http://erc-registry.vm-staging.arkhai.io:8888` (via FRP tunnel)
+- HTTPS: `https://erc-registry.vm-staging.arkhai.io` (with SSL enabled)
 - Direct Access: `http://<server-ip>:8001` (bypasses Nginx, FRP only)
 
 **Security Considerations**:
@@ -1836,11 +1836,11 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
   -e "app_container_internal_port=8081" \
   -e "app_container_port=8001" \
   -e "app_nginx_port=8888" \
-  -e "frp_subdomain_host=arkhainet-market.arkhai.io" \
+  -e "frp_subdomain_host=vm-market.arkhai.io" \
   -e "enable_ssl=true" \
-  -e "certbot_email=admin@arkhainet-market.arkhai.io" \
+  -e "certbot_email=admin@vm-market.arkhai.io" \
   -e "app_nginx_site_name=provisioner" \
-  -e '{"app_container_env": {"HOST":"0.0.0.0","PORT":"8081","LOG_LEVEL":"info","DATABASE_URL":"postgresql+psycopg2://postgres:postgres@<postgres-host>:5432/provisioning","REDIS_URL":"redis://<redis-host>:6379/0","REDIS_QUEUE_NAME":"provisioning_jobs","ANSIBLE_TIMEOUT_SECONDS":"1800","ANSIBLE_BECOME_PASS":"vmhostuserpassword","DEFAULT_VM_HOST":"ww1","FRP_SERVER_ADDR":"34.87.54.66","FRP_DOMAIN":"arkhainet.arkhai.io","FRP_DASHBOARD_PASSWORD":"frpadashboardapipassword","ENABLE_AUTH":"true","AUTH_FAIL_OPEN":"false","REGISTRY_URL":"https://<registry-url>","REGISTRY_CACHE_TTL_SECONDS":"300","REGISTRY_CACHE_MAX_SIZE":"256","SSH_PRIVATE_KEY":"<base64-encoded-ssh-private-key>","MANAGEMENT_VARS_YAML":"<base64-encoded-management-vars-yaml>"}}' \
+  -e '{"app_container_env": {"HOST":"0.0.0.0","PORT":"8081","LOG_LEVEL":"info","DATABASE_URL":"postgresql+psycopg2://postgres:postgres@<postgres-host>:5432/provisioning","REDIS_URL":"redis://<redis-host>:6379/0","REDIS_QUEUE_NAME":"provisioning_jobs","ANSIBLE_TIMEOUT_SECONDS":"1800","ANSIBLE_BECOME_PASS":"vmhostuserpassword","DEFAULT_VM_HOST":"kvm1","FRP_SERVER_ADDR":"34.87.54.66","FRP_DOMAIN":"vm.arkhai.io","FRP_DASHBOARD_PASSWORD":"frpadashboardapipassword","ENABLE_AUTH":"true","AUTH_FAIL_OPEN":"false","REGISTRY_URL":"https://<registry-url>","REGISTRY_CACHE_TTL_SECONDS":"300","REGISTRY_CACHE_MAX_SIZE":"256","SSH_PRIVATE_KEY":"<base64-encoded-ssh-private-key>","MANAGEMENT_VARS_YAML":"<base64-encoded-management-vars-yaml>"}}' \
   --limit provisioning-dev
 ```
 
@@ -1858,7 +1858,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 - `app_container_internal_port`: Port the application listens on inside the container (`8081`)
 - `app_container_port`: Host port mapped to container (`8001` - direct access port)
 - `app_nginx_port`: Nginx reverse proxy port (`8888` - HTTP access port)
-- `frp_subdomain_host`: Base domain for FRP subdomain routing (e.g., `arkhainet-market.arkhai.io`)
+- `frp_subdomain_host`: Base domain for FRP subdomain routing (e.g., `vm-market.arkhai.io`)
 - `enable_ssl`: Enable HTTPS with Let's Encrypt (`true`)
 - `certbot_email`: Email for SSL certificate notifications
 - `app_nginx_site_name`: Nginx site config name and subdomain prefix (`provisioner`)
@@ -1874,9 +1874,9 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 - `ANSIBLE_BECOME_PASS`: Sudo password for Ansible privilege escalation on VM hosts
 - `ENABLE_AUTH`: Keep `true` in deployed environments so the service enforces `X-Agent-ID`
 - `AUTH_FAIL_OPEN`: Keep `false` so registry lookup failures do not bypass auth
-- `DEFAULT_VM_HOST`: Default KVM host used for VM provisioning (e.g., `ww1`)
+- `DEFAULT_VM_HOST`: Default KVM host used for VM provisioning (e.g., `kvm1`)
 - `FRP_SERVER_ADDR`: IP address of the FRP server for VM network proxy registration
-- `FRP_DOMAIN`: FRP base domain for VM subdomain routing (e.g., `arkhainet.arkhai.io`)
+- `FRP_DOMAIN`: FRP base domain for VM subdomain routing (e.g., `vm.arkhai.io`)
 - `FRP_DASHBOARD_PASSWORD`: FRP dashboard API password for proxy management
 - `ENABLE_AUTH`: Enable token-based API authentication (`true` or `false`)
 - `REGISTRY_URL`: URL of the local ERC Registry service (e.g., `http://localhost:8080`)
@@ -1886,8 +1886,8 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 - `MANAGEMENT_VARS_YAML`: base64-encoded `management-vars.yaml` (no newlines). The container decodes it to `/app/compute-provisioning-iac/ansible/inventory/management-vars.yaml` on startup. Required when using Golden Images (`vm_action=create` or `vm_action=undefine`). Encode with: `base64 < inventory/management-vars.yaml | tr -d '\n'`
 
 **Access URLs**:
-- HTTP: `http://provisioner.arkhainet-market.arkhai.io:8888` (via FRP tunnel)
-- HTTPS: `https://provisioner.arkhainet-market.arkhai.io` (with SSL enabled)
+- HTTP: `http://provisioner.vm-market.arkhai.io:8888` (via FRP tunnel)
+- HTTPS: `https://provisioner.vm-market.arkhai.io` (with SSL enabled)
 - Direct Access: `http://<server-ip>:8001` (bypasses Nginx)
 
 **Firewall Ports Opened**:

@@ -13,7 +13,7 @@ db_path             = "./src/market_storefront/data/sell-agent/agent.db"
 log_file_path       = "./logs/bob.log"
 admin_api_key       = "test-api-key"
 # Seed the resources table from this CSV on startup when the table is empty.
-# The bundled ww1-machine.csv is the local dev inventory. Bind-mounted into
+# The bundled kvm1-machine.csv is the local dev inventory. Bind-mounted into
 # the container at /app/resources.csv by `make deploy-seller-agent`.
 # For helm deployments, inject via --set-file (RESOURCES_CSV_FILE) instead —
 # the CSV content is delivered through the agent Secret, not a file path.

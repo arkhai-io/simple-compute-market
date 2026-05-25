@@ -159,7 +159,7 @@ _INIT_USER_TEMPLATE = """\
 # resource_lease_grace_seconds = 1800
 # negotiation_timeout_seconds = 1800
 # negotiation_watchdog_interval = 60
-# default_vm_host = "ww1"                      # KVM host name from ansible inventory
+# default_vm_host = "kvm1"                      # KVM host name from ansible inventory
 
 # ---------------------------------------------------------------------------
 # Shared sections (also used by the buyer-side `market` CLI)

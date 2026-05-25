@@ -166,7 +166,7 @@ provisioning:
     log_level: "info"
     database_url: "sqlite:////app/data/provisioning.db"
     ansible_timeout_seconds: 1800
-    default_vm_host: "ww1"
+    default_vm_host: "kvm1"
     enable_auth: false
     registry_cache_ttl_seconds: 300
     registry_cache_max_size: 256

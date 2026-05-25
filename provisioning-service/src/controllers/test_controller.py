@@ -23,10 +23,10 @@ Rule schema (POST /test/mock-rules body)
 ::
 
     {
-        "rule_id": "my-ww1-create",     // optional; auto-assigned if absent
+        "rule_id": "my-kvm1-create",     // optional; auto-assigned if absent
         "match": {                       // subset of AnsibleJobParams fields
             "vm_action": "create",
-            "vm_host": "ww1"
+            "vm_host": "kvm1"
         },
         "pause_before_result": true,     // block at wait_for_playbook until resumed
         "result_stdout": "...",          // Ansible stdout to inject (optional)

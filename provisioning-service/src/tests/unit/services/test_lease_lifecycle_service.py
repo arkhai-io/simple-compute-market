@@ -75,9 +75,9 @@ def _make_check_svc(lease_svc, **settings_overrides):
 
 
 def _expired_lease_data(
-    resource_id: str = "compute-ww1-001",
+    resource_id: str = "compute-kvm1-001",
     escrow_uid: str = "escrow-test",
-    vm_host: str = "ww1",
+    vm_host: str = "kvm1",
     vm_target: str = "tenant-a1b2",
     seconds_ago: int = 10,
 ) -> LeaseCreate:
@@ -102,7 +102,7 @@ class TestCheckLeasesActivation:
         data = LeaseCreate(
             resource_id="r1",
             escrow_uid="e-activate",
-            vm_host="ww1",
+            vm_host="kvm1",
             vm_target="t1",
             lease_start_utc=future_start,
             lease_end_utc=datetime.now(timezone.utc) + timedelta(hours=2),
@@ -115,7 +115,7 @@ class TestCheckLeasesActivation:
         data2 = LeaseCreate(
             resource_id="r2",
             escrow_uid="e-activate2",
-            vm_host="ww1",
+            vm_host="kvm1",
             vm_target="t2",
             lease_start_utc=future_start2,
             lease_end_utc=datetime.now(timezone.utc) + timedelta(hours=3),
@@ -137,7 +137,7 @@ class TestCheckLeasesActivation:
         lease = lease_svc.create(LeaseCreate(
             resource_id="r-act",
             escrow_uid="e-act-manual",
-            vm_host="ww1",
+            vm_host="kvm1",
             vm_target="t1",
             lease_end_utc=datetime.now(timezone.utc) + timedelta(hours=2),
         ))
@@ -222,7 +222,7 @@ class TestCheckLeasesGracePeriod:
         data = LeaseCreate(
             resource_id="r-force",
             escrow_uid="e-force",
-            vm_host="ww1",
+            vm_host="kvm1",
             vm_target="t1",
             lease_end_utc=past,
         )
@@ -255,7 +255,7 @@ class TestPatchStorefrontResource:
         lease.id = "test-lease-id"
         lease.resource_id = resource_id
         lease.escrow_uid = "esc-1"
-        lease.vm_host = "ww1"
+        lease.vm_host = "kvm1"
         lease.vm_target = "t1"
         return lease
 
@@ -326,7 +326,7 @@ class TestPatchStorefrontResource:
             storefront_url="http://mysf:8001",
             storefront_admin_key="my-key",
         )
-        lease = self._make_fake_lease(resource_id="compute-ww1-001")
+        lease = self._make_fake_lease(resource_id="compute-kvm1-001")
         mock_sf = self._mock_sf_client()
 
         with patch("storefront_client.StorefrontClient", return_value=mock_sf) as mock_cls:
@@ -339,7 +339,7 @@ class TestPatchStorefrontResource:
 
         # patch_resource was called with correct resource_id and body
         pr_call = mock_sf.patch_resource.call_args
-        assert pr_call.args[0] == "compute-ww1-001"
+        assert pr_call.args[0] == "compute-kvm1-001"
         assert pr_call.kwargs.get("state") == "available"
         assert pr_call.kwargs.get("attributes") == {"lease_end_utc": None}
 

@@ -15,7 +15,7 @@ asyncio.Event via this seam and await it instead of sleeping:
 
     job_dispatched = asyncio.Event()
     # ... fixture injects the event ...
-    response = await client.post("/api/v1/hosts/ww1/vms/", json={...})
+    response = await client.post("/api/v1/hosts/kvm1/vms/", json={...})
     await job_dispatched.wait()   # no sleep — fires exactly once per job
     # Now safe to inspect DB, assert on result, etc.
 
@@ -180,12 +180,12 @@ FAKE_CREATE_STDOUT = """\
 PLAY [Provision VM] ***********************************************************
 
 TASK [debug] ******************************************************************
-ok: [ww1] => {
+ok: [kvm1] => {
     "vm_creation_data": {
         "action": "create",
         "vm_name": "agent-vm-01",
         "status": "running",
-        "host": "ww1",
+        "host": "kvm1",
         "timestamp": "2025-01-01T00:00:00Z",
         "tenant_user": "agentvm01",
         "external_ssh_port": "54321",
@@ -242,7 +242,7 @@ def fake_inventory_path(tmp_path) -> Path:
     hosts = tmp_path / "hosts"
     hosts.write_text(
         "[kvm_hosts]\n"
-        "ww1  ansible_host=10.0.0.1  ansible_user=root  "
+        "kvm1  ansible_host=10.0.0.1  ansible_user=root  "
         "ansible_ssh_private_key_file=~/.ssh/id_ed25519\n"
     )
     return hosts
@@ -284,14 +284,14 @@ def fake_ansible(fake_inventory_path) -> MagicMock:
     # write_inventory — return a temp path (content irrelevant; Ansible never runs)
     import tempfile
     fake_inv_tmp = Path(tempfile.gettempdir()) / "test_inventory.ini"
-    fake_inv_tmp.write_text("[kvm_hosts]\nww1  ansible_host=10.0.0.1  ansible_user=root\n")
+    fake_inv_tmp.write_text("[kvm_hosts]\nkvm1  ansible_host=10.0.0.1  ansible_user=root\n")
     mock.write_inventory.return_value = fake_inv_tmp
 
     # check_connectivity_with_inventory — synchronous mock returning reachable
     from models.ansible import ConnectivityResult
     from unittest.mock import AsyncMock as _AsyncMock
     mock.check_connectivity_with_inventory = _AsyncMock(
-        return_value=ConnectivityResult(host="ww1", reachable=True, detail="mock ping ok")
+        return_value=ConnectivityResult(host="kvm1", reachable=True, detail="mock ping ok")
     )
 
     return mock
@@ -317,7 +317,7 @@ async def client_and_queue(
     # Build services directly — bypass the container's DB singleton so we use
     # the fresh per-test in-memory DB.
     mock_settings = MagicMock(
-        default_vm_host="ww1",
+        default_vm_host="kvm1",
         default_max_retries=3,
         retry_backoff_initial_seconds=60,
         retry_backoff_multiplier=2.0,

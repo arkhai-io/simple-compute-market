@@ -153,7 +153,7 @@ class CreateVmRequest(BaseModel):
     )
     frp_domain: Optional[str] = Field(
         default=None,
-        description="Base domain of the FRP server (e.g. 'arkhainet.example.com')",
+        description="Base domain of the FRP server (e.g. 'vm.example.com')",
     )
     frp_dashboard_password: Optional[str] = Field(
         default=None,

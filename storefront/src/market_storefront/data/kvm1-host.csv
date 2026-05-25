@@ -1,2 +1,2 @@
 name,enabled,cpu_type,host_cpu_cores,host_ram_gb,host_disk_gb,host_disk_type,motherboard,total_gpu_count,gpu_model,gpu_interconnect,nic_speed_gbps,internet_download_mbps,internet_upload_mbps,static_ip,open_ports_count,region,datacenter_grade
-ww1,true,Intel Xeon W5-2465X,16,256,4000,Kingston SFYRD2000G,ASUS Pro WS W790-ACE,1,RTX 5080,pcie_only,10,1000,1000,true,32,"California, US",true
+kvm1,true,Intel Xeon W5-2465X,16,256,4000,Kingston SFYRD2000G,ASUS Pro WS W790-ACE,1,RTX 5080,pcie_only,10,1000,1000,true,32,"California, US",true

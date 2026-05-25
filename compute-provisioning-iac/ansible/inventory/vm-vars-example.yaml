@@ -8,8 +8,8 @@
 # =============================================================================
 
 # --- Required: core VM operation ---------------------------------------------
-# Host from [kvm_hosts] in inventory/hosts (e.g. ww1, vm1).
-vm_host: ww1
+# Host from [kvm_hosts] in inventory/hosts (e.g. kvm1, vm1).
+vm_host: kvm1
 
 # VM name (libvirt domain name). Must not already exist when vm_action is create.
 vm_target: my-vm

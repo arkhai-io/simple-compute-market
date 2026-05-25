@@ -950,7 +950,7 @@ The provisioning service owns lease lifecycle via the `vm_leases` table and the 
 | Column | Type | Description |
 |---|---|---|
 | `id` | UUID PK | Internal lease ID |
-| `resource_id` | TEXT | Storefront-assigned resource identifier (e.g. `compute-ww1-001`). Application-level FK — unvalidated by the provisioning service. |
+| `resource_id` | TEXT | Storefront-assigned resource identifier (e.g. `compute-kvm1-001`). Application-level FK — unvalidated by the provisioning service. |
 | `escrow_uid` | TEXT UNIQUE | On-chain escrow UID. One deal = one lease. |
 | `vm_host` | TEXT | KVM host alias (Ansible inventory name) |
 | `vm_target` | TEXT | Libvirt domain name of the provisioned VM |
@@ -1102,8 +1102,8 @@ GET    /test/jobs/{job_id}/wait            Long-poll until one job is terminal
 **Mock rule schema:**
 ```json
 {
-  "rule_id": "my-ww1-create",
-  "match": {"vm_action": "create", "vm_host": "ww1"},
+  "rule_id": "my-kvm1-create",
+  "match": {"vm_action": "create", "vm_host": "kvm1"},
   "pause_before_result": true,
   "result_stdout": "...",
   "fail_with": null
@@ -1382,8 +1382,8 @@ The `vm_creation_data` JSON returned by the playbook (and stored in `job.result`
 | `frp.enabled` | `true` | `false` |
 | `frp.remote_port` | allocated port (e.g. `7045`) | N/A |
 | `frp.subdomain` | e.g. `a3b9f2` | N/A |
-| `frp.domain` | e.g. `arkhainet.arkhai.io` | N/A |
-| `authentication.tenant.ssh_commands.external` | `ssh -i <key> -p 7045 vmname@a3b9f2.arkhainet.arkhai.io` | `ssh -i <key> -p <port> vmname@<kvm_host_ip>` |
+| `frp.domain` | e.g. `vm.arkhai.io` | N/A |
+| `authentication.tenant.ssh_commands.external` | `ssh -i <key> -p 7045 vmname@a3b9f2.vm.arkhai.io` | `ssh -i <key> -p <port> vmname@<kvm_host_ip>` |
 | `authentication.tenant.ssh_commands.internal` | `ssh -i <key> vmname@<vm_internal_ip>` | same |
 
 The provisioning client (`service/clients/provisioning.py`) normalizes the result and substitutes `frp.domain` as `vm_host_ip` when FRP is active, so the rest of the agent code sees a consistent connection-details shape regardless of mode.
@@ -1642,12 +1642,12 @@ must be disabled for all GKE-hosted deployments:
 
 *Three delivery mechanisms, in priority order:*
 1. **`seller.resources_csv_inline`** (Helm) — raw CSV content injected via the per-agent Secret. Set via `make deploy RESOURCES_CSV_FILE=/path/to/resources.csv`, which passes `--set-file storefront.agents[0].secret.resourcesCsvInline=<path>` to `helm upgrade`. The CSV is stored in the Kubernetes Secret alongside the wallet key and rendered into the dynaconf profile that the storefront reads at startup. This is the production path — no CSV file ever touches the container image.
-2. **`seller.resources_csv_path`** (compose / local dev) — path to a CSV file on disk, bind-mounted into the container by `make deploy-seller-agent` via `RESOURCES_CSV_FILE` (defaults to `storefront/src/market_storefront/data/ww1-machine.csv`). Used by the docker-run compose flow.
+2. **`seller.resources_csv_path`** (compose / local dev) — path to a CSV file on disk, bind-mounted into the container by `make deploy-seller-agent` via `RESOURCES_CSV_FILE` (defaults to `storefront/src/market_storefront/data/kvm1-machine.csv`). Used by the docker-run compose flow.
 3. **`POST /api/v1/admin/portfolio/resources/import`** — admin endpoint for runtime clobber. Accepts a CSV file upload and upserts regardless of current table state. Used for inventory updates without restarting the pod.
 
 *Startup seeding is idempotent*: if the resources table already has rows (e.g. from a previous startup or a prior import call), seeding is skipped. Pod restarts do not overwrite operator changes. To force a full re-seed, use the import endpoint.
 
-The full-deal e2e scenario uses the admin import path: it carries an inline CSV fixture and imports the exact compute row it needs through `SyncStorefrontClient.admin_import_resources()` during readiness. This keeps the test self-contained and prevents it from depending on `ww1-machine.csv` being mounted into the storefront container.
+The full-deal e2e scenario uses the admin import path: it carries an inline CSV fixture and imports the exact compute row it needs through `SyncStorefrontClient.admin_import_resources()` during readiness. This keeps the test self-contained and prevents it from depending on `kvm1-machine.csv` being mounted into the storefront container.
 
 The CSV files in `storefront/src/market_storefront/data/*.csv` are excluded from the container image via `.dockerignore`. They exist in the source tree as reference/default inventory for local dev (used by the compose bind-mount path) but are not baked into the image.
 
@@ -1986,7 +1986,7 @@ def _on_started(job_id: str) -> None:
 
 job_queue._on_job_started = _on_started
 
-response = await client.post("/api/v1/hosts/ww1/vms/", json={...})
+response = await client.post("/api/v1/hosts/kvm1/vms/", json={...})
 await asyncio.wait_for(job_dispatched.wait(), timeout=5.0)
 # Now safe to poll GET /api/v1/jobs/{job_id} for terminal state
 ```
@@ -1997,7 +1997,7 @@ await asyncio.wait_for(job_dispatched.wait(), timeout=5.0)
 
 **What they cover:** Stateless, idempotent verification that a deployed stack is wired correctly — services can reach each other, authentication headers are enforced, health endpoints return 200, expected routes exist. These run as Helm test hooks in Kubernetes.
 
-**What they do not cover:** Service semantics. By the time a smoke test runs, the semantics have already been validated by integration tests. A smoke test for the provisioning service should verify that `GET /health` returns 200 and that `POST /api/v1/hosts/ww1/vms/` returns 401 without an `X-Agent-ID` header — it should not submit a real provisioning job and poll for completion.
+**What they do not cover:** Service semantics. By the time a smoke test runs, the semantics have already been validated by integration tests. A smoke test for the provisioning service should verify that `GET /health` returns 200 and that `POST /api/v1/hosts/kvm1/vms/` returns 401 without an `X-Agent-ID` header — it should not submit a real provisioning job and poll for completion.
 
 **Current location:** `helm/templates/tests/` as Kubernetes Job resources executed by `helm test`.
 

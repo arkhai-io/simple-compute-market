@@ -135,7 +135,7 @@ services:
       # Compute inventory seed CSV — storefront.bob.toml's
       # seller.resources_csv_path expects this at /app/resources.csv.
       # Mirrors the deploy-seller-agent Makefile target.
-      - ./storefront/src/market_storefront/data/ww1-machine.csv:/app/resources.csv:ro
+      - ./storefront/src/market_storefront/data/kvm1-machine.csv:/app/resources.csv:ro
       - zerotier-sell:/var/lib/zerotier-one
       # Named volume so `docker compose down -v` actually wipes seller state
       # (resources, listings, negotiations, settlement jobs). Replaced the
@@ -184,7 +184,7 @@ services:
       # at runtime via admin_import_resources anyway, so the on-disk CSV
       # content is irrelevant. Bind-mounted to satisfy the config's
       # resources_csv_path requirement.
-      - ./storefront/src/market_storefront/data/ww1-machine.csv:/app/resources.csv:ro
+      - ./storefront/src/market_storefront/data/kvm1-machine.csv:/app/resources.csv:ro
       - zerotier-alice:/var/lib/zerotier-one
       - alice-agent-data:/app/src/market_storefront/data/alice-agent
     networks:

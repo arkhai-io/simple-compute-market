@@ -48,7 +48,7 @@ resource_lease_grace_seconds = 1800
 # Negotiation watchdog
 negotiation_timeout_seconds   = 1800
 negotiation_watchdog_interval = 60
-default_vm_host               = "ww1"
+default_vm_host               = "kvm1"
 
 [wallet]
 # Sensitive — populated by Secret overlay in k8s, by local file otherwise.

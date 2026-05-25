@@ -44,7 +44,7 @@ def _make_service(
 
 def _base_params(**overrides) -> ProvisioningParams:
     defaults = dict(
-        vm_host="ww1",
+        vm_host="kvm1",
         vm_target="test-vm",
         vm_action="create",
     )
@@ -74,7 +74,7 @@ def _lines(yaml_str: str) -> dict[str, str]:
 class TestBuildVmVarsRequired:
     def test_vm_host_always_present(self):
         svc = _make_service()
-        assert "vm_host: ww1" in _build(svc)
+        assert "vm_host: kvm1" in _build(svc)
 
     def test_vm_action_always_present(self):
         svc = _make_service()
@@ -86,7 +86,7 @@ class TestBuildVmVarsRequired:
 
     def test_vm_target_absent_when_none(self):
         svc = _make_service()
-        yaml = svc._build_vm_vars(ProvisioningParams(vm_host="ww1", vm_target=None, vm_action="list"))
+        yaml = svc._build_vm_vars(ProvisioningParams(vm_host="kvm1", vm_target=None, vm_action="list"))
         assert "vm_target" not in yaml
 
     def test_scratch_mode_adds_not_provided_credentials(self):
@@ -194,7 +194,7 @@ class TestBuildVmVarsLease:
         svc = _make_service()
         yaml = svc._build_vm_vars(
             ProvisioningParams(
-                vm_host="ww1",
+                vm_host="kvm1",
                 vm_target="test-vm",
                 vm_action="lease_end",
                 vm_lease_end="2025-12-31 23:59",
@@ -262,13 +262,13 @@ class TestExtractSshPort:
 
     def test_extracts_from_ssh_command_with_host(self):
         svc = _make_service()
-        output = "ssh -i key -p 2222 root@ww1"
-        assert svc._extract_ssh_port(output, vm_host="ww1") == "2222"
+        output = "ssh -i key -p 2222 root@kvm1"
+        assert svc._extract_ssh_port(output, vm_host="kvm1") == "2222"
 
     def test_extracts_from_ssh_command_non_root_user(self):
         svc = _make_service()
-        output = "ssh -i key -p 3333 tenant@ww1"
-        assert svc._extract_ssh_port(output, vm_host="ww1") == "3333"
+        output = "ssh -i key -p 3333 tenant@kvm1"
+        assert svc._extract_ssh_port(output, vm_host="kvm1") == "3333"
 
     def test_fallback_to_generic_pattern_without_host(self):
         svc = _make_service()
@@ -277,8 +277,8 @@ class TestExtractSshPort:
 
     def test_json_field_takes_precedence_over_ssh_command(self):
         svc = _make_service()
-        output = '"external_ssh_port": "1111" and also ssh -p 2222 root@ww1'
-        assert svc._extract_ssh_port(output, vm_host="ww1") == "1111"
+        output = '"external_ssh_port": "1111" and also ssh -p 2222 root@kvm1'
+        assert svc._extract_ssh_port(output, vm_host="kvm1") == "1111"
 
     def test_returns_none_when_no_port_found(self):
         svc = _make_service()
@@ -301,13 +301,13 @@ class TestExtractTenantUser:
 
     def test_extracts_from_ssh_command_with_host(self):
         svc = _make_service()
-        output = "ssh -p 2222 myuser@ww1"
-        assert svc._extract_tenant_user(output, vm_host="ww1") == "myuser"
+        output = "ssh -p 2222 myuser@kvm1"
+        assert svc._extract_tenant_user(output, vm_host="kvm1") == "myuser"
 
     def test_json_field_takes_precedence(self):
         svc = _make_service()
-        output = '"tenant_user": "fromjson" and ssh -p 22 fromcmd@ww1'
-        assert svc._extract_tenant_user(output, vm_host="ww1") == "fromjson"
+        output = '"tenant_user": "fromjson" and ssh -p 22 fromcmd@kvm1'
+        assert svc._extract_tenant_user(output, vm_host="kvm1") == "fromjson"
 
     def test_fallback_generic_pattern(self):
         svc = _make_service()
@@ -325,7 +325,7 @@ class TestExtractTenantUser:
 
 PLAYBOOK_OUTPUT_CREATE = """\
 TASK [debug] ***
-ok: [ww1] => {
+ok: [kvm1] => {
     "vm_creation_data": {
         "action": "create",
         "vm_name": "test-vm",
@@ -335,7 +335,7 @@ ok: [ww1] => {
 """
 
 PLAYBOOK_OUTPUT_LIST = """\
-ok: [ww1] => {
+ok: [kvm1] => {
     "vm_list_data": {
         "action": "list",
         "vms": [{"name": "vm-a"}, {"name": "vm-b"}],
@@ -345,7 +345,7 @@ ok: [ww1] => {
 """
 
 PLAYBOOK_OUTPUT_CHECK = """\
-ok: [ww1] => {
+ok: [kvm1] => {
     "check_data": {
         "action": "check",
         "resources": {"vcpus_total": 32}

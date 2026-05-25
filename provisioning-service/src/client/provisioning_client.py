@@ -16,7 +16,7 @@ Usage (async)::
 
     client = ProvisioningClient("http://provisioning:8081", agent_id="eip155:1:0x…:42")
     async with client:
-        submit = await client.create_vm("ww1", CreateVmRequest(...))
+        submit = await client.create_vm("kvm1", CreateVmRequest(...))
         result = await client.poll_until_complete(submit.job_id)
 
 Usage (sync, e.g. smoke tests)::

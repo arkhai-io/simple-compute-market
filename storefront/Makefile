@@ -65,7 +65,7 @@ deploy: deploy-seller-agent
 ## Bind-mounted read-only into the container so the storefront can seed
 ## its resources table on startup via seller.resources_csv_path in config.
 ## Defaults to the dev inventory shipped in the source tree.
-RESOURCES_CSV_FILE ?= $(CURDIR)/src/market_storefront/data/ww1-machine.csv
+RESOURCES_CSV_FILE ?= $(CURDIR)/src/market_storefront/data/kvm1-machine.csv
 
 deploy-seller-agent:
 	docker run --rm -d --name market-agent-sell \

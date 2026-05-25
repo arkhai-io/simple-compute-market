@@ -35,9 +35,9 @@ def _past_dt(seconds: int = 10) -> str:
 
 
 _SAMPLE_LEASE = {
-    "resource_id": "compute-ww1-001",
+    "resource_id": "compute-kvm1-001",
     "escrow_uid": "escrow-integ-001",
-    "vm_host": "ww1",
+    "vm_host": "kvm1",
     "vm_target": "tenant-a1b2",
 }
 
@@ -51,9 +51,9 @@ class TestCreateLease:
     async def test_create_returns_lease_data(self, client_and_queue):
         client, _ = client_and_queue
         lease = await _create(client)
-        assert lease["resource_id"] == "compute-ww1-001"
+        assert lease["resource_id"] == "compute-kvm1-001"
         assert lease["escrow_uid"] == "escrow-integ-001"
-        assert lease["vm_host"] == "ww1"
+        assert lease["vm_host"] == "kvm1"
         assert lease["status"] in ("active", "pending")
         assert "id" in lease
 
@@ -186,9 +186,9 @@ class TestCheckLeasesEndpoint:
 
         # Create a lease that is already expired
         expired_lease = await client.register_lease(
-            resource_id="compute-ww1-001",
+            resource_id="compute-kvm1-001",
             escrow_uid="esc-check-test",
-            vm_host="ww1",
+            vm_host="kvm1",
             vm_target="tenant-test",
             lease_end_utc=(datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat(),
         )

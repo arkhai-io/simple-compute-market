@@ -26,7 +26,7 @@ database_url = "sqlite:///provisioning.db"
 # Ansible
 ansible_cfg = ""  # Path to ansible.cfg; set via active profile (e.g. config-docker.yml)
 ansible_timeout_seconds = 1800
-default_vm_host = "ww1"
+default_vm_host = "kvm1"
 
 # Ansible filesystem paths.
 # Set to absolute paths via your active profile or PROVISIONING_* env vars.

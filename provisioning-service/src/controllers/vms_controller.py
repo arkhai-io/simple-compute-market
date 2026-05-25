@@ -4,7 +4,7 @@ All VM operations are scoped to a KVM host identified in the URL:
 
     /api/v1/hosts/{host}/vms/...
 
-``host`` is the Ansible inventory alias for the KVM host (e.g. ``ww1``).
+``host`` is the Ansible inventory alias for the KVM host (e.g. ``kvm1``).
 ``vm_name`` is the libvirt domain name of the target VM.
 
 Every mutating endpoint submits an Ansible job and returns a
