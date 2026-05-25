@@ -475,9 +475,9 @@ async def create_listing(self, request: CreateListingRequest, policy_svc) -> Cre
 
 Each step is independently callable from an admin endpoint for diagnosis — see the `evaluate-create` and `evaluate-close` admin endpoints.
 
-**Why not pure event-driven:** The buyer CLI and e2e test expect `listing_id` synchronously in the create-listing response. There is no queue consumer process.
+**Why not pure event-driven:** Synchronous control flow gives the e2e suite explicit interruption points between each orchestrator step — the dry-run + pause/advance pattern at the [Testing](#testing-strategy) section relies on them. An event-bus implementation would hide those transitions inside the runtime, making introspection and progress-gating much harder. The buyer CLI also expects `listing_id` synchronously in the create-listing response, so a queue front end would have no caller.
 
-**The thin untested wrapper:** A future pure event-driven architecture would look like:
+**Optional queue adapter:** If a deployment ever needed an async queue front end (say, to fan out high-volume listing creates without changing the orchestrator), it would be a two-line wrapper per public method:
 
 ```python
 def create_listing(request: CreateListingRequest) -> CreateListingResponse:
@@ -486,7 +486,7 @@ def create_listing(request: CreateListingRequest) -> CreateListingResponse:
     return result
 ```
 
-The synchronous orchestrator tests everything except this two-line wrapper, which is correct by inspection.
+This isn't on the roadmap and isn't tested. It's noted here so the orchestrator's `DomainEvent`-typed internal inputs aren't mistaken for a transitional design pointing toward a future event-bus migration.
 
 `PolicyService` exposes only named domain-language methods. Domain event construction is fully private. Callers (`ListingService`, `AlertsController`) never construct domain events themselves. The word "event" does not appear in any public method name. Event construction (`_build_listing_created_event`, `_build_listing_closed_event`) is private.
 
@@ -1853,9 +1853,9 @@ This section records design decisions reached through implementation experience.
 
 ---
 
-### E2E Test Architecture for Event-Driven Services
+### E2E Test Architecture: Stage-by-Stage Validation
 
-**Context:** The e2e test validates a system that is conceptually event-driven (policy dispatch, settlement pipeline, provisioning) but is implemented as a synchronous orchestrator with an audit-log event stream (the `stage_events` SQLite table).
+**Context:** The e2e test validates the synchronous-orchestrator pipeline (policy dispatch, settlement, provisioning) using its append-only `stage_events` SQLite audit log as the only inter-stage observable. The test reads from that log between stages to confirm what happened — never from internal state — and gates progress via the orchestrator's dry-run and pause/advance affordances.
 
 **Testing pattern for each pipeline stage:**
 
@@ -1898,7 +1898,7 @@ These call the policy consultation step only — `PolicyService.evaluate_*_listi
 
 **The pause/advance pattern for multi-step pipelines:** Create resources with `paused=True` to prevent them from propagating to the next pipeline stage before the test has validated the current stage. Use admin endpoints (`resume`, `advance`, `force-accept`) to advance one step at a time. This is how the e2e test controls pacing through the negotiation → settlement → provisioning pipeline without race conditions.
 
-**What the e2e test deliberately does NOT test:** The two-line event-queue adapter (see orchestration section above). Everything else in the service layer is exercised by the stage-by-stage dry-run + advance + stream-inspect pattern.
+**What the e2e test deliberately does NOT test:** The hypothetical event-queue adapter described in the orchestration section above — it isn't built. Everything else in the service layer is exercised by the stage-by-stage dry-run + advance + stream-inspect pattern.
 
 ---
 
@@ -2017,7 +2017,7 @@ stages but diverging on how the buyer drives negotiation and settle:
 
 | File | Marker | Buyer side |
 |---|---|---|
-| `test_full_deal.py` | `e2e_deal` | Synthetic — `SyncStorefrontClient.negotiate_new()` + admin `force_accept`, dry-run + advance at every stage (matches the "E2E Test Architecture for Event-Driven Services" pattern below) |
+| `test_full_deal.py` | `e2e_deal` | Synthetic — `SyncStorefrontClient.negotiate_new()` + admin `force_accept`, dry-run + advance at every stage (matches the "Stage-by-Stage Validation" pattern below) |
 | `test_full_deal_buyer_cli.py` | `e2e_deal_buyer_cli` | Production — `market negotiate` and `market settle` subprocesses against a hermetic XDG state dir; cross-process state is observed via the buyer's run-log JSONL |
 
 Both run via `make test-module MODULE=<marker>`. They share the readiness
