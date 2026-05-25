@@ -53,11 +53,19 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 SSH_KEY    ?= $(HOME)/.ssh/id_ed25519
 ENV_FILE   ?= .env.docker-compose
 
+# In-container appuser UID/GID. Override to match the host user that
+# bind-mounts SSH keys / data dirs — required when running on hosts where
+# the operator's UID isn't 1000 (e.g. multi-tenant boxes).
+APPUSER_UID ?= 1000
+APPUSER_GID ?= 1000
+
 build: build-image ## Build the provisioning service image
 
 build-image: ## Build a single unified image
 	docker build \
 		--ulimit nofile=65536 \
+		--build-arg APPUSER_UID=$(APPUSER_UID) \
+		--build-arg APPUSER_GID=$(APPUSER_GID) \
 		-t $(IMAGE_NAME):$(IMAGE_TAG) \
 		-f Dockerfile ..
 	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)

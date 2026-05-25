@@ -11,12 +11,21 @@ FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookwor
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 
+# UID/GID of the in-container `appuser`. Override at build time to match
+# the host user that bind-mounts SSH keys / data dirs into the container
+# — without alignment, mode-0600 keys mounted from a host user with a
+# different UID become unreadable. Defaults preserve the historical
+# uid=1000 image.
+ARG APPUSER_UID=1000
+ARG APPUSER_GID=1000
+
 # psutil falls back to a source build on platforms without a prebuilt
 # wheel (e.g. aarch64 cpython 3.13); needs a C toolchain.
 RUN apt-get update && apt-get install -y --no-install-recommends gcc python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd --create-home --uid 1000 --shell /bin/bash appuser
+RUN groupadd --gid ${APPUSER_GID} appuser && \
+    useradd --create-home --uid ${APPUSER_UID} --gid ${APPUSER_GID} --shell /bin/bash appuser
 WORKDIR /app
 RUN chown appuser:appuser /app
 USER appuser
@@ -27,7 +36,7 @@ COPY --chown=appuser:appuser .dist/ /dist/
 
 COPY --chown=appuser:appuser provisioning-service/pyproject.toml ./
 COPY --chown=appuser:appuser provisioning-service/src ./src
-RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1000 \
+RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
     uv sync --no-dev --no-install-project --find-links /dist
 
 COPY --chown=appuser:appuser compute-provisioning-iac/ansible/requirements.yml /tmp/requirements.yml
@@ -36,7 +45,7 @@ COPY --chown=appuser:appuser compute-provisioning-iac/ansible/requirements.yml /
 # produces a SIGILL (exit 132) on Podman/crun arm64 *after* the install
 # completes — invoking the venv binary directly skips the `uv run` post-exec
 # teardown path that crashes.
-RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1000 \
+RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
     uv pip install 'ansible-core>=2.17,<2.20'
 # Galaxy's API endpoint frequently returns truncated responses on the
 # larger community.general tarball (~40MB). ansible-galaxy's downloader
@@ -67,11 +76,16 @@ RUN mkdir -p /tmp/galaxy-tarballs && \
 # Stage 2: Runtime
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime
 
+# ARGs from build args; default 1000 (see explanation in builder stage).
+ARG APPUSER_UID=1000
+ARG APPUSER_GID=1000
+
 RUN apt-get update && \
     apt-get install -y --no-install-recommends openssh-client sshpass && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN useradd --create-home --uid 1000 --shell /bin/bash appuser
+RUN groupadd --gid ${APPUSER_GID} appuser && \
+    useradd --create-home --uid ${APPUSER_UID} --gid ${APPUSER_GID} --shell /bin/bash appuser
 WORKDIR /app
 RUN chown appuser:appuser /app
 
