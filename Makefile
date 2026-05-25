@@ -95,6 +95,14 @@ build-runtime-images: init-prerequisites dist
 build-seller: init-prerequisites dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service ## Build only what a seller needs: storefront + provisioning images.
 	$(MAKE) -j2 build-storefront build-provisioning
 
+# Same as build-seller, but the provisioning image's in-container appuser
+# is built with the current host user's UID/GID. Required on hosts where
+# the operator's UID isn't 1000 — otherwise the seller-provisioning
+# container can't read mode-0600 SSH keys bind-mounted from the operator's
+# home, and ansible falls over with `Permission denied (publickey)`.
+build-seller-for-host: ## build-seller with appuser UID/GID matching the current user
+	$(MAKE) build-seller APPUSER_UID=$(shell id -u) APPUSER_GID=$(shell id -g)
+
 build-buyer: init-prerequisites init-dependencies
 	cd buyer && make build
 
