@@ -1,0 +1,459 @@
+---
+# VM Management - Undefine Tasks
+
+- name: Declare root SSH Name
+  set_fact:
+    vm_root_ssh_filename: "{{ vm_image_root_fname | default(vm_name + '_root_ed25519') }}"
+  when: vm_action == "undefine"
+
+- name: Get VM IP before undefining (for cleanup)
+  shell: |
+    # Try multiple methods to get VM IP
+    VM_IP=""
+    
+    # Method 1: Try domifaddr (works if VM is running)
+    VM_IP=$(virsh domifaddr {{ vm_name }} 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1)
+    
+    # Method 2: If domifaddr fails, get IP from static DHCP lease
+    if [ -z "$VM_IP" ]; then
+      # Get MAC address first
+      VM_MAC=$(virsh domiflist {{ vm_name }} 2>/dev/null | grep -oE '([0-9a-f]{2}:){5}[0-9a-f]{2}' | head -1)
+      if [ -n "$VM_MAC" ]; then
+        # Look up IP from static DHCP lease using MAC (MAC and IP are on the same line)
+        VM_IP=$(virsh net-dumpxml default 2>/dev/null | grep "mac='$VM_MAC'" | grep -oE "ip='[^']+'" | cut -d"'" -f2)
+      fi
+    fi
+    
+    echo "$VM_IP"
+  register: vm_ip_for_cleanup
+  when: vm_action == "undefine"
+  delegate_to: "{{ target_host }}"
+
+- name: Warn if VM IP cannot be determined before cleanup
+  debug:
+    msg: |
+      Cannot determine IP address for VM '{{ vm_name }}'.
+      
+      Continuing with best-effort cleanup and undefine. The following network
+      artifacts may require manual review after the VM is removed:
+      - iptables port forwarding rules
+      - UFW firewall rules
+      - DHCP lease
+      
+      Manual checks if needed:
+        sudo iptables -t nat -L PREROUTING -n --line-numbers
+        sudo iptables -L FORWARD -n --line-numbers
+        sudo ufw status numbered
+  when:
+    - vm_action == "undefine"
+    - vm_ip_for_cleanup.stdout is defined
+    - vm_ip_for_cleanup.stdout | trim == ""
+
+- name: Get external port before cleanup (for firewall rule removal)
+  shell: |
+    VM_IP="{{ vm_ip_for_cleanup.stdout | default('') | trim }}"
+    EXTERNAL_PORT=""
+    
+    if [ -n "$VM_IP" ]; then
+      # Find the external port by looking at DNAT rules
+      # iptables output: DNAT tcp -- 0.0.0.0/0 0.0.0.0/0 tcp dpt:7001 to:192.168.122.100:22
+      EXTERNAL_PORT=$(iptables -t nat -L PREROUTING -n | grep "to.*$VM_IP:22" | grep -oE 'dpt:[0-9]+' | cut -d: -f2 | head -1)
+    fi
+    
+    echo "$EXTERNAL_PORT"
+  register: vm_external_port_for_cleanup
+  ignore_errors: yes
+  when: vm_action == "undefine"
+  delegate_to: "{{ target_host }}"
+
+- name: Remove FRP proxy configuration for VM
+  blockinfile:
+    path: /etc/frp/frpc.toml
+    marker: "# {mark} ANSIBLE MANAGED BLOCK FOR VM {{ vm_name }}"
+    state: absent
+  when: vm_action == "undefine"
+  delegate_to: "{{ target_host }}"
+  ignore_errors: yes
+  notify: restart frpc
+
+- name: Restart FRP client after removing proxy configuration
+  systemd:
+    name: frpc
+    state: restarted
+  when: vm_action == "undefine"
+  delegate_to: "{{ target_host }}"
+  ignore_errors: yes
+
+- name: Clean up iptables port forwarding rules
+  shell: |
+    echo "=== Cleaning up port forwarding rules for VM {{ vm_name }} ==="
+    
+    VM_IP="{{ vm_ip_for_cleanup.stdout | default('') | trim }}"
+    
+    if [ -n "$VM_IP" ]; then
+      echo "VM IP found: $VM_IP - removing specific rules"
+      
+      # Remove DNAT rules (PREROUTING chain) - targeting specific VM IP
+      echo "Removing DNAT rules for VM IP $VM_IP..."
+      iptables -t nat -L PREROUTING -n --line-numbers | grep "to:$VM_IP:22" | awk '{print $1}' | sort -nr | while read line; do
+        if [ -n "$line" ]; then
+          echo "Removing DNAT rule line $line"
+          iptables -t nat -D PREROUTING $line
+        fi
+      done
+      
+      # Remove POSTROUTING MASQUERADE rules for specific VM
+      echo "Removing POSTROUTING MASQUERADE rules for VM IP $VM_IP..."
+      iptables -t nat -L POSTROUTING -n --line-numbers | grep "MASQUERADE.*$VM_IP" | awk '{print $1}' | sort -nr | while read line; do
+        if [ -n "$line" ]; then
+          echo "Removing MASQUERADE rule line $line"
+          iptables -t nat -D POSTROUTING $line
+        fi
+      done
+      
+      # Remove FORWARD rules for specific VM (both directions)
+      echo "Removing FORWARD rules for VM IP $VM_IP..."
+      
+      # Remove FORWARD rules where VM IP is destination (incoming SSH)
+      iptables -L FORWARD -n --line-numbers | grep "ACCEPT.*$VM_IP.*dpt:22" | awk '{print $1}' | sort -nr | while read line; do
+        if [ -n "$line" ]; then
+          echo "Removing FORWARD rule (incoming SSH) line $line"
+          iptables -D FORWARD $line
+        fi
+      done
+      
+      # Remove FORWARD rules where VM IP is source (outgoing SSH)
+      iptables -L FORWARD -n --line-numbers | grep "ACCEPT.*$VM_IP.*spt:22" | awk '{print $1}' | sort -nr | while read line; do
+        if [ -n "$line" ]; then
+          echo "Removing FORWARD rule (outgoing SSH) line $line"
+          iptables -D FORWARD $line
+        fi
+      done
+      
+    else
+      echo "⚠ WARNING: VM IP not found - cannot automatically clean up iptables rules"
+      echo "The VM may have already been removed or never had an IP assigned"
+      echo "Please manually check iptables rules if needed:"
+      echo "  sudo iptables -t nat -L PREROUTING -n --line-numbers"
+      echo "  sudo iptables -L FORWARD -n --line-numbers"
+    fi
+    
+    echo "=== Port forwarding cleanup completed ==="
+  delegate_to: "{{ target_host }}"
+
+- name: Check if VM has attached GPU before undefine
+  shell: |
+    # Check if VM has any GPU (hostdev) attached
+    GPU_ATTACHED=$(virsh dumpxml {{ vm_name }} 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3.\4/" || echo "")
+    if [ ! -z "$GPU_ATTACHED" ]; then
+      echo "GPU_ATTACHED=true"
+      echo "GPU_PCI=$GPU_ATTACHED"
+      GPU_MODEL=$(lspci -s ${GPU_ATTACHED#0000:} 2>/dev/null | grep -i "vga\|3d\|display" | cut -d: -f3- || echo "Unknown GPU")
+      echo "GPU_MODEL=$GPU_MODEL"
+    else
+      echo "GPU_ATTACHED=false"
+    fi
+  register: vm_gpu_status
+  delegate_to: "{{ target_host }}"
+  ignore_errors: yes
+
+- name: Display GPU detachment information
+  debug:
+    msg:
+      - "=== GPU Status for VM {{ vm_name }} ==="
+      - "{{ vm_gpu_status.stdout_lines }}"
+      - ""
+      - "{% if 'GPU_ATTACHED=true' in vm_gpu_status.stdout %}GPU will be returned to the available pool after VM is undefined.{% else %}No GPU attached to this VM.{% endif %}"
+  when: 
+    - vm_action == "undefine"
+    - vm_gpu_status is defined
+
+- name: Check if VM is running before undefine
+  shell: virsh domstate {{ vm_name }}
+  register: vm_state_check
+  delegate_to: "{{ target_host }}"
+
+- name: Fail if VM is running
+  fail:
+    msg: |
+      Cannot undefine VM '{{ vm_name }}' - VM is currently running (state: {{ vm_state_check.stdout }}).
+      
+      Please stop the VM first using one of these methods:
+      1. Graceful shutdown: ansible-playbook ... -e vm_action=shutdown
+      2. Force stop: ansible-playbook ... -e vm_action=destroy
+      
+      Then retry the undefine operation.
+  when:
+    - vm_action == "undefine"
+    - vm_state_check is defined
+    - vm_state_check.stdout == "running"
+
+- name: Detach GPU from VM before undefine (if attached)
+  shell: |
+    # Extract PCI address components
+    GPU_PCI=$(echo "{{ vm_gpu_status.stdout }}" | grep "GPU_PCI=" | cut -d= -f2)
+    if [ ! -z "$GPU_PCI" ]; then
+      # Parse PCI address: domain:bus:slot.function
+      DOMAIN=$(echo $GPU_PCI | cut -d: -f1)
+      BUS=$(echo $GPU_PCI | cut -d: -f2)
+      SLOT=$(echo $GPU_PCI | cut -d: -f3 | cut -d. -f1)
+      FUNC=$(echo $GPU_PCI | cut -d. -f2)
+      
+      # Create hostdev XML for detachment
+      cat > /tmp/{{ vm_name }}_gpu_detach.xml <<EOF
+    <hostdev mode='subsystem' type='pci'>
+      <source>
+        <address domain='$DOMAIN' bus='$BUS' slot='$SLOT' function='$FUNC'/>
+      </source>
+    </hostdev>
+    EOF
+      
+      # Try to detach if VM is running
+      if virsh list --state-running --name | grep -q "^{{ vm_name }}$"; then
+        echo "VM is running, attempting live GPU detachment..."
+        virsh detach-device {{ vm_name }} /tmp/{{ vm_name }}_gpu_detach.xml --live --config || echo "Live detach failed, will remove with undefine"
+      else
+        echo "VM is not running, GPU will be released when VM is undefined"
+      fi
+      
+      rm -f /tmp/{{ vm_name }}_gpu_detach.xml
+      
+      echo "GPU $GPU_PCI will be returned to available pool"
+    fi
+  register: gpu_detach_result
+  when: 
+    - vm_action == "undefine"
+    - vm_gpu_status is defined
+    - "'GPU_ATTACHED=true' in vm_gpu_status.stdout"
+  delegate_to: "{{ target_host }}"
+
+- name: Clean up firewall rules for external ports
+  shell: |
+    set -e
+    echo "=== Cleaning up firewall rules ==="
+    
+    EXTERNAL_PORT="{{ vm_external_port_for_cleanup.stdout | default('') | trim }}"
+    VM_IP="{{ vm_ip_for_cleanup.stdout | default('') }}"
+    
+    if [ -n "$EXTERNAL_PORT" ] && [ "$EXTERNAL_PORT" != "22" ]; then
+      echo "Found external port $EXTERNAL_PORT for VM (IP: $${VM_IP:-unknown})"
+      
+      if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+        echo "Checking UFW rules for port $EXTERNAL_PORT"
+        
+        while ufw status numbered | grep -q "$EXTERNAL_PORT/tcp"; do
+          # Extract rule number from format: [ 2] 56620/tcp ...
+          RULE_NUM=$(ufw status numbered | grep "$EXTERNAL_PORT/tcp" | head -1 | grep -oE '^\[ *[0-9]+' | grep -oE '[0-9]+')
+          if [ -n "$RULE_NUM" ]; then
+            echo "Removing UFW rule number $RULE_NUM for port $EXTERNAL_PORT"
+            echo y | ufw delete "$RULE_NUM" || break
+          else
+            break
+          fi
+        done
+        
+        echo "All UFW rules for port $EXTERNAL_PORT removed"
+      fi
+      
+      if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
+        echo "Removing firewalld rule for port $EXTERNAL_PORT"
+        firewall-cmd --permanent --remove-port=$EXTERNAL_PORT/tcp || echo "Firewalld rule removal failed"
+        firewall-cmd --reload || echo "Firewalld reload failed"
+      fi
+      
+      echo "Removing iptables INPUT rules for port $EXTERNAL_PORT"
+      iptables -L INPUT -n --line-numbers | grep "dpt:$EXTERNAL_PORT" | awk '{print $$1}' | sort -nr | while read line; do
+        if [ -n "$line" ]; then
+          echo "Removing INPUT rule line $line"
+          iptables -D INPUT $line
+        fi
+      done
+      
+      echo "Firewall rules removed for port $EXTERNAL_PORT"
+    else
+      echo "No external port found for this VM"
+    fi
+    
+    echo "=== Firewall cleanup completed ==="
+  delegate_to: "{{ target_host }}"
+  when: vm_action == "undefine"
+
+- name: Save iptables rules after cleanup
+  shell: |
+    if command -v iptables-save >/dev/null 2>&1; then
+      if [ -f /etc/iptables/rules.v4 ]; then
+        iptables-save > /etc/iptables/rules.v4
+      elif [ -d /etc/sysconfig ]; then
+        iptables-save > /etc/sysconfig/iptables
+      elif [ -f /etc/iptables.rules ]; then
+        iptables-save > /etc/iptables.rules
+      else
+        iptables-save > /etc/iptables.rules
+      fi
+      echo "Iptables rules saved after cleanup"
+    fi
+  delegate_to: "{{ target_host }}"
+
+- name: Clean up VM-related files
+  shell: |
+    echo "=== Cleaning up VM-related files for {{ vm_name }} ==="
+    
+    vm_image_type={{ vm_image_type }}
+
+    # Remove SSH keys from ~/.ssh
+    echo "Removing SSH keys from ~/.ssh..."
+    if [ "$vm_image_type" == "scratch" ]; then
+      rm -f ~/.ssh/{{ vm_root_ssh_filename }} ~/.ssh/{{ vm_root_ssh_filename }}.pub
+    fi
+    rm -f ~/.ssh/{{ vm_name }}_tenant_ed25519 ~/.ssh/{{ vm_name }}_tenant_ed25519.pub
+    
+    # Remove any remaining SSH keys from /tmp (pattern matching for any random string)
+    echo "Removing any remaining SSH keys from /tmp..."
+    rm -f /tmp/{{ vm_name }}_*_ed25519 /tmp/{{ vm_name }}_*_ed25519.pub
+    
+    # Remove cloud-init directories (pattern matching)
+    echo "Removing cloud-init directories..."
+    rm -rf /tmp/cloudinit_{{ vm_name }}_*
+    
+    # Remove cloud-init ISO
+    echo "Removing cloud-init ISO..."
+    rm -f /var/lib/libvirt/images/{{ vm_name }}-init.iso
+    
+    # List what files remain (for verification)
+    echo "Remaining files with VM name:"
+    find /tmp ~/.ssh /var/lib/libvirt/images -name "*{{ vm_name }}*" 2>/dev/null || echo "No remaining files found"
+    
+    echo "=== File cleanup completed ==="
+  delegate_to: "{{ target_host }}"
+
+- name: Get VM MAC address for DHCP lease removal
+  shell: virsh domiflist {{ vm_name }} 2>/dev/null | grep -oE '([0-9a-f]{2}:){5}[0-9a-f]{2}' | head -1
+  register: vm_mac_for_cleanup
+  ignore_errors: yes
+  delegate_to: "{{ target_host }}"
+
+- name: Remove static DHCP lease for VM
+  shell: |
+    VM_MAC="{{ vm_mac_for_cleanup.stdout }}"
+    VM_IP="{{ vm_ip_for_cleanup.stdout | default('') }}"
+    
+    if [ -z "$VM_MAC" ]; then
+      echo "No MAC address found for VM {{ vm_name }}, skipping DHCP lease removal"
+    else
+      # Check if lease exists
+      if virsh net-dumpxml default | grep -q "$VM_MAC"; then
+        # Remove static DHCP host entry from the default network
+        virsh net-update default delete ip-dhcp-host \
+          "<host mac='$VM_MAC'/>" \
+          --live --config || echo "DHCP lease removal failed or already removed"
+        echo "Static DHCP lease removed for MAC $VM_MAC (IP: ${VM_IP:-unknown})"
+      else
+        echo "No static DHCP lease found for MAC $VM_MAC"
+      fi
+    fi
+  when:
+    - vm_action == "undefine"
+    - vm_mac_for_cleanup is defined
+  delegate_to: "{{ target_host }}"
+
+- name: Remove VM definition and storage
+  shell: virsh undefine {{ vm_name }} --remove-all-storage --nvram
+  register: undefine_result
+  delegate_to: "{{ target_host }}"
+
+- name: Verify UFW cleanup for this VM only
+  shell: |
+    set -e
+    echo "=== Verifying UFW cleanup for VM {{ vm_name }} ==="
+    
+    EXTERNAL_PORT="{{ vm_external_port_for_cleanup.stdout | default('') | trim }}"
+    
+    if [ -n "$EXTERNAL_PORT" ] && [ "$EXTERNAL_PORT" != "22" ]; then
+      if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+        echo "Checking if any UFW rules remain for port $EXTERNAL_PORT..."
+        
+        if ufw status numbered | grep -q "$EXTERNAL_PORT/tcp"; then
+          echo "⚠ WARNING: Found remaining UFW rules for port $EXTERNAL_PORT"
+          echo "These should have been cleaned up in the previous step."
+          ufw status numbered | grep "$EXTERNAL_PORT/tcp"
+        else
+          echo "✓ All UFW rules for port $EXTERNAL_PORT have been removed"
+        fi
+      else
+        echo "UFW not active, skipping verification"
+      fi
+    else
+      echo "No external port was used by this VM, skipping UFW verification"
+    fi
+    
+    echo "=== UFW verification completed ==="
+  register: ufw_verification_result
+  delegate_to: "{{ target_host }}"
+  when: vm_action == "undefine"
+  ignore_errors: yes
+
+- name: Display UFW verification results
+  debug:
+    msg: "{{ ufw_verification_result.stdout_lines }}"
+  when: vm_action == "undefine" and ufw_verification_result is defined
+
+- name: Get current timestamp for undefine action
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: undefine_timestamp
+  delegate_to: localhost
+
+- name: Create JSON data structure for VM undefine
+  set_fact:
+    vm_undefine_data:
+      action: "undefine"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ undefine_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "{{ 'success' if (undefine_result is defined and undefine_result.rc == 0) else 'failed' }}"
+      operation_initiated: "{{ 'yes' if undefine_result is defined else 'no' }}"
+      vm_ip_cleaned: "{{ vm_ip_for_cleanup.stdout | default('unknown') }}"
+      cleanup_operations:
+        port_forwarding_rules: "cleaned"
+        ssh_keys: "removed"
+        cloud_init_files: "removed"
+        vm_storage: "{{ 'removed' if undefine_result is defined and undefine_result.rc == 0 else 'may still exist' }}"
+        downloaded_keys: "removed from local directory"
+        inventory: "{{ 'updated' if (tenant_id is not defined or tenant_id == '') else 'not applicable' }}"
+      result_message: "{{ undefine_result.stdout if undefine_result is defined else 'No output' }}"
+      error: "{{ undefine_result.stderr | default('') if undefine_result is defined and undefine_result.rc != 0 else '' }}"
+      note: "VM definition and all associated files have been permanently removed"
+
+- name: Display undefine result
+  debug:
+    msg: 
+      - "VM {{ vm_name }} undefine result: {{ undefine_result.stdout }}"
+      - "Port forwarding rules cleaned up for VM"
+
+- name: Clean up local downloaded SSH keys
+  block:
+    - name: Remove downloaded tenant SSH keys from local keys directory
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ playbook_dir }}/../../keys/{{ vm_name }}_tenant_private_key"
+        - "{{ playbook_dir }}/../../keys/{{ vm_name }}_tenant_public_key.pub"
+      delegate_to: localhost
+      ignore_errors: yes
+  when: 
+    - vm_action == "undefine"
+    - undefine_result is defined
+
+- name: Remove single-tenant VM from inventory
+  block:
+    - name: Remove VM from [kvms] group in hosts file
+      lineinfile:
+        path: "{{ playbook_dir }}/../../inventory/hosts"
+        regexp: "^{{ vm_name }}\\s+.*ansible_host="
+        state: absent
+        backup: yes
+      delegate_to: localhost
+  when: 
+    - vm_action == "undefine"
+    - undefine_result is defined
+    - tenant_id is not defined or tenant_id == ""

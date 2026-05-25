@@ -1,0 +1,10 @@
+# Your Google Cloud project id
+gcp_project_name = "GCP_PROJECT_ID"
+
+# The Google Cloud region you will use to deploy the infrastructure
+gcp_project_region = "GCP_PROJECT_REGION"
+
+# Optional: suffix appended after the GCP project name in all resource names.
+# Enables multiple environments on a single GCP project.
+# Example values: "prod", "stg", "dev". Leave empty ("") if using separate GCP projects per environment.
+resource_suffix = ""

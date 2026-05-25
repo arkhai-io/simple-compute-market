@@ -1,0 +1,39 @@
+---
+- name: restart sshd
+  systemd:
+    name: sshd
+    state: restarted
+  ignore_errors: yes
+
+- name: restart libvirtd
+  shell: |
+    set -x  # Enable verbose logging
+    
+    # Stop sockets first to prevent automatic reactivation
+    systemctl stop libvirtd.socket libvirtd-ro.socket libvirtd-admin.socket
+    
+    # Stop libvirtd service
+    systemctl stop libvirtd.service
+    
+    # Clean up orphaned dnsmasq processes safely
+    pgrep -f "dnsmasq.*virbr" | xargs -r kill -TERM || true
+    sleep 2
+    
+    # Reset failure count
+    systemctl reset-failed libvirtd.service
+    
+    # Start the sockets and service
+    systemctl start libvirtd.socket libvirtd-ro.socket libvirtd-admin.socket
+    systemctl start libvirtd.service
+    
+    # Wait for socket to be ready
+    sleep 3    
+  ignore_errors: yes
+- name: reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: restart frpc
+  systemd:
+    name: frpc
+    state: restarted

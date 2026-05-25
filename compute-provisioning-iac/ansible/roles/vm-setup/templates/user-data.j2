@@ -1,0 +1,80 @@
+#cloud-config
+# SSH configuration
+users:
+  - name: root
+    ssh_authorized_keys:
+      # Make sure this matches your /root/.ssh/id_ed25519.pub
+      - {{ ssh_pubkey }}
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    shell: /bin/bash
+    lock_passwd: false
+chpasswd:
+  list:
+    - root:{{ ssh_pword }}
+  expire: False
+ssh_pwauth: true
+disable_root: false
+
+# Network configuration
+network:
+  version: 2
+  ethernets:
+    enp1s0:
+      dhcp4: true
+      dhcp6: false
+
+# Essential packages for SSH and monitoring
+packages:
+  - openssh-server
+  - curl
+  - wget
+  - net-tools
+  - qemu-guest-agent
+  - acpid
+  - netplan.io
+  - systemd-networkd
+  - isc-dhcp-client
+  - cloud-guest-utils
+
+package_update: true
+package_upgrade: true
+
+# SSH configuration
+write_files:
+  - path: /etc/ssh/sshd_config.d/90-cloudinit.conf
+    content: |
+      PasswordAuthentication yes
+      PubkeyAuthentication yes
+      PermitRootLogin yes
+      ChallengeResponseAuthentication no
+      UseDNS no
+    owner: root:root
+    permissions: '0644'
+  - path: /etc/cloud/cloud.cfg.d/99-ssh-ready.cfg
+    content: |
+      # Signal SSH readiness
+      ssh_svcname: ssh
+    owner: root:root
+    permissions: '0644'
+
+# Commands to run after packages are installed
+runcmd:
+  - echo "Starting cloud-init final setup..."
+  - systemctl enable systemd-networkd
+  - systemctl enable systemd-resolved
+  - systemctl enable ssh
+  - echo "SSH config test" > /tmp/ssh-debug.log
+  - systemctl status ssh >> /tmp/ssh-debug.log
+  - cat /etc/ssh/sshd_config.d/90-cloudinit-password.conf >> /tmp/ssh-debug.log
+  - systemctl restart sshd
+  - echo "SSH restarted at $(date)" >> /tmp/ssh-debug.log
+  - systemctl enable qemu-guest-agent
+  - systemctl enable --now qemu-guest-agent
+  - systemctl enable --now acpid
+  - systemctl enable acpid
+  - systemctl start acpid
+  - echo "SSH should now be ready"
+  - echo "VM setup completed at $(date)" >> /tmp/ssh-debug.log
+
+# Final message
+final_message: "VM {{ base_instance_name }} cloud-init setup completed successfully"

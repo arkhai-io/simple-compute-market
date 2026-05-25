@@ -1,0 +1,204 @@
+---
+# VM Setup Role - Main Task Orchestration
+# This file coordinates all the sub-tasks for Host Kit installation and VM operations
+#
+# Task Flow:
+# 1. System Packages - Install basic tools and packages
+# 2. GPU Passthrough - Configure GPU passthrough (if available)
+# 3. KVM Setup - Configure KVM virtualization
+# 4. KVM Network - Setup KVM networking
+# 5. Security Hardening - Apply security configurations
+# 6. Golden Image Build - Build golden images (if vm_image_type == "golden")
+# 7. GPU Detection Service - Setup GPU detection service
+# 8. Verification - Verify installation
+
+# ============================================
+# Host Kit Installation Tasks
+# ============================================
+
+- name: Include system packages installation
+  include_tasks:
+    file: system-packages.yml
+    apply:
+      tags:
+        - system_setup
+        - host_setup
+        - always
+  tags:
+    - system_setup
+    - host_setup
+    - always
+
+- name: Include GPU passthrough configuration
+  include_tasks:
+    file: gpu-passthrough.yml
+    apply:
+      tags:
+        - gpu_passthrough
+        - host_setup
+  tags:
+    - gpu_passthrough
+    - host_setup
+
+- name: Include KVM setup and configuration
+  include_tasks:
+    file: kvm-setup.yml
+    apply:
+      tags:
+        - kvm_config
+        - host_setup
+  tags:
+    - kvm_config
+    - host_setup
+
+- name: Include KVM network configuration
+  include_tasks:
+    file: kvm-network.yml
+    apply:
+      tags:
+        - kvm_network
+        - host_setup
+  tags:
+    - kvm_network
+    - host_setup
+
+- name: Include security hardening
+  include_tasks:
+    file: security-hardening.yml
+    apply:
+      tags:
+        - security_hardening
+        - host_setup
+  tags:
+    - security_hardening
+    - host_setup
+
+- name: Include SSH authorized keys injection
+  include_tasks:
+    file: ssh-authorized-keys.yml
+    apply:
+      tags:
+        - ssh_keys
+        - security_hardening
+        - host_setup
+  tags:
+    - ssh_keys
+    - security_hardening
+    - host_setup
+
+- name: Include FRP client installation
+  include_tasks:
+    file: frp-client.yml
+    apply:
+      tags:
+        - frp_client
+        - host_setup
+  tags:
+    - frp_client
+    - host_setup
+
+# ============================================
+# Host Kit VM Operations Tasks
+# ============================================
+
+- name: Include golden image build (only when vm_image_type == "golden")
+  include_tasks:
+    file: golden-image-build.yml
+    apply:
+      tags:
+        - golden_image
+        - vm_operations
+        - build
+  when: vm_image_type is defined and vm_image_type == "golden"
+  tags:
+    - golden_image
+    - vm_operations
+    - build
+
+- name: Include GPU detection service setup
+  include_tasks:
+    file: gpu-detection-service.yml
+    apply:
+      tags:
+        - gpu_detection
+        - vm_operations
+        - build_completion
+  tags:
+    - gpu_detection
+    - vm_operations
+    - build_completion
+
+# ============================================
+# Verification and Final Notes
+# ============================================
+
+- name: Display post-installation notes
+  debug:
+    msg:
+      - "=== KVM Installation & Security Hardening Complete ==="
+      - "1. Users have been added to libvirt and kvm groups"
+      - "2. Nested virtualization has been enabled (if supported)"
+      - "3. Default libvirt network has been configured"
+      - "4. A bridge network setup script has been created at /tmp/setup_bridge.sh"
+      - "5. Security hardening applied - VMs blocked from accessing host SSH"
+      - "6. Network isolation rules configured and persistent"
+      - "7. Fail2ban intrusion prevention system installed and configured"
+      - "8. GPU detection service configured and enabled"
+      - "9. FRP client installed and configured for remote access"
+      - ""
+      - "SECURITY FEATURES ACTIVE:"
+      - "  ✓ VM-to-host SSH access blocked (iptables + SSH config)"
+      - "  ✓ Libvirt security hardening applied"
+      - "  ✓ Network isolation service enabled"
+      - "  ✓ SSH connection monitoring configured"
+      - "  ✓ Fail2ban monitoring and auto-banning suspicious IPs"
+      - "  ✓ Custom filters for VM and libvirt attack detection"
+      - "  ✓ SSH public key(s) injected into authorized_keys (if supplied)"
+      - ""
+      - "FAIL2BAN JAILS ACTIVE:"
+      - "  - SSH brute force protection (6 attempts, 20 min ban)"
+      - "  - VM SSH attack detection (4 attempts, 20 min ban, internal network only)"
+      - "  - Bridged SSH attack detection (4 attempts, 20 min ban, all ports except 22)"
+      - "  - All jails use iptables-allports (complete IP blocking)"
+      - ""
+      - "FRP CLIENT:"
+      - "  - Config: /etc/frp/frpc.toml"
+      - "  - Logs: /var/log/frp/frpc.log"
+      - "  - Status: sudo systemctl status frpc"
+      - "  - View logs: sudo tail -f /var/log/frp/frpc.log"
+      - ""
+      - "IMPORTANT: A reboot is recommended to ensure all changes take effect"
+      - "After reboot, you can:"
+      - "  - Use virt-manager for GUI VM management"
+      - "  - Use virsh for command-line VM operations"
+      - "  - Run /tmp/setup_bridge.sh to configure bridge networking (optional)"
+      - "  - Use the vm-management role to download cloud images and manage VMs"
+      - ""
+      - "Security Verification:"
+      - "  - Check iptables: sudo iptables -L INPUT | grep 192.168.122"
+      - "  - Check SSH config: sudo sshd -T | grep -i deny"
+      - "  - Monitor logs: sudo tail -f /var/log/auth.log | grep BLOCKED-VM-SSH"
+      - "  - Check fail2ban: sudo fail2ban-client status"
+      - "  - View banned IPs: sudo fail2ban-client status sshd"
+      - "  - Check bridged attacks: sudo fail2ban-client status bridged-ssh-attacks"
+      - "  - Monitor fail2ban logs: sudo tail -f /var/log/fail2ban.log"
+      - "  - Monitor bridge SSH logs: sudo tail -f /var/log/kern.log | grep BLOCKED-BRIDGE-SSH"
+      - ""
+      - "To test: virsh list --all"
+  tags: verify_kvm
+
+# ============================================
+# Reboot System
+# ============================================
+
+- name: Reboot the system to apply all changes
+  reboot:
+    msg: "Rebooting to apply KVM and security configuration changes"
+    connect_timeout: 5
+    reboot_timeout: 600
+    pre_reboot_delay: 0
+    post_reboot_delay: 30
+    test_command: whoami
+  tags:
+    - reboot
+    - always

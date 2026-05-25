@@ -1,0 +1,23 @@
+---
+# Default variables for the vm-setup role
+
+# ============================================
+# SSH Authorized Keys
+# ============================================
+
+# List of SSH public keys to inject into authorized_keys.
+# Pass one or more keys when calling the playbook:
+#   -e '{"vm_ssh_authorized_keys": ["ssh-ed25519 AAAA... user@host"]}'
+# or as a single string via:
+#   -e "vm_ssh_authorized_key=ssh-ed25519 AAAA... user@host"
+#
+# vm_ssh_authorized_key   – convenience single-key variable (string, optional)
+# vm_ssh_authorized_keys  – list of keys to add (list, optional)
+#
+# Both may be supplied at the same time; duplicates are handled by the module.
+vm_ssh_authorized_key: ""
+vm_ssh_authorized_keys: []
+
+# The user account whose authorized_keys file will be updated.
+# Defaults to the connection user (ansible_user).
+vm_ssh_key_user: "{{ ansible_user }}"

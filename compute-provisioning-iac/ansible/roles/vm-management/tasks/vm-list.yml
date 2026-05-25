@@ -1,0 +1,73 @@
+---
+# VM Management - List Tasks
+
+- name: List all VMs
+  shell: virsh list --all
+  register: vm_list_result
+  delegate_to: "{{ target_host }}"
+
+- name: Display VM list
+  debug:
+    var: vm_list_result.stdout_lines
+  when: vm_list_result is defined
+
+- name: Show current port forwarding rules
+  shell: |
+    echo "=== Current NAT PREROUTING Rules (Port Forwarding) ==="
+    iptables -t nat -L PREROUTING -n --line-numbers | grep -E "(DNAT|target|Chain)" || echo "No DNAT rules found"
+    echo ""
+    echo "=== Current FORWARD Rules ==="
+    iptables -L FORWARD -n --line-numbers | grep -E "(ACCEPT.*:22|target|Chain)" || echo "No SSH forwarding rules found"
+  register: port_forwarding_rules
+  delegate_to: "{{ target_host }}"
+
+- name: Get current timestamp for list action
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: list_timestamp
+  delegate_to: localhost
+
+- name: Parse VM list into structured format
+  shell: |
+    echo '{{ vm_list_result.stdout }}' | awk '
+    BEGIN { print "[" }
+    NR > 2 && NF >= 3 { 
+      gsub(/"/, "\\\"", $0)
+      id = $1
+      name = $2
+      # Handle state which might have spaces
+      state = ""
+      for(i=3; i<=NF; i++) {
+        if(i > 3) state = state " "
+        state = state $i
+      }
+      if (NR > 3) print ","
+      printf "{\"id\": \"%s\", \"name\": \"%s\", \"state\": \"%s\"}", id, name, state
+    }
+    END { print "\n]" }
+    '
+  register: vm_list_json_raw
+  when: vm_list_result is defined
+  delegate_to: localhost
+
+- name: Set parsed VM list
+  set_fact:
+    vm_list_parsed: "{{ vm_list_json_raw.stdout | from_json }}"
+  when: vm_list_json_raw is defined
+
+- name: Create JSON data structure for VM list
+  set_fact:
+    vm_list_data:
+      action: "list"
+      timestamp: "{{ list_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "success"
+      vm_count: "{{ vm_list_parsed | length if vm_list_parsed is defined else 0 }}"
+      vms: "{{ vm_list_parsed if vm_list_parsed is defined else [] }}"
+      port_forwarding_active: "{{ port_forwarding_rules.stdout_lines | select('search', 'DNAT') | list | length > 0 if port_forwarding_rules is defined else false }}"
+      raw_output: "{{ vm_list_result.stdout_lines }}"
+      port_forwarding_rules: "{{ port_forwarding_rules.stdout_lines if port_forwarding_rules is defined else [] }}"
+
+- name: Display port forwarding rules
+  debug:
+    var: port_forwarding_rules.stdout_lines
+  when: port_forwarding_rules is defined

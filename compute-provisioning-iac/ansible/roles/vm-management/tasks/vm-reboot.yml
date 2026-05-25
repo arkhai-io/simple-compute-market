@@ -1,0 +1,36 @@
+---
+# VM Management - Reboot Tasks
+
+- name: Reboot VM
+  command: virsh reboot {{ vm_name }}
+  register: reboot_result
+  delegate_to: "{{ target_host }}"
+
+- name: Log reboot initiation
+  debug:
+    msg: "VM {{ vm_name }} reboot has been initiated."
+  when: reboot_result.rc == 0
+
+- name: Get current timestamp for reboot action
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: reboot_timestamp
+  delegate_to: localhost
+
+- name: Create JSON data structure for VM reboot
+  set_fact:
+    vm_reboot_data:
+      action: "reboot"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ reboot_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "{{ 'success' if (reboot_result is defined and reboot_result.rc == 0) else 'failed' }}"
+      operation_initiated: "{{ 'yes' if (vm_info is defined and vm_info.rc == 0 and reboot_result is defined) else 'no' }}"
+      reboot_method: "graceful"
+      result_message: "{{ reboot_result.stdout if reboot_result is defined else (vm_info.stdout if vm_info is defined else 'No output') }}"
+      error: "{{ (reboot_result.stderr | default('')) if (reboot_result is defined and reboot_result.rc != 0) else ((vm_info.stderr | default('')) if (vm_info is defined and vm_info.rc != 0) else '') }}"
+      note: "VM reboot initiated - VM will restart gracefully"
+
+- name: Display reboot result
+  debug:
+    msg: "VM {{ vm_name }} {{ 'rebooted successfully' if (reboot_result is defined and reboot_result.rc == 0) else 'failed to reboot' }}"
+  when: reboot_result is defined or (vm_info is defined and vm_info.rc != 0)

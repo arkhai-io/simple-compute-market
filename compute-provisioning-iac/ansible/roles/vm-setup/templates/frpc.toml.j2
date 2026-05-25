@@ -1,0 +1,23 @@
+# FRP Client Configuration for Host VM
+# Connect to FRP Server
+serverAddr = "{{ frp_server_addr | default('127.0.0.1') }}"
+serverPort = {{ frp_server_port | default(7000) }}
+
+# Authentication (must match server)
+auth.method = "token"
+auth.token = "{{ frp_auth_token | default('password123456789') }}"
+
+# Enable TLS
+transport.tls.enable = true
+
+# Logging
+log.to = "/var/log/frp/frpc.log"
+log.level = "info"
+log.maxDays = 30
+
+# Heartbeat
+transport.heartbeatInterval = 30
+transport.heartbeatTimeout = 90
+
+# Connection pooling
+transport.poolCount = 5

@@ -1,0 +1,342 @@
+---
+# Main tasks for FRP Server Setup
+
+- name: Ensure we have root privileges
+  become: yes
+  become_method: sudo
+  ansible.builtin.set_fact:
+    ansible_become: yes
+  tags: always
+
+- name: Generate random auth token (64 characters)
+  ansible.builtin.set_fact:
+    frp_auth_token: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=64') }}"
+  when: frp_auth_token is not defined
+
+- name: Generate random dashboard password (32 characters)
+  ansible.builtin.set_fact:
+    frp_dashboard_password: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=32') }}"
+  when: frp_dashboard_password is not defined
+
+- name: Display generated credentials
+  ansible.builtin.debug:
+    msg: "{{ ['================================================', 'FRP Server Credentials (SAVE THESE SECURELY!)', '================================================', 'Auth Token: ' + frp_auth_token, 'Dashboard Password: ' + frp_dashboard_password, 'Dashboard URL: http://127.0.0.1:7001 (SSH tunnel only)'] + (['Dashboard Public URL: https://frp-admin.' + frp_subdomain_host] if frp_subdomain_host is defined else []) + ['Dashboard User: admin', '================================================'] }}"
+
+- name: Include fail2ban installation tasks
+  ansible.builtin.include_tasks: install-fail2ban.yml
+
+- name: Include FRP server installation tasks
+  ansible.builtin.include_tasks: install-frp-server.yml
+
+- name: Deploy FRP server configuration
+  ansible.builtin.template:
+    src: frps.toml.j2
+    dest: /etc/frp/frps.toml
+    mode: '0600'
+  notify: restart frps
+
+- name: Deploy FRP server systemd service
+  ansible.builtin.template:
+    src: frps.service.j2
+    dest: /etc/systemd/system/frps.service
+    mode: '0644'
+  notify:
+    - reload systemd daemon
+    - restart frps
+
+- name: Enable and start FRP server
+  ansible.builtin.systemd:
+    name: frps
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: Install UFW firewall and fail2ban
+  ansible.builtin.package:
+    name:
+      - ufw
+      - fail2ban
+      - at
+    state: present
+
+- name: Ensure fail2ban configuration directory exists
+  ansible.builtin.file:
+    path: /etc/fail2ban/filter.d
+    state: directory
+    mode: '0755'
+
+- name: Deploy fail2ban jail configuration for SSH
+  ansible.builtin.copy:
+    content: |
+      [sshd]
+      enabled = true
+      port = ssh,22,7002:8000
+      filter = sshd
+      logpath = /var/log/auth.log
+      maxretry = 5
+      findtime = 10m
+      bantime = 1h
+      
+      [sshd-ddos]
+      enabled = true
+      port = ssh,22,7002:8000
+      filter = sshd-ddos
+      logpath = /var/log/auth.log
+      maxretry = 10
+      findtime = 5m
+      bantime = 30m
+    dest: /etc/fail2ban/jail.d/sshd-frp.conf
+    mode: '0644'
+  notify: restart fail2ban
+
+- name: Enable and start fail2ban
+  ansible.builtin.systemd:
+    name: fail2ban
+    enabled: yes
+    state: started
+
+- name: Configure UFW - Allow FRP control port
+  community.general.ufw:
+    rule: allow
+    port: '7000'
+    proto: tcp
+
+- name: Configure UFW - Allow FRP proxy port range
+  community.general.ufw:
+    rule: allow
+    port: '7002:8000'
+    proto: tcp
+
+- name: Configure UFW - Allow SSH (ensure we don't lock ourselves out)
+  community.general.ufw:
+    rule: allow
+    port: '22'
+    proto: tcp
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+
+- name: Display UFW status
+  ansible.builtin.command: ufw status verbose
+  register: ufw_status
+  changed_when: false
+
+- name: Show UFW status
+  ansible.builtin.debug:
+    var: ufw_status.stdout_lines
+
+- name: Install Nginx and Certbot
+  ansible.builtin.package:
+    name:
+      - nginx
+      - certbot
+      - python3-certbot-nginx
+    state: present
+
+- name: Deploy Nginx configuration for FRP admin dashboard
+  ansible.builtin.template:
+    src: frp-admin-nginx.conf.j2
+    dest: /etc/nginx/sites-available/frp-admin
+    mode: '0644'
+  notify: restart nginx
+
+- name: Enable FRP admin Nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/frp-admin
+    dest: /etc/nginx/sites-enabled/frp-admin
+    state: link
+  notify: restart nginx
+
+- name: Test Nginx configuration
+  ansible.builtin.command: nginx -t
+  register: nginx_test
+  changed_when: false
+
+- name: Display Nginx test results
+  ansible.builtin.debug:
+    var: nginx_test.stdout_lines
+
+- name: Ensure Nginx is running
+  ansible.builtin.systemd:
+    name: nginx
+    state: started
+    enabled: yes
+
+- name: Configure UFW - Allow HTTP for Certbot
+  community.general.ufw:
+    rule: allow
+    port: '80'
+    proto: tcp
+
+- name: Configure UFW - Allow HTTPS for FRP admin
+  community.general.ufw:
+    rule: allow
+    port: '443'
+    proto: tcp
+
+- name: Configure UFW - Allow colocated registry ZeroTier port
+  community.general.ufw:
+    rule: allow
+    port: '18080'
+    proto: tcp
+
+- name: Check if DNS is properly configured for FRP admin subdomain
+  ansible.builtin.shell: |
+    dig +short frp-admin.{{ frp_subdomain_host }} | grep -q "{{ ansible_host }}"
+  register: dns_check
+  changed_when: false
+  failed_when: false
+  when: frp_subdomain_host is defined
+
+- name: Display DNS check result
+  ansible.builtin.debug:
+    msg:
+      - "DNS Check Result:"
+      - "{{ 'DNS is properly configured' if dns_check.rc == 0 else 'DNS is NOT configured or does not point to this server' }}"
+      - "Expected: frp-admin.{{ frp_subdomain_host }} -> {{ ansible_host }}"
+      - "{{ 'SSL certificate will be obtained' if dns_check.rc == 0 else 'SSL certificate step will be skipped - configure DNS first' }}"
+  when: frp_subdomain_host is defined
+
+- name: Obtain SSL certificate with Certbot
+  ansible.builtin.command: >
+    certbot --nginx -d frp-admin.{{ frp_subdomain_host }}
+    --non-interactive --agree-tos --email {{ certbot_email | default('admin@' + frp_subdomain_host) }}
+    --redirect
+  register: certbot_result
+  changed_when: "'Successfully received certificate' in certbot_result.stdout"
+  failed_when: false
+  when: 
+    - frp_subdomain_host is defined
+    - dns_check.rc == 0
+
+- name: Display Certbot result
+  ansible.builtin.debug:
+    msg: "{{ certbot_result.stdout_lines if certbot_result.stdout_lines is defined else ['Certbot skipped - DNS not configured'] }}"
+  when: frp_subdomain_host is defined
+
+- name: Get fail2ban status
+  ansible.builtin.command: fail2ban-client status sshd
+  register: fail2ban_status
+  changed_when: false
+  failed_when: false
+
+- name: Display SSL setup instructions if DNS not configured
+  ansible.builtin.debug:
+    msg:
+      - "================================================"
+      - "SSL Certificate Setup Required"
+      - "================================================"
+      - "Before SSL can be configured, you need to:"
+      - "1. Create DNS A record: frp-admin.{{ frp_subdomain_host }} -> {{ ansible_host }}"
+      - "2. Wait for DNS propagation (check with: dig frp-admin.{{ frp_subdomain_host }})"
+      - "3. Re-run this playbook with: --tags frp_ssl"
+      - "================================================"
+      - "For now, dashboard is accessible via:"
+      - "- SSH tunnel: ssh -L 7001:localhost:7001 user@{{ ansible_host }}"
+      - "- Then visit: http://localhost:7001"
+      - "================================================"
+  when:
+    - frp_subdomain_host is defined
+    - dns_check.rc != 0
+
+- name: Test Certbot renewal process
+  ansible.builtin.command: certbot renew --dry-run
+  register: certbot_renewal_test
+  changed_when: false
+  failed_when: false
+  when: 
+    - frp_subdomain_host is defined
+    - dns_check.rc == 0
+    - certbot_result.rc == 0
+
+- name: Display renewal test results
+  ansible.builtin.debug:
+    msg:
+      - "Certbot renewal test completed successfully"
+      - "Auto-renewal is configured via systemd timer"
+  when: 
+    - frp_subdomain_host is defined
+    - dns_check.rc == 0
+    - certbot_renewal_test is defined
+    - certbot_renewal_test.rc == 0
+
+- name: Ensure credentials directory exists
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../../credentials"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: no
+
+- name: Save credentials to local file
+  ansible.builtin.copy:
+    content: |
+      {
+        "generated": "{{ ansible_date_time.iso8601 }}",
+        "server": "{{ ansible_host }}",
+        "auth_token": "{{ frp_auth_token }}",
+        "dashboard": {
+          "url": "http://127.0.0.1:7001",
+          "user": "admin",
+          "password": "{{ frp_dashboard_password }}",
+          "public_url": "{% if frp_subdomain_host is defined %}https://frp-admin.{{ frp_subdomain_host }}{% else %}N/A{% endif %}"
+        },
+        "subdomain_host": "{{ frp_subdomain_host | default('yourdomain.com') }}",
+        "ports": {
+          "control": 7000,
+          "proxy_range": "7002-8000"
+        },
+        "note": "Store these credentials securely! These will be needed for FRP client configuration."
+      }
+    dest: "{{ playbook_dir }}/../../credentials/frp-server-credentials-{{ ansible_host }}-{{ ansible_date_time.epoch }}.json"
+    mode: '0600'
+  delegate_to: localhost
+  become: no
+
+- name: Display reboot notification
+  ansible.builtin.debug:
+    msg:
+      - "================================================"
+      - "FRP Server setup complete!"
+      - "Credentials saved to: credentials/frp-server-credentials-{{ ansible_host }}-{{ ansible_date_time.epoch }}.json"
+      - "System will reboot in 10 seconds..."
+      - "================================================"
+
+- name: Reboot the server
+  ansible.builtin.reboot:
+    msg: "Rebooting after FRP server setup"
+    pre_reboot_delay: 10
+    post_reboot_delay: 30
+    reboot_timeout: 300
+
+- name: Return credentials as structured data
+  ansible.builtin.set_stats:
+    data:
+      frp_credentials:
+        server: "{{ ansible_host }}"
+        generated: "{{ ansible_date_time.iso8601 }}"
+        auth_token: "{{ frp_auth_token }}"
+        dashboard:
+          url: "http://127.0.0.1:7001"
+          user: "admin"
+          password: "{{ frp_dashboard_password }}"
+          public_url: "{{ 'https://frp-admin.' + frp_subdomain_host if frp_subdomain_host is defined else 'N/A' }}"
+        subdomain_host: "{{ frp_subdomain_host | default('yourdomain.com') }}"
+        ports:
+          control: 7000
+          proxy_range: "7002-8000"
+    per_host: yes
+
+- name: Display credentials as JSON
+  ansible.builtin.debug:
+    msg: "{{ {'frp_credentials': {'server': ansible_host, 'generated': ansible_date_time.iso8601, 'auth_token': frp_auth_token, 'dashboard': {'url': 'http://127.0.0.1:7001', 'user': 'admin', 'password': frp_dashboard_password}, 'subdomain_host': frp_subdomain_host | default('yourdomain.com'), 'ports': {'control': 7000, 'proxy_range': '7002-8000'}}} | to_nice_json }}"
+
+- name: Display final completion message
+  ansible.builtin.debug:
+    msg:
+      - "================================================"
+      - "FRP Server setup complete and rebooted!"
+      - "Credentials file: credentials/frp-server-credentials-{{ ansible_host }}-{{ ansible_date_time.epoch }}.json"
+      - "JSON credentials available in playbook output above"
+      - "================================================"

@@ -1,0 +1,51 @@
+# FRP Server Configuration for VM Hosting Service
+
+# Main control port
+bindPort = 7000
+
+# Port range for SSH proxies (one port per Guest VM)
+# Allocate a large range for future customers
+allowPorts = [
+  { start = 7002, end = 8000 }
+]
+
+# Enable subdomain support
+subDomainHost = "{{ frp_subdomain_host | default('yourdomain.com') }}"
+
+# HTTP/HTTPS ports for subdomain routing (optional but recommended)
+# These ports handle the subdomain-to-port mapping
+vhostHTTPPort = 8080
+vhostHTTPSPort = 8443
+
+# Authentication - CRITICAL for security
+auth.method = "token"
+auth.token = "{{ frp_auth_token }}"
+
+# Transport security
+transport.tls.force = true
+
+# Dashboard for monitoring
+webServer.addr = "127.0.0.1"
+webServer.port = 7001
+webServer.user = "admin"
+webServer.password = "{{ frp_dashboard_password }}"
+
+# Logging
+log.to = "/var/log/frp/frps.log"
+log.level = "info"
+log.maxDays = 30
+
+# Connection limits per client (adjust based on your needs)
+transport.maxPoolCount = 50
+
+# Heartbeat
+transport.heartbeatTimeout = 90
+
+# Rate limiting and security (protects against connection floods)
+# Max concurrent connections per proxy
+maxConnections = 100
+
+# Connection rate limiting per client IP
+# Format: connections per time window
+# This limits how many NEW connections can be established per time period
+transport.maxConnections = 1000

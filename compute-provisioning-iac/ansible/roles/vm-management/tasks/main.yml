@@ -1,0 +1,171 @@
+---
+# VM Management Role - Main Task Orchestration
+# This file coordinates all the sub-tasks for VM management operations
+#
+# Task Flow:
+# 1. Prerequisites - Initial checks, validation, and setup
+# 2. VM Actions - Execute specific VM operations based on vm_action variable
+# 3. JSON Output - Format and output results
+
+# ============================================
+# Prerequisites and Setup
+# ============================================
+
+- name: Include prerequisites and validation
+  include_tasks:
+    file: prerequisites.yml
+    apply:
+      tags:
+        - always
+  tags:
+    - always
+
+# ============================================
+# VM Action-Specific Tasks
+# ============================================
+
+- name: Include VM create tasks
+  include_tasks:
+    file: vm-create.yml
+    apply:
+      tags:
+        - vm_create
+  when: vm_action == "create"
+  tags:
+    - vm_create
+
+- name: Include VM list tasks
+  include_tasks:
+    file: vm-list.yml
+    apply:
+      tags:
+        - vm_list
+  when: vm_action == "list"
+  tags:
+    - vm_list
+
+- name: Include VM start tasks
+  include_tasks:
+    file: vm-start.yml
+    apply:
+      tags:
+        - vm_start
+  when: vm_action == "start"
+  tags:
+    - vm_start
+
+- name: Include VM shutdown tasks
+  include_tasks:
+    file: vm-shutdown.yml
+    apply:
+      tags:
+        - vm_shutdown
+  when: vm_action == "shutdown"
+  tags:
+    - vm_shutdown
+
+- name: Include VM destroy tasks
+  include_tasks:
+    file: vm-destroy.yml
+    apply:
+      tags:
+        - vm_destroy
+  when: vm_action == "destroy"
+  tags:
+    - vm_destroy
+
+- name: Include VM reboot tasks
+  include_tasks:
+    file: vm-reboot.yml
+    apply:
+      tags:
+        - vm_reboot
+  when: vm_action == "reboot"
+  tags:
+    - vm_reboot
+
+- name: Include VM undefine tasks
+  include_tasks:
+    file: vm-undefine.yml
+    apply:
+      tags:
+        - vm_undefine
+  when: vm_action == "undefine"
+  tags:
+    - vm_undefine
+
+- name: Include VM monitor tasks
+  include_tasks:
+    file: vm-monitor.yml
+    apply:
+      tags:
+        - vm_monitor
+  when: vm_action == "monitor"
+  tags:
+    - vm_monitor
+
+- name: Include VM reset password tasks
+  include_tasks:
+    file: vm-reset-password.yml
+    apply:
+      tags:
+        - vm_reset_password
+  when: vm_action == "reset_password"
+  tags:
+    - vm_reset_password
+
+- name: Include VM lease end tasks
+  include_tasks:
+    file: vm-lease-end.yml
+    apply:
+      tags:
+        - vm_lease_end
+  when: vm_action == "lease_end"
+  tags:
+    - vm_lease_end
+
+- name: Include VM lease remove tasks
+  include_tasks:
+    file: vm-lease-remove.yml
+    apply:
+      tags:
+        - vm_lease_remove
+  when: vm_action == "lease_remove"
+  tags:
+    - vm_lease_remove
+
+- name: Include VM check tasks
+  include_tasks:
+    file: vm-check.yml
+    apply:
+      tags:
+        - vm_check
+  when: vm_action == "check"
+  tags:
+    - vm_check
+
+# ============================================
+# JSON Output and Error Handling
+# ============================================
+
+- name: Include JSON output formatting
+  include_tasks:
+    file: json-output.yml
+    apply:
+      tags:
+        - always
+  tags:
+    - always
+
+- name: Handle errors for failed VM operations
+  fail:
+    msg: "VM operation '{{ vm_action }}' failed on VM '{{ vm_name }}' at host '{{ target_host }}'"
+  when: 
+    - vm_action in ['start', 'shutdown', 'destroy', 'reboot', 'undefine', 'lease_end', 'lease_remove']
+    - (start_result is defined and start_result.failed | default(false)) or
+      (shutdown_result is defined and shutdown_result.failed | default(false)) or
+      (destroy_result is defined and destroy_result.failed | default(false)) or
+      (reboot_result is defined and reboot_result.failed | default(false)) or
+      (undefine_result is defined and undefine_result.failed | default(false)) or
+      (lease_end_result is defined and lease_end_result.failed | default(false)) or
+      (lease_remove_result is defined and lease_remove_result.failed | default(false))
