@@ -57,6 +57,7 @@ build: build-image ## Build the provisioning service image
 
 build-image: ## Build a single unified image
 	docker build \
+		--ulimit nofile=65536 \
 		-t $(IMAGE_NAME):$(IMAGE_TAG) \
 		-f Dockerfile ..
 	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
