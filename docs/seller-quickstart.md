@@ -5,7 +5,9 @@ publish a listing, and (optionally) provision real KVM VMs to buyers.
 
 For the buyer side see [`buyer-quickstart.md`](./buyer-quickstart.md).
 To run your own indexer registry instead of pointing at an existing one,
-see [`indexer-quickstart.md`](./indexer-quickstart.md).
+see [`indexer-quickstart.md`](./indexer-quickstart.md). To expose VMs
+via wildcard subdomains instead of direct port-forward NAT, see
+[`seller-frp-setup.md`](./seller-frp-setup.md).
 
 ## Prerequisites
 

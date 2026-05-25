@@ -32,6 +32,7 @@ Pick the role you're standing up:
 - **Buy compute on Base Sepolia** → [`docs/buyer-quickstart.md`](./docs/buyer-quickstart.md)
 - **Sell compute on Base Sepolia** → [`docs/seller-quickstart.md`](./docs/seller-quickstart.md)
 - **Run your own indexer registry** → [`docs/indexer-quickstart.md`](./docs/indexer-quickstart.md)
+- **Add FRP reverse-proxy for VM subdomains** → [`docs/seller-frp-setup.md`](./docs/seller-frp-setup.md)
 
 ## Publishing Artifacts to Artifact Registry
 
