@@ -3,7 +3,7 @@
 How to stand up your own indexer registry. Reasons to run one:
 
 - **Curate which sellers can publish and which buyers can query**
-  (bearer-token auth, §4).
+  (bearer-token auth, §6).
 - **No third-party rate limits.**
 - **Custom `filter-spec.yaml`** — the vocabulary for `gpu_model`,
   `region`, etc. is per-indexer.
@@ -12,50 +12,50 @@ How to stand up your own indexer registry. Reasons to run one:
 `compose/seller.yml` is registry-agnostic, so an indexer can run on
 the same host as a seller or anywhere else.
 
-## 1. Compose
-
-Put `compose.registry.yml` next to `compose/seller.yml` (or wherever you
-like) and share its network:
-
-```yaml
-services:
-  registry:
-    image: arkhai:registry
-    ports: ["8080:8080"]
-    environment:
-      - DATABASE_URL=sqlite:///./indexer.db
-      - CHAIN_ID=84532
-      - RPC_URL=https://base-sepolia.infura.io/v3/<YOUR_KEY>
-      - IDENTITY_REGISTRY_ADDRESS=0x8004A818BFB912233c491871b3d84c89A494BD9e
-      - REPUTATION_REGISTRY_ADDRESS=0x8004B663056A597Dffe9eCcC1965A193B7388713
-      # Backfill past your earliest agent registration. Without this the
-      # first sync only walks the last 1000 blocks and silently drops
-      # any historical agent.
-      - REGISTRY_START_BLOCK=41707000
-      - PORT=8080
-      - HOST=0.0.0.0
-      # See §4 for the auth-on variant. Leave these out for a fully
-      # public registry — anyone can publish and query.
-    networks:
-      - seller
-    restart: unless-stopped
-
-networks:
-  seller:
-```
-
-Don't mark the network `external: true` — the first `up -d` would fail
-because it doesn't exist yet.
-
-Bring it up:
+## 1. Build the image
 
 ```bash
-docker compose -f compose.registry.yml up -d
-# or, sharing a stack with a seller:
-docker compose -f compose/seller.yml -f compose.registry.yml up -d
+make build-registry
 ```
 
-## 2. Wire sellers and buyers
+Produces `arkhai:registry`.
+
+## 2. Configure
+
+```bash
+cp config.registry.env.example config.registry.env
+$EDITOR config.registry.env
+```
+
+Fill in:
+
+- `RPC_URL` — your Base Sepolia RPC endpoint.
+- `REGISTRY_ADMIN_API_KEY` — operator-only secret used to mint/revoke
+  per-user keys at `/admin/api-keys`. Generate with `openssl rand -hex 32`.
+- `REGISTRY_BOOTSTRAP_API_KEY` — the bearer token sellers and buyers
+  will use until per-user keys are minted. Same `openssl rand -hex 32`
+  pattern. This is the shared secret you give out.
+
+Defaults already set: chain ID 84532, ERC-8004 contract addresses,
+`REGISTRY_START_BLOCK` (deep enough to catch historical agents),
+`REGISTRY_REQUIRE_API_KEY=true` (private indexer).
+
+For a fully public indexer (anyone can publish and query) set
+`REGISTRY_REQUIRE_API_KEY=false` and drop the two key vars.
+
+## 3. Bring it up
+
+```bash
+docker compose -f compose/registry.yml up -d
+
+# or, sharing a docker network with a seller stack:
+docker compose -f compose/seller.yml -f compose/registry.yml up -d
+```
+
+The compose file mounts a named volume at `/app/data` so the sqlite
+state persists across restarts.
+
+## 4. Wire sellers and buyers
 
 In each storefront / buyer TOML:
 
@@ -67,7 +67,7 @@ urls = ["http://<INDEXER_HOST>:8080"]
 When the indexer and seller share a docker network, use the service
 name: `urls = ["http://registry:8080"]`.
 
-## 3. Checks
+## 5. Checks
 
 ```bash
 curl -sf http://<INDEXER_HOST>:8080/health
@@ -81,20 +81,11 @@ curl -s "http://<INDEXER_HOST>:8080/agents/eip155%3A84532%3A0x8004A818BFB912233c
   | jq
 ```
 
-## 4. Bearer-token auth (optional)
+## 6. Bearer-token auth
 
-To gate publishes and queries behind shared secrets, add these to the
-`registry` service env:
-
-```yaml
-      - REGISTRY_REQUIRE_API_KEY=true
-      # Gates /admin/api-keys for minting/revoking per-user keys.
-      - REGISTRY_ADMIN_API_KEY=admin-secret-rotate-this
-      # Seeds one api_keys row on first boot if the table is empty.
-      # Lets you come up with one operator-known key without a
-      # separate admin orchestration step.
-      - REGISTRY_BOOTSTRAP_API_KEY=shared-bootstrap-token
-```
+`config.registry.env.example` ships with `REGISTRY_REQUIRE_API_KEY=true`
+already set. To disable auth (fully public indexer) flip it to `false`
+and drop the two key vars.
 
 Flow:
 

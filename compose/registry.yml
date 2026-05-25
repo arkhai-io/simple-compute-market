@@ -1,0 +1,71 @@
+# Registry stack — a private ERC-8004 indexer.
+#
+# Sellers and buyers publish/query agent identity and listings here.
+# Designed to run alongside compose/seller.yml on the same docker network,
+# so the storefront can reach the indexer via the service name
+# (`http://registry:8080`) and external clients can reach it at port 8080
+# on the host.
+#
+# Operator-provided file (override path via REGISTRY_ENV_PATH):
+#   ./config.registry.env  — chain RPC URL, contract addresses, auth keys.
+#                            Copy config.registry.env.example and fill in
+#                            REPLACE_WITH_* values. See docs/indexer-quickstart.md.
+#
+# Required image (run `make build-registry` from the repo root):
+#   arkhai:registry
+#
+# Usage (standalone):
+#   docker compose -f compose/registry.yml up -d
+#
+# Usage (co-deployed with seller):
+#   docker compose -f compose/seller.yml -f compose/registry.yml up -d
+#
+# Environment overrides:
+#   REGISTRY_ENV_PATH  — path to the registry env file (default: ./config.registry.env)
+
+services:
+  # Named volumes are root-owned on first create; the indexer runs as
+  # uid 1000 (appuser baked into arkhai:registry) and needs the sqlite
+  # dir writable. This init container chowns it once per up; idempotent.
+  registry-data-init:
+    image: arkhai:registry
+    user: "0:0"
+    entrypoint: ["sh", "-c"]
+    command: ["mkdir -p /app/data && chown -R 1000:1000 /app/data"]
+    volumes:
+      - registry-data:/app/data
+    restart: "no"
+
+  registry:
+    image: arkhai:registry
+    ports:
+      - "8080:8080"
+    depends_on:
+      registry-data-init:
+        condition: service_completed_successfully
+    env_file:
+      # env_file paths resolve relative to the compose file's directory,
+      # not to docker's CWD — so the default reaches up to the repo root
+      # where config.registry.env (operator-edited) lives. Pass an
+      # absolute path via REGISTRY_ENV_PATH if running from elsewhere.
+      - ${REGISTRY_ENV_PATH:-../config.registry.env}
+    environment:
+      # Pin the sqlite file inside the named volume so restarts preserve
+      # synced events / minted api keys. Four slashes after `sqlite:` =
+      # absolute path. Override in config.registry.env only if you point
+      # at Postgres instead.
+      - DATABASE_URL=sqlite:////app/data/indexer.db
+    volumes:
+      - registry-data:/app/data
+    networks:
+      - seller
+    restart: unless-stopped
+
+# Use the same network name as compose/seller.yml so the storefront can
+# reach the indexer at `http://registry:8080`. When this file is used
+# standalone (no seller stack), compose still creates the network fresh.
+networks:
+  seller:
+
+volumes:
+  registry-data:
