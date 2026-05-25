@@ -598,16 +598,16 @@ The project includes GitHub Actions for automated Docker image builds and pushes
 
 **Pre-built images available at:**
 ```
-whitewidget/arkhai-erc-8004-registry:latest
-whitewidget/arkhai-erc-8004-registry:v1.0.0
+arkhai-io/arkhai-erc-8004-registry:latest
+arkhai-io/arkhai-erc-8004-registry:v1.0.0
 ```
 
 **Deploy using pre-built image:**
 
 ```bash
 # Pull and run (public images, no auth needed)
-docker pull whitewidget/arkhai-erc-8004-registry:latest
-docker run --env-file .env -p 8080:8080 whitewidget/arkhai-erc-8004-registry:latest
+docker pull arkhai-io/arkhai-erc-8004-registry:latest
+docker run --env-file .env -p 8080:8080 arkhai-io/arkhai-erc-8004-registry:latest
 
 # Or use docker-compose
 docker-compose up -d

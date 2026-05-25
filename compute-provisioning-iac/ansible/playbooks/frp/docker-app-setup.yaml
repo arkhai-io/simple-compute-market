@@ -40,7 +40,7 @@
     app_nginx_path: "/"
     
     # === FRP Subdomain Configuration (Optional) ===
-    # frp_subdomain_host: "arkhainet.whitewidget.tech"
+    # frp_subdomain_host: "arkhainet.arkhai.io"
 
   roles:
     - ../../roles/docker-app

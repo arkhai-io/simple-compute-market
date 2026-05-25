@@ -1,4 +1,4 @@
-export const GCS_BUCKET = "ww-migration-arkhai-installer-files";
+export const GCS_BUCKET = "arkhai-io-installer-files";
 export const TARBALL_NAME = "market-cli.tar.gz";
 export const SA_KEY_FILE = "arkhai-public-registry-reader.json";
 export const INIT_REVERSE_SSH_FILE = "init-reverse-ssh.sh";

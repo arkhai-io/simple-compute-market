@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   erc-8004-registry:
-    image: whitewidget/arkhai-erc-8004-registry:latest
+    image: arkhai-io/arkhai-erc-8004-registry:latest
     # Uncomment to build locally instead
     # build: .
     ports:

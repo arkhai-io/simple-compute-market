@@ -92,9 +92,8 @@ The `--legacy-peer-deps` flag is needed due to a peer conflict in `@okxweb3/hard
 ## Compatibility with erc-8004-registry-py
 
 `erc-8004-registry-py` decodes on-chain events using **hardcoded ABIs** in
-`src/contracts/abis.py` (comment says "Based on ww-jermaine/erc-8004-contracts").
-There is no automated lock — if the deployed contracts change, the ABIs must be
-updated manually.
+`src/contracts/abis.py`. There is no automated lock — if the deployed
+contracts change, the ABIs must be updated manually.
 
 **How to keep them in sync:**
 

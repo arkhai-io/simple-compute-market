@@ -11,7 +11,7 @@ terraform {
     }
   }
   backend "gcs" {
-    bucket = "ww-migration-arkhai-tfstate-e9fbb654"
+    bucket = "arkhai-io-tfstate-e9fbb654"
     prefix = "terraform/state"
   }
 }

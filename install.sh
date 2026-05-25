@@ -7,8 +7,8 @@ BIN_DIR="$HOME/.local/bin"
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=12
 UV_VERSION="0.8.13"
-GCP_SA_KEY_URL="https://us-central1-ww-migration-arkhai.cloudfunctions.net/getServiceAccountKey"
-DOCKER_IMAGE="us-east4-docker.pkg.dev/ww-migration-arkhai/a2a-agent/a2a-agent:v0.0.1"
+GCP_SA_KEY_URL="https://us-central1-arkhai-io.cloudfunctions.net/getServiceAccountKey"
+DOCKER_IMAGE="us-east4-docker.pkg.dev/arkhai-io/a2a-agent/a2a-agent:v0.0.1"
 GCP_DOCKER_REGISTRY="$(echo "$DOCKER_IMAGE" | cut -d'/' -f1)"
 
 # ── System dependency mapping ─────────────────────────────────

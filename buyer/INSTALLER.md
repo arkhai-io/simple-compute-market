@@ -7,13 +7,13 @@ Cross-platform installer for the Market CLI, supporting both offline and cloud-b
 ### Remote Install (Latest)
 
 ```bash
-curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash
+curl -fsSL https://us-central1-arkhai-io.cloudfunctions.net/downloadMarketCli | bash
 ```
 
 ### Remote Install (Specific Version)
 
 ```bash
-curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash -s -- --version market-cli-v1.0.0
+curl -fsSL https://us-central1-arkhai-io.cloudfunctions.net/downloadMarketCli | bash -s -- --version market-cli-v1.0.0
 ```
 
 ### Self-Extracting Script (Offline)
@@ -58,7 +58,7 @@ inside `buyer/`, or activate the venv directly with
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                     GCS Bucket Layout                           │
-│  gs://ww-migration-arkhai-installer-files/                               │
+│  gs://arkhai-io-installer-files/                               │
 │  ├── install.sh                  (remote installer entry point) │
 │  ├── releases/                                                   │
 │  │   ├── latest/                                                 │
@@ -175,7 +175,7 @@ Releases follow the tag format `market-cli-v{major}.{minor}.{patch}` (e.g., `mar
 |----------|---------|-------------|
 | `MARKET_INSTALL_DIR` | `~/.market` | Where the CLI is installed |
 | `CLI_VERSION` | latest | Target version for remote installs |
-| `GCS_BUCKET` | `ww-migration-arkhai-installer-files` | GCS bucket name (CI/CD and upload script only) |
+| `GCS_BUCKET` | `arkhai-io-installer-files` | GCS bucket name (CI/CD and upload script only) |
 | `GCS_STG_WRITER_KEY` | — | GCP service account credentials (CI/CD secret) |
 
 ## Creating a Dev Build
@@ -193,7 +193,7 @@ gh workflow run release-cli.yml
 The tarball is uploaded to `/releases/dev-{sha}/market-cli.tar.gz` in the GCS bucket and can be installed with:
 
 ```bash
-curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash -s -- --version dev-abc1234
+curl -fsSL https://us-central1-arkhai-io.cloudfunctions.net/downloadMarketCli | bash -s -- --version dev-abc1234
 ```
 
 ## Testing
@@ -208,5 +208,5 @@ Test against a remote URL:
 
 ```bash
 docker build -f Dockerfile.installer-test \
-  --build-arg INSTALLER_URL=https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli .
+  --build-arg INSTALLER_URL=https://us-central1-arkhai-io.cloudfunctions.net/downloadMarketCli .
 ```

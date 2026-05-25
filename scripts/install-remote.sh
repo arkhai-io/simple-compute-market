@@ -4,13 +4,13 @@ set -euo pipefail
 # ── Market CLI cURL Installer ────────────────────────────────
 #
 # Usage:
-#   curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash
+#   curl -fsSL https://us-central1-arkhai-io.cloudfunctions.net/downloadMarketCli | bash
 #
 # This script downloads the latest Market CLI tarball,
 # extracts it, and runs the bundled install.sh.
 # ─────────────────────────────────────────────────────────────
 
-CF_URL="https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli"
+CF_URL="https://us-central1-arkhai-io.cloudfunctions.net/downloadMarketCli"
 TARBALL_NAME="market-cli.tar.gz"
 CLI_VERSION=""
 

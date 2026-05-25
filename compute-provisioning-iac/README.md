@@ -70,7 +70,7 @@ ww1 ansible_host=<kvm-host-ip> ansible_user=<user> ansible_ssh_private_key_file=
 Generate an ed25519 SSH keypair to be used for provisioning operations. The **private key** will be injected into the Docker app (Async Provisioning Service) as a credential for connecting to VMs, and the **public key** will be added to `authorized_keys` on the KVM host during `vm-setup`.
 
 ```bash
-ssh-keygen -t ed25519 -C "ww-migration@arkhai.io"
+ssh-keygen -t ed25519 -C "arkhai-ops@arkhai.io"
 ```
 
 When prompted:
@@ -308,8 +308,8 @@ The FRP server acts as a secure bridge for buyers to access their leased VM reso
 
 ```bash
 ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
-  -e "frp_domain=arkhainet.whitewidget.tech" \
-  -e "certbot_email=admin@arkhainet.whitewidget.tech" \
+  -e "frp_domain=arkhainet.arkhai.io" \
+  -e "certbot_email=admin@arkhainet.arkhai.io" \
   --limit proxy-dev
 ```
 
@@ -356,7 +356,7 @@ vm_tenant_pubkey: "<tenant-ssh-key-from-local-machine>"
 vm_gpu_provisioned: true
 vm_gpu_count: 2
 image_setup_type: scratch
-frp_domain: "arkhainet.whitewidget.tech"
+frp_domain: "arkhainet.arkhai.io"
 frp_server_addr: "<frp-server-vm-ip-address>"
 frp_dashboard_password: "<some-random-dashboard-api-password>"                        
 EOF                                 
@@ -757,16 +757,16 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 **Standard FRP Server Setup with SSL**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
-  -e "frp_domain=arkhainet.whitewidget.tech" \
-  -e "certbot_email=admin@arkhainet.whitewidget.tech" \
+  -e "frp_domain=arkhainet.arkhai.io" \
+  -e "certbot_email=admin@arkhainet.arkhai.io" \
   --limit proxy-dev
 ```
 
 **FRP Server Setup with Custom Credentials**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
-  -e "frp_domain=arkhainet.whitewidget.tech" \
-  -e "certbot_email=admin@arkhainet.whitewidget.tech" \
+  -e "frp_domain=arkhainet.arkhai.io" \
+  -e "certbot_email=admin@arkhainet.arkhai.io" \
   -e "frp_auth_token=your-custom-64-char-token-here-make-it-secure-and-random" \
   -e "frp_dashboard_password=your-custom-32-char-password" \
   --limit proxy-dev
@@ -775,15 +775,15 @@ ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
 **FRP Server Setup with Subdomain Host** (alternative parameter):
 ```bash
 ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
-  -e "frp_subdomain_host=arkhainet.whitewidget.tech" \
-  -e "certbot_email=admin@arkhainet.whitewidget.tech" \
+  -e "frp_subdomain_host=arkhainet.arkhai.io" \
+  -e "certbot_email=admin@arkhainet.arkhai.io" \
   --limit proxy-dev
 ```
 
 **Parameter Reference**:
-- `frp_domain`: Primary domain/subdomain for FRP services (e.g., `arkhainet.whitewidget.tech`)
+- `frp_domain`: Primary domain/subdomain for FRP services (e.g., `arkhainet.arkhai.io`)
 - `frp_subdomain_host`: Alternative parameter for domain (same as `frp_domain`, used internally)
-- `certbot_email`: Email for Let's Encrypt SSL certificate notifications (e.g., `admin@arkhainet.whitewidget.tech`)
+- `certbot_email`: Email for Let's Encrypt SSL certificate notifications (e.g., `admin@arkhainet.arkhai.io`)
 - `frp_auth_token`: Custom 64-character authentication token (auto-generated if not provided)
 - `frp_dashboard_password`: Custom 32-character dashboard password (auto-generated if not provided)
 
@@ -809,7 +809,7 @@ ssh -L 7001:localhost:7001 user@<frp-server-ip>
 # Then visit: http://localhost:7001
 
 # Direct HTTPS access (after SSL setup)
-# Visit: https://frp-admin.arkhainet.whitewidget.tech
+# Visit: https://frp-admin.arkhainet.arkhai.io
 ```
 
 #### FRP Dashboard API Examples
@@ -823,7 +823,7 @@ FRP_USER="admin"
 FRP_PASSWORD="<dashboard-password-from-credentials-file>"
 FRP_API_URL="http://localhost:7001/api"  # Via SSH tunnel
 # OR
-FRP_API_URL="https://frp-admin.arkhainet.whitewidget.tech/api"  # Direct HTTPS
+FRP_API_URL="https://frp-admin.arkhainet.arkhai.io/api"  # Direct HTTPS
 ```
 
 **Get Server Information**:
@@ -842,7 +842,7 @@ curl -u "${FRP_USER}:${FRP_PASSWORD}" \
     "tcpmuxHTTPConnectPort": 0,
     "kcpBindPort": 0,
     "quicBindPort": 0,
-    "subdomainHost": "arkhainet.whitewidget.tech",
+    "subdomainHost": "arkhainet.arkhai.io",
     "maxPoolCount": 50,
     "maxPortsPerClient": 0,
     "heartbeatTimeout": 90,
@@ -1050,7 +1050,7 @@ vm_tenant_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjmOBBEpr7KvLbsmjLOaqmPa
 vm_gpu_provisioned: true
 vm_gpu_count: 2
 image_setup_type: scratch
-frp_domain: arkhainet.whitewidget.tech
+frp_domain: arkhainet.arkhai.io
 frp_server_addr: 192.168.100.61
 frp_dashboard_password: "prFHMe8bsiOgTOM8I39udN0lD9h4Nt2W"
 EOF
@@ -1073,7 +1073,7 @@ vm_disk_size: 10G
 vm_tenant_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjmOBBEpr7KvLbsmjLOaqmPahELCroCiTYEjQ+p6yRM buyer@example.com"
 vm_gpu_provisioned: false
 image_setup_type: scratch
-frp_domain: arkhainet.whitewidget.tech
+frp_domain: arkhainet.arkhai.io
 frp_server_addr: 192.168.100.61
 frp_dashboard_password: "prFHMe8bsiOgTOM8I39udN0lD9h4Nt2W"
 EOF
@@ -1216,7 +1216,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 - `vm_gpu_provisioned`: Enable GPU passthrough (`true` or `false`)
 - `vm_gpu_count`: Number of GPUs to allocate (only when `vm_gpu_provisioned: true`)
 - `image_setup_type`: Base image type (`scratch` for Ubuntu cloud image, `golden` for custom image)
-- `frp_domain`: FRP domain for remote access (e.g., `arkhainet.whitewidget.tech`)
+- `frp_domain`: FRP domain for remote access (e.g., `arkhainet.arkhai.io`)
 - `frp_server_addr`: IP address of FRP server (e.g., `192.168.100.61`)
 - `frp_dashboard_password`: FRP dashboard API password for proxy registration
 - `vm_lease_end`: Lease expiration datetime in UTC format `YYYY-MM-DD HH:MM` (e.g., `2026-02-23 10:45`) - use JSON format in command: `-e '{"vm_lease_end":"2026-02-23 10:45"}'`
@@ -1398,13 +1398,13 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
   -e "app_container_port=8002" \
   -e "app_nginx_port=8888" \
   -e "app_nginx_site_name=erc-registry" \
-  -e "frp_subdomain_host=arkhainet.whitewidget.tech" \
+  -e "frp_subdomain_host=arkhainet.arkhai.io" \
   -e "enable_ssl=true" \
   -e "certbot_email=admin@example.com" \
   --limit proxy-dev
 ```
 
-Access: `https://erc-registry.arkhainet.whitewidget.tech/` (with SSL) or `http://erc-registry.arkhainet.whitewidget.tech:8888/` (without SSL)
+Access: `https://erc-registry.arkhainet.arkhai.io/` (with SSL) or `http://erc-registry.arkhainet.arkhai.io:8888/` (without SSL)
 
 #### Required Variables
 
@@ -1476,7 +1476,7 @@ app_nginx_path: "/"                  # Default, or "/api" for subpath
 docker_network_mode: "bridge"        # Default: bridge (port-mapped). Set to "host" to use host networking (e.g. for ZeroTier access)
 
 # FRP Subdomain Support (if frp-setup role configured)
-frp_subdomain_host: "example.com"    # Wildcard DNS domain (e.g., arkhainet.whitewidget.tech)
+frp_subdomain_host: "example.com"    # Wildcard DNS domain (e.g., arkhainet.arkhai.io)
 # Results in: app_nginx_site_name.frp_subdomain_host
 # Example: my-app.example.com
 
@@ -1501,7 +1501,7 @@ Set `docker_network_mode=host` to enable this:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
   -e "docker_registry_type=gcp" \
-  -e "gcp_project_id=ww-migration-arkhai" \
+  -e "gcp_project_id=arkhai-io" \
   -e "gcp_registry_region=us-east4" \
   -e "gcp_repository=async-provisioning-service" \
   -e "gcp_service_account_key=~/Downloads/key-reader.json" \
@@ -1651,7 +1651,7 @@ The role returns JSON deployment information via `ansible_stats`:
   "nginx_port": 8888,
   "container_port": 8002,
   "internal_port": 8080,
-  "nginx_url": "http://erc-registry.arkhainet.whitewidget.tech:8888/",
+  "nginx_url": "http://erc-registry.arkhainet.arkhai.io:8888/",
   "image": "asia-southeast1-docker.pkg.dev/principia-infrastructure-dev/erc-8004-registry/erc-8004-registry:latest"
 }
 ```
@@ -1660,7 +1660,7 @@ The role returns JSON deployment information via `ansible_stats`:
 ```json
 {
   "app_name": "erc-registry",
-  "nginx_url": "https://erc-registry.arkhainet.whitewidget.tech/",
+  "nginx_url": "https://erc-registry.arkhainet.arkhai.io/",
   "ssl_enabled": true
 }
 ```
@@ -1675,8 +1675,8 @@ The role returns JSON deployment information via `ansible_stats`:
 ```
 
 **Note**:
-- Without SSL: URL includes port (e.g., `http://erc-registry.arkhainet.whitewidget.tech:8888/`)
-- With SSL: Certbot configures nginx for standard HTTPS port 443 with redirect (e.g., `https://erc-registry.arkhainet.whitewidget.tech/`)
+- Without SSL: URL includes port (e.g., `http://erc-registry.arkhainet.arkhai.io:8888/`)
+- With SSL: Certbot configures nginx for standard HTTPS port 443 with redirect (e.g., `https://erc-registry.arkhainet.arkhai.io/`)
 - FRP subdomain uses wildcard DNS from Cloudflare, nginx handles the actual port routing
 
 #### Docker Application Deployment Command Examples
@@ -1695,9 +1695,9 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
   -e "app_container_internal_port=8080" \
   -e "app_container_port=8001" \
   -e "app_nginx_port=8888" \
-  -e "frp_subdomain_host=arkhainet.whitewidget.tech" \
+  -e "frp_subdomain_host=arkhainet.arkhai.io" \
   -e "enable_ssl=true" \
-  -e "certbot_email=admin@arkhainet.whitewidget.tech" \
+  -e "certbot_email=admin@arkhainet.arkhai.io" \
   -e "app_nginx_site_name=my-app" \
   -e '{"app_container_env":{"DATABASE_URL":"postgresql://user:pass@db.example.com/mydb?sslmode=require","API_KEY":"your-api-key-here","PORT":"8080","HOST":"0.0.0.0","LOG_LEVEL":"info"}}' \
   --limit proxy-dev
@@ -1716,15 +1716,15 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 - `app_container_internal_port`: Container's internal port (e.g., `8080`, `3000`)
 - `app_nginx_port`: Nginx listening port (e.g., `8888`, `8080`)
 - `app_nginx_site_name`: Nginx site configuration name and subdomain prefix
-- `frp_subdomain_host`: FRP domain for subdomain routing (e.g., `arkhainet.whitewidget.tech`)
+- `frp_subdomain_host`: FRP domain for subdomain routing (e.g., `arkhainet.arkhai.io`)
 - `enable_ssl`: Enable Let's Encrypt SSL certificates (`true` or `false`)
 - `certbot_email`: Email for Let's Encrypt notifications
 - `app_container_env`: JSON dictionary of environment variables for the container
 - `app_container_volumes`: List of volume mounts in `host:container` format (optional)
 
 **Access URLs**:
-- HTTP: `http://my-app.arkhainet.whitewidget.tech:8888` (via FRP tunnel)
-- HTTPS: `https://my-app.arkhainet.whitewidget.tech` (with SSL enabled)
+- HTTP: `http://my-app.arkhainet.arkhai.io:8888` (via FRP tunnel)
+- HTTPS: `https://my-app.arkhainet.arkhai.io` (with SSL enabled)
 
 **Note**: This role is optional and typically deployed on the FRP server to run additional services alongside the proxy. The example shows GCP Artifact Registry deployment - for Docker Hub or other registries, adjust `docker_registry_type` and authentication parameters accordingly.
 
@@ -1748,9 +1748,9 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
   -e "app_container_internal_port=8080" \
   -e "app_container_port=8001" \
   -e "app_nginx_port=8888" \
-  -e "frp_subdomain_host=arkhainet.whitewidget.tech" \
+  -e "frp_subdomain_host=arkhainet.arkhai.io" \
   -e "enable_ssl=true" \
-  -e "certbot_email=admin@arkhainet.whitewidget.tech" \
+  -e "certbot_email=admin@arkhainet.arkhai.io" \
   -e "app_nginx_site_name=erc-registry" \
   -e '{"app_container_env":{"DATABASE_URL":"postgresql://neondb_owner:password@us-east-1.aws.neon.tech/erc-8004-registry?sslmode=require&channel_binding=require","CHAIN_ID":"84532","RPC_URL":"https://base-sepolia.infura.io/v3/<infura-project-id>","IDENTITY_REGISTRY_ADDRESS":"0x<identity-registry-address>","REPUTATION_REGISTRY_ADDRESS":"0x<reputation-registry-address>","VALIDATION_REGISTRY_ADDRESS":"","PORT":"8080","HOST":"0.0.0.0","ENABLE_HEALTH_CHECKS":"false","HEALTH_CHECK_INTERVAL":"60","ENDPOINT_CHECK_TIMEOUT":"10","HEARTBEAT_TTL_SECS":"60","LOG_LEVEL":"info"}}' \
   --limit proxy-dev
@@ -1770,7 +1770,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 - `app_container_internal_port`: Port the application listens on inside the container (`8080`)
 - `app_container_port`: Host port mapped to container (`8001` - direct access port)
 - `app_nginx_port`: Nginx reverse proxy port (`8888` - HTTP access port)
-- `frp_subdomain_host`: Base domain for FRP subdomain routing (`arkhainet.whitewidget.tech`)
+- `frp_subdomain_host`: Base domain for FRP subdomain routing (`arkhainet.arkhai.io`)
 - `enable_ssl`: Enable HTTPS with Let's Encrypt (`true`)
 - `certbot_email`: Email for SSL certificate notifications
 - `app_nginx_site_name`: Nginx site config name and subdomain prefix (`erc-registry`)
@@ -1792,8 +1792,8 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 - `LOG_LEVEL`: Logging verbosity level (`info`, `debug`, `warn`, `error`)
 
 **Access URLs**:
-- HTTP: `http://erc-registry.arkhainet-staging.whitewidget.tech:8888` (via FRP tunnel)
-- HTTPS: `https://erc-registry.arkhainet-staging.whitewidget.tech` (with SSL enabled)
+- HTTP: `http://erc-registry.arkhainet-staging.arkhai.io:8888` (via FRP tunnel)
+- HTTPS: `https://erc-registry.arkhainet-staging.arkhai.io` (with SSL enabled)
 - Direct Access: `http://<server-ip>:8001` (bypasses Nginx, FRP only)
 
 **Security Considerations**:
@@ -1836,11 +1836,11 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
   -e "app_container_internal_port=8081" \
   -e "app_container_port=8001" \
   -e "app_nginx_port=8888" \
-  -e "frp_subdomain_host=arkhainet-market.whitewidget.tech" \
+  -e "frp_subdomain_host=arkhainet-market.arkhai.io" \
   -e "enable_ssl=true" \
-  -e "certbot_email=admin@arkhainet-market.whitewidget.tech" \
+  -e "certbot_email=admin@arkhainet-market.arkhai.io" \
   -e "app_nginx_site_name=provisioner" \
-  -e '{"app_container_env": {"HOST":"0.0.0.0","PORT":"8081","LOG_LEVEL":"info","DATABASE_URL":"postgresql+psycopg2://postgres:postgres@<postgres-host>:5432/provisioning","REDIS_URL":"redis://<redis-host>:6379/0","REDIS_QUEUE_NAME":"provisioning_jobs","ANSIBLE_TIMEOUT_SECONDS":"1800","ANSIBLE_BECOME_PASS":"vmhostuserpassword","DEFAULT_VM_HOST":"ww1","FRP_SERVER_ADDR":"34.87.54.66","FRP_DOMAIN":"arkhainet.whitewidget.tech","FRP_DASHBOARD_PASSWORD":"frpadashboardapipassword","ENABLE_AUTH":"true","AUTH_FAIL_OPEN":"false","REGISTRY_URL":"https://<registry-url>","REGISTRY_CACHE_TTL_SECONDS":"300","REGISTRY_CACHE_MAX_SIZE":"256","SSH_PRIVATE_KEY":"<base64-encoded-ssh-private-key>","MANAGEMENT_VARS_YAML":"<base64-encoded-management-vars-yaml>"}}' \
+  -e '{"app_container_env": {"HOST":"0.0.0.0","PORT":"8081","LOG_LEVEL":"info","DATABASE_URL":"postgresql+psycopg2://postgres:postgres@<postgres-host>:5432/provisioning","REDIS_URL":"redis://<redis-host>:6379/0","REDIS_QUEUE_NAME":"provisioning_jobs","ANSIBLE_TIMEOUT_SECONDS":"1800","ANSIBLE_BECOME_PASS":"vmhostuserpassword","DEFAULT_VM_HOST":"ww1","FRP_SERVER_ADDR":"34.87.54.66","FRP_DOMAIN":"arkhainet.arkhai.io","FRP_DASHBOARD_PASSWORD":"frpadashboardapipassword","ENABLE_AUTH":"true","AUTH_FAIL_OPEN":"false","REGISTRY_URL":"https://<registry-url>","REGISTRY_CACHE_TTL_SECONDS":"300","REGISTRY_CACHE_MAX_SIZE":"256","SSH_PRIVATE_KEY":"<base64-encoded-ssh-private-key>","MANAGEMENT_VARS_YAML":"<base64-encoded-management-vars-yaml>"}}' \
   --limit provisioning-dev
 ```
 
@@ -1858,7 +1858,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 - `app_container_internal_port`: Port the application listens on inside the container (`8081`)
 - `app_container_port`: Host port mapped to container (`8001` - direct access port)
 - `app_nginx_port`: Nginx reverse proxy port (`8888` - HTTP access port)
-- `frp_subdomain_host`: Base domain for FRP subdomain routing (e.g., `arkhainet-market.whitewidget.tech`)
+- `frp_subdomain_host`: Base domain for FRP subdomain routing (e.g., `arkhainet-market.arkhai.io`)
 - `enable_ssl`: Enable HTTPS with Let's Encrypt (`true`)
 - `certbot_email`: Email for SSL certificate notifications
 - `app_nginx_site_name`: Nginx site config name and subdomain prefix (`provisioner`)
@@ -1876,7 +1876,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 - `AUTH_FAIL_OPEN`: Keep `false` so registry lookup failures do not bypass auth
 - `DEFAULT_VM_HOST`: Default KVM host used for VM provisioning (e.g., `ww1`)
 - `FRP_SERVER_ADDR`: IP address of the FRP server for VM network proxy registration
-- `FRP_DOMAIN`: FRP base domain for VM subdomain routing (e.g., `arkhainet.whitewidget.tech`)
+- `FRP_DOMAIN`: FRP base domain for VM subdomain routing (e.g., `arkhainet.arkhai.io`)
 - `FRP_DASHBOARD_PASSWORD`: FRP dashboard API password for proxy management
 - `ENABLE_AUTH`: Enable token-based API authentication (`true` or `false`)
 - `REGISTRY_URL`: URL of the local ERC Registry service (e.g., `http://localhost:8080`)
@@ -1886,8 +1886,8 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 - `MANAGEMENT_VARS_YAML`: base64-encoded `management-vars.yaml` (no newlines). The container decodes it to `/app/compute-provisioning-iac/ansible/inventory/management-vars.yaml` on startup. Required when using Golden Images (`vm_action=create` or `vm_action=undefine`). Encode with: `base64 < inventory/management-vars.yaml | tr -d '\n'`
 
 **Access URLs**:
-- HTTP: `http://provisioner.arkhainet-market.whitewidget.tech:8888` (via FRP tunnel)
-- HTTPS: `https://provisioner.arkhainet-market.whitewidget.tech` (with SSL enabled)
+- HTTP: `http://provisioner.arkhainet-market.arkhai.io:8888` (via FRP tunnel)
+- HTTPS: `https://provisioner.arkhainet-market.arkhai.io` (with SSL enabled)
 - Direct Access: `http://<server-ip>:8001` (bypasses Nginx)
 
 **Firewall Ports Opened**:

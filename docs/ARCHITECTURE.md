@@ -1382,8 +1382,8 @@ The `vm_creation_data` JSON returned by the playbook (and stored in `job.result`
 | `frp.enabled` | `true` | `false` |
 | `frp.remote_port` | allocated port (e.g. `7045`) | N/A |
 | `frp.subdomain` | e.g. `a3b9f2` | N/A |
-| `frp.domain` | e.g. `arkhainet.whitewidget.tech` | N/A |
-| `authentication.tenant.ssh_commands.external` | `ssh -i <key> -p 7045 vmname@a3b9f2.arkhainet.whitewidget.tech` | `ssh -i <key> -p <port> vmname@<kvm_host_ip>` |
+| `frp.domain` | e.g. `arkhainet.arkhai.io` | N/A |
+| `authentication.tenant.ssh_commands.external` | `ssh -i <key> -p 7045 vmname@a3b9f2.arkhainet.arkhai.io` | `ssh -i <key> -p <port> vmname@<kvm_host_ip>` |
 | `authentication.tenant.ssh_commands.internal` | `ssh -i <key> vmname@<vm_internal_ip>` | same |
 
 The provisioning client (`service/clients/provisioning.py`) normalizes the result and substitutes `frp.domain` as `vm_host_ip` when FRP is active, so the rest of the agent code sees a consistent connection-details shape regardless of mode.

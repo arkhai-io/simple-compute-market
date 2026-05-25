@@ -16,7 +16,7 @@ on:
 
 env:
   GAR_REGISTRY: us-east4-docker.pkg.dev
-  GCP_PROJECT_ID: ww-migration-arkhai
+  GCP_PROJECT_ID: arkhai-io
   GAR_REPOSITORY: async-provisioning-service
   IMAGE_NAME: async-provisioning-service
   PYTHON_VERSION: "3.13"
@@ -65,7 +65,7 @@ jobs:
           labels: |
             org.opencontainers.image.title=Async Provisioning Service
             org.opencontainers.image.description=Arkhai Async Provisioning Service for resource management
-            org.opencontainers.image.vendor=WhiteWidget
+            org.opencontainers.image.vendor=Arkhai
 
       - name: Build and push Docker image
         id: build

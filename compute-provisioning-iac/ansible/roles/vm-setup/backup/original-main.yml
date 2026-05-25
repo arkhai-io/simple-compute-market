@@ -1069,27 +1069,8 @@
             interfaces:
               - $WIRED_INTERFACE
       EOF
-      elif [ ! -z "$WIRELESS_INTERFACE" ]; then
-        echo "Setting up bridge with wireless interface: $WIRELESS_INTERFACE"
-        cat > /etc/netplan/01-netcfg.yaml <<EOF
-      network:
-        version: 2
-        renderer: networkd
-        wifis:
-          $WIRELESS_INTERFACE:
-            dhcp4: no
-            optional: yes
-            access-points:
-              "White Widget Cyber":
-                password: "fourwordsalluppercase"
-        bridges:
-          br0:
-            dhcp4: yes
-            interfaces:
-              - $WIRELESS_INTERFACE
-      EOF
       else
-        echo "No suitable network interface found for bridging"
+        echo "No wired interface found for bridging"
         exit 1
       fi
       

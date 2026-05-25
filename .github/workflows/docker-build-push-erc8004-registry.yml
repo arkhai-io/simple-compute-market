@@ -16,7 +16,7 @@ on:
 
 env:
   GAR_REGISTRY: us-east4-docker.pkg.dev
-  GCP_PROJECT_ID: ww-migration-arkhai
+  GCP_PROJECT_ID: arkhai-io
   GAR_REPOSITORY: registry-service
   IMAGE_NAME: registry-service
   PYTHON_VERSION: "3.13"
@@ -64,7 +64,7 @@ jobs:
           labels: |
             org.opencontainers.image.title=ERC-8004 Registry
             org.opencontainers.image.description=ERC-8004 Identity and Reputation Registry Service
-            org.opencontainers.image.vendor=WhiteWidget
+            org.opencontainers.image.vendor=Arkhai
 
       - name: Build and push Docker image
         id: build
