@@ -5,9 +5,7 @@ description = "Provider-side storefront server: hosts /orders, /negotiate, /sett
 authors = [
     {name = "Your Name", email = "your@email.com"},
 ]
-#3.13 requires numpy>2 or else you have to install the gcc toolchain and compile numpy yourself.
-#pufferlib requires numpy<2. So we're stuck with python 3.12
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12"
 dependencies = [
 	"arkhai-registry-client>=0.7.0",
     "arkhai-storefront-client>=0.10.0",
@@ -44,9 +42,14 @@ dev = [
 
 [project.optional-dependencies]
 
+# Inference-only — just enough to load and run the trained .pt checkpoints
+# in domain/compute/agent/app/policy/models/. The architecture is
+# reproduced inline in arkhai_common.ArkhaiInferencePolicy (state-dict
+# compatible with checkpoints trained against pufferlib.models.Default,
+# verified bit-identical). Training (which still uses pufferlib's C env)
+# lives in domain/compute/training and is not exposed as an extra here.
 rl = [
     "torch>=2.7.0",
-    "pufferlib @ git+https://github.com/arkhai-io/ArkhaiPufferEnv@f18e3b42c0ae22e8aec5e8d26a26f424e6b18a30",
 ]
 
 jupyter = [
@@ -61,7 +64,6 @@ lint = [
 ]
 
 [tool.uv]
-no-build-isolation-package = ["pufferlib"]
 # Restrict resolution to platforms that have alkahest_py wheels.
 # Without this, uv attempts to solve for all platforms and fails to
 # find provisioning-service / market-service wheels for platforms
@@ -71,10 +73,6 @@ environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
     "sys_platform == 'linux' and platform_machine == 'aarch64'",
 ]
-
-# requirement for pufferlib 3.0.0
-[tool.uv.extra-build-dependencies]
-pufferlib = ["setuptools", "Cython", "numpy<2"]
 
 [tool.uv.sources]
 market-policy = { path = "../policy", editable = true }

@@ -3,6 +3,16 @@
 Observation layout, model creation, checkpoint loading, and action extraction
 are identical for both sides. Role-specific logic (accept/counter/reject
 thresholds, model path, env var) lives in the role-specific modules.
+
+Inference here does **not** depend on pufferlib. The trained checkpoints
+were produced by ``pufferlib.models.Default(env_stub, hidden_size=128)``
+in the non-Dict, MultiDiscrete branch — that architecture is a few
+``nn.Linear`` layers with a GELU, reproducible inline (see
+``ArkhaiInferencePolicy`` below). Outputs are bit-identical to the
+pufferlib version on the existing ``.pt`` files.
+
+Training still uses pufferlib's C env + trainer (``domain/compute/training/``);
+runtime callers (storefront, buyer) only need torch.
 """
 from __future__ import annotations
 
@@ -12,8 +22,6 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-import gymnasium as gym
-
 from market_storefront.models.domain_models import GPUModel
 
 try:  # Torch is optional at runtime; fail gracefully if unavailable.
@@ -21,27 +29,52 @@ try:  # Torch is optional at runtime; fail gracefully if unavailable.
 except Exception:  # pragma: no cover - environment-dependent
     torch = None
 
+
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Environment stub for puffer model creation
+# Inline inference-only port of pufferlib.models.Default
 # ---------------------------------------------------------------------------
+#
+# State-dict compatible with checkpoints trained against
+# ``pufferlib.models.Default(env_stub, hidden_size=128)`` for the
+# (Box obs, MultiDiscrete([9, 2]) action) shape used by arkhai_negotiator_*.pt.
+# Three nn.Linear layers + GELU; sum of action_nvec = 11 output logits split
+# into two heads (price_idx ∈ {0..8}, sell_flag ∈ {0, 1}) plus a value head.
 
-class PolicyEnvStub:
-    """Minimal env shape/action stub for puffer Default policy."""
+def _build_inference_policy(obs_dim_val: int) -> Optional[Any]:
+    """Construct the inference model class lazily so this module imports
+    cleanly when torch is absent (``policy_mode = bisection`` deployments).
+    """
+    if torch is None:
+        return None
 
-    def __init__(self, obs_dim: int) -> None:
-        self.single_observation_space = gym.spaces.Box(
-            low=0.0,
-            high=1.0,
-            shape=(obs_dim,),
-            dtype="float32",
-        )
-        self.single_action_space = gym.spaces.MultiDiscrete([9, 2])
-        # Aliases required by pufferlib.models.Default dict-obs detection fallback
-        self.observation_space = self.single_observation_space
-        self.action_space = self.single_action_space
+    import torch.nn as nn
+
+    action_nvec = (9, 2)
+    hidden_size = 128
+
+    class ArkhaiInferencePolicy(nn.Module):
+        action_nvec = (9, 2)
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.encoder = nn.Sequential(
+                nn.Linear(obs_dim_val, hidden_size),
+                nn.GELU(),
+            )
+            self.decoder = nn.Linear(hidden_size, sum(action_nvec))
+            self.value = nn.Linear(hidden_size, 1)
+
+        def forward(self, observations: Any) -> tuple[Any, Any]:
+            batch = observations.shape[0]
+            hidden = self.encoder(observations.float().view(batch, -1))
+            logits = self.decoder(hidden).split(action_nvec, dim=1)
+            values = self.value(hidden)
+            return logits, values
+
+    return ArkhaiInferencePolicy()
 
 
 # ---------------------------------------------------------------------------
@@ -147,15 +180,13 @@ def obs_dim(node_types: int) -> int:
 # ---------------------------------------------------------------------------
 
 def create_model(obs_dim: int) -> Optional[Any]:
-    if torch is None:
-        return None
-    try:
-        puffer_models = importlib.import_module("pufferlib.models")
-        env_stub = PolicyEnvStub(obs_dim)
-        return puffer_models.Default(env_stub, hidden_size=128)
-    except Exception as exc:
-        logger.error("[ARKHAI COMMON] Failed to create puffer model stub: %s", exc)
-        return None
+    """Build a fresh inference policy with random weights.
+
+    The caller (``load_state_dict`` below) overwrites those weights from
+    a checkpoint. Returns ``None`` if torch isn't installed — callers
+    must handle that path (storefront falls back to bisection middleware).
+    """
+    return _build_inference_policy(obs_dim)
 
 
 def load_state_dict(model_file: Path, obs_dim_val: int) -> Optional[Any]:
