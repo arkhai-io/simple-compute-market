@@ -13,11 +13,12 @@
 # unused.
 #
 # Environment override:
-#   SELLER_SSH_PRIVKEY       — path to KVM-host SSH privkey (default: ./keys/id_ed25519)
+#   SELLER_SSH_PRIVKEY       — path to KVM-host SSH privkey (default: ../keys/id_ed25519,
+#                              i.e. ./keys/id_ed25519 relative to the project root)
 
 services:
   seller-provisioning:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ${SELLER_SSH_PRIVKEY:-./keys/id_ed25519}:/home/appuser/.ssh/id_ed25519:ro
+      - ${SELLER_SSH_PRIVKEY:-../keys/id_ed25519}:/home/appuser/.ssh/id_ed25519:ro

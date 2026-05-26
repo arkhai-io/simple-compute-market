@@ -33,8 +33,9 @@
 #   docker compose -f compose/seller.yml logs -f seller-agent
 #
 # Environment overrides (all optional):
-#   SELLER_CONFIG_PATH       — path to seller TOML (default: ./config.seller.toml)
-#   SELLER_RESOURCES_CSV     — path to inventory CSV (default: ./resources.csv)
+#   SELLER_CONFIG_PATH       — path to seller TOML (default: ../config.seller.toml,
+#                              i.e. ./config.seller.toml relative to the project root)
+#   SELLER_RESOURCES_CSV     — path to inventory CSV (default: ../resources.csv)
 
 services:
   # One-shot init container that chowns the named volumes to the runtime
@@ -75,8 +76,8 @@ services:
       seller-data-init:
         condition: service_completed_successfully
     volumes:
-      - ${SELLER_CONFIG_PATH:-./config.seller.toml}:/etc/arkhai/storefront.toml:ro
-      - ${SELLER_RESOURCES_CSV:-./resources.csv}:/app/resources.csv:ro
+      - ${SELLER_CONFIG_PATH:-../config.seller.toml}:/etc/arkhai/storefront.toml:ro
+      - ${SELLER_RESOURCES_CSV:-../resources.csv}:/app/resources.csv:ro
       - seller-agent-data:/app/src/market_storefront/data/sell-agent
       - zerotier-sell:/var/lib/zerotier-one
     networks:
@@ -96,7 +97,7 @@ services:
       # Same storefront TOML the seller-agent reads. The provisioning
       # service reads `admin_api_key` from it so the operator writes the
       # admin key in exactly one file.
-      - ${SELLER_CONFIG_PATH:-./config.seller.toml}:/etc/arkhai/storefront.toml:ro
+      - ${SELLER_CONFIG_PATH:-../config.seller.toml}:/etc/arkhai/storefront.toml:ro
       - seller-provisioning-data:/app/data
     networks:
       - seller
