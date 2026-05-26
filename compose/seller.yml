@@ -1,7 +1,7 @@
 # Seller stack — services a seller (someone with compute to sell) runs in production.
 #
 # Two services:
-#   1. seller-agent          — storefront HTTP server (arkhai:storefront).
+#   1. seller-storefront     — storefront HTTP server (arkhai:storefront).
 #                              Publishes offers, negotiates with buyers,
 #                              settles deals on chain.
 #   2. seller-provisioning   — runs ansible to create/destroy VMs on the
@@ -30,7 +30,7 @@
 # Usage:
 #   docker compose -f compose/seller.yml up -d                          # mock mode
 #   docker compose -f compose/seller.yml -f compose/seller.live.yml up -d   # live KVM
-#   docker compose -f compose/seller.yml logs -f seller-agent
+#   docker compose -f compose/seller.yml logs -f seller-storefront
 #
 # Environment overrides (all optional):
 #   SELLER_CONFIG_PATH       — path to seller TOML (default: ../config.seller.toml,
@@ -51,13 +51,13 @@ services:
   #
   # Both exit successfully after one run; idempotent (chown -R no-ops
   # on already-correct ownership).
-  seller-agent-data-init:
+  seller-storefront-data-init:
     image: arkhai:storefront
     user: "0:0"
     entrypoint: ["sh", "-c"]
     command: ["chown -R appuser:appuser /data"]
     volumes:
-      - seller-agent-data:/data
+      - seller-storefront-data:/data
     restart: "no"
 
   seller-provisioning-data-init:
@@ -69,11 +69,11 @@ services:
       - seller-provisioning-data:/data
     restart: "no"
 
-  seller-agent:
+  seller-storefront:
     image: arkhai:storefront
     ports:
       - "8001:8001"
-    # cap_add / devices / zerotier-sell volume below are for optional
+    # cap_add / devices / zerotier-seller volume below are for optional
     # ZeroTier overlay networking. Harmless when [seller].zerotier_network
     # is unset — the entrypoint fail-softs and continues.
     cap_add:
@@ -82,15 +82,13 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     depends_on:
-      seller-agent-data-init:
+      seller-storefront-data-init:
         condition: service_completed_successfully
     volumes:
       - ${SELLER_CONFIG_PATH:-../config.seller.toml}:/etc/arkhai/storefront.toml:ro
       - ${SELLER_RESOURCES_CSV:-../resources.csv}:/app/resources.csv:ro
-      - seller-agent-data:/app/src/market_storefront/data/sell-agent
-      - zerotier-sell:/var/lib/zerotier-one
-    networks:
-      - seller
+      - seller-storefront-data:/app/src/market_storefront/data/storefront
+      - zerotier-seller:/var/lib/zerotier-one
     restart: unless-stopped
 
   seller-provisioning:
@@ -103,19 +101,14 @@ services:
     environment:
       - ACTIVE_PROFILES=seller
     volumes:
-      # Same storefront TOML the seller-agent reads. The provisioning
+      # Same storefront TOML the seller-storefront reads. The provisioning
       # service reads `admin_api_key` from it so the operator writes the
       # admin key in exactly one file.
       - ${SELLER_CONFIG_PATH:-../config.seller.toml}:/etc/arkhai/storefront.toml:ro
       - seller-provisioning-data:/app/data
-    networks:
-      - seller
     restart: unless-stopped
 
-networks:
-  seller:
-
 volumes:
-  seller-agent-data:
+  seller-storefront-data:
   seller-provisioning-data:
-  zerotier-sell:
+  zerotier-seller:

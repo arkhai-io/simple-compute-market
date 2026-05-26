@@ -9,8 +9,8 @@
 # seller writes the value in exactly one place.
 # ---------------------------------------------------------------------------
 
-# Service name on the seller compose's `seller` network.
-storefront_url: "http://seller-agent:8001"
+# Service name on the seller compose's default network.
+storefront_url: "http://seller-storefront:8001"
 
 # SQLite under the seller-provisioning-data named volume (defined in
 # compose/seller.yml). The path inside the container is /app/data, the

@@ -1,10 +1,10 @@
-"""Market layer: what a marketplace operator runs.
+"""Registry layer: what a marketplace operator runs.
 
 A marketplace operator runs the registry service — nothing else. They
 provide the discovery surface that lets independent buyers and sellers
 find each other. They do NOT run agents.
 
-Produces the ``market_registry`` fixture for downstream tests.
+Produces the ``registry_layer`` fixture for downstream tests.
 """
 
 from __future__ import annotations
@@ -32,46 +32,46 @@ def _http_get(url: str, timeout: float = 5) -> tuple[int, str]:
 
 
 @pytest.fixture(scope="session")
-def market_registry(external_world: dict) -> dict:
-    """The marketplace registry: an indexer service operated by a market operator.
+def registry_layer(external_world: dict) -> dict:
+    """The registry/indexer service operated by a marketplace operator.
 
     Builds on top of ``external_world``. Consumed by any test that needs
     to talk to the registry (which is most stage tests).
     """
-    url = settings.get("AGENTS.REGISTRY_URL")
+    url = settings.get("REGISTRY.API_URL")
     if not url:
-        pytest.skip("AGENTS.REGISTRY_URL not configured — skipping market-dependent tests")
+        pytest.skip("REGISTRY.API_URL not configured — skipping registry-dependent tests")
     return {
         "external": external_world,
         "url": url,
     }
 
 
-@pytest.mark.roles_layer_market
-class TestMarketRegistry:
-    """Verify the market operator's registry service is up."""
+@pytest.mark.roles_layer_registry
+class TestRegistryLayer:
+    """Verify the marketplace operator's registry service is up."""
 
-    def test_registry_reachable(self, market_registry: dict):
+    def test_registry_reachable(self, registry_layer: dict):
         """Registry service responds to /health."""
-        status, body = _http_get(f"{market_registry['url']}/health")
+        status, body = _http_get(f"{registry_layer['url']}/health")
         assert status == 200, (
-            f"Registry at {market_registry['url']} not healthy: "
+            f"Registry at {registry_layer['url']} not healthy: "
             f"status={status} body={body[:200]}"
         )
 
-    def test_registry_has_orders_endpoint(self, market_registry: dict):
+    def test_registry_has_orders_endpoint(self, registry_layer: dict):
         """Registry exposes /listings for querying."""
-        status, body = _http_get(f"{market_registry['url']}/listings")
+        status, body = _http_get(f"{registry_layer['url']}/listings")
         assert status == 200, (
-            f"GET {market_registry['url']}/listings failed: status={status}"
+            f"GET {registry_layer['url']}/listings failed: status={status}"
         )
         data = json.loads(body)
         # Response shape: {"items": [...], "count": N} or similar
         assert isinstance(data, dict), f"Unexpected /listings response: {data!r}"
 
-    def test_registry_has_agents_endpoint(self, market_registry: dict):
+    def test_registry_has_agents_endpoint(self, registry_layer: dict):
         """Registry exposes /agents for querying."""
-        status, body = _http_get(f"{market_registry['url']}/agents")
+        status, body = _http_get(f"{registry_layer['url']}/agents")
         assert status == 200, (
-            f"GET {market_registry['url']}/agents failed: status={status}"
+            f"GET {registry_layer['url']}/agents failed: status={status}"
         )

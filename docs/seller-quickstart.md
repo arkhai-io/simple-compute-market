@@ -1,7 +1,7 @@
 # Seller quickstart
 
-How to bring up a compute storefront on Base Sepolia: register on-chain,
-publish a listing, and (optionally) provision real KVM VMs to buyers.
+How to bring up a compute storefront: register on-chain, publish a
+listing, and (optionally) provision real KVM VMs to buyers.
 
 For the buyer side see [`buyer-quickstart.md`](./buyer-quickstart.md).
 To run your own indexer registry instead of pointing at an existing one,
@@ -12,12 +12,12 @@ via wildcard subdomains instead of direct port-forward NAT, see
 ## Prerequisites
 
 - Linux host with Docker + `docker compose` v2.
-- A Base Sepolia wallet with some test ETH for gas and whatever ERC-20
-  you'll accept as payment. The reference uses USDC at
-  `0x036CbD53842c5426634e7929541eC2318f3dCF7e` — funds from
-  [faucet.circle.com](https://faucet.circle.com).
-- A Base Sepolia RPC URL (`https://sepolia.base.org` works for light
-  load; Infura/Alchemy for anything sustained).
+- A wallet on the EVM chain you'll operate on, funded with gas plus
+  whatever ERC-20 you'll accept as payment. The examples in this guide
+  use Base Sepolia + USDC at `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
+  (test funds from [faucet.circle.com](https://faucet.circle.com)), but
+  any EVM chain with ERC-8004 + Alkahest contracts deployed works.
+- An RPC URL for that chain.
 - An indexer URL + (if private) bearer token to publish to.
 - **Live provisioning only** — KVM-capable host: `egrep -c "(vmx|svm)"
   /proc/cpuinfo > 0`, `libvirtd` running, your ansible user has
@@ -49,7 +49,7 @@ agent_id         = "seller_one"          # Python identifier; no dashes
 port             = 8001
 base_url         = "http://<YOUR_PUBLIC_IP>:8001/"
 
-db_path          = "./src/market_storefront/data/sell-agent/agent.db"
+db_path          = "./src/market_storefront/data/storefront/agent.db"
 log_file_path    = "./logs/seller.log"
 admin_api_key    = "<choose-a-secret>"   # used by the provisioning service for lease-expiry callbacks
 
@@ -123,7 +123,7 @@ SELLER_CONFIG_PATH="$PWD/config.seller.toml" \
 SELLER_RESOURCES_CSV="$PWD/resources.csv" \
 docker compose -f compose/seller.yml up -d
 
-docker compose -f compose/seller.yml logs -f seller-agent
+docker compose -f compose/seller.yml logs -f seller-storefront
 ```
 
 The `admin_api_key` you set in §2 is the only secret — the
@@ -141,7 +141,7 @@ onchain_agent_id = "<N>"
 ## 5. Publish
 
 ```bash
-docker compose -f compose/seller.yml exec seller-agent \
+docker compose -f compose/seller.yml exec seller-storefront \
   market-storefront publish --inventory /app/resources.csv
 ```
 

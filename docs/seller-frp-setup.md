@@ -127,9 +127,9 @@ Bring the stack down and back up so the storefront re-reads the config:
 
 ```bash
 docker compose -f compose/seller.yml -f compose/seller.live.yml \
-  down seller-agent seller-provisioning
+  down seller-storefront seller-provisioning
 docker compose -f compose/seller.yml -f compose/seller.live.yml \
-  up -d seller-agent seller-provisioning
+  up -d seller-storefront seller-provisioning
 ```
 
 ## 6. Verify

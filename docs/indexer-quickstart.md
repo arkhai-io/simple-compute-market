@@ -29,16 +29,16 @@ $EDITOR config.registry.env
 
 Fill in:
 
-- `RPC_URL` — your Base Sepolia RPC endpoint.
+- `CHAIN_ID`, `RPC_URL`, and the three contract addresses for the chain
+  this indexer should serve. The example file ships with Base Sepolia
+  values; any EVM chain with the ERC-8004 contracts deployed works.
 - `REGISTRY_ADMIN_API_KEY` — operator-only secret used to mint/revoke
   per-user keys at `/admin/api-keys`. Generate with `openssl rand -hex 32`.
 - `REGISTRY_BOOTSTRAP_API_KEY` — the bearer token sellers and buyers
   will use until per-user keys are minted. Same `openssl rand -hex 32`
   pattern. This is the shared secret you give out.
 
-Defaults already set: chain ID 84532, ERC-8004 contract addresses,
-`REGISTRY_START_BLOCK` (deep enough to catch historical agents),
-`REGISTRY_REQUIRE_API_KEY=true` (private indexer).
+`REGISTRY_REQUIRE_API_KEY=true` is the default (private indexer).
 
 For a fully public indexer (anyone can publish and query) set
 `REGISTRY_REQUIRE_API_KEY=false` and drop the two key vars.
@@ -72,7 +72,7 @@ name: `urls = ["http://registry:8080"]`.
 ```bash
 curl -sf http://<INDEXER_HOST>:8080/health
 
-docker compose logs registry | grep -i "Synced up to block"
+docker compose logs registry | grep -i "JIT.*Indexed agent"
 
 curl -s http://<INDEXER_HOST>:8080/filter-spec | jq
 

@@ -1,7 +1,7 @@
 # Buyer quickstart
 
 Install the `market` CLI, point it at an indexer, find a listing, buy
-compute on Base Sepolia, and SSH into the leased VM.
+compute, and SSH into the leased VM.
 
 For the seller side see [`seller-quickstart.md`](./seller-quickstart.md).
 
@@ -9,11 +9,12 @@ For the seller side see [`seller-quickstart.md`](./seller-quickstart.md).
 
 - Linux or macOS (Windows: WSL).
 - Python 3.12+.
-- A Base Sepolia wallet with test ETH (for gas) and whatever ERC-20 the
-  seller accepts (USDC test funds from
-  [faucet.circle.com](https://faucet.circle.com)).
-- A Base Sepolia RPC URL (`https://sepolia.base.org` works for one-offs;
-  Infura/Alchemy otherwise).
+- A wallet on the EVM chain the seller publishes on, funded with gas
+  plus whatever ERC-20 the seller accepts. Examples below use Base
+  Sepolia + USDC at `0x036CbD53842c5426634e7929541eC2318f3dCF7e` (test
+  funds from [faucet.circle.com](https://faucet.circle.com)); any EVM
+  chain with ERC-8004 + Alkahest deployed works.
+- An RPC URL for that chain.
 - An SSH keypair for leased VMs:
 
   ```bash

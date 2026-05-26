@@ -19,14 +19,11 @@ services:
       - "8545:8545"
     environment:
       - ANVIL_IP_ADDR=0.0.0.0
-    networks:
-      - market-network
 
   # One-shot: deploys Alkahest + ERC-8004 contracts, writes addresses to
   # shared-env/.env, then exits. This runs once per fresh chain.
   contracts-deploy:
     image: arkhai:contract-deployer
-    container_name: market-contracts-deploy
     depends_on:
       anvil:
         condition: service_started
@@ -35,11 +32,4 @@ services:
       - RPC_URL=http://anvil:8545
     volumes:
       - ./shared-env:/app/shared-env
-    networks:
-      - market-network
     command: sh -c ./deploy-local.sh
-
-networks:
-  market-network:
-    driver: bridge
-    name: market-network

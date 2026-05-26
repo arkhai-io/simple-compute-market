@@ -11,13 +11,13 @@
 # and she ends up sharing the sentinel agent's identity. So we pick
 # the next unclaimed Anvil account.
 #
-# Mounted into the alice_agent container at /etc/arkhai/storefront.toml.
+# Mounted into the alice-storefront container at /etc/arkhai/storefront.toml.
 # XDG_CONFIG_HOME=/etc tells dynaconf to look here.
 
 agent_id            = "alice"
 port                = 8002
-base_url            = "http://alice_agent:8002/"
-db_path             = "./src/market_storefront/data/alice-agent/agent.db"
+base_url            = "http://alice-storefront:8002/"
+db_path             = "./src/market_storefront/data/storefront/agent.db"
 log_file_path       = "./logs/alice.log"
 admin_api_key       = "test-api-key"
 resources_csv_path  = "/app/resources.csv"
@@ -48,7 +48,7 @@ identity_registry_address = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
 # stops at negotiation start so we never hit settle/lease/watchdog —
 # if Alice later needs to settle, this needs its own provisioning
 # instance (the provisioning service's PROVISIONING_STOREFRONT_URL
-# callback points at sell_agent, not alice_agent).
+# callback points at bob-storefront, not alice-storefront).
 service_url   = "http://provisioning:8081"
 mode          = "http"
 poll_interval = 1

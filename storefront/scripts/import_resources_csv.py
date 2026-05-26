@@ -38,7 +38,7 @@ def _load_env_file(env_file: str | None) -> None:
 def _resolve_db_path(cli_db_path: str | None) -> str:
     if cli_db_path:
         return cli_db_path
-    env_path = os.getenv("AGENT_DB_PATH")
+    env_path = os.getenv("STOREFRONT_DB_PATH")
     if env_path:
         return env_path
     # Fall back to the same path the server reads — ensures the CSV importer
@@ -76,10 +76,10 @@ async def _run(csv_path: str, db_path: str, dry_run: bool) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Import resource portfolio rows from CSV into Agent DB.")
+    parser = argparse.ArgumentParser(description="Import resource portfolio rows from CSV into the storefront DB.")
     parser.add_argument("--csv", required=True, help="Path to CSV file.")
-    parser.add_argument("--db-path", default=None, help="Path to agent SQLite DB. Defaults to AGENT_DB_PATH or /tmp/agent.db.")
-    parser.add_argument("--env-file", default=".env", help="Optional env file to load before resolving AGENT_DB_PATH.")
+    parser.add_argument("--db-path", default=None, help="Path to storefront SQLite DB. Defaults to STOREFRONT_DB_PATH or /tmp/agent.db.")
+    parser.add_argument("--env-file", default=".env", help="Optional env file to load before resolving STOREFRONT_DB_PATH.")
     parser.add_argument("--dry-run", action="store_true", help="Validate and report without writing to DB.")
     args = parser.parse_args()
 

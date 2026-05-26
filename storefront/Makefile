@@ -10,7 +10,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 # this variable is for local development only.
 DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
 
-.PHONY: build build-images build-no-cache deploy deploy-seller-agent init reinit test test-unit test-integration
+.PHONY: build build-images build-no-cache deploy deploy-storefront init reinit test test-unit test-integration
 
 init: ## Resolve deps and create .venv. Run once after checkout or after changing pyproject.toml.
 	uv sync --find-links $(DIST_DIR)
@@ -55,20 +55,20 @@ test-integration: ## Run integration tests (no real infrastructure required — 
 	AGENT_WALLET_ADDRESS="" \
 	uv run --find-links $(DIST_DIR) pytest tests/integration/ -v
 
-deploy: deploy-seller-agent
+deploy: deploy-storefront
 
 # Buyers are pure HTTP clients (the `market` CLI / market_buyer
-# library); they don't run a storefront. Use `make deploy-seller-agent`
+# library); they don't run a storefront. Use `make deploy-storefront`
 # to bring up the seller; run `market buy ...` from the host or another
-# container against `http://market-agent-sell:8001`.
+# container against `http://bob-storefront:8001`.
 ## RESOURCES_CSV_FILE: host path to the compute resource inventory CSV.
 ## Bind-mounted read-only into the container so the storefront can seed
 ## its resources table on startup via seller.resources_csv_path in config.
 ## Defaults to the dev inventory shipped in the source tree.
 RESOURCES_CSV_FILE ?= $(CURDIR)/src/market_storefront/data/kvm1-machine.csv
 
-deploy-seller-agent:
-	docker run --rm -d --name market-agent-sell \
+deploy-storefront:
+	docker run --rm -d --name bob-storefront \
 	--network market -p 8001:8001 \
 	--cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun:/dev/net/tun \
 	-e XDG_CONFIG_HOME=/etc \
@@ -77,7 +77,7 @@ deploy-seller-agent:
 	arkhai:storefront
 
 deploy-dev:
-	docker run --rm -it --name market-agent-sell \
+	docker run --rm -it --name bob-storefront \
 	--network market -p 8001:8001 \
 	--cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun:/dev/net/tun \
 	-e XDG_CONFIG_HOME=/etc \
@@ -86,7 +86,7 @@ deploy-dev:
 	arkhai:storefront
 
 stop:
-	docker kill market-agent-sell
+	docker kill bob-storefront
 
 status:
 	curl -s -X GET http://localhost:8001/api/v1/system/status -H "X-Admin-Key: test-api-key" | jq .

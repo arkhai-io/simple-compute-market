@@ -57,15 +57,7 @@ services:
       - DATABASE_URL=sqlite:////app/data/indexer.db
     volumes:
       - registry-data:/app/data
-    networks:
-      - seller
     restart: unless-stopped
-
-# Use the same network name as compose/seller.yml so the storefront can
-# reach the indexer at `http://registry:8080`. When this file is used
-# standalone (no seller stack), compose still creates the network fresh.
-networks:
-  seller:
 
 volumes:
   registry-data:

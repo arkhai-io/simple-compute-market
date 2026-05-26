@@ -176,7 +176,7 @@ registry-service/src/
 ├── api/             # FastAPI routes (agent_routes, order_routes)
 ├── contracts/       # ABI + web3.py interaction layer
 ├── db/              # SQLAlchemy models + Alembic migrations (7 versions so far)
-├── services/        # event_sync.py (chain watcher), health_check.py
+├── services/        # chain_client.py (shared web3 client), health_check.py
 ├── types/
 └── main.py
 ```
@@ -1459,10 +1459,11 @@ See `docs/cli-redesign-plan.md` for the rationale behind the current
 ### Local Dev (compose)
 
 ```
-compose/external.yml — Anvil node + one-shot contract deployer (the "external"
-                       chain layer; in prod this is a live RPC, not run here)
-compose/market.yml   — registry-service
-compose/seller.yml   — storefront server + provisioning service (unified)
+compose/external.yml     — Anvil node + one-shot contract deployer (the "external"
+                           chain layer; in prod this is a live RPC, not run here)
+compose/registry.dev.yml — registry-service against the dev chain
+                           (compose/registry.yml is the operator-facing variant)
+compose/seller.yml       — storefront server + provisioning service (unified)
 ```
 
 There is no `compose/buyer.yml` — the buyer is the `market`
@@ -1503,12 +1504,12 @@ helm/
 | `provisioning` | 1 (unified API + job loop) | 1 ClusterIP (:8081) |
 
 **Startup ordering** is enforced by init containers:
-- The seller agent waits on RPC (`eth_blockNumber` poll) and registry (`/health` poll) before starting
+- The storefront waits on RPC (`eth_blockNumber` poll) and registry (`/health` poll) before starting
 - The provisioning container has no init containers or startup dependencies
 - The test-env container has no init containers or startup dependencies
 
 **Secrets:**
-- Seller agent private key + wallet address → `Secret` per agent, sourced from `values.yaml` `secret.privKey` / `secret.walletAddress`, or an externally pre-created secret
+- Storefront private key + wallet address → `Secret` per storefront, sourced from `values.yaml` `secret.privKey` / `secret.walletAddress`, or an externally pre-created secret
 - SSH private key for Ansible → `Secret` mounted as a volume at `/home/appuser/.ssh/id_ed25519` (mode 0400); set via `--set-file provisioning.sshKey.sshPrivateKey=$(SSH_KEY_FILE)` at deploy time or by providing a pre-existing Secret
 
 **Global values** propagated to all subcharts:
@@ -1625,7 +1626,7 @@ must be disabled for all GKE-hosted deployments:
 
 *Three delivery mechanisms, in priority order:*
 1. **`seller.resources_csv_inline`** (Helm) — raw CSV content injected via the per-agent Secret. Set via `make deploy RESOURCES_CSV_FILE=/path/to/resources.csv`, which passes `--set-file storefront.agents[0].secret.resourcesCsvInline=<path>` to `helm upgrade`. The CSV is stored in the Kubernetes Secret alongside the wallet key and rendered into the dynaconf profile that the storefront reads at startup. This is the production path — no CSV file ever touches the container image.
-2. **`seller.resources_csv_path`** (compose / local dev) — path to a CSV file on disk, bind-mounted into the container by `make deploy-seller-agent` via `RESOURCES_CSV_FILE` (defaults to `storefront/src/market_storefront/data/kvm1-machine.csv`). Used by the docker-run compose flow.
+2. **`seller.resources_csv_path`** (compose / local dev) — path to a CSV file on disk, bind-mounted into the container by `make deploy-storefront` via `RESOURCES_CSV_FILE` (defaults to `storefront/src/market_storefront/data/kvm1-machine.csv`). Used by the docker-run compose flow.
 3. **`POST /api/v1/admin/portfolio/resources/import`** — admin endpoint for runtime clobber. Accepts a CSV file upload and upserts regardless of current table state. Used for inventory updates without restarting the pod.
 
 *Startup seeding is idempotent*: if the resources table already has rows (e.g. from a previous startup or a prior import call), seeding is skipped. Pod restarts do not overwrite operator changes. To force a full re-seed, use the import endpoint.
@@ -2123,7 +2124,6 @@ registry-service/tests/
 ├── conftest.py                  # db_session fixture (in-memory SQLite), sign_order_auth helper
 ├── unit/
 │   ├── test_agent_id_lookup.py  # find_agent_by_id — canonical ID parsing, case folding
-│   ├── test_event_sync.py       # EventSyncService — chain event processing, error handling
 │   ├── test_order_auth_utils.py # EIP-191 signature verification helpers (exhaustive)
 │   ├── test_filter_eval.py      # build_criteria + evaluate_all — spec-driven listing
 │   │                            # filter semantics
@@ -2132,7 +2132,7 @@ registry-service/tests/
     ├── conftest.py              # RegistryClient wired to in-process app via httpx ASGITransport;
     │                            # shared agent/order fixtures; Hardhat key constants
     ├── test_agents.py           # GET /agents, GET /agents/{id}, GET /agents/search,
-    │                            # POST /agents/register, POST /agents/{id}/heartbeat
+    │                            # POST /agents/{id}/heartbeat
     ├── test_api_keys.py         # REQUIRE_API_KEY mode auth flow
     ├── test_filter_spec.py      # GET /filter-spec full HTTP path + ETag header
     ├── test_listings.py         # GET /listings, GET /listings/{id}, POST /agents/{id}/listings,
@@ -2206,9 +2206,9 @@ integration-tests/
     │   └── test_storefront_smoke.py    # Seller storefront reachability + registration
     └── e2e/                     # System integration tests — cross-service scenarios
         └── roles/               # Organised by deployment layer and negotiation stage
-            ├── conftest.py      # Imports layer fixtures (external_world, market_registry, seller_node)
+            ├── conftest.py      # Imports layer fixtures (external_world, registry_layer, seller_node)
             ├── helpers/         # deal.py (full deal flow helper), erc20.py
-            ├── layers/          # test_external.py, test_market.py, test_seller.py
+            ├── layers/          # test_external.py, test_registry.py, test_seller.py
             └── stages/
                 └── discovery/test_buyer.py
 ```

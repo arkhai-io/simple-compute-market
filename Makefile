@@ -115,7 +115,7 @@ build-anvil-state:
 	-docker network create anvil
 	-mkdir shared-env
 	docker run -d --rm --network anvil --name anvil -p 8545:8545 -e ANVIL_IP_ADDR=0.0.0.0 -v ./test-env/state:/state --user root --entrypoint anvil ghcr.io/foundry-rs/foundry:${FOUNDRY_VERSION} --dump-state /state/state.json
-	docker run --rm --network anvil --name market-contracts-deploy -e ENV_FILE=/app/shared-env/.env -v ./shared-env:/app/shared-env/ arkhai:contract-deployer
+	docker run --rm --network anvil --name contracts-deploy -e ENV_FILE=/app/shared-env/.env -v ./shared-env:/app/shared-env/ arkhai:contract-deployer
 	echo "Todo: add a step here to verify contract deployment"
 	docker stop anvil
 	-docker network rm anvil

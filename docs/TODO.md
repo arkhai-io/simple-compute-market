@@ -56,8 +56,6 @@ The `orders → listings` rename is already done; the plan's older framing of "d
 **Context:** "agent" in this codebase has two meanings — the ERC-8004 protocol concept (`agent_card`, `agent_id` as on-chain numeric ID, `IdentityRegistry`, `AgentRegistered`, `register_onchain`, `agent_heartbeat`) and historical references to the seller's runtime process from the ADK era. The first set is protocol-defined and stays. The second set should be `storefront`. The user-facing pass (`market-storefront provide` → `publish`, `--agent-url` CLI flag → `--storefront-url`, `agent_settings` test fixtures) is done; the remaining items are internal:
 
 - **`storefront/src/market_storefront/agent.py`** — residual startup-helpers module (docstring: "Storefront startup/background-task helpers"). A sibling `server.py` already exists; this file should be folded into `server.py` or renamed to something purpose-named (e.g. `startup.py`). Importers: `server.py` (lifespan), `identity_controller.py`.
-- **`AGENT_DB_PATH` env var** — referenced in `README.md:81`, `ARCHITECTURE.md`, `storefront/scripts/import_resources_csv.py:41,81,82`, `buyer/config/agent.schema.yaml:45`. Rename to `STOREFRONT_DB_PATH`. The dynaconf-prefix convention is `STOREFRONT_*` (`storefront/.../utils/config.py`), so this lines up cleanly.
-- **One stray `agent_db_path` setting** in `integration-tests/tests/e2e/roles/layers/test_seller.py:61,82` via `AGENTS.SELLER_DB` — rename when touching the surrounding config.
 
 **Not worth chasing:** the internal `agent_url` parameter name in `cli_publish.py`, `groups/escrow.py`, `action_executor.py`, `sync_negotiation.py`, `negotiation_models.py` (`buyer_agent_url`), etc. It's pervasive, internal-only (no wire surface), and the value plumbed through is consistently a storefront URL. Rename opportunistically; don't sweep.
 
@@ -164,9 +162,9 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 
 - **Global pause state persists across e2e test runs:** The storefront's `_GLOBALLY_PAUSED` flag (toggled by `POST /admin/pause` — distinct from per-listing `paused=True`) is in-process memory, not reset between `pytest` sessions. Neither full-deal scenario currently calls global `admin_pause` (storefront integration tests do, but those have their own teardown). The risk is a developer or external script having toggled it manually; the next `/negotiate/new` then 503s with `{"reason": "global"}` regardless of any per-listing state. The `ensure_storefront_resumed` autouse fixture in `integration-tests/tests/e2e/roles/scenarios/conftest.py` mitigates this by calling `admin_resume()` in module teardown. If running against a live environment that may have been left paused, execute `curl -X POST http://localhost:8001/admin/resume -H "X-Admin-Key: <key>"` before running.
 
-- **Resource CSV importer DB path:** `scripts/import_resources_csv.py` resolves the target SQLite path via `--db-path` CLI arg → `AGENT_DB_PATH` env var → `CONFIG.agent_db_path`, in that order. If the importer writes to a different path than the server reads (e.g. via an unset `AGENT_DB_PATH` falling through to a wrong default), the server starts with zero resources and rejects all `/negotiate/new` calls with `409 no_matching_inventory`. `compose/seller.yml` pins `--db-path src/market_storefront/data/sell-agent/agent.db` explicitly. **Detection:** `GET /api/v1/system/status` exposes `resource_count` as a top-level field; a value of `0` signals this misconfiguration. The smoke test `test_resource_portfolio_seeded` in `test_storefront_smoke.py` asserts `resource_count > 0` and fails with a remediation command.
+- **Resource CSV importer DB path:** `scripts/import_resources_csv.py` resolves the target SQLite path via `--db-path` CLI arg → `STOREFRONT_DB_PATH` env var → `CONFIG.db_path`, in that order. If the importer writes to a different path than the server reads (e.g. via an unset `STOREFRONT_DB_PATH` falling through to a wrong default), the server starts with zero resources and rejects all `/negotiate/new` calls with `409 no_matching_inventory`. `compose/seller.yml` pins `--db-path src/market_storefront/data/storefront/agent.db` explicitly. **Detection:** `GET /api/v1/system/status` exposes `resource_count` as a top-level field; a value of `0` signals this misconfiguration. The smoke test `test_resource_portfolio_seeded` in `test_storefront_smoke.py` asserts `resource_count > 0` and fails with a remediation command.
 
-- **Registry indexer lag at startup:** The `EventSyncService` in the registry polls on-chain events every 60 s. On a fresh stack the initial sync (`sync_from_start`) may not complete before the e2e test reaches stage 03b (resume + publish). `publish_order_to_registry` issues `POST /agents/{canonical_id}/listings` against the registry; if the agent is not yet indexed, the registry returns 404 and the publish silently fails (`registry_status="error"` in the response). Stage 03c (`TestStage03c_SellerAgentIndexed`) gates on indexing completion via `GET /api/v1/system/sync/wait-for-agent` (long-poll) before any negotiation stage runs. **The `wait-for-agent` endpoint is the canonical pattern for this class of problem**: when a test needs to gate on an async background service completing a unit of work, add an admin/system endpoint that blocks server-side until the condition is met, then call it once from the test. This avoids client-side polling loops (fragile, sleep-based) and makes the wait observable (the endpoint logs the elapsed time).
+- **Registry indexer cold-start gate:** Agent rows are indexed just-in-time on the publish/heartbeat/lookup path (`registry-service/src/api/utils.py::ensure_agent_indexed`) — the indexer never pre-walks the chain. A fresh on-chain registration becomes queryable as soon as the indexer's RPC node has the tx mined. `GET /api/v1/system/sync/wait-for-agent` is a server-side long-poll that hammers JIT lookups until they succeed, used by stage 03c (`TestStage03c_SellerAgentIndexed`) to gate negotiation stages on chain visibility. **`wait-for-agent` is the canonical pattern for this class of problem**: when a test needs to gate on an async condition (chain mining, queue drain, etc.), add an admin/system endpoint that blocks server-side until the condition is met. Avoids client-side polling loops (fragile, sleep-based) and makes the wait observable.
 
 - **`settings.SELLER.AGENT_ID` in e2e config files can drift:** The e2e config files (`config/config-local.yml`, `config/config-docker.yml`) hard-code `seller.agent_id` to e.g. `"eip155:31337:...:2"`. The numeric suffix depends on chain state — on a fresh Anvil the sentinel agent registers as ID 0 and the seller as ID 1, so `:2` is stale. Stage 03c uses `storefront.wait_for_registry_agent_ready()` (live runtime agent ID), but `SyncProvisioningClient` (as the `X-Agent-ID` header) and smoke tests still consume `SELLER.AGENT_ID`. Update it to match `curl http://localhost:8080/agents` output for the seller's wallet when rebuilding the Anvil state.
 
@@ -186,28 +184,20 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 
 ---
 
-### Event sync full-history gap
+### `/agents/register` HTTP endpoint removed
 
-**Status:** Planned.
+**Status:** Done. Removed in the JIT switch.
 
-**Problem:** `EventSyncService.sync_from_start()` only scans the last 1000
-blocks for `Registered`, `MetadataSet`, and `URIUpdated` events. On a live
-chain with registrations months ago this window misses all historical agents.
-The registry's agent count is therefore a function of how recently agents
-registered, not how many are actually on-chain. `REGISTRY_START_BLOCK` env
-(read in `registry-service/src/config.py`) is the current escape hatch: a
-fresh indexer can backfill from a known earlier block — typically the
-IdentityRegistry's deployment block. This brings a new indexer up to date on
-a known chain but leaves the 1000-block sliding window in place for
-steady-state polling.
-
-**Planned fix:** Replace the sliding window with a full enumeration using view
-functions: call `totalSupply()` on the IdentityRegistry to get the count of
-registered agents, then call `ownerOf(id)` and `tokenURI(id)` for each token
-ID from 0 to `totalSupply()-1`. This is a set of pure read calls with no event
-history dependency, works correctly on any RPC provider, and is immune to
-block range limits. The periodic sync can still use event filtering for
-incremental updates after the initial full enumeration.
+**Context:** The endpoint accepted a caller-provided `owner` field (with
+signature verification against that claimed owner) but never cross-checked
+against `ownerOf` on chain. That made it possible to register an agent row
+under a fake owner — subsequent legitimate publishes from the real on-chain
+owner would then fail signature verification against the cached fake owner.
+JIT lookup is strictly safer: every agent record sources `owner` from a
+fresh `ownerOf` call on chain. Note for the broader ERC-8004 keep/remove
+decision: if ERC-8004 stays, JIT covers the registration path completely;
+if it goes, agent identification collapses to wallet-address-as-seller and
+the whole `agents` table can be dropped.
 
 ---
 

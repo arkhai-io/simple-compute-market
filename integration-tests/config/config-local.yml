@@ -22,7 +22,7 @@ buyer:
 
 seller:
   api_url:           "http://localhost:8001"
-  base_url_override: "http://sell_agent:8001/"
+  base_url_override: "http://bob-storefront:8001/"
   private_key:       "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
   wallet_address:    "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
   # Deterministic on a fresh Anvil: account #2 registers second against

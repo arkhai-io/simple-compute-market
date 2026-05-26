@@ -9,7 +9,7 @@ A Python/FastAPI service that integrates with ERC-8004 smart contracts for agent
 - **Health Monitoring**: Automatic health checks via heartbeat and endpoint monitoring
 - **Event Sync**: Real-time synchronization of on-chain events to off-chain database
 - **Multi-Database Support**: Works with SQLite (development) and PostgreSQL (production)
-- **Base Sepolia Integration**: Pre-configured for Base Sepolia testnet
+- **EVM-chain agnostic**: Configure `CHAIN_ID`, `RPC_URL`, and the three contract addresses for any chain with ERC-8004 deployed
 
 ## Architecture
 
@@ -95,7 +95,8 @@ IDENTITY_REGISTRY_ADDRESS=0x8004AA63c570c570eBF15376c0dB199918BFe9Fb
 REPUTATION_REGISTRY_ADDRESS=0x8004bd8daB57f14Ed299135749a5CB5c42d341BF
 VALIDATION_REGISTRY_ADDRESS=0x8004C269D0A5647E51E121FeB226200ECE932d55
 
-# To target Base Sepolia instead, override CHAIN_ID + RPC_URL:
+# To target a different chain, override CHAIN_ID + RPC_URL.
+# Example (Base Sepolia):
 #   CHAIN_ID=84532
 #   RPC_URL=https://sepolia.base.org
 
@@ -559,7 +560,10 @@ alembic upgrade head
 
 All configuration is done via environment variables. See `.env.example` for available options.
 
-### Base Sepolia Contract Addresses
+### ERC-8004 Contract Addresses
+
+The contracts are deployed via CREATE2 so the addresses are the same on
+every chain. The values below are the canonical ERC-8004 deployments:
 
 - **IdentityRegistry**: `0x8004AA63c570c570eBF15376c0dB199918BFe9Fb`
 - **ReputationRegistry**: `0x8004bd8daB57f14Ed299135749a5CB5c42d341BF`
@@ -638,7 +642,7 @@ The Dockerfile has been configured with **empty values** for sensitive environme
 - `RPC_URL` - Blockchain RPC endpoint URL with API key
 
 **Non-sensitive (have defaults, can be overridden):**
-- `CHAIN_ID` - Default: 84532 (Base Sepolia)
+- `CHAIN_ID` - The EVM chain ID this indexer serves
 - `IDENTITY_REGISTRY_ADDRESS`
 - `REPUTATION_REGISTRY_ADDRESS`
 - `VALIDATION_REGISTRY_ADDRESS`
@@ -677,8 +681,8 @@ docker run --env-file .env -p 8080:8080 erc-8004-registry
 ```bash
 docker run -p 8080:8080 \
   -e DATABASE_URL="postgresql://user:pass@host/db" \
-  -e RPC_URL="https://base-sepolia.infura.io/v3/YOUR_API_KEY" \
-  -e CHAIN_ID=84532 \
+  -e RPC_URL="https://your-rpc-endpoint" \
+  -e CHAIN_ID=<your-chain-id> \
   erc-8004-registry
 ```
 
@@ -781,5 +785,4 @@ ENV DATABASE_URL=postgresql://user:password@host/db
 
 - [ERC-8004 Specification](https://eips.ethereum.org/EIPS/eip-8004)
 - [ERC-8004 Contracts](https://github.com/erc-8004/erc-8004-contracts)
-- [Base Sepolia](https://docs.base.org/docs/networks/base-sepolia/)
 - [Agent0 SDK](https://sdk.ag0.xyz/)

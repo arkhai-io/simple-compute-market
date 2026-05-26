@@ -120,7 +120,7 @@ class TestMetadataEntryAlignment:
         )
         encoded = contract.encode_abi(
             "register",
-            args=["http://sell_agent:8001/.well-known/erc-8004-registration.json", metadata],
+            args=["http://bob-storefront:8001/.well-known/erc-8004-registration.json", metadata],
         )
         assert isinstance(encoded, (bytes, str)) and len(encoded) > 0
 
@@ -128,7 +128,7 @@ class TestMetadataEntryAlignment:
         """register(agentURI) one-argument overload encodes correctly."""
         encoded = contract.encode_abi(
             "register",
-            args=["http://sell_agent:8001/.well-known/erc-8004-registration.json"],
+            args=["http://bob-storefront:8001/.well-known/erc-8004-registration.json"],
         )
         assert isinstance(encoded, (bytes, str)) and len(encoded) > 0
 
@@ -204,6 +204,6 @@ class TestContractFunctionEncoding:
         """setAgentURI(uint256 agentId, string agentURI) — used for token URI updates."""
         encoded = contract.encode_abi(
             "setAgentURI",
-            args=[1, "http://sell_agent:8001/.well-known/erc-8004-registration.json"],
+            args=[1, "http://bob-storefront:8001/.well-known/erc-8004-registration.json"],
         )
         assert isinstance(encoded, (bytes, str)) and len(encoded) > 0
