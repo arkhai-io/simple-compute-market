@@ -734,13 +734,13 @@ def register(app: typer.Typer) -> None:
 
         # Honor [buyer.negotiation].policy_mode from config (mirrors
         # `market negotiate`). Without this, the buyer falls through to
-        # the RL strategy default, which needs torch — not installed in
-        # the lean buyer wheel.
-        strategy = None
+        # the default terminal (RL needs torch — not installed in the
+        # lean buyer wheel).
+        chain = None
         policy_mode = resolve_config_value(toml_path="buyer.negotiation.policy_mode")
         if policy_mode:
-            from market_policy.negotiation_strategy import load_strategy
-            strategy = load_strategy(policy_mode)
+            from market_buyer.buyer_client import _load_buyer_chain
+            chain = _load_buyer_chain(policy_mode)
 
         try:
             result = run_buy(
@@ -757,7 +757,7 @@ def register(app: typer.Typer) -> None:
                 settlement_total_timeout=settlement_timeout,
                 on_event=_observe,
                 confirm_settlement=confirm_settlement_cb,
-                strategy=strategy,
+                chain=chain,
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))

@@ -1,9 +1,4 @@
-"""Compute-domain torch-based negotiation strategy.
-
-Replaces the legacy ``negotiation_action_torch_arkhai`` policy callable
-that fired on the (now-removed) NegotiationEvent. Conforms to the
-asymmetric ``NegotiationStrategy`` interface: takes a
-``NegotiationRoundInput`` and returns a ``NegotiationDecision``.
+"""Compute-domain torch-based negotiation middleware.
 
 Loads one of two pufferlib checkpoints based on ``direction``:
 - ``maximize`` (seller-side): ``arkhai_negotiator_seller.pt``
@@ -26,17 +21,16 @@ Falls back to checkpoints shipped under
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from market_policy.negotiation_strategy import (
-    NegotiationDecision,
-    NegotiationRoundInput,
-)
 from market_policy.negotiation_middleware import (
     NegotiationContext,
+    NegotiationDecision,
     NegotiationRound,
     NegotiationStep,
+    our_previous_counters,
     register_negotiation_middleware,
     their_proposed_price,
 )
@@ -57,13 +51,32 @@ CONVERGENCE_RATIO = 0.01
 REASONABLE_MULTIPLIER = 1.5
 
 
+@dataclass
+class _RoundInput:
+    """Local view bundling the fields the observation builder needs.
+
+    Kept private to this module since the middleware framework's
+    ``NegotiationContext`` carries the same information in a different
+    layout; this struct is just an adapter for the model's input shape.
+    """
+    direction: str
+    our_reference_price: float
+    their_proposed_price: float | None
+    history: list[NegotiationRound]
+    max_rounds: int
+
+    @property
+    def our_previous_counters(self) -> list[float]:
+        return our_previous_counters(self.history)
+
+
 class TorchArkhaiStrategy:
     """RL negotiation policy using bilateral pufferlib checkpoints.
 
-    Picks model by ``ri.direction`` (one for seller, one for buyer).
-    Builds a price-anchored observation, runs a torch forward pass,
-    decodes a price-multiplier index, and applies the same convergence
-    / reasonable-range thresholds as ``BisectionStrategy`` to wrap the
+    Picks model by direction (one for seller, one for buyer). Builds a
+    price-anchored observation, runs a torch forward pass, decodes a
+    price-multiplier index, and applies the same convergence /
+    reasonable-range thresholds as the bisection middleware to wrap the
     multiplier in an accept / counter / exit decision.
 
     Constructor accepts optional explicit model paths; otherwise reads
@@ -126,7 +139,7 @@ class TorchArkhaiStrategy:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_observation(ri: NegotiationRoundInput, node_types: int) -> Optional[Any]:
+    def _build_observation(ri: _RoundInput, node_types: int) -> Optional[Any]:
         try:
             import torch
         except ImportError:
@@ -166,10 +179,10 @@ class TorchArkhaiStrategy:
         return obs
 
     # ------------------------------------------------------------------
-    # Strategy contract
+    # Decision body
     # ------------------------------------------------------------------
 
-    def decide(self, ri: NegotiationRoundInput) -> NegotiationDecision:
+    def decide(self, ri: _RoundInput) -> NegotiationDecision:
         # Open with our reference on the very first call (no peer price yet).
         if ri.their_proposed_price is None:
             return NegotiationDecision(action="counter", price=ri.our_reference_price)
@@ -254,10 +267,10 @@ def rl_middleware(
 ) -> NegotiationStep:
     """Terminal middleware backed by the torch RL strategy.
 
-    Builds a ``NegotiationRoundInput`` view from (history, context) and
-    delegates to the existing strategy's ``decide``. Always returns Some.
+    Builds a local round-input view from (history, context) and delegates
+    to the strategy's decision body. Always returns Some.
     """
-    ri = NegotiationRoundInput(
+    ri = _RoundInput(
         direction=context.direction,
         our_reference_price=context.our_reference_price,
         their_proposed_price=their_proposed_price(history),

@@ -308,7 +308,7 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
     ``typer.BadParameter`` if the log doesn't have enough state to
     resume (no negotiation_id, no recorded rounds, etc.).
     """
-    from market_policy.negotiation_strategy import NegotiationRound
+    from market_policy.negotiation_middleware import NegotiationRound
 
     events = read_run(run_id)
     if not events:

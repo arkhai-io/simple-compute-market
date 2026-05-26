@@ -344,29 +344,41 @@ class SystemService:
         return {"seeded": True, "imported_count": imported, "source": source}
 
     def negotiation_strategy_check(self) -> str:
-        """Probe the configured negotiation strategy. Returns a viability string.
+        """Probe the configured negotiation chain. Returns a viability string.
+
+        Runs the chain against a synthetic round-0 input (buyer matching
+        seller price exactly, no listing context) and reports whether the
+        terminal middleware would accept/counter (viable) or exit (broken
+        config). Guard middlewares fire first; their veto produces
+        ``exit_on_probe`` with the guard's reason — operator can read the
+        reason to see whether the chain is misconfigured for their setup.
 
         Possible values:
-          'bisection'                    — BisectionStrategy loaded; always viable
-          'rl (viable)'                  — RL strategy loaded; torch is available
-          '<name> (exit_on_probe: <r>)'  — strategy exits every round; will fail
-          'unknown: <msg>'               — load_strategy raised
+          '<chain> (count=N)'            — chain produced a non-exit decision
+          '<chain> (exit_on_probe: <r>)' — chain returned an exit/reject
+          'error: <msg>'                 — load or run failed
         """
         try:
-            from market_policy.negotiation_strategy import NegotiationRoundInput
-            from market_storefront.utils.sync_negotiation import _load_storefront_strategy
+            from market_policy.negotiation_middleware import (
+                NegotiationContext,
+                NegotiationRound,
+                run_negotiation_chain,
+            )
+            from market_storefront.utils.sync_negotiation import _load_storefront_chain
 
-            strategy = _load_storefront_strategy()
-            name = type(strategy).__name__
-            probe = strategy.decide(NegotiationRoundInput(
+            chain = _load_storefront_chain()
+            label = f"chain[{len(chain)}]"
+            history = [NegotiationRound(
+                round_number=0, sender="them", action="initial", price=10_000,
+            )]
+            context = NegotiationContext(
                 direction="maximize",
                 our_reference_price=10_000,
-                their_proposed_price=10_000,
-                history=[],
-            ))
-            if probe.action == "exit":
-                return f"{name} (exit_on_probe: {probe.reason})"
-            return name.lower().replace("strategy", "").strip() or name
+            )
+            probe = run_negotiation_chain(chain, history, context)
+            if probe.action in ("exit", "reject"):
+                return f"{label} (exit_on_probe: {probe.reason})"
+            return f"{label} (count={len(chain)})"
         except KeyError as exc:
             return f"unknown: {exc}"
         except Exception as exc:

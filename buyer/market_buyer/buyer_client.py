@@ -9,11 +9,10 @@ registration.
 Public API:
     negotiate_with_seller(...) -> NegotiationOutcome
 
-The per-round decision logic lives in
-`market_policy.negotiation_strategy` (BisectionStrategy or the
-register-on-import RL strategy). Both sides of a negotiation resolve
-their moves through the same package; this module is just the buyer's
-HTTP transport + signing.
+Per-round decisions go through ``market_policy.negotiation_middleware``
+— same chain framework the seller uses. The buyer's default chain is
+just the terminal strategy (``bisection`` or ``rl``); guards like
+inventory match are seller-side.
 """
 
 from __future__ import annotations
@@ -25,30 +24,45 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from market_policy.negotiation_strategy import (
-    DEFAULT_MAX_ROUNDS,
-    DEFAULT_STRATEGY,
+from market_policy.negotiation_middleware import (
+    NegotiationContext,
+    NegotiationMiddleware,
     NegotiationRound,
-    NegotiationRoundInput,
-    NegotiationStrategy,
-    load_strategy,
+    load_negotiation_chain,
+    run_negotiation_chain,
 )
 from service.schemas import EscrowProposal, ProvisionTerms
 
 
-def _maybe_register_rl_strategy() -> None:
-    """Trigger self-registration of the torch RL strategy.
+DEFAULT_MAX_ROUNDS = 10
+DEFAULT_TERMINAL = "bisection"
+
+
+def _maybe_register_rl_middleware() -> None:
+    """Trigger self-registration of the torch RL middleware.
 
     Mirrors the storefront-side helper: imports
     ``domain.compute.agent.app.policy.torch_arkhai_strategy`` so its
-    ``register_strategy("rl", ...)`` call fires. The import is best-effort —
-    if torch / pufferlib aren't installed, ``load_strategy("rl")`` will
-    raise its own actionable KeyError pointing at the [rl] extras.
+    ``register_negotiation_middleware("rl")`` call fires. Best-effort —
+    if torch / pufferlib aren't installed, the chain loader raises its
+    own actionable KeyError pointing at the [rl] extras.
     """
     try:
         import domain.compute.agent.app.policy.torch_arkhai_strategy  # noqa: F401
     except Exception:
         pass
+
+
+def _load_buyer_chain(name: str | None = None) -> list[NegotiationMiddleware]:
+    """Load the buyer's negotiation chain. Single-middleware by default.
+
+    Buyer-side has no inventory or escrow guards — those are seller
+    concerns. Default is just the terminal strategy.
+    """
+    terminal = (name or "").strip() or DEFAULT_TERMINAL
+    if terminal == "rl":
+        _maybe_register_rl_middleware()
+    return load_negotiation_chain([terminal])
 
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
@@ -191,7 +205,7 @@ def negotiate_with_seller(
     escrow_proposal: Optional[EscrowProposal] = None,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
     on_round: Optional[Callable[[int, dict, dict], None]] = None,
-    strategy: Optional[NegotiationStrategy] = None,
+    chain: Optional[list[NegotiationMiddleware]] = None,
     resume: Optional[ResumeState] = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
@@ -231,11 +245,8 @@ def negotiate_with_seller(
     accepted_prov: Optional[ProvisionTerms] = None
     accepted_esc: Optional[EscrowProposal] = None
     duration_seconds: Optional[float] = None  # populated from provision_terms or resume
-    if strategy is None:
-        # Default to the registered default ("rl"); pull the torch
-        # module in if installed so its registration fires.
-        _maybe_register_rl_strategy()
-        strategy = load_strategy()
+    if chain is None:
+        chain = _load_buyer_chain()
 
     if resume is not None:
         # Resume mode: skip /api/v1/negotiate/new and the first counter exchange.
@@ -329,13 +340,27 @@ def negotiate_with_seller(
         if seller_counter_price is None:
             raise RuntimeError(f"Seller counter without price: {reply!r}")
 
-        next_move = strategy.decide(NegotiationRoundInput(
+        # Append the seller's current counter to history so the chain
+        # sees it as their_proposed_price.
+        round_history = list(transcript)
+        if seller_counter_price is not None and (
+            not round_history or round_history[-1].sender != "them"
+        ):
+            round_history.append(NegotiationRound(
+                round_number=len(round_history),
+                sender="them",
+                action="counter",
+                price=float(seller_counter_price),
+            ))
+        ctx = NegotiationContext(
             direction="minimize",
             our_reference_price=float(max_price),
-            their_proposed_price=float(seller_counter_price),
-            history=transcript,
+            listing={},
+            escrow_proposal=None,
+            available_resources={},
             max_rounds=max_rounds,
-        ))
+        )
+        next_move = run_negotiation_chain(chain, round_history, ctx)
 
         body: dict[str, Any] = {
             "action": next_move.action,

@@ -33,20 +33,15 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from market_policy.negotiation_strategy import (
-    NegotiationDecision,
-    NegotiationRound,
-    NegotiationRoundInput,
-    load_strategy,
-    register_strategy,
-)
 from market_policy.negotiation_middleware import (
     NegotiationContext,
+    NegotiationDecision,
+    NegotiationMiddleware,
+    NegotiationRound,
     NegotiationStep,
     load_negotiation_chain,
     register_negotiation_middleware,
     run_negotiation_chain,
-    their_proposed_price,
 )
 
 from service.schemas import EscrowProposal
@@ -224,9 +219,20 @@ def _default_policy_dir() -> Path:
 
 
 def _register_file_policy(folder: Path) -> bool:
-    """Load ``folder/policy.py`` and register its ``factory`` under the
-    folder name. Returns True on success, False if the folder doesn't
-    look like a policy (missing ``policy.py`` or ``factory``)."""
+    """Load ``folder/policy.py`` and register its ``middleware`` callable
+    under the folder name. Returns True on success, False if the folder
+    doesn't look like a policy (missing ``policy.py`` or ``middleware``).
+
+    The expected shape::
+
+        # /path/to/policies/my_policy/policy.py
+        from market_policy.negotiation_middleware import (
+            NegotiationContext, NegotiationDecision, NegotiationStep,
+        )
+
+        def middleware(history, context) -> NegotiationStep:
+            return NegotiationDecision(...), context
+    """
     policy_file = folder / "policy.py"
     if not policy_file.is_file():
         return False
@@ -247,16 +253,16 @@ def _register_file_policy(folder: Path) -> bool:
         )
         return False
 
-    factory = getattr(module, "factory", None)
-    if not callable(factory):
+    middleware = getattr(module, "middleware", None)
+    if not callable(middleware):
         logger.warning(
-            "[POLICY] %s has no callable 'factory' — skipping",
+            "[POLICY] %s has no callable 'middleware' — skipping",
             policy_file,
         )
         return False
 
-    register_strategy(name, factory)
-    logger.info("[POLICY] registered file policy %r from %s", name, policy_file)
+    register_negotiation_middleware(name)(middleware)
+    logger.info("[POLICY] registered file middleware %r from %s", name, policy_file)
     return True
 
 
@@ -306,40 +312,12 @@ _DEFAULT_GUARDS = ["has_matching_inventory_guard", "escrow_shape_guard"]
 _DEFAULT_TERMINAL = "bisection"
 
 
-def _strategy_to_middleware(strategy_name: str):
-    """Adapt a legacy ``NegotiationStrategy`` to the middleware signature.
-
-    Lets operators keep their file-based ``policy.py`` factories (which
-    return strategies) plugged into the new chain. The adapter builds a
-    ``NegotiationRoundInput`` from (history, context) and calls
-    ``strategy.decide(ri)``.
-    """
-    strategy = load_strategy(strategy_name)
-
-    def _adapter(history: list[NegotiationRound], context: NegotiationContext) -> NegotiationStep:
-        ri = NegotiationRoundInput(
-            direction=context.direction,
-            our_reference_price=context.our_reference_price,
-            their_proposed_price=their_proposed_price(history),
-            history=history,
-            max_rounds=context.max_rounds,
-        )
-        return strategy.decide(ri), context
-
-    return _adapter
-
-
 def _load_storefront_chain():
     """Resolve the storefront's configured negotiation middleware chain.
 
     Reads ``[negotiation].chain`` from TOML. Back-compat fallback: if
     ``chain`` is absent, synthesize one from the legacy ``policy_mode``
     key — `["has_matching_inventory_guard", "escrow_shape_guard", policy_mode]`.
-
-    Each name is resolved against the middleware registry first; if absent,
-    falls back to the legacy strategy registry (file-discovered ``policy.py``
-    factories register there) wrapped in an adapter. This keeps existing
-    operator policies working while the new middleware framework rolls out.
     """
     from market_storefront.utils.config import settings
 
@@ -354,13 +332,7 @@ def _load_storefront_chain():
     if "rl" in chain_names:
         _maybe_register_rl_middleware()
 
-    chain = []
-    for name in chain_names:
-        try:
-            chain.extend(load_negotiation_chain([name]))
-        except KeyError:
-            chain.append(_strategy_to_middleware(name))
-    return chain
+    return load_negotiation_chain(chain_names)
 
 
 def _direction_from_strategy_label(strategy: str) -> str:

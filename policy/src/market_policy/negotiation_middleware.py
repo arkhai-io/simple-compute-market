@@ -35,14 +35,44 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Optional
 
-from market_policy.negotiation_strategy import NegotiationDecision, NegotiationRound
-
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
 # Types
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class NegotiationRound:
+    """One round's transcript entry. Both parties contribute one per round."""
+
+    round_number: int
+    sender: Literal["us", "them"]
+    action: Literal["initial", "counter", "accept", "exit", "reject"]
+    price: float | None = None  # set for initial / counter / accept; base units per hour
+
+
+@dataclass(frozen=True)
+class NegotiationDecision:
+    """One round's resulting decision.
+
+    ``action="reject"`` is reserved for pre-flight guard vetoes (caller
+    maps to HTTP 409). Terminal strategies use ``"counter"``, ``"accept"``,
+    or ``"exit"``.
+    """
+
+    action: Literal["accept", "counter", "exit", "reject"]
+    price: float | None = None  # required for counter / accept; base units per hour
+    reason: str | None = None  # required for exit / reject; optional otherwise
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"action": self.action}
+        if self.price is not None:
+            d["price"] = self.price
+        if self.reason is not None:
+            d["reason"] = self.reason
+        return d
 
 
 @dataclass
