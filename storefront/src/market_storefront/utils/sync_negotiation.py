@@ -17,10 +17,11 @@ Shape:
 `action` in the request is what the buyer is proposing *in this round*.
 `action` in the response is the seller's resulting decision.
 
-Negotiation state is persisted in the existing `negotiation_threads` +
-`negotiation_messages` tables. The per-round decision lives in
-`market_policy.negotiation_strategy` so both buyer and storefront drive
-rounds through the same engine.
+Per-round decisions go through ``market_policy.negotiation_middleware``:
+the configured chain runs at round 0 (including pre-flight guards like
+inventory match + escrow shape) and on every subsequent round. The
+storefront builds a ``NegotiationContext`` from the listing + portfolio
+snapshot once per call; the chain decides.
 """
 
 from __future__ import annotations
@@ -32,13 +33,15 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from market_policy.negotiation_strategy import (
-    DEFAULT_STRATEGY,
+from market_policy.negotiation_middleware import (
+    NegotiationContext,
     NegotiationDecision,
+    NegotiationMiddleware,
     NegotiationRound,
-    NegotiationRoundInput,
-    load_strategy,
-    register_strategy,
+    NegotiationStep,
+    load_negotiation_chain,
+    register_negotiation_middleware,
+    run_negotiation_chain,
 )
 
 from service.schemas import EscrowProposal
@@ -216,9 +219,20 @@ def _default_policy_dir() -> Path:
 
 
 def _register_file_policy(folder: Path) -> bool:
-    """Load ``folder/policy.py`` and register its ``factory`` under the
-    folder name. Returns True on success, False if the folder doesn't
-    look like a policy (missing ``policy.py`` or ``factory``)."""
+    """Load ``folder/policy.py`` and register its ``middleware`` callable
+    under the folder name. Returns True on success, False if the folder
+    doesn't look like a policy (missing ``policy.py`` or ``middleware``).
+
+    The expected shape::
+
+        # /path/to/policies/my_policy/policy.py
+        from market_policy.negotiation_middleware import (
+            NegotiationContext, NegotiationDecision, NegotiationStep,
+        )
+
+        def middleware(history, context) -> NegotiationStep:
+            return NegotiationDecision(...), context
+    """
     policy_file = folder / "policy.py"
     if not policy_file.is_file():
         return False
@@ -239,16 +253,16 @@ def _register_file_policy(folder: Path) -> bool:
         )
         return False
 
-    factory = getattr(module, "factory", None)
-    if not callable(factory):
+    middleware = getattr(module, "middleware", None)
+    if not callable(middleware):
         logger.warning(
-            "[POLICY] %s has no callable 'factory' — skipping",
+            "[POLICY] %s has no callable 'middleware' — skipping",
             policy_file,
         )
         return False
 
-    register_strategy(name, factory)
-    logger.info("[POLICY] registered file policy %r from %s", name, policy_file)
+    register_negotiation_middleware(name)(middleware)
+    logger.info("[POLICY] registered file middleware %r from %s", name, policy_file)
     return True
 
 
@@ -280,12 +294,12 @@ def _discover_file_policies(force: bool = False) -> None:
             _register_file_policy(entry)
 
 
-def _maybe_register_rl_strategy() -> None:
-    """Trigger self-registration of the torch RL strategy.
+def _maybe_register_rl_middleware() -> None:
+    """Trigger self-registration of the torch RL middleware.
 
-    The strategy module calls ``register_strategy("rl", ...)`` at import
-    time. If torch / pufferlib aren't installed, the import fails — we
-    swallow it and let ``load_strategy("rl")`` raise the actionable
+    The strategy module registers under name ``"rl"`` at import time. If
+    torch / pufferlib aren't installed, the import fails — we swallow it
+    and let ``load_negotiation_chain(["rl"])`` raise the actionable
     KeyError so callers get a clear "install with [rl] extras" message.
     """
     try:
@@ -294,19 +308,31 @@ def _maybe_register_rl_strategy() -> None:
         logger.debug("[NEGOTIATION] torch_arkhai_strategy not available: %s", exc)
 
 
-def _load_storefront_strategy():
-    """Resolve the storefront's configured strategy.
+_DEFAULT_GUARDS = ["has_matching_inventory_guard", "escrow_shape_guard"]
+_DEFAULT_TERMINAL = "bisection"
 
-    Selected via ``settings.negotiation.policy_mode``; defaults to the
-    registered default ("rl") if unset. Triggers the torch strategy's
-    self-registration on first call.
+
+def _load_storefront_chain():
+    """Resolve the storefront's configured negotiation middleware chain.
+
+    Reads ``[negotiation].chain`` from TOML. Back-compat fallback: if
+    ``chain`` is absent, synthesize one from the legacy ``policy_mode``
+    key — `["has_matching_inventory_guard", "escrow_shape_guard", policy_mode]`.
     """
-    from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
-    name = (settings.negotiation.policy_mode or "").strip() or None
+    from market_storefront.utils.config import settings
+
     _discover_file_policies()
-    if (name or DEFAULT_STRATEGY) == "rl":
-        _maybe_register_rl_strategy()
-    return load_strategy(name)
+
+    negotiation_cfg = getattr(settings, "negotiation", None)
+    chain_names = list(getattr(negotiation_cfg, "chain", []) or [])
+    if not chain_names:
+        policy_mode = (getattr(negotiation_cfg, "policy_mode", "") or "").strip() or _DEFAULT_TERMINAL
+        chain_names = _DEFAULT_GUARDS + [policy_mode]
+
+    if "rl" in chain_names:
+        _maybe_register_rl_middleware()
+
+    return load_negotiation_chain(chain_names)
 
 
 def _direction_from_strategy_label(strategy: str) -> str:
@@ -351,19 +377,23 @@ def _history_from_messages(messages: list[dict[str, Any]], our_sender: str) -> l
 # ---------------------------------------------------------------------------
 
 
-def _compute_round_zero_decision(
+async def _compute_round_zero_decision(
     *,
+    sqlite_client: Any,
     listing: Any,
     their_proposed_price: float,
-) -> tuple[int, str, str, NegotiationDecision]:
+    escrow_proposal: dict[str, Any] | None = None,
+) -> tuple[int, str, str, str, NegotiationDecision]:
     """Determine the seller's round-0 decision for a given buyer price.
 
-    Loads the configured strategy, builds a ``NegotiationRoundInput`` for
-    round 0, and calls ``strategy.decide()``.  No SQLite writes and no
-    stage events are emitted — those remain the responsibility of the
-    real flow in ``start_sync_negotiation``.
+    Builds a ``NegotiationContext`` (listing snapshot + portfolio for the
+    inventory guard + buyer escrow proposal for the shape guard), constructs
+    a single-element history representing the buyer's opening proposal,
+    and runs the configured middleware chain. No SQLite writes and no
+    stage events are emitted — those remain the responsibility of the real
+    flow in ``start_sync_negotiation``.
 
-    Returns ``(our_price, strategy_label, direction, strategy_name, decision)``
+    Returns ``(our_price, strategy_label, direction, chain_label, decision)``
     so callers have all the context needed to emit events or build response
     payloads without duplicating the extraction logic.
 
@@ -374,6 +404,7 @@ def _compute_round_zero_decision(
         _extract_initial_price_from_order,
         determine_strategy_from_order,
     )
+    from market_storefront.models.domain_models import Listing
 
     strategy_label = determine_strategy_from_order(listing)
     if not strategy_label:
@@ -384,15 +415,28 @@ def _compute_round_zero_decision(
     our_price = _extract_initial_price_from_order(listing)
     direction = _direction_from_strategy_label(strategy_label)
 
-    strategy_obj = _load_storefront_strategy()
-    strategy_name = type(strategy_obj).__name__
-    decision = strategy_obj.decide(NegotiationRoundInput(
+    chain = _load_storefront_chain()
+
+    listing_dict = (
+        listing.model_dump(mode="json") if isinstance(listing, Listing) else listing
+    )
+    resources = await sqlite_client.list_resources()
+    context = NegotiationContext(
         direction=direction,
         our_reference_price=our_price,
-        their_proposed_price=their_proposed_price,
-        history=[],
-    ))
-    return our_price, strategy_label, direction, strategy_name, decision
+        listing=listing_dict if isinstance(listing_dict, dict) else {},
+        escrow_proposal=escrow_proposal,
+        available_resources={"resources": resources or []},
+    )
+    history = [NegotiationRound(
+        round_number=0,
+        sender="them",
+        action="initial",
+        price=float(their_proposed_price),
+    )]
+    decision = run_negotiation_chain(chain, history, context)
+    chain_label = ",".join(type(mw).__name__ if not hasattr(mw, "__name__") else mw.__name__ for mw in chain)
+    return our_price, strategy_label, direction, chain_label, decision
 
 
 # ---------------------------------------------------------------------------
@@ -410,7 +454,6 @@ async def start_sync_negotiation(
     escrow_proposal: Any = None,
     our_base_url: str,
     their_agent_url: str,
-    policy_service: Any = None,
 ) -> dict[str, Any]:
     """Create a new negotiation thread and return the seller's first response.
 
@@ -465,29 +508,6 @@ async def start_sync_negotiation(
             listing_id=our_listing_id,
         )
 
-    # Run the seeded pre-thread guard composite. The default for an
-    # immediate-deal seller checks that available portfolio inventory
-    # matches the listing's offer; operators running futures or
-    # off-chain-matched flows swap the composite's components and the
-    # same code path lets non-immediate negotiations through.
-    if policy_service is not None:
-        rejection_reason = await policy_service.consult_pre_negotiation_guards(
-            listing_id=our_listing_id,
-            listing=our_order_dict,
-            proposed_price=their_proposed_price,
-            requested_duration_seconds=requested_duration_seconds,
-            escrow_proposal=(
-                escrow_proposal.model_dump()
-                if escrow_proposal is not None
-                and hasattr(escrow_proposal, "model_dump")
-                else escrow_proposal
-            ),
-        )
-        if rejection_reason:
-            raise OfferUnfulfillableError(
-                rejection_reason, listing_id=our_listing_id,
-            )
-
     # Validate the buyer's duration ask against the listing's advertised
     # ceiling. NULL on the listing means "unlimited" — accept any positive
     # duration. A buyer ask exceeding the cap is rejected before any thread
@@ -514,23 +534,38 @@ async def start_sync_negotiation(
 
     our_order = Listing.model_validate(our_order_dict)
 
-    # Pure compute: resolve strategy and get round-0 decision without writing anything.
+    # Pure compute: resolve strategy and run the chain for the round-0
+    # decision without writing anything. The chain includes pre-flight
+    # guards (inventory match, escrow shape); a guard veto returns
+    # ``action="reject"`` which we map to a 409 OfferUnfulfillableError.
+    # The terminal strategy uses ``action="exit"`` for its own
+    # exits (max_rounds, price_unreasonable) — those flow through as
+    # normal negotiation responses.
+    proposal_dict = (
+        escrow_proposal.model_dump()
+        if escrow_proposal is not None and hasattr(escrow_proposal, "model_dump")
+        else escrow_proposal
+    )
     try:
-        our_price, strategy, direction, _strategy_name, decision = _compute_round_zero_decision(
+        our_price, strategy, direction, _chain_label, decision = await _compute_round_zero_decision(
+            sqlite_client=sqlite_client,
             listing=our_order,
             their_proposed_price=their_proposed_price,
+            escrow_proposal=proposal_dict,
         )
     except ValueError as exc:
-        # Price-less listing without a configured fallback floor — the
-        # operator opted into publishing without a price but never set
-        # default_min_price. Surface as an unfulfillable offer (409) so
-        # the buyer gets a clean retry hint, not a 404.
         if "price-less" in str(exc) or "default_min_price" in str(exc):
             raise OfferUnfulfillableError(
                 "no_floor_price",
                 listing_id=our_listing_id,
             ) from exc
         raise
+
+    if decision.action == "reject":
+        raise OfferUnfulfillableError(
+            decision.reason or "rejected",
+            listing_id=our_listing_id,
+        )
 
     neg_id = "neg_" + uuid.uuid4().hex
 
@@ -727,13 +762,25 @@ async def continue_sync_negotiation(
 
     from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
     our_sender = BASE_URL_OVERRIDE or "seller"
-    strategy_obj = _load_storefront_strategy()
-    decision = strategy_obj.decide(NegotiationRoundInput(
+    history = _history_from_messages(messages, our_sender)
+    # The buyer's just-recorded counter isn't in `messages` (loaded before
+    # the txn) — append it so the chain sees it as their_proposed_price.
+    history.append(NegotiationRound(
+        round_number=len(history),
+        sender="them",
+        action="counter",
+        price=float(buyer_price),
+    ))
+    chain = _load_storefront_chain()
+    resources = await sqlite_client.list_resources()
+    context = NegotiationContext(
         direction=_direction_from_strategy_label(strategy),
         our_reference_price=our_price,
-        their_proposed_price=float(buyer_price),
-        history=_history_from_messages(messages, our_sender),
-    ))
+        listing=our_order_dict,
+        escrow_proposal=thread.get("buyer_escrow_proposal"),
+        available_resources={"resources": resources or []},
+    )
+    decision = run_negotiation_chain(chain, history, context)
     await _record_seller_decision(
         neg_id=neg_id, our_price=our_price,
         their_price=float(buyer_price), decision=decision,

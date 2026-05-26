@@ -355,7 +355,7 @@ class TestBestPriceTimeoutResolver:
         # Patch the config load to return a single key. get_dotted
         # then traverses it normally — so we exercise the real
         # parsing path, not a stub.
-        cfg = {"buyer": {"aggregation": {"best_price_timeout": raw}}}
+        cfg = {"aggregation": {"best_price_timeout": raw}}
         with patch.object(agg, "_load_buyer_config", lambda: cfg):
             return agg._resolve_best_price_timeout()
 
@@ -387,7 +387,7 @@ class TestBestPriceTimeoutResolver:
 
 
 class TestBestPriceTimeout:
-    """The optional `[buyer.aggregation] best_price_timeout` knob.
+    """The optional `[aggregation] best_price_timeout` knob.
 
     Patches the resolver directly rather than touching real TOML —
     keeps the tests self-contained and avoids buyer-config singleton

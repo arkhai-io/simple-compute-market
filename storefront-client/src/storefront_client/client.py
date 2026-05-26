@@ -500,10 +500,6 @@ class StorefrontClient(_StorefrontClientBase):
         self._raise_for_status("POST", url, resp.status_code, resp.text)
         return ImportResourcesResponse.from_dict(resp.json())
 
-    async def policy_seed(self) -> dict:
-        """POST /admin/policy/seed — discover callables + seed default policies (admin key)."""
-        return await self._post("/api/v1/admin/policy/seed", {}, extra_headers=self._admin_headers())
-
     async def get_resource(self, resource_id: str) -> dict:
         """GET /api/v1/admin/portfolio/resources/{resource_id}  (admin key required).
 
@@ -545,61 +541,6 @@ class StorefrontClient(_StorefrontClientBase):
         )
         self._raise_for_status("PATCH", url, resp.status_code, resp.text)
         return resp.json()
-
-    async def policy_status(self) -> dict:
-        """GET /api/v1/system/policy — callable registry + seeded policy diagnostic."""
-        return await self._get("/api/v1/system/policy")
-
-    async def policy_evaluate(
-        self,
-        *,
-        offer: dict,
-        accepted_escrows: list[dict[str, Any]],
-        max_duration_seconds: int | None = None,
-        policy_components: list[str],
-    ) -> dict:
-        """POST /api/v1/system/policy/evaluate — dry-run an order_create event.
-
-        Pure data operation — no DB lookup.  Supply the callable names to
-        evaluate against (e.g. read from GET /api/v1/system/policy after seeding).
-        """
-        return await self._post(
-            "/api/v1/system/policy/evaluate",
-            {
-                "event_type": "order_create",
-                "offer": offer,
-                "accepted_escrows": accepted_escrows,
-                "max_duration_seconds": max_duration_seconds,
-                "policy_components": policy_components,
-            },
-        )
-
-    async def evaluate_create_listing(
-        self,
-        *,
-        offer: dict[str, Any],
-        accepted_escrows: list[dict[str, Any]],
-        max_duration_seconds: int | None = None,
-        paused: bool = False,
-    ) -> dict:
-        """POST /api/v1/admin/listings/evaluate-create — dry-run, no DB writes (admin key)."""
-        body = {
-            "offer": offer,
-            "accepted_escrows": accepted_escrows,
-            "max_duration_seconds": max_duration_seconds,
-            "paused": paused,
-        }
-        return await self._post(
-            "/api/v1/admin/listings/evaluate-create", body,
-            extra_headers=self._admin_headers(),
-        )
-
-    async def evaluate_close_listing(self, listing_id: str) -> dict:
-        """POST /api/v1/admin/listings/{listing_id}/evaluate-close — dry-run, no DB writes (admin key)."""
-        return await self._post(
-            f"/api/v1/admin/listings/{listing_id}/evaluate-close", {},
-            extra_headers=self._admin_headers(),
-        )
 
     async def evaluate_negotiate(
         self,
@@ -714,26 +655,6 @@ class StorefrontClient(_StorefrontClientBase):
         return StorefrontListingClaimResponse.from_dict(
             await self._post("/listings/claim", body, extra_headers=headers)
         )
-
-
-    async def send_resource_alert(
-        self,
-        *,
-        event_type: str = "resource_imbalance",
-        resource: dict[str, Any],
-        value: float,
-        label: str,
-        threshold: str,
-    ) -> dict[str, Any]:
-        """POST /alerts/resource"""
-        body = {
-            "event_type": event_type,
-            "resource": resource,
-            "value": value,
-            "label": label,
-            "threshold": threshold,
-        }
-        return await self._post("/api/v1/alerts/resource", body)
 
 
     # ------------------------------------------------------------------
@@ -1359,65 +1280,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
             extra_headers=self._admin_headers(),
         )
 
-    def policy_seed(self) -> dict:
-        """POST /admin/policy/seed — discover callables + seed default policies (admin key)."""
-        return self._post("/api/v1/admin/policy/seed", {}, extra_headers=self._admin_headers())
-
-    def policy_status(self) -> dict:
-        """GET /api/v1/system/policy — callable registry + seeded policy diagnostic."""
-        return self._get("/api/v1/system/policy")
-
-    def policy_evaluate(
-        self,
-        *,
-        offer: dict,
-        accepted_escrows: list[dict[str, Any]],
-        max_duration_seconds: int | None = None,
-        policy_components: list[str],
-    ) -> dict:
-        """POST /api/v1/system/policy/evaluate — dry-run an order_create event.
-
-        Pure data operation — no DB lookup.  Supply the callable names to
-        evaluate against (e.g. read from GET /api/v1/system/policy after seeding).
-        """
-        return self._post(
-            "/api/v1/system/policy/evaluate",
-            {
-                "event_type": "order_create",
-                "offer": offer,
-                "accepted_escrows": accepted_escrows,
-                "max_duration_seconds": max_duration_seconds,
-                "policy_components": policy_components,
-            },
-        )
-
-    def evaluate_create_listing(
-        self,
-        *,
-        offer: dict[str, Any],
-        accepted_escrows: list[dict[str, Any]],
-        max_duration_seconds: int | None = None,
-        paused: bool = False,
-    ) -> dict:
-        """POST /api/v1/admin/listings/evaluate-create — dry-run, no DB writes (admin key)."""
-        body = {
-            "offer": offer,
-            "accepted_escrows": accepted_escrows,
-            "max_duration_seconds": max_duration_seconds,
-            "paused": paused,
-        }
-        return self._post(
-            "/api/v1/admin/listings/evaluate-create", body,
-            extra_headers=self._admin_headers(),
-        )
-
-    def evaluate_close_listing(self, listing_id: str) -> dict:
-        """POST /api/v1/admin/listings/{listing_id}/evaluate-close — dry-run, no DB writes (admin key)."""
-        return self._post(
-            f"/api/v1/admin/listings/{listing_id}/evaluate-close", {},
-            extra_headers=self._admin_headers(),
-        )
-
     def evaluate_negotiate(
         self,
         listing_id: str,
@@ -1531,25 +1393,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
         return StorefrontListingClaimResponse.from_dict(
             self._post("/listings/claim", body, extra_headers=headers)
         )
-
-    def send_resource_alert(
-        self,
-        *,
-        event_type: str = "resource_imbalance",
-        resource: dict[str, Any],
-        value: float,
-        label: str,
-        threshold: str,
-    ) -> dict[str, Any]:
-        """POST /alerts/resource"""
-        body = {
-            "event_type": event_type,
-            "resource": resource,
-            "value": value,
-            "label": label,
-            "threshold": threshold,
-        }
-        return self._post("/api/v1/alerts/resource", body)
 
     # ------------------------------------------------------------------
     # Buyer protocol — negotiate / settle

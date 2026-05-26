@@ -27,10 +27,11 @@ from unittest.mock import patch
 
 import pytest
 
-from market_policy.negotiation_strategy import (
+from market_policy.negotiation_middleware import (
+    NegotiationContext,
     NegotiationDecision,
     NegotiationRound,
-    NegotiationStrategy,
+    NegotiationStep,
 )
 
 from market_buyer.buyer_client import (
@@ -87,25 +88,24 @@ def _urlopen_capture(responses):
     return _fn, seen
 
 
-class _FixedDecisionStrategy(NegotiationStrategy):
-    """Strategy that returns a pre-baked decision per call.
+def _fixed_chain(decisions: list[NegotiationDecision]):
+    """Build a single-middleware chain that returns pre-baked decisions in order.
 
     Lets tests pin the buyer's response to a specific seller counter
-    without depending on the real ceiling-bisection or RL strategies.
+    without depending on the real ceiling-bisection or RL middlewares.
     """
+    state = {"idx": 0}
 
-    def __init__(self, decisions: list[NegotiationDecision]) -> None:
-        self._decisions = list(decisions)
-        self._idx = 0
-
-    def decide(self, _input):  # type: ignore[override]
-        if self._idx >= len(self._decisions):
+    def _mw(history, context):
+        if state["idx"] >= len(decisions):
             raise AssertionError(
-                "_FixedDecisionStrategy exhausted — test scripted too few decisions"
+                "_fixed_chain exhausted — test scripted too few decisions"
             )
-        d = self._decisions[self._idx]
-        self._idx += 1
-        return d
+        d = decisions[state["idx"]]
+        state["idx"] += 1
+        return d, context
+
+    return [_mw]
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +130,7 @@ def test_resume_buyer_accepts_recovered_seller_price(mock_urlopen):
         listing_id="L-1",
         initial_price=0,           # ignored in resume mode
         max_price=100,
-        strategy=_FixedDecisionStrategy([
+        chain=_fixed_chain([
             NegotiationDecision(action="accept", price=90),
         ]),
         resume=ResumeState(
@@ -172,7 +172,7 @@ def test_resume_signed_message_uses_continue_not_new(mock_urlopen):
         listing_id="L-1",
         initial_price=0,
         max_price=100,
-        strategy=_FixedDecisionStrategy([
+        chain=_fixed_chain([
             NegotiationDecision(action="accept", price=80),
         ]),
         resume=ResumeState(
@@ -208,7 +208,7 @@ def test_resume_buyer_counters_then_seller_accepts(mock_urlopen):
         listing_id="L-1",
         initial_price=0,
         max_price=100,
-        strategy=_FixedDecisionStrategy([
+        chain=_fixed_chain([
             NegotiationDecision(action="counter", price=70),
         ]),
         resume=ResumeState(
@@ -243,7 +243,7 @@ def test_resume_buyer_exits(mock_urlopen):
         listing_id="L-1",
         initial_price=0,
         max_price=100,
-        strategy=_FixedDecisionStrategy([
+        chain=_fixed_chain([
             NegotiationDecision(action="exit", reason="ceiling_breached"),
         ]),
         resume=ResumeState(
@@ -277,7 +277,7 @@ def test_resume_without_last_seller_price_raises(mock_urlopen):
             listing_id="L-1",
             initial_price=0,
             max_price=100,
-            strategy=_FixedDecisionStrategy([]),
+            chain=_fixed_chain([]),
             resume=ResumeState(
                 negotiation_id="neg-x",
                 transcript=[],
@@ -303,7 +303,7 @@ def test_resume_carries_rounds_completed_into_outcome(mock_urlopen):
         listing_id="L-1",
         initial_price=0,
         max_price=100,
-        strategy=_FixedDecisionStrategy([
+        chain=_fixed_chain([
             NegotiationDecision(action="accept", price=60),
         ]),
         resume=ResumeState(
@@ -334,7 +334,7 @@ def test_resume_skips_negotiate_new_endpoint_entirely(mock_urlopen):
         listing_id="L-1",
         initial_price=0,
         max_price=100,
-        strategy=_FixedDecisionStrategy([
+        chain=_fixed_chain([
             NegotiationDecision(action="counter", price=70),
             NegotiationDecision(action="accept", price=70),
         ]),

@@ -5,39 +5,6 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 
-class PolicyPersistencePort(Protocol):
-    async def save_policy(
-        self,
-        *,
-        agent_id: str,
-        name: str,
-        trigger_type: str,
-        callable_ref: str | None = None,
-    ) -> None: ...
-
-    async def load_policies_by_trigger(
-        self,
-        *,
-        agent_id: str,
-        trigger_type: str,
-    ) -> list[dict[str, Any]]: ...
-
-    async def save_policy_composite(
-        self,
-        *,
-        agent_id: str,
-        policy_name: str,
-        components: list[str],
-    ) -> None: ...
-
-    async def load_policy_composite(
-        self,
-        *,
-        agent_id: str,
-        policy_name: str,
-    ) -> list[str]: ...
-
-
 class NegotiationThreadPersistencePort(Protocol):
     async def create_negotiation_thread(
         self,

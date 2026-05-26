@@ -66,10 +66,9 @@ urls = ["http://<INDEXER_HOST>:8080"]
 # port, no trailing slash).
 "http://<INDEXER_HOST>:8080" = "<your-token>"
 
-[buyer]
 default_token_address = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 
-[buyer.negotiation]
+[negotiation]
 # Bisection avoids a ~1GB torch download. Switch to "rl" if you want it.
 policy_mode = "bisection"
 ```

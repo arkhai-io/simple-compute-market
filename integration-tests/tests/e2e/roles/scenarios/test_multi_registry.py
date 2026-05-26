@@ -119,7 +119,6 @@ _REGISTRY_DEAD = "http://localhost:9"  # reserved discard port; connection refus
 
 DURATION_HOURS = 1
 BUYER_INITIAL_PRICE = 7_000
-ORDER_CREATE_CALLABLE = "oc.action.make_offer_from_order_create"
 
 DEMAND_RESOURCE = {
     "token": {
@@ -183,8 +182,6 @@ class MRState:
     registry_b_reachable: bool = False
     bob_strategy_ok: bool = False
     alice_strategy_ok: bool = False
-    bob_policies_seeded: bool = False
-    alice_policies_seeded: bool = False
     bob_inventory_seeded: bool = False
     alice_inventory_seeded: bool = False
     bob_indexed: bool = False
@@ -390,30 +387,6 @@ class TestStage00g_AliceStrategy:
 
 
 # ===========================================================================
-# Phase 1 — policy seed on both storefronts
-# ===========================================================================
-
-class TestStage01a_BobPolicySeed:
-    def test_01a_bob_seeds_policies(self, storefront_admin_client, mr_state):
-        _require(mr_state, "bob_strategy_ok")
-        result = storefront_admin_client.policy_seed()
-        assert result.get("callable_registry_count", 0) > 0, (
-            f"Bob's CALLABLE_REGISTRY empty after seed: {result}"
-        )
-        mr_state.bob_policies_seeded = True
-
-
-class TestStage01b_AlicePolicySeed:
-    def test_01b_alice_seeds_policies(self, alice_admin_client, mr_state):
-        _require(mr_state, "alice_strategy_ok")
-        result = alice_admin_client.policy_seed()
-        assert result.get("callable_registry_count", 0) > 0, (
-            f"Alice's CALLABLE_REGISTRY empty after seed: {result}"
-        )
-        mr_state.alice_policies_seeded = True
-
-
-# ===========================================================================
 # Phase 2 — inventory seed
 # ===========================================================================
 
@@ -475,18 +448,7 @@ class TestStage03c_BobPublishes:
         self, storefront_admin_client, seller_wallet, mr_state
     ):
         _require(
-            mr_state, "bob_indexed", "bob_policies_seeded", "bob_inventory_seeded"
-        )
-        # Validate dry-run first — catches policy/inventory misalignment
-        # before we commit a DB write.
-        evaluate = storefront_admin_client.evaluate_create_listing(
-            offer=BOB_OFFER,
-            accepted_escrows=ACCEPTED_ESCROWS,
-            max_duration_seconds=DURATION_HOURS * 3600,
-            paused=True,
-        )
-        assert evaluate.get("would_create") is True, (
-            f"Bob evaluate-create failed: {evaluate}"
+            mr_state, "bob_indexed", "bob_inventory_seeded"
         )
 
         resp = storefront_admin_client.create_listing(
@@ -514,17 +476,7 @@ class TestStage03d_AlicePublishes:
         self, alice_admin_client, alice_wallet, mr_state
     ):
         _require(
-            mr_state, "alice_indexed", "alice_policies_seeded",
-            "alice_inventory_seeded",
-        )
-        evaluate = alice_admin_client.evaluate_create_listing(
-            offer=ALICE_OFFER,
-            accepted_escrows=ACCEPTED_ESCROWS,
-            max_duration_seconds=DURATION_HOURS * 3600,
-            paused=True,
-        )
-        assert evaluate.get("would_create") is True, (
-            f"Alice evaluate-create failed: {evaluate}"
+            mr_state, "alice_indexed", "alice_inventory_seeded",
         )
 
         resp = alice_admin_client.create_listing(

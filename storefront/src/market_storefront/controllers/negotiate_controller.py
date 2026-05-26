@@ -68,7 +68,6 @@ class NegotiateController:
                 escrow_proposal=body.escrow_proposal,
                 our_base_url=base_url,
                 their_agent_url=body.buyer_agent_url or body.buyer_address,
-                policy_service=_container.resolved_policy_service,
             )
         except StorefrontPausedError as exc:
             raise HTTPException(status_code=503, detail={

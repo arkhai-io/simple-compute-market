@@ -1,7 +1,7 @@
 """File-based aggregation-policy discovery.
 
 Verifies that subdirectories of ``$XDG_CONFIG_HOME/arkhai/aggregation_policies/``
-and ``[buyer.aggregation] extra_policy_paths`` are picked up as policies
+and ``[aggregation] extra_policy_paths`` are picked up as policies
 named after the folder. Each subdir is expected to expose ``policy.py``
 with a callable ``factory(cfg) -> AggregationPolicy``.
 

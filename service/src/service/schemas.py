@@ -7,15 +7,10 @@ here, so any change is a cross-package break.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from enum import Enum
 from typing import Any, Literal
-
-UTC = timezone.utc
 
 from pydantic import (
     BaseModel,
-    ConfigDict,
     Field,
     SerializeAsAny,
     field_serializer,
@@ -74,34 +69,6 @@ def _parse_uint256_str(v: Any, field_name: str) -> int | None:
 
 def _serialize_uint256_str(v: int | None) -> str | None:
     return None if v is None else str(v)
-
-
-class ActionType(str, Enum):
-    """The full vocabulary of actions the policy engine can emit.
-
-    Lives here (next to DomainAction / DecisionContext) rather than in
-    the engine package because both the engine and the runtimes that
-    execute actions need to agree on the values.
-    """
-
-    # Market entry
-    RESPOND_TO_ORDER = "respond_to_order"
-    IGNORE_ORDER = "ignore_order"
-    MAKE_OFFER = "make_offer"
-
-    # Negotiation
-    ACCEPT_OFFER = "accept_offer"
-    REJECT_OFFER = "reject_offer"
-    COUNTER_OFFER = "counter_offer"
-    EXIT_NEGOTIATION = "exit_negotiation"
-    CLOSE_ORDER = "close_order"
-
-    # Resource management
-    RESOLVE_INTERNALLY = "resolve_internally"
-    OUTSOURCE = "outsource"
-
-    # No-op
-    NOOP = "noop"
 
 
 class Resource(BaseModel):
@@ -378,60 +345,3 @@ class EscrowProposal(BaseModel):
     )
 
 
-class DomainEvent(BaseModel):
-    """Generic domain event transported through core orchestration."""
-
-    model_config = ConfigDict(use_enum_values=False)
-
-    event_id: str = Field(description="Unique event identifier")
-    event_type: Any = Field(description="Event type identifier")
-    source: str = Field(description="Source identifier")
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    data: dict[str, Any] = Field(default_factory=dict)
-
-
-class DomainAction(BaseModel):
-    """Generic domain action selected by policy and executed by action handlers."""
-
-    action_type: Any = Field(description="Action type identifier")
-    parameters: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
-
-
-class Decision(BaseModel):
-    """A policy decision and its execution outcome."""
-
-    decision_id: str = Field(description="Unique decision identifier")
-    agent_id: str = Field(description="Agent who made the decision")
-    context: "DecisionContext" = Field(description="Context that led to the decision")
-    action: DomainAction = Field(description="Chosen action")
-    policy_used: str = Field(description="Policy that produced the decision")
-    timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="When the decision was made",
-    )
-    outcome: dict[str, Any] | None = Field(
-        default=None,
-        description="Outcome of executing this decision",
-    )
-
-    def record_outcome(self, outcome: dict[str, Any]) -> None:
-        self.outcome = outcome
-
-
-class DecisionContext(BaseModel):
-    """Domain-neutral policy evaluation context."""
-
-    event: DomainEvent
-    agent_id: str
-    available_resources: dict[str, Any] = Field(default_factory=dict)
-    past_experiences: list[dict[str, Any]] = Field(default_factory=list)
-    market_state: dict[str, Any] = Field(default_factory=dict)
-    negotiation_history: list[dict[str, Any]] = Field(default_factory=list)
-
-    def get_event_type(self) -> str:
-        et = self.event.event_type
-        return et.value if hasattr(et, "value") else str(et)
-
-    def has_negotiation_context(self) -> bool:
-        return len(self.negotiation_history) > 0

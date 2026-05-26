@@ -229,8 +229,8 @@ def resolve_chain_settings(
         tc = resolve_default_token_address()
         if not tc:
             typer.secho(
-                "No --token-contract given and [buyer].default_token_address "
-                "is unset in config.toml.",
+                "No --token-contract given and top-level default_token_address "
+                "is unset in buyer.toml.",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(2)
@@ -308,7 +308,7 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
     ``typer.BadParameter`` if the log doesn't have enough state to
     resume (no negotiation_id, no recorded rounds, etc.).
     """
-    from market_policy.negotiation_strategy import NegotiationRound
+    from market_policy.negotiation_middleware import NegotiationRound
 
     events = read_run(run_id)
     if not events:
