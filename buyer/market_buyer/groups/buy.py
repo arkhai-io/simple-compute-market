@@ -191,7 +191,7 @@ def _run_resume_from(
                 resume=ResumeState(
                     negotiation_id=resume_point.negotiation_id,
                     transcript=resume_point.transcript,
-                    last_seller_price=resume_point.last_seller_price,
+                    last_seller_proposal=resume_point.last_seller_proposal,
                     rounds_completed=resume_point.rounds_completed,
                 ),
             )

@@ -280,7 +280,7 @@ class NegotiationResumePoint:
     listing_id: str
     negotiation_id: str
     transcript: list  # list[NegotiationRound] — typed downstream
-    last_seller_price: Optional[float]
+    last_seller_proposal: Optional[dict]
     rounds_completed: int
     last_status: Optional[str]
 
@@ -303,7 +303,7 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
     """Reconstruct a partial negotiation from a prior run-log.
 
     Reads ``negotiation_round`` events to rebuild the transcript and
-    pick the most recent seller counter price. Raises
+    pick the most recent seller counter proposal. Raises
     ``typer.BadParameter`` if the log doesn't have enough state to
     resume (no negotiation_id, no recorded rounds, etc.).
     """
@@ -320,7 +320,7 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
     listing_id: Optional[str] = None
     negotiation_id: Optional[str] = None
     transcript: list = []
-    last_seller_price: Optional[float] = None
+    last_seller_proposal: Optional[dict] = None
     last_status: Optional[str] = None
     rounds_completed = 0
 
@@ -341,23 +341,23 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
             round_idx = int(ev.get("round", rounds_completed))
             rounds_completed = max(rounds_completed, round_idx + 1)
             our_action = our.get("action") or "initial"
-            our_price_raw = our.get("price") or our.get("initial_price")
+            our_proposal = our.get("proposal")
             transcript.append(NegotiationRound(
                 round_number=round_idx,
                 sender="us",
                 action=our_action,
-                price=float(our_price_raw) if our_price_raw is not None else None,
+                proposal=our_proposal if isinstance(our_proposal, dict) else None,
             ))
             their_action = their.get("action") or "counter"
-            their_price_raw = their.get("price")
+            their_proposal = their.get("proposal")
             transcript.append(NegotiationRound(
                 round_number=round_idx,
                 sender="them",
                 action=their_action,
-                price=float(their_price_raw) if their_price_raw is not None else None,
+                proposal=their_proposal if isinstance(their_proposal, dict) else None,
             ))
-            if their_action == "counter" and their_price_raw is not None:
-                last_seller_price = float(their_price_raw)
+            if their_action == "counter" and isinstance(their_proposal, dict):
+                last_seller_proposal = their_proposal
         elif et == "negotiation_completed":
             last_status = ev.get("status") or last_status
             if ev.get("negotiation_id"):
@@ -381,7 +381,7 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
         listing_id=listing_id,                # type: ignore[arg-type]
         negotiation_id=negotiation_id,        # type: ignore[arg-type]
         transcript=transcript,
-        last_seller_price=last_seller_price,
+        last_seller_proposal=last_seller_proposal,
         rounds_completed=rounds_completed,
         last_status=last_status,
     )

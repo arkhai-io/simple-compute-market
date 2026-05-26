@@ -88,8 +88,8 @@ def _seed_partial_negotiation(seller_url: str, listing_id: str) -> str:
     log.event(
         "negotiation_round",
         round=0,
-        our_message={"action": "initial", "price": 50},
-        their_reply={"negotiation_id": "neg-mid", "action": "counter", "price": 90},
+        our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
+        their_reply={"negotiation_id": "neg-mid", "action": "counter", "proposal": {"fields": {"amount": 90}}},
     )
     return log.run_id
 
@@ -105,8 +105,8 @@ def _seed_agreed_negotiation(seller_url: str, listing_id: str) -> str:
     log.event(
         "negotiation_round",
         round=0,
-        our_message={"action": "initial", "price": 50},
-        their_reply={"negotiation_id": "neg-done", "action": "accept", "price": 70},
+        our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
+        their_reply={"negotiation_id": "neg-done", "action": "accept", "proposal": {"fields": {"amount": 70}}},
     )
     log.event(
         "negotiation_completed",
@@ -136,7 +136,7 @@ class TestNegotiateFrom:
         # Seller's accept response to our resumed continue.
         monkeypatch.setattr(
             "market_buyer.buyer_client.urllib.request.urlopen",
-            _urlopen_for([{"action": "accept", "price": 70}]),
+            _urlopen_for([{"action": "accept", "proposal": {"fields": {"amount": 70}}}]),
         )
         # Best-effort wallet fetch in negotiate.py — make it succeed
         # cheaply so it doesn't perturb the test path.
@@ -174,7 +174,7 @@ class TestNegotiateFrom:
 
         monkeypatch.setattr(
             "market_buyer.buyer_client.urllib.request.urlopen",
-            _urlopen_for([{"action": "accept", "price": 70}]),
+            _urlopen_for([{"action": "accept", "proposal": {"fields": {"amount": 70}}}]),
         )
         monkeypatch.setattr(
             "market_buyer.buy_orchestrator._resolve_seller_wallet",
@@ -221,7 +221,7 @@ class TestBuyFrom:
 
         monkeypatch.setattr(
             "market_buyer.buyer_client.urllib.request.urlopen",
-            _urlopen_for([{"action": "accept", "price": 70}]),
+            _urlopen_for([{"action": "accept", "proposal": {"fields": {"amount": 70}}}]),
         )
 
         settle_calls: list[dict] = []

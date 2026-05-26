@@ -158,12 +158,12 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
         ],
         "seller-a": [
             # /negotiate/new — seller-a accepts at 80 (worse for buyer)
-            {"negotiation_id": "neg-a", "action": "accept", "price": 80, **_ACCEPTED_ECHO_AGG},
+            {"negotiation_id": "neg-a", "action": "accept", "proposal": {"fields": {"amount": 80}}, **_ACCEPTED_ECHO_AGG},
             # Settlement flow only runs for the *winner*; seller-a never gets here
         ],
         "seller-b": [
             # /negotiate/new — seller-b accepts at 60 (better for buyer)
-            {"negotiation_id": "neg-b", "action": "accept", "price": 60, **_ACCEPTED_ECHO_AGG},
+            {"negotiation_id": "neg-b", "action": "accept", "proposal": {"fields": {"amount": 60}}, **_ACCEPTED_ECHO_AGG},
             # Wallet + settle for the winner
             {"agent_wallet_address": _SELLER_WALLET_B},
             {"escrow_uid": "0xescrow", "status": "provisioning"},
@@ -214,7 +214,7 @@ def test_cheapest_first_preserves_first_agreed_semantics():
             ]},
         ],
         "seller-a": [
-            {"negotiation_id": "neg-a", "action": "accept", "price": 50, **_ACCEPTED_ECHO_AGG},
+            {"negotiation_id": "neg-a", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO_AGG},
             {"agent_wallet_address": _SELLER_WALLET_A},
             {"escrow_uid": "0xescrow", "status": "provisioning"},
             {"status": "ready", "fulfillment_uid": "0xattest"},
