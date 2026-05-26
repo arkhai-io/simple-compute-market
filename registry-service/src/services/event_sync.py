@@ -24,19 +24,24 @@ class EventSyncService:
         self._last_on_demand_sync = 0.0
 
     async def start(self, sync_interval_ms: int = 60000):
-        """Start the event sync service"""
+        """Start the event sync service.
+
+        Returns once the background sync task is scheduled. The
+        historical backfill (``sync_from_start``) runs inside that task
+        rather than being awaited here so the caller — typically the
+        FastAPI lifespan — can finish startup and open the HTTP port
+        immediately. A large ``REGISTRY_START_BLOCK`` or a slow / rate-
+        limited RPC would otherwise hang the entire service for the
+        duration of the backfill.
+        """
         if self.is_running:
             logger.info("[EventSync] Service already running")
             return
 
         self.is_running = True
-        logger.info("[EventSync] Starting event sync service...")
+        logger.info("[EventSync] Starting event sync service (background)...")
 
-        # Initial sync to catch up on missed events
-        await self.sync_from_start()
-
-        # Set up periodic sync
-        self.sync_task = asyncio.create_task(self._periodic_sync(sync_interval_ms))
+        self.sync_task = asyncio.create_task(self._sync_loop(sync_interval_ms))
 
     async def stop(self):
         """Stop the event sync service"""
@@ -52,8 +57,20 @@ class EventSyncService:
                 pass
         logger.info("[EventSync] Event sync service stopped")
 
-    async def _periodic_sync(self, interval_ms: int):
-        """Periodic sync loop"""
+    async def _sync_loop(self, interval_ms: int):
+        """Run the historical backfill then the periodic polling loop.
+
+        Sharing one task keeps the periodic loop from racing the
+        backfill — periodic only kicks in after ``sync_from_start`` has
+        set ``last_synced_block``. If the backfill itself fails, the
+        periodic loop still runs; ``sync_latest`` will retry the
+        backfill on its own when ``last_synced_block`` is still 0.
+        """
+        try:
+            await self.sync_from_start()
+        except Exception as e:
+            logger.error(f"[EventSync] Initial backfill failed; periodic loop will retry: {e}")
+
         while self.is_running:
             try:
                 await asyncio.sleep(interval_ms / 1000)
