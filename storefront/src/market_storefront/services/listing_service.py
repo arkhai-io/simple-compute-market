@@ -270,7 +270,8 @@ class ListingService:
             raise ValueError(f"Listing {listing_id} not found")
         listing = Listing.model_validate(row)
         our_price, _strategy_label, direction, strategy_name, decision = (
-            _compute_round_zero_decision(
+            await _compute_round_zero_decision(
+                sqlite_client=self._db,
                 listing=listing,
                 their_proposed_price=their_proposed_price,
             )

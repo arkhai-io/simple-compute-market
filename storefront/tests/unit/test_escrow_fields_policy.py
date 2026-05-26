@@ -1,26 +1,18 @@
-"""Unit tests for negotiate.guard.escrow_fields_strict_match.
+"""Unit tests for the escrow-shape guard middleware.
 
-The strict per-field equality check used to live in
-``sync_negotiation._validate_escrow_proposal`` as protocol-enforced
-behaviour. PR (c1) of the generic-escrow plan lifted it into a seller
-policy so operators can swap in softer matching by editing the
-composite components list — no code changes needed. These tests pin the
-default (strict) behaviour and confirm the wiring through
-``consult_pre_negotiation_guards``.
+The strict per-field equality check is a seller policy expressed as a
+middleware (``market_policy.negotiation_middleware.escrow_shape_guard``).
+Operators swap in softer matching by editing ``[negotiation].chain`` in
+their seller config — no code changes needed.
+
+These tests pin the default (strict) behaviour against the middleware
+directly: given a (history, context), assert the returned step.
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
-import pytest
-
-from domain.compute.agent.app.policy.store import (
-    negotiate_guard_escrow_fields_strict_match,
-)
-from market_storefront.models.domain_models import (
-    ActionType as DomainActionType,
-    DecisionContext,
-    NegotiationRequestedEvent,
+from market_policy.negotiation_middleware import (
+    NegotiationContext,
+    escrow_shape_guard,
 )
 
 
@@ -28,24 +20,13 @@ def _ctx(
     *,
     listing: dict,
     escrow_proposal: dict | None,
-    listing_id: str = "L1",
-) -> DecisionContext:
-    event = NegotiationRequestedEvent(
-        event_id="evt-1",
-        source="seller",
-        listing_id=listing_id,
+) -> NegotiationContext:
+    return NegotiationContext(
+        direction="maximize",
+        our_reference_price=1000.0,
         listing=listing,
-        proposed_price=1000,
-        requested_duration_seconds=3600,
         escrow_proposal=escrow_proposal,
-    )
-    return DecisionContext(
-        event=event,
-        agent_id="seller-1",
-        available_resources={"resources": []},
-        market_state={},
-        negotiation_history=[],
-        past_experiences=[],
+        available_resources={},
     )
 
 
@@ -80,14 +61,13 @@ class TestPassesWhenAllFieldsMatch:
                 "fields": {"token": _TOKEN},
             },
         )
-        assert negotiate_guard_escrow_fields_strict_match(ctx) is None
+        decision, _ctx_out = escrow_shape_guard([], ctx)
+        assert decision is None
 
     def test_address_case_insensitive(self):
         """EIP-55 checksummed addresses keep the ``0x`` prefix but mix
         case in the 40-char body; the guard must compare those as equal
         to their lowercase form to avoid spurious vetoes."""
-        # Body-only upper variant (preserves "0x" prefix) — that's the
-        # shape that survives EIP-55 round-trips.
         mixed_addr = "0x" + _ADDR[2:].upper()
         mixed_token = "0x" + _TOKEN[2:].upper()
         ctx = _ctx(
@@ -98,7 +78,8 @@ class TestPassesWhenAllFieldsMatch:
                 "fields": {"token": mixed_token},
             },
         )
-        assert negotiate_guard_escrow_fields_strict_match(ctx) is None
+        decision, _ = escrow_shape_guard([], ctx)
+        assert decision is None
 
     def test_accepted_escrows_serialized_as_json_string(self):
         """The listing row comes off SQLite with accepted_escrows still
@@ -114,7 +95,8 @@ class TestPassesWhenAllFieldsMatch:
                 "fields": {"token": _TOKEN},
             },
         )
-        assert negotiate_guard_escrow_fields_strict_match(ctx) is None
+        decision, _ = escrow_shape_guard([], ctx)
+        assert decision is None
 
 
 class TestRejectsWhenFieldDiverges:
@@ -127,13 +109,11 @@ class TestRejectsWhenFieldDiverges:
                 "fields": {"token": _OTHER_TOKEN},
             },
         )
-        action = negotiate_guard_escrow_fields_strict_match(ctx)
-        assert action is not None
-        assert action.action_type == DomainActionType.REJECT_OFFER
-        reason = action.parameters["reason"]
-        assert "escrow_field_mismatch" in reason
-        assert "'token'" in reason
-        assert action.parameters["field"] == "token"
+        decision, _ = escrow_shape_guard([], ctx)
+        assert decision is not None
+        assert decision.action == "reject"
+        assert "escrow_field_mismatch" in (decision.reason or "")
+        assert "'token'" in (decision.reason or "")
 
     def test_buyer_omits_a_required_field(self):
         """When the seller pinned a field but the buyer didn't include
@@ -146,9 +126,10 @@ class TestRejectsWhenFieldDiverges:
                 "fields": {"token": _TOKEN},  # no arbiter
             },
         )
-        action = negotiate_guard_escrow_fields_strict_match(ctx)
-        assert action is not None
-        assert action.parameters["field"] == "arbiter"
+        decision, _ = escrow_shape_guard([], ctx)
+        assert decision is not None
+        assert decision.action == "reject"
+        assert "'arbiter'" in (decision.reason or "")
 
 
 class TestPassesThroughWithoutVetoing:
@@ -163,7 +144,8 @@ class TestPassesThroughWithoutVetoing:
             listing=_listing_with_one_escrow(),
             escrow_proposal=None,
         )
-        assert negotiate_guard_escrow_fields_strict_match(ctx) is None
+        decision, _ = escrow_shape_guard([], ctx)
+        assert decision is None
 
     def test_listing_with_no_accepted_escrows_passes(self):
         """Publish-time synthesis couldn't resolve a chain — pinning
@@ -176,7 +158,8 @@ class TestPassesThroughWithoutVetoing:
                 "fields": {"token": _TOKEN},
             },
         )
-        assert negotiate_guard_escrow_fields_strict_match(ctx) is None
+        decision, _ = escrow_shape_guard([], ctx)
+        assert decision is None
 
     def test_zero_address_passes(self):
         """Legacy buyer client sends the zero placeholder for
@@ -190,11 +173,12 @@ class TestPassesThroughWithoutVetoing:
                 "fields": {"token": _TOKEN},
             },
         )
-        assert negotiate_guard_escrow_fields_strict_match(ctx) is None
+        decision, _ = escrow_shape_guard([], ctx)
+        assert decision is None
 
     def test_address_advertised_but_not_in_set_passes(self):
         """The structural "address not in accepted set" rejection lives
-        in sync_negotiation._match_accepted_escrow. The policy callable
+        in sync_negotiation._match_accepted_escrow. The middleware
         declines to double-report — that would surface confusing
         error messages."""
         ctx = _ctx(
@@ -205,45 +189,5 @@ class TestPassesThroughWithoutVetoing:
                 "fields": {"token": _TOKEN},
             },
         )
-        assert negotiate_guard_escrow_fields_strict_match(ctx) is None
-
-class TestConsultPreNegotiationGuardsWiring:
-    """Verify ``escrow_proposal`` round-trips through PolicyService into
-    the event the policy callables see."""
-
-    @pytest.mark.asyncio
-    async def test_escrow_proposal_reaches_event(self, monkeypatch):
-        from market_storefront.services import policy_service as ps_module
-        from market_storefront.services.policy_service import PolicyService
-
-        seen_events = []
-
-        async def _capture(self, domain_event):
-            seen_events.append(domain_event)
-            return None
-
-        monkeypatch.setattr(PolicyService, "_consult_policy", _capture)
-
-        # Build a barebones PolicyService — we only exercise
-        # consult_pre_negotiation_guards which doesn't touch the policy
-        # manager when _consult_policy is stubbed.
-        svc = PolicyService.__new__(PolicyService)
-        svc._config = MagicMock(base_url_override="http://seller")
-
-        proposal = {
-            "chain_name": "anvil",
-            "escrow_address": _ADDR,
-            "fields": {"token": _TOKEN},
-            "expiration_unix": 9_999_999_999,
-        }
-        await svc.consult_pre_negotiation_guards(
-            listing_id="L1",
-            listing={"accepted_escrows": [], "offer_resource": {}},
-            proposed_price=1000,
-            requested_duration_seconds=3600,
-            escrow_proposal=proposal,
-        )
-        assert seen_events, "policy_service did not consult policy"
-        event = seen_events[0]
-        assert isinstance(event, NegotiationRequestedEvent)
-        assert event.escrow_proposal == proposal
+        decision, _ = escrow_shape_guard([], ctx)
+        assert decision is None

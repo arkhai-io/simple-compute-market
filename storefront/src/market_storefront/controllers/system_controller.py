@@ -30,11 +30,9 @@ class SystemController:
         self,
         db=Depends(lambda: _container.resolved_sqlite_client),
         system_svc=Depends(lambda: _container.resolved_system_service),
-        policy_svc=Depends(lambda: _container.resolved_policy_service),
     ) -> None:
         self._db = db
         self._svc = system_svc
-        self._policy_svc = policy_svc
 
     @router.get("/health", response_model=HealthResponse, summary="Kubernetes liveness probe")
     async def health_bare(self) -> HealthResponse:

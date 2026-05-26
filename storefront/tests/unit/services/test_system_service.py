@@ -27,10 +27,10 @@ def db(tmp_path) -> SQLiteClient:
 
 
 def _make_service(db: SQLiteClient, registry: dict | None = None) -> SystemService:
+    """``registry`` arg kept for compat with older test invocations; ignored."""
     return SystemService(
         sqlite_client=db,
         agent_id="test-agent",
-        callable_registry=registry if registry is not None else {},
     )
 
 
@@ -178,7 +178,6 @@ class TestWaitForRegistryAgent:
         return SystemService(
             sqlite_client=db,
             agent_id="test-agent",
-            callable_registry={},
         )
 
     @pytest.mark.asyncio

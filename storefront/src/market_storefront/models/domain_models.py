@@ -26,9 +26,6 @@ from service.clients.token import ERC20TokenMetadata
 # │   └── ComputeDomainResource     Parse/coerce helper; extends CoreResource
 # │       ├── ComputeResource       A compute slice (GPU, CPU, RAM, region, ...)
 # │       └── TokenResource         ERC-20 token payment (= CoreTokenResource alias)
-# ├── CoreDomainEvent               Base event model
-# │   ├── DomainEvent               (alias for CoreDomainEvent)
-# │   └── NegotiationRequestedEvent pre-thread guard pipeline trigger
 # └── (other core types re-aliased below)
 #     ├── Action                    = CoreDomainAction
 #     ├── DecisionContext           = CoreDecisionContext
@@ -48,8 +45,7 @@ from service.clients.token import ERC20TokenMetadata
 # ├── Region            Advisory string-enum. Field types are plain `str`;
 # │                       region vocabularies are indexer-local.
 # ├── GpuInterconnect   nvlink | nvswitch | pcie_only | infiniband
-# ├── VirtualizationType bare_metal | vm | container
-# └── EventType         order_create | order_close | resource_imbalance | ...
+# └── VirtualizationType bare_metal | vm | container
 # =============================================================================
 
 
@@ -478,69 +474,14 @@ class Listing(BaseModel):
 
 
 # =============================
-# Event models for A2A workflow
+# =============================
+# Decision and Action domain models — re-exported from service.schemas
+# for back-compat with callers that import via this module. Direct
+# producers/consumers are migrating off these; phase 4 deletes them.
 # =============================
 
 
-class EventType(str, Enum):
-    """Pre-thread guard hook: fires from /negotiate/new before any state
-    mutation. The seeded policy composite runs guards (e.g. inventory
-    match) and emits REJECT_OFFER with a reason on veto, mapped to
-    HTTP 409 (OfferUnfulfillableError) by the negotiate flow. Operators
-    who want to support non-immediate deals (futures, off-chain matched)
-    swap the composite's components for an empty list or an alternative
-    guard set.
-    """
-
-    NEGOTIATION_REQUESTED = "negotiation_requested"
 DomainEvent = CoreDomainEvent
-
-
-class NegotiationRequestedEvent(DomainEvent):
-    """Event triggered when a buyer asks to start a negotiation thread.
-
-    Fires from ``sync_negotiation.start_negotiation_for_remote_request``
-    before any thread state is written. The seeded guard composite runs
-    against this event; if any guard returns ``REJECT_OFFER``, the flow
-    short-circuits with HTTP 409 and the reason in the action's
-    ``parameters["reason"]``.
-
-    Carries the listing dict (so guards can read ``offer_resource``,
-    ``accepted_escrows``, ``status``, etc.) plus the buyer's proposed
-    price, duration, and escrow proposal so escrow- and price-aware
-    guards can run against the request before any thread state is
-    written.
-    """
-
-    event_type: EventType = Field(default=EventType.NEGOTIATION_REQUESTED)
-    listing_id: str = Field(description="Listing the buyer wants to negotiate against")
-    listing: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Full listing row from sqlite (offer_resource, accepted_escrows, status, ...)",
-    )
-    proposed_price: float | None = Field(
-        default=None,
-        description="Buyer's initial price proposal (None if not provided)",
-    )
-    requested_duration_seconds: int | None = Field(
-        default=None,
-        description="Buyer's requested lease duration in seconds (None if not provided)",
-    )
-    escrow_proposal: dict[str, Any] | None = Field(
-        default=None,
-        description=(
-            "Buyer's EscrowProposal as a dict (chain_name, escrow_address, "
-            "fields, expiration_unix). None for legacy clients."
-        ),
-    )
-
-
-# =============================
-# Decision and Action domain models for reactive agents
-# =============================
-# ActionType moved to service.schemas (imported at module top).
-
-
 Action = CoreDomainAction
 DecisionContext = CoreDecisionContext
 Decision = CoreDecision

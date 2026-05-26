@@ -14,7 +14,6 @@ import time
 from typing import Any
 
 import market_storefront.container as _container
-from market_policy.registry import CALLABLE_REGISTRY
 from market_storefront.utils.config import settings, chain_id, AGENT_ID
 
 logger = logging.getLogger(__name__)
@@ -25,33 +24,16 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class SystemService:
-    """Business logic for system-level policy operations.
-
-    Parameters
-    ----------
-    sqlite_client:
-        The storefront SQLiteClient instance — used for policy row reads/writes.
-    agent_id:
-        Agent identifier used as the key for policy DB rows.
-    callable_registry:
-        Override for the module-level CALLABLE_REGISTRY.  Inject a plain dict
-        in unit tests to avoid touching the real global singleton.
-    """
-
-    # Package walked during seed.  Named here so tests can patch it.
-    POLICY_PACKAGE = "domain.compute.agent.app.policy"
+    """Business logic for storefront health and connectivity checks."""
 
     def __init__(
         self,
         *,
         sqlite_client,
         agent_id: str | None = None,
-        callable_registry: dict | None = None,
     ) -> None:
         self._db = sqlite_client
         self._agent_id = agent_id or AGENT_ID or "agent"
-        # Injected registry lets tests work without touching the global singleton.
-        self._registry: dict = callable_registry if callable_registry is not None else CALLABLE_REGISTRY
 
     # ------------------------------------------------------------------
     # Health / connectivity checks

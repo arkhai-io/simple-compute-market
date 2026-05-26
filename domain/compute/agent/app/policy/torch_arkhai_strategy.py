@@ -32,7 +32,13 @@ from typing import Any, Optional
 from market_policy.negotiation_strategy import (
     NegotiationDecision,
     NegotiationRoundInput,
-    register_strategy,
+)
+from market_policy.negotiation_middleware import (
+    NegotiationContext,
+    NegotiationRound,
+    NegotiationStep,
+    register_negotiation_middleware,
+    their_proposed_price,
 )
 
 logger = logging.getLogger(__name__)
@@ -229,6 +235,34 @@ class TorchArkhaiStrategy:
         return NegotiationDecision(action="reject", reason=f"unknown_direction:{ri.direction!r}")
 
 
-# Self-register on module import. Callers (storefront, buyer) import
-# this module at startup; ``load_strategy("rl", ...)`` then resolves.
-register_strategy("rl", lambda cfg: TorchArkhaiStrategy(**cfg))
+_singleton: TorchArkhaiStrategy | None = None
+
+
+def _get_singleton() -> TorchArkhaiStrategy:
+    """Lazy-init the torch strategy so model files don't load until the
+    middleware actually fires."""
+    global _singleton
+    if _singleton is None:
+        _singleton = TorchArkhaiStrategy()
+    return _singleton
+
+
+@register_negotiation_middleware("rl")
+def rl_middleware(
+    history: list[NegotiationRound],
+    context: NegotiationContext,
+) -> NegotiationStep:
+    """Terminal middleware backed by the torch RL strategy.
+
+    Builds a ``NegotiationRoundInput`` view from (history, context) and
+    delegates to the existing strategy's ``decide``. Always returns Some.
+    """
+    ri = NegotiationRoundInput(
+        direction=context.direction,
+        our_reference_price=context.our_reference_price,
+        their_proposed_price=their_proposed_price(history),
+        history=history,
+        max_rounds=context.max_rounds,
+    )
+    decision = _get_singleton().decide(ri)
+    return decision, context

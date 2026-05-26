@@ -72,7 +72,6 @@ async def _seed_listing(db: SQLiteClient, listing_id: str, status: str = "open")
 async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = None  # not used by read/pause/resume
-    _container.resolved_policy_service = None  # not used by read/pause/resume
 
     app = FastAPI()
     app.include_router(listings_router)
@@ -88,14 +87,12 @@ async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
-    _container.resolved_policy_service = None
 
 
 @pytest_asyncio.fixture
 async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = None  # not used by read/pause/resume
-    _container.resolved_policy_service = None  # not used by read/pause/resume
 
     app = FastAPI()
     app.include_router(listings_router)
@@ -253,12 +250,11 @@ class TestResumeListing:
 
 
 # ---------------------------------------------------------------------------
-# Admin evaluate endpoints — evaluate-create, evaluate-close, evaluate-negotiate
+# Admin evaluate endpoints — evaluate-negotiate
 #
-# These tests use a dedicated fixture that includes both the buyer-facing
-# router and the admin_router (which hosts the /api/v1/admin/listings/* routes).
-# They require a real ListingService and PolicyService because the evaluate
-# paths exercise the full service stack.
+# Uses both the buyer-facing router and the admin_router (which hosts the
+# /api/v1/admin/listings/* routes). ListingService is real; evaluate-negotiate
+# is a pure dry-run of the negotiation chain against a listing row.
 # ---------------------------------------------------------------------------
 
 from unittest.mock import MagicMock, patch
@@ -266,32 +262,15 @@ from unittest.mock import MagicMock, patch
 
 @pytest_asyncio.fixture
 async def admin_client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
-    """Fixture wiring both listings router and admin_router with real services.
-
-    PolicyService requires a config mock — only base_url_override and agent_id
-    are read during evaluate paths (via _consult_policy → PolicyManager).
-    """
     from market_storefront.controllers.listings_controller import admin_router
     from market_storefront.services.listing_service import ListingService
-    from market_storefront.services.policy_service import PolicyService
-
-    config = MagicMock()
-    config.base_url_override = ""
-    config.base_url_override_raw = ""
-    config.agent_id = "test-agent"
-    config.agent_priv_key = ""
-    config.chain_rpc_url = ""
 
     listing_svc = ListingService(
         sqlite_client=db, alkahest_client=None
     )
-    policy_svc = PolicyService(
-        sqlite_client=db, alkahest_client=None, agent_id="test-agent"
-    )
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = listing_svc
-    _container.resolved_policy_service = policy_svc
 
     app = FastAPI()
     app.include_router(listings_router)
@@ -307,7 +286,6 @@ async def admin_client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
-    _container.resolved_policy_service = None
 
 
 @pytest_asyncio.fixture
@@ -315,25 +293,13 @@ async def admin_no_key_client(db) -> AsyncIterator[StorefrontClient]:
     """Admin router wired without an admin key — for 403 tests on admin endpoints."""
     from market_storefront.controllers.listings_controller import admin_router
     from market_storefront.services.listing_service import ListingService
-    from market_storefront.services.policy_service import PolicyService
-
-    config = MagicMock()
-    config.base_url_override = ""
-    config.base_url_override_raw = ""
-    config.agent_id = "test-agent"
-    config.agent_priv_key = ""
-    config.chain_rpc_url = ""
 
     listing_svc = ListingService(
         sqlite_client=db, alkahest_client=None
     )
-    policy_svc = PolicyService(
-        sqlite_client=db, alkahest_client=None, agent_id="test-agent"
-    )
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = listing_svc
-    _container.resolved_policy_service = policy_svc
 
     app = FastAPI()
     app.include_router(listings_router)
@@ -350,7 +316,6 @@ async def admin_no_key_client(db) -> AsyncIterator[StorefrontClient]:
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
-    _container.resolved_policy_service = None
 
 
 _OFFER = {
@@ -379,8 +344,8 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-1")
         with patch(
-            "market_storefront.utils.sync_negotiation._load_storefront_strategy",
-            return_value=_bisection_strategy(),
+            "market_storefront.utils.sync_negotiation._load_storefront_chain",
+            return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate("neg-eval-1", their_proposed_price=5000)
         assert isinstance(result.would_negotiate, bool)
@@ -390,8 +355,8 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-2")
         with patch(
-            "market_storefront.utils.sync_negotiation._load_storefront_strategy",
-            return_value=_bisection_strategy(),
+            "market_storefront.utils.sync_negotiation._load_storefront_chain",
+            return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate("neg-eval-2", their_proposed_price=5000)
         assert result.decision in ("accept", "counter", "exit")
@@ -404,8 +369,8 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-floor")  # default price_per_hour=9000
         with patch(
-            "market_storefront.utils.sync_negotiation._load_storefront_strategy",
-            return_value=_bisection_strategy(),
+            "market_storefront.utils.sync_negotiation._load_storefront_chain",
+            return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate(
                 "neg-eval-floor", their_proposed_price=9000
@@ -428,8 +393,8 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-no-thread")
         with patch(
-            "market_storefront.utils.sync_negotiation._load_storefront_strategy",
-            return_value=_bisection_strategy(),
+            "market_storefront.utils.sync_negotiation._load_storefront_chain",
+            return_value=_bisection_chain(),
         ):
             await c.evaluate_negotiate("neg-eval-no-thread", their_proposed_price=5000)
         threads = await db.get_active_negotiations_for_listing(listing_id="neg-eval-no-thread")
@@ -444,14 +409,14 @@ class TestEvaluateNegotiate:
         assert "403" in str(exc_info.value)
 
 
-def _bisection_strategy():
-    """Return a real BisectionStrategy instance for use in integration tests.
+def _bisection_chain():
+    """Single-middleware chain (just bisection) for negotiate-evaluate tests.
 
-    Patches _load_storefront_strategy to avoid torch/rl dependency and
-    CONFIG access in integration tests.
+    Skips the guards so the test's seeded listings don't need to match
+    an inventory-portfolio entry. Avoids the torch/rl dependency.
     """
-    from market_policy.negotiation_strategy import load_strategy
-    return load_strategy("bisection")
+    from market_policy.negotiation_middleware import bisection_middleware
+    return [bisection_middleware]
 
 
 # ---------------------------------------------------------------------------
@@ -483,7 +448,6 @@ async def seller_auth_client(db):
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = None  # 403 fires before service is called
-    _container.resolved_policy_service = None
 
     app = FastAPI()
     app.include_router(listings_router)
@@ -501,28 +465,23 @@ async def seller_auth_client(db):
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
-    _container.resolved_policy_service = None
 
 
 @pytest_asyncio.fixture
 async def seller_auth_full_client(db):
-    """seller_auth_client variant with real ListingService + PolicyService.
+    """seller_auth_client variant with a real ListingService.
 
     Used by TestCreateListing to exercise the full create round-trip:
-    auth → service → controller → response.
+    auth → service → controller → response. Listing CRUD is procedural,
+    so no policy_svc wiring needed.
     """
     from market_storefront.services.listing_service import ListingService
-    from market_storefront.services.policy_service import PolicyService
     from tests._settings_overrides import settings_overrides
 
     listing_svc = ListingService(sqlite_client=db, alkahest_client=None)
-    policy_svc = PolicyService(
-        sqlite_client=db, alkahest_client=None, agent_id="test-agent"
-    )
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = listing_svc
-    _container.resolved_policy_service = policy_svc
 
     app = FastAPI()
     app.include_router(listings_router)
@@ -540,7 +499,6 @@ async def seller_auth_full_client(db):
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
-    _container.resolved_policy_service = None
 
 
 class TestCreateListing:

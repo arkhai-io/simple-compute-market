@@ -70,11 +70,9 @@ class ListingsController:
         self,
         db=Depends(lambda: _container.resolved_sqlite_client),
         listing_svc=Depends(lambda: _container.resolved_listing_service),
-        policy_svc=Depends(lambda: _container.resolved_policy_service),
     ) -> None:
         self._db = db
         self._listing_svc = listing_svc
-        self._policy_svc = policy_svc
 
     @router.get(
         "/listings",
@@ -248,11 +246,9 @@ class AdminListingsController:
     def __init__(
         self,
         listing_svc=Depends(lambda: _container.resolved_listing_service),
-        policy_svc=Depends(lambda: _container.resolved_policy_service),
         _key=Depends(require_admin_key),
     ) -> None:
         self._listing_svc = listing_svc
-        self._policy_svc = policy_svc
 
     @admin_router.post(
         "/{listing_id}/evaluate-negotiate",

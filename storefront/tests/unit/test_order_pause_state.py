@@ -236,14 +236,15 @@ class TestStartSyncNegotiationPauseGuard:
     async def test_pre_negotiation_guard_rejection_raises_offer_unfulfillable(
         self, db, monkeypatch
     ):
-        """Policy-owned pre-thread guards veto before negotiation state writes."""
+        """Round-0 guard veto (no matching inventory) raises OfferUnfulfillableError.
+
+        The fixture's listing offers ``gpu_model=H200, region=California, US``;
+        the test DB has no portfolio resources at all, so the
+        ``has_matching_inventory_guard`` middleware vetoes with
+        ``no_matching_inventory``, which maps to 409.
+        """
         import market_storefront.server as server_mod
         monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", False)
-
-        policy_service = AsyncMock()
-        policy_service.consult_pre_negotiation_guards.return_value = (
-            "no_matching_inventory"
-        )
 
         from market_storefront.utils.sync_negotiation import start_sync_negotiation
         from service.schemas import ProvisionTerms
@@ -258,9 +259,7 @@ class TestStartSyncNegotiationPauseGuard:
                 ),
                 our_base_url="http://seller:8001",
                 their_agent_url="0xBuyer",
-                policy_service=policy_service,
             )
 
         assert exc_info.value.reason == "no_matching_inventory"
         assert exc_info.value.listing_id == "order-001"
-        policy_service.consult_pre_negotiation_guards.assert_awaited_once()
