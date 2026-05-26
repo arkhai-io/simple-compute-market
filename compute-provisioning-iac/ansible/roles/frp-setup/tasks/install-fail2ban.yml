@@ -1,0 +1,26 @@
+---
+# Install and configure fail2ban
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  when: ansible_os_family == "Debian"
+
+- name: Install fail2ban (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Install fail2ban (RedHat/CentOS)
+  ansible.builtin.yum:
+    name: fail2ban
+    state: present
+  when: ansible_os_family == "RedHat"
+
+- name: Ensure fail2ban is enabled and started
+  ansible.builtin.systemd:
+    name: fail2ban
+    enabled: yes
+    state: started

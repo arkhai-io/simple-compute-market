@@ -300,7 +300,7 @@ class TestSeedResourcesIfEmpty:
 
         db = SQLiteClient(db_path=str(tmp_path / "seed_test.db"))
 
-        # Minimal valid ww1-style CSV row.
+        # Minimal valid kvm1-style CSV row.
         csv_file = tmp_path / "resources.csv"
         csv_file.write_text(
             "resource_id,resource_type,resource_subtype,unit,value,state,"
@@ -311,7 +311,7 @@ class TestSeedResourcesIfEmpty:
             "compute-test-001,compute.gpu,rtx5080,count,1,available,"
             "150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,"
             'RTX 5080,90.0,"California, US",'
-            "ww1,16,256,4000,bare_metal\n"
+            "kvm1,16,256,4000,bare_metal\n"
         )
 
         svc = _make_service(db)
@@ -332,7 +332,7 @@ class TestSeedResourcesIfEmpty:
             "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
             'compute-inline-001,compute.gpu,rtx5080,count,1,available,'
             '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-            'RTX 5080,90.0,"California, US",ww1\n'
+            'RTX 5080,90.0,"California, US",kvm1\n'
         )
         svc = _make_service(db)
         result = await svc.seed_resources_if_empty(csv_inline=csv_content)
@@ -356,7 +356,7 @@ class TestSeedResourcesIfEmpty:
             "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
             'compute-inline-001,compute.gpu,rtx5080,count,1,available,'
             '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-            'RTX 5080,90.0,"California, US",ww1\n'
+            'RTX 5080,90.0,"California, US",kvm1\n'
         )
         svc = _make_service(db)
         result = await svc.seed_resources_if_empty(

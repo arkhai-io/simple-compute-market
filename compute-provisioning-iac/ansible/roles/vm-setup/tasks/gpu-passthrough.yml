@@ -1,0 +1,643 @@
+---
+# GPU Passthrough Enablement
+
+- name: Check for NVIDIA GPU presence
+  become: yes
+  shell: lspci -nn | grep -i nvidia | grep -iE '(VGA|Display|3D controller)'
+  register: nvidia_gpu_check
+  changed_when: false
+  failed_when: false
+  tags: gpu_passthrough
+
+- name: Check for AMD GPU presence
+  become: yes
+  shell: lspci -nn | grep -i amd | grep -iE '(VGA|Display|3D controller)'
+  register: amd_gpu_check
+  changed_when: false
+  failed_when: false
+  tags: gpu_passthrough
+
+- name: Set GPU passthrough availability flag
+  set_fact:
+    gpu_passthrough_available: "{{ (nvidia_gpu_check.stdout != '' or amd_gpu_check.stdout != '') }}"
+  tags: gpu_passthrough
+
+- name: Display GPU detection status
+  debug:
+    msg:
+      - "============================================"
+      - "GPU DETECTION"
+      - "============================================"
+      - "NVIDIA GPU detected: {{ 'Yes' if nvidia_gpu_check.stdout != '' else 'No' }}"
+      - "AMD GPU detected: {{ 'Yes' if amd_gpu_check.stdout != '' else 'No' }}"
+      - "GPU Passthrough: {{ 'Will be configured' if gpu_passthrough_available else 'SKIPPED - No compatible GPU found' }}"
+      - "============================================"
+  tags: gpu_passthrough
+
+- name: Get NVIDIA GPU PCI addresses
+  become: yes
+  shell: lspci -D | grep -i nvidia | grep -iE '(VGA|Display|3D controller)' | awk '{print $1}'
+  register: nvidia_gpu_addresses
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Get NVIDIA GPU device ID
+  become: yes
+  shell: lspci -D -nn | grep -i nvidia | grep -iE '(VGA|Display|3D controller)' | head -1 | grep -oP '\[[\da-f]{4}:[\da-f]{4}\]' | tr -d '[]' | head -1
+  register: nvidia_gpu_id_result
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available and nvidia_gpu_addresses.stdout != ""
+  tags: gpu_passthrough
+
+- name: Set NVIDIA GPU device ID variable
+  set_fact:
+    nvidia_gpu_id: "{{ nvidia_gpu_id_result.stdout }}"
+  when: gpu_passthrough_available and nvidia_gpu_id_result is defined and nvidia_gpu_id_result.stdout is defined and nvidia_gpu_id_result.stdout != ""
+  tags: gpu_passthrough
+
+- name: Get NVIDIA GPU IOMMU group numbers
+  become: yes
+  shell: |
+    GROUPS=""
+    {% for gpu_addr in nvidia_gpu_addresses.stdout_lines %}
+    if [ -L "/sys/bus/pci/devices/{{ gpu_addr }}/iommu_group" ]; then
+      GROUP_NUM=$(basename $(readlink /sys/bus/pci/devices/{{ gpu_addr }}/iommu_group))
+      if [ ! -z "$GROUP_NUM" ]; then
+        if [ -z "$GROUPS" ]; then
+          GROUPS="$GROUP_NUM"
+        elif ! echo "$GROUPS" | grep -qw "$GROUP_NUM"; then
+          GROUPS="$GROUPS $GROUP_NUM"
+        fi
+      fi
+    fi
+    {% endfor %}
+    echo "$GROUPS"
+  register: nvidia_iommu_groups
+  changed_when: false
+  when: gpu_passthrough_available and nvidia_gpu_addresses.stdout != ""
+  tags: gpu_passthrough
+
+- name: Debug NVIDIA IOMMU group numbers
+  debug:
+    msg:
+      - "NVIDIA GPU addresses: {{ nvidia_gpu_addresses.stdout_lines }}"
+      - "NVIDIA IOMMU group numbers: {{ nvidia_iommu_groups.stdout }}"
+  when: gpu_passthrough_available and nvidia_iommu_groups is defined and nvidia_iommu_groups.stdout is defined
+  tags: gpu_passthrough
+
+- name: Get all devices in NVIDIA GPU IOMMU groups
+  become: yes
+  shell: |
+    ALL_DEVICES=""
+    for GROUP_NUM in {{ nvidia_iommu_groups.stdout }}; do
+      if [ -d "/sys/kernel/iommu_groups/$GROUP_NUM/devices" ]; then
+        for device in /sys/kernel/iommu_groups/$GROUP_NUM/devices/*; do
+          DEV_ADDR=$(basename "$device")
+          DEV_ID=$(lspci -n -s "$DEV_ADDR" | awk '{print $3}')
+          if [ ! -z "$DEV_ID" ]; then
+            if [ -z "$ALL_DEVICES" ]; then
+              ALL_DEVICES="$DEV_ID"
+            elif ! echo "$ALL_DEVICES" | grep -qw "$DEV_ID"; then
+              ALL_DEVICES="$ALL_DEVICES,$DEV_ID"
+            fi
+          fi
+        done
+      fi
+    done
+    echo "$ALL_DEVICES"
+  register: nvidia_iommu_device_ids
+  changed_when: false
+  when: gpu_passthrough_available and nvidia_iommu_groups is defined and nvidia_iommu_groups.stdout is defined and nvidia_iommu_groups.stdout != ""
+  tags: gpu_passthrough
+
+- name: Display NVIDIA IOMMU group devices
+  debug:
+    msg:
+      - "NVIDIA GPU IOMMU group device IDs: {{ nvidia_iommu_device_ids.stdout }}"
+  when: gpu_passthrough_available and nvidia_iommu_device_ids is defined and nvidia_iommu_device_ids.stdout is defined and nvidia_iommu_device_ids.stdout != ""
+  tags: gpu_passthrough
+
+- name: Verify NVIDIA IOMMU group contents manually
+  become: yes
+  shell: |
+    echo "=== NVIDIA IOMMU Group Verification ==="
+    for GROUP_NUM in {{ nvidia_iommu_groups.stdout }}; do
+      echo "Group $GROUP_NUM devices:"
+      if [ -d "/sys/kernel/iommu_groups/$GROUP_NUM/devices" ]; then
+        ls -la /sys/kernel/iommu_groups/$GROUP_NUM/devices/ | tail -n +4
+        echo "Device IDs in group $GROUP_NUM:"
+        for device in /sys/kernel/iommu_groups/$GROUP_NUM/devices/*; do
+          DEV_ADDR=$(basename "$device")
+          echo "  $DEV_ADDR: $(lspci -n -s $DEV_ADDR)"
+        done
+      else
+        echo "  Group directory not found"
+      fi
+      echo ""
+    done
+  register: nvidia_iommu_verification
+  when: gpu_passthrough_available and nvidia_iommu_groups is defined and nvidia_iommu_groups.stdout is defined and nvidia_iommu_groups.stdout != ""
+  tags: gpu_passthrough
+
+- name: Display NVIDIA IOMMU group verification
+  debug:
+    var: nvidia_iommu_verification.stdout_lines
+  when: gpu_passthrough_available and nvidia_iommu_verification is defined and nvidia_iommu_verification.stdout is defined
+  tags: gpu_passthrough
+
+- name: Get AMD GPU PCI addresses
+  become: yes
+  shell: lspci -D | grep -i amd | grep -iE '(VGA|Display|3D controller)' | awk '{print $1}'
+  register: amd_gpu_addresses
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Get AMD GPU device ID
+  become: yes
+  shell: lspci -D -nn | grep -i amd | grep -iE '(VGA|Display|3D controller)' | head -1 | grep -oP '\[[\da-f]{4}:[\da-f]{4}\]' | tr -d '[]' | head -1
+  register: amd_gpu_id_result
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available and amd_gpu_addresses.stdout != ""
+  tags: gpu_passthrough
+
+- name: Set AMD GPU device ID variable
+  set_fact:
+    amd_gpu_id: "{{ amd_gpu_id_result.stdout }}"
+  when: gpu_passthrough_available and amd_gpu_id_result is defined and amd_gpu_id_result.stdout is defined and amd_gpu_id_result.stdout != ""
+  tags: gpu_passthrough
+
+- name: Get AMD GPU IOMMU group numbers
+  become: yes
+  shell: |
+    GROUPS=""
+    {% for gpu_addr in amd_gpu_addresses.stdout_lines %}
+    if [ -L "/sys/bus/pci/devices/{{ gpu_addr }}/iommu_group" ]; then
+      GROUP_NUM=$(basename $(readlink /sys/bus/pci/devices/{{ gpu_addr }}/iommu_group))
+      if [ ! -z "$GROUP_NUM" ]; then
+        if [ -z "$GROUPS" ]; then
+          GROUPS="$GROUP_NUM"
+        elif ! echo "$GROUPS" | grep -qw "$GROUP_NUM"; then
+          GROUPS="$GROUPS $GROUP_NUM"
+        fi
+      fi
+    fi
+    {% endfor %}
+    echo "$GROUPS"
+  register: amd_iommu_groups
+  changed_when: false
+  when: gpu_passthrough_available and amd_gpu_addresses.stdout != ""
+  tags: gpu_passthrough
+
+- name: Debug AMD IOMMU group numbers
+  debug:
+    msg:
+      - "AMD GPU addresses: {{ amd_gpu_addresses.stdout_lines }}"
+      - "AMD IOMMU group numbers: {{ amd_iommu_groups.stdout }}"
+  when: gpu_passthrough_available and amd_iommu_groups is defined and amd_iommu_groups.stdout is defined
+  tags: gpu_passthrough
+
+- name: Get all devices in AMD GPU IOMMU groups
+  become: yes
+  shell: |
+    ALL_DEVICES=""
+    for GROUP_NUM in {{ amd_iommu_groups.stdout }}; do
+      if [ -d "/sys/kernel/iommu_groups/$GROUP_NUM/devices" ]; then
+        for device in /sys/kernel/iommu_groups/$GROUP_NUM/devices/*; do
+          DEV_ADDR=$(basename "$device")
+          DEV_ID=$(lspci -n -s "$DEV_ADDR" | awk '{print $3}')
+          if [ ! -z "$DEV_ID" ]; then
+            if [ -z "$ALL_DEVICES" ]; then
+              ALL_DEVICES="$DEV_ID"
+            elif ! echo "$ALL_DEVICES" | grep -qw "$DEV_ID"; then
+              ALL_DEVICES="$ALL_DEVICES,$DEV_ID"
+            fi
+          fi
+        done
+      fi
+    done
+    echo "$ALL_DEVICES"
+  register: amd_iommu_device_ids
+  changed_when: false
+  when: gpu_passthrough_available and amd_iommu_groups is defined and amd_iommu_groups.stdout is defined and amd_iommu_groups.stdout != ""
+  tags: gpu_passthrough
+
+- name: Display AMD IOMMU group devices
+  debug:
+    msg:
+      - "AMD GPU IOMMU group device IDs: {{ amd_iommu_device_ids.stdout }}"
+  when: gpu_passthrough_available and amd_iommu_device_ids is defined and amd_iommu_device_ids.stdout is defined and amd_iommu_device_ids.stdout != ""
+  tags: gpu_passthrough
+
+- name: Combine all IOMMU group device IDs for VFIO binding
+  set_fact:
+    vfio_device_ids_combined: "{{ ((nvidia_iommu_device_ids.stdout if (nvidia_iommu_device_ids is defined and nvidia_iommu_device_ids.stdout is defined and nvidia_iommu_device_ids.stdout != '') else '') + (',' if (nvidia_iommu_device_ids is defined and nvidia_iommu_device_ids.stdout is defined and nvidia_iommu_device_ids.stdout != '' and amd_iommu_device_ids is defined and amd_iommu_device_ids.stdout is defined and amd_iommu_device_ids.stdout != '') else '') + (amd_iommu_device_ids.stdout if (amd_iommu_device_ids is defined and amd_iommu_device_ids.stdout is defined and amd_iommu_device_ids.stdout != '') else '')) }}"
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Display all devices to be bound to VFIO
+  debug:
+    msg:
+      - "All IOMMU group devices to bind to VFIO-PCI: {{ vfio_device_ids_combined }}"
+  when: gpu_passthrough_available and vfio_device_ids_combined != ""
+  tags: gpu_passthrough
+
+- name: Detect CPU vendor (Intel or AMD)
+  become: yes
+  shell: lscpu | grep -i "vendor id" | awk '{print $3}'
+  register: cpu_vendor
+  changed_when: false
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Set IOMMU parameter based on CPU vendor
+  set_fact:
+    iommu_param: "{{ 'intel_iommu=on' if 'Intel' in cpu_vendor.stdout else 'amd_iommu=on' }}"
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Check current GRUB configuration
+  become: yes
+  shell: grep "GRUB_CMDLINE_LINUX_DEFAULT" /etc/default/grub
+  register: current_grub_config
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Display current GRUB configuration
+  debug:
+    msg:
+      - "Current GRUB config: {{ current_grub_config.stdout if current_grub_config.stdout != '' else 'Not found' }}"
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Check if IOMMU is already enabled in GRUB
+  set_fact:
+    iommu_already_enabled: "{{ 'iommu=' in current_grub_config.stdout }}"
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Check if VFIO-PCI prebinding already configured in GRUB
+  become: yes
+  shell: grep "^GRUB_CMDLINE_LINUX_DEFAULT=" /etc/default/grub | grep -q "vfio-pci.ids=" && echo "PRESENT" || echo "ABSENT"
+  register: vfio_grub_check
+  changed_when: false
+  when: gpu_passthrough_available and vfio_device_ids_combined is defined and vfio_device_ids_combined != ""
+  tags: gpu_passthrough
+
+- name: Backup GRUB configuration before modifications
+  become: yes
+  copy:
+    src: /etc/default/grub
+    dest: "/etc/default/grub.backup.{{ ansible_date_time.epoch }}"
+    remote_src: yes
+  when: 
+    - gpu_passthrough_available
+    - (not iommu_already_enabled) or (vfio_grub_check is defined and vfio_grub_check.stdout is defined and vfio_grub_check.stdout == "ABSENT") or (vfio_device_ids_combined is defined and vfio_device_ids_combined != "")
+  tags: gpu_passthrough
+
+- name: Enable IOMMU in GRUB (if not already present)
+  become: yes
+  shell: |
+    CURRENT_LINE=$(grep "^GRUB_CMDLINE_LINUX_DEFAULT=" /etc/default/grub | sed 's/^GRUB_CMDLINE_LINUX_DEFAULT="//' | sed 's/"$//')
+    
+    # Add IOMMU parameters if not present
+    if ! echo "$CURRENT_LINE" | grep -q "{{ iommu_param }}"; then
+      CURRENT_LINE="$CURRENT_LINE {{ iommu_param }}"
+    fi
+    if ! echo "$CURRENT_LINE" | grep -q "iommu=pt"; then
+      CURRENT_LINE="$CURRENT_LINE iommu=pt"
+    fi
+    
+    # Update GRUB file
+    sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"$CURRENT_LINE\"|" /etc/default/grub
+    echo "IOMMU_UPDATED"
+  register: grub_iommu_result
+  when: gpu_passthrough_available and not iommu_already_enabled
+  changed_when: "'IOMMU_UPDATED' in grub_iommu_result.stdout"
+  tags: gpu_passthrough
+
+- name: Add VFIO-PCI prebinding to GRUB (if not already present)
+  become: yes
+  shell: |
+    CURRENT_LINE=$(grep "^GRUB_CMDLINE_LINUX_DEFAULT=" /etc/default/grub | sed 's/^GRUB_CMDLINE_LINUX_DEFAULT="//' | sed 's/"$//')
+    
+    # Remove existing vfio-pci.ids and vfio-pci.disable_vga if present
+    CURRENT_LINE=$(echo "$CURRENT_LINE" | sed 's/vfio-pci\.ids=[^ ]*//g' | sed 's/vfio-pci\.disable_vga=[^ ]*//g' | sed 's/  */ /g' | sed 's/^ *//' | sed 's/ *$//')
+    
+    # Add new vfio-pci parameters
+    CURRENT_LINE="$CURRENT_LINE vfio-pci.ids={{ vfio_device_ids_combined }} vfio-pci.disable_vga=1"
+    
+    # Update GRUB file
+    sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"$CURRENT_LINE\"|" /etc/default/grub
+    echo "VFIO_UPDATED"
+  register: grub_vfio_result
+  when: 
+    - gpu_passthrough_available
+    - vfio_device_ids_combined is defined
+    - vfio_device_ids_combined != ""
+  changed_when: "'VFIO_UPDATED' in grub_vfio_result.stdout"
+  tags: gpu_passthrough
+
+- name: Set GRUB modified flag
+  set_fact:
+    grub_modified:
+      changed: "{{ (grub_iommu_result is defined and grub_iommu_result.changed) or (grub_vfio_result is defined and grub_vfio_result.changed) }}"
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Update GRUB
+  become: yes
+  command: update-grub
+  when: gpu_passthrough_available and grub_modified.changed
+  tags: gpu_passthrough
+
+- name: Check if VFIO modules config exists
+  become: yes
+  stat:
+    path: /etc/modules-load.d/vfio.conf
+  register: vfio_conf_stat
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Read existing VFIO modules config
+  become: yes
+  slurp:
+    path: /etc/modules-load.d/vfio.conf
+  register: vfio_conf_content
+  when: gpu_passthrough_available and vfio_conf_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Display existing VFIO modules config
+  debug:
+    msg:
+      - "File exists: /etc/modules-load.d/vfio.conf"
+      - "Contents:"
+      - "{{ vfio_conf_content.content | b64decode }}"
+  when: gpu_passthrough_available and vfio_conf_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Create VFIO modules configuration
+  become: yes
+  copy:
+    dest: /etc/modules-load.d/vfio.conf
+    content: |
+      vfio
+      vfio_iommu_type1
+      vfio_pci
+      vfio_virqfd
+    mode: '0644'
+  when: gpu_passthrough_available and (not vfio_conf_stat.stat.exists or ('vfio_pci' not in (vfio_conf_content.content | b64decode)))
+  tags: gpu_passthrough
+
+- name: Check if VFIO PCI config exists
+  become: yes
+  stat:
+    path: /etc/modprobe.d/vfio.conf
+  register: vfio_pci_conf_stat
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Read existing VFIO PCI config
+  become: yes
+  slurp:
+    path: /etc/modprobe.d/vfio.conf
+  register: vfio_pci_conf_content
+  when: gpu_passthrough_available and vfio_pci_conf_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Display existing VFIO PCI config
+  debug:
+    msg:
+      - "File exists: /etc/modprobe.d/vfio.conf"
+      - "Contents:"
+      - "{{ vfio_pci_conf_content.content | b64decode }}"
+  when: gpu_passthrough_available and vfio_pci_conf_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Bind all IOMMU group devices to VFIO-PCI
+  become: yes
+  copy:
+    dest: /etc/modprobe.d/vfio.conf
+    content: |
+      options vfio-pci ids={{ vfio_device_ids_combined }} disable_vga=1
+    mode: '0644'
+  when: 
+    - gpu_passthrough_available
+    - vfio_device_ids_combined is defined
+    - vfio_device_ids_combined != ""
+    - not vfio_pci_conf_stat.stat.exists or (vfio_device_ids_combined not in (vfio_pci_conf_content.content | b64decode))
+  register: vfio_pci_configured
+  tags: gpu_passthrough
+
+- name: Check if NVIDIA blacklist exists
+  become: yes
+  stat:
+    path: /etc/modprobe.d/blacklist-nvidia.conf
+  register: blacklist_nvidia_stat
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Read existing NVIDIA blacklist
+  become: yes
+  slurp:
+    path: /etc/modprobe.d/blacklist-nvidia.conf
+  register: blacklist_nvidia_content
+  when: gpu_passthrough_available and blacklist_nvidia_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Display existing NVIDIA blacklist
+  debug:
+    msg:
+      - "File exists: /etc/modprobe.d/blacklist-nvidia.conf"
+      - "Contents:"
+      - "{{ blacklist_nvidia_content.content | b64decode }}"
+  when: gpu_passthrough_available and blacklist_nvidia_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Blacklist NVIDIA and Nouveau drivers
+  become: yes
+  copy:
+    dest: /etc/modprobe.d/blacklist-nvidia.conf
+    content: |
+      blacklist nouveau
+      blacklist nvidia
+      blacklist nvidia_drm
+      blacklist nvidia_modeset
+      blacklist nvidia_uvm
+      options nouveau modeset=0
+    mode: '0644'
+  when: gpu_passthrough_available and nvidia_gpu_id is defined and nvidia_gpu_id != "" and (not blacklist_nvidia_stat.stat.exists or ('blacklist nouveau' not in (blacklist_nvidia_content.content | b64decode)))
+  register: nvidia_blacklisted
+  tags: gpu_passthrough
+
+- name: Check if AMD blacklist exists
+  become: yes
+  stat:
+    path: /etc/modprobe.d/blacklist-amd.conf
+  register: blacklist_amd_stat
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Read existing AMD blacklist
+  become: yes
+  slurp:
+    path: /etc/modprobe.d/blacklist-amd.conf
+  register: blacklist_amd_content
+  when: gpu_passthrough_available and blacklist_amd_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Display existing AMD blacklist
+  debug:
+    msg:
+      - "File exists: /etc/modprobe.d/blacklist-amd.conf"
+      - "Contents:"
+      - "{{ blacklist_amd_content.content | b64decode }}"
+  when: gpu_passthrough_available and blacklist_amd_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Blacklist AMD drivers
+  become: yes
+  copy:
+    dest: /etc/modprobe.d/blacklist-amd.conf
+    content: |
+      blacklist amdgpu
+      blacklist radeon
+    mode: '0644'
+  when: gpu_passthrough_available and amd_gpu_id is defined and amd_gpu_id != "" and (not blacklist_amd_stat.stat.exists or ('blacklist amdgpu' not in (blacklist_amd_content.content | b64decode)))
+  register: amd_blacklisted
+  tags: gpu_passthrough
+
+- name: Update initramfs
+  become: yes
+  command: update-initramfs -u -k all
+  when: gpu_passthrough_available and (grub_modified.changed or vfio_pci_configured.changed or nvidia_blacklisted.changed or amd_blacklisted.changed)
+  register: initramfs_updated
+  tags: gpu_passthrough
+
+- name: Verify NVIDIA VFIO binding (check if reboot needed)
+  become: yes
+  shell: lspci -nnk -d {{ nvidia_gpu_id }} | grep "Kernel driver in use"
+  register: nvidia_vfio_check
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available and nvidia_gpu_id is defined and nvidia_gpu_id != ""
+  tags: gpu_passthrough
+
+- name: Display NVIDIA VFIO status
+  debug:
+    msg: 
+      - "NVIDIA GPU driver: {{ nvidia_vfio_check.stdout if nvidia_vfio_check.stdout != '' else 'Not bound yet' }}"
+      - "{% if 'vfio-pci' in nvidia_vfio_check.stdout %}✔️ NVIDIA GPU is already bound to vfio-pci{% elif initramfs_updated.changed %}⚠️ Reboot required to apply VFIO binding{% else %}⚠️ Configuration may need reboot{% endif %}"
+  when: gpu_passthrough_available and nvidia_gpu_id is defined and nvidia_gpu_id != ""
+  tags: gpu_passthrough
+
+- name: Verify AMD VFIO binding (check if reboot needed)
+  become: yes
+  shell: lspci -nnk -d {{ amd_gpu_id }} | grep "Kernel driver in use"
+  register: amd_vfio_check
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available and amd_gpu_id is defined and amd_gpu_id != ""
+  tags: gpu_passthrough
+
+- name: Display AMD VFIO status
+  debug:
+    msg: 
+      - "AMD GPU driver: {{ amd_vfio_check.stdout if amd_vfio_check.stdout != '' else 'Not bound yet' }}"
+      - "{% if 'vfio-pci' in amd_vfio_check.stdout %}✔️ AMD GPU is already bound to vfio-pci{% elif initramfs_updated.changed %}⚠️ Reboot required to apply VFIO binding{% else %}⚠️ Configuration may need reboot{% endif %}"
+  when: gpu_passthrough_available and amd_gpu_id is defined and amd_gpu_id != ""
+  tags: gpu_passthrough
+
+- name: Verify IOMMU in dmesg
+  become: yes
+  shell: dmesg | grep -e IOMMU -e DMAR
+  register: iommu_dmesg
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Display IOMMU status
+  debug:
+    msg: "{{ iommu_dmesg.stdout_lines if iommu_dmesg.stdout != '' else 'IOMMU not detected in dmesg (may need reboot)' }}"
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Create reboot notification file
+  become: yes
+  copy:
+    dest: /root/GPU_PASSTHROUGH_REBOOT_REQUIRED.txt
+    content: |
+      ============================================
+      GPU PASSTHROUGH CONFIGURATION COMPLETED
+      ============================================
+      
+      {% if nvidia_iommu_device_ids is defined and nvidia_iommu_device_ids.stdout is defined and nvidia_iommu_device_ids.stdout != "" %}
+      NVIDIA GPU IOMMU Group Device IDs: {{ nvidia_iommu_device_ids.stdout }}
+      {% endif %}
+      {% if amd_iommu_device_ids is defined and amd_iommu_device_ids.stdout is defined and amd_iommu_device_ids.stdout != "" %}
+      AMD GPU IOMMU Group Device IDs: {{ amd_iommu_device_ids.stdout }}
+      {% endif %}
+      All Devices Bound to VFIO-PCI: {{ vfio_device_ids_combined }}
+      
+      CPU Vendor: {{ cpu_vendor.stdout }}
+      IOMMU Parameter: {{ iommu_param }}
+      
+      CHANGES MADE:
+      {% if grub_modified.changed %}
+      ✓ GRUB configuration updated with IOMMU settings
+      {% endif %}
+      {% if vfio_pci_configured.changed %}
+      ✓ VFIO-PCI binding configured for all IOMMU group devices
+      {% endif %}
+      {% if nvidia_blacklisted.changed %}
+      ✓ NVIDIA and Nouveau drivers blacklisted
+      {% endif %}
+      {% if amd_blacklisted.changed %}
+      ✓ AMD drivers (amdgpu, radeon) blacklisted
+      {% endif %}
+      {% if initramfs_updated.changed %}
+      ✓ Initramfs updated
+      {% endif %}
+      
+      === REBOOT REQUIRED TO APPLY CHANGES ===
+      
+      After reboot, verify with:
+      {% if nvidia_gpu_addresses is defined and nvidia_gpu_addresses.stdout != "" %}
+      {% for gpu_addr in nvidia_gpu_addresses.stdout_lines %}
+      - lspci -nnk -s {{ gpu_addr }}
+      {% endfor %}
+      {% endif %}
+      {% if amd_gpu_addresses is defined and amd_gpu_addresses.stdout != "" %}
+      {% for gpu_addr in amd_gpu_addresses.stdout_lines %}
+      - lspci -nnk -s {{ gpu_addr }}
+      {% endfor %}
+      {% endif %}
+      - dmesg | grep -e IOMMU -e DMAR
+      - Check all IOMMU group devices: ls -l /sys/bus/pci/devices/<GPU_ADDRESS>/iommu_group/devices/
+      
+      Expected: Kernel driver in use: vfio-pci (for all devices in GPU's IOMMU group)
+      ============================================
+    mode: '0644'
+  when: gpu_passthrough_available and initramfs_updated.changed
+  tags: gpu_passthrough
+
+- name: Display reboot warning
+  debug:
+    msg: 
+      - "============================================"
+      - "=== REBOOT REQUIRED ==="
+      - "GPU passthrough configuration completed."
+      - "System reboot is required to apply changes."
+      - "Details saved in: /root/GPU_PASSTHROUGH_REBOOT_REQUIRED.txt"
+      - "============================================"
+  when: gpu_passthrough_available and initramfs_updated.changed
+  tags: gpu_passthrough
+

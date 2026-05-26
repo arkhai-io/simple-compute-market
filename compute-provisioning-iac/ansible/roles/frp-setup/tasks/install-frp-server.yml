@@ -1,0 +1,55 @@
+---
+# Install FRP Server on Public VPS
+
+- name: Set FRP version
+  ansible.builtin.set_fact:
+    frp_version: "0.54.0"
+
+- name: Check if FRP server binary exists
+  ansible.builtin.stat:
+    path: /usr/local/bin/frps
+  register: frps_binary
+
+- name: Download FRP server
+  ansible.builtin.get_url:
+    url: "https://github.com/fatedier/frp/releases/download/v{{ frp_version }}/frp_{{ frp_version }}_linux_amd64.tar.gz"
+    dest: "/tmp/frp_{{ frp_version }}_linux_amd64.tar.gz"
+    mode: '0644'
+  when: not frps_binary.stat.exists
+
+- name: Extract FRP server
+  ansible.builtin.unarchive:
+    src: "/tmp/frp_{{ frp_version }}_linux_amd64.tar.gz"
+    dest: /tmp/
+    remote_src: yes
+  when: not frps_binary.stat.exists
+
+- name: Install FRP server binary
+  ansible.builtin.copy:
+    src: "/tmp/frp_{{ frp_version }}_linux_amd64/frps"
+    dest: /usr/local/bin/frps
+    mode: '0755'
+    remote_src: yes
+  when: not frps_binary.stat.exists
+  notify: restart frps
+
+- name: Create FRP configuration directory
+  ansible.builtin.file:
+    path: /etc/frp
+    state: directory
+    mode: '0755'
+
+- name: Create FRP log directory
+  ansible.builtin.file:
+    path: /var/log/frp
+    state: directory
+    mode: '0755'
+
+- name: Clean up downloaded files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/frp_{{ frp_version }}_linux_amd64.tar.gz"
+    - "/tmp/frp_{{ frp_version }}_linux_amd64"
+  when: not frps_binary.stat.exists

@@ -228,8 +228,8 @@ class TestStorefrontRegistration:
             "The resource CSV importer likely wrote to a different SQLite path than the server reads.\n"
             "Check that the compose command passes --db-path matching [seller].db_path in config.toml.\n"
             "Run the importer manually:\n"
-            "  docker exec market-agent-sell python scripts/import_resources_csv.py \\\n"
-            "    --csv src/market_storefront/data/ww1-machine.csv \\\n"
-            "    --db-path src/market_storefront/data/sell-agent/agent.db"
+            "  docker exec bob-storefront python scripts/import_resources_csv.py \\\n"
+            "    --csv src/market_storefront/data/kvm1-machine.csv \\\n"
+            "    --db-path src/market_storefront/data/storefront/agent.db"
         )
         log.info("✓ Resource portfolio seeded: resource_count=%d", resource_count)

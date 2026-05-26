@@ -1,0 +1,194 @@
+---
+# VM Management - JSON Output Formatting
+
+# VM Create JSON Output
+- name: Create JSON formatted output for VM creation
+  set_fact:
+    vm_creation_json: "{{ vm_creation_data | to_nice_json }}"
+  when: vm_action == "create" and vm_creation_data is defined
+
+- name: Output VM creation data as parsable JSON
+  debug:
+    var: vm_creation_data
+  when: vm_action == "create" and vm_creation_data is defined
+
+- name: Output VM creation JSON string for external parsing
+  debug:
+    msg: "{{ vm_creation_json }}"
+  when: vm_action == "create" and vm_creation_json is defined
+
+# VM Start JSON Output
+- name: Create JSON formatted output for VM start
+  set_fact:
+    vm_start_json: "{{ vm_start_data | to_nice_json }}"
+  when: vm_action == "start" and vm_start_data is defined
+
+- name: Output VM start data as parsable JSON
+  debug:
+    var: vm_start_data
+  when: vm_action == "start" and vm_start_data is defined
+
+- name: Output VM start JSON string for external parsing
+  debug:
+    msg: "{{ vm_start_json }}"
+  when: vm_action == "start" and vm_start_json is defined
+
+# VM Shutdown JSON Output
+- name: Create JSON formatted output for VM shutdown
+  set_fact:
+    vm_shutdown_json: "{{ vm_shutdown_data | to_nice_json }}"
+  when: vm_action == "shutdown" and vm_shutdown_data is defined
+
+- name: Output VM shutdown data as parsable JSON
+  debug:
+    var: vm_shutdown_data
+  when: vm_action == "shutdown" and vm_shutdown_data is defined
+
+- name: Output VM shutdown JSON string for external parsing
+  debug:
+    msg: "{{ vm_shutdown_json }}"
+  when: vm_action == "shutdown" and vm_shutdown_json is defined
+
+# VM Destroy JSON Output
+- name: Create JSON formatted output for VM destroy
+  set_fact:
+    vm_destroy_json: "{{ vm_destroy_data | to_nice_json }}"
+  when: vm_action == "destroy" and vm_destroy_data is defined
+
+- name: Output VM destroy data as parsable JSON
+  debug:
+    var: vm_destroy_data
+  when: vm_action == "destroy" and vm_destroy_data is defined
+
+- name: Output VM destroy JSON string for external parsing
+  debug:
+    msg: "{{ vm_destroy_json }}"
+  when: vm_action == "destroy" and vm_destroy_json is defined
+
+# VM Reboot JSON Output
+- name: Create JSON formatted output for VM reboot
+  set_fact:
+    vm_reboot_json: "{{ vm_reboot_data | to_nice_json }}"
+  when: vm_action == "reboot" and vm_reboot_data is defined
+
+- name: Output VM reboot data as parsable JSON
+  debug:
+    var: vm_reboot_data
+  when: vm_action == "reboot" and vm_reboot_data is defined
+
+- name: Output VM reboot JSON string for external parsing
+  debug:
+    msg: "{{ vm_reboot_json }}"
+  when: vm_action == "reboot" and vm_reboot_json is defined
+
+# VM Reset Password JSON Output
+- name: Create JSON formatted output for VM reset_password
+  set_fact:
+    vm_password_reset_json: "{{ vm_password_reset_data | to_nice_json }}"
+  when: vm_action == "reset_password" and vm_password_reset_data is defined
+
+- name: Output VM reset_password data as parsable JSON
+  debug:
+    var: vm_password_reset_data
+  when: vm_action == "reset_password" and vm_password_reset_data is defined
+
+- name: Output VM reset_password JSON string for external parsing
+  debug:
+    msg: "{{ vm_password_reset_json }}"
+  when: vm_action == "reset_password" and vm_password_reset_json is defined
+
+# VM Undefine JSON Output
+- name: Create JSON formatted output for VM undefine
+  set_fact:
+    vm_undefine_json: "{{ vm_undefine_data | to_nice_json }}"
+  when: vm_action == "undefine" and vm_undefine_data is defined
+
+- name: Output VM undefine data as parsable JSON
+  debug:
+    var: vm_undefine_data
+  when: vm_action == "undefine" and vm_undefine_data is defined
+
+- name: Output VM undefine JSON string for external parsing
+  debug:
+    msg: "{{ vm_undefine_json }}"
+  when: vm_action == "undefine" and vm_undefine_json is defined
+
+# VM Monitor JSON Output
+- name: Create JSON formatted output for VM monitor
+  set_fact:
+    vm_monitoring_json: "{{ vm_monitoring_data | to_nice_json }}"
+  when: vm_action == "monitor" and vm_monitoring_data is defined
+
+- name: Output VM monitor data as parsable JSON
+  debug:
+    var: vm_monitoring_data
+  when: vm_action == "monitor" and vm_monitoring_data is defined
+
+- name: Output VM monitor JSON string for external parsing
+  debug:
+    msg: "{{ vm_monitoring_json }}"
+  when: vm_action == "monitor" and vm_monitoring_json is defined
+
+# VM Lease End JSON Output
+- name: Create JSON formatted output for VM lease_end
+  set_fact:
+    vm_lease_end_json: "{{ vm_lease_end_data | to_nice_json }}"
+  when: vm_action == "lease_end" and vm_lease_end_data is defined
+
+- name: Output VM lease_end data as parsable JSON
+  debug:
+    var: vm_lease_end_data
+  when: vm_action == "lease_end" and vm_lease_end_data is defined
+
+- name: Output VM lease_end JSON string for external parsing
+  debug:
+    msg: "{{ vm_lease_end_json }}"
+  when: vm_action == "lease_end" and vm_lease_end_json is defined
+
+# VM Lease Remove JSON Output
+- name: Create JSON formatted output for VM lease_remove
+  set_fact:
+    vm_lease_remove_json: "{{ vm_lease_remove_data | to_nice_json }}"
+  when: vm_action == "lease_remove" and vm_lease_remove_data is defined
+
+- name: Output VM lease_remove data as parsable JSON
+  debug:
+    var: vm_lease_remove_data
+  when: vm_action == "lease_remove" and vm_lease_remove_data is defined
+
+- name: Output VM lease_remove JSON string for external parsing
+  debug:
+    msg: "{{ vm_lease_remove_json }}"
+  when: vm_action == "lease_remove" and vm_lease_remove_json is defined
+
+# VM List JSON Output
+- name: Create JSON formatted output for VM list
+  set_fact:
+    vm_list_json: "{{ vm_list_data | to_nice_json }}"
+  when: vm_action == "list" and vm_list_data is defined
+
+- name: Output VM list data as parsable JSON
+  debug:
+    var: vm_list_data
+  when: vm_action == "list" and vm_list_data is defined
+
+- name: Output VM list JSON string for external parsing
+  debug:
+    msg: "{{ vm_list_json }}"
+  when: vm_action == "list" and vm_list_json is defined
+
+# VM Check JSON Output
+- name: Create JSON formatted output for VM check
+  set_fact:
+    vm_check_json: "{{ check_data | to_nice_json }}"
+  when: vm_action == "check" and check_data is defined
+
+- name: Output VM check data as parsable JSON
+  debug:
+    var: check_data
+  when: vm_action == "check" and check_data is defined
+
+- name: Output VM check JSON string for external parsing
+  debug:
+    msg: "{{ vm_check_json }}"
+  when: vm_action == "check" and check_data is defined

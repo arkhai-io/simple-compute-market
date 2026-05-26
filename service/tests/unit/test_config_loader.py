@@ -1,7 +1,7 @@
 """Unit tests for the XDG-aware user config loader.
 
 The loader is what lets `market buy` / `market negotiate` pick up chain
-+ wallet + registry defaults from `~/.config/arkhai/config.toml`. These
++ wallet + registry defaults from `~/.config/arkhai/buyer.toml`. These
 tests cover the resolution path surface: file discovery via XDG,
 missing + malformed files falling back to empty, dotted get/set,
 write roundtrip, and the precedence hierarchy used by resolve_value().
@@ -36,7 +36,7 @@ def test_user_config_dir_defaults_to_dot_config(monkeypatch, tmp_path):
 
 def test_user_config_file_nests_under_dir(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    assert config_loader.user_config_file() == tmp_path / "arkhai" / "config.toml"
+    assert config_loader.user_config_file() == tmp_path / "arkhai" / "buyer.toml"
 
 
 # ---------------------------------------------------------------------------
@@ -74,25 +74,25 @@ def test_load_returns_empty_on_malformed_toml(tmp_path, capsys):
 
 
 # ---------------------------------------------------------------------------
-# Layered config — config.toml + config.secrets.toml merge
+# Layered config — buyer.toml + buyer.secrets.toml merge
 # ---------------------------------------------------------------------------
 
 
 def test_layered_load_merges_base_then_secrets(monkeypatch, tmp_path):
-    """The Secret overlay (config.secrets.toml) merges on top of the
-    ConfigMap base (config.toml). Disjoint tables compose as siblings;
+    """The Secret overlay (buyer.secrets.toml) merges on top of the
+    ConfigMap base (buyer.toml). Disjoint tables compose as siblings;
     same-key conflicts resolve overlay-wins."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     cfg_dir = tmp_path / "arkhai"
     cfg_dir.mkdir(parents=True)
-    (cfg_dir / "config.toml").write_text("""
+    (cfg_dir / "buyer.toml").write_text("""
 [wallet]
 ssh_public_key = "ssh-ed25519 AAAA..."
 
 [chain]
 name = "anvil"
 """)
-    (cfg_dir / "config.secrets.toml").write_text("""
+    (cfg_dir / "buyer.secrets.toml").write_text("""
 [wallet]
 private_key = "0xkey"
 address = "0xaddr"
@@ -111,18 +111,18 @@ def test_layered_load_secrets_wins_on_conflict(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     cfg_dir = tmp_path / "arkhai"
     cfg_dir.mkdir(parents=True)
-    (cfg_dir / "config.toml").write_text('[seller]\nadmin_api_key = "from-base"\n')
-    (cfg_dir / "config.secrets.toml").write_text('[seller]\nadmin_api_key = "from-secret"\n')
+    (cfg_dir / "buyer.toml").write_text('[seller]\nadmin_api_key = "from-base"\n')
+    (cfg_dir / "buyer.secrets.toml").write_text('[seller]\nadmin_api_key = "from-secret"\n')
     cfg = config_loader.load_user_config()
     assert cfg["seller"]["admin_api_key"] == "from-secret"
 
 
 def test_layered_load_secrets_optional(monkeypatch, tmp_path):
-    """Missing config.secrets.toml is a no-op — base file alone still loads."""
+    """Missing buyer.secrets.toml is a no-op — base file alone still loads."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     cfg_dir = tmp_path / "arkhai"
     cfg_dir.mkdir(parents=True)
-    (cfg_dir / "config.toml").write_text('[chain]\nname = "base_sepolia"\n')
+    (cfg_dir / "buyer.toml").write_text('[chain]\nname = "base_sepolia"\n')
     cfg = config_loader.load_user_config()
     assert cfg["chain"]["name"] == "base_sepolia"
 
@@ -140,7 +140,7 @@ def test_cli_path_override_skips_secrets_layer(monkeypatch, tmp_path):
     cfg_dir = tmp_path / "arkhai"
     cfg_dir.mkdir(parents=True)
     # An ambient secrets file in the XDG dir that should be IGNORED.
-    (cfg_dir / "config.secrets.toml").write_text('[wallet]\nprivate_key = "0xshould-not-leak"\n')
+    (cfg_dir / "buyer.secrets.toml").write_text('[wallet]\nprivate_key = "0xshould-not-leak"\n')
     explicit = tmp_path / "only.toml"
     explicit.write_text('[chain]\nname = "anvil"\n')
     config_loader.set_user_config_path(explicit)
@@ -156,8 +156,8 @@ def test_user_config_files_lists_base_and_secrets(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     files = config_loader.user_config_files()
     assert files == [
-        tmp_path / "arkhai" / "config.toml",
-        tmp_path / "arkhai" / "config.secrets.toml",
+        tmp_path / "arkhai" / "buyer.toml",
+        tmp_path / "arkhai" / "buyer.secrets.toml",
     ]
 
 
@@ -168,6 +168,100 @@ def test_user_config_files_collapses_to_override(monkeypatch, tmp_path):
         assert config_loader.user_config_files() == [explicit]
     finally:
         config_loader.set_user_config_path(None)
+
+
+# ---------------------------------------------------------------------------
+# storefront_config_file / load_storefront_config — distinct from the
+# buyer's user_config_file so the two roles' state on one host stays
+# separate. `market-storefront config init-user` previously wrote to
+# buyer.toml and so was silently scaffolding into the buyer's file.
+# ---------------------------------------------------------------------------
+
+
+def test_storefront_config_file_nests_under_arkhai_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert config_loader.storefront_config_file() == tmp_path / "arkhai" / "storefront.toml"
+
+
+def test_storefront_config_file_is_distinct_from_buyer(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert config_loader.storefront_config_file() != config_loader.user_config_file()
+
+
+def test_storefront_config_file_honors_override(tmp_path):
+    explicit = tmp_path / "explicit.toml"
+    config_loader.set_user_config_path(explicit)
+    try:
+        assert config_loader.storefront_config_file() == explicit
+    finally:
+        config_loader.set_user_config_path(None)
+
+
+def test_load_storefront_config_walks_storefront_files(monkeypatch, tmp_path):
+    """`load_storefront_config` reads `storefront.toml` + `storefront.secrets.toml`
+    and ignores the buyer's `buyer.toml` even when both pairs exist side by side."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "buyer.toml").write_text('[seller]\nagent_id = "from-buyer-file"\n')
+    (cfg_dir / "storefront.toml").write_text('[seller]\nagent_id = "from-base"\n')
+    (cfg_dir / "storefront.secrets.toml").write_text('[wallet]\nprivate_key = "0xkey"\n')
+
+    cfg = config_loader.load_storefront_config()
+
+    assert cfg["seller"]["agent_id"] == "from-base"        # not "from-buyer-file"
+    assert cfg["wallet"]["private_key"] == "0xkey"          # secrets layer merged
+
+
+def test_load_storefront_config_returns_empty_when_neither_file_present(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert config_loader.load_storefront_config() == {}
+
+
+# ---------------------------------------------------------------------------
+# identity_registry_address — chain-name fallback to the canonical CREATE2
+# vanity address. Saves users from having to copy a fixed hex string into
+# every config for the standard chains.
+# ---------------------------------------------------------------------------
+
+
+def test_identity_registry_address_uses_explicit_toml_value():
+    cfg = {"registry": {"identity_registry_address": "0xCUSTOM"}, "chain": {"name": "base_sepolia"}}
+    assert config_loader.identity_registry_address(config=cfg) == "0xCUSTOM"
+
+
+def test_identity_registry_address_falls_back_to_chain_name_default():
+    """No address in config → use canonical CREATE2 vanity for known chain."""
+    cfg = {"chain": {"name": "base_sepolia"}}
+    canonical = config_loader.KNOWN_IDENTITY_REGISTRY["base_sepolia"]
+    assert config_loader.identity_registry_address(config=cfg) == canonical
+
+
+def test_identity_registry_address_known_chains_all_match():
+    """base_sepolia, ethereum_sepolia, and anvil all share the canonical
+    CREATE2 deployment, so the default should be the same address."""
+    addresses = {
+        chain: config_loader.identity_registry_address(config={"chain": {"name": chain}})
+        for chain in ("base_sepolia", "ethereum_sepolia", "anvil")
+    }
+    assert len(set(addresses.values())) == 1
+
+
+def test_identity_registry_address_unknown_chain_returns_none():
+    cfg = {"chain": {"name": "some_random_chain"}}
+    assert config_loader.identity_registry_address(config=cfg) is None
+
+
+def test_identity_registry_address_flag_overrides_everything(monkeypatch):
+    monkeypatch.setenv("IDENTITY_REGISTRY_ADDRESS", "0xENV")
+    cfg = {"registry": {"identity_registry_address": "0xTOML"}, "chain": {"name": "base_sepolia"}}
+    assert config_loader.identity_registry_address(flag="0xFLAG", config=cfg) == "0xFLAG"
+
+
+def test_identity_registry_address_env_beats_toml(monkeypatch):
+    monkeypatch.setenv("IDENTITY_REGISTRY_ADDRESS", "0xENV")
+    cfg = {"registry": {"identity_registry_address": "0xTOML"}, "chain": {"name": "base_sepolia"}}
+    assert config_loader.identity_registry_address(config=cfg) == "0xENV"
 
 
 def test_deep_merge_recurses_into_nested_tables():
@@ -308,7 +402,7 @@ def test_coerce_applied_to_env_string(monkeypatch):
 
 
 def test_write_then_read_roundtrips(tmp_path):
-    p = tmp_path / "config.toml"
+    p = tmp_path / "buyer.toml"
     doc = {
         "wallet": {"address": "0xdeadbeef", "private_key": "0xabc"},
         "chain": {"name": "base_sepolia", "rpc_url": "https://sepolia.base.org"},
@@ -319,7 +413,7 @@ def test_write_then_read_roundtrips(tmp_path):
 
 
 def test_write_creates_parent_directory(tmp_path):
-    nested = tmp_path / "deep" / "path" / "config.toml"
+    nested = tmp_path / "deep" / "path" / "buyer.toml"
     config_loader.write_user_config({"chain": {"name": "anvil"}}, nested)
     assert nested.exists()
     assert config_loader.load_user_config(nested) == {"chain": {"name": "anvil"}}
@@ -341,7 +435,7 @@ def test_write_serializes_bool_int_float():
 
 
 def test_write_escapes_quotes_and_backslashes(tmp_path):
-    p = tmp_path / "config.toml"
+    p = tmp_path / "buyer.toml"
     doc = {"wallet": {"note": 'has "quotes" and a backslash \\'}}
     config_loader.write_user_config(doc, p)
     assert config_loader.load_user_config(p) == doc
@@ -367,3 +461,142 @@ def test_wallet_address_falls_back_to_toml(monkeypatch):
 def test_chain_name_default_when_everything_missing(monkeypatch):
     monkeypatch.delenv("CHAIN_NAME", raising=False)
     assert config_loader.chain_name(config={}) == "ethereum_sepolia"
+
+
+# ---------------------------------------------------------------------------
+# derive_wallet_address
+# ---------------------------------------------------------------------------
+
+
+# Test vector: deterministic eth_account derivation from a well-known key.
+# This is the first key from Anvil's default mnemonic.
+_ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+_ANVIL_ADDR = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+
+
+def test_derive_wallet_address_known_key():
+    assert config_loader.derive_wallet_address(_ANVIL_KEY) == _ANVIL_ADDR
+
+
+def test_derive_wallet_address_empty_returns_none():
+    assert config_loader.derive_wallet_address("") is None
+    assert config_loader.derive_wallet_address(None) is None
+
+
+def test_derive_wallet_address_malformed_returns_none():
+    assert config_loader.derive_wallet_address("not a real key") is None
+    assert config_loader.derive_wallet_address("0xdeadbeef") is None  # too short
+
+
+# ---------------------------------------------------------------------------
+# query_chain_id_via_rpc + chain_name_for_rpc
+# ---------------------------------------------------------------------------
+
+
+def _fake_urlopen(returned_chain_hex: str):
+    """Build a urlopen replacement that always replies with a fixed chain id."""
+    import io
+    import json
+
+    class _Resp:
+        def __init__(self, payload: bytes) -> None:
+            self._payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return self._payload
+
+    payload = json.dumps({"jsonrpc": "2.0", "id": 1, "result": returned_chain_hex}).encode()
+    return lambda req, timeout=None: _Resp(payload)
+
+
+def test_query_chain_id_via_rpc_returns_int(monkeypatch):
+    monkeypatch.setattr(
+        "urllib.request.urlopen", _fake_urlopen("0xaa36a7"),  # 11155111 = sepolia
+    )
+    assert config_loader.query_chain_id_via_rpc("https://sepolia.example") == 11155111
+
+
+def test_query_chain_id_via_rpc_handles_ws_url(monkeypatch):
+    captured = {}
+
+    def _urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        import io
+        import json
+        payload = json.dumps({"jsonrpc": "2.0", "id": 1, "result": "0x14a34"}).encode()
+
+        class _R:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return payload
+
+        return _R()
+
+    monkeypatch.setattr("urllib.request.urlopen", _urlopen)
+    cid = config_loader.query_chain_id_via_rpc("ws://localhost:8546")
+    assert cid == 84532
+    assert captured["url"].startswith("http://"), (
+        f"ws:// should be rewritten to http://, got {captured['url']}"
+    )
+
+
+def test_query_chain_id_via_rpc_returns_none_on_error(monkeypatch):
+    def _raise(*a, **kw):
+        raise OSError("boom")
+
+    monkeypatch.setattr("urllib.request.urlopen", _raise)
+    assert config_loader.query_chain_id_via_rpc("https://broken.example") is None
+
+
+def test_query_chain_id_via_rpc_returns_none_for_empty_url():
+    assert config_loader.query_chain_id_via_rpc("") is None
+    assert config_loader.query_chain_id_via_rpc(None) is None
+    assert config_loader.query_chain_id_via_rpc("   ") is None
+
+
+def test_chain_name_for_rpc_resolves_known_chain(monkeypatch):
+    monkeypatch.setattr(
+        "urllib.request.urlopen", _fake_urlopen("0xaa36a7"),  # 11155111
+    )
+    assert config_loader.chain_name_for_rpc("https://sepolia.example") == "ethereum_sepolia"
+
+
+def test_chain_name_for_rpc_anvil(monkeypatch):
+    monkeypatch.setattr(
+        "urllib.request.urlopen", _fake_urlopen(hex(31337)),
+    )
+    assert config_loader.chain_name_for_rpc("http://localhost:8545") == "anvil"
+
+
+def test_chain_name_for_rpc_anvil_legacy_id(monkeypatch):
+    """Anvil ships with 1337 as well as 31337 — both map to 'anvil'."""
+    monkeypatch.setattr(
+        "urllib.request.urlopen", _fake_urlopen(hex(1337)),
+    )
+    assert config_loader.chain_name_for_rpc("http://localhost:8545") == "anvil"
+
+
+def test_chain_name_for_rpc_unknown_id_returns_none(monkeypatch):
+    monkeypatch.setattr(
+        "urllib.request.urlopen", _fake_urlopen(hex(999999)),
+    )
+    assert config_loader.chain_name_for_rpc("https://exotic.example") is None
+
+
+def test_chain_name_for_rpc_returns_none_on_rpc_failure(monkeypatch):
+    def _raise(*a, **kw):
+        raise OSError("boom")
+
+    monkeypatch.setattr("urllib.request.urlopen", _raise)
+    assert config_loader.chain_name_for_rpc("https://broken.example") is None

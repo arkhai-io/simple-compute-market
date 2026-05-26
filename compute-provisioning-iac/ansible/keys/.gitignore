@@ -1,0 +1,11 @@
+# SSH private keys - never commit to git
+*_private_key
+*_ed25519
+*.pem
+
+# Allow public keys (optional)
+# *_public_key.pub
+
+# Keep this directory but ignore all contents by default
+*
+!.gitignore

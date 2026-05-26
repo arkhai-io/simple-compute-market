@@ -2,19 +2,19 @@
 # Anvil default account #2; deterministic vanity contract addresses.
 # DO NOT use these keys on any public network.
 #
-# Mounted into the sell_agent container at /etc/arkhai/storefront.toml.
+# Mounted into the bob-storefront container at /etc/arkhai/storefront.toml.
 # XDG_CONFIG_HOME=/etc tells dynaconf to look here.
 
 agent_id            = "bob"
 # onchain_agent_id    = "1"
 port                = 8001
-base_url            = "http://sell_agent:8001/"
-db_path             = "./src/market_storefront/data/sell-agent/agent.db"
+base_url            = "http://bob-storefront:8001/"
+db_path             = "./src/market_storefront/data/storefront/agent.db"
 log_file_path       = "./logs/bob.log"
 admin_api_key       = "test-api-key"
 # Seed the resources table from this CSV on startup when the table is empty.
-# The bundled ww1-machine.csv is the local dev inventory. Bind-mounted into
-# the container at /app/resources.csv by `make deploy-seller-agent`.
+# The bundled kvm1-machine.csv is the local dev inventory. Bind-mounted into
+# the container at /app/resources.csv by `make deploy-storefront`.
 # For helm deployments, inject via --set-file (RESOURCES_CSV_FILE) instead —
 # the CSV content is delivered through the agent Secret, not a file path.
 resources_csv_path  = "/app/resources.csv"

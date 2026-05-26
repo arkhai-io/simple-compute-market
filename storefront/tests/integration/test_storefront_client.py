@@ -228,3 +228,19 @@ class TestAgentWalletEndpoint:
         assert "agent_wallet_address" in data
         # Value is a string (may be empty if not configured)
         assert isinstance(data["agent_wallet_address"], str)
+
+
+# ---------------------------------------------------------------------------
+# /.well-known/agent-card.json
+# ---------------------------------------------------------------------------
+
+class TestAgentCardEndpoint:
+    async def test_returns_200_with_json(self, identity_client):
+        resp = await identity_client.get("/.well-known/agent-card.json")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, dict)
+        # A2A AgentCard requires name + url + version + skills/capabilities.
+        assert "name" in data
+        assert "url" in data
+        assert "version" in data

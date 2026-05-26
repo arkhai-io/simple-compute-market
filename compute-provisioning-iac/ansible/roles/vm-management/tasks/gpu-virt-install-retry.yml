@@ -1,0 +1,218 @@
+---
+# This file handles recursive GPU retry logic for virt-install
+# It will be called when a GPU fails and another should be tried
+
+- name: Try virt-install with alternative GPU
+  block:
+    - name: Execute virt-install with alternative GPU
+      shell: |
+        virt-install \
+          --name {{ vm_name }} \
+          --ram {{ vm_ram }} \
+          --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \
+          {% if vm_image_type == 'scratch' %}--disk path=/var/lib/libvirt/images/{{ vm_name }}-init.iso,device=cdrom \{% endif %}
+
+          --vcpus {{ vm_vcpus }} \
+          --cpu host-passthrough,cache.mode=passthrough \
+          --machine q35 \
+          --boot uefi \
+          --features smm=on \
+          --tpm none \
+          --os-variant {{ vm_os_variant }} \
+          --network network=default,model=virtio \
+          --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 \
+          --hostdev {{ vm_gpu_device }}{% if vm_gpu_rom_file is defined and vm_gpu_rom_file != '' %},romfile={{ vm_gpu_rom_file }}{% endif %} \
+          {% if alternative_gpu_audio is defined and alternative_gpu_audio.stdout is defined and alternative_gpu_audio.stdout != 'NO_AUDIO_DEVICE' %}--hostdev {{ alternative_gpu_audio.stdout }} \{% endif %}
+
+          --graphics none \
+          --console pty,target_type=serial \
+          --import \
+          --noautoconsole
+      register: vm_create_result
+      delegate_to: "{{ target_host }}"
+
+    - name: Mark virt-install as successful
+      set_fact:
+        virt_install_success: true
+
+  rescue:
+    - name: Check if error is GPU-related
+      set_fact:
+        is_gpu_error: "{{ (vm_create_result.stderr | default('') is search('hostdev|PCI|GPU|vfio|IOMMU')) or (vm_create_result.msg | default('') is search('hostdev|PCI|GPU|vfio|IOMMU')) }}"
+
+    - name: Add failed GPU to attempted list
+      set_fact:
+        attempted_gpus: "{{ attempted_gpus + [vm_gpu_device] }}"
+      when: is_gpu_error | bool
+
+    - name: Increment retry count
+      set_fact:
+        gpu_retry_count: "{{ gpu_retry_count | int + 1 }}"
+      when: is_gpu_error | bool
+
+    - name: Check if we should continue retrying
+      set_fact:
+        should_retry: "{{ (gpu_retry_count | int) < (max_gpu_retries | int) and (is_gpu_error | bool) }}"
+
+    - name: Get next alternative GPU (excluding attempted ones)
+      shell: |
+        #!/bin/bash
+        
+        # Read GPU lockfile
+        if [ ! -f /etc/libvirt/gpu-capabilities/gpu-lockfile.json ]; then
+          echo "NO_LOCKFILE"
+          exit 0
+        fi
+        
+        # Get list of available GPUs from lockfile
+        AVAILABLE_GPUS=$(jq -r '.gpu_modes.passthrough.available_devices[]' /etc/libvirt/gpu-capabilities/gpu-lockfile.json 2>/dev/null)
+        
+        if [ -z "$AVAILABLE_GPUS" ]; then
+          echo "NO_AVAILABLE_GPU"
+          exit 0
+        fi
+        
+        # Build array of attempted GPUs
+        declare -a ATTEMPTED_GPUS_ARRAY
+        {% if attempted_gpus is defined and attempted_gpus | length > 0 %}
+        ATTEMPTED_GPUS_ARRAY=({% for gpu in attempted_gpus %}"{{ gpu }}" {% endfor %})
+        {% endif %}
+        
+        # Build associative array of GPU to VM count, excluding attempted GPUs
+        declare -A GPU_VM_COUNT
+        for gpu_pci in $AVAILABLE_GPUS; do
+          if [ -z "$gpu_pci" ]; then
+            continue
+          fi
+          
+          # Skip already attempted GPUs
+          IS_ATTEMPTED=0
+          for attempted in "${ATTEMPTED_GPUS_ARRAY[@]}"; do
+            if [ "$gpu_pci" = "$attempted" ]; then
+              IS_ATTEMPTED=1
+              break
+            fi
+          done
+          
+          if [ $IS_ATTEMPTED -eq 1 ]; then
+            continue
+          fi
+          
+          # Count VMs using this GPU
+          COUNT=0
+          for vm in $(virsh list --all --name); do
+            if [ ! -z "$vm" ]; then
+              VM_GPUS=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s\n", $1, $2, $3, $4}' | sed 's/ /0/g')
+              if echo "$VM_GPUS" | grep -q "^${gpu_pci}$"; then
+                COUNT=$((COUNT + 1))
+              fi
+            fi
+          done
+          
+          GPU_VM_COUNT[$gpu_pci]=$COUNT
+        done
+        
+        # Check if we have any available GPUs
+        GPU_COUNT=0
+        for key in "${!GPU_VM_COUNT[@]}"; do
+          GPU_COUNT=$((GPU_COUNT + 1))
+        done
+        
+        if [ $GPU_COUNT -eq 0 ]; then
+          echo "NO_AVAILABLE_GPU"
+          exit 0
+        fi
+        
+        # Find GPU with lowest usage count
+        MIN_COUNT=999999
+        SELECTED_GPU=""
+        for gpu_pci in "${!GPU_VM_COUNT[@]}"; do
+          COUNT=${GPU_VM_COUNT[$gpu_pci]}
+          if [ $COUNT -lt $MIN_COUNT ]; then
+            MIN_COUNT=$COUNT
+            SELECTED_GPU=$gpu_pci
+          fi
+        done
+        
+        if [ ! -z "$SELECTED_GPU" ]; then
+          echo "$SELECTED_GPU"
+        else
+          echo "NO_AVAILABLE_GPU"
+        fi
+      args:
+        executable: /bin/bash
+      register: alternative_gpu_pci
+      when: should_retry | bool
+      delegate_to: "{{ target_host }}"
+
+    - name: Find audio device for next alternative GPU
+      shell: |
+        GPU_PCI="{{ alternative_gpu_pci.stdout }}"
+        GPU_DOMAIN=$(echo "$GPU_PCI" | cut -d':' -f1)
+        GPU_BUS=$(echo "$GPU_PCI" | cut -d':' -f2)
+        GPU_SLOT=$(echo "$GPU_PCI" | cut -d':' -f3 | cut -d'.' -f1)
+        AUDIO_DEVICE=$(lspci -D | grep "^${GPU_DOMAIN}:${GPU_BUS}:${GPU_SLOT}\.1" | grep -i "audio" | awk '{print $1}' | head -1)
+        if [ -z "$AUDIO_DEVICE" ]; then
+          echo "NO_AUDIO_DEVICE"
+        else
+          echo "$AUDIO_DEVICE"
+        fi
+      register: alternative_gpu_audio
+      when:
+        - should_retry | bool
+        - alternative_gpu_pci is defined
+        - alternative_gpu_pci.stdout is defined
+        - alternative_gpu_pci.stdout != "NO_AVAILABLE_GPU"
+      delegate_to: "{{ target_host }}"
+
+    - name: Update GPU device variables for next retry
+      set_fact:
+        vm_gpu_device: "{{ alternative_gpu_pci.stdout }}"
+        gpu_audio_device: "{{ alternative_gpu_audio }}"
+      when:
+        - should_retry | bool
+        - alternative_gpu_pci is defined
+        - alternative_gpu_pci.stdout is defined
+        - alternative_gpu_pci.stdout != "NO_AVAILABLE_GPU"
+
+    - name: Display retry information
+      debug:
+        msg:
+          - "=== GPU Retry Attempt {{ gpu_retry_count }}/{{ max_gpu_retries }} ==="
+          - "Previous GPU failed: {{ attempted_gpus[-1] if attempted_gpus | length > 0 else 'N/A' }}"
+          - "Trying alternative GPU: {{ vm_gpu_device }}"
+          - "Alternative Audio Device: {{ alternative_gpu_audio.stdout if (alternative_gpu_audio is defined and alternative_gpu_audio.stdout is defined) else 'N/A' }}"
+      when:
+        - should_retry | bool
+        - alternative_gpu_pci is defined
+        - alternative_gpu_pci.stdout is defined
+        - alternative_gpu_pci.stdout != "NO_AVAILABLE_GPU"
+
+    - name: Recursively retry with next GPU
+      include_tasks: gpu-virt-install-retry.yml
+      when:
+        - should_retry | bool
+        - alternative_gpu_pci is defined
+        - alternative_gpu_pci.stdout is defined
+        - alternative_gpu_pci.stdout != "NO_AVAILABLE_GPU"
+
+    - name: Fail if no more GPUs available or max retries reached
+      fail:
+        msg: |
+          Failed to create VM with GPU after {{ gpu_retry_count }} attempts.
+          {% if (alternative_gpu_pci is defined and alternative_gpu_pci.stdout is defined and alternative_gpu_pci.stdout == 'NO_AVAILABLE_GPU') or not should_retry | bool %}
+          All available GPUs have been exhausted.
+          {% endif %}
+          
+          Attempted GPUs: {{ attempted_gpus | join(', ') }}
+          
+          Last error: {{ vm_create_result.stderr | default('Unknown error') }}
+          
+          Please check:
+          1. GPU hardware status
+          2. VFIO-PCI driver binding
+          3. IOMMU configuration
+          4. PCI device availability
+      when:
+        - not (virt_install_success | default(false) | bool)
+        - (alternative_gpu_pci is defined and alternative_gpu_pci.stdout is defined and alternative_gpu_pci.stdout == "NO_AVAILABLE_GPU") or not (should_retry | bool)

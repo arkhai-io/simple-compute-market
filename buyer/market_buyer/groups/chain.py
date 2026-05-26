@@ -91,7 +91,9 @@ def chain_check(
                 addresses[label] = obj
 
     # ERC-8004 IdentityRegistry — buyer reads it for seller-attestation lookups.
-    identity_registry = resolve_config_value(toml_path="registry.identity_registry_address")
+    # Falls back to the canonical CREATE2 vanity address for known chains.
+    from service.config_loader import identity_registry_address
+    identity_registry = identity_registry_address()
     if identity_registry:
         addresses["identity_registry"] = identity_registry
 

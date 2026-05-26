@@ -139,6 +139,46 @@ async def _ensure_agent_identity() -> int:
             "or set seller.auto_register = true to allow automatic registration."
         )
 
+    # Before registering a fresh agent, see whether this wallet already
+    # owns one on the IdentityRegistry. Without this, restarting a pod
+    # whose onchain_agent_id wasn't pinned would mint a brand-new agent
+    # every time the container comes up — gas burn + duplicate
+    # registrations the operator then has to manually reconcile.
+    if settings.chain.rpc_url and settings.registry.identity_registry_address and settings.wallet.address:
+        try:
+            from service.clients.erc8004.blockchain import (
+                find_agent_id_by_owner,
+                get_identity_registry_contract,
+            )
+            from web3 import Web3
+            from web3.providers import HTTPProvider
+
+            rpc = settings.chain.rpc_url
+            if rpc.startswith("ws"):
+                rpc_http = rpc.replace("ws://", "http://").replace("wss://", "https://")
+                w3 = Web3(HTTPProvider(rpc_http, request_kwargs={"timeout": 5}))
+            else:
+                w3 = Web3(HTTPProvider(rpc, request_kwargs={"timeout": 5}))
+
+            contract = get_identity_registry_contract(
+                w3, settings.registry.identity_registry_address
+            )
+            existing = find_agent_id_by_owner(w3, contract, settings.wallet.address)
+            if existing is not None:
+                _AGENT_ID = int(existing)
+                logger.info(
+                    "[IDENTITY] Found existing agent %d owned by %s on-chain — "
+                    "skipping registration. Pin onchain_agent_id = \"%d\" in "
+                    "your config to skip this lookup on the next start.",
+                    _AGENT_ID, settings.wallet.address, _AGENT_ID,
+                )
+                return _AGENT_ID
+        except Exception as exc:
+            logger.warning(
+                "[IDENTITY] Wallet-lookup fallback failed (%s) — falling through "
+                "to fresh registration.", exc,
+            )
+
     logger.info("[IDENTITY] No agent ID pinned — performing on-chain registration.")
     from market_storefront.commands.register import perform_registration
     _AGENT_ID = await perform_registration(chain_id=settings.chain.chain_id)
@@ -149,6 +189,11 @@ async def _ensure_agent_identity() -> int:
 async def _start_heartbeat():
     """Start heartbeat loop after server is ready."""
     from service.clients.erc8004.heartbeat import start_agent_heartbeat
+    auth_section = getattr(settings.registry, "auth", None)
+    try:
+        indexer_auth = dict(auth_section) if auth_section else {}
+    except (TypeError, ValueError):
+        indexer_auth = {}
     await start_agent_heartbeat({
         "indexer_urls": settings.registry.urls,
         "identity_registry_address": settings.registry.identity_registry_address,
@@ -156,6 +201,7 @@ async def _start_heartbeat():
         "onchain_agent_id": str(_AGENT_ID) if _AGENT_ID is not None else None,
         "chain_rpc_url": settings.chain.rpc_url,
         "agent_priv_key": settings.wallet.private_key,
+        "indexer_auth": indexer_auth,
     })
 
 
@@ -308,30 +354,32 @@ async def _startup_tasks():
     # which crashes the startup and surfaces as a clear pod CrashLoopBackOff.
     await _ensure_agent_identity()
 
-    # Seed the resources table on startup if it is empty.
-    # Source priority: inline CSV content (Helm Secret injection) > file path (compose/local).
+    # Seed the resources table on startup if it is empty. Source priority:
+    # inline CSV content (Helm Secret injection) > explicit resources_csv_path
+    # > auto-discovery of /app/resources.csv (compose bind-mount default).
     # Must run before the resource poller so the poller has rows to query.
-    if settings.resources_csv_inline or settings.resources_csv_path:
-        import market_storefront.container as _container
-        try:
-            result = await _container.resolved_system_service.seed_resources_if_empty(
-                csv_inline=settings.resources_csv_inline,
-                csv_path=settings.resources_csv_path,
+    import market_storefront.container as _container
+    try:
+        result = await _container.resolved_system_service.seed_resources_if_empty(
+            csv_inline=settings.resources_csv_inline,
+            csv_path=settings.resources_csv_path,
+        )
+        if result["seeded"]:
+            logger.info(
+                "[STARTUP] Seeded %d resource(s) from %s",
+                result["imported_count"],
+                result["source"],
             )
-            if result["seeded"]:
-                logger.info(
-                    "[STARTUP] Seeded %d resource(s) from %s",
-                    result["imported_count"],
-                    result["source"],
-                )
-            else:
-                logger.info(
-                    "[STARTUP] Resource seeding skipped — %d resource(s) already present",
-                    result["imported_count"],
-                )
-        except Exception as exc:
-            logger.error("[STARTUP] Resource seeding failed: %s", exc)
-            raise
+        elif result["source"] is None:
+            logger.info("[STARTUP] No resource source configured — starting with empty inventory")
+        else:
+            logger.info(
+                "[STARTUP] Resource seeding skipped — %d resource(s) already present",
+                result["imported_count"],
+            )
+    except Exception as exc:
+        logger.error("[STARTUP] Resource seeding failed: %s", exc)
+        raise
 
     # Probe configured contract addresses for bytecode. Logs a warning
     # naming any address that has nothing deployed at it on the

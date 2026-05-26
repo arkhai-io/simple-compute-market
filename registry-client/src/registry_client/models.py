@@ -411,24 +411,24 @@ class SystemConfigResponse:
 
 @dataclass
 class SystemSyncResponse:
-    """Response from GET /api/v1/system/sync."""
+    """Response from GET /api/v1/system/sync.
 
-    event_sync_running: bool = False
-    event_sync_last_block: int = 0
+    Reports liveness of the registry's background services. Agent indexing
+    happens just-in-time on the request path (no background scanner), so
+    only the health-check service is reported here.
+    """
+
     health_check_running: bool = False
     health_check_enabled: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "SystemSyncResponse":
-        es = d.get("event_sync", {})
         hc = d.get("health_check", {})
         return cls(
-            event_sync_running=bool(es.get("running", False)),
-            event_sync_last_block=int(es.get("last_synced_block", 0)),
             health_check_running=bool(hc.get("running", False)),
             health_check_enabled=bool(hc.get("enabled", False)),
-            extra={k: v for k, v in d.items() if k not in ("event_sync", "health_check")},
+            extra={k: v for k, v in d.items() if k not in ("health_check",)},
         )
 
 

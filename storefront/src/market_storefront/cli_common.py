@@ -19,19 +19,19 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def resolve_storefront_url(
-    agent_url: str | None,
+    explicit_url: str | None,
     default_port: int = 8000,
 ) -> str:
     """Resolve the URL the CLI should dial to reach the storefront.
 
-    Precedence: explicit ``agent_url`` > ``seller.base_url`` from
-    config.toml > ``http://localhost:{default_port}``.
+    Precedence: explicit ``--storefront-url`` > ``base_url`` from
+    ``storefront.toml`` (the same file the server reads) > ``http://localhost:{default_port}``.
     """
-    if agent_url:
-        return agent_url
-    from service.config_loader import get_dotted, load_user_config
-    cfg = load_user_config()
-    base_url = get_dotted(cfg, "seller.base_url")
+    if explicit_url:
+        return explicit_url
+    from service.config_loader import get_dotted, load_storefront_config
+    cfg = load_storefront_config()
+    base_url = get_dotted(cfg, "base_url")
     if isinstance(base_url, str) and base_url:
         return base_url
     return f"http://localhost:{default_port}"
@@ -39,12 +39,12 @@ def resolve_storefront_url(
 
 def _resolve_db_path(db: str | None) -> str | None:
     """Return the SQLite DB path from explicit ``--db`` or
-    ``seller.db_path`` in config.toml."""
+    ``db_path`` in ``storefront.toml`` (same file the server reads)."""
     if db:
         return db
-    from service.config_loader import get_dotted, load_user_config
-    cfg = load_user_config()
-    toml_db = get_dotted(cfg, "seller.db_path")
+    from service.config_loader import get_dotted, load_storefront_config
+    cfg = load_storefront_config()
+    toml_db = get_dotted(cfg, "db_path")
     if isinstance(toml_db, str) and toml_db and Path(toml_db).exists():
         return toml_db
     return None

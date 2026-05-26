@@ -1,7 +1,9 @@
-"""User-level TOML config, XDG-aware.
+"""Buyer-side TOML config, XDG-aware.
 
-Canonical location: `$XDG_CONFIG_HOME/arkhai/config.toml`, defaulting to
-`~/.config/arkhai/config.toml` when XDG is unset.
+Canonical location: `$XDG_CONFIG_HOME/arkhai/buyer.toml`, defaulting to
+`~/.config/arkhai/buyer.toml` when XDG is unset. Read by the buyer's
+`market` CLI; the storefront's server + `market-storefront` CLI use a
+separate `storefront.toml` in the same dir (see :func:`storefront_config_file`).
 
 The shape is small and deliberately flat-ish:
 
@@ -61,9 +63,9 @@ def user_config_dir() -> Path:
 
 
 def user_config_file() -> Path:
-    """Return the path to the user's primary config.toml (may not exist).
+    """Return the path to the buyer's primary ``buyer.toml`` (may not exist).
 
-    Other files in the layered set (e.g. ``config.secrets.toml``) are
+    Other files in the layered set (e.g. ``buyer.secrets.toml``) are
     discovered by :func:`user_config_files`; this function still returns
     the base file path for callers that need a single canonical location
     (e.g. ``write_user_config`` defaults).
@@ -71,17 +73,17 @@ def user_config_file() -> Path:
     override = _config_path_override
     if override is not None:
         return override
-    return user_config_dir() / "config.toml"
+    return user_config_dir() / "buyer.toml"
 
 
 def user_config_files() -> list[Path]:
     """Return the ordered list of TOML files the loader merges.
 
     Base first, overlays later — files listed later win on key conflicts.
-    Today: ``config.toml`` (ConfigMap-rendered base) then
-    ``config.secrets.toml`` (Secret-rendered sensitive overlay). Missing
+    Today: ``buyer.toml`` (ConfigMap-rendered base) then
+    ``buyer.secrets.toml`` (Secret-rendered sensitive overlay). Missing
     files are skipped silently at load time, so local-dev with a single
-    ``config.toml`` keeps working.
+    ``buyer.toml`` keeps working.
 
     The ``--config PATH`` override (via :func:`set_user_config_path`)
     short-circuits this to a single-file load — useful for tests and ad-
@@ -90,7 +92,7 @@ def user_config_files() -> list[Path]:
     Under pytest, when neither ``set_user_config_path()`` nor
     ``XDG_CONFIG_HOME`` has been set, the loader returns an empty list
     instead of reading the developer's ambient
-    ``~/.config/arkhai/config.toml``. That file otherwise leaks into
+    ``~/.config/arkhai/buyer.toml``. That file otherwise leaks into
     test process state — e.g. the storefront's seller_auth dependency
     flips from dev-bypass to enforcing mode because a populated
     ``wallet.address`` was loaded into ``CONFIG.agent_wallet_address``
@@ -105,7 +107,7 @@ def user_config_files() -> list[Path]:
         # Trust XDG only when it's been pointed somewhere other than the
         # user's home — i.e. a test fixture explicitly set it. Bare
         # ambient XDG ($HOME/.config) is suppressed: a populated
-        # ~/.config/arkhai/config.toml would otherwise leak into every
+        # ~/.config/arkhai/buyer.toml would otherwise leak into every
         # storefront-importing test, flipping seller_auth into enforcing
         # mode and causing surprising 403s. Tests that exercise the
         # loader's layered behaviour monkeypatch XDG_CONFIG_HOME to
@@ -116,7 +118,26 @@ def user_config_files() -> list[Path]:
                 return []
         except (OSError, RuntimeError):
             return []
-    return [base / "config.toml", base / "config.secrets.toml"]
+    return [base / "buyer.toml", base / "buyer.secrets.toml"]
+
+
+def storefront_config_file() -> Path:
+    """Return the path to the storefront's primary ``storefront.toml``.
+
+    Mirrors :func:`user_config_file` for the storefront's own file pair
+    (``storefront.toml`` + ``storefront.secrets.toml``). The storefront has
+    a separate identity and role-scoped knobs, so it gets its own file
+    rather than reusing the buyer's ``config.toml``. On a host that runs
+    both buyer and seller, this prevents one role's CLI scaffold from
+    clobbering the other's.
+
+    Honours :func:`set_user_config_path` so ``--config PATH`` on the
+    storefront CLI applies here too.
+    """
+    override = _config_path_override
+    if override is not None:
+        return override
+    return user_config_dir() / "storefront.toml"
 
 
 def storefront_config_files() -> list[Path]:
@@ -141,6 +162,21 @@ def storefront_config_files() -> list[Path]:
         except (OSError, RuntimeError):
             return []
     return [base / "storefront.toml", base / "storefront.secrets.toml"]
+
+
+def load_storefront_config() -> dict[str, Any]:
+    """Read the storefront's layered TOML config as a single merged dict.
+
+    Mirrors :func:`load_user_config` (no-path form) but walks
+    :func:`storefront_config_files` instead of :func:`user_config_files`.
+    Use this from the storefront's ``config show`` / ``config get`` CLI
+    commands so they reflect what the storefront server actually reads,
+    not the buyer's layered files.
+    """
+    merged: dict[str, Any] = {}
+    for p in storefront_config_files():
+        _deep_merge(merged, _read_one(p))
+    return merged
 
 
 # Set by ``set_user_config_path`` from a CLI ``--config`` callback so
@@ -337,6 +373,141 @@ def alkahest_address_config_path(flag: Optional[str] = None,
         toml_path="chain.alkahest_address_config_path",
         config=config,
     )
+
+
+# Canonical ERC-8004 v0.1 IdentityRegistry CREATE2 vanity address. The
+# alkahest deployer uses the same salt across every chain it deploys to,
+# so for the canonical deployment this address is the same on every chain.
+# Custom deployments override via ``[registry] identity_registry_address``
+# in the TOML.
+_CANONICAL_IDENTITY_REGISTRY = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
+KNOWN_IDENTITY_REGISTRY: dict[str, str] = {
+    "base_sepolia":     _CANONICAL_IDENTITY_REGISTRY,
+    "ethereum_sepolia": _CANONICAL_IDENTITY_REGISTRY,
+    "anvil":            _CANONICAL_IDENTITY_REGISTRY,
+}
+
+
+def derive_wallet_address(private_key: Optional[str]) -> Optional[str]:
+    """Compute the checksummed EVM address from an ECDSA private key.
+
+    Pure local — no RPC. Returns ``None`` when the key is missing or
+    eth_account refuses it (malformed hex, wrong length, etc.). Callers
+    decide whether the absence is fatal.
+    """
+    if not private_key:
+        return None
+    try:
+        from eth_account import Account
+        return Account.from_key(private_key).address
+    except Exception:
+        return None
+
+
+# Canonical chain_id ↔ chain_name table. Used to derive ``chain.name``
+# from a configured ``chain.rpc_url`` via a one-shot ``eth_chainId``
+# call, so operators who set the RPC don't also have to set the name.
+# The set mirrors ``service.clients.alkahest.SUPPORTED_NETWORKS``;
+# ``genlayer_bradbury`` is omitted because its mainnet chain ID isn't
+# pinned in the codebase yet — users on that chain must set chain.name
+# explicitly.
+KNOWN_CHAIN_IDS: dict[str, int] = {
+    "anvil":                31337,
+    "base_sepolia":         84532,
+    "ethereum_sepolia":     11155111,
+    "ethereum_mainnet":     1,
+    "filecoin_calibration": 314159,
+}
+CHAIN_NAME_BY_ID: dict[int, str] = {v: k for k, v in KNOWN_CHAIN_IDS.items()}
+# Anvil ships with two common default chain IDs; both map to the same name.
+CHAIN_NAME_BY_ID[1337] = "anvil"
+
+
+def query_chain_id_via_rpc(
+    rpc_url: Optional[str],
+    *,
+    timeout: float = 5.0,
+) -> Optional[int]:
+    """Issue a one-shot ``eth_chainId`` against ``rpc_url``.
+
+    Returns the decoded integer chain ID, or ``None`` on any failure
+    (no url, transport error, malformed reply). Translates ``ws://``
+    and ``wss://`` to ``http(s)://`` for the urllib client — the
+    ``eth_chainId`` method works identically over either transport.
+    """
+    if not rpc_url or not rpc_url.strip():
+        return None
+    url = rpc_url.strip()
+    if url.startswith("ws://"):
+        url = "http://" + url[len("ws://"):]
+    elif url.startswith("wss://"):
+        url = "https://" + url[len("wss://"):]
+    import json as _json
+    import urllib.error as _urlerr
+    import urllib.request as _urlreq
+    try:
+        req = _urlreq.Request(
+            url,
+            data=_json.dumps({
+                "jsonrpc": "2.0", "id": 1,
+                "method": "eth_chainId", "params": [],
+            }).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        with _urlreq.urlopen(req, timeout=timeout) as resp:
+            body = _json.loads(resp.read())
+        raw = body.get("result", "0x0")
+        cid = int(raw, 16)
+        return cid or None
+    except (_urlerr.URLError, OSError, ValueError, TypeError):
+        return None
+
+
+def chain_name_for_rpc(
+    rpc_url: Optional[str],
+    *,
+    timeout: float = 5.0,
+) -> Optional[str]:
+    """Look up the canonical chain name the given RPC serves.
+
+    Returns ``None`` if the RPC is unreachable, returns garbage, or
+    reports a chain ID we don't have a canonical name for.
+    """
+    cid = query_chain_id_via_rpc(rpc_url, timeout=timeout)
+    if cid is None:
+        return None
+    return CHAIN_NAME_BY_ID.get(cid)
+
+
+def identity_registry_address(
+    flag: Optional[str] = None,
+    config: Optional[dict[str, Any]] = None,
+) -> Optional[str]:
+    """Resolve the ERC-8004 IdentityRegistry contract address.
+
+    Hierarchy: flag > ``IDENTITY_REGISTRY_ADDRESS`` env > TOML
+    ``registry.identity_registry_address`` > per-chain known default
+    (looked up by ``chain.name``).
+
+    The canonical deployment uses a CREATE2 vanity address that's the
+    same on every chain — so for the standard ``base_sepolia`` /
+    ``ethereum_sepolia`` / ``anvil`` setups the user doesn't need to
+    set the address explicitly. Custom deployments override via the
+    TOML key.
+
+    Returns ``None`` only when neither resolution nor chain-name
+    lookup yields an address — callers decide whether that's fatal.
+    """
+    resolved = resolve_value(
+        flag=flag,
+        env_name="IDENTITY_REGISTRY_ADDRESS",
+        toml_path="registry.identity_registry_address",
+        config=config,
+    )
+    if resolved:
+        return resolved
+    chain = chain_name(config=config)
+    return KNOWN_IDENTITY_REGISTRY.get(chain)
 
 
 def registry_urls(

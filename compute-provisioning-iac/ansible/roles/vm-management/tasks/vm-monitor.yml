@@ -1,0 +1,288 @@
+---
+# VM Management - Monitor Tasks
+
+- name: Check if VM exists for monitoring
+  shell: virsh list --all --name | grep -q "^{{ vm_name }}$"
+  register: vm_exists_monitoring
+  ignore_errors: yes
+  when: vm_action == "monitor"
+  delegate_to: "{{ target_host }}"
+
+- name: Get VM performance statistics with usage percentages
+  shell: |
+    echo "=== VM Performance Statistics for {{ vm_name }} ==="
+    
+    # Check if VM exists
+    if ! virsh list --all --name | grep -q "^{{ vm_name }}$"; then
+      echo "ERROR: VM '{{ vm_name }}' not found"
+      exit 1
+    fi
+    
+    # Check VM state
+    VM_STATE=$(virsh domstate {{ vm_name }})
+    echo "VM State: $VM_STATE"
+    
+    if [ "$VM_STATE" != "running" ]; then
+      echo "ERROR: VM is not running (state: $VM_STATE)"
+      exit 2
+    fi
+    
+    echo ""
+    echo "=== Domain Statistics ==="
+    virsh domstats {{ vm_name }} 2>/dev/null || echo "domstats failed"
+    
+    echo ""
+    echo "=== CPU Statistics ==="
+    # Extract CPU info from domstats (more reliable than cpu-stats)
+    CPU_INFO=$(virsh domstats {{ vm_name }} | grep -E 'cpu\.|vcpu\.')
+    if [ -n "$CPU_INFO" ]; then
+      echo "$CPU_INFO"
+    else
+      echo "cpu-stats: Unable to get CPU statistics"
+    fi
+    
+    echo ""
+    echo "=== CPU Usage Calculation ==="
+    # Get CPU times with 1 second interval for percentage calculation
+    CPU_TIME_1=$(virsh domstats {{ vm_name }} | grep 'cpu.time=' | cut -d'=' -f2)
+    sleep 1
+    CPU_TIME_2=$(virsh domstats {{ vm_name }} | grep 'cpu.time=' | cut -d'=' -f2)
+    VCPU_COUNT=$(virsh domstats {{ vm_name }} | grep 'vcpu.current=' | cut -d'=' -f2)
+    
+    if [ -n "$CPU_TIME_1" ] && [ -n "$CPU_TIME_2" ] && [ -n "$VCPU_COUNT" ]; then
+      # Calculate CPU usage percentage
+      CPU_DIFF=$((CPU_TIME_2 - CPU_TIME_1))
+      # Convert nanoseconds to percentage (1 second = 1,000,000,000 nanoseconds)
+      CPU_USAGE_PERCENT=$(echo "scale=2; ($CPU_DIFF / 1000000000) * 100 / $VCPU_COUNT" | bc -l 2>/dev/null || echo "0.00")
+      echo "CPU Usage: ${CPU_USAGE_PERCENT}% (${VCPU_COUNT} vCPUs provisioned)"
+    else
+      echo "CPU Usage: Unable to calculate"
+    fi
+    
+    echo ""
+    echo "=== Memory Statistics with Usage ==="
+    virsh dommemstat {{ vm_name }} 2>/dev/null || echo "dommemstat failed"
+    
+    # Get memory usage details
+    MEMORY_STATS=$(virsh dommemstat {{ vm_name }} 2>/dev/null)
+    if [ $? -eq 0 ]; then
+      # Extract memory values (in KB)
+      ACTUAL_MEM=$(echo "$MEMORY_STATS" | grep "^actual " | awk '{print $2}' || echo "0")
+      AVAILABLE_MEM=$(echo "$MEMORY_STATS" | grep "^available " | awk '{print $2}' || echo "0")
+      UNUSED_MEM=$(echo "$MEMORY_STATS" | grep "^unused " | awk '{print $2}' || echo "0")
+      
+      if [ "$AVAILABLE_MEM" -gt 0 ]; then
+        USED_MEM=$((ACTUAL_MEM - UNUSED_MEM))
+        MEMORY_USAGE_PERCENT=$(echo "scale=2; ($USED_MEM * 100) / $AVAILABLE_MEM" | bc -l 2>/dev/null || echo "0.00")
+        echo "Memory Usage: ${MEMORY_USAGE_PERCENT}% (${USED_MEM}KB used / ${AVAILABLE_MEM}KB provisioned)"
+        echo "Memory Available: $(echo "scale=2; $AVAILABLE_MEM / 1024" | bc -l)MB"
+        echo "Memory Used: $(echo "scale=2; $USED_MEM / 1024" | bc -l)MB"
+      else
+        echo "Memory Usage: Unable to calculate percentage"
+      fi
+    fi
+    
+    echo ""
+    echo "=== Block I/O Statistics ==="
+    virsh domblkstat {{ vm_name }} 2>/dev/null || echo "domblkstat failed"
+    
+    echo ""
+    echo "=== Storage Usage ==="
+    
+    # Method A: Get disk targets and host-side storage info
+    echo "Getting disk targets:"
+    DISK_TARGETS=$(virsh domblklist {{ vm_name }} 2>/dev/null | awk 'NR>2 && NF>1 {print $1}' | grep -v "^$")
+    echo "Found disk targets: $DISK_TARGETS"
+    
+    if [ -n "$DISK_TARGETS" ]; then
+      for TARGET in $DISK_TARGETS; do
+        echo "=== Disk Target: $TARGET ==="
+        
+        # Get host-side storage info using domblkinfo
+        BLKINFO=$(virsh domblkinfo {{ vm_name }} $TARGET 2>/dev/null)
+        if [ $? -eq 0 ]; then
+          CAPACITY=$(echo "$BLKINFO" | grep "Capacity:" | awk '{print $2}')
+          ALLOCATION=$(echo "$BLKINFO" | grep "Allocation:" | awk '{print $2}')
+          PHYSICAL=$(echo "$BLKINFO" | grep "Physical:" | awk '{print $2}')
+          
+          # Convert bytes to human readable
+          if [ -n "$CAPACITY" ] && [ "$CAPACITY" != "0" ]; then
+            CAPACITY_GB=$(echo "scale=2; $CAPACITY / 1024 / 1024 / 1024" | bc -l 2>/dev/null || echo "0")
+            ALLOCATION_GB=$(echo "scale=2; $ALLOCATION / 1024 / 1024 / 1024" | bc -l 2>/dev/null || echo "0")
+            HOST_USAGE_PERCENT=$(echo "scale=2; ($ALLOCATION * 100) / $CAPACITY" | bc -l 2>/dev/null || echo "0")
+            
+            echo "Host Storage Capacity: ${CAPACITY_GB}GB"
+            echo "Host Storage Allocation: ${ALLOCATION_GB}GB"
+            echo "Host Storage Usage: ${HOST_USAGE_PERCENT}%"
+          else
+            echo "Host Storage: Unable to get capacity info"
+          fi
+        else
+          echo "domblkinfo failed for target $TARGET"
+        fi
+        
+        echo ""
+      done
+    fi
+    
+    # Method B: Get guest filesystem info using domfsinfo (requires qemu-guest-agent)
+    echo "=== Guest Filesystem Info ==="
+    FSINFO=$(virsh domfsinfo {{ vm_name }} 2>/dev/null)
+    if [ $? -eq 0 ] && [ -n "$FSINFO" ]; then
+      echo "Guest filesystem details:"
+      echo "$FSINFO"
+      
+      # Parse the main filesystem (usually /)
+      ROOT_FS=$(echo "$FSINFO" | grep -E "^\s*/" | head -1)
+      if [ -n "$ROOT_FS" ]; then
+        # Extract filesystem info (columns: Mountpoint, Name, Fstype, Total, Used, Available)
+        FS_TOTAL=$(echo "$ROOT_FS" | awk '{print $4}')
+        FS_USED=$(echo "$ROOT_FS" | awk '{print $5}')  
+        FS_AVAILABLE=$(echo "$ROOT_FS" | awk '{print $6}')
+        
+        if [ -n "$FS_TOTAL" ] && [ -n "$FS_USED" ] && [ "$FS_TOTAL" != "0" ]; then
+          # Calculate percentage (values are already in human format from domfsinfo)
+          echo "Guest Root Filesystem Total: $FS_TOTAL"
+          echo "Guest Root Filesystem Used: $FS_USED"
+          echo "Guest Root Filesystem Available: $FS_AVAILABLE"
+          echo "Guest Storage Usage: Available from domfsinfo"
+        fi
+      fi
+    else
+      echo "Guest filesystem info not available (qemu-guest-agent may not be installed/running)"
+      echo "Guest Storage Usage: N/A (requires qemu-guest-agent)"
+    fi
+    
+    echo ""
+    echo "=== Network Interface Statistics ==="
+    # Get network interfaces for the VM
+    INTERFACES=$(virsh domiflist {{ vm_name }} 2>/dev/null | awk 'NR>2 && NF>0 {print $1}' | grep -v "^$")
+    if [ -n "$INTERFACES" ]; then
+      for INTERFACE in $INTERFACES; do
+        echo "Interface: $INTERFACE"
+        virsh domifstat {{ vm_name }} $INTERFACE 2>/dev/null || echo "domifstat failed for interface $INTERFACE"
+        echo ""
+      done
+    else
+      echo "domifstat: No network interfaces found"
+    fi
+  register: vm_monitoring_raw
+  when: vm_action == "monitor" and vm_exists_monitoring.rc == 0
+  delegate_to: "{{ target_host }}"
+
+- name: Fail if VM does not exist for monitoring
+  fail:
+    msg: |
+      Cannot monitor VM '{{ vm_name }}' - VM does not exist or is not running.
+      
+      Available actions:
+      - Check existing VMs: virsh list --all
+      - Create VM: Use vm_action=create
+      - List all VMs: Use vm_action=list
+  when: vm_action == "monitor" and (vm_exists_monitoring.rc != 0 or (vm_monitoring_raw is defined and vm_monitoring_raw.rc != 0))
+
+- name: Get current timestamp
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: current_timestamp
+  delegate_to: localhost
+
+- name: Parse VM monitoring data into structured format
+  set_fact:
+    vm_monitoring_data:
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ current_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "{{ 'success' if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'failed' }}"
+      vm_state: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^VM State:.*') | list | first | default('VM State: unknown') | regex_replace('^VM State: ', '')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'unknown' }}"
+      cpu_usage_percent: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^CPU Usage:.*%.*') | list | first | default('CPU Usage: N/A%') | regex_replace('^CPU Usage: ([0-9.]+|N/A)%.*$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      cpu_vcpus_provisioned: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^CPU Usage:.*vCPUs provisioned.*') | list | first | default('(N/A vCPUs provisioned)') | regex_replace('.*\\(([0-9]+|N/A) vCPUs provisioned\\).*', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      memory_usage_percent: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Memory Usage:.*%.*') | list | first | default('Memory Usage: N/A%') | regex_replace('^Memory Usage: ([0-9.]+|N/A)%.*$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      memory_used_mb: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Memory Used:.*MB$') | list | first | default('Memory Used: N/AMB') | regex_replace('^Memory Used: ([0-9.]+|N/A)MB$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      memory_available_mb: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Memory Available:.*MB$') | list | first | default('Memory Available: N/AMB') | regex_replace('^Memory Available: ([0-9.]+|N/A)MB$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      host_storage_capacity_gb: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Host Storage Capacity:.*GB$') | list | first | default('Host Storage Capacity: N/AGB') | regex_replace('^Host Storage Capacity: ([0-9.]+|N/A)GB$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      host_storage_allocation_gb: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Host Storage Allocation:.*GB$') | list | first | default('Host Storage Allocation: N/AGB') | regex_replace('^Host Storage Allocation: ([0-9.]+|N/A)GB$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      host_storage_usage_percent: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Host Storage Usage:.*%$') | list | first | default('Host Storage Usage: N/A%') | regex_replace('^Host Storage Usage: ([0-9.]+|N/A)%$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      guest_storage_total: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Guest Root Filesystem Total:.*') | list | first | default('Guest Root Filesystem Total: N/A') | regex_replace('^Guest Root Filesystem Total: (.*)$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      guest_storage_used: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Guest Root Filesystem Used:.*') | list | first | default('Guest Root Filesystem Used: N/A') | regex_replace('^Guest Root Filesystem Used: (.*)$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      guest_storage_available: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Guest Root Filesystem Available:.*') | list | first | default('Guest Root Filesystem Available: N/A') | regex_replace('^Guest Root Filesystem Available: (.*)$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      network_interfaces: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Interface:.*') | list | map('regex_replace', '^Interface: (.*)$', '\\1') | list) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else [] }}"
+      error: "{{ vm_monitoring_raw.stderr | default('VM monitoring failed') if vm_monitoring_raw is defined and vm_monitoring_raw.rc != 0 else 'VM not found or not running' if vm_monitoring_raw is not defined else '' }}"
+
+- name: Generate VM monitoring summary
+  set_fact:
+    monitoring_summary: |
+      VM MONITORING SUMMARY for {{ vm_name }}
+      {% if vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0 %}
+      Status: VM is running and accessible
+      Timestamp: {{ current_timestamp.stdout }}
+      Host: {{ target_host }}
+      
+      KEY METRICS:
+      {% set stats_found = false %}
+      {% for line in vm_monitoring_raw.stdout_lines %}
+        {% if 'CPU Usage:' in line and '%' in line %}
+          {% set stats_found = true %}
+      - {{ line }}
+        {% elif 'Memory Usage:' in line and '%' in line %}
+      - {{ line }}
+        {% elif 'Host Storage Usage:' in line and '%' in line %}
+      - {{ line }}
+        {% elif 'Memory Available:' in line %}
+      - {{ line }}
+        {% elif 'Memory Used:' in line %}
+      - {{ line }}
+        {% elif 'Host Storage Capacity:' in line %}
+      - {{ line }}
+        {% elif 'Host Storage Allocation:' in line %}
+      - {{ line }}
+        {% elif 'Guest Root Filesystem Total:' in line %}
+      - {{ line }}
+        {% elif 'Guest Root Filesystem Used:' in line %}
+      - {{ line }}
+        {% elif 'Guest Root Filesystem Available:' in line %}
+      - {{ line }}
+        {% elif 'vcpu.current=' in line %}
+      - Current vCPUs: {{ line.split('=')[1] }}
+        {% elif 'vcpu.maximum=' in line %}
+      - Maximum vCPUs: {{ line.split('=')[1] }}
+        {% elif 'balloon.current=' in line %}
+      - Allocated Memory: {{ (line.split('=')[1] | int / 1024) | round(2) }} MB
+        {% elif 'balloon.maximum=' in line %}
+      - Maximum Memory: {{ (line.split('=')[1] | int / 1024) | round(2) }} MB
+        {% elif 'rd_bytes' in line %}
+      - Disk Read: {{ line.split()[1] }} bytes
+        {% elif 'wr_bytes' in line %}
+      - Disk Write: {{ line.split()[1] }} bytes
+        {% elif 'rx_bytes' in line %}
+      - Network RX: {{ line.split()[1] }} bytes
+        {% elif 'tx_bytes' in line %}
+      - Network TX: {{ line.split()[1] }} bytes
+        {% endif %}
+      {% endfor %}
+      {% if not stats_found %}
+      - Statistics collection in progress...
+      {% endif %}
+      
+      COMMANDS EXECUTED:
+      - virsh domstats {{ vm_name }}
+      - virsh domblkstat {{ vm_name }}
+      - virsh domblklist {{ vm_name }}
+      - virsh domblkinfo {{ vm_name }} <target>
+      - virsh domfsinfo {{ vm_name }}
+      - virsh domifstat {{ vm_name }} <interface>
+      - virsh dommemstat {{ vm_name }}
+      {% else %}
+      Status: {{ 'VM not found' if vm_exists_monitoring.rc != 0 else 'Monitoring failed' }}
+      {% if vm_monitoring_raw is defined and vm_monitoring_raw.rc == 2 %}
+      Reason: VM is not in running state
+      {% elif vm_monitoring_raw is defined and vm_monitoring_raw.rc == 1 %}
+      Reason: VM does not exist
+      {% else %}
+      Reason: Unknown error during monitoring
+      {% endif %}
+      
+      TROUBLESHOOTING:
+      - Check if VM exists: virsh list --all
+      - Check VM state: virsh domstate {{ vm_name }}
+      - Start VM if needed: virsh start {{ vm_name }}
+      {% endif %}

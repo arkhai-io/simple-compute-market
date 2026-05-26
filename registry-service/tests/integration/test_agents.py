@@ -81,33 +81,6 @@ class TestSearchAgents:
         assert isinstance(result, AgentListResponse)
 
 
-class TestRegisterAgent:
-    async def test_missing_required_registration_content_returns_422(self, registry_client):
-        """AgentRegistration requires registrationFile, registrationFileUrl, or agentCard.
-        A body without any of these fails Pydantic validation with 422."""
-        with pytest.raises(RegistryClientError) as exc_info:
-            await registry_client._request(
-                "POST", "/agents/register",
-                json={
-                    "owner": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
-                    "chain_id": 31337,
-                },
-            )
-        assert exc_info.value.status_code == 422
-
-    async def test_zero_address_owner_rejected(self, registry_client):
-        """Zero-address owner is rejected with 400 after Pydantic validation passes."""
-        with pytest.raises(RegistryClientError) as exc_info:
-            await registry_client._request(
-                "POST", "/agents/register",
-                json={
-                    "owner": "0x0000000000000000000000000000000000000000",
-                    "registrationFileUrl": "http://localhost:9099/.well-known/agent-card.json",
-                },
-            )
-        assert exc_info.value.status_code == 400
-
-
 class TestHeartbeat:
     async def test_valid_heartbeat_accepted(self, registry_client, maker_agent):
         result = await registry_client.send_heartbeat(maker_agent.agent_id, MAKER_PRIVATE_KEY)

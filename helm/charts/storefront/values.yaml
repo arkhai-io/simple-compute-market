@@ -18,7 +18,7 @@ image:
 # as a one-shot client process (or a Job for E2E tests).
 #
 # Each entry renders one Deployment + Service + Secret. The Secret holds
-# the rendered config.toml mounted at /etc/arkhai/config.toml.
+# the rendered storefront.toml mounted at /etc/arkhai/storefront.toml.
 # ---------------------------------------------------------------------------
 agents:
   - name: bob
@@ -47,8 +47,9 @@ agents:
       # RESOURCES_CSV_FILE=/path/to/resources.csv to set this via --set-file.
       # Leave empty to start with no inventory (seed via the import API later).
       resourcesCsvInline: ""
-    # config.* lands in the rendered config.toml. Keys map 1:1 to the
-    # typed Config dataclass in market_storefront.utils.config.
+    # config.* lands in the rendered storefront.toml. Keys map 1:1 to the
+    # storefront schema in market_storefront.utils.config (which reads top-level
+    # keys + [provisioning] / [negotiation] / [pricing] sections — no [seller] prefix).
     config:
       seller:
         agentId: bob
@@ -65,7 +66,7 @@ agents:
         # Path to the bundled compute resource inventory CSV. The file is
         # included in the container image at this path. Set to "" to disable
         # auto-seeding (resources must be imported manually or via a ConfigMap).
-        resourcesCsvPath: "/app/src/market_storefront/data/ww1-machine.csv"
+        resourcesCsvPath: "/app/src/market_storefront/data/kvm1-machine.csv"
         sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
         enableEventQueue: false
         provisioning:
@@ -143,7 +144,7 @@ persistence:
 #                   environment where the agent is reachable via an API gateway
 #                   rather than a ZeroTier overlay network.
 #
-# The application runtime is unaffected when seller.zerotier_network is unset
-# in config.toml — all ZeroTier code paths are conditional on that value.
+# The application runtime is unaffected when zerotier_network is unset
+# in storefront.toml — all ZeroTier code paths are conditional on that value.
 # ---------------------------------------------------------------------------
 zerotierEnabled: true

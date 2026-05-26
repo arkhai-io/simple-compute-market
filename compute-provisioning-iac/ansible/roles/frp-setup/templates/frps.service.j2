@@ -1,0 +1,22 @@
+[Unit]
+Description=FRP Server Service for VM Hosting
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Restart=always
+RestartSec=5s
+ExecStart=/usr/local/bin/frps -c /etc/frp/frps.toml
+LimitNOFILE=1048576
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/frp
+
+[Install]
+WantedBy=multi-user.target

@@ -41,12 +41,12 @@ _FAKE_STDOUT = """\
 PLAY [Mock Provision] *********************************************************
 
 TASK [debug] ******************************************************************
-ok: [ww1] => {
+ok: [kvm1] => {
     "vm_creation_data": {
         "action": "create",
         "vm_name": "mock-vm",
         "status": "running",
-        "host": "ww1",
+        "host": "kvm1",
         "timestamp": "2025-01-01T00:00:00Z",
         "tenant_user": "mockuser",
         "external_ssh_port": "2222",
@@ -160,7 +160,7 @@ class MockAnsibleService:
         """Return a single fake host entry."""
         hosts = [
             InventoryHost(
-                name="ww1",
+                name="kvm1",
                 ansible_host=self._host_ip,
                 vars={"ansible_ssh_private_key_file": "~/.ssh/id_ed25519"},
             )

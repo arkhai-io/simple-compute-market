@@ -1,0 +1,8 @@
+---
+# Handlers for vm-management role
+
+- name: restart frpc
+  systemd:
+    name: frpc
+    state: restarted
+  ignore_errors: yes

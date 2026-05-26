@@ -48,7 +48,7 @@ resource_lease_grace_seconds = 1800
 # Negotiation watchdog
 negotiation_timeout_seconds   = 1800
 negotiation_watchdog_interval = 60
-default_vm_host               = "ww1"
+default_vm_host               = "kvm1"
 
 [wallet]
 # Sensitive — populated by Secret overlay in k8s, by local file otherwise.
@@ -57,13 +57,18 @@ private_key    = ""
 ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess demo@example"
 
 [chain]
-name     = "ethereum_sepolia"  # ethereum_sepolia | base_sepolia | anvil
+name     = ""                   # ethereum_sepolia | base_sepolia | anvil — auto-derived from rpc_url via eth_chainId when empty
 rpc_url  = ""
 chain_id = 0                    # 0 means unset — chain_id() falls back to live eth_chainId
 alkahest_address_config_path = ""
 
 [registry]
-urls                      = ["http://localhost:8080"]
+# Leave empty by default. Any user-supplied list at a higher overlay
+# (storefront.toml / env / secrets) fully replaces this. If we shipped
+# a default URL here, dynaconf's merge_enabled=True would *append* the
+# user's list onto the default, leaving the storefront heartbeating to
+# both registries.
+urls                      = []
 discovery_timeout         = 5.0
 identity_registry_address = ""
 

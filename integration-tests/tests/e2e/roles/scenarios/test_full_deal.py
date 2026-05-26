@@ -149,7 +149,7 @@ PROV_RULE_ID = "e2e-create-pause"
 CHECK_RULE_ID = "e2e-check-pause"   # mock rule that pauses the lease check job
 E2E_RESOURCE_ID = "compute-e2e-deal-001"
 E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",ww1
+compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm1
 """
 
 # Canonical callable name registered in domain/compute/agent/app/policy/store.py.
@@ -384,7 +384,7 @@ class TestStage00h_ProvisioningStorefrontLink:
         If this fails with storefront='unconfigured':
           - For deploy-docker: ensure storefront_url and storefront_admin_key
             are set in provisioning-service/src/config/config-docker.yml.
-            The container name on the market network is 'market-agent-sell'.
+            The compose service name resolved by docker DNS is 'bob-storefront'.
           - For Helm: provisioning.storefront.url defaults to the release's
             bob storefront Service; provisioning.storefront.adminKey defaults
             to global.adminApiKey.
@@ -408,7 +408,8 @@ class TestStage00h_ProvisioningStorefrontLink:
             "The lease watchdog will not be able to release resources when leases expire.\n"
             "For deploy-docker: verify storefront_url in "
             "provisioning-service/src/config/config-docker.yml points to "
-            "'http://market-agent-sell:8001' and both containers are on the 'market' network.\n"
+            "'http://bob-storefront:8001' and both containers share the compose "
+            "project's default network.\n"
             f"Full health response: {health}"
         )
 
@@ -628,7 +629,7 @@ class TestStage03a_ValidatePublish:
         from registry_client import ValidatePublishRequest
         req = ValidatePublishRequest(
             listing_id=deal_state.seller_listing_id,
-            seller="http://sell_agent:8001/",
+            seller="http://bob-storefront:8001/",
             offer_resource=OFFER_RESOURCE,
             accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,

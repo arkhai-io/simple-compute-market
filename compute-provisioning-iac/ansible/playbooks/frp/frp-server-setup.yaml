@@ -1,0 +1,10 @@
+---
+- name: Setup FRP Server on Public VPS
+  hosts: frp_servers
+  become: true
+  vars:
+    frp_subdomain_host: "{{ frp_domain | default('yourdomain.com') }}"
+  roles:
+    - ../../roles/frp-setup
+
+

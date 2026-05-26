@@ -1,0 +1,3942 @@
+---
+- name: Ensure we have root privileges
+  become: yes
+  become_method: sudo
+  set_fact:
+    ansible_become: yes
+  tags: always
+
+- name: Use tenant-aware VM management
+  include_tasks: tenant_main.yml
+  when: 
+    - tenant_id is defined
+    - tenant_id != ""
+    - false  # TODO: tenant_main.yml doesn't exist yet, disable for now
+
+- name: Apply default VM settings from group_vars
+  set_fact:
+    vm_ram: "{{ vm_ram | default(default_vm_settings.ram | default(2048)) }}"
+    vm_vcpus: "{{ vm_vcpus | default(default_vm_settings.vcpus | default(2)) }}"
+    vm_disk_size: "{{ vm_disk_size | default(default_vm_settings.disk_size | default('20G')) }}"
+    vm_os_variant: "{{ vm_os_variant | default(default_vm_settings.os_variant | default('ubuntu24.04')) }}"
+  when: 
+    - tenant_id is not defined or tenant_id == ""
+    - vm_action == "create"
+
+- name: Validate single-tenant resource limits
+  assert:
+    that:
+      - (vm_ram | int) <= ((default_tenant_quotas.max_total_ram_gb | default(32) | int) * 1024)
+      - (vm_vcpus | int) <= (default_tenant_quotas.max_total_vcpus | default(20) | int)
+    fail_msg: "VM resources exceed quota limits. RAM: {{ vm_ram }}MB (max: {{ (default_tenant_quotas.max_total_ram_gb | default(32) | int) * 1024 }}MB), vCPUs: {{ vm_vcpus }} (max: {{ default_tenant_quotas.max_total_vcpus | default(20) }})"
+    success_msg: "VM resources within acceptable limits"
+  when: 
+    - tenant_id is not defined or tenant_id == ""
+    - vm_action == "create"
+
+- name: Check if VM already exists (single-tenant mode)
+  shell: virsh list --all --name | grep -q "^{{ vm_name }}$"
+  register: vm_exists_check
+  ignore_errors: yes
+  when: 
+    - vm_action == "create"
+    - tenant_id is not defined or tenant_id == ""
+  delegate_to: "{{ target_host }}"
+
+- name: Fail if VM already exists
+  fail:
+    msg: "VM '{{ vm_name }}' already exists on host '{{ target_host }}'. Use a different name or remove the existing VM first."
+  when: 
+    - vm_action == "create"
+    - vm_exists_check is defined
+    - vm_exists_check.rc is defined
+    - vm_exists_check.rc == 0
+
+- name: Generate random string for unique filenames
+  set_fact:
+    random_string: "{{ lookup('password', '/dev/null chars=ascii_lowercase,digits length=8') }}"
+  when: vm_action == "create"
+
+- name: Generate random port for SSH forwarding
+  shell: |
+    # Generate random port between 10000-65000
+    while true; do
+      PORT=$(shuf -i 10000-65000 -n 1)
+      # Check if port is not in use
+      if ! netstat -tuln | grep -q ":$PORT "; then
+        echo $PORT
+        break
+      fi
+    done
+  register: random_port_result
+  when: vm_action == "create"
+  delegate_to: "{{ target_host }}"
+
+- name: Set external SSH port fact
+  set_fact:
+    external_ssh_port: "{{ random_port_result.stdout }}"
+  when: vm_action == "create"
+
+- name: Debug tenant public key parameter
+  debug:
+    msg:
+      - "=== TENANT PUBLIC KEY DEBUG ==="
+      - "vm_tenant_pubkey is defined: {{ vm_tenant_pubkey is defined }}"
+      - "vm_tenant_pubkey value: '{{ vm_tenant_pubkey | default('NOT PROVIDED') }}'"
+      - "vm_tenant_pubkey length: {{ (vm_tenant_pubkey | default('')) | length }}"
+      - "Key type detected: {{ vm_tenant_pubkey.split(' ')[0] if (vm_tenant_pubkey is defined and vm_tenant_pubkey != '') else 'N/A' }}"
+      - "==============================="
+  when: vm_action == "create"
+
+- name: Generate SSH key pair for tenant access (when no tenant public key provided)
+  openssh_keypair:
+    path: "~/.ssh/{{ vm_name }}_tenant_ed25519"
+    type: ed25519
+    size: 256
+    state: present
+    force: yes
+  register: ssh_keypair_tenant
+  when: 
+    - vm_action == "create"
+    - (vm_tenant_pubkey is not defined or vm_tenant_pubkey == "")
+  delegate_to: "{{ target_host }}"
+
+- name: Generate random password for tenant user
+  set_fact:
+    tenant_password: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=32') }}"
+  when: vm_action == "create"
+
+- name: Set tenant user Name
+  set_fact:
+    tenant_user: "{{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}"
+  when: vm_action == "create"
+
+- name: Declare root SSH Name
+  set_fact:
+    vm_root_ssh_filename: "{{ vm_image_root_fname | default(vm_name + '_root_ed25519') }}"
+  when: vm_action == "create" or vm_action == "reset_password" or vm_action == "undefine"
+
+# Define as VM creation from scratch
+- name: Check if Ubuntu Noble cloud image already exists
+  stat:
+    path: /var/lib/libvirt/images/noble-server-cloudimg-amd64.img
+  register: ubuntu_image_exists
+  when: 
+    - vm_action == "create" and vm_image_type == "scratch"
+  delegate_to: "{{ target_host }}"
+
+- name: Download Ubuntu Noble Server cloud image
+  get_url:
+    url: https://cloud-images.ubuntu.com/noble/20251126/noble-server-cloudimg-amd64.img
+    dest: /tmp/noble-server-cloudimg-amd64.img
+    mode: '0644'
+  when:
+    - vm_action == "create" and vm_image_type == "scratch" and not ubuntu_image_exists.stat.exists
+  delegate_to: "{{ target_host }}"
+
+- name: Move Ubuntu cloud image to libvirt directory
+  command: mv /tmp/noble-server-cloudimg-amd64.img /var/lib/libvirt/images/
+  when:
+    - vm_action == "create" and vm_image_type == "scratch" and not ubuntu_image_exists.stat.exists
+  delegate_to: "{{ target_host }}"
+
+- name: Set ownership and permissions for Ubuntu cloud image
+  file:
+    path: /var/lib/libvirt/images/noble-server-cloudimg-amd64.img
+    owner: libvirt-qemu
+    group: kvm
+    mode: '0644'
+  when: 
+    - vm_action == "create" and vm_image_type == "scratch" and not ubuntu_image_exists.stat.exists
+  delegate_to: "{{ target_host }}"
+
+- name: Generate SSH key pair for root access
+  openssh_keypair:
+    path: "~/.ssh/{{ vm_root_ssh_filename }}"
+    type: ed25519
+    size: 256
+    state: present
+    force: yes
+  register: ssh_keypair_root
+  when:
+    - vm_action == "create" and vm_image_type == "scratch"
+  delegate_to: "{{ target_host }}"
+
+- name: Generate random password for root user
+  set_fact:
+    root_password: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=32') }}"
+  when:
+    - vm_action == "create" and vm_image_type == "scratch"
+
+- name: Create cloud-init working directory
+  file:
+    path: "/tmp/cloudinit_{{ vm_name }}_{{ random_string }}"
+    state: directory
+    mode: '0755'
+  when:
+    - vm_action == "create" and vm_image_type == "scratch"
+  delegate_to: "{{ target_host }}"
+
+- name: Create VM disk image from cloud image
+  shell: qemu-img create -f qcow2 -F qcow2 -b /var/lib/libvirt/images/noble-server-cloudimg-amd64.img /var/lib/libvirt/images/{{ vm_name }}.qcow2 {{ vm_disk_size }}
+  when:
+    - vm_action == "create" and vm_image_type == "scratch"
+  delegate_to: "{{ target_host }}"
+
+- name: Create cloud-init user-data file (basic SSH and networking only)
+  copy:
+    dest: "/tmp/cloudinit_{{ vm_name }}_{{ random_string }}/user-data"
+    content: |
+      #cloud-config
+      users:
+        - name: root
+          ssh-authorized-keys:
+            - {{ ssh_keypair_root.public_key }}
+          sudo: ['ALL=(ALL) NOPASSWD:ALL']
+          groups: sudo
+          shell: /bin/bash
+          lock_passwd: false
+      chpasswd:
+        list: |
+          root:{{ root_password }}
+        expire: false
+      ssh_pwauth: true
+      disable_root: false
+  when:
+    - vm_action == "create" and vm_image_type == "scratch"
+  delegate_to: "{{ target_host }}"
+
+- name: Add network configuration and packages, including GPU drivers, to cloud-init
+  blockinfile:
+    path: "/tmp/cloudinit_{{ vm_name }}_{{ random_string }}/user-data"
+    marker: "      # {mark} ANSIBLE MANAGED BLOCK - NETWORK AND PACKAGES"
+    block: |
+      
+      # Network configuration
+      network:
+        version: 2
+        ethernets:
+          enp1s0:
+            dhcp4: true
+            dhcp6: false
+      
+      # Essential packages for SSH and monitoring
+      package_update: true
+      packages:
+        - openssh-server
+        - curl
+        - wget
+        - net-tools
+        - qemu-guest-agent
+        - acpid
+        - cloud-guest-utils
+      
+      # SSH configuration
+      write_files:
+        - path: /etc/ssh/sshd_config.d/90-cloudinit.conf
+          content: |
+            PasswordAuthentication yes
+            PubkeyAuthentication yes
+            PermitRootLogin yes
+            ChallengeResponseAuthentication no
+            UseDNS no
+          owner: root:root
+          permissions: '0644'
+        - path: /etc/cloud/cloud.cfg.d/99-ssh-ready.cfg
+          content: |
+            # Signal SSH readiness
+            ssh_svcname: ssh
+          owner: root:root
+          permissions: '0644'
+      
+      # Commands to run after packages are installed
+      runcmd:
+        - echo "Starting cloud-init final setup..."
+        - systemctl enable ssh || systemctl enable sshd
+        - systemctl start ssh || systemctl start sshd
+        - systemctl enable qemu-guest-agent
+        - systemctl start qemu-guest-agent
+        - systemctl enable acpid
+        - systemctl start acpid
+        - echo "SSH should now be ready"
+        - |
+          if lspci | grep -qi nvidia; then
+            echo "========================================"
+            echo "NVIDIA GPU detected - Installing driver for passthrough"
+            echo "========================================"
+            export DEBIAN_FRONTEND=noninteractive
+            
+            # Install prerequisites
+            echo "Installing kernel headers and build tools..."
+            apt-get update
+            apt-get install -y --no-install-recommends --quiet \
+              build-essential \
+              dkms \
+              linux-headers-$(uname -r) \
+              ubuntu-drivers-common \
+              pciutils \
+              wget \
+              software-properties-common
+            
+            # Use ubuntu-drivers to auto-install latest recommended driver
+            echo "Installing NVIDIA driver (this may take several minutes)..."
+            ubuntu-drivers install --gpgpu nvidia 2>&1 | tee /var/log/nvidia-driver-install.log
+            
+            # Install CUDA Toolkit
+            echo "Installing CUDA Toolkit..."
+            wget -O- https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb | dpkg -i -
+            add-apt-repository -y contrib
+            apt-get update
+            apt-get install -y --no-install-recommends --quiet cuda-toolkit 2>&1 | tee -a /var/log/cuda-install.log
+            
+            # Verify installation
+            if nvidia-detector 2>/dev/null | head -1 | grep -q "nvidia-driver"; then
+              echo "✓ NVIDIA driver detected by nvidia-detector"
+              NVIDIA_DETECTED=$(nvidia-detector 2>/dev/null | head -1)
+              echo "Detected driver package: $NVIDIA_DETECTED"
+            else
+              echo "⚠ WARNING: NVIDIA driver not detected by nvidia-detector. Installation may need completion after reboot."
+            fi
+            
+            if command -v nvcc &> /dev/null; then
+              echo "✓ CUDA Toolkit installed successfully"
+              echo "CUDA version: $(nvcc --version | grep "release" | sed -n -e 's/^.*release \([0-9]\+\.[0-9]\+\).*$/\1/p')"
+            else
+              echo "⚠ WARNING: CUDA Toolkit not found."
+            fi
+            
+            # Create marker file for post-reboot validation
+            echo "$(date): NVIDIA driver and CUDA installed via cloud-init" > /var/log/nvidia-driver-ready
+            echo "========================================"
+            echo "NVIDIA driver and CUDA installation complete"
+            echo "GPU will be fully operational after VM reboot"
+            echo "========================================"
+            # Set flag to trigger reboot
+            touch /var/run/reboot-required-gpu-driver
+            
+          elif lspci | grep -qi amd; then
+            echo "========================================"
+            echo "AMD GPU detected - Installing driver"
+            echo "========================================"
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y \
+              firmware-amd-graphics \
+              xserver-xorg-video-amdgpu \
+              mesa-vulkan-drivers \
+              vulkan-tools \
+              pciutils
+            echo "✓ AMD driver installation complete"
+            echo "========================================"
+            # AMD drivers also benefit from reboot
+            touch /var/run/reboot-required-gpu-driver
+          else
+            echo "No NVIDIA or AMD GPU detected, skipping driver installation."
+          fi
+        - echo "VM setup completed at $(date)" >> /var/log/vm-setup.log
+      
+      # Reboot if GPU driver was installed (ensures kernel modules load properly)
+      power_state:
+        delay: now
+        mode: reboot
+        message: "Rebooting to activate GPU drivers"
+        timeout: 300
+        condition: test -f /var/run/reboot-required-gpu-driver
+      
+      # Final message
+      final_message: "VM {{ vm_name }} cloud-init setup completed successfully"
+  when:
+    - vm_action == "create" and vm_image_type == "scratch"
+  delegate_to: "{{ target_host }}"
+
+- name: Create cloud-init meta-data file
+  copy:
+    dest: "/tmp/cloudinit_{{ vm_name }}_{{ random_string }}/meta-data"
+    content: |
+      instance-id: {{ vm_name }}
+      local-hostname: {{ vm_name }}
+    mode: '0644'
+  when:
+    - vm_action == "create" and vm_image_type == "scratch"
+  delegate_to: "{{ target_host }}"
+
+- name: Install genisoimage package
+  package:
+    name: genisoimage
+    state: present
+  when:
+    - vm_action == "create" and vm_image_type == "scratch"
+  delegate_to: "{{ target_host }}"
+
+- name: Create cloud-init ISO
+  shell: genisoimage -output /var/lib/libvirt/images/{{ vm_name }}-init.iso -V cidata -r -J /tmp/cloudinit_{{ vm_name }}_{{ random_string }}/user-data /tmp/cloudinit_{{ vm_name }}_{{ random_string }}/meta-data
+  when:
+    - vm_action == "create" and vm_image_type == "scratch"
+  delegate_to: "{{ target_host }}"
+
+- name: Determine GPU provisioning mode
+  set_fact:
+    gpu_provision_mode: "{{ 'partitioned' if (vm_gpu_partition_size is defined and vm_gpu_partition_size | length > 0) else 'passthrough' }}"
+    gpu_partition_type: "{{ 'mig' if (vm_gpu_partition_size is defined and vm_gpu_partition_size | length > 0 and vm_gpu_partition_size is search('g\\.[0-9]+gb')) else 'sriov' if (vm_gpu_partition_size is defined and vm_gpu_partition_size | length > 0 and vm_gpu_partition_size is search('vf[0-9]+')) else 'none' }}"
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined 
+    - vm_gpu_provisioned | bool
+
+- name: Block partitioned GPU creation (not yet implemented)
+  fail:
+    msg: |
+      Partitioned GPU provisioning is not yet implemented.
+      Requested: {{ gpu_partition_type | upper }} partition ({{ vm_gpu_partition_size }})
+      
+      To use full GPU passthrough instead, remove the vm_gpu_partition_size parameter.
+  when:
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_partition_size is defined
+    - vm_gpu_partition_size | length > 0
+
+- name: Load GPU capabilities lockfile if GPU provisioning requested
+  slurp:
+    src: /etc/libvirt/gpu-capabilities/gpu-lockfile.json
+  register: gpu_lockfile_content
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined 
+    - vm_gpu_provisioned | bool
+  delegate_to: "{{ target_host }}"
+
+- name: Parse GPU lockfile JSON
+  set_fact:
+    gpu_lockfile: "{{ gpu_lockfile_content.content | b64decode | from_json }}"
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined 
+    - vm_gpu_provisioned | bool
+    - gpu_lockfile_content is defined
+    - gpu_lockfile_content.content is defined
+  ignore_errors: yes
+
+- name: Get all GPUs currently attached to VMs
+  shell:
+    cmd: |
+      echo "=== GPU Attachments Across All VMs ==="
+      HOST_GPU=$(lspci -D -vmm | awk '/^Class:.*VGA|^Class:.*3D|^Class:.*Display/ {getline; if ($0 ~ /^Slot:/) print $2}' | while read pci; do
+        if [ -f "/sys/bus/pci/devices/${pci}/boot_vga" ] && [ "$(cat /sys/bus/pci/devices/${pci}/boot_vga 2>/dev/null)" = "1" ]; then
+          echo "$pci"
+          break
+        fi
+      done)
+      
+      if [ ! -z "$HOST_GPU" ]; then
+        echo "Host is using GPU: $HOST_GPU"
+        HOST_GPU_MODEL=$(lspci -s ${HOST_GPU#0000:} | grep -i "vga\|3d\|display" | cut -d: -f3-)
+        HOST_GPU_DRIVER=$(lspci -nnk -s ${HOST_GPU#0000:} | grep "Kernel driver in use:" | awk '{print $5}' || echo "none")
+        echo "Model: $HOST_GPU_MODEL"
+        echo "Driver: $HOST_GPU_DRIVER"
+      else
+        echo "No host GPU detected (headless or no boot_vga)"
+        HOST_GPU="NONE"
+      fi
+      echo ""
+      
+      # 1. List all VMs with attached GPU PCI IDs (single clean output)
+      echo "GPU Attachments Across All VMs:"
+      ATTACHED_GPUS_LIST=""
+      for vm in $(virsh list --all --name); do
+        [ -z "$vm" ] && continue
+        GPU_DEVICES=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" || echo "")
+        if [ -n "$GPU_DEVICES" ]; then
+          while read -r pci_addr; do
+            [ -z "$pci_addr" ] && continueThen remove all task that contains installation of GPU driver that is not
+            normalized_pci=$(echo "$pci_addr" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s", $1, $2, $3, $4}' | sed 's/ /0/g')
+            ATTACHED_GPUS_LIST="$ATTACHED_GPUS_LIST $normalized_pci"
+            GPU_MODEL=$(lspci -s ${normalized_pci#0000:} 2>/dev/null | grep -i "vga\|3d\|display" | cut -d: -f3- || echo "Unknown GPU")
+            GPU_DRIVER=$(lspci -nnk -s ${normalized_pci#0000:} 2>/dev/null | grep "Kernel driver in use:" | awk '{print $5}' || echo "none")
+            echo "VM: $vm"
+            echo "  PCI: $normalized_pci - $GPU_MODEL"
+            echo "      Driver: $GPU_DRIVER"
+          done <<< "$GPU_DEVICES"
+        else
+          echo "VM: $vm"
+          echo "  No GPU attached"
+        fi
+      done
+      ATTACHED_GPUS_LIST=$(echo "$ATTACHED_GPUS_LIST" | xargs)
+      echo ""
+
+      # 2. Get LOCKFILE_AVAILABLE list
+      {% if gpu_lockfile is defined and gpu_lockfile.gpu_modes.passthrough.available_devices is defined %}
+      LOCKFILE_AVAILABLE="{{ gpu_lockfile.gpu_modes.passthrough.available_devices | join(' ') }}"
+      {% else %}
+      LOCKFILE_AVAILABLE=""
+      {% endif %}
+
+      # 3. List all GPUs not attached to any VM (and not host GPU)
+      echo "=== Available GPUs (Not Attached and Not Host GPU) ==="
+      if [ -z "$LOCKFILE_AVAILABLE" ]; then
+        echo "  No available devices in lockfile"
+      else
+        for gpu_pci in $LOCKFILE_AVAILABLE; do
+          [ -z "$gpu_pci" ] && continue
+          if [ "$HOST_GPU" != "NONE" ] && [ "$gpu_pci" == "$HOST_GPU" ]; then
+            continue
+          fi
+          if echo " $ATTACHED_GPUS_LIST " | grep -q " $gpu_pci "; then
+            continue
+          fi
+          GPU_MODEL=$(lspci -s ${gpu_pci#0000:} 2>/dev/null | grep -i "vga\|3d\|display" | cut -d: -f3- || echo "Unknown GPU")
+          GPU_DRIVER=$(lspci -nnk -s ${gpu_pci#0000:} 2>/dev/null | grep "Kernel driver in use:" | awk '{print $5}' || echo "none")
+          echo "  PCI: $gpu_pci - $GPU_MODEL"
+          echo "      Driver: $GPU_DRIVER ✓ Ready for passthrough"
+        done
+      fi
+    executable: /bin/bash
+  register: all_vm_gpu_attachments
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined 
+    - vm_gpu_provisioned | bool
+    - gpu_provision_mode is defined
+    - gpu_provision_mode == 'passthrough'
+  delegate_to: "{{ target_host }}"
+
+- name: Display GPU attachment status across all VMs
+  debug:
+    var: all_vm_gpu_attachments.stdout_lines
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined 
+    - vm_gpu_provisioned | bool
+    - gpu_provision_mode is defined
+    - gpu_provision_mode == 'passthrough'
+    - all_vm_gpu_attachments is defined
+
+- name: Find least-used available GPU (avoid exhausting first GPU)
+  shell:
+    cmd: |
+      set -e
+      # Get available devices from parsed lockfile
+      {% if gpu_lockfile is not defined or gpu_lockfile.gpu_modes.passthrough.available_devices is not defined %}
+      echo "NO_LOCKFILE"
+      exit 0
+      {% endif %}
+      
+      HOST_GPU=$(lspci -D -vmm | awk '/^Class:.*VGA|^Class:.*3D|^Class:.*Display/ {getline; if ($0 ~ /^Slot:/) print $2}' | while read pci; do
+        if [ -f "/sys/bus/pci/devices/${pci}/boot_vga" ] && [ "$(cat /sys/bus/pci/devices/${pci}/boot_vga 2>/dev/null)" = "1" ]; then
+          echo "$pci"
+          break
+        fi
+      done)
+      
+      if [ -z "$HOST_GPU" ]; then
+        HOST_GPU="NONE"
+      fi
+      
+      # Use available devices from parsed lockfile
+      LOCKFILE_AVAILABLE='{{ gpu_lockfile.gpu_modes.passthrough.available_devices | join(" ") }}'
+      
+      # Declare array to collect attached PCI devices
+      declare -a ATTACHED_GPUS_ARRAY=()
+      
+      # Collect attached PCI devices from VMs
+      for vm in $(virsh list --all --name); do
+        if [ ! -z "$vm" ]; then
+          GPU_DEVICES=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" || echo "")
+          if [ ! -z "$GPU_DEVICES" ]; then
+            while read -r pci_addr; do
+              if [ ! -z "$pci_addr" ]; then
+                # Normalize PCI address (remove 0x prefixes and ensure proper format)
+                normalized_pci=$(echo "$pci_addr" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s", $1, $2, $3, $4}' | sed 's/ /0/g')
+                ATTACHED_GPUS_ARRAY+=("$normalized_pci")
+              fi
+            done < <(echo "$GPU_DEVICES")
+          fi
+        fi
+      done
+      
+      # Create sorted unique list of attached GPUs
+      ATTACHED_GPUS=$(printf '%s\n' "${ATTACHED_GPUS_ARRAY[@]}" | sort -u)
+      
+      # Filter out attached GPUs from lockfile available devices
+      AVAILABLE_UNATTACHED=""
+      for gpu_pci in $LOCKFILE_AVAILABLE; do
+        if [ -z "$gpu_pci" ]; then
+          continue
+        fi
+        
+        # Check if this GPU is attached to any VM
+        IS_ATTACHED=0
+        for attached in $ATTACHED_GPUS; do
+          if [ "$gpu_pci" == "$attached" ]; then
+            IS_ATTACHED=1
+            break
+          fi
+        done
+        
+        if [ $IS_ATTACHED -eq 0 ]; then
+          AVAILABLE_UNATTACHED="$AVAILABLE_UNATTACHED $gpu_pci"
+        fi
+      done
+      
+      # Remove first available GPU from filtered list (reserve it)
+      RESERVED_GPU=""
+      FILTERED_GPUS=""
+      for gpu_pci in $AVAILABLE_UNATTACHED; do
+        if [ -z "$gpu_pci" ]; then
+          continue
+        fi
+        if [ -z "$RESERVED_GPU" ]; then
+          RESERVED_GPU="$gpu_pci"
+        else
+          FILTERED_GPUS="$FILTERED_GPUS $gpu_pci"
+        fi
+      done
+      
+      # Get all GPU attachments with VM counts (using filtered list)
+      declare -A GPU_VM_COUNT
+      for gpu_pci in $FILTERED_GPUS; do
+        if [ -z "$gpu_pci" ]; then
+          continue
+        fi
+        
+        if [ "$HOST_GPU" != "NONE" ] && [ "$gpu_pci" == "$HOST_GPU" ]; then
+          echo "Skipping host GPU: $gpu_pci" >&2
+          continue
+        fi
+        
+        # Count VMs using this GPU
+        COUNT=0
+        for vm in $(virsh list --all --name); do
+          if [ ! -z "$vm" ]; then
+            # Get normalized PCI addresses from VM and check if they match our GPU
+            VM_GPUS=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s\n", $1, $2, $3, $4}' | sed 's/ /0/g')
+            if echo "$VM_GPUS" | grep -q "^${gpu_pci}$"; then
+              COUNT=$((COUNT + 1))
+            fi
+          fi
+        done
+        
+        GPU_VM_COUNT[$gpu_pci]=$COUNT
+      done
+      
+      # Check if we have any available GPUs
+      GPU_COUNT=0
+      for key in "${!GPU_VM_COUNT[@]}"; do
+        GPU_COUNT=$((GPU_COUNT + 1))
+      done
+      
+      if [ $GPU_COUNT -eq 0 ]; then
+        echo "NO_AVAILABLE_GPU"
+        exit 0
+      fi
+      
+      # Find GPU with lowest usage count
+      MIN_COUNT=999999
+      SELECTED_GPU=""
+      for gpu_pci in "${!GPU_VM_COUNT[@]}"; do
+        COUNT=${GPU_VM_COUNT[$gpu_pci]}
+        if [ $COUNT -lt $MIN_COUNT ]; then
+          MIN_COUNT=$COUNT
+          SELECTED_GPU=$gpu_pci
+        fi
+      done
+      
+      if [ ! -z "$SELECTED_GPU" ]; then
+        echo "$SELECTED_GPU"
+      else
+        echo "NO_AVAILABLE_GPU"
+      fi
+    executable: /bin/bash
+  register: available_gpu_pci
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined 
+    - vm_gpu_provisioned | bool
+    - gpu_provision_mode is defined
+    - gpu_provision_mode == 'passthrough'
+    - gpu_lockfile is defined
+    - gpu_lockfile.gpu_modes.passthrough.available_devices is defined
+    - vm_gpu_count is not defined or vm_gpu_count | int <= 1
+  delegate_to: "{{ target_host }}"
+
+- name: Fail if GPU lockfile not found
+  fail:
+    msg: |
+      GPU capabilities lockfile not found on host {{ target_host }}.
+      
+      The lockfile is required for GPU provisioning and should be at:
+      /etc/libvirt/gpu-capabilities/gpu-lockfile.json
+      
+      To generate the lockfile:
+      1. Ensure GPU passthrough is configured (IOMMU, vfio-pci binding)
+      2. Run: systemctl start gpu-detect
+      3. Verify: cat /etc/libvirt/gpu-capabilities/gpu-lockfile.json
+  when:
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - gpu_provision_mode is defined
+    - gpu_provision_mode == 'passthrough'
+    - available_gpu_pci is defined
+    - available_gpu_pci.stdout is defined
+    - available_gpu_pci.stdout == "NO_LOCKFILE"
+    - vm_gpu_count is not defined or vm_gpu_count | int <= 1
+
+- name: Fail if no available GPU found
+  fail:
+    msg: |
+      No available GPU found on host {{ target_host }}.
+      All GPUs are either:
+      - Attached to VMs
+      - Used by the host
+      - Not bound to vfio-pci driver
+      
+      {{ all_vm_gpu_attachments.stdout }}
+      
+      To make a GPU available for passthrough:
+      1. Ensure GPU is bound to vfio-pci driver (see GPU passthrough configuration)
+      2. Free up a GPU by shutting down a VM, or
+      3. Add more GPUs to the host
+  when:
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - gpu_provision_mode is defined
+    - gpu_provision_mode == 'passthrough'
+    - available_gpu_pci is defined
+    - available_gpu_pci.stdout is defined
+    - available_gpu_pci.stdout == "NO_AVAILABLE_GPU"
+    - vm_gpu_count is not defined or vm_gpu_count | int <= 1
+
+- name: Get total available GPUs for retry calculation (not attached to VMs)
+  shell: |
+    if [ ! -f /etc/libvirt/gpu-capabilities/gpu-lockfile.json ]; then
+      echo "0"
+      exit 0
+    fi
+    
+    # Get all GPUs from lockfile
+    AVAILABLE_GPUS=$(jq -r '.gpu_modes.passthrough.available_devices[]' /etc/libvirt/gpu-capabilities/gpu-lockfile.json 2>/dev/null)
+    
+    if [ -z "$AVAILABLE_GPUS" ]; then
+      echo "0"
+      exit 0
+    fi
+    
+    # Collect all GPUs currently attached to VMs
+    declare -a ATTACHED_GPUS_ARRAY=()
+    for vm in $(virsh list --all --name); do
+      if [ ! -z "$vm" ]; then
+        GPU_DEVICES=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" || echo "")
+        if [ ! -z "$GPU_DEVICES" ]; then
+          while read -r pci_addr; do
+            if [ ! -z "$pci_addr" ]; then
+              normalized_pci=$(echo "$pci_addr" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s", $1, $2, $3, $4}' | sed 's/ /0/g')
+              ATTACHED_GPUS_ARRAY+=("$normalized_pci")
+            fi
+          done < <(echo "$GPU_DEVICES")
+        fi
+      fi
+    done
+    
+    # Count GPUs that are in lockfile but NOT attached to any VM
+    UNATTACHED_COUNT=0
+    for gpu_pci in $AVAILABLE_GPUS; do
+      IS_ATTACHED=0
+      for attached in "${ATTACHED_GPUS_ARRAY[@]}"; do
+        if [ "$gpu_pci" = "$attached" ]; then
+          IS_ATTACHED=1
+          break
+        fi
+      done
+      if [ $IS_ATTACHED -eq 0 ]; then
+        UNATTACHED_COUNT=$((UNATTACHED_COUNT + 1))
+      fi
+    done
+    
+    echo "$UNATTACHED_COUNT"
+  args:
+    executable: /bin/bash
+  register: total_available_gpus
+  when:
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_count is not defined or vm_gpu_count | int <= 1
+  delegate_to: "{{ target_host }}"
+
+- name: Initialize GPU retry variables
+  set_fact:
+    attempted_gpus: []
+    gpu_retry_count: 0
+    max_gpu_retries: "{{ total_available_gpus.stdout | default('1') | int }}"
+    virt_install_success: false
+  when:
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_count is not defined or vm_gpu_count | int <= 1
+
+- name: Check GPU mode support using parsed lockfile
+  set_fact:
+    gpu_mode_supported: "{% if gpu_lockfile is not defined %}NO_LOCKFILE{% elif gpu_provision_mode == 'passthrough' %}{{ 'SUPPORTED' if (gpu_lockfile.gpu_modes.passthrough.supported | default(false)) else 'NOT_SUPPORTED' }}{% elif gpu_provision_mode == 'partitioned' and gpu_partition_type == 'mig' %}{{ 'SUPPORTED' if (gpu_lockfile.gpu_modes.partitioned.nvidia_mig.supported | default(false)) else 'NOT_SUPPORTED' }}{% elif gpu_provision_mode == 'partitioned' and gpu_partition_type == 'sriov' %}{{ 'SUPPORTED' if (gpu_lockfile.gpu_modes.partitioned.sriov.supported | default(false)) else 'NOT_SUPPORTED' }}{% else %}NOT_SUPPORTED{% endif %}"
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+
+- name: Validate GPU provisioning request against capabilities
+  fail:
+    msg: |
+      GPU provisioning error: Requested mode '{{ gpu_provision_mode }}' not supported on {{ target_host }}.
+      {% if gpu_provision_mode == 'partitioned' %}
+      Requested partition: {{ gpu_partition_type }} ({{ vm_gpu_partition_size }})
+      {% endif %}
+      
+      Available capabilities:
+      - Passthrough: {{ gpu_lockfile.gpu_modes.passthrough.supported if gpu_lockfile is defined else 'Unknown' }}
+      - Partitioned: {{ gpu_lockfile.gpu_modes.partitioned.supported if gpu_lockfile is defined else 'Unknown' }}
+      {% if gpu_lockfile is defined and gpu_lockfile.gpu_modes.partitioned.supported %}
+        - MIG: {{ gpu_lockfile.gpu_modes.partitioned.nvidia_mig.supported }}
+        - SR-IOV: {{ gpu_lockfile.gpu_modes.partitioned.sriov.supported }}
+      {% endif %}
+      
+      
+      {% if gpu_provision_mode == 'partitioned' and gpu_partition_type == 'mig' and gpu_lockfile is defined %}
+      To enable MIG:
+      {% for step in gpu_lockfile.gpu_modes.partitioned.nvidia_mig.setup_required %}
+      {{ loop.index }}. {{ step }}
+      {% endfor %}
+      {% elif gpu_provision_mode == 'partitioned' and gpu_partition_type == 'sriov' and gpu_lockfile is defined %}
+      To enable SR-IOV:
+      {% for step in gpu_lockfile.gpu_modes.partitioned.sriov.setup_required %}
+      {{ loop.index }}. {{ step }}
+      {% endfor %}
+      {% elif gpu_provision_mode == 'partitioned' and gpu_partition_type == 'none' %}
+      Invalid partition format '{{ vm_gpu_partition_size }}'. Use: 1g.5gb, 2g.10gb (MIG) or vf0, vf1 (SR-IOV)
+      {% endif %}
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - gpu_mode_supported is defined
+    - gpu_mode_supported != "SUPPORTED"
+
+- name: Get GPU PCI address for passthrough
+  set_fact:
+    gpu_pci_for_passthrough: "{{ available_gpu_pci }}"
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - gpu_provision_mode == 'passthrough'
+    - available_gpu_pci is defined
+    - available_gpu_pci.stdout is defined
+    - available_gpu_pci.stdout != "NO_AVAILABLE_GPU"
+    - vm_gpu_count is not defined or vm_gpu_count | int <= 1
+
+- name: Find audio device associated with the GPU
+  shell: |
+    GPU_PCI="{{ gpu_pci_for_passthrough.stdout }}"
+    # Extract domain, bus, and slot from GPU PCI address (e.g., 0000:22:00.0 -> domain:0000 bus:22 slot:00)
+    GPU_DOMAIN=$(echo "$GPU_PCI" | cut -d':' -f1)
+    GPU_BUS=$(echo "$GPU_PCI" | cut -d':' -f2)
+    GPU_SLOT=$(echo "$GPU_PCI" | cut -d':' -f3 | cut -d'.' -f1)
+    # Find audio device on the same domain:bus:slot but with function 1
+    AUDIO_DEVICE=$(lspci -D | grep "^${GPU_DOMAIN}:${GPU_BUS}:${GPU_SLOT}\.1" | grep -i "audio" | awk '{print $1}' | head -1)
+    if [ -z "$AUDIO_DEVICE" ]; then
+      echo "NO_AUDIO_DEVICE"
+    else
+      echo "$AUDIO_DEVICE"
+    fi
+  register: gpu_audio_device
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - gpu_provision_mode == 'passthrough'
+    - gpu_pci_for_passthrough is defined
+    - gpu_pci_for_passthrough.stdout is defined
+    - gpu_pci_for_passthrough.stdout != "NO_AVAILABLE_GPU"
+    - vm_gpu_count is not defined or vm_gpu_count | int <= 1
+  delegate_to: "{{ target_host }}"
+
+- name: Display GPU and audio device info
+  debug:
+    msg:
+      - "GPU PCI Address: {{ gpu_pci_for_passthrough.stdout }}"
+      - "Audio Device PCI Address: {{ gpu_audio_device.stdout if (gpu_audio_device is defined and gpu_audio_device.stdout != 'NO_AUDIO_DEVICE') else 'Not found or not available' }}"
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - gpu_provision_mode == 'passthrough'
+    - gpu_pci_for_passthrough is defined
+    - vm_gpu_count is not defined or vm_gpu_count | int <= 1
+
+- name: Get MIG instance PCI address for partitioned GPU
+  shell: |
+    nvidia-smi mig -lgi | grep "{{ vm_gpu_partition_size }}" | head -1 | awk '{print $1}' || echo "MIG_INSTANCE_NOT_CREATED"
+  register: gpu_mig_instance_addr
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - gpu_provision_mode == 'partitioned'
+    - gpu_partition_type == 'mig'
+  ignore_errors: yes
+  delegate_to: "{{ target_host }}"
+
+- name: Get SR-IOV VF PCI address for partitioned GPU
+  shell: |
+    VF_NUM=$(echo "{{ vm_gpu_partition_size }}" | sed 's/vf//')
+    lspci -D | grep "Virtual Function" | sed -n "$((VF_NUM + 1))p" | awk '{print $1}' || echo "VF_NOT_FOUND"
+  register: gpu_sriov_vf_addr
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - gpu_provision_mode == 'partitioned'
+    - gpu_partition_type == 'sriov'
+  ignore_errors: yes
+  delegate_to: "{{ target_host }}"
+
+- name: Set GPU device for VM
+  set_fact:
+    vm_gpu_device: >-
+      {{ gpu_pci_for_passthrough.stdout if (gpu_provision_mode == 'passthrough' and gpu_pci_for_passthrough is defined and gpu_pci_for_passthrough.stdout is defined)
+         else gpu_mig_instance_addr.stdout if (gpu_partition_type == 'mig' and gpu_mig_instance_addr is defined and gpu_mig_instance_addr.stdout is defined)
+         else gpu_sriov_vf_addr.stdout if (gpu_partition_type == 'sriov' and gpu_sriov_vf_addr is defined and gpu_sriov_vf_addr.stdout is defined)
+         else '' }}
+    vm_gpu_assigned: true
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_count is not defined or vm_gpu_count | int <= 1
+
+- name: Debug GPU retry configuration
+  debug:
+    msg:
+      - "=== GPU Retry Configuration ==="
+      - "Total GPUs in lockfile: {{ gpu_lockfile.gpu_modes.passthrough.available_devices | length if gpu_lockfile is defined else 'N/A' }}"
+      - "Currently unattached GPUs: {{ total_available_gpus.stdout | default('0') }}"
+      - "Max retry attempts: {{ max_gpu_retries }}"
+      - "Initial GPU to try: {{ vm_gpu_device | default('Not yet assigned') }}"
+  when:
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_count is not defined or vm_gpu_count | int <= 1
+
+- name: Validate GPU device was found
+  fail:
+    msg: |
+      GPU device not found for mode '{{ gpu_provision_mode }}'{% if gpu_provision_mode == 'partitioned' %} ({{ gpu_partition_type }}: {{ vm_gpu_partition_size }}){% endif %}.
+      Result: {{ vm_gpu_device }}
+      
+      {% if gpu_provision_mode == 'partitioned' and gpu_partition_type == 'mig' %}
+      Create MIG instances: nvidia-smi mig -cgi <profile_id>
+      List instances: nvidia-smi mig -lgi
+      {% elif gpu_provision_mode == 'partitioned' and gpu_partition_type == 'sriov' %}
+      Enable VFs: echo <NUM_VFS> > /sys/bus/pci/devices/<GPU_PCI>/sriov_numvfs
+      {% endif %}
+  when:
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_device is defined
+    - vm_gpu_device == '' or vm_gpu_device is search('NOT_CREATED|NOT_FOUND')
+    - vm_gpu_count is not defined or vm_gpu_count | int <= 1
+
+- name: Get GPU model information
+  shell: |
+    PCI_ADDR=$(echo "{{ vm_gpu_device }}" | sed 's/^[0-9]*://g')
+    GPU_MODEL=$(lspci -s $PCI_ADDR | grep -oP '(?<=: ).*')
+    
+    echo "GPU_MODEL=$GPU_MODEL"
+    echo "GPU_PCI_ID={{ vm_gpu_device }}"
+  register: gpu_info_result
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_device is defined
+    - vm_gpu_device != ''
+    - vm_gpu_count is not defined or vm_gpu_count | int <= 1
+  delegate_to: "{{ target_host }}"
+
+- name: Set GPU information facts
+  set_fact:
+    gpu_model: "{{ gpu_info_result.stdout_lines | select('match', '^GPU_MODEL=') | first | default('GPU_MODEL=Unknown') | regex_replace('^GPU_MODEL=', '') }}"
+    gpu_pci_id: "{{ vm_gpu_device }}"
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_device is defined
+    - vm_gpu_device != ''
+    - gpu_info_result is defined
+    - vm_gpu_count is not defined or vm_gpu_count | int <= 1
+
+- name: Display GPU provisioning configuration
+  debug:
+    msg:
+      - "=== GPU Provisioning for VM {{ vm_name }} ==="
+      - "Mode: {{ gpu_provision_mode | upper }}"
+      - "{% if gpu_provision_mode == 'partitioned' %}Partition Type: {{ gpu_partition_type | upper }}{% endif %}"
+      - "{% if gpu_provision_mode == 'partitioned' %}Partition Size: {{ vm_gpu_partition_size }}{% endif %}"
+      - "GPU Device PCI Address: {{ vm_gpu_device }}"
+      - "GPU Model: {{ gpu_model | default('Unknown') }}"
+      - ""
+      - "This GPU will be attached to the VM during creation."
+  when: 
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_device is defined
+    - vm_gpu_device != ''
+    - vm_gpu_count is not defined or vm_gpu_count | int <= 1
+
+# ===== AUTO-SELECT GPUS BY COUNT =====
+# When vm_gpu_count is defined (number), automatically select that many available GPUs
+- name: Auto-select available GPUs by count
+  shell: |
+    #!/bin/bash
+    
+    REQUESTED_COUNT={{ vm_gpu_count | default(0) }}
+    
+    if [ $REQUESTED_COUNT -eq 0 ]; then
+      echo "[]"
+      exit 0
+    fi
+    
+    # Read GPU lockfile
+    if [ ! -f /etc/libvirt/gpu-capabilities/gpu-lockfile.json ]; then
+      echo "[]"
+      exit 0
+    fi
+    
+    # Get list of available GPUs from lockfile
+    AVAILABLE_GPUS=$(jq -r '.gpu_modes.passthrough.available_devices[]' /etc/libvirt/gpu-capabilities/gpu-lockfile.json 2>/dev/null)
+    
+    if [ -z "$AVAILABLE_GPUS" ]; then
+      echo "[]"
+      exit 0
+    fi
+    
+    # Collect all GPUs currently attached to VMs
+    declare -a ATTACHED_GPUS_ARRAY=()
+    for vm in $(virsh list --all --name); do
+      if [ ! -z "$vm" ]; then
+        GPU_DEVICES=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" || echo "")
+        if [ ! -z "$GPU_DEVICES" ]; then
+          while read -r pci_addr; do
+            if [ ! -z "$pci_addr" ]; then
+              normalized_pci=$(echo "$pci_addr" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s\n", $1, $2, $3, $4}' | sed 's/ /0/g')
+              ATTACHED_GPUS_ARRAY+=("$normalized_pci")
+            fi
+          done < <(echo "$GPU_DEVICES")
+        fi
+      fi
+    done
+    
+    # Create sorted unique list of attached GPUs
+    ATTACHED_GPUS=$(printf '%s\n' "${ATTACHED_GPUS_ARRAY[@]}" | sort -u)
+    
+    # Filter out attached GPUs from lockfile available devices
+    AVAILABLE_UNATTACHED=""
+    for gpu_pci in $AVAILABLE_GPUS; do
+      if [ -z "$gpu_pci" ]; then
+        continue
+      fi
+      
+      # Check if this GPU is attached to any VM
+      IS_ATTACHED=0
+      for attached in $ATTACHED_GPUS; do
+        if [ "$gpu_pci" == "$attached" ]; then
+          IS_ATTACHED=1
+          break
+        fi
+      done
+      
+      if [ $IS_ATTACHED -eq 0 ]; then
+        AVAILABLE_UNATTACHED="$AVAILABLE_UNATTACHED $gpu_pci"
+      fi
+    done
+    
+    # Remove first available GPU from filtered list (reserve it)
+    RESERVED_GPU=""
+    FILTERED_GPUS=""
+    for gpu_pci in $AVAILABLE_UNATTACHED; do
+      if [ -z "$gpu_pci" ]; then
+        continue
+      fi
+      if [ -z "$RESERVED_GPU" ]; then
+        RESERVED_GPU="$gpu_pci"
+      else
+        FILTERED_GPUS="$FILTERED_GPUS $gpu_pci"
+      fi
+    done
+    
+    # Build associative array of GPU to VM count (using filtered list)
+    declare -A GPU_VM_COUNT
+    for gpu_pci in $FILTERED_GPUS; do
+      if [ -z "$gpu_pci" ]; then
+        continue
+      fi
+      
+      # Count VMs using this GPU
+      COUNT=0
+      for vm in $(virsh list --all --name); do
+        if [ ! -z "$vm" ]; then
+          VM_GPUS=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s\n", $1, $2, $3, $4}' | sed 's/ /0/g')
+          if echo "$VM_GPUS" | grep -q "^${gpu_pci}$"; then
+            COUNT=$((COUNT + 1))
+          fi
+        fi
+      done
+      
+      GPU_VM_COUNT[$gpu_pci]=$COUNT
+    done
+    
+    # Sort GPUs by usage count and select requested number
+    # Build sorted list of GPUs
+    SORTED_GPUS=$(
+      for gpu_pci in "${!GPU_VM_COUNT[@]}"; do
+        COUNT=${GPU_VM_COUNT[$gpu_pci]}
+        echo "$COUNT $gpu_pci"
+      done | sort -n | awk '{print $2}'
+    )
+    
+    # Select requested number and build JSON
+    SELECTED_COUNT=0
+    echo -n "["
+    for pci in $SORTED_GPUS; do
+      if [ $SELECTED_COUNT -ge $REQUESTED_COUNT ]; then
+        break
+      fi
+      
+      # Find audio device for this GPU
+      GPU_DOMAIN=$(echo "$pci" | cut -d':' -f1)
+      GPU_BUS=$(echo "$pci" | cut -d':' -f2)
+      GPU_SLOT=$(echo "$pci" | cut -d':' -f3 | cut -d'.' -f1)
+      AUDIO_DEVICE=$(lspci -D | grep "^${GPU_DOMAIN}:${GPU_BUS}:${GPU_SLOT}\.1" | grep -i "audio" | awk '{print $1}' | head -1)
+      
+      if [ -z "$AUDIO_DEVICE" ]; then
+        AUDIO_DEVICE="NO_AUDIO_DEVICE"
+      fi
+      
+      # Output JSON for this GPU
+      if [ $SELECTED_COUNT -gt 0 ]; then
+        echo -n ","
+      fi
+      echo -n "{\"pci\":\"$pci\",\"audio\":\"$AUDIO_DEVICE\"}"
+      
+      SELECTED_COUNT=$((SELECTED_COUNT + 1))
+    done
+    echo "]"
+  args:
+    executable: /bin/bash
+  register: auto_selected_gpus_json
+  when:
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_count is defined
+    - vm_gpu_count | int > 1
+    - vm_gpu_devices is not defined or (vm_gpu_devices | length) <= 1
+  delegate_to: "{{ target_host }}"
+
+- name: Parse auto-selected GPUs from JSON
+  set_fact:
+    vm_gpu_devices: "{{ auto_selected_gpus_json.stdout | from_json }}"
+  when:
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_count is defined
+    - vm_gpu_count | int > 0
+    - auto_selected_gpus_json is defined
+    - auto_selected_gpus_json.stdout is defined
+
+- name: Validate enough GPUs were found
+  fail:
+    msg: |
+      Requested {{ vm_gpu_count }} GPUs but only {{ vm_gpu_devices | length }} available GPUs were found.
+      
+      Please check:
+      1. GPU availability on the host
+      2. GPU lockfile: /etc/libvirt/gpu-capabilities/gpu-lockfile.json
+      3. Current GPU allocations: virsh list --all
+  when:
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_count is defined
+    - vm_gpu_count | int > 0
+    - vm_gpu_devices is defined
+    - (vm_gpu_devices | length) < (vm_gpu_count | int)
+
+- name: Display auto-selected GPUs
+  debug:
+    msg:
+      - "=== Auto-Selected {{ vm_gpu_count }} GPUs ==="
+      - "{{ vm_gpu_devices }}"
+  when:
+    - vm_action == "create"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_count is defined
+    - vm_gpu_count | int > 0
+    - vm_gpu_devices is defined
+    - (vm_gpu_devices | length) > 0
+
+# ===== MULTI-GPU SUPPORT (WITHOUT RETRY) =====
+# When vm_gpu_devices has > 1 GPU, use multi-GPU approach without retry
+- name: Create VM with multiple GPUs (no retry)
+  include_tasks: gpu-virt-install-multi.yml
+  when:
+    - vm_action == "create" 
+    - vm_image_type in ["scratch", "base"]
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_devices is defined
+    - vm_gpu_devices | length > 1
+
+# ===== SINGLE GPU SUPPORT (WITH RETRY) =====
+# When only vm_gpu_device is defined (single GPU), use retry logic
+- name: Create VM with virt-install (with GPU) - Retry Block
+  block:
+    - name: Try virt-install with current GPU
+      shell: |
+        virt-install \
+          --name {{ vm_name }} \
+          --ram {{ vm_ram }} \
+          --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \
+          --disk path=/var/lib/libvirt/images/{{ vm_name }}-init.iso,device=cdrom \
+          --vcpus {{ vm_vcpus }} \
+          --cpu host-passthrough,cache.mode=passthrough \
+          --machine q35 \
+          --boot uefi \
+          --features smm=on \
+          --os-variant {{ vm_os_variant }} \
+          --network network=default,model=virtio \
+          --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 \
+          --hostdev {{ vm_gpu_device }}{% if vm_gpu_rom_file is defined and vm_gpu_rom_file != '' %},romfile={{ vm_gpu_rom_file }}{% endif %} \
+          {% if gpu_audio_device is defined and gpu_audio_device.stdout is defined and gpu_audio_device.stdout != 'NO_AUDIO_DEVICE' %}--hostdev {{ gpu_audio_device.stdout }} \{% endif %}
+
+          --graphics none \
+          --console pty,target_type=serial \
+          --import \
+          --noautoconsole
+      register: vm_create_result
+      delegate_to: "{{ target_host }}"
+
+    - name: Mark virt-install as successful
+      set_fact:
+        virt_install_success: true
+
+  rescue:
+    - name: Check if error is GPU-related
+      set_fact:
+        is_gpu_error: "{{ (vm_create_result.stderr | default('') is search('hostdev|PCI|GPU|vfio|IOMMU')) or (vm_create_result.msg | default('') is search('hostdev|PCI|GPU|vfio|IOMMU')) }}"
+
+    - name: Add failed GPU to attempted list
+      set_fact:
+        attempted_gpus: "{{ attempted_gpus + [vm_gpu_device] }}"
+      when: is_gpu_error | bool
+
+    - name: Increment retry count
+      set_fact:
+        gpu_retry_count: "{{ gpu_retry_count | int + 1 }}"
+      when: is_gpu_error | bool
+
+    - name: Check if we should continue retrying
+      set_fact:
+        should_retry: "{{ (gpu_retry_count | int) < (max_gpu_retries | int) and (is_gpu_error | bool) }}"
+
+    - name: Get alternative GPU (excluding attempted ones)
+      shell: |
+        #!/bin/bash
+        
+        # Read GPU lockfile
+        if [ ! -f /etc/libvirt/gpu-capabilities/gpu-lockfile.json ]; then
+          echo "NO_LOCKFILE"
+          exit 0
+        fi
+        
+        # Get list of available GPUs from lockfile
+        AVAILABLE_GPUS=$(jq -r '.gpu_modes.passthrough.available_devices[]' /etc/libvirt/gpu-capabilities/gpu-lockfile.json 2>/dev/null)
+        
+        if [ -z "$AVAILABLE_GPUS" ]; then
+          echo "NO_AVAILABLE_GPU"
+          exit 0
+        fi
+        
+        # Build array of attempted GPUs
+        declare -a ATTEMPTED_GPUS_ARRAY
+        {% if attempted_gpus is defined and attempted_gpus | length > 0 %}
+        ATTEMPTED_GPUS_ARRAY=({% for gpu in attempted_gpus %}"{{ gpu }}" {% endfor %})
+        {% endif %}
+        
+        # Build associative array of GPU to VM count, excluding attempted GPUs
+        declare -A GPU_VM_COUNT
+        for gpu_pci in $AVAILABLE_GPUS; do
+          if [ -z "$gpu_pci" ]; then
+            continue
+          fi
+          
+          # Skip already attempted GPUs
+          IS_ATTEMPTED=0
+          for attempted in "${ATTEMPTED_GPUS_ARRAY[@]}"; do
+            if [ "$gpu_pci" = "$attempted" ]; then
+              IS_ATTEMPTED=1
+              break
+            fi
+          done
+          
+          if [ $IS_ATTEMPTED -eq 1 ]; then
+            continue
+          fi
+          
+          # Count VMs using this GPU
+          COUNT=0
+          for vm in $(virsh list --all --name); do
+            if [ ! -z "$vm" ]; then
+              VM_GPUS=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s\n", $1, $2, $3, $4}' | sed 's/ /0/g')
+              if echo "$VM_GPUS" | grep -q "^${gpu_pci}$"; then
+                COUNT=$((COUNT + 1))
+              fi
+            fi
+          done
+          
+          GPU_VM_COUNT[$gpu_pci]=$COUNT
+        done
+        
+        # Check if we have any available GPUs
+        GPU_COUNT=0
+        for key in "${!GPU_VM_COUNT[@]}"; do
+          GPU_COUNT=$((GPU_COUNT + 1))
+        done
+        
+        if [ $GPU_COUNT -eq 0 ]; then
+          echo "NO_AVAILABLE_GPU"
+          exit 0
+        fi
+        
+        # Find GPU with lowest usage count
+        MIN_COUNT=999999
+        SELECTED_GPU=""
+        for gpu_pci in "${!GPU_VM_COUNT[@]}"; do
+          COUNT=${GPU_VM_COUNT[$gpu_pci]}
+          if [ $COUNT -lt $MIN_COUNT ]; then
+            MIN_COUNT=$COUNT
+            SELECTED_GPU=$gpu_pci
+          fi
+        done
+        
+        if [ ! -z "$SELECTED_GPU" ]; then
+          echo "$SELECTED_GPU"
+        else
+          echo "NO_AVAILABLE_GPU"
+        fi
+      args:
+        executable: /bin/bash
+      register: alternative_gpu_pci
+      when: should_retry | bool
+      delegate_to: "{{ target_host }}"
+
+    - name: Find audio device for alternative GPU
+      shell: |
+        GPU_PCI="{{ alternative_gpu_pci.stdout }}"
+        GPU_DOMAIN=$(echo "$GPU_PCI" | cut -d':' -f1)
+        GPU_BUS=$(echo "$GPU_PCI" | cut -d':' -f2)
+        GPU_SLOT=$(echo "$GPU_PCI" | cut -d':' -f3 | cut -d'.' -f1)
+        AUDIO_DEVICE=$(lspci -D | grep "^${GPU_DOMAIN}:${GPU_BUS}:${GPU_SLOT}\.1" | grep -i "audio" | awk '{print $1}' | head -1)
+        if [ -z "$AUDIO_DEVICE" ]; then
+          echo "NO_AUDIO_DEVICE"
+        else
+          echo "$AUDIO_DEVICE"
+        fi
+      register: alternative_gpu_audio
+      when:
+        - should_retry | bool
+        - alternative_gpu_pci is defined
+        - alternative_gpu_pci.stdout is defined
+        - alternative_gpu_pci.stdout != "NO_AVAILABLE_GPU"
+      delegate_to: "{{ target_host }}"
+
+    - name: Update GPU device variables for retry
+      set_fact:
+        vm_gpu_device: "{{ alternative_gpu_pci.stdout }}"
+        gpu_audio_device: "{{ alternative_gpu_audio }}"
+      when:
+        - should_retry | bool
+        - alternative_gpu_pci is defined
+        - alternative_gpu_pci.stdout is defined
+        - alternative_gpu_pci.stdout != "NO_AVAILABLE_GPU"
+
+    - name: Display retry information
+      debug:
+        msg:
+          - "=== GPU Retry Attempt {{ gpu_retry_count }}/{{ max_gpu_retries }} ==="
+          - "Previous GPU failed: {{ attempted_gpus[-1] if attempted_gpus | length > 0 else 'N/A' }}"
+          - "Trying alternative GPU: {{ vm_gpu_device }}"
+          - "Alternative Audio Device: {{ alternative_gpu_audio.stdout if (alternative_gpu_audio is defined and alternative_gpu_audio.stdout is defined) else 'N/A' }}"
+      when:
+        - should_retry | bool
+        - alternative_gpu_pci is defined
+        - alternative_gpu_pci.stdout is defined
+        - alternative_gpu_pci.stdout != "NO_AVAILABLE_GPU"
+
+    - name: Recursively retry with next GPU
+      include_tasks: gpu-virt-install-retry.yml
+      when:
+        - should_retry | bool
+        - alternative_gpu_pci is defined
+        - alternative_gpu_pci.stdout is defined
+        - alternative_gpu_pci.stdout != "NO_AVAILABLE_GPU"
+
+    - name: Fail if no alternative GPU available or max retries reached
+      fail:
+        msg: |
+          Failed to create VM with GPU after {{ gpu_retry_count }} attempts.
+          {% if alternative_gpu_pci.stdout == 'NO_AVAILABLE_GPU' or not should_retry | bool %}
+          All available GPUs have been exhausted.
+          {% endif %}
+          
+          Attempted GPUs: {{ attempted_gpus | join(', ') }}
+          
+          Last error: {{ vm_create_result.stderr | default('Unknown error') }}
+          
+          Please check:
+          1. GPU hardware status
+          2. VFIO-PCI driver binding
+          3. IOMMU configuration
+          4. PCI device availability
+      when:
+        - not (virt_install_success | default(false) | bool)
+        - alternative_gpu_pci.stdout == "NO_AVAILABLE_GPU" or not should_retry | bool
+
+  when:
+    - vm_action == "create" and vm_image_type == "scratch"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_device is defined and vm_gpu_device != ''
+    - vm_gpu_devices is not defined or (vm_gpu_devices | length) <= 1
+
+- name: Create VM with virt-install (without GPU)
+  shell: |
+    virt-install \
+      --name {{ vm_name }} \
+      --ram {{ vm_ram }} \
+      --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \
+      --disk path=/var/lib/libvirt/images/{{ vm_name }}-init.iso,device=cdrom \
+      --vcpus {{ vm_vcpus }} \
+      --os-variant {{ vm_os_variant }} \
+      --network network=default,model=virtio \
+      --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 \
+      --graphics none \
+      --console pty,target_type=serial \
+      --import \
+      --noautoconsole
+  register: vm_create_result
+  when:
+    - vm_action == "create" and vm_image_type == "scratch"
+    - vm_gpu_provisioned is not defined or not (vm_gpu_provisioned | bool)
+  delegate_to: "{{ target_host }}"
+
+- name: Set root password available for Golden VMs
+  set_fact:
+    root_password: "{{ vm_image_root_pword | default('') }}"
+  when:
+    - vm_action == "create" and vm_image_type == "golden"
+
+- name: Debug GCS config
+  debug:
+    var: vm_golden_image_gcs_url
+  when: 
+    - vm_action == "create" and vm_image_type == "golden"
+
+- name: Debug GCS config
+  debug:
+    var: vm_golden_image_gcs_path
+  when: 
+    - vm_action == "create" and vm_image_type == "golden"  
+
+- name: Check if Ubuntu Noble golden image already exists
+  stat:
+    path: /var/lib/libvirt/images/{{ vm_golden_image_name }}.qcow2
+  register: ubuntu_image_exists
+  when: 
+    - vm_action == "create" and vm_image_type == "golden"
+  delegate_to: "{{ target_host }}"
+
+- name: Fail if golden image does not exist and no GCS url and path provided
+  fail:
+    msg: "Golden image '{{ vm_golden_image_name }}' does not exist on host '{{ target_host }}'. Please upload the golden image or provide GCS details before creating VMs from it."
+  when: 
+    - vm_action == "create" and vm_image_type == "golden" and not ubuntu_image_exists.stat.exists and (vm_golden_image_gcs_url == "" or vm_golden_image_gcs_path == "")
+
+- name: If golden image does not exist in KVM images, download from GCS
+  block:
+    - name: Verify GCS Bucket if exists
+      shell: gcloud storage ls {{ vm_golden_image_gcs_url }}/{{ vm_golden_image_gcs_path }}
+      register: gcs_bucket_check
+      failed_when: gcs_bucket_check.rc != 0
+    - name: Download golden image from GCS
+      shell: |
+        gcloud storage cp {{ vm_golden_image_gcs_url }}/{{ vm_golden_image_gcs_path }}/{{ vm_golden_image_name }}.qcow2 /var/lib/libvirt/images/{{ vm_golden_image_name }}.qcow2
+  when: 
+    - vm_action == "create" and vm_image_type == "golden" and not ubuntu_image_exists.stat.exists
+
+- name: Create VM-specific disk from golden image
+  shell: |
+    # Create a copy of the golden image for this VM
+    cp /var/lib/libvirt/images/{{ vm_golden_image_name }}.qcow2 /var/lib/libvirt/images/{{ vm_name }}.qcow2
+    # Resize if needed
+    qemu-img resize /var/lib/libvirt/images/{{ vm_name }}.qcow2 {{ vm_disk_size }}
+    # Set proper ownership
+    chown libvirt-qemu:kvm /var/lib/libvirt/images/{{ vm_name }}.qcow2
+  when:
+    - vm_action == "create" and vm_image_type == "golden"
+  delegate_to: "{{ target_host }}"
+
+# ===== MULTI-GPU SUPPORT FOR GOLDEN IMAGE (WITHOUT RETRY) =====
+# When vm_gpu_devices is defined (list of GPUs), use multi-GPU approach without retry
+- name: Create VM from golden image with multiple GPUs (no retry)
+  include_tasks: gpu-virt-install-multi.yml
+  when:
+    - vm_action == "create" and vm_image_type == "golden"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_devices is defined
+    - vm_gpu_devices | length > 1
+
+# ===== SINGLE GPU SUPPORT FOR GOLDEN IMAGE (WITH RETRY) =====
+# When only vm_gpu_device is defined (single GPU), use retry logic
+- name: Create VM from golden image (with GPU) - Retry Block
+  block:
+    - name: Try virt-install with current GPU
+      shell: |
+        virt-install \
+          --name {{ vm_name }} \
+          --ram {{ vm_ram }} \
+          --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \
+          --vcpus {{ vm_vcpus }} \
+          --cpu host-passthrough,cache.mode=passthrough \
+          --machine q35 \
+          --boot uefi \
+          --features smm=on \
+          --os-variant {{ vm_os_variant }} \
+          --network network=default,model=virtio \
+          --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 \
+          --hostdev {{ vm_gpu_device }}{% if vm_gpu_rom_file is defined and vm_gpu_rom_file != '' %},romfile={{ vm_gpu_rom_file }}{% endif %} \
+          {% if gpu_audio_device is defined and gpu_audio_device.stdout is defined and gpu_audio_device.stdout != 'NO_AUDIO_DEVICE' %}--hostdev {{ gpu_audio_device.stdout }} \{% endif %}
+
+          --graphics none \
+          --console pty,target_type=serial \
+          --import \
+          --noautoconsole
+      register: vm_create_result
+      delegate_to: "{{ target_host }}"
+
+    - name: Mark virt-install as successful
+      set_fact:
+        virt_install_success: true
+
+  rescue:
+    - name: Check if error is GPU-related
+      set_fact:
+        is_gpu_error: "{{ (vm_create_result.stderr | default('') is search('hostdev|PCI|GPU|vfio|IOMMU')) or (vm_create_result.msg | default('') is search('hostdev|PCI|GPU|vfio|IOMMU')) }}"
+
+    - name: Add failed GPU to attempted list
+      set_fact:
+        attempted_gpus: "{{ attempted_gpus + [vm_gpu_device] }}"
+      when: is_gpu_error | bool
+
+    - name: Increment retry count
+      set_fact:
+        gpu_retry_count: "{{ gpu_retry_count | int + 1 }}"
+      when: is_gpu_error | bool
+
+    - name: Check if we should continue retrying
+      set_fact:
+        should_retry: "{{ (gpu_retry_count | int) < (max_gpu_retries | int) and (is_gpu_error | bool) }}"
+
+    - name: Get alternative GPU (excluding attempted ones)
+      shell: |
+        #!/bin/bash
+        
+        # Read GPU lockfile
+        if [ ! -f /etc/libvirt/gpu-capabilities/gpu-lockfile.json ]; then
+          echo "NO_LOCKFILE"
+          exit 0
+        fi
+        
+        # Get list of available GPUs from lockfile
+        AVAILABLE_GPUS=$(jq -r '.gpu_modes.passthrough.available_devices[]' /etc/libvirt/gpu-capabilities/gpu-lockfile.json 2>/dev/null)
+        
+        if [ -z "$AVAILABLE_GPUS" ]; then
+          echo "NO_AVAILABLE_GPU"
+          exit 0
+        fi
+        
+        # Build array of attempted GPUs
+        declare -a ATTEMPTED_GPUS_ARRAY
+        {% if attempted_gpus is defined and attempted_gpus | length > 0 %}
+        ATTEMPTED_GPUS_ARRAY=({% for gpu in attempted_gpus %}"{{ gpu }}" {% endfor %})
+        {% endif %}
+        
+        # Build associative array of GPU to VM count, excluding attempted GPUs
+        declare -A GPU_VM_COUNT
+        for gpu_pci in $AVAILABLE_GPUS; do
+          if [ -z "$gpu_pci" ]; then
+            continue
+          fi
+          
+          # Skip already attempted GPUs
+          IS_ATTEMPTED=0
+          for attempted in "${ATTEMPTED_GPUS_ARRAY[@]}"; do
+            if [ "$gpu_pci" = "$attempted" ]; then
+              IS_ATTEMPTED=1
+              break
+            fi
+          done
+          
+          if [ $IS_ATTEMPTED -eq 1 ]; then
+            continue
+          fi
+          
+          # Count VMs using this GPU
+          COUNT=0
+          for vm in $(virsh list --all --name); do
+            if [ ! -z "$vm" ]; then
+              VM_GPUS=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s\n", $1, $2, $3, $4}' | sed 's/ /0/g')
+              if echo "$VM_GPUS" | grep -q "^${gpu_pci}$"; then
+                COUNT=$((COUNT + 1))
+              fi
+            fi
+          done
+          
+          GPU_VM_COUNT[$gpu_pci]=$COUNT
+        done
+        
+        # Check if we have any available GPUs
+        GPU_COUNT=0
+        for key in "${!GPU_VM_COUNT[@]}"; do
+          GPU_COUNT=$((GPU_COUNT + 1))
+        done
+        
+        if [ $GPU_COUNT -eq 0 ]; then
+          echo "NO_AVAILABLE_GPU"
+          exit 0
+        fi
+        
+        # Find GPU with lowest usage count
+        MIN_COUNT=999999
+        SELECTED_GPU=""
+        for gpu_pci in "${!GPU_VM_COUNT[@]}"; do
+          COUNT=${GPU_VM_COUNT[$gpu_pci]}
+          if [ $COUNT -lt $MIN_COUNT ]; then
+            MIN_COUNT=$COUNT
+            SELECTED_GPU=$gpu_pci
+          fi
+        done
+        
+        if [ ! -z "$SELECTED_GPU" ]; then
+          echo "$SELECTED_GPU"
+        else
+          echo "NO_AVAILABLE_GPU"
+        fi
+      args:
+        executable: /bin/bash
+      register: alternative_gpu_pci
+      when: should_retry | bool
+      delegate_to: "{{ target_host }}"
+
+    - name: Find audio device for alternative GPU
+      shell: |
+        GPU_PCI="{{ alternative_gpu_pci.stdout }}"
+        GPU_DOMAIN=$(echo "$GPU_PCI" | cut -d':' -f1)
+        GPU_BUS=$(echo "$GPU_PCI" | cut -d':' -f2)
+        GPU_SLOT=$(echo "$GPU_PCI" | cut -d':' -f3 | cut -d'.' -f1)
+        AUDIO_DEVICE=$(lspci -D | grep "^${GPU_DOMAIN}:${GPU_BUS}:${GPU_SLOT}\.1" | grep -i "audio" | awk '{print $1}' | head -1)
+        if [ -z "$AUDIO_DEVICE" ]; then
+          echo "NO_AUDIO_DEVICE"
+        else
+          echo "$AUDIO_DEVICE"
+        fi
+      register: alternative_gpu_audio
+      when:
+        - should_retry | bool
+        - alternative_gpu_pci is defined
+        - alternative_gpu_pci.stdout is defined
+        - alternative_gpu_pci.stdout != "NO_AVAILABLE_GPU"
+      delegate_to: "{{ target_host }}"
+
+    - name: Update GPU device variables for retry
+      set_fact:
+        vm_gpu_device: "{{ alternative_gpu_pci.stdout }}"
+        gpu_audio_device: "{{ alternative_gpu_audio }}"
+      when:
+        - should_retry | bool
+        - alternative_gpu_pci is defined
+        - alternative_gpu_pci.stdout is defined
+        - alternative_gpu_pci.stdout != "NO_AVAILABLE_GPU"
+
+    - name: Display retry information
+      debug:
+        msg:
+          - "=== GPU Retry Attempt {{ gpu_retry_count }}/{{ max_gpu_retries }} ==="
+          - "Previous GPU failed: {{ attempted_gpus[-1] if attempted_gpus | length > 0 else 'N/A' }}"
+          - "Trying alternative GPU: {{ vm_gpu_device }}"
+          - "Alternative Audio Device: {{ alternative_gpu_audio.stdout if (alternative_gpu_audio is defined and alternative_gpu_audio.stdout is defined) else 'N/A' }}"
+      when:
+        - should_retry | bool
+        - alternative_gpu_pci is defined
+        - alternative_gpu_pci.stdout is defined
+        - alternative_gpu_pci.stdout != "NO_AVAILABLE_GPU"
+
+    - name: Recursively retry with next GPU
+      include_tasks: gpu-virt-install-retry.yml
+      when:
+        - should_retry | bool
+        - alternative_gpu_pci is defined
+        - alternative_gpu_pci.stdout is defined
+        - alternative_gpu_pci.stdout != "NO_AVAILABLE_GPU"
+
+    - name: Fail if no alternative GPU available or max retries reached
+      fail:
+        msg: |
+          Failed to create VM with GPU after {{ gpu_retry_count }} attempts.
+          {% if alternative_gpu_pci.stdout == 'NO_AVAILABLE_GPU' or not should_retry | bool %}
+          All available GPUs have been exhausted.
+          {% endif %}
+          
+          Attempted GPUs: {{ attempted_gpus | join(', ') }}
+          
+          Last error: {{ vm_create_result.stderr | default('Unknown error') }}
+          
+          Please check:
+          1. GPU hardware status
+          2. VFIO-PCI driver binding
+          3. IOMMU configuration
+          4. PCI device availability
+      when:
+        - not (virt_install_success | default(false) | bool)
+        - alternative_gpu_pci.stdout == "NO_AVAILABLE_GPU" or not should_retry | bool
+
+  when:
+    - vm_action == "create" and vm_image_type == "golden"
+    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+    - vm_gpu_device is defined and vm_gpu_device != ''
+    - vm_gpu_devices is not defined or (vm_gpu_devices | length) <= 1
+
+- name: Create VM from golden image (without GPU)
+  shell: |
+    virt-install \
+      --name {{ vm_name }} \
+      --ram {{ vm_ram }} \
+      --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \
+      --vcpus {{ vm_vcpus }} \
+      --os-variant {{ vm_os_variant }} \
+      --network network=default,model=virtio \
+      --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 \
+      --graphics none \
+      --console pty,target_type=serial \
+      --import \
+      --noautoconsole
+  register: vm_create_result
+  when:
+    - vm_action == "create" and vm_image_type == "golden"
+    - vm_gpu_provisioned is not defined or not (vm_gpu_provisioned | bool)
+  delegate_to: "{{ target_host }}"
+
+- name: Wait for VM to boot and be SSH-ready
+  shell: |
+    echo "Waiting for VM {{ vm_name }} to be SSH-ready..."
+    
+    # Wait for VM to be in running state
+    echo "Checking VM state..."
+    i=1
+    while [ $i -le 60 ]; do
+      VM_STATE=$(virsh domstate {{ vm_name }})
+      echo "Attempt $i/60: VM state is $VM_STATE"
+      if [ "$VM_STATE" = "running" ]; then
+        echo "VM is running, waiting for cloud-init to complete..."
+        break
+      fi
+      sleep 5
+      i=$((i + 1))
+    done
+    
+    if [ "$VM_STATE" != "running" ]; then
+      echo "VM failed to reach running state"
+      exit 1
+    fi
+    
+    # Wait for VM to get IP address
+    echo "Waiting for IP address..."
+    i=1
+    while [ $i -le 120 ]; do
+      echo "Attempt $i/120: Checking for IP address..."
+      
+      # Get IP using domifaddr
+      VM_IP=$(virsh domifaddr {{ vm_name }} 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1)
+      
+      if [ ! -z "$VM_IP" ]; then
+        echo "Found VM IP: $VM_IP"
+        
+        # Test SSH connectivity
+        echo "Testing SSH connectivity to $VM_IP..."
+        if timeout 10 ssh -i ~/.ssh/{{ vm_root_ssh_filename }} -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$VM_IP 'echo "SSH_READY"' 2>/dev/null | grep -q "SSH_READY"; then
+          echo "VM is SSH-ready at $VM_IP"
+          echo $VM_IP
+          exit 0
+        else
+          echo "SSH not ready yet, cloud-init may still be running..."
+        fi
+      else                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     
+        echo "No IP address found yet..."
+      fi
+      
+      sleep 5
+      i=$((i + 1))
+    done
+    
+    echo "VM failed to become SSH-ready within timeout"
+    echo "Final diagnostics:"
+    echo "VM State: $(virsh domstate {{ vm_name }})"
+    echo "domifaddr output:"
+    virsh domifaddr {{ vm_name }} 2>/dev/null || echo "domifaddr failed"
+    exit 1
+  register: vm_ready_result
+  when: vm_action == "create" and vm_create_result is defined
+  delegate_to: "{{ target_host }}"
+
+- name: Set VM IP from readiness check
+  set_fact:
+    vm_ip: "{{ vm_ready_result.stdout_lines[-1] }}"
+  when: vm_action == "create" and vm_ready_result is defined and vm_ready_result.rc == 0
+
+- name: Install GPU drivers in golden VM with GPU passthrough
+  shell: |
+    ssh -i ~/.ssh/{{ vm_root_ssh_filename }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@{{ vm_ip }} << 'EOF'
+    if lspci | grep -qi nvidia; then
+      echo "========================================"
+      echo "NVIDIA GPU detected - Installing driver for passthrough"
+      echo "========================================"
+      export DEBIAN_FRONTEND=noninteractive
+      
+      # Install prerequisites
+      echo "Installing kernel headers and build tools..."
+      apt-get update
+      apt-get install -y --no-install-recommends --quiet \
+        build-essential \
+        dkms \
+        linux-headers-$(uname -r) \
+        ubuntu-drivers-common \
+        pciutils \
+        wget \
+        software-properties-common
+      
+      # Use ubuntu-drivers to auto-install latest recommended driver
+      echo "Installing NVIDIA driver (this may take several minutes)..."
+      ubuntu-drivers install --gpgpu nvidia 2>&1 | tee /var/log/nvidia-driver-install.log
+      
+      # Install CUDA Toolkit
+      echo "Installing CUDA Toolkit..."
+      wget -O- https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb | dpkg -i -
+      add-apt-repository -y contrib
+      apt-get update
+      apt-get install -y --no-install-recommends --quiet cuda-toolkit 2>&1 | tee -a /var/log/cuda-install.log
+      
+      # Verify installation
+      if nvidia-detector 2>/dev/null | head -1 | grep -q "nvidia-driver"; then
+        echo "✓ NVIDIA driver detected by nvidia-detector"
+        NVIDIA_DETECTED=$(nvidia-detector 2>/dev/null | head -1)
+        echo "Detected driver package: $NVIDIA_DETECTED"
+      else
+        echo "⚠ WARNING: NVIDIA driver not detected by nvidia-detector. Installation may need completion after reboot."
+      fi
+      
+      if command -v nvcc &> /dev/null; then
+        echo "✓ CUDA Toolkit installed successfully"
+        echo "CUDA version: $(nvcc --version | grep "release" | sed -n -e 's/^.*release \([0-9]\+\.[0-9]\+\).*$/\1/p')"
+      else
+        echo "⚠ WARNING: CUDA Toolkit not found."
+      fi
+      
+      # Create marker file for post-reboot validation
+      echo "$(date): NVIDIA driver and CUDA installed via SSH" > /var/log/nvidia-driver-ready
+      echo "========================================"
+      echo "NVIDIA driver and CUDA installation complete"
+      echo "GPU will be fully operational after VM reboot"
+      echo "========================================"
+      # Reboot to activate drivers
+      echo "Rebooting to activate GPU drivers"
+      reboot
+      
+    elif lspci | grep -qi amd; then
+      echo "========================================"
+      echo "AMD GPU detected - Installing driver"
+      echo "========================================"
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y \
+        firmware-amd-graphics \
+        xserver-xorg-video-amdgpu \
+        mesa-vulkan-drivers \
+        vulkan-tools \
+        pciutils
+      echo "✓ AMD driver installation complete"
+      echo "========================================"
+      # Reboot to activate drivers
+      echo "Rebooting to activate GPU drivers"
+      sudo reboot
+    else
+      echo "No NVIDIA or AMD GPU detected, skipping driver installation."
+    fi
+    EOF
+  when: vm_action == "create" and vm_image_type == "golden" and vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+  delegate_to: "{{ target_host }}"
+
+- name: Wait for VM to boot after GPU driver installation reboot
+  shell: |
+    echo "Waiting for VM {{ vm_name }} to be SSH-ready after GPU driver reboot..."
+    bash -c 'until ssh -i ~/.ssh/{{ vm_root_ssh_filename }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 root@{{ vm_ip }} "echo SSH ready after reboot" 2>/dev/null; do sleep 5; done'
+  when: vm_action == "create" and vm_image_type == "golden" and vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
+  delegate_to: "{{ target_host }}"
+
+- name: Get VM MAC address for static DHCP lease
+  shell: virsh domiflist {{ vm_name }} | grep -oE '([0-9a-f]{2}:){5}[0-9a-f]{2}' | head -1
+  register: vm_mac_address
+  when:
+    - vm_action == "create"
+    - vm_ip is defined
+  delegate_to: "{{ target_host }}"
+
+- name: Configure static DHCP lease for VM to preserve IP address
+  shell: |
+    VM_IP="{{ vm_ip }}"
+    VM_MAC="{{ vm_mac_address.stdout }}"
+    VM_NAME="{{ vm_name }}"
+    
+    # Check if lease already exists
+    if virsh net-dumpxml default | grep -q "$VM_MAC"; then
+      echo "Static DHCP lease already exists for MAC $VM_MAC"
+    else
+      # Add static DHCP host entry to the default network
+      virsh net-update default add ip-dhcp-host \
+        "<host mac='$VM_MAC' name='$VM_NAME' ip='$VM_IP'/>" \
+        --live --config
+      echo "Static DHCP lease configured: IP $VM_IP will always be assigned to MAC $VM_MAC"
+    fi
+  when:
+    - vm_action == "create"
+    - vm_ip is defined
+    - vm_mac_address is defined
+    - vm_mac_address.stdout != ""
+  delegate_to: "{{ target_host }}"
+
+- name: Set VM to autostart on host boot
+  shell: virsh autostart {{ vm_name }}
+  when:
+    - vm_action == "create"
+    - vm_ip is defined
+  delegate_to: "{{ target_host }}"
+
+- name: Set up iptables port forwarding for SSH
+  shell: |
+    # Enable IP forwarding
+    echo 1 > /proc/sys/net/ipv4/ip_forward
+    
+    # Make IP forwarding persistent
+    if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
+      echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+    fi
+    
+    # Get the external network interface
+    EXT_INTERFACE=$(ip route | grep default | awk '{print $5}' | head -1)
+    echo "Using external interface: $EXT_INTERFACE"
+    
+    # Add DNAT rule for incoming connections
+    iptables -t nat -A PREROUTING -p tcp --dport {{ external_ssh_port }} -j DNAT --to-destination {{ vm_ip }}:22
+    
+    # Add SNAT rule for outgoing connections from specific VM
+    iptables -t nat -A POSTROUTING -p tcp -d {{ vm_ip }} --dport 22 -j MASQUERADE
+    
+    # Add general MASQUERADE rule for the libvirt subnet
+    iptables -t nat -A POSTROUTING -s 192.168.122.0/24 -o $EXT_INTERFACE -j MASQUERADE
+    
+    # Allow forwarding for this specific connection
+    iptables -A FORWARD -p tcp -d {{ vm_ip }} --dport 22 -j ACCEPT
+    iptables -A FORWARD -p tcp -s {{ vm_ip }} --sport 22 -j ACCEPT
+    
+    echo "Port forwarding configured: External port {{ external_ssh_port }} -> VM {{ vm_ip }}:22"
+  when: vm_action == "create" and vm_ip is defined
+  delegate_to: "{{ target_host }}"
+
+- name: Configure firewall to allow external SSH port
+  shell: |
+    # Prioritize UFW (common on Ubuntu/Debian/Linode)
+    if command -v ufw >/dev/null 2>&1; then
+      echo "Using UFW firewall method (recommended for Linode)"
+      echo "Command: ufw allow {{ external_ssh_port }}/tcp"
+      ufw allow {{ external_ssh_port }}/tcp
+      # Also ensure UFW allows forwarding
+      if ! grep -q "DEFAULT_FORWARD_POLICY=\"ACCEPT\"" /etc/default/ufw; then
+        sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+        echo "Updated UFW forward policy to ACCEPT"
+      fi
+      echo "UFW rule added for port {{ external_ssh_port }}"
+      echo "FIREWALL_METHOD=UFW"
+    # Check if firewalld is installed and active
+    elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
+      echo "Using firewalld method"
+      echo "Commands: firewall-cmd --permanent --add-port={{ external_ssh_port }}/tcp && firewall-cmd --reload"
+      firewall-cmd --permanent --add-port={{ external_ssh_port }}/tcp
+      firewall-cmd --reload
+      echo "Firewalld rule added for port {{ external_ssh_port }}"
+      echo "FIREWALL_METHOD=FIREWALLD"
+    # Fallback to iptables INPUT rule
+    else
+      echo "Using direct iptables method"
+      echo "Command: iptables -A INPUT -p tcp --dport {{ external_ssh_port }} -j ACCEPT"
+      iptables -A INPUT -p tcp --dport {{ external_ssh_port }} -j ACCEPT
+      echo "Direct iptables rule added for port {{ external_ssh_port }}"
+      echo "FIREWALL_METHOD=IPTABLES"
+    fi
+  register: firewall_config_result
+  when: vm_action == "create" and external_ssh_port is defined
+  delegate_to: "{{ target_host }}"
+
+- name: Debug firewall configuration
+  debug:
+    msg: 
+      - "=== Firewall Configuration for Port {{ external_ssh_port }} ==="
+      - "{{ firewall_config_result.stdout_lines | join('\n') }}"
+  when: vm_action == "create" and external_ssh_port is defined and firewall_config_result is defined
+
+- name: Extract and display firewall method used
+  debug:
+    msg: "Firewall method: {{ firewall_config_result.stdout_lines | select('match', '^FIREWALL_METHOD=.*') | first | default('UNKNOWN') | regex_replace('^FIREWALL_METHOD=', '') }}"
+  when: vm_action == "create" and external_ssh_port is defined and firewall_config_result is defined
+
+- name: Verify port is open using netstat/ss
+  shell: |
+    echo "Checking if port {{ external_ssh_port }} is accessible..."
+    
+    # Check if port is listening (should show iptables DNAT rule working)
+    echo "Active listening ports:"
+    if command -v ss >/dev/null 2>&1; then
+      ss -tuln | grep ":{{ external_ssh_port }} " || echo "Port {{ external_ssh_port }} not found in listening ports (this is expected for DNAT)"
+    else
+      netstat -tuln | grep ":{{ external_ssh_port }} " || echo "Port {{ external_ssh_port }} not found in listening ports (this is expected for DNAT)"
+    fi
+    
+    echo ""
+    echo "Checking iptables NAT rules for port {{ external_ssh_port }}:"
+    iptables -t nat -L PREROUTING -n | grep "{{ external_ssh_port }}" || echo "No NAT rule found for port {{ external_ssh_port }}"
+    
+    echo ""
+    echo "Checking iptables INPUT rules for port {{ external_ssh_port }}:"
+    iptables -L INPUT -n | grep "{{ external_ssh_port }}" || echo "No INPUT rule found for port {{ external_ssh_port }}"
+  register: port_verification_result
+  when: vm_action == "create" and external_ssh_port is defined
+  delegate_to: "{{ target_host }}"
+
+- name: Display port verification results
+  debug:
+    msg: 
+      - "=== Port {{ external_ssh_port }} verification results ==="
+      - "{{ port_verification_result.stdout_lines | join('\n') }}"
+  when: vm_action == "create" and external_ssh_port is defined and port_verification_result is defined
+
+- name: Save iptables rules
+  shell: |
+    # Try different methods to save iptables rules based on the system
+    if command -v iptables-save >/dev/null 2>&1; then
+      if [ -f /etc/iptables/rules.v4 ]; then
+        iptables-save > /etc/iptables/rules.v4
+      elif [ -d /etc/sysconfig ]; then
+        iptables-save > /etc/sysconfig/iptables
+      else
+        # Create a simple service file to restore rules on boot
+        mkdir -p /etc/systemd/system
+        cat > /etc/systemd/system/iptables-restore.service << 'EOF'
+    [Unit]
+    Description=Restore iptables rules
+    After=network.target
+    
+    [Service]
+    Type=oneshot
+    ExecStart=/sbin/iptables-restore < /etc/iptables.rules
+    RemainAfterExit=yes
+    
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+        iptables-save > /etc/iptables.rules
+        systemctl enable iptables-restore.service
+      fi
+      echo "Iptables rules saved"
+    else
+      echo "Warning: Could not save iptables rules - they may not persist after reboot"
+    fi
+  when: vm_action == "create" and vm_ip is defined
+  delegate_to: "{{ target_host }}"
+
+# Post-installation instance-id update
+- name: Set instance-id and host-name via SSH connection
+  shell: |
+    ssh -i ~/.ssh/{{ vm_root_ssh_filename }} \
+        -o ConnectTimeout=10 \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        root@{{ vm_ip }} << 'REMOTE_COMMANDS'
+    
+    echo "Setting hostname and instance-id to {{ vm_name }}"
+    hostnamectl set-hostname {{ vm_name }}
+    echo "instance-id: {{ vm_name }}" > /etc/cloud/instance-id
+    REMOTE_COMMANDS
+  delegate_to: "{{ target_host }}"
+  when:
+    - vm_action == "create" and vm_image_type == "golden" and vm_ip is defined
+
+# Post-SSH user creation and SSH key setup
+- name: Create tenant user via SSH connection
+  shell: |
+    ssh -i ~/.ssh/{{ vm_root_ssh_filename }} \
+        -o ConnectTimeout=10 \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        root@{{ vm_ip }} << 'REMOTE_COMMANDS'
+    
+    # Create tenant user
+    TENANT_USER="{{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}"
+    echo "Creating user: $TENANT_USER"
+    
+    # Add user with home directory
+    useradd -m -s /bin/bash "$TENANT_USER"
+    
+    # Set user password
+    echo "$TENANT_USER:{{ tenant_password }}" | chpasswd
+    
+    # Add user to sudo group
+    usermod -aG sudo "$TENANT_USER"
+    
+    # Create .ssh directory
+    mkdir -p /home/$TENANT_USER/.ssh
+    chmod 700 /home/$TENANT_USER/.ssh
+    chown $TENANT_USER:$TENANT_USER /home/$TENANT_USER/.ssh
+    
+    echo "User $TENANT_USER created successfully"
+    REMOTE_COMMANDS
+  when: vm_action == "create" and vm_ip is defined
+  delegate_to: "{{ target_host }}"
+
+- name: Set up SSH key for tenant user (with provided public key)
+  shell: |
+    ssh -i ~/.ssh/{{ vm_root_ssh_filename }} \
+        -o ConnectTimeout=10 \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        root@{{ vm_ip }} << 'REMOTE_COMMANDS'
+    
+    TENANT_USER="{{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}"
+    echo "Setting up SSH key for user: $TENANT_USER"
+    
+    # Add the provided public key to authorized_keys
+    echo "{{ vm_tenant_pubkey }}" > /home/$TENANT_USER/.ssh/authorized_keys
+    chmod 600 /home/$TENANT_USER/.ssh/authorized_keys
+    chown $TENANT_USER:$TENANT_USER /home/$TENANT_USER/.ssh/authorized_keys
+    
+    echo "SSH key configured for $TENANT_USER"
+    REMOTE_COMMANDS
+  when: 
+    - vm_action == "create" 
+    - vm_ip is defined
+    - vm_tenant_pubkey is defined 
+    - vm_tenant_pubkey != ""
+  delegate_to: "{{ target_host }}"
+
+- name: Set up SSH key for tenant user (with generated key pair)
+  shell: |
+    ssh -i ~/.ssh/{{ vm_root_ssh_filename }} \
+        -o ConnectTimeout=10 \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        root@{{ vm_ip }} << 'REMOTE_COMMANDS'
+    
+    TENANT_USER="{{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}"
+    echo "Setting up SSH key for user: $TENANT_USER"
+    
+    # Add the generated public key to authorized_keys
+    echo "{{ ssh_keypair_tenant.public_key }}" > /home/$TENANT_USER/.ssh/authorized_keys
+    chmod 600 /home/$TENANT_USER/.ssh/authorized_keys
+    chown $TENANT_USER:$TENANT_USER /home/$TENANT_USER/.ssh/authorized_keys
+    
+    echo "SSH key configured for $TENANT_USER"
+    REMOTE_COMMANDS
+  when: 
+    - vm_action == "create" 
+    - vm_ip is defined
+    - (vm_tenant_pubkey is not defined or vm_tenant_pubkey == "")
+  delegate_to: "{{ target_host }}"
+
+- name: Verify tenant user SSH access (with generated key)
+  shell: timeout 10 ssh -i ~/.ssh/{{ vm_name }}_tenant_ed25519 -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }} "echo TENANT_SSH_SUCCESS" 2>/dev/null
+  register: tenant_ssh_verification
+  ignore_errors: yes
+  when: 
+    - vm_action == "create" 
+    - vm_ip is defined
+    - (vm_tenant_pubkey is not defined or vm_tenant_pubkey == "")
+  delegate_to: "{{ target_host }}"
+
+- name: Set verification message for generated key
+  set_fact:
+    tenant_ssh_message: "{{ 'Tenant SSH access verified successfully' if (tenant_ssh_verification is defined and tenant_ssh_verification.rc == 0) else 'Warning: Could not verify tenant SSH access' }}"
+  when: 
+    - vm_action == "create" 
+    - vm_ip is defined
+    - (vm_tenant_pubkey is not defined or vm_tenant_pubkey == "")
+
+- name: Set verification message for provided key
+  set_fact:
+    tenant_ssh_message: "SSH key configured - test with your private key"
+  when: 
+    - vm_action == "create" 
+    - vm_ip is defined
+    - vm_tenant_pubkey is defined 
+    - vm_tenant_pubkey != ""
+
+- name: Create verification output for JSON
+  set_fact:
+    tenant_ssh_verification:
+      stdout: "{{ tenant_ssh_message | default('Not tested') }}"
+  when: vm_action == "create" and vm_ip is defined
+
+- name: Get current timestamp for creation
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: creation_timestamp
+  when: 
+    - vm_action == "create"
+    - vm_create_result is defined 
+    - vm_ip is defined
+  delegate_to: localhost
+
+- name: Create JSON data structure for VM creation (generated tenant key)
+  set_fact:
+    vm_creation_data:
+      action: "create"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ creation_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "success"
+      vm_state: "running"
+      vm_ip_internal: "{{ vm_ip }}"
+      external_ssh_port: "{{ external_ssh_port }}"
+      tenant_user: "{{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}"
+      tenant_user_creation_method: "post-boot-ssh"
+      authentication:
+        root:
+          password: "{{ root_password }}"
+          ssh_key_path_host: "~/.ssh/{{ vm_root_ssh_filename }}"
+          ssh_commands:
+            internal: "ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }}"
+            external: "ssh -i ~/.ssh/{{ vm_root_ssh_filename }} -p {{ external_ssh_port }} root@{{ target_host }}"
+        tenant:
+          password: "{{ tenant_password }}"
+          key_type: "generated"
+          ssh_key_path_host: "~/.ssh/{{ vm_name }}_tenant_ed25519"
+          ssh_key_path_downloaded: "keys/{{ vm_name }}_tenant_private_key"
+          ssh_commands:
+            internal: "ssh -i keys/{{ vm_name }}_tenant_private_key {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }}"
+            external: "ssh -i keys/{{ vm_name }}_tenant_private_key -p {{ external_ssh_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ target_host }}"
+      network:
+        port_forwarding: "{{ target_host }}:{{ external_ssh_port }} -> {{ vm_ip }}:22"
+      verification:
+        tenant_ssh_status: "{{ tenant_ssh_verification.stdout | default('Not tested') }}"
+      gpu:
+        provisioned: "{{ vm_gpu_provisioned | default(false) | bool }}"
+        pci_address: "{{ gpu_pci_id | default('N/A') }}"
+        model: "{{ gpu_model | default('N/A') }}"
+        mode: "{{ gpu_provision_mode | default('N/A') }}"
+        partition_type: "{{ gpu_partition_type | default('N/A') if (vm_gpu_provisioned | default(false) | bool and gpu_provision_mode == 'partitioned') else 'N/A' }}"
+        partition_size: "{{ vm_gpu_partition_size | default('N/A') if (vm_gpu_provisioned | default(false) | bool and gpu_provision_mode == 'partitioned') else 'N/A' }}"
+      system:
+        random_string: "{{ random_string }}"
+        cloud_init_method: "basic-networking-only"
+  when: 
+    - vm_action == "create" 
+    - vm_create_result is defined 
+    - vm_ip is defined
+    - (vm_tenant_pubkey is not defined or vm_tenant_pubkey == "")
+
+- name: Display VM creation result (SSH-ready, generated tenant key)
+  debug:
+    msg: 
+      - "VM {{ vm_name }} created successfully - IP: {{ vm_ip }}:{{ external_ssh_port }}"
+      - "Root: ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }} (pwd: {{ root_password }})"
+      - "Tenant: ssh -i keys/{{ vm_name }}_tenant_private_key {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }} (pwd: {{ tenant_password }})"
+  when: 
+    - vm_action == "create" 
+    - vm_create_result is defined 
+    - vm_ip is defined
+    - (vm_tenant_pubkey is not defined or vm_tenant_pubkey == "")
+
+- name: Create JSON data structure for VM creation (provided tenant key)
+  set_fact:
+    vm_creation_data:
+      action: "create"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ creation_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "success"
+      vm_state: "running"
+      vm_ip_internal: "{{ vm_ip }}"
+      external_ssh_port: "{{ external_ssh_port }}"
+      tenant_user: "{{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}"
+      tenant_user_creation_method: "post-boot-ssh"
+      authentication:
+        root:
+          password: "{{ root_password }}"
+          ssh_key_path_host: "~/.ssh/{{ vm_root_ssh_filename }}"
+          ssh_commands:
+            internal: "ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }}"
+            external: "ssh -i ~/.ssh/{{ vm_root_ssh_filename }} -p {{ external_ssh_port }} root@{{ target_host }}"
+        tenant:
+          password: "{{ tenant_password }}"
+          key_type: "provided"
+          public_key: "{{ vm_tenant_pubkey }}"
+          ssh_commands:
+            internal: "ssh -i <your_private_key> {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }}"
+            external: "ssh -i <your_private_key> -p {{ external_ssh_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ target_host }}"
+      network:
+        port_forwarding: "{{ target_host }}:{{ external_ssh_port }} -> {{ vm_ip }}:22"
+      gpu:
+        provisioned: "{{ vm_gpu_provisioned | default(false) | bool }}"
+        pci_address: "{{ gpu_pci_id | default('N/A') }}"
+        model: "{{ gpu_model | default('N/A') }}"
+        mode: "{{ gpu_provision_mode | default('N/A') }}"
+        partition_type: "{{ gpu_partition_type | default('N/A') if (vm_gpu_provisioned | default(false) | bool and gpu_provision_mode == 'partitioned') else 'N/A' }}"
+        partition_size: "{{ vm_gpu_partition_size | default('N/A') if (vm_gpu_provisioned | default(false) | bool and gpu_provision_mode == 'partitioned') else 'N/A' }}"
+        audio_device:
+          pci_address: "{{ gpu_audio_device.stdout | default('N/A') if (gpu_audio_device is defined and gpu_audio_device.stdout is defined and gpu_audio_device.stdout != 'NO_AUDIO_DEVICE') else 'N/A' }}"
+          attached: "{{ true if (gpu_audio_device is defined and gpu_audio_device.stdout is defined and gpu_audio_device.stdout != 'NO_AUDIO_DEVICE') else false }}"
+      system:
+        random_string: "{{ random_string }}"
+        cloud_init_method: "basic-networking-only"
+  when: 
+    - vm_action == "create" 
+    - vm_create_result is defined 
+    - vm_ip is defined
+    - vm_tenant_pubkey is defined 
+    - vm_tenant_pubkey != ""
+
+- name: Display VM creation result (SSH-ready, with provided tenant key)
+  debug:
+    msg: 
+      - "VM {{ vm_name }} created successfully - IP: {{ vm_ip }}:{{ external_ssh_port }}"
+      - "Root access: ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }} (password: {{ root_password }})"
+      - "Tenant access: ssh -i <your_private_key> {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }} (password: {{ tenant_password }})"
+  when: 
+    - vm_action == "create" 
+    - vm_create_result is defined 
+    - vm_ip is defined
+    - vm_tenant_pubkey is defined 
+    - vm_tenant_pubkey != ""
+
+- name: Download tenant SSH key pair when no tenant public key provided
+  block:
+    - name: Download tenant SSH private key
+      fetch:
+        src: "~/.ssh/{{ vm_name }}_tenant_ed25519"
+        dest: "{{ playbook_dir }}/../../keys/{{ vm_name }}_tenant_private_key"
+        flat: yes
+      delegate_to: "{{ target_host }}"
+    
+    - name: Download tenant SSH public key
+      fetch:
+        src: "~/.ssh/{{ vm_name }}_tenant_ed25519.pub"
+        dest: "{{ playbook_dir }}/../../keys/{{ vm_name }}_tenant_public_key.pub"
+        flat: yes
+      delegate_to: "{{ target_host }}"
+    
+    - name: Set tenant private key permissions
+      file:
+        path: "{{ playbook_dir }}/../../keys/{{ vm_name }}_tenant_private_key"
+        mode: '0600'
+      delegate_to: localhost
+  when: 
+    - vm_action == "create" 
+    - vm_create_result is defined
+    - (vm_tenant_pubkey is not defined or vm_tenant_pubkey == "")
+
+- name: Clean up temporary files after VM creation
+  shell: |
+    echo "=== Cleaning up temporary files after VM creation ==="
+    
+    # Remove cloud-init directory
+    echo "Removing cloud-init directory..."
+    rm -rf /tmp /cloudinit_{{ vm_name }}_{{ random_string }}
+
+    # Remove any leftover files from /tmp
+    echo "Removing any leftover VM creation files from /tmp..."
+    find /tmp -name "*{{ vm_name }}*" -type f 2>/dev/null | while read file; do
+      echo "Removing: $file"
+      rm -f "$file"
+    done
+    
+    echo "=== Temporary file cleanup completed ==="
+  when: 
+    - vm_action == "create" 
+    - vm_create_result is defined
+  delegate_to: "{{ target_host }}"
+
+- name: Add single-tenant VM to inventory
+  block:
+    - name: Add VM to [kvms] group in hosts file
+      lineinfile:
+        path: "{{ playbook_dir }}/../../inventory/hosts"
+        insertafter: "^\\[kvms\\]"
+        line: "{{ vm_name }} ansible_host={{ target_host }} ansible_port={{ external_ssh_port }} ansible_user=root ansible_ssh_private_key_file=~/.ssh/{{ vm_root_ssh_filename }}"
+        backup: yes
+        create: yes
+      delegate_to: localhost
+    
+    - name: Ensure [kvms] group exists in single-tenant hosts file
+      lineinfile:
+        path: "{{ playbook_dir }}/../../inventory/hosts"
+        line: "[kvms]"
+        insertbefore: BOF
+        backup: yes
+        create: yes
+      delegate_to: localhost
+  when: 
+    - vm_action == "create" 
+    - vm_create_result is defined 
+    - vm_ip is defined
+    - tenant_id is not defined or tenant_id == ""
+
+- name: Create JSON data structure for VM creation failure (not SSH-ready)
+  set_fact:
+    vm_creation_data:
+      action: "create"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ creation_timestamp.stdout | default('unknown') }}"
+      host: "{{ target_host }}"
+      status: "partial_success"
+      vm_state: "created_but_not_ssh_ready"
+      error: "VM created but SSH readiness check failed"
+      external_ssh_port: "{{ external_ssh_port | default('Not configured') }}"
+      troubleshooting:
+        - "Check VM status: virsh domstate {{ vm_name }}"
+        - "Get VM IP: virsh net-dhcp-leases default"
+        - "Try connecting as root: ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@<vm_ip>"
+        - "Try connecting as tenant: ssh -i keys/{{ vm_name }}_tenant_private_key {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@<vm_ip>"
+      authentication:
+        root:
+          password: "{{ root_password }}"
+          ssh_key_path_host: "~/.ssh/{{ vm_root_ssh_filename }}"
+          ssh_command_external: "ssh -i ~/.ssh/{{ vm_root_ssh_filename }} -p {{ external_ssh_port | default('XXXX') }} root@{{ target_host }}"
+        tenant:
+          password: "{{ tenant_password }}"
+          ssh_key_path_downloaded: "keys/{{ vm_name }}_tenant_private_key"
+      gpu:
+        provisioned: "{{ vm_gpu_provisioned | default(false) | bool }}"
+        pci_address: "{{ gpu_pci_id | default('N/A') }}"
+        model: "{{ gpu_model | default('N/A') }}"
+        mode: "{{ gpu_provision_mode | default('N/A') }}"
+        partition_type: "{{ gpu_partition_type | default('N/A') if (vm_gpu_provisioned | default(false) | bool and gpu_provision_mode == 'partitioned') else 'N/A' }}"
+        partition_size: "{{ vm_gpu_partition_size | default('N/A') if (vm_gpu_provisioned | default(false) | bool and gpu_provision_mode == 'partitioned') else 'N/A' }}"
+        audio_device:
+          pci_address: "{{ gpu_audio_device.stdout | default('N/A') if (gpu_audio_device is defined and gpu_audio_device.stdout is defined and gpu_audio_device.stdout != 'NO_AUDIO_DEVICE') else 'N/A' }}"
+          attached: "{{ true if (gpu_audio_device is defined and gpu_audio_device.stdout is defined and gpu_audio_device.stdout != 'NO_AUDIO_DEVICE') else false }}"
+      system:
+        cloud_init_method: "basic-networking-only"
+        note: "Both SSH key and password authentication are supported"
+  when: vm_action == "create" and vm_create_result is defined and (vm_ip is not defined or vm_ready_result.rc != 0)
+
+- name: Create JSON formatted output for VM creation failure
+  set_fact:
+    vm_creation_json: "{{ vm_creation_data | to_nice_json }}"
+  when: vm_action == "create" and vm_create_result is defined and (vm_ip is not defined or vm_ready_result.rc != 0)
+
+- name: Output VM creation failure data as parsable JSON
+  debug:
+    var: vm_creation_data
+  when: vm_action == "create" and vm_create_result is defined and (vm_ip is not defined or vm_ready_result.rc != 0)
+
+- name: Output VM creation failure JSON string for external parsing
+  debug:
+    msg: "{{ vm_creation_json }}"
+  when: vm_action == "create" and vm_create_result is defined and (vm_ip is not defined or vm_ready_result.rc != 0)
+
+- name: Display VM creation result (not SSH-ready)
+  debug:
+    msg: 
+      - "VM {{ vm_name }} created but SSH readiness check failed"
+      - "VM may still be booting or cloud-init may be taking longer than expected"
+      - "External SSH Port: {{ external_ssh_port | default('Not configured') }}"
+      - "Root SSH Private Key (host only): ~/.ssh/{{ vm_root_ssh_filename }}"
+      - "Root SSH Public Key (host only): ~/.ssh/{{ vm_root_ssh_filename }}.pub"
+      - "Tenant SSH Private Key (downloaded): keys/{{ vm_name }}_tenant_private_key"
+      - "Tenant SSH Public Key (downloaded): keys/{{ vm_name }}_tenant_public_key.pub"
+      - "Root Password: {{ root_password }}"
+      - "Tenant Password: {{ tenant_password }}"
+      - "Note: Both SSH key and password authentication are supported"
+      - "Try connecting as root: ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@<vm_ip>"
+      - "Try connecting as tenant: ssh -i keys/{{ vm_name }}_tenant_private_key {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@<vm_ip>"
+      - "External access (when ready): ssh -i ~/.ssh/{{ vm_root_ssh_filename }} -p {{ external_ssh_port | default('XXXX') }} root@{{ target_host }}"
+      - "Check VM status: virsh domstate {{ vm_name }}"
+      - "Get VM IP: virsh net-dhcp-leases default"
+  when: vm_action == "create" and vm_create_result is defined and (vm_ip is not defined or vm_ready_result.rc != 0)
+
+- name: List all VMs
+  shell: virsh list --all
+  register: vm_list_result
+  when: vm_action == "list"
+  delegate_to: "{{ target_host }}"
+
+- name: Display VM list
+  debug:
+    var: vm_list_result.stdout_lines
+  when: vm_action == "list" and vm_list_result is defined
+
+- name: Show current port forwarding rules
+  shell: |
+    echo "=== Current NAT PREROUTING Rules (Port Forwarding) ==="
+    iptables -t nat -L PREROUTING -n --line-numbers | grep -E "(DNAT|target|Chain)" || echo "No DNAT rules found"
+    echo ""
+    echo "=== Current FORWARD Rules ==="
+    iptables -L FORWARD -n --line-numbers | grep -E "(ACCEPT.*:22|target|Chain)" || echo "No SSH forwarding rules found"
+  register: port_forwarding_rules
+  when: vm_action == "list"
+  delegate_to: "{{ target_host }}"
+
+- name: Get current timestamp for list action
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: list_timestamp
+  when: vm_action == "list"
+  delegate_to: localhost
+
+- name: Parse VM list into structured format
+  shell: |
+    echo '{{ vm_list_result.stdout }}' | awk '
+    BEGIN { print "[" }
+    NR > 2 && NF >= 3 { 
+      gsub(/"/, "\\\"", $0)
+      id = $1
+      name = $2
+      # Handle state which might have spaces
+      state = ""
+      for(i=3; i<=NF; i++) {
+        if(i > 3) state = state " "
+        state = state $i
+      }
+      if (NR > 3) print ","
+      printf "{\"id\": \"%s\", \"name\": \"%s\", \"state\": \"%s\"}", id, name, state
+    }
+    END { print "\n]" }
+    '
+  register: vm_list_json_raw
+  when: vm_action == "list" and vm_list_result is defined
+  delegate_to: localhost
+
+- name: Set parsed VM list
+  set_fact:
+    vm_list_parsed: "{{ vm_list_json_raw.stdout | from_json }}"
+  when: vm_action == "list" and vm_list_json_raw is defined
+
+- name: Create JSON data structure for VM list
+  set_fact:
+    vm_list_data:
+      action: "list"
+      timestamp: "{{ list_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "success"
+      vm_count: "{{ vm_list_parsed | length if vm_list_parsed is defined else 0 }}"
+      vms: "{{ vm_list_parsed if vm_list_parsed is defined else [] }}"
+      port_forwarding_active: "{{ port_forwarding_rules.stdout_lines | select('search', 'DNAT') | list | length > 0 if port_forwarding_rules is defined else false }}"
+      raw_output: "{{ vm_list_result.stdout_lines }}"
+      port_forwarding_rules: "{{ port_forwarding_rules.stdout_lines if port_forwarding_rules is defined else [] }}"
+  when: vm_action == "list"
+
+- name: Display port forwarding rules
+  debug:
+    var: port_forwarding_rules.stdout_lines
+  when: vm_action == "list" and port_forwarding_rules is defined
+
+- name: Start VM
+  shell: virsh start {{ vm_name }}
+  register: start_result
+  when: vm_action == "start"
+  delegate_to: "{{ target_host }}"
+
+- name: Get current timestamp for start action
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: start_timestamp
+  when: vm_action == "start"
+  delegate_to: localhost
+
+- name: Create JSON data structure for VM start
+  set_fact:
+    vm_start_data:
+      action: "start"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ start_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "{{ 'success' if (start_result is defined and start_result.rc == 0) else 'failed' }}"
+      operation_initiated: "{{ 'yes' if start_result is defined else 'no' }}"
+      result_message: "{{ start_result.stdout if start_result is defined else 'No output' }}"
+      error: "{{ start_result.stderr | default('') if start_result is defined and start_result.rc != 0 else '' }}"
+  when: vm_action == "start"
+
+- name: Display start result
+  debug:
+    msg: "VM {{ vm_name }} {{ 'started successfully' if start_result.rc == 0 else 'failed to start' }}"
+  when: vm_action == "start" and start_result is defined
+
+- name: Shutdown VM gracefully
+  shell: virsh shutdown {{ vm_name }}
+  register: shutdown_result
+  when: vm_action == "shutdown"
+  delegate_to: "{{ target_host }}"
+
+- name: Wait for VM to shut down completely
+  shell: virsh domstate {{ vm_name }}
+  register: vm_state_check
+  until: vm_state_check.stdout.find('shut off') != -1
+  retries: 120
+  delay: 2
+  when: vm_action == "shutdown"
+  delegate_to: "{{ target_host }}"
+
+- name: Get current timestamp for shutdown action
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: shutdown_timestamp
+  when: vm_action == "shutdown"
+  delegate_to: localhost
+
+- name: Create JSON data structure for VM shutdown
+  set_fact:
+    vm_shutdown_data:
+      action: "shutdown"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ shutdown_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "{{ 'success' if (shutdown_result is defined and shutdown_result.rc == 0) else 'failed' }}"
+      operation_initiated: "{{ 'yes' if shutdown_result is defined else 'no' }}"
+      final_vm_state: "{{ vm_state_check.stdout if vm_state_check is defined else 'unknown' }}"
+      shutdown_method: "graceful"
+      result_message: "{{ shutdown_result.stdout if shutdown_result is defined else 'No output' }}"
+      error: "{{ shutdown_result.stderr | default('') if shutdown_result is defined and shutdown_result.rc != 0 else '' }}"
+  when: vm_action == "shutdown"
+
+- name: Display shutdown result
+  debug:
+    msg: "VM {{ vm_name }} {{ 'shutdown successfully' if shutdown_result.rc == 0 else 'failed to shutdown' }}"
+  when: vm_action == "shutdown" and shutdown_result is defined
+
+- name: Force stop VM
+  shell: virsh destroy {{ vm_name }}
+  register: destroy_result
+  when: vm_action == "destroy"
+  delegate_to: "{{ target_host }}"
+
+- name: Get current timestamp for destroy action
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: destroy_timestamp
+  when: vm_action == "destroy"
+  delegate_to: localhost
+
+- name: Create JSON data structure for VM destroy
+  set_fact:
+    vm_destroy_data:
+      action: "destroy"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ destroy_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "{{ 'success' if (destroy_result is defined and destroy_result.rc == 0) else 'failed' }}"
+      operation_initiated: "{{ 'yes' if destroy_result is defined else 'no' }}"
+      shutdown_method: "force"
+      result_message: "{{ destroy_result.stdout if destroy_result is defined else 'No output' }}"
+      error: "{{ destroy_result.stderr | default('') if destroy_result is defined and destroy_result.rc != 0 else '' }}"
+      note: "VM was forcefully stopped and may lose unsaved data"
+  when: vm_action == "destroy"
+
+- name: Display destroy result
+  debug:
+    msg: "VM {{ vm_name }} {{ 'destroyed successfully' if destroy_result.rc == 0 else 'failed to destroy' }}"
+  when: vm_action == "destroy" and destroy_result is defined
+
+- name: Reboot VM
+  shell: |
+    virsh reboot {{ vm_name }}    
+    echo "VM {{ vm_name }} reboot has been initiated."
+  register: reboot_result
+  when: vm_action == "reboot"
+  delegate_to: "{{ target_host }}"
+
+- name: Get current timestamp for reboot action
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: reboot_timestamp
+  when: vm_action == "reboot"
+  delegate_to: localhost
+
+- name: Create JSON data structure for VM reboot
+  set_fact:
+    vm_reboot_data:
+      action: "reboot"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ reboot_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "{{ 'success' if (reboot_result is defined and reboot_result.rc == 0) else 'failed' }}"
+      operation_initiated: "{{ 'yes' if reboot_result is defined else 'no' }}"
+      reboot_method: "graceful"
+      result_message: "{{ reboot_result.stdout if reboot_result is defined else 'No output' }}"
+      error: "{{ reboot_result.stderr | default('') if reboot_result is defined and reboot_result.rc != 0 else '' }}"
+      note: "VM reboot initiated - VM will restart gracefully"
+  when: vm_action == "reboot"
+
+- name: Display reboot result
+  debug:
+    msg: "VM {{ vm_name }} {{ 'rebooted successfully' if reboot_result.rc == 0 else 'failed to reboot' }}"
+  when: vm_action == "reboot" and reboot_result is defined
+
+- name: Reset tenant user password via root SSH access
+  block:
+    - name: Get VM IP address for password reset
+      shell: |
+        # Try multiple methods to get VM IP
+        VM_IP=""
+        
+        # Method 1: Try domifaddr (works if VM is running)
+        VM_IP=$(virsh domifaddr {{ vm_name }} 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1)
+        
+        # Method 2: If domifaddr fails, try to get IP from DHCP leases
+        if [ -z "$VM_IP" ]; then
+          VM_IP=$(virsh net-dhcp-leases default 2>/dev/null | grep "{{ vm_name }}" | awk '{print $5}' | cut -d'/' -f1 | head -1)
+        fi
+        
+        # Method 3: If still no IP, check if we can get it from inventory or arp table
+        if [ -z "$VM_IP" ]; then
+          # Try to get MAC address first, then look up in ARP table
+          MAC_ADDR=$(virsh domiflist {{ vm_name }} 2>/dev/null | awk 'NR>2 && NF>1 {print $5}' | head -1)
+          if [ -n "$MAC_ADDR" ]; then
+            VM_IP=$(arp -a | grep -i "$MAC_ADDR" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1)
+          fi
+        fi
+        
+        if [ -z "$VM_IP" ]; then
+          echo "ERROR: Could not determine VM IP address"
+          echo "VM may not be running or may not have obtained an IP address"
+          exit 1
+        fi
+        
+        echo "$VM_IP"
+      register: vm_ip_discovery
+      delegate_to: "{{ target_host }}"
+    
+    - name: Set VM IP for password reset
+      set_fact:
+        vm_ip: "{{ vm_ip_discovery.stdout.strip() }}"
+      when: vm_ip_discovery.rc == 0
+    
+    - name: Generate new tenant password
+      set_fact:
+        new_tenant_password: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=32') }}"
+    
+    - name: Reset tenant password on VM
+      shell: |
+        # Connect to VM using root SSH key and reset tenant password
+        ssh -i ~/.ssh/{{ vm_root_ssh_filename }} \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=10 \
+            root@{{ vm_ip }} \
+            "echo '{{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}:{{ new_tenant_password }}' | chpasswd && echo 'Password reset completed for user {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}'"
+      register: password_reset_result
+      delegate_to: "{{ target_host }}"
+    
+    - name: Get current timestamp for password reset
+      shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+      register: password_reset_timestamp
+      delegate_to: localhost
+    
+    - name: Create JSON data structure for password reset
+      set_fact:
+        vm_password_reset_data:
+          action: "reset_password"
+          vm_name: "{{ vm_name }}"
+          timestamp: "{{ password_reset_timestamp.stdout }}"
+          host: "{{ target_host }}"
+          status: "{{ 'success' if (password_reset_result is defined and password_reset_result.rc == 0) else 'failed' }}"
+          tenant_user: "{{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}"
+          new_password: "{{ new_tenant_password }}"
+          vm_ip: "{{ vm_ip | default('unknown') }}"
+          ssh_access:
+            command: "ssh {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip | default('<vm_ip>') }}"
+            note: "Both root and tenant users support SSH key and password authentication"
+          error: "{{ password_reset_result.stderr | default('') if password_reset_result is defined and password_reset_result.rc != 0 else '' }}"
+    
+    
+    - name: Display password reset result
+      debug:
+        msg:
+          - "Tenant password reset completed successfully"
+          - "VM: {{ vm_name }}"
+          - "Tenant User: {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}"
+          - "New Password: {{ new_tenant_password }}"
+          - "VM IP: {{ vm_ip | default('Use inventory or domifaddr to find IP') }}"
+          - "SSH Access: ssh {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip | default('<vm_ip>') }}"
+          - "Note: Both root and tenant users support SSH key and password authentication"
+  when: vm_action == "reset_password"
+  delegate_to: "{{ target_host }}"
+
+# Schedule VM shutdown at specific date/time using 'at' command
+- name: Validate lease_end datetime format
+  fail:
+    msg: "lease_end must be in format 'YYYY-MM-DD HH:MM' (e.g., '2025-12-31 23:59') - will be interpreted as UTC"
+  when: 
+    - vm_action == "lease_end"
+    - (vm_lease_end is not defined or not vm_lease_end | regex_search('^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$'))
+
+- name: Check if 'at' package is installed
+  shell: |
+    if ! command -v at >/dev/null 2>&1; then
+      echo "ERROR: 'at' command not found. Please install the 'at' package first."
+      echo "On Ubuntu/Debian: sudo apt install at"
+      echo "On RHEL/CentOS: sudo yum install at" 
+      echo "On Fedora: sudo dnf install at"
+      exit 1
+    fi
+    echo "'at' command is available"
+  when: vm_action == "lease_end"
+  register: at_check_result
+  delegate_to: "{{ target_host }}"
+
+- name: Schedule VM shutdown using at command with UTC timezone
+  shell: |
+    # Check if at service is running
+    if ! systemctl is-active --quiet atd; then
+      systemctl start atd
+      if ! systemctl is-active --quiet atd; then
+        echo "ERROR: Failed to start atd service"
+        exit 1
+      fi
+    fi
+    
+    # Convert input datetime and validate
+    LEASE_TIME="{{ vm_lease_end }}"
+    echo "Scheduling VM {{ vm_name }} shutdown at $LEASE_TIME UTC"
+    
+    if ! TZ=UTC date -d "$LEASE_TIME" >/dev/null 2>&1; then
+      echo "ERROR: Invalid datetime format '$LEASE_TIME'. Use 'YYYY-MM-DD HH:MM' format."
+      exit 1
+    fi
+    
+    # Check if time is in future
+    CURRENT_UTC_EPOCH=$(TZ=UTC date +%s)
+    LEASE_UTC_EPOCH=$(TZ=UTC date -d "$LEASE_TIME" +%s)
+    
+    if [ $LEASE_UTC_EPOCH -le $CURRENT_UTC_EPOCH ]; then
+      echo "ERROR: Time '$LEASE_TIME UTC' is in the past. Current UTC: $(TZ=UTC date)"
+      exit 1
+    fi
+    
+    # Convert to format 'at' accepts and schedule
+    AT_DATE=$(TZ=UTC date -d "$LEASE_TIME" "+%H:%M %m/%d/%Y")
+    AT_OUTPUT=$(TZ=UTC echo "virsh shutdown {{ vm_name }} #LEASE:{{ vm_name }}" | TZ=UTC at "$AT_DATE" 2>&1)
+    AT_EXIT_CODE=$?
+    
+    # Try alternative format if first fails
+    if [ $AT_EXIT_CODE -ne 0 ]; then
+      AT_DATE=$(TZ=UTC date -d "$LEASE_TIME" "+%m/%d/%Y %H:%M")
+      AT_OUTPUT=$(TZ=UTC echo "virsh shutdown {{ vm_name }} #LEASE:{{ vm_name }}" | TZ=UTC at "$AT_DATE" 2>&1)
+      AT_EXIT_CODE=$?
+    fi
+    
+    if [ $AT_EXIT_CODE -ne 0 ]; then
+      echo "ERROR: Failed to schedule job - $AT_OUTPUT"
+      exit 1
+    fi
+    
+    # Verify job was scheduled
+    sleep 1
+    JOB_NUM=$(atq | tail -1 | awk '{print $1}')
+    if [ -z "$JOB_NUM" ]; then
+      echo "ERROR: No job scheduled"
+      exit 1
+    fi
+    
+    echo "SUCCESS: Job $JOB_NUM scheduled - shutdown at $LEASE_TIME UTC"
+    echo "Active jobs: $(atq | wc -l)"
+  when: vm_action == "lease_end"
+  register: lease_end_result
+  delegate_to: "{{ target_host }}"
+
+- name: Get current timestamp for lease_end
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: lease_end_timestamp
+  when: 
+    - vm_action == "lease_end"
+    - lease_end_result is defined
+  delegate_to: localhost
+
+- name: Create JSON data structure for lease_end action
+  set_fact:
+    vm_lease_end_data:
+      action: "lease_end"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ lease_end_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "{{ 'success' if (lease_end_result is defined and lease_end_result.rc == 0) else 'failed' }}"
+      scheduled_shutdown_utc: "{{ vm_lease_end }} UTC"
+      timezone_info: "Input time treated as UTC, scheduled accordingly"
+      at_command: "virsh shutdown {{ vm_name }}"
+      scheduled_jobs: "{{ lease_end_result.stdout_lines | select('match', '.*[0-9]+.*') | list if lease_end_result is defined else [] }}"
+      error: "{{ lease_end_result.stderr | default('') if lease_end_result.rc != 0 else '' }}"
+  when: 
+    - vm_action == "lease_end"
+    - lease_end_result is defined
+
+- name: Display lease_end scheduling result
+  debug:
+    msg:
+      - "VM {{ vm_name }} shutdown scheduled for {{ vm_lease_end }} UTC"
+      - "Host: {{ target_host }}"
+      - "Status: {{ 'Success' if lease_end_result.rc == 0 else 'Failed' }}"
+  when: 
+    - vm_action == "lease_end"
+    - lease_end_result is defined
+    - lease_end_result.rc == 0
+
+# Remove scheduled VM lease end jobs
+- name: Check if 'at' package is installed for lease_remove
+  shell: |
+    if ! command -v at >/dev/null 2>&1; then
+      echo "ERROR: 'at' command not found. Please install the 'at' package first."
+      echo "On Ubuntu/Debian: sudo apt install at"
+      echo "On RHEL/CentOS: sudo yum install at" 
+      echo "On Fedora: sudo dnf install at"
+      exit 1
+    fi
+    echo "'at' command is available for lease removal"
+  when: vm_action == "lease_remove"
+  register: at_remove_check_result
+  delegate_to: "{{ target_host }}"
+
+- name: Remove scheduled lease end jobs for VM
+  shell: |
+    echo "Searching for lease jobs for VM {{ vm_name }}"
+    
+    # Find all lease jobs using the improved command
+    echo "=== Current lease jobs ==="
+    for id in $(atq | awk '{print $1}'); do
+      at -c "$id" | grep -H "LEASE:" && echo "→ Job ID: $id"
+    done
+    
+    echo "=== Removing jobs for VM {{ vm_name }} ==="
+    REMOVED_JOBS=""
+    JOBS_FOUND=0
+    
+    for id in $(atq | awk '{print $1}'); do
+      if at -c "$id" 2>/dev/null | grep -q "LEASE:{{ vm_name }}"; then
+        echo "Found lease job $id for VM {{ vm_name }}"
+        JOBS_FOUND=$((JOBS_FOUND + 1))
+        if atrm "$id" 2>/dev/null; then
+          echo "Removed job $id"
+          if [ -z "$REMOVED_JOBS" ]; then
+            REMOVED_JOBS="$id"
+          else
+            REMOVED_JOBS="$REMOVED_JOBS,$id"
+          fi
+        else
+          echo "Failed to remove job $id"
+        fi
+      fi
+    done
+    
+    if [ $JOBS_FOUND -eq 0 ]; then
+      echo "ERROR: No lease jobs found for VM {{ vm_name }}"
+      echo "REMOVED_JOBS=none"
+      echo "OPERATION_STATUS=no_jobs_found"
+      exit 1
+    elif [ -z "$REMOVED_JOBS" ]; then
+      echo "ERROR: Failed to remove jobs"
+      echo "REMOVED_JOBS=none"
+      echo "OPERATION_STATUS=removal_failed"
+      exit 1
+    else
+      echo "SUCCESS: Removed jobs $REMOVED_JOBS for VM {{ vm_name }}"
+      echo "REMOVED_JOBS=$REMOVED_JOBS"
+      echo "OPERATION_STATUS=success"
+    fi
+  when: vm_action == "lease_remove"
+  register: lease_remove_result
+  delegate_to: "{{ target_host }}"
+  failed_when: lease_remove_result.rc != 0
+
+- name: Get current timestamp for lease_remove
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: lease_remove_timestamp
+  when: 
+    - vm_action == "lease_remove"
+    - lease_remove_result is defined
+  delegate_to: localhost
+
+- name: Extract removed job IDs from lease_remove result
+  set_fact:
+    removed_job_ids: "{{ lease_remove_result.stdout_lines | select('match', '^REMOVED_JOBS=.*') | first | regex_replace('^REMOVED_JOBS=', '') | default('none') }}"
+  when:
+    - vm_action == "lease_remove"
+    - lease_remove_result is defined
+
+- name: Extract operation status from lease_remove result
+  set_fact:
+    operation_status: "{{ lease_remove_result.stdout_lines | select('match', '^OPERATION_STATUS=.*') | first | regex_replace('^OPERATION_STATUS=', '') | default('unknown') }}"
+  when:
+    - vm_action == "lease_remove"
+    - lease_remove_result is defined
+
+- name: Create JSON data structure for lease_remove action
+  set_fact:
+    vm_lease_remove_data:
+      action: "lease_remove"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ lease_remove_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "{{ 'success' if (lease_remove_result is defined and lease_remove_result.rc == 0) else 'failed' }}"
+      operation_result: "{{ operation_status | default('unknown') }}"
+      removed_jobs: "{{ removed_job_ids.split(',') if removed_job_ids != 'none' else [] }}"
+      jobs_found: "{{ 'yes' if removed_job_ids != 'none' else 'no' }}"
+      remaining_jobs: "{{ lease_remove_result.stdout_lines | select('match', '.*[0-9]+.*') | list if lease_remove_result is defined else [] }}"
+      error: "{{ lease_remove_result.stderr | default('') if lease_remove_result is defined and lease_remove_result.rc != 0 else '' }}"
+      error_message: "{{ 'No lease jobs found for this VM' if operation_status == 'no_jobs_found' else ('Job removal failed' if operation_status == 'removal_failed' else '') }}"
+  when: 
+    - vm_action == "lease_remove"
+    - lease_remove_result is defined
+
+- name: Display lease_remove result
+  debug:
+    msg:
+      - "VM {{ vm_name }} lease jobs removed: {{ removed_job_ids }}"
+      - "Host: {{ target_host }}"
+      - "Status: {{ 'Success' if lease_remove_result.rc == 0 else 'Failed' }}"
+  when: 
+    - vm_action == "lease_remove"
+    - lease_remove_result is defined
+    - lease_remove_result.rc == 0
+
+- name: Get VM IP before undefining (for cleanup)
+  shell: |
+    # Try multiple methods to get VM IP
+    VM_IP=""
+    
+    # Method 1: Try domifaddr (works if VM is running)
+    VM_IP=$(virsh domifaddr {{ vm_name }} 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1)
+    
+    # Method 2: If domifaddr fails, try to get IP from DNAT rules
+    if [ -z "$VM_IP" ]; then
+      VM_IP=$(iptables -t nat -L PREROUTING -n | grep ":22$" | grep -oE 'to:[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:22' | cut -d: -f2 | head -1)
+    fi
+    
+    # Method 3: If still no IP, try from FORWARD rules
+    if [ -z "$VM_IP" ]; then
+      VM_IP=$(iptables -L FORWARD -n | grep "dpt:22" | grep -oE '192\.168\.122\.[0-9]+' | head -1)
+    fi
+    
+    echo "$VM_IP"
+  register: vm_ip_for_cleanup
+  ignore_errors: yes
+  when: vm_action == "undefine"
+  delegate_to: "{{ target_host }}"
+
+- name: Clean up iptables port forwarding rules
+  shell: |
+    echo "=== Cleaning up port forwarding rules for VM {{ vm_name }} ==="
+    
+    VM_IP="{{ vm_ip_for_cleanup.stdout | default('') | trim }}"
+    
+    if [ -n "$VM_IP" ]; then
+      echo "VM IP found: $VM_IP - removing specific rules"
+      
+      # Remove DNAT rules (PREROUTING chain) - targeting specific VM IP
+      echo "Removing DNAT rules for VM IP $VM_IP..."
+      iptables -t nat -L PREROUTING -n --line-numbers | grep "to:$VM_IP:22" | awk '{print $1}' | sort -nr | while read line; do
+        if [ -n "$line" ]; then
+          echo "Removing DNAT rule line $line"
+          iptables -t nat -D PREROUTING $line
+        fi
+      done
+      
+      # Remove POSTROUTING MASQUERADE rules for specific VM
+      echo "Removing POSTROUTING MASQUERADE rules for VM IP $VM_IP..."
+      iptables -t nat -L POSTROUTING -n --line-numbers | grep "MASQUERADE.*$VM_IP" | awk '{print $1}' | sort -nr | while read line; do
+        if [ -n "$line" ]; then
+          echo "Removing MASQUERADE rule line $line"
+          iptables -t nat -D POSTROUTING $line
+        fi
+      done
+      
+      # Remove FORWARD rules for specific VM (both directions)
+      echo "Removing FORWARD rules for VM IP $VM_IP..."
+      
+      # Remove FORWARD rules where VM IP is destination (incoming SSH)
+      iptables -L FORWARD -n --line-numbers | grep "ACCEPT.*$VM_IP.*dpt:22" | awk '{print $1}' | sort -nr | while read line; do
+        if [ -n "$line" ]; then
+          echo "Removing FORWARD rule (incoming SSH) line $line"
+          iptables -D FORWARD $line
+        fi
+      done
+      
+      # Remove FORWARD rules where VM IP is source (outgoing SSH)
+      iptables -L FORWARD -n --line-numbers | grep "ACCEPT.*$VM_IP.*spt:22" | awk '{print $1}' | sort -nr | while read line; do
+        if [ -n "$line" ]; then
+          echo "Removing FORWARD rule (outgoing SSH) line $line"
+          iptables -D FORWARD $line
+        fi
+      done
+      
+    else
+      echo "VM IP not found - attempting cleanup by removing SSH-related rules in 192.168.122.x range"
+      
+      # Cleanup orphaned rules that might belong to the VM
+      echo "Removing orphaned DNAT rules..."
+      iptables -t nat -L PREROUTING -n --line-numbers | grep "192\.168\.122\." | grep ":22$" | awk '{print $1}' | sort -nr | while read line; do
+        if [ -n "$line" ]; then
+          echo "Removing orphaned DNAT rule line $line"
+          iptables -t nat -D PREROUTING $line
+        fi
+      done
+      
+      echo "Removing orphaned FORWARD rules..."
+      iptables -L FORWARD -n --line-numbers | grep "192\.168\.122\." | grep "dpt:22\|spt:22" | awk '{print $1}' | sort -nr | while read line; do
+        if [ -n "$line" ]; then
+          echo "Removing orphaned FORWARD rule line $line"
+          iptables -D FORWARD $line
+        fi
+      done
+    fi
+    
+    echo "=== Port forwarding cleanup completed ==="
+  when: vm_action == "undefine"
+  delegate_to: "{{ target_host }}"
+
+- name: Check if VM has attached GPU before undefine
+  shell: |
+    # Check if VM has any GPU (hostdev) attached
+    GPU_ATTACHED=$(virsh dumpxml {{ vm_name }} 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3.\4/" || echo "")
+    if [ ! -z "$GPU_ATTACHED" ]; then
+      echo "GPU_ATTACHED=true"
+      echo "GPU_PCI=$GPU_ATTACHED"
+      GPU_MODEL=$(lspci -s ${GPU_ATTACHED#0000:} 2>/dev/null | grep -i "vga\|3d\|display" | cut -d: -f3- || echo "Unknown GPU")
+      echo "GPU_MODEL=$GPU_MODEL"
+    else
+      echo "GPU_ATTACHED=false"
+    fi
+  register: vm_gpu_status
+  when: vm_action == "undefine"
+  delegate_to: "{{ target_host }}"
+  ignore_errors: yes
+
+- name: Display GPU detachment information
+  debug:
+    msg:
+      - "=== GPU Status for VM {{ vm_name }} ==="
+      - "{{ vm_gpu_status.stdout_lines }}"
+      - ""
+      - "{% if 'GPU_ATTACHED=true' in vm_gpu_status.stdout %}GPU will be returned to the available pool after VM is undefined.{% else %}No GPU attached to this VM.{% endif %}"
+  when: 
+    - vm_action == "undefine"
+    - vm_gpu_status is defined
+
+- name: Check if VM is running before undefine
+  shell: virsh domstate {{ vm_name }}
+  register: vm_state_check
+  when: vm_action == "undefine"
+  delegate_to: "{{ target_host }}"
+
+- name: Fail if VM is running
+  fail:
+    msg: |
+      Cannot undefine VM '{{ vm_name }}' - VM is currently running (state: {{ vm_state_check.stdout }}).
+      
+      Please stop the VM first using one of these methods:
+      1. Graceful shutdown: ansible-playbook ... -e vm_action=shutdown
+      2. Force stop: ansible-playbook ... -e vm_action=destroy
+      
+      Then retry the undefine operation.
+  when:
+    - vm_action == "undefine"
+    - vm_state_check is defined
+    - vm_state_check.stdout == "running"
+
+- name: Detach GPU from VM before undefine (if attached)
+  shell: |
+    # Extract PCI address components
+    GPU_PCI=$(echo "{{ vm_gpu_status.stdout }}" | grep "GPU_PCI=" | cut -d= -f2)
+    if [ ! -z "$GPU_PCI" ]; then
+      # Parse PCI address: domain:bus:slot.function
+      DOMAIN=$(echo $GPU_PCI | cut -d: -f1)
+      BUS=$(echo $GPU_PCI | cut -d: -f2)
+      SLOT=$(echo $GPU_PCI | cut -d: -f3 | cut -d. -f1)
+      FUNC=$(echo $GPU_PCI | cut -d. -f2)
+      
+      # Create hostdev XML for detachment
+      cat > /tmp/{{ vm_name }}_gpu_detach.xml <<EOF
+    <hostdev mode='subsystem' type='pci'>
+      <source>
+        <address domain='$DOMAIN' bus='$BUS' slot='$SLOT' function='$FUNC'/>
+      </source>
+    </hostdev>
+    EOF
+      
+      # Try to detach if VM is running
+      if virsh list --state-running --name | grep -q "^{{ vm_name }}$"; then
+        echo "VM is running, attempting live GPU detachment..."
+        virsh detach-device {{ vm_name }} /tmp/{{ vm_name }}_gpu_detach.xml --live --config || echo "Live detach failed, will remove with undefine"
+      else
+        echo "VM is not running, GPU will be released when VM is undefined"
+      fi
+      
+      rm -f /tmp/{{ vm_name }}_gpu_detach.xml
+      
+      echo "GPU $GPU_PCI will be returned to available pool"
+    fi
+  register: gpu_detach_result
+  when: 
+    - vm_action == "undefine"
+    - vm_gpu_status is defined
+    - "'GPU_ATTACHED=true' in vm_gpu_status.stdout"
+  delegate_to: "{{ target_host }}"
+
+- name: Clean up firewall rules for external ports
+  shell: |
+    echo "=== Cleaning up firewall rules ==="
+    
+    # Try to find SSH keys to determine the external port used
+    SSH_KEY_FILES="/tmp/{{ vm_name }}_*_ed25519"
+    
+    # Check if we can determine the port from existing firewall rules or other sources
+    VM_IP="{{ vm_ip_for_cleanup.stdout | default('') }}"
+    
+    if [ -n "$VM_IP" ]; then
+      # Find the external port by looking at DNAT rules
+      EXTERNAL_PORT=$(iptables -t nat -L PREROUTING -n | grep "to:$VM_IP:22" | awk '{print $4}' | cut -d: -f2 | head -1)
+      
+      if [ -n "$EXTERNAL_PORT" ] && [ "$EXTERNAL_PORT" != "22" ]; then
+        echo "Found external port $EXTERNAL_PORT for VM IP $VM_IP"
+        
+        # Remove UFW rules if UFW is active
+        if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+          echo "Removing UFW rule for port $EXTERNAL_PORT"
+          ufw delete allow $EXTERNAL_PORT/tcp || echo "UFW rule removal failed or rule not found"
+        fi
+        
+        # Remove firewalld rules if firewalld is active
+        if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
+          echo "Removing firewalld rule for port $EXTERNAL_PORT"
+          firewall-cmd --permanent --remove-port=$EXTERNAL_PORT/tcp || echo "Firewalld rule removal failed or rule not found"
+          firewall-cmd --reload || echo "Firewalld reload failed"
+        fi
+        
+        # Remove direct iptables INPUT rules for the external port
+        echo "Removing INPUT rules for port $EXTERNAL_PORT"
+        iptables -L INPUT -n --line-numbers | grep "dpt:$EXTERNAL_PORT" | awk '{print $1}' | sort -nr | while read line; do
+          if [ -n "$line" ]; then
+            echo "Removing INPUT rule line $line"
+            iptables -D INPUT $line
+          fi
+        done
+      else
+        echo "Could not determine external port for cleanup"
+      fi
+    else
+      echo "VM IP not available for port cleanup"
+    fi
+    
+    echo "=== Firewall cleanup completed ==="
+  when: vm_action == "undefine"
+  delegate_to: "{{ target_host }}"
+
+- name: Save iptables rules after cleanup
+  shell: |
+    if command -v iptables-save >/dev/null 2>&1; then
+      if [ -f /etc/iptables/rules.v4 ]; then
+        iptables-save > /etc/iptables/rules.v4
+      elif [ -d /etc/sysconfig ]; then
+        iptables-save > /etc/sysconfig/iptables
+      elif [ -f /etc/iptables.rules ]; then
+        iptables-save > /etc/iptables.rules
+      else
+        iptables-save > /etc/iptables.rules
+      fi
+      echo "Iptables rules saved after cleanup"
+    fi
+  when: vm_action == "undefine"
+  delegate_to: "{{ target_host }}"
+
+- name: Clean up VM-related files
+  shell: |
+    echo "=== Cleaning up VM-related files for {{ vm_name }} ==="
+    
+    vm_image_type={{ vm_image_type }}
+
+    # Remove SSH keys from ~/.ssh
+    echo "Removing SSH keys from ~/.ssh..."
+    if [ "$vm_image_type" == "scratch" ]; then
+      rm -f ~/.ssh/{{ vm_root_ssh_filename }} ~/.ssh/{{ vm_root_ssh_filename }}.pub
+    fi
+    rm -f ~/.ssh/{{ vm_name }}_tenant_ed25519 ~/.ssh/{{ vm_name }}_tenant_ed25519.pub
+    
+    # Remove any remaining SSH keys from /tmp (pattern matching for any random string)
+    echo "Removing any remaining SSH keys from /tmp..."
+    rm -f /tmp/{{ vm_name }}_*_ed25519 /tmp/{{ vm_name }}_*_ed25519.pub
+    
+    # Remove cloud-init directories (pattern matching)
+    echo "Removing cloud-init directories..."
+    rm -rf /tmp/cloudinit_{{ vm_name }}_*
+    
+    # Remove cloud-init ISO
+    echo "Removing cloud-init ISO..."
+    rm -f /var/lib/libvirt/images/{{ vm_name }}-init.iso
+    
+    # List what files remain (for verification)
+    echo "Remaining files with VM name:"
+    find /tmp ~/.ssh /var/lib/libvirt/images -name "*{{ vm_name }}*" 2>/dev/null || echo "No remaining files found"
+    
+    echo "=== File cleanup completed ==="
+  when: vm_action == "undefine"
+  delegate_to: "{{ target_host }}"
+
+- name: Get VM MAC address for DHCP lease removal
+  shell: virsh domiflist {{ vm_name }} 2>/dev/null | grep -oE '([0-9a-f]{2}:){5}[0-9a-f]{2}' | head -1
+  register: vm_mac_for_cleanup
+  ignore_errors: yes
+  when: vm_action == "undefine"
+  delegate_to: "{{ target_host }}"
+
+- name: Remove static DHCP lease for VM
+  shell: |
+    VM_MAC="{{ vm_mac_for_cleanup.stdout }}"
+    
+    if [ -z "$VM_MAC" ]; then
+      echo "No MAC address found for VM {{ vm_name }}, skipping DHCP lease removal"
+    else
+      # Check if lease exists
+      if virsh net-dumpxml default | grep -q "$VM_MAC"; then
+        # Remove static DHCP host entry from the default network
+        virsh net-update default delete ip-dhcp-host \
+          "<host mac='$VM_MAC'/>" \
+          --live --config || echo "DHCP lease removal failed or already removed"
+        echo "Static DHCP lease removed for MAC $VM_MAC"
+      else
+        echo "No static DHCP lease found for MAC $VM_MAC"
+      fi
+    fi
+  when:
+    - vm_action == "undefine"
+    - vm_mac_for_cleanup is defined
+  delegate_to: "{{ target_host }}"
+
+- name: Remove VM definition and storage
+  shell: virsh undefine {{ vm_name }} --remove-all-storage --nvram
+  register: undefine_result
+  when: vm_action == "undefine"
+  delegate_to: "{{ target_host }}"
+
+- name: Get current timestamp for undefine action
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: undefine_timestamp
+  when: vm_action == "undefine"
+  delegate_to: localhost
+
+- name: Create JSON data structure for VM undefine
+  set_fact:
+    vm_undefine_data:
+      action: "undefine"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ undefine_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "{{ 'success' if (undefine_result is defined and undefine_result.rc == 0) else 'failed' }}"
+      operation_initiated: "{{ 'yes' if undefine_result is defined else 'no' }}"
+      vm_ip_cleaned: "{{ vm_ip_for_cleanup.stdout | default('unknown') }}"
+      cleanup_operations:
+        port_forwarding_rules: "cleaned"
+        ssh_keys: "removed"
+        cloud_init_files: "removed"
+        vm_storage: "{{ 'removed' if undefine_result is defined and undefine_result.rc == 0 else 'may still exist' }}"
+        downloaded_keys: "removed from local directory"
+        inventory: "{{ 'updated' if (tenant_id is not defined or tenant_id == '') else 'not applicable' }}"
+      result_message: "{{ undefine_result.stdout if undefine_result is defined else 'No output' }}"
+      error: "{{ undefine_result.stderr | default('') if undefine_result is defined and undefine_result.rc != 0 else '' }}"
+      note: "VM definition and all associated files have been permanently removed"
+  when: vm_action == "undefine"
+
+- name: Display undefine result
+  debug:
+    msg: 
+      - "VM {{ vm_name }} undefine result: {{ undefine_result.stdout }}"
+      - "Port forwarding rules cleaned up for VM"
+  when: vm_action == "undefine" and undefine_result is defined
+
+- name: Clean up local downloaded SSH keys
+  block:
+    - name: Remove downloaded tenant SSH keys from local keys directory
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ playbook_dir }}/../../keys/{{ vm_name }}_tenant_private_key"
+        - "{{ playbook_dir }}/../../keys/{{ vm_name }}_tenant_public_key.pub"
+      delegate_to: localhost
+      ignore_errors: yes
+  when: 
+    - vm_action == "undefine"
+    - undefine_result is defined
+
+- name: Remove single-tenant VM from inventory
+  block:
+    - name: Remove VM from [kvms] group in hosts file
+      lineinfile:
+        path: "{{ playbook_dir }}/../../inventory/hosts"
+        regexp: "^{{ vm_name }}\\s+.*ansible_host="
+        state: absent
+        backup: yes
+      delegate_to: localhost
+  when: 
+    - vm_action == "undefine"
+    - undefine_result is defined
+    - tenant_id is not defined or tenant_id == ""
+
+- name: Check if VM exists for monitoring
+  shell: virsh list --all --name | grep -q "^{{ vm_name }}$"
+  register: vm_exists_monitoring
+  ignore_errors: yes
+  when: vm_action == "monitor"
+  delegate_to: "{{ target_host }}"
+
+- name: Get VM performance statistics with usage percentages
+  shell: |
+    echo "=== VM Performance Statistics for {{ vm_name }} ==="
+    
+    # Check if VM exists
+    if ! virsh list --all --name | grep -q "^{{ vm_name }}$"; then
+      echo "ERROR: VM '{{ vm_name }}' not found"
+      exit 1
+    fi
+    
+    # Check VM state
+    VM_STATE=$(virsh domstate {{ vm_name }})
+    echo "VM State: $VM_STATE"
+    
+    if [ "$VM_STATE" != "running" ]; then
+      echo "ERROR: VM is not running (state: $VM_STATE)"
+      exit 2
+    fi
+    
+    echo ""
+    echo "=== Domain Statistics ==="
+    virsh domstats {{ vm_name }} 2>/dev/null || echo "domstats failed"
+    
+    echo ""
+    echo "=== CPU Statistics ==="
+    # Extract CPU info from domstats (more reliable than cpu-stats)
+    CPU_INFO=$(virsh domstats {{ vm_name }} | grep -E 'cpu\.|vcpu\.')
+    if [ -n "$CPU_INFO" ]; then
+      echo "$CPU_INFO"
+    else
+      echo "cpu-stats: Unable to get CPU statistics"
+    fi
+    
+    echo ""
+    echo "=== CPU Usage Calculation ==="
+    # Get CPU times with 1 second interval for percentage calculation
+    CPU_TIME_1=$(virsh domstats {{ vm_name }} | grep 'cpu.time=' | cut -d'=' -f2)
+    sleep 1
+    CPU_TIME_2=$(virsh domstats {{ vm_name }} | grep 'cpu.time=' | cut -d'=' -f2)
+    VCPU_COUNT=$(virsh domstats {{ vm_name }} | grep 'vcpu.current=' | cut -d'=' -f2)
+    
+    if [ -n "$CPU_TIME_1" ] && [ -n "$CPU_TIME_2" ] && [ -n "$VCPU_COUNT" ]; then
+      # Calculate CPU usage percentage
+      CPU_DIFF=$((CPU_TIME_2 - CPU_TIME_1))
+      # Convert nanoseconds to percentage (1 second = 1,000,000,000 nanoseconds)
+      CPU_USAGE_PERCENT=$(echo "scale=2; ($CPU_DIFF / 1000000000) * 100 / $VCPU_COUNT" | bc -l 2>/dev/null || echo "0.00")
+      echo "CPU Usage: ${CPU_USAGE_PERCENT}% (${VCPU_COUNT} vCPUs provisioned)"
+    else
+      echo "CPU Usage: Unable to calculate"
+    fi
+    
+    echo ""
+    echo "=== Memory Statistics with Usage ==="
+    virsh dommemstat {{ vm_name }} 2>/dev/null || echo "dommemstat failed"
+    
+    # Get memory usage details
+    MEMORY_STATS=$(virsh dommemstat {{ vm_name }} 2>/dev/null)
+    if [ $? -eq 0 ]; then
+      # Extract memory values (in KB)
+      ACTUAL_MEM=$(echo "$MEMORY_STATS" | grep "^actual " | awk '{print $2}' || echo "0")
+      AVAILABLE_MEM=$(echo "$MEMORY_STATS" | grep "^available " | awk '{print $2}' || echo "0")
+      UNUSED_MEM=$(echo "$MEMORY_STATS" | grep "^unused " | awk '{print $2}' || echo "0")
+      
+      if [ "$AVAILABLE_MEM" -gt 0 ]; then
+        USED_MEM=$((ACTUAL_MEM - UNUSED_MEM))
+        MEMORY_USAGE_PERCENT=$(echo "scale=2; ($USED_MEM * 100) / $AVAILABLE_MEM" | bc -l 2>/dev/null || echo "0.00")
+        echo "Memory Usage: ${MEMORY_USAGE_PERCENT}% (${USED_MEM}KB used / ${AVAILABLE_MEM}KB provisioned)"
+        echo "Memory Available: $(echo "scale=2; $AVAILABLE_MEM / 1024" | bc -l)MB"
+        echo "Memory Used: $(echo "scale=2; $USED_MEM / 1024" | bc -l)MB"
+      else
+        echo "Memory Usage: Unable to calculate percentage"
+      fi
+    fi
+    
+    echo ""
+    echo "=== Block I/O Statistics ==="
+    virsh domblkstat {{ vm_name }} 2>/dev/null || echo "domblkstat failed"
+    
+    echo ""
+    echo "=== Storage Usage ==="
+    
+    # Method A: Get disk targets and host-side storage info
+    echo "Getting disk targets:"
+    DISK_TARGETS=$(virsh domblklist {{ vm_name }} 2>/dev/null | awk 'NR>2 && NF>1 {print $1}' | grep -v "^$")
+    echo "Found disk targets: $DISK_TARGETS"
+    
+    if [ -n "$DISK_TARGETS" ]; then
+      for TARGET in $DISK_TARGETS; do
+        echo "=== Disk Target: $TARGET ==="
+        
+        # Get host-side storage info using domblkinfo
+        BLKINFO=$(virsh domblkinfo {{ vm_name }} $TARGET 2>/dev/null)
+        if [ $? -eq 0 ]; then
+          CAPACITY=$(echo "$BLKINFO" | grep "Capacity:" | awk '{print $2}')
+          ALLOCATION=$(echo "$BLKINFO" | grep "Allocation:" | awk '{print $2}')
+          PHYSICAL=$(echo "$BLKINFO" | grep "Physical:" | awk '{print $2}')
+          
+          # Convert bytes to human readable
+          if [ -n "$CAPACITY" ] && [ "$CAPACITY" != "0" ]; then
+            CAPACITY_GB=$(echo "scale=2; $CAPACITY / 1024 / 1024 / 1024" | bc -l 2>/dev/null || echo "0")
+            ALLOCATION_GB=$(echo "scale=2; $ALLOCATION / 1024 / 1024 / 1024" | bc -l 2>/dev/null || echo "0")
+            HOST_USAGE_PERCENT=$(echo "scale=2; ($ALLOCATION * 100) / $CAPACITY" | bc -l 2>/dev/null || echo "0")
+            
+            echo "Host Storage Capacity: ${CAPACITY_GB}GB"
+            echo "Host Storage Allocation: ${ALLOCATION_GB}GB"
+            echo "Host Storage Usage: ${HOST_USAGE_PERCENT}%"
+          else
+            echo "Host Storage: Unable to get capacity info"
+          fi
+        else
+          echo "domblkinfo failed for target $TARGET"
+        fi
+        
+        echo ""
+      done
+    fi
+    
+    # Method B: Get guest filesystem info using domfsinfo (requires qemu-guest-agent)
+    echo "=== Guest Filesystem Info ==="
+    FSINFO=$(virsh domfsinfo {{ vm_name }} 2>/dev/null)
+    if [ $? -eq 0 ] && [ -n "$FSINFO" ]; then
+      echo "Guest filesystem details:"
+      echo "$FSINFO"
+      
+      # Parse the main filesystem (usually /)
+      ROOT_FS=$(echo "$FSINFO" | grep -E "^\s*/" | head -1)
+      if [ -n "$ROOT_FS" ]; then
+        # Extract filesystem info (columns: Mountpoint, Name, Fstype, Total, Used, Available)
+        FS_TOTAL=$(echo "$ROOT_FS" | awk '{print $4}')
+        FS_USED=$(echo "$ROOT_FS" | awk '{print $5}')  
+        FS_AVAILABLE=$(echo "$ROOT_FS" | awk '{print $6}')
+        
+        if [ -n "$FS_TOTAL" ] && [ -n "$FS_USED" ] && [ "$FS_TOTAL" != "0" ]; then
+          # Calculate percentage (values are already in human format from domfsinfo)
+          echo "Guest Root Filesystem Total: $FS_TOTAL"
+          echo "Guest Root Filesystem Used: $FS_USED"
+          echo "Guest Root Filesystem Available: $FS_AVAILABLE"
+          echo "Guest Storage Usage: Available from domfsinfo"
+        fi
+      fi
+    else
+      echo "Guest filesystem info not available (qemu-guest-agent may not be installed/running)"
+      echo "Guest Storage Usage: N/A (requires qemu-guest-agent)"
+    fi
+    
+    echo ""
+    echo "=== Network Interface Statistics ==="
+    # Get network interfaces for the VM
+    INTERFACES=$(virsh domiflist {{ vm_name }} 2>/dev/null | awk 'NR>2 && NF>0 {print $1}' | grep -v "^$")
+    if [ -n "$INTERFACES" ]; then
+      for INTERFACE in $INTERFACES; do
+        echo "Interface: $INTERFACE"
+        virsh domifstat {{ vm_name }} $INTERFACE 2>/dev/null || echo "domifstat failed for interface $INTERFACE"
+        echo ""
+      done
+    else
+      echo "domifstat: No network interfaces found"
+    fi
+  register: vm_monitoring_raw
+  when: vm_action == "monitor" and vm_exists_monitoring.rc == 0
+  delegate_to: "{{ target_host }}"
+
+- name: Fail if VM does not exist for monitoring
+  fail:
+    msg: |
+      Cannot monitor VM '{{ vm_name }}' - VM does not exist or is not running.
+      
+      Available actions:
+      - Check existing VMs: virsh list --all
+      - Create VM: Use vm_action=create
+      - List all VMs: Use vm_action=list
+  when: vm_action == "monitor" and (vm_exists_monitoring is not defined or vm_exists_monitoring.rc != 0)
+
+- name: Get current timestamp
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: current_timestamp
+  when: vm_action == "monitor"
+  delegate_to: localhost
+
+- name: Parse VM monitoring data into structured format
+  set_fact:
+    vm_monitoring_data:
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ current_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "{{ 'success' if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'failed' }}"
+      vm_state: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^VM State:.*') | list | first | default('VM State: unknown') | regex_replace('^VM State: ', '')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'unknown' }}"
+      cpu_usage_percent: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^CPU Usage:.*%.*') | list | first | default('CPU Usage: N/A%') | regex_replace('^CPU Usage: ([0-9.]+|N/A)%.*$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      cpu_vcpus_provisioned: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^CPU Usage:.*vCPUs provisioned.*') | list | first | default('(N/A vCPUs provisioned)') | regex_replace('.*\\(([0-9]+|N/A) vCPUs provisioned\\).*', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      memory_usage_percent: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Memory Usage:.*%.*') | list | first | default('Memory Usage: N/A%') | regex_replace('^Memory Usage: ([0-9.]+|N/A)%.*$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      memory_used_mb: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Memory Used:.*MB$') | list | first | default('Memory Used: N/AMB') | regex_replace('^Memory Used: ([0-9.]+|N/A)MB$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      memory_available_mb: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Memory Available:.*MB$') | list | first | default('Memory Available: N/AMB') | regex_replace('^Memory Available: ([0-9.]+|N/A)MB$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      host_storage_capacity_gb: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Host Storage Capacity:.*GB$') | list | first | default('Host Storage Capacity: N/AGB') | regex_replace('^Host Storage Capacity: ([0-9.]+|N/A)GB$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      host_storage_allocation_gb: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Host Storage Allocation:.*GB$') | list | first | default('Host Storage Allocation: N/AGB') | regex_replace('^Host Storage Allocation: ([0-9.]+|N/A)GB$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      host_storage_usage_percent: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Host Storage Usage:.*%$') | list | first | default('Host Storage Usage: N/A%') | regex_replace('^Host Storage Usage: ([0-9.]+|N/A)%$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      guest_storage_total: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Guest Root Filesystem Total:.*') | list | first | default('Guest Root Filesystem Total: N/A') | regex_replace('^Guest Root Filesystem Total: (.*)$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      guest_storage_used: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Guest Root Filesystem Used:.*') | list | first | default('Guest Root Filesystem Used: N/A') | regex_replace('^Guest Root Filesystem Used: (.*)$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      guest_storage_available: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Guest Root Filesystem Available:.*') | list | first | default('Guest Root Filesystem Available: N/A') | regex_replace('^Guest Root Filesystem Available: (.*)$', '\\1')) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else 'N/A' }}"
+      network_interfaces: "{{ (vm_monitoring_raw.stdout_lines | default([]) | select('match', '^Interface:.*') | list | map('regex_replace', '^Interface: (.*)$', '\\1') | list) if (vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0) else [] }}"
+      error: "{{ vm_monitoring_raw.stderr | default('VM monitoring failed') if vm_monitoring_raw is defined and vm_monitoring_raw.rc != 0 else 'VM not found or not running' if vm_monitoring_raw is not defined else '' }}"
+  when: vm_action == "monitor" and current_timestamp is defined
+
+- name: Generate VM monitoring summary
+  set_fact:
+    monitoring_summary: |
+      VM MONITORING SUMMARY for {{ vm_name }}
+      {% if vm_monitoring_raw is defined and vm_monitoring_raw.rc == 0 %}
+      Status: VM is running and accessible
+      Timestamp: {{ current_timestamp.stdout }}
+      Host: {{ target_host }}
+      
+      KEY METRICS:
+      {% set stats_found = false %}
+      {% for line in vm_monitoring_raw.stdout_lines %}
+        {% if 'CPU Usage:' in line and '%' in line %}
+          {% set stats_found = true %}
+      - {{ line }}
+        {% elif 'Memory Usage:' in line and '%' in line %}
+      - {{ line }}
+        {% elif 'Host Storage Usage:' in line and '%' in line %}
+      - {{ line }}
+        {% elif 'Memory Available:' in line %}
+      - {{ line }}
+        {% elif 'Memory Used:' in line %}
+      - {{ line }}
+        {% elif 'Host Storage Capacity:' in line %}
+      - {{ line }}
+        {% elif 'Host Storage Allocation:' in line %}
+      - {{ line }}
+        {% elif 'Guest Root Filesystem Total:' in line %}
+      - {{ line }}
+        {% elif 'Guest Root Filesystem Used:' in line %}
+      - {{ line }}
+        {% elif 'Guest Root Filesystem Available:' in line %}
+      - {{ line }}
+        {% elif 'vcpu.current=' in line %}
+      - Current vCPUs: {{ line.split('=')[1] }}
+        {% elif 'vcpu.maximum=' in line %}
+      - Maximum vCPUs: {{ line.split('=')[1] }}
+        {% elif 'balloon.current=' in line %}
+      - Allocated Memory: {{ (line.split('=')[1] | int / 1024) | round(2) }} MB
+        {% elif 'balloon.maximum=' in line %}
+      - Maximum Memory: {{ (line.split('=')[1] | int / 1024) | round(2) }} MB
+        {% elif 'rd_bytes' in line %}
+      - Disk Read: {{ line.split()[1] }} bytes
+        {% elif 'wr_bytes' in line %}
+      - Disk Write: {{ line.split()[1] }} bytes
+        {% elif 'rx_bytes' in line %}
+      - Network RX: {{ line.split()[1] }} bytes
+        {% elif 'tx_bytes' in line %}
+      - Network TX: {{ line.split()[1] }} bytes
+        {% endif %}
+      {% endfor %}
+      {% if not stats_found %}
+      - Statistics collection in progress...
+      {% endif %}
+      
+      COMMANDS EXECUTED:
+      - virsh domstats {{ vm_name }}
+      - virsh domblkstat {{ vm_name }}
+      - virsh domblklist {{ vm_name }}
+      - virsh domblkinfo {{ vm_name }} <target>
+      - virsh domfsinfo {{ vm_name }}
+      - virsh domifstat {{ vm_name }} <interface>
+      - virsh dommemstat {{ vm_name }}
+      {% else %}
+      Status: {{ 'VM not found' if vm_exists_monitoring.rc != 0 else 'Monitoring failed' }}
+      {% if vm_monitoring_raw is defined and vm_monitoring_raw.rc == 2 %}
+      Reason: VM is not in running state
+      {% elif vm_monitoring_raw is defined and vm_monitoring_raw.rc == 1 %}
+      Reason: VM does not exist
+      {% else %}
+      Reason: Unknown error during monitoring
+      {% endif %}
+      
+      TROUBLESHOOTING:
+      - Check if VM exists: virsh list --all
+      - Check VM state: virsh domstate {{ vm_name }}
+      - Start VM if needed: virsh start {{ vm_name }}
+      {% endif %}
+  when: vm_action == "monitor" and current_timestamp is defined
+
+- name: Display VM monitoring summary
+  debug:
+    msg: "{{ monitoring_summary.split('\n') }}"
+  when: vm_action == "monitor" and monitoring_summary is defined
+
+# =============================================================================
+# JSON OUTPUT SECTION - All structured data outputs for external consumption
+# =============================================================================
+
+# VM Creation JSON Outputs
+- name: Create JSON formatted output for VM creation (generated tenant key)
+  set_fact:
+    vm_creation_json: "{{ vm_creation_data | to_nice_json }}"
+  when: 
+    - vm_action == "create" 
+    - vm_create_result is defined 
+    - vm_ip is defined
+    - (vm_tenant_pubkey is not defined or vm_tenant_pubkey == "")
+
+- name: Output VM creation data as parsable JSON (generated tenant key)
+  debug:
+    var: vm_creation_data
+  when: 
+    - vm_action == "create" 
+    - vm_create_result is defined 
+    - vm_ip is defined
+    - (vm_tenant_pubkey is not defined or vm_tenant_pubkey == "")
+
+- name: Output VM creation JSON string for external parsing (generated tenant key)
+  debug:
+    msg: "{{ vm_creation_json }}"
+  when: 
+    - vm_action == "create" 
+    - vm_create_result is defined 
+    - vm_ip is defined
+    - (vm_tenant_pubkey is not defined or vm_tenant_pubkey == "")
+
+- name: Create JSON formatted output for VM creation (provided tenant key)
+  set_fact:
+    vm_creation_json: "{{ vm_creation_data | to_nice_json }}"
+  when: 
+    - vm_action == "create" 
+    - vm_create_result is defined 
+    - vm_ip is defined
+    - vm_tenant_pubkey is defined 
+    - vm_tenant_pubkey != ""
+
+- name: Output VM creation data as parsable JSON (provided tenant key)
+  debug:
+    var: vm_creation_data
+  when: 
+    - vm_action == "create" 
+    - vm_create_result is defined 
+    - vm_ip is defined
+    - vm_tenant_pubkey is defined 
+    - vm_tenant_pubkey != ""
+
+- name: Output VM creation JSON string for external parsing (provided tenant key)
+  debug:
+    msg: "{{ vm_creation_json }}"
+  when: 
+    - vm_action == "create" 
+    - vm_create_result is defined 
+    - vm_ip is defined
+    - vm_tenant_pubkey is defined 
+    - vm_tenant_pubkey != ""
+
+- name: Create JSON formatted output for VM creation failure (not SSH-ready)
+  set_fact:
+    vm_creation_json: "{{ vm_creation_data | to_nice_json }}"
+  when: vm_action == "create" and vm_create_result is defined and (vm_ip is not defined or vm_ready_result.rc != 0)
+
+- name: Output VM creation failure data as parsable JSON
+  debug:
+    var: vm_creation_data
+  when: vm_action == "create" and vm_create_result is defined and (vm_ip is not defined or vm_ready_result.rc != 0)
+
+- name: Output VM creation failure JSON string for external parsing
+  debug:
+    msg: "{{ vm_creation_json }}"
+  when: vm_action == "create" and vm_create_result is defined and (vm_ip is not defined or vm_ready_result.rc != 0)
+
+# VM List JSON Output
+- name: Create JSON formatted output for VM list
+  set_fact:
+    vm_list_json: "{{ vm_list_data | to_nice_json }}"
+  when: vm_action == "list"
+
+- name: Output VM list data as parsable JSON
+  debug:
+    var: vm_list_data
+  when: vm_action == "list"
+
+- name: Output VM list JSON string for external parsing
+  debug:
+    msg: "{{ vm_list_json }}"
+  when: vm_action == "list"
+
+# VM Start JSON Output
+- name: Create JSON formatted output for VM start
+  set_fact:
+    vm_start_json: "{{ vm_start_data | to_nice_json }}"
+  when: vm_action == "start"
+
+- name: Output VM start data as parsable JSON
+  debug:
+    var: vm_start_data
+  when: vm_action == "start"
+
+- name: Output VM start JSON string for external parsing
+  debug:
+    msg: "{{ vm_start_json }}"
+  when: vm_action == "start"
+
+# VM Shutdown JSON Output
+- name: Create JSON formatted output for VM shutdown
+  set_fact:
+    vm_shutdown_json: "{{ vm_shutdown_data | to_nice_json }}"
+  when: vm_action == "shutdown"
+
+- name: Output VM shutdown data as parsable JSON
+  debug:
+    var: vm_shutdown_data
+  when: vm_action == "shutdown"
+
+- name: Output VM shutdown JSON string for external parsing
+  debug:
+    msg: "{{ vm_shutdown_json }}"
+  when: vm_action == "shutdown"
+
+# VM Destroy JSON Output
+- name: Create JSON formatted output for VM destroy
+  set_fact:
+    vm_destroy_json: "{{ vm_destroy_data | to_nice_json }}"
+  when: vm_action == "destroy"
+
+- name: Output VM destroy data as parsable JSON
+  debug:
+    var: vm_destroy_data
+  when: vm_action == "destroy"
+
+- name: Output VM destroy JSON string for external parsing
+  debug:
+    msg: "{{ vm_destroy_json }}"
+  when: vm_action == "destroy"
+
+# VM Reboot JSON Output
+- name: Create JSON formatted output for VM reboot
+  set_fact:
+    vm_reboot_json: "{{ vm_reboot_data | to_nice_json }}"
+  when: vm_action == "reboot"
+
+- name: Output VM reboot data as parsable JSON
+  debug:
+    var: vm_reboot_data
+  when: vm_action == "reboot"
+
+- name: Output VM reboot JSON string for external parsing
+  debug:
+    msg: "{{ vm_reboot_json }}"
+  when: vm_action == "reboot"
+
+# VM Password Reset JSON Output
+- name: Create JSON formatted output for password reset
+  set_fact:
+    vm_password_reset_json: "{{ vm_password_reset_data | to_nice_json }}"
+  when: vm_action == "reset_password"
+
+- name: Output password reset data as parsable JSON
+  debug:
+    var: vm_password_reset_data
+  when: vm_action == "reset_password"
+
+- name: Output password reset JSON string for external parsing
+  debug:
+    msg: "{{ vm_password_reset_json }}"
+  when: vm_action == "reset_password"
+
+# VM Undefine JSON Output
+- name: Create JSON formatted output for VM undefine
+  set_fact:
+    vm_undefine_json: "{{ vm_undefine_data | to_nice_json }}"
+  when: vm_action == "undefine"
+
+- name: Output VM undefine data as parsable JSON
+  debug:
+    var: vm_undefine_data
+  when: vm_action == "undefine"
+
+- name: Output VM undefine JSON string for external parsing
+  debug:
+    msg: "{{ vm_undefine_json }}"
+  when: vm_action == "undefine"
+
+# VM Monitor JSON Output
+- name: Create JSON formatted output for monitor
+  set_fact:
+    vm_monitoring_json: "{{ vm_monitoring_data | to_nice_json }}"
+  when: vm_action == "monitor"
+
+- name: Output monitoring data as parsable JSON
+  debug:
+    var: vm_monitoring_data
+  when: vm_action == "monitor"
+
+- name: Output monitoring JSON string for external parsing
+  debug:
+    msg: "{{ vm_monitoring_json }}"
+  when: vm_action == "monitor"
+
+# VM Lease End Final JSON Output
+- name: Create final JSON formatted output for lease end
+  set_fact:
+    vm_lease_end_final_json: "{{ vm_lease_end_data | to_nice_json }}"
+  when: vm_action == "lease_end"
+
+- name: Output final lease end data as parsable JSON
+  debug:
+    var: vm_lease_end_data
+  when: vm_action == "lease_end"
+
+- name: Output final lease end JSON string for external parsing
+  debug:
+    msg: "{{ vm_lease_end_final_json }}"
+  when: vm_action == "lease_end"
+
+# VM Lease Remove Final JSON Output
+- name: Create final JSON formatted output for lease remove
+  set_fact:
+    vm_lease_remove_final_json: "{{ vm_lease_remove_data | to_nice_json }}"
+  when: vm_action == "lease_remove"
+
+- name: Output final lease remove data as parsable JSON
+  debug:
+    var: vm_lease_remove_data
+  when: vm_action == "lease_remove"
+
+- name: Output final lease remove JSON string for external parsing
+  debug:
+    msg: "{{ vm_lease_remove_final_json }}"
+  when: vm_action == "lease_remove"
+
+# =============================================================================
+# END JSON OUTPUT SECTION
+# =============================================================================
+
+- name: Handle errors for failed VM operations
+  fail:
+    msg: "VM operation '{{ vm_action }}' failed on VM '{{ vm_name }}' at host '{{ target_host }}'"
+  when: 
+    - vm_action in ['start', 'shutdown', 'destroy', 'reboot', 'undefine', 'lease_end', 'lease_remove']
+    - (start_result is defined and start_result.failed | default(false)) or
+      (shutdown_result is defined and shutdown_result.failed | default(false)) or
+      (destroy_result is defined and destroy_result.failed | default(false)) or
+      (reboot_result is defined and reboot_result.failed | default(false)) or
+      (undefine_result is defined and undefine_result.failed | default(false)) or
+      (lease_end_result is defined and lease_end_result.failed | default(false)) or
+      (lease_remove_result is defined and lease_remove_result.failed | default(false))

@@ -66,7 +66,7 @@ async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
         attributes={
             "gpu_model": "H200",
             "region": "California, US",
-            "vm_host": "ww1",
+            "vm_host": "kvm1",
         },
     )
 
@@ -265,7 +265,7 @@ class TestNegotiateNew:
             unit="vm",
             value=1,
             state="available",
-            attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "ww1"},
+            attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "kvm1"},
         )
         # default_min_price is None in the test config — falls through.
         with pytest.raises(StorefrontClientError) as exc_info:

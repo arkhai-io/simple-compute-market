@@ -88,9 +88,9 @@ def claim_cmd(
         help="Override the fulfillment_uid from local state. Use this if the seller's "
              "StringObligation attestation landed on-chain but the storefront DB is out of sync.",
     ),
-    agent_url: Optional[str] = typer.Option(
+    storefront_url: Optional[str] = typer.Option(
         None, "--storefront-url", "-a",
-        help="Provider storefront base URL (default: seller.base_url from config.toml).",
+        help="Provider storefront base URL (default: base_url from storefront.toml).",
     ),
 ) -> None:
     """Collect an escrow on-chain after fulfillment.
@@ -102,7 +102,7 @@ def claim_cmd(
     """
     console = Console()
     from ..utils.config import settings
-    base_url = resolve_storefront_url(agent_url, default_port=8001)
+    base_url = resolve_storefront_url(storefront_url, default_port=8001)
     private_key = settings.wallet.private_key
 
     header = Table.grid(padding=(0, 2))
@@ -157,9 +157,9 @@ def refund_cmd(
         help="Override the refund token (0x contract address). Defaults to the "
              "token on the listing's accepted_escrows[0].",
     ),
-    agent_url: Optional[str] = typer.Option(
+    storefront_url: Optional[str] = typer.Option(
         None, "--storefront-url", "-a",
-        help="Provider storefront base URL (default: seller.base_url from config.toml).",
+        help="Provider storefront base URL (default: base_url from storefront.toml).",
     ),
 ) -> None:
     """Refund a deal via direct ERC-20 transfer from the provider wallet.
@@ -170,7 +170,7 @@ def refund_cmd(
     """
     console = Console()
     from ..utils.config import settings
-    base_url = resolve_storefront_url(agent_url, default_port=8001)
+    base_url = resolve_storefront_url(storefront_url, default_port=8001)
     private_key = settings.wallet.private_key
 
     header = Table.grid(padding=(0, 2))

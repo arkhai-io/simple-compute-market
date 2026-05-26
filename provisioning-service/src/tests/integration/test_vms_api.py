@@ -28,7 +28,7 @@ from services.async_job_queue import AsyncJobQueue
 
 
 AGENT_ID = "eip155:1337:0xdeadbeef:1"
-HOST = "ww1"
+HOST = "kvm1"
 VM_NAME = "agent-vm-01"
 
 

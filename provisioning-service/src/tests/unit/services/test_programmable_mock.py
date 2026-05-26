@@ -42,7 +42,7 @@ def _make_run(params: AnsibleJobParams | None = None) -> AnsibleRun:
 
 
 def _params(**kwargs) -> AnsibleJobParams:
-    defaults = dict(vm_host="ww1", vm_action="create")
+    defaults = dict(vm_host="kvm1", vm_action="create")
     defaults.update(kwargs)
     return AnsibleJobParams(**defaults)
 
@@ -67,10 +67,10 @@ class TestRuleMatching:
 
     async def test_specific_rule_matches_by_field(self):
         svc = _make_service()
-        svc.add_rule(MockRule(rule_id="create-ww1", match={"vm_action": "create", "vm_host": "ww1"},
+        svc.add_rule(MockRule(rule_id="create-kvm1", match={"vm_action": "create", "vm_host": "kvm1"},
                               result_stdout="WW1 CREATE OK"))
         svc.add_rule(MockRule(rule_id="catchall", match={}, result_stdout="FALLBACK"))
-        run = _make_run(_params(vm_action="create", vm_host="ww1"))
+        run = _make_run(_params(vm_action="create", vm_host="kvm1"))
         result = await svc.wait_for_playbook(run, timeout_seconds=30)
         assert result.stdout == "WW1 CREATE OK"
 
@@ -85,7 +85,7 @@ class TestRuleMatching:
     async def test_non_matching_rule_falls_through_to_base(self):
         svc = _make_service()
         svc.add_rule(MockRule(rule_id="ww2-only", match={"vm_host": "ww2"}, result_stdout="WW2"))
-        run = _make_run(_params(vm_host="ww1"))
+        run = _make_run(_params(vm_host="kvm1"))
         result = await svc.wait_for_playbook(run, timeout_seconds=30)
         # Falls through to base fake stdout
         assert "mock-vm" in result.stdout
@@ -207,7 +207,7 @@ class TestEvaluateJob:
                                ssh_decryption_key=""),
         )
 
-    def _params(self, host: str = "ww1", vm_action: str = "create"):
+    def _params(self, host: str = "kvm1", vm_action: str = "create"):
         from models.jobs_model import AnsibleJobParams
         return AnsibleJobParams(vm_host=host, vm_action=vm_action, vm_target="t1")
 
@@ -225,7 +225,7 @@ class TestEvaluateJob:
 
     def test_known_host_no_rules_returns_host_exists_true_rule_matched_none(self):
         mock_svc = self._make_svc()
-        result = mock_svc.evaluate_job(self._params(host="ww1"), self._mock_host_service(True))
+        result = mock_svc.evaluate_job(self._params(host="kvm1"), self._mock_host_service(True))
         assert result.host_exists is True
         assert result.params_valid is True
         assert result.rule_matched is None

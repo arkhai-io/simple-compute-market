@@ -1,0 +1,72 @@
+# Global configuration for multi-tenant VM infrastructure
+# This file defines default settings and tenant isolation parameters
+
+---
+# Default VM settings
+default_vm_settings:
+  ram: 2048
+  vcpus: 2
+  disk_size: 20G
+  os_variant: ubuntu-lts-latest
+
+# Tenant isolation settings
+tenant_isolation:
+  # Enable strict tenant separation
+  enable_strict_isolation: true
+
+  # Base paths for tenant separation
+  base_paths:
+    vm_storage: "/var/lib/libvirt/tenants"
+    ssh_keys: "/etc/ssh/tenant_keys"
+    logs: "/var/log/tenants"
+    configs: "/etc/tenants"
+
+  # Network isolation
+  network:
+    # Each tenant gets isolated network range
+    base_network: "192.168.100.0/16"
+    subnet_size: 24  # /24 subnets per tenant
+    enable_network_isolation: true
+
+  # Security settings
+  security:
+    enable_selinux_labels: true
+    enforce_resource_limits: true
+    enable_audit_logging: true
+
+# Resource quotas per tenant
+default_tenant_quotas:
+  max_vms: 10
+  max_total_ram_gb: 32
+  max_total_vcpus: 20
+  max_storage_gb: 500
+
+# KVM/QEMU settings for tenant isolation
+kvm_settings:
+  # Enable cgroups for resource isolation
+  enable_cgroups: true
+  # Use separate libvirt pools per tenant
+  separate_pools: true
+  # Enable NUMA awareness
+  enable_numa: false
+
+# GCP Variables
+gcp_variables:
+  gcs_bucket_url: gs://principia-infrastructure-dev-compute-images
+  gcs_project_id: principia-infrastructure-dev
+  gcs_service_account_content: ''
+
+# Packer variables
+packer_variables:
+  # Packer variables from values.pkrvars.hcl
+  iso_url: https://cloud-images.ubuntu.com/noble/20260307/noble-server-cloudimg-amd64.img
+  iso_checksum: sha256:931dba2bec09d574f032485bda386c664481ef01208371957af28fad40bc7f2d
+  accelerator: none
+  build_format: qcow2
+  # make sure we keep it to <OS Name>_<Nickname>
+  build_name: ubuntu_noble
+  build_version: "0.0.1"
+  # Additional variables
+  packer_work_dir: /tmp/packer
+  output_dir: artifacts
+  generate_new_templates: true

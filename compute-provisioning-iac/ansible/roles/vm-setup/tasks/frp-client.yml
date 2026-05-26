@@ -1,0 +1,97 @@
+---
+# FRP Client Installation and Configuration
+# Install and configure FRP (Fast Reverse Proxy) client for secure remote access
+
+- name: Display FRP configuration
+  debug:
+    msg:
+      - "FRP Server Address: {{ frp_server_addr | default('127.0.0.1') }}"
+      - "FRP Server Port: {{ frp_server_port | default(7000) }}"
+
+- name: Set FRP version
+  set_fact:
+    frp_version: "0.54.0"
+
+- name: Check if FRP client is already installed
+  stat:
+    path: /usr/local/bin/frpc
+  register: frpc_binary
+
+- name: Download FRP client
+  get_url:
+    url: "https://github.com/fatedier/frp/releases/download/v{{ frp_version }}/frp_{{ frp_version }}_linux_amd64.tar.gz"
+    dest: "/tmp/frp_{{ frp_version }}_linux_amd64.tar.gz"
+    mode: '0644'
+  when: not frpc_binary.stat.exists
+
+- name: Extract FRP client archive
+  unarchive:
+    src: "/tmp/frp_{{ frp_version }}_linux_amd64.tar.gz"
+    dest: /tmp
+    remote_src: yes
+  when: not frpc_binary.stat.exists
+
+- name: Install FRP client binary
+  copy:
+    src: "/tmp/frp_{{ frp_version }}_linux_amd64/frpc"
+    dest: /usr/local/bin/frpc
+    mode: '0755'
+    remote_src: yes
+  when: not frpc_binary.stat.exists
+
+- name: Create FRP configuration directory
+  file:
+    path: /etc/frp
+    state: directory
+    mode: '0755'
+
+- name: Create FRP log directory
+  file:
+    path: /var/log/frp
+    state: directory
+    mode: '0755'
+
+- name: Deploy FRP client configuration
+  template:
+    src: frpc.toml.j2
+    dest: /etc/frp/frpc.toml
+    mode: '0644'
+  notify: restart frpc
+
+- name: Deploy FRP client systemd service
+  template:
+    src: frpc.service.j2
+    dest: /etc/systemd/system/frpc.service
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart frpc
+
+- name: Enable and start FRP client service
+  systemd:
+    name: frpc
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: Clean up temporary files
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/frp_{{ frp_version }}_linux_amd64.tar.gz"
+    - "/tmp/frp_{{ frp_version }}_linux_amd64"
+  when: not frpc_binary.stat.exists
+
+- name: Display FRP client status
+  debug:
+    msg:
+      - "=== FRP Client Installation Complete ==="
+      - "FRP client installed and configured"
+      - "Service: frpc"
+      - "Config: /etc/frp/frpc.toml"
+      - "Logs: /var/log/frp/frpc.log"
+      - ""
+      - "Check status: sudo systemctl status frpc"
+      - "View logs: sudo journalctl -u frpc -f"
+      - "View FRP logs: sudo tail -f /var/log/frp/frpc.log"

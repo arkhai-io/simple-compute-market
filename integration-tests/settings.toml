@@ -46,18 +46,6 @@ agent_id          = ""        # ERC-8004 canonical ID; used as X-Agent-ID for pr
 admin_api_key     = ""        # X-Admin-Key for /admin/* and admin-only resource endpoints
 
 # ---------------------------------------------------------------------------
-# Agent / registry endpoints (e2e tests)
-# ---------------------------------------------------------------------------
-[default.agents]
-registry_url = ""
-buyer_url = ""
-seller_url = ""
-buyer_db = ""
-seller_db = ""
-buyer_env = ""
-seller_env = ""
-
-# ---------------------------------------------------------------------------
 # Test behaviour
 # ---------------------------------------------------------------------------
 [default.tests]

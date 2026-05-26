@@ -19,8 +19,10 @@ from src.db.models import Agent, Listing, OrderStatusEnum
 from src.api.filter_eval import FilterParamError, build_criteria, evaluate_all
 from src.api.filter_spec import compute_etag, get_loaded_spec
 from src.api.utils import (
+    ensure_agent_indexed,
     find_agent_by_id,
     order_to_dict,
+    refresh_agent_owner,
     validate_order_status,
     verify_order_signature,
 )
@@ -43,7 +45,7 @@ async def publish_listing(
     db: Session = Depends(get_db),
 ):
     """Publish a marketplace listing to the registry."""
-    agent = find_agent_by_id(db, agent_id)
+    agent = await ensure_agent_indexed(db, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
@@ -54,7 +56,10 @@ async def publish_listing(
             raise HTTPException(status_code=401, detail="Signature and timestamp required for authenticated agents")
         _check_timestamp(timestamp)
         if not verify_order_signature("create_listing", agent.agent_id, timestamp, signature, agent.owner):
-            raise HTTPException(status_code=401, detail="Invalid signature")
+            # Owner may have changed on-chain since we cached it. Refresh once and retry.
+            agent = await refresh_agent_owner(db, agent)
+            if not verify_order_signature("create_listing", agent.agent_id, timestamp, signature, agent.owner):
+                raise HTTPException(status_code=401, detail="Invalid signature")
 
     agent_id_for_listing = agent.agent_id
 
@@ -117,7 +122,7 @@ async def get_agent_listings(
     db: Session = Depends(get_db),
 ):
     """List marketplace listings for a specific agent."""
-    agent = find_agent_by_id(db, agent_id)
+    agent = await ensure_agent_indexed(db, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
@@ -229,7 +234,9 @@ async def update_listing(
             raise HTTPException(status_code=403, detail="Only the listing seller can update after a buyer is assigned")
 
         if not verify_order_signature("update_listing", listing_id, timestamp, signature, signer_agent.owner):
-            raise HTTPException(status_code=401, detail="Invalid signature")
+            signer_agent = await refresh_agent_owner(db, signer_agent)
+            if not verify_order_signature("update_listing", listing_id, timestamp, signature, signer_agent.owner):
+                raise HTTPException(status_code=401, detail="Invalid signature")
 
     if "status" in body:
         listing.status = validate_order_status(body["status"])
@@ -289,7 +296,9 @@ async def delete_listing(
             raise HTTPException(status_code=401, detail="Signature and timestamp required for authenticated listings")
         _check_timestamp(timestamp)
         if not verify_order_signature("delete_listing", listing_id, timestamp, signature, seller_agent.owner):
-            raise HTTPException(status_code=401, detail="Invalid signature")
+            seller_agent = await refresh_agent_owner(db, seller_agent)
+            if not verify_order_signature("delete_listing", listing_id, timestamp, signature, seller_agent.owner):
+                raise HTTPException(status_code=401, detail="Invalid signature")
 
     db.delete(listing)
     db.commit()

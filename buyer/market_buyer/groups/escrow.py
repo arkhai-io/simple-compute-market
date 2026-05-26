@@ -210,9 +210,11 @@ def create_cmd(
         None, "--token-contract",
         help="ERC-20 contract address. Default: resolve 'MOCK' via the token registry.",
     ),
-    token_decimals: int = typer.Option(
-        18, "--token-decimals",
-        help="ERC-20 token decimals.",
+    token_decimals: Optional[int] = typer.Option(
+        None, "--token-decimals",
+        help="ERC-20 token decimals override. When omitted, reads "
+             "the value recorded in the run-log; if that's also "
+             "missing, falls back to a chain decimals() lookup.",
     ),
     chain_name_flag: Optional[str] = typer.Option(
         None, "--chain-name",
@@ -259,8 +261,12 @@ def create_cmd(
         return
 
     effective_token = token_contract or deal.token_contract
-    effective_token_decimals = (
-        token_decimals if token_decimals != 18 else (deal.token_decimals or 18)
+    # Precedence: explicit override > run-log recording > chain lookup
+    # (delegated to resolve_chain_settings when this is None).
+    effective_token_decimals: Optional[int] = (
+        int(token_decimals)
+        if token_decimals is not None
+        else (int(deal.token_decimals) if deal.token_decimals is not None else None)
     )
     chain = resolve_chain_settings(
         buyer_address=buyer_address,

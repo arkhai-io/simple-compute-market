@@ -131,8 +131,8 @@ class TestCreateVmDefaults:
 class TestCreateVmToParams:
     def test_host_comes_from_argument_not_body(self):
         req = CreateVmRequest(vm_target="my-vm")
-        params = req.to_ansible_job_params("ww1")
-        assert params.vm_host == "ww1"
+        params = req.to_ansible_job_params("kvm1")
+        assert params.vm_host == "kvm1"
         assert params.vm_target == "my-vm"
         assert params.vm_action == "create"
 
@@ -157,7 +157,7 @@ class TestCreateVmToParams:
             frp_domain="example.com",
             frp_dashboard_password="secret",
         )
-        p = req.to_ansible_job_params("ww1")
+        p = req.to_ansible_job_params("kvm1")
         assert p.frp_server_addr == "1.2.3.4"
         assert p.frp_domain == "example.com"
         assert p.frp_dashboard_password == "secret"
@@ -169,7 +169,7 @@ class TestCreateVmToParams:
             vm_gpu_count=2,
             vm_gpu_devices=["0000:03:00.0", "0000:04:00.0"],
         )
-        p = req.to_ansible_job_params("ww1")
+        p = req.to_ansible_job_params("kvm1")
         assert p.gpu_provisioned is True
         assert p.vm_gpu_count == 2
         assert p.vm_gpu_devices == ["0000:03:00.0", "0000:04:00.0"]
@@ -182,13 +182,13 @@ class TestCreateVmToParams:
             gcs_bucket_url="gs://bucket",
             gcs_image_path="images/img.qcow2",
         )
-        p = req.to_ansible_job_params("ww1")
+        p = req.to_ansible_job_params("kvm1")
         assert p.image_setup_type == "golden"
         assert p.golden_image_name == "base-v3"
 
     def test_buyer_agent_id_propagated(self):
         req = CreateVmRequest(vm_target="t", buyer_agent_id="agent-42")
-        p = req.to_ansible_job_params("ww1")
+        p = req.to_ansible_job_params("kvm1")
         assert p.buyer_agent_id == "agent-42"
 
 
@@ -203,9 +203,9 @@ class TestScheduleVmExpiry:
 
     def test_to_ansible_job_params_sets_lease_end_action(self):
         req = ScheduleVmExpiryRequest(vm_expiry_at="2025-12-31T23:59:00")
-        p = req.to_ansible_job_params(host="ww1", vm_name="agent-vm-01")
+        p = req.to_ansible_job_params(host="kvm1", vm_name="agent-vm-01")
         assert p.vm_action == "lease_end"
-        assert p.vm_host == "ww1"
+        assert p.vm_host == "kvm1"
         assert p.vm_target == "agent-vm-01"
         assert p.vm_expiry_at == "2025-12-31T23:59:00"
 
@@ -214,7 +214,7 @@ class TestScheduleVmExpiry:
             vm_expiry_at="2025-12-31T23:59:00",
             buyer_agent_id="buyer-7",
         )
-        p = req.to_ansible_job_params("ww1", "vm-1")
+        p = req.to_ansible_job_params("kvm1", "vm-1")
         assert p.buyer_agent_id == "buyer-7"
 
 
@@ -248,16 +248,16 @@ class TestBuildSimpleParams:
     ])
     def test_vm_name_actions(self, action):
         body = VmActionRequest(max_retries=1)
-        p = build_simple_params(action, "ww1", body, "my-vm")
+        p = build_simple_params(action, "kvm1", body, "my-vm")
         assert p.vm_action == action
-        assert p.vm_host == "ww1"
+        assert p.vm_host == "kvm1"
         assert p.vm_target == "my-vm"
         assert p.max_retries == 1
 
     @pytest.mark.parametrize("action", ["list", "check"])
     def test_host_level_actions_have_no_vm_target(self, action):
         body = VmActionRequest()
-        p = build_simple_params(action, "ww1", body)
+        p = build_simple_params(action, "kvm1", body)
         assert p.vm_action == action
-        assert p.vm_host == "ww1"
+        assert p.vm_host == "kvm1"
         assert p.vm_target is None

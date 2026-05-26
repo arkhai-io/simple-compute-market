@@ -33,7 +33,12 @@ from pathlib import Path
 from typing import Any
 
 from dynaconf import Dynaconf
-from service.config_loader import storefront_config_files  # type: ignore[import-not-found]
+from service.config_loader import (  # type: ignore[import-not-found]
+    KNOWN_IDENTITY_REGISTRY,
+    chain_name_for_rpc,
+    derive_wallet_address,
+    storefront_config_files,
+)
 from service.clients.erc8004.blockchain import (  # type: ignore[import-not-found]
     rpc_url_for_http_provider,
 )
@@ -51,7 +56,7 @@ _DEFAULTS_FILE = Path(__file__).resolve().parent.parent / "settings.toml"
 
 def _build_settings() -> Dynaconf:
     overlays = [str(p) for p in storefront_config_files() if Path(p).exists()]
-    return Dynaconf(
+    s = Dynaconf(
         settings_file=[str(_DEFAULTS_FILE)],
         includes=overlays,
         envvar_prefix="STOREFRONT",
@@ -60,6 +65,64 @@ def _build_settings() -> Dynaconf:
         environments=False,
         merge_enabled=True,
     )
+
+    # Derive wallet.address from wallet.private_key when only the key is
+    # set. The address is a deterministic function of the key, so there's
+    # no reason to require both in config. When both are set and disagree
+    # the configured address wins (user might be intentionally signing
+    # for a delegated address), but we log a warning so the mismatch
+    # doesn't hide later confusion.
+    pk = str(s.get("wallet.private_key", "") or "")
+    addr_cfg = str(s.get("wallet.address", "") or "")
+    if pk:
+        derived_addr = derive_wallet_address(pk)
+        if derived_addr:
+            if not addr_cfg:
+                s.set("wallet.address", derived_addr)
+            elif addr_cfg.lower() != derived_addr.lower():
+                logger.warning(
+                    "[CONFIG] wallet.address (%s) does not match the address "
+                    "derived from wallet.private_key (%s); using the configured "
+                    "address.",
+                    addr_cfg, derived_addr,
+                )
+
+    # Derive chain.name from chain.rpc_url via a one-shot eth_chainId call
+    # when the operator left chain.name unset. The RPC reachability check
+    # is best-effort: on failure (no rpc_url, transport error, unknown
+    # chain ID) we fall back to the legacy default of "ethereum_sepolia"
+    # so downstream code that branches on chain.name keeps a sensible
+    # answer to read.
+    chain_cfg = str(s.get("chain.name", "") or "")
+    rpc_url = str(s.get("chain.rpc_url", "") or "")
+    if not chain_cfg:
+        derived_chain = chain_name_for_rpc(rpc_url) if rpc_url else None
+        if derived_chain:
+            s.set("chain.name", derived_chain)
+            logger.info(
+                "[CONFIG] chain.name resolved to %r from chain.rpc_url",
+                derived_chain,
+            )
+        else:
+            s.set("chain.name", "ethereum_sepolia")
+            if rpc_url:
+                logger.warning(
+                    "[CONFIG] chain.name not configured and eth_chainId lookup "
+                    "against %r did not yield a known chain; defaulting to "
+                    "'ethereum_sepolia'.",
+                    rpc_url,
+                )
+
+    # Inject per-chain default for the ERC-8004 IdentityRegistry when the
+    # operator hasn't set one. The canonical CREATE2 deployment uses the
+    # same vanity address on every chain, so for the standard chain.name
+    # values the operator gets a working default with no config required.
+    if not s.get("registry.identity_registry_address"):
+        chain = str(s.get("chain.name", "") or "")
+        default = KNOWN_IDENTITY_REGISTRY.get(chain)
+        if default:
+            s.set("registry.identity_registry_address", default)
+    return s
 
 
 settings: Dynaconf = _build_settings()

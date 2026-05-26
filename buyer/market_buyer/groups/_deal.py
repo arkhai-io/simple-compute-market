@@ -173,7 +173,7 @@ def resolve_chain_settings(
     chain_name: Optional[str],
     alkahest_addr_config: Optional[str],
     token_contract: Optional[str],
-    token_decimals: int,
+    token_decimals: Optional[int],
     require_ssh: bool = True,
 ) -> ChainSettings:
     """Resolve chain/token flags + config.toml fallbacks.
@@ -186,27 +186,25 @@ def resolve_chain_settings(
     don't submit settlement (the SSH key only matters for the seller's
     provisioning step).
     """
-    from ..common import resolve_ssh_public_key
+    from ..common import resolve_buyer_wallet, resolve_chain_name, resolve_ssh_public_key
 
-    addr = resolve_config_value(override=buyer_address, toml_path="wallet.address")
-    pk = resolve_config_value(override=buyer_private_key, toml_path="wallet.private_key")
+    addr, pk = resolve_buyer_wallet(
+        override_addr=buyer_address, override_pk=buyer_private_key,
+    )
     ssh = resolve_ssh_public_key(override=ssh_public_key)
     rpc = resolve_config_value(override=rpc_url, toml_path="chain.rpc_url")
-    chain = resolve_config_value(
-        override=chain_name, toml_path="chain.name", default="ethereum_sepolia",
-    )
+    chain = resolve_chain_name(override=chain_name, rpc_url=rpc)
     addr_cfg = resolve_config_value(
         override=alkahest_addr_config, toml_path="chain.alkahest_address_config_path",
     )
 
     _key_for = {
-        "buyer_address": "wallet.address",
         "buyer_priv_key": "wallet.private_key",
         "rpc_url": "chain.rpc_url",
         "ssh_public_key": "wallet.ssh_public_key",
     }
     missing = [n for n, v in (
-        ("buyer_address", addr), ("buyer_priv_key", pk),
+        ("buyer_priv_key", pk),
         ("rpc_url", rpc),
     ) if not v]
     if require_ssh and not ssh:
@@ -225,9 +223,9 @@ def resolve_chain_settings(
         raise typer.Exit(2)
 
     tc = token_contract
-    decimals = token_decimals
+    decimals: Optional[int] = token_decimals
     if not tc:
-        from ..common import resolve_default_token_address, resolve_chain_id
+        from ..common import resolve_default_token_address
         tc = resolve_default_token_address()
         if not tc:
             typer.secho(
@@ -236,14 +234,15 @@ def resolve_chain_settings(
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(2)
+    if decimals is None:
+        # No explicit --token-decimals — resolve on chain.
+        from ..common import resolve_chain_id
         from service.clients.token import resolve_token, TokenResolutionError
         try:
             meta = resolve_token(
                 tc, rpc_url=rpc, chain_id=resolve_chain_id(rpc),
             )
-            # Caller-supplied --token-decimals wins over the chain value.
-            if token_decimals == 18:  # the typer default
-                decimals = meta.decimals
+            decimals = meta.decimals
         except (TokenResolutionError, RuntimeError) as exc:
             typer.secho(
                 f"Could not resolve token {tc} on chain — pass "

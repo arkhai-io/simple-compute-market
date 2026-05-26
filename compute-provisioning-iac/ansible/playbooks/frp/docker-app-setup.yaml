@@ -1,0 +1,46 @@
+---
+- name: Deploy Docker Application with Nginx Reverse Proxy
+  hosts: all
+  become: yes
+  
+  vars:
+    # Docker Registry Type: 'gcp', 'dockerhub', 'generic', or leave undefined for Docker Hub
+    # docker_registry_type: "gcp"
+    
+    # === GCP Artifact Registry Configuration (when docker_registry_type: 'gcp') ===
+    # gcp_project_id: "your-gcp-project-id"
+    # gcp_registry_region: "us-central1"  # e.g., us-central1, asia-southeast1, europe-west1
+    # gcp_repository: "your-repository-name"
+    # gcp_service_account_key: "/path/to/service-account-key.json"  # Optional
+    
+    # === Generic Registry Configuration (when docker_registry_type: 'generic') ===
+    # docker_registry_url: "registry.example.com"
+    # docker_registry_username: "username"
+    # docker_registry_password: "password"
+    
+    # === Docker Hub Configuration (when docker_registry_type: 'dockerhub' or undefined) ===
+    # dockerhub_username: "your-username"
+    # dockerhub_password: "your-password"
+    
+    # === Docker Image Configuration ===
+    docker_image_name: "nginx"
+    docker_image_tag: "latest"
+    
+    # === Container Configuration ===
+    app_container_name: "my-app"
+    app_container_internal_port: 8080
+    app_container_port: 8002
+    app_container_env: {}
+    app_container_volumes: []
+    
+    # === Nginx Reverse Proxy Configuration ===
+    app_nginx_site_name: "my-app"
+    app_nginx_port: 8080
+    app_nginx_server_name: "_"
+    app_nginx_path: "/"
+    
+    # === FRP Subdomain Configuration (Optional) ===
+    # frp_subdomain_host: "vm.arkhai.io"
+
+  roles:
+    - ../../roles/docker-app

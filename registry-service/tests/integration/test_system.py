@@ -70,21 +70,14 @@ class TestSystemConfig:
 
 
 class TestSystemSync:
-    async def test_event_sync_shape(self, registry_client):
+    async def test_response_shape(self, registry_client):
         sync = await registry_client.get_system_sync()
         assert isinstance(sync, SystemSyncResponse)
-        assert isinstance(sync.event_sync_running, bool)
-        assert isinstance(sync.event_sync_last_block, int)
 
     async def test_health_check_shape(self, registry_client):
         sync = await registry_client.get_system_sync()
         assert isinstance(sync.health_check_running, bool)
         assert isinstance(sync.health_check_enabled, bool)
-
-    async def test_event_sync_not_running_outside_lifespan(self, registry_client):
-        sync = await registry_client.get_system_sync()
-        assert sync.event_sync_running is False
-        assert sync.event_sync_last_block == 0
 
 
 class TestSystemStats:

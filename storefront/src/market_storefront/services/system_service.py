@@ -462,6 +462,13 @@ class SystemService:
             "elapsed_ms": elapsed_ms,
         }
 
+    # Canonical bind-mount target for the inventory CSV inside a container.
+    # When neither csv_inline nor csv_path is set explicitly,
+    # ``seed_resources_if_empty`` auto-discovers a file at this path. Lets
+    # the canonical compose deploy work with no resources_csv_path setting
+    # in the TOML.
+    _DEFAULT_CSV_PATH = "/app/resources.csv"
+
     async def seed_resources_if_empty(
         self,
         *,
@@ -475,6 +482,9 @@ class SystemService:
              (Helm Secret ``resources_csv_inline``). Used when the CSV must not
              be baked into the container image.
           2. ``csv_path`` — path to a CSV file on disk (compose / local dev).
+          3. Auto-discovery of ``/app/resources.csv`` — the canonical
+             container bind-mount target. Skipped silently when the file
+             doesn't exist, so local-dev outside a container is unaffected.
 
         Seeding is skipped when the resources table already has rows, so that
         operator changes made via the import API are not overwritten on pod
@@ -503,6 +513,9 @@ class SystemService:
         elif csv_path:
             report = await self._db.upsert_resources_from_csv(csv_path=csv_path)
             source = csv_path
+        elif os.path.exists(self._DEFAULT_CSV_PATH):
+            report = await self._db.upsert_resources_from_csv(csv_path=self._DEFAULT_CSV_PATH)
+            source = f"{self._DEFAULT_CSV_PATH} (auto-discovered)"
         else:
             logger.info("[RESOURCE SEED] No resource source configured — starting with empty inventory")
             return {"seeded": False, "imported_count": 0, "source": None}

@@ -38,13 +38,6 @@ class ConfigResponse(BaseModel):
     )
 
 
-class EventSyncStatus(BaseModel):
-    running: bool
-    last_synced_block: int = Field(
-        description="Most recent EVM block number successfully processed (0 if never synced)"
-    )
-
-
 class HealthCheckServiceStatus(BaseModel):
     running: bool
     enabled: bool = Field(
@@ -53,9 +46,13 @@ class HealthCheckServiceStatus(BaseModel):
 
 
 class SyncResponse(BaseModel):
-    """Liveness of the two background services started at application startup."""
+    """Liveness of the background services started at application startup.
 
-    event_sync: EventSyncStatus
+    Agent indexing happens just-in-time on the request path (see
+    ``api/utils.py::ensure_agent_indexed``); there is no event-sync
+    background service to report on here.
+    """
+
     health_check: HealthCheckServiceStatus
 
 

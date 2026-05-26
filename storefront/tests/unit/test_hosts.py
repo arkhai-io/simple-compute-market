@@ -54,7 +54,7 @@ class TestHostCrud:
     def test_upsert_and_read(self, client):
         async def _run():
             await client.upsert_host(
-                name="ww1",
+                name="kvm1",
                 cpu_type="Intel Xeon W5-2465X",
                 host_cpu_cores=16,
                 host_ram_gb=256,
@@ -72,7 +72,7 @@ class TestHostCrud:
                 region="California, US",
                 datacenter_grade=True,
             )
-            row = await client.get_host(name="ww1")
+            row = await client.get_host(name="kvm1")
             assert row is not None
             assert row["cpu_type"] == "Intel Xeon W5-2465X"
             assert row["host_cpu_cores"] == 16

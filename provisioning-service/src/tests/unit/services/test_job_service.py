@@ -24,7 +24,7 @@ from services.job_service import AnsibleJobService
 
 def _make_service(**settings_overrides) -> AnsibleJobService:
     settings = MagicMock()
-    settings.default_vm_host = "ww1"
+    settings.default_vm_host = "kvm1"
     settings.default_max_retries = 3
     settings.retry_backoff_initial_seconds = 60
     settings.retry_backoff_multiplier = 2.0
@@ -70,13 +70,13 @@ class TestBuildParams:
     def test_defaults_applied_for_missing_keys(self):
         svc = _make_service()
         params = svc._build_params({})
-        assert params.vm_host == "ww1"  # from settings.default_vm_host
+        assert params.vm_host == "kvm1"  # from settings.default_vm_host
         assert params.vm_action == "create"
         assert params.image_setup_type == "scratch"
 
     def test_optional_fields_are_none_when_absent(self):
         svc = _make_service()
-        params = svc._build_params({"vm_host": "ww1", "vm_action": "list"})
+        params = svc._build_params({"vm_host": "kvm1", "vm_action": "list"})
         assert params.vm_ram is None
         assert params.vm_vcpus is None
         assert params.ssh_pubkey is None
@@ -85,7 +85,7 @@ class TestBuildParams:
     def test_all_optional_fields_mapped(self):
         svc = _make_service()
         raw = {
-            "vm_host": "ww1",
+            "vm_host": "kvm1",
             "vm_target": "test-vm",
             "vm_action": "create",
             "image_setup_type": "golden",
@@ -129,14 +129,14 @@ class TestBuildParams:
 
     def test_frp_falls_back_to_settings_when_not_in_params(self):
         svc = _make_service(frp_server_addr="9.9.9.9", frp_domain="fallback.com")
-        params = svc._build_params({"vm_host": "ww1", "vm_action": "create"})
+        params = svc._build_params({"vm_host": "kvm1", "vm_action": "create"})
         assert params.frp_server_addr == "9.9.9.9"
         assert params.frp_domain == "fallback.com"
 
     def test_frp_param_overrides_settings(self):
         svc = _make_service(frp_server_addr="9.9.9.9")
         params = svc._build_params({
-            "vm_host": "ww1",
+            "vm_host": "kvm1",
             "vm_action": "create",
             "frp_server_addr": "1.1.1.1",
         })
@@ -197,7 +197,7 @@ class TestRedactLogs:
 
     def test_non_sensitive_content_preserved(self):
         svc = _make_service()
-        logs = "TASK [Create VM] *** ok: [ww1] => status: running"
+        logs = "TASK [Create VM] *** ok: [kvm1] => status: running"
         result = svc._redact_logs(logs)
         assert result == logs
 
@@ -308,7 +308,7 @@ class TestBuildResultPayload:
             "action": "create",
             "vm_name": "test-vm",
             "status": "running",
-            "host": "ww1",
+            "host": "kvm1",
             "timestamp": "2025-01-01T00:00:00Z",
         }
         payload = svc._build_result_payload(_base_run_result(ansible_result=ar))

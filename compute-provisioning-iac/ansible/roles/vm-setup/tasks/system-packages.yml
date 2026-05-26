@@ -1,0 +1,225 @@
+---
+# System Packages Installation
+# Handles basic package installation: vim, nano, git, python, net-tools, fail2ban, UFW, etc.
+# Also includes build tools for golden images: GCP SDK, Packer
+
+- name: Ensure we have root privileges
+  become: yes
+  become_method: sudo
+  set_fact:
+    ansible_become: yes
+  tags: always
+
+- name: Check if /tmp directory exists
+  stat:
+    path: /tmp
+  register: tmp_stat
+  tags: always
+
+- name: Ensure parent directory for install script exists
+  file:
+    path: /tmp
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+    recurse: yes
+  when: not tmp_stat.stat.exists
+  tags: always
+
+- name: Create install script on remote
+  copy:
+    dest: /tmp/install_tools.sh
+    content: "#!/bin/bash\nset -e\n"
+    mode: '0755'
+  tags: always
+
+- name: Add vim/nano install to script
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get update && apt-get install -y vim nano"
+    insertafter: EOF
+  tags: vim_nano
+
+- name: Add git install to script
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y git ca-certificates"
+    insertafter: EOF
+  tags: git
+
+- name: Add python install to script
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y python3 python3-pip python3-venv"
+    insertafter: EOF
+  tags: python
+
+- name: Add net-tools install to script
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y net-tools"
+    insertafter: EOF
+  tags: net_tools
+
+- name: Add at package for scheduled tasks
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y at"
+    insertafter: EOF
+  tags: at
+
+- name: Add fail2ban for intrusion prevention
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y fail2ban"
+    insertafter: EOF
+  tags: fail2ban
+
+- name: Add UFW firewall
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y ufw"
+    insertafter: EOF
+  tags: ufw
+
+- name: Add selinux-utils for SELinux support
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y selinux-utils"
+    insertafter: EOF
+  tags: selinux
+
+- name: Check if GCP SDK is present
+  command: which gcloud
+  register: gcloud_check
+  failed_when: false
+  changed_when: false
+  when: vm_image_type == "golden"
+  tags:
+    - gcloud
+    - build_setup
+
+- name: Add GCP Public Key
+  when: vm_image_type == "golden" and gcloud_check.rc != 0
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --yes --dearmor -o /usr/share/keyrings/cloud.google.gpg"
+    insertafter: EOF
+  tags:
+    - gcloud
+    - build_setup
+
+- name: Add gcloud CLI distribution URI as a package source
+  when: vm_image_type == "golden" and gcloud_check.rc != 0
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "echo \"deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main\" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list"
+    insertafter: EOF
+  tags:
+    - gcloud
+    - build_setup
+
+- name: Install gcloud and requirements
+  when: vm_image_type == "golden" and gcloud_check.rc != 0
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get update && apt-get install -y apt-transport-https ca-certificates gnupg curl google-cloud-cli"
+    insertafter: EOF
+  tags:
+    - gcloud
+    - build_setup
+
+- name: Check first if Packer is already installed
+  shell: which packer
+  register: packer_check
+  failed_when: false
+  changed_when: false
+  when: vm_image_type == "golden"
+  tags:
+    - packer
+    - build_setup
+
+- name: Add HashiCorp's GPG Key
+  when: vm_image_type == "golden" and packer_check.rc != 0
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "wget -O - https://apt.releases.hashicorp.com/gpg | gpg --yes --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg"
+    insertafter: EOF
+  tags:
+    - packer
+    - build_setup
+
+- name: Add HashiCorp's official Linux repository
+  when: vm_image_type == "golden" and packer_check.rc != 0
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(grep -oP '(?<=UBUNTU_CODENAME=).*' /etc/os-release || lsb_release -cs) main" | tee /etc/apt/sources.list.d/hashicorp.list
+    insertafter: EOF
+  tags:
+    - packer
+    - build_setup
+
+- name: Update apt and install Packer
+  when: vm_image_type == "golden" and packer_check.rc != 0
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get update && apt-get install -y packer genisoimage"
+    insertafter: EOF
+  tags:
+    - packer
+    - build_setup
+
+- name: Add KVM virtualization packages to script
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst virt-manager virt-viewer libguestfs-tools qemu-guest-agent"
+    insertafter: EOF
+  tags: kvm
+
+- name: Run install script
+  shell: /tmp/install_tools.sh
+  args:
+    executable: /bin/bash
+  register: install_script_result
+  tags:
+    - run_script
+    - build_setup
+
+- name: Show install script execution results
+  debug:
+    msg: "Install script completed with return code: {{ install_script_result.rc }}"
+  tags:
+    - run_script
+    - build_setup
+
+- name: Allow SSH through UFW
+  ufw:
+    rule: allow
+    port: '22'
+    proto: tcp
+  tags: ufw
+
+- name: Enable UFW
+  ufw:
+    state: enabled
+    policy: deny
+  tags: ufw
+
+- name: Verify installed packages
+  shell: |
+    vim --version && nano --version && git --version && python3 --version && pip3 --version
+  register: verify_output
+  ignore_errors: yes
+  tags: verify_kvm
+
+- name: Show verification results
+  debug:
+    var: verify_output.stdout_lines
+  tags: verify_kvm
+
+- name: Clean up installation script
+  file:
+    path: /tmp/install_tools.sh
+    state: absent
+  tags: cleanup

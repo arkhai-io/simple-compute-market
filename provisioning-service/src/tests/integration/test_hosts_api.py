@@ -26,7 +26,7 @@ from models.host_model import HostCreate, HostResponse, HostListResponse, HostUp
 
 
 _SAMPLE_HOST = HostCreate(
-    name="ww1",
+    name="kvm1",
     kvm_host="10.0.0.1",
     ssh_user="ubuntu",
     ssh_key_type="path",
@@ -36,7 +36,7 @@ _SAMPLE_HOST = HostCreate(
 
 _SAMPLE_INI = (
     "[kvm_hosts]\n"
-    "ww1  ansible_host=10.0.0.1  ansible_user=ubuntu  "
+    "kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu  "
     "ansible_ssh_private_key_file=/home/appuser/.ssh/id_ed25519\n"
     "ww2  ansible_host=10.0.0.2  ansible_user=ubuntu  "
     "ansible_ssh_private_key_file=/home/appuser/.ssh/id_ed25519\n"
@@ -60,7 +60,7 @@ class TestRegisterHost:
         client, _ = client_and_queue
         host = await _register(client)
         assert isinstance(host, HostResponse)
-        assert host.name == "ww1"
+        assert host.name == "kvm1"
         assert host.kvm_host == "10.0.0.1"
         assert host.ssh_user == "ubuntu"
         assert host.gpu_count == 2
@@ -70,7 +70,7 @@ class TestRegisterHost:
         client, _ = client_and_queue
         await _register(client)
         result = await client.list_hosts()
-        assert any(h.name == "ww1" for h in result.hosts)
+        assert any(h.name == "kvm1" for h in result.hosts)
 
     async def test_register_host_client_contract(self, client_and_queue):
         """register_host return value is a typed HostResponse — contract enforced."""
@@ -85,9 +85,9 @@ class TestGetHost:
     async def test_get_registered_host(self, client_and_queue):
         client, _ = client_and_queue
         await _register(client)
-        host = await client.get_host("ww1")
+        host = await client.get_host("kvm1")
         assert isinstance(host, HostResponse)
-        assert host.name == "ww1"
+        assert host.name == "kvm1"
 
     async def test_get_unknown_host_raises_404(self, client_and_queue):
         client, _ = client_and_queue
@@ -100,15 +100,15 @@ class TestUpdateHost:
     async def test_update_kvm_host_ip(self, client_and_queue):
         client, _ = client_and_queue
         await _register(client)
-        updated = await client.update_host("ww1", HostUpdate(kvm_host="10.0.0.99"))
+        updated = await client.update_host("kvm1", HostUpdate(kvm_host="10.0.0.99"))
         assert isinstance(updated, HostResponse)
         assert updated.kvm_host == "10.0.0.99"
 
     async def test_update_persisted_on_get(self, client_and_queue):
         client, _ = client_and_queue
         await _register(client)
-        await client.update_host("ww1", HostUpdate(ssh_user="root"))
-        host = await client.get_host("ww1")
+        await client.update_host("kvm1", HostUpdate(ssh_user="root"))
+        host = await client.get_host("kvm1")
         assert host.ssh_user == "root"
 
     async def test_update_unknown_host_raises_404(self, client_and_queue):
@@ -122,31 +122,31 @@ class TestEnableDisableHost:
     async def test_disable_sets_enabled_false(self, client_and_queue):
         client, _ = client_and_queue
         await _register(client)
-        host = await client.disable_host("ww1")
+        host = await client.disable_host("kvm1")
         assert isinstance(host, HostResponse)
         assert host.enabled is False
 
     async def test_disabled_host_excluded_from_default_list(self, client_and_queue):
         client, _ = client_and_queue
         await _register(client)
-        await client.disable_host("ww1")
+        await client.disable_host("kvm1")
         result = await client.list_hosts()
-        assert not any(h.name == "ww1" for h in result.hosts)
+        assert not any(h.name == "kvm1" for h in result.hosts)
 
     async def test_disabled_host_visible_with_include_disabled(self, client_and_queue):
         client, _ = client_and_queue
         await _register(client)
-        await client.disable_host("ww1")
+        await client.disable_host("kvm1")
         result = await client.list_hosts(include_disabled=True)
-        assert any(h.name == "ww1" for h in result.hosts)
+        assert any(h.name == "kvm1" for h in result.hosts)
 
     async def test_enable_restores_visibility(self, client_and_queue):
         client, _ = client_and_queue
         await _register(client)
-        await client.disable_host("ww1")
-        await client.enable_host("ww1")
+        await client.disable_host("kvm1")
+        await client.enable_host("kvm1")
         result = await client.list_hosts()
-        assert any(h.name == "ww1" for h in result.hosts)
+        assert any(h.name == "kvm1" for h in result.hosts)
 
     async def test_disable_unknown_host_raises_404(self, client_and_queue):
         client, _ = client_and_queue
@@ -161,7 +161,7 @@ class TestImportHosts:
         result = await client.import_hosts_from_text(_SAMPLE_INI, ssh_key_type="path")
         assert isinstance(result, HostListResponse)
         names = [h.name for h in result.hosts]
-        assert "ww1" in names
+        assert "kvm1" in names
         assert "ww2" in names
 
     async def test_import_is_idempotent(self, client_and_queue):
@@ -171,7 +171,7 @@ class TestImportHosts:
         result = await client.list_hosts()
         names = [h.name for h in result.hosts]
         assert len(names) == len(set(names))
-        assert "ww1" in names
+        assert "kvm1" in names
         assert "ww2" in names
 
     async def test_import_does_not_disable_absent_hosts(self, client_and_queue):
@@ -184,7 +184,7 @@ class TestImportHosts:
             "ansible_ssh_private_key_file=/home/appuser/.ssh/id_ed25519\n"
         )
         await client.import_hosts_from_text(ini_ww2_only, ssh_key_type="path")
-        host = await client.get_host("ww1")
+        host = await client.get_host("kvm1")
         assert host.enabled is True
 
 
@@ -192,18 +192,18 @@ class TestConnectivity:
     async def test_connectivity_registered_host(self, client_and_queue):
         client, _ = client_and_queue
         await _register(client)
-        result = await client.check_connectivity("ww1")
-        assert result.host == "ww1"
+        result = await client.check_connectivity("kvm1")
+        assert result.host == "kvm1"
         assert "reachable" in result.__dict__
 
     async def test_connectivity_uses_db_inventory(self, client_and_queue, fake_ansible):
         client, _ = client_and_queue
         await _register(client)
-        await client.check_connectivity("ww1")
+        await client.check_connectivity("kvm1")
         fake_ansible.write_inventory.assert_called_once()
         called_hosts = fake_ansible.write_inventory.call_args[0][0]
         assert len(called_hosts) == 1
-        assert called_hosts[0].name == "ww1"
+        assert called_hosts[0].name == "kvm1"
 
     async def test_connectivity_unknown_host_raises_404(self, client_and_queue):
         client, _ = client_and_queue

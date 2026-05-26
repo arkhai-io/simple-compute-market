@@ -12,10 +12,10 @@ The docker-compose stack runs:
   * ``registry``    on host port 8080 — public, no auth
   * ``registry-b``  on host port 8082 — REGISTRY_REQUIRE_API_KEY=true,
                     seeded with bearer ``test-buyer-token``
-  * ``sell_agent``  (Bob)   on host port 8001 — Anvil acct #2,
-                    [registry] urls = [registry, registry-b]
-  * ``alice_agent`` (Alice) on host port 8002 — Anvil acct #4,
-                    [registry] urls = [registry]
+  * ``bob-storefront``   (Bob)   on host port 8001 — Anvil acct #2,
+                         [registry] urls = [registry, registry-b]
+  * ``alice-storefront`` (Alice) on host port 8002 — Anvil acct #4,
+                         [registry] urls = [registry]
 
 Provider topology
 -----------------
@@ -74,8 +74,8 @@ Phase 5 — buyer-side discovery
   05b  Fan-in over [A, DEAD] still returns both (A has both)
 
 Phase 6 — simultaneous negotiations
-  06a  Buyer starts negotiation against Bob via sell_agent
-  06b  Buyer starts negotiation against Alice via alice_agent
+  06a  Buyer starts negotiation against Bob via bob-storefront
+  06b  Buyer starts negotiation against Alice via alice-storefront
   06c  Both negotiations independently recorded round-0 counter
 """
 
@@ -159,7 +159,7 @@ _BOB_CSV = (
     "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,"
     "attribute.vm_host\n"
     'compute-mr-bob-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-    'RTX 5080,90.0,"California, US",ww1\n'
+    'RTX 5080,90.0,"California, US",kvm1\n'
 )
 _ALICE_CSV = (
     "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
@@ -248,7 +248,7 @@ def alice_agent_id(alice_admin_client) -> str:
     live = getattr(status, "agent_id", None)
     if not live:
         pytest.skip(
-            "Alice has no live agent_id — the alice_agent container hasn't "
+            "Alice has no live agent_id — the alice-storefront container hasn't "
             "completed on-chain registration yet."
         )
     return str(live)
@@ -672,7 +672,7 @@ class TestStage06a_NegotiateWithBob:
     def test_06a_buyer_starts_negotiation_with_bob(
         self, storefront_admin_client, buyer_config, mr_state
     ):
-        """Buyer hits sell_agent:8001 to start a negotiation against Bob's listing."""
+        """Buyer hits bob-storefront:8001 to start a negotiation against Bob's listing."""
         _require(mr_state, "bob_listing_id", "fanin_ok")
         from storefront_client import SyncStorefrontClient
         buyer_to_bob = SyncStorefrontClient(
@@ -707,7 +707,7 @@ class TestStage06b_NegotiateWithAlice:
     def test_06b_buyer_starts_negotiation_with_alice(
         self, alice_admin_client, buyer_config, mr_state
     ):
-        """Buyer hits alice_agent:8002 to start a negotiation against Alice's listing.
+        """Buyer hits alice-storefront:8002 to start a negotiation against Alice's listing.
 
         Confirms the buyer can route to a different storefront for a
         different provider — same wire protocol, different URL. The

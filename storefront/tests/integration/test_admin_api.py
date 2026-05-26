@@ -307,7 +307,7 @@ class TestAdminImportResources:
         "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
         'compute-import-001,compute.gpu,rtx5080,count,1,available,'
         '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-        'RTX 5080,90.0,"California, US",ww1\n'
+        'RTX 5080,90.0,"California, US",kvm1\n'
     )
 
     async def test_requires_admin_key(self, client_no_key):
@@ -357,9 +357,9 @@ class TestAdminImportResources:
             "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
             'compute-good-001,compute.gpu,rtx5080,count,1,available,'
             '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-            'RTX 5080,90.0,"California, US",ww1\n'
+            'RTX 5080,90.0,"California, US",kvm1\n'
             # Row with missing resource_id will fail.
-            ',compute.gpu,rtx5080,count,1,available,150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",ww1\n'
+            ',compute.gpu,rtx5080,count,1,available,150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm1\n'
         ).encode()
         result = await c.admin_import_resources(mixed_csv)
         assert result.total_rows == 2

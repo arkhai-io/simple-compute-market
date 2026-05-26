@@ -32,7 +32,7 @@ class LeaseCreate(BaseModel):
 
     resource_id: str = Field(
         description=(
-            "Storefront-assigned resource identifier (e.g. 'compute-ww1-001'). "
+            "Storefront-assigned resource identifier (e.g. 'compute-kvm1-001'). "
             "Treated as an opaque string; the provisioning service does not "
             "validate it against any local table."
         )
@@ -41,7 +41,7 @@ class LeaseCreate(BaseModel):
         description="On-chain escrow UID from the deal. Unique per lease."
     )
     vm_host: str = Field(
-        description="KVM host alias (Ansible inventory name, e.g. 'ww1')."
+        description="KVM host alias (Ansible inventory name, e.g. 'kvm1')."
     )
     vm_target: str = Field(
         description="Libvirt domain name of the provisioned VM (e.g. 'tenant-a3f2')."

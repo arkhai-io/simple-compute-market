@@ -148,6 +148,7 @@ class TestNegotiateFrom:
         result = runner.invoke(app, [
             "negotiate", "--from", run_id,
             "--max-price", "100",
+            "--token-decimals", "0",
             "--buyer-address", _BUYER_ADDR,
             "--buyer-priv-key", _BUYER_PK,
         ])
@@ -183,6 +184,7 @@ class TestNegotiateFrom:
         result = runner.invoke(app, [
             "negotiate", "--from", original_run,
             "--max-price", "100",
+            "--token-decimals", "0",
             "--buyer-address", _BUYER_ADDR,
             "--buyer-priv-key", _BUYER_PK,
         ])
@@ -234,6 +236,7 @@ class TestBuyFrom:
         result = runner.invoke(app, [
             "buy", "--from", run_id,
             "--max-price", "100",
+            "--token-decimals", "0",
             "--buyer-address", _BUYER_ADDR,
             "--buyer-priv-key", _BUYER_PK,
         ])
@@ -307,6 +310,7 @@ class TestBuyFrom:
         result = runner.invoke(app, [
             "buy", "--from", run_id,
             "--max-price", "100",
+            "--token-decimals", "0",
             "--buyer-address", _BUYER_ADDR,
             "--buyer-priv-key", _BUYER_PK,
         ])

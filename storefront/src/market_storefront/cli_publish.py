@@ -45,25 +45,26 @@ from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
 def _import_csv(csv_path: str, db: Optional[str]) -> None:
     """Invoke the existing import_resources_csv.py script directly.
 
-    Uses ``storefront/.venv/bin/python`` rather than ``uv run`` — the
-    latter fails cleanly from outside the storefront project, and the
-    storefront venv is a stable dependency of the provider-side
-    deployment anyway.
+    Uses ``sys.executable`` (the python running this CLI) and locates
+    the script relative to this package — works in both dev checkouts
+    (``storefront/scripts/...``) and the container runtime
+    (``/app/scripts/...``).
     """
-    script = REPO_ROOT / "storefront" / "scripts" / "import_resources_csv.py"
-    python = REPO_ROOT / "storefront" / ".venv" / "bin" / "python"
-    if not python.exists():
+    import sys
+    package_root = Path(__file__).resolve().parents[2]
+    script = package_root / "scripts" / "import_resources_csv.py"
+    if not script.exists():
         raise typer.BadParameter(
-            f"Storefront venv not found at {python}. "
-            "Run `cd storefront && uv sync` first."
+            f"import_resources_csv.py not found at {script}. "
+            "This shouldn't happen with a normal install — file a bug."
         )
     cmd = [
-        str(python), str(script),
+        sys.executable, str(script),
         "--csv", str(Path(csv_path).resolve()),
     ]
     if db:
         cmd.extend(["--db-path", str(Path(db).resolve())])
-    subprocess.run(cmd, cwd=str(REPO_ROOT), check=True)
+    subprocess.run(cmd, cwd=str(package_root), check=True)
 
 
 def _available_resources(db_path: str) -> list[dict]:
@@ -526,33 +527,33 @@ def register(app: typer.Typer) -> None:
             30.0, "--poll-interval",
             help="Seconds between scans in --watch mode.",
         ),
-        agent_url: Optional[str] = typer.Option(
+        storefront_url: Optional[str] = typer.Option(
             None, "--storefront-url", "-a",
-            help="Seller agent base URL (default: seller.base_url from config.toml).",
+            help="Storefront base URL (default: base_url from storefront.toml).",
         ),
         db: Optional[str] = typer.Option(
             None, "--db",
-            help="Explicit seller agent SQLite DB path "
-                 "(default: seller.db_path from config.toml).",
+            help="Explicit storefront SQLite DB path "
+                 "(default: db_path from storefront.toml).",
         ),
     ) -> None:
-        """Publish sell orders for every priced compute resource on the seller's node.
+        """Publish sell orders for every priced compute resource on the storefront.
 
         Pricing is per-resource: each row's `min_price` / `token` columns
-        win over the [seller.pricing] defaults. Resources without either
-        a row-level price or a default are skipped (reported as failed).
+        win over the [pricing] defaults. Resources without either a
+        row-level price or a default are skipped (reported as failed).
         """
         console = Console()
         from .utils.config import settings
 
-        base_url = resolve_storefront_url(agent_url, default_port=8001)
+        base_url = resolve_storefront_url(storefront_url, default_port=8001)
         private_key = settings.wallet.private_key
         wallet_address = settings.wallet.address or ""
         db_path = _resolve_db_path(db)
         if not db_path:
             typer.secho(
-                "Could not resolve seller agent DB. Pass --db or set "
-                "seller.db_path in config.toml.",
+                "Could not resolve storefront DB. Pass --db or set "
+                "db_path in storefront.toml.",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(1)

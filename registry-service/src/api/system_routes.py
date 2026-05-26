@@ -6,8 +6,8 @@ Exposes four endpoint groups:
                                     Returns 200 (ok) or 503 (degraded) — never
                                     masks failures with a 200 that lies to k8s.
   ``GET /api/v1/system/config``     Active chain and contract configuration.
-  ``GET /api/v1/system/sync``       Background service liveness (event sync,
-                                    health check service).
+  ``GET /api/v1/system/sync``       Background service liveness (health
+                                    check service).
   ``GET /api/v1/system/stats``      DB population counts by entity type and
                                     order status.
 
@@ -32,7 +32,6 @@ from sqlalchemy.orm import Session
 from src.api.system_model import (
     AgentIndexedResponse,
     ConfigResponse,
-    EventSyncStatus,
     HealthCheckServiceStatus,
     HealthChecks,
     HealthResponse,
@@ -117,10 +116,10 @@ def system_config() -> ConfigResponse:
     response_model=SyncResponse,
     summary="Background service liveness",
     description=(
-        "Reports whether the event sync and health check background services "
-        "started during application lifespan are still running. "
-        "A stopped event_sync means on-chain agent registration events are "
-        "no longer being indexed."
+        "Reports whether the health check background service started during "
+        "application lifespan is still running. Agent rows are populated "
+        "just-in-time from chain reads on the publish/heartbeat/lookup path "
+        "— there is no separate event-sync background service."
     ),
 )
 def system_sync() -> SyncResponse:
@@ -128,16 +127,9 @@ def system_sync() -> SyncResponse:
     # imports from src.api.routes which imports this module.
     import src.main as _main
 
-    event_sync = _main.event_sync
     health_check_svc = _main.health_check
 
     return SyncResponse(
-        event_sync=EventSyncStatus(
-            running=event_sync.is_running if event_sync is not None else False,
-            last_synced_block=(
-                event_sync.last_synced_block if event_sync is not None else 0
-            ),
-        ),
         health_check=HealthCheckServiceStatus(
             running=(
                 health_check_svc.is_running if health_check_svc is not None else False
@@ -155,16 +147,16 @@ def system_sync() -> SyncResponse:
 @_system_router.get(
     "/sync/wait-for-agent",
     response_model=AgentIndexedResponse,
-    summary="Long-poll until an agent is indexed (test/admin helper)",
+    summary="Long-poll until an agent is on-chain (test/admin helper)",
     description=(
-        "Blocks (server-side) until the specified canonical agent ID appears "
-        "in the registry DB, or until *timeout* seconds elapse.  Returns "
-        "``indexed=True`` as soon as the row exists; ``indexed=False`` on "
-        "timeout.  Intended for e2e test suites that need to wait for the "
-        "EventSync background service to index a freshly registered agent "
-        "before proceeding with heartbeat and listing-publish calls.  "
-        "Poll interval is 500 ms — callers should set timeout >= 60 s to "
-        "cover a normal sync cycle."
+        "Blocks (server-side) until the specified canonical agent ID can be "
+        "resolved on chain, or until *timeout* seconds elapse. Returns "
+        "``indexed=True`` as soon as the JIT lookup succeeds (and the agent "
+        "row gets cached); ``indexed=False`` on timeout. Intended for e2e "
+        "test suites that need to gate on a freshly-broadcast on-chain "
+        "registration tx being mined and visible to this indexer's RPC "
+        "node, before proceeding with heartbeat and listing-publish calls. "
+        "Poll interval is 500 ms."
     ),
 )
 async def wait_for_agent_indexed(
@@ -175,6 +167,8 @@ async def wait_for_agent_indexed(
     import asyncio
     import time as _time
 
+    from src.api.utils import ensure_agent_indexed
+
     if timeout > 120.0:
         timeout = 120.0  # hard cap — protect the server from indefinite holds
 
@@ -182,17 +176,8 @@ async def wait_for_agent_indexed(
     start = _time.monotonic()
     deadline = start + timeout
 
-    # Lazy-driven sync: each poll tick tries a throttled sync_latest before
-    # checking the DB. The EventSyncService throttle (2 s by default) caps
-    # the actual RPC load; without this, this endpoint just waited for the
-    # 60 s periodic timer and routinely missed the e2e poll window.
-    import src.main as _main
-
     while True:
-        if _main.event_sync is not None:
-            await _main.event_sync.sync_on_demand()
-        db.expire_all()
-        agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
+        agent = await ensure_agent_indexed(db, agent_id)
         if agent is not None:
             elapsed_ms = int((_time.monotonic() - start) * 1000)
             return AgentIndexedResponse(

@@ -23,8 +23,8 @@ EXTRA_SET_FILE_ARGS ?=
 ## into the storefront agent on first deploy. Left empty by default — the
 ## storefront starts with no inventory and the operator seeds via the API.
 ## Example:
-##   make deploy RESOURCES_CSV_FILE=./storefront/src/market_storefront/data/ww1-machine.csv
-RESOURCES_CSV_FILE ?=../storefront/src/market_storefront/data/ww1-machine.csv
+##   make deploy RESOURCES_CSV_FILE=./storefront/src/market_storefront/data/kvm1-machine.csv
+RESOURCES_CSV_FILE ?=../storefront/src/market_storefront/data/kvm1-machine.csv
 
 ## Render the full parent chart (and all enabled subcharts) to stdout
 template:
@@ -37,7 +37,7 @@ template:
 ## Verify structural invariants of the rendered chart without needing
 ## a real cluster. Runs `helm template` against the umbrella chart and
 ## asserts the storefront ConfigMap/Secret split layout — per-agent
-## ConfigMap holds config.toml, Secret holds config.secrets.toml,
+## ConfigMap holds storefront.toml, Secret holds storefront.secrets.toml,
 ## Deployment mounts both at /etc/arkhai/ with independent checksums,
 ## and no sensitive keys leak across the boundary. Stable across
 ## cosmetic chart edits (no byte-level snapshots).

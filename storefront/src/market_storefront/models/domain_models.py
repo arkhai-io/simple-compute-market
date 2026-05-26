@@ -116,7 +116,7 @@ class Host(BaseModel):
     ``tag.*`` namespace (e.g. ``attributes["tag.datacenter_tier"]``).
     """
 
-    name: str = Field(description="Host alias (matches provisioning-service host alias, e.g. 'ww1').")
+    name: str = Field(description="Host alias (matches provisioning-service host alias, e.g. 'kvm1').")
     cpu_type: str | None = Field(default=None, description="Host CPU model string, e.g. 'AMD EPYC 9654'")
     host_cpu_cores: int | None = Field(default=None, description="Total physical CPU cores on host")
     host_ram_gb: int | None = Field(default=None, description="Host total RAM in GB")

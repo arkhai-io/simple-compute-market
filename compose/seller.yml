@@ -1,90 +1,114 @@
-# Seller layer: what a seller (someone with compute to sell) runs on their machine.
+# Seller stack — services a seller (someone with compute to sell) runs in production.
 #
-# A seller runs:
-#   1. The seller agent — the process that publishes offers, negotiates,
-#      accepts matches, and coordinates provisioning on their hardware.
-#   2. A provisioning service — the process that actually turns escrows
-#      into running VMs on the seller's hardware (or mock hardware for dev).
-#   3. Redis — job queue used by the provisioning service.
+# Two services:
+#   1. seller-storefront     — storefront HTTP server (arkhai:storefront).
+#                              Publishes offers, negotiates with buyers,
+#                              settles deals on chain.
+#   2. seller-provisioning   — runs ansible to create/destroy VMs on the
+#                              seller's KVM host (arkhai:provisioning).
 #
-# Depends on:
-#   - An external chain with contracts deployed
-#   - A marketplace registry (from compose/market.yml) reachable via INDEXER_URL
+# This base file works in mock mode (no SSH key needed). For real KVM
+# provisioning add `-f compose/seller.live.yml` which mounts the SSH key
+# the ansible runner uses to reach the host. See docs/seller-quickstart.md §6.
+#
+# Operator-provided files (paths overridable via env):
+#   ./config.seller.toml     — seller config; see docs/seller-quickstart.md.
+#                              The provisioning service reads `admin_api_key`
+#                              from this same file via the mount on
+#                              seller-provisioning, so the secret lives in
+#                              one place.
+#   ./resources.csv          — inventory CSV. Starter:
+#                              storefront/src/market_storefront/data/resources.sample.csv
+#
+# Required images (run `make build-seller` from the repo root):
+#   arkhai:storefront
+#   arkhai:provisioning
+#
+# Registry: not included. Either run your own (see docs/indexer-quickstart.md)
+# or point [registry] urls in the seller TOML at an external indexer.
 #
 # Usage:
-#   docker compose -f compose/seller.yml up
+#   docker compose -f compose/seller.yml up -d                          # mock mode
+#   docker compose -f compose/seller.yml -f compose/seller.live.yml up -d   # live KVM
+#   docker compose -f compose/seller.yml logs -f seller-storefront
 #
-# Environment:
-#   PROVISIONING_MODE        — mock | ansible | http (default: http)
-#   MOCK_PROVISIONING_SUCCESS — true | false (when mock mode)
+# Environment overrides (all optional):
+#   SELLER_CONFIG_PATH       — path to seller TOML (default: ../config.seller.toml,
+#                              i.e. ./config.seller.toml relative to the project root)
+#   SELLER_RESOURCES_CSV     — path to inventory CSV (default: ../resources.csv)
 
 services:
-  seller-agent:
-    image: arkhai:core
-    platform: linux/amd64
-    container_name: market-agent-sell
+  # One-shot init containers that chown the named volumes to the
+  # appuser baked into each image. Docker creates fresh named volumes
+  # as root-owned; without this, sqlite init crashes at first start
+  # with "unable to open database file".
+  #
+  # Split per-image because `make build-seller-for-host` builds the
+  # provisioning image with the host's `ubuntu` uid/gid (often != 1000)
+  # to match the bind-mounted SSH key, while the storefront image
+  # stays on the default 1000:1000. Chowning by username (appuser)
+  # picks up the right uid in each image's /etc/passwd.
+  #
+  # Both exit successfully after one run; idempotent (chown -R no-ops
+  # on already-correct ownership).
+  seller-storefront-data-init:
+    image: arkhai:storefront
+    user: "0:0"
+    entrypoint: ["sh", "-c"]
+    command: ["chown -R appuser:appuser /data"]
+    volumes:
+      - seller-storefront-data:/data
+    restart: "no"
+
+  seller-provisioning-data-init:
+    image: arkhai:provisioning
+    user: "0:0"
+    entrypoint: ["sh", "-c"]
+    command: ["chown -R appuser:appuser /data"]
+    volumes:
+      - seller-provisioning-data:/data
+    restart: "no"
+
+  seller-storefront:
+    image: arkhai:storefront
     ports:
       - "8001:8001"
+    # cap_add / devices / zerotier-seller volume below are for optional
+    # ZeroTier overlay networking. Harmless when [seller].zerotier_network
+    # is unset — the entrypoint fail-softs and continues.
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
     devices:
       - /dev/net/tun:/dev/net/tun
-    environment:
-      - XDG_CONFIG_HOME=/etc
-      - PROVISIONING_MODE=${PROVISIONING_MODE:-http}
-      - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
+    depends_on:
+      seller-storefront-data-init:
+        condition: service_completed_successfully
     volumes:
-      - ../storefront/storefront.bob.toml:/etc/arkhai/storefront.toml:ro
-      - zerotier-sell:/var/lib/zerotier-one
-      - ../storefront/src/market_storefront/data/sell-agent:/app/src/market_storefront/data/sell-agent
-    networks:
-      - market-network
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-    command:
-      - ./entrypoint.sh
-
-  seller-redis:
-    image: redis:7-alpine
-    container_name: market-redis
-    ports:
-      - "6379:6379"
-    networks:
-      - market-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
+      - ${SELLER_CONFIG_PATH:-../config.seller.toml}:/etc/arkhai/storefront.toml:ro
+      - ${SELLER_RESOURCES_CSV:-../resources.csv}:/app/resources.csv:ro
+      - seller-storefront-data:/app/src/market_storefront/data/storefront
+      - zerotier-seller:/var/lib/zerotier-one
+    restart: unless-stopped
 
   seller-provisioning:
     image: arkhai:provisioning
-    container_name: market-provisioning
-    depends_on:
-      seller-redis:
-        condition: service_healthy
     ports:
       - "8081:8081"
-    env_file:
-      - ../async-provisioning-service/.env.docker-compose
+    depends_on:
+      seller-provisioning-data-init:
+        condition: service_completed_successfully
+    environment:
+      - ACTIVE_PROFILES=seller
     volumes:
-      - ../compute-provisioning-iac:/app/compute-provisioning-iac
-      - ${HOME}/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro
-    networks:
-      - market-network
+      # Same storefront TOML the seller-storefront reads. The provisioning
+      # service reads `admin_api_key` from it so the operator writes the
+      # admin key in exactly one file.
+      - ${SELLER_CONFIG_PATH:-../config.seller.toml}:/etc/arkhai/storefront.toml:ro
+      - seller-provisioning-data:/app/data
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 384m
-
-networks:
-  market-network:
-    external: true
-    name: market-network
 
 volumes:
-  zerotier-sell:
+  seller-storefront-data:
+  seller-provisioning-data:
+  zerotier-seller:

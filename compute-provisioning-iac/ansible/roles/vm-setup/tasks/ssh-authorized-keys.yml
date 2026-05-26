@@ -1,0 +1,42 @@
+---
+# Add supplied SSH public key(s) to the target user's authorized_keys file.
+#
+# Variables (defined in defaults/main.yml):
+#   vm_ssh_authorized_key   – single public key string  (optional)
+#   vm_ssh_authorized_keys  – list of public key strings (optional)
+#   vm_ssh_key_user         – user whose authorized_keys is updated (default: ansible_user)
+#
+# Usage examples:
+#   # Single key via convenience variable
+#   ansible-playbook ... -e "vm_ssh_authorized_key='ssh-ed25519 AAAA... user@host'"
+#
+#   # Multiple keys via list
+#   ansible-playbook ... -e '{"vm_ssh_authorized_keys": ["ssh-ed25519 AAAA... user@host", "ssh-rsa BBBB... other@host"]}'
+#
+#   # Target a specific user
+#   ansible-playbook ... -e "vm_ssh_key_user=ubuntu" -e "vm_ssh_authorized_key='ssh-ed25519 AAAA...'"
+
+- name: Add single SSH public key to authorized_keys
+  ansible.posix.authorized_key:
+    user: "{{ vm_ssh_key_user }}"
+    key: "{{ vm_ssh_authorized_key }}"
+    state: present
+    exclusive: false
+  when: vm_ssh_authorized_key | default('') | length > 0
+  tags:
+    - ssh_keys
+    - security_hardening
+    - host_setup
+
+- name: Add list of SSH public keys to authorized_keys
+  ansible.posix.authorized_key:
+    user: "{{ vm_ssh_key_user }}"
+    key: "{{ item }}"
+    state: present
+    exclusive: false
+  loop: "{{ vm_ssh_authorized_keys }}"
+  when: vm_ssh_authorized_keys | default([]) | length > 0
+  tags:
+    - ssh_keys
+    - security_hardening
+    - host_setup

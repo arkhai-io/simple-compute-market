@@ -72,7 +72,7 @@ markers = [
     "mock_provisioning_happy: Happy path — deal completes successfully",
     "mock_provisioning_failure: Failure path — provisioning fails, orders reopen",
     "roles_layer_external: External layer — EVM chain + deployed contracts",
-    "roles_layer_market: Market layer — marketplace operator's registry service",
+    "roles_layer_registry: Registry layer — marketplace operator's registry service",
     "roles_layer_seller: Seller layer — a seller's agent + provisioning service",
     "roles_layer_buyer: Buyer layer — a buyer's agent",
     "roles_discovery_seller: Discovery stage, seller perspective",

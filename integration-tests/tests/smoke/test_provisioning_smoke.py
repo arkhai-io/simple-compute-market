@@ -192,7 +192,7 @@ class TestProvisioningSmoke:
             pytest.skip("Auth is not enabled on this deployment — skipping 401 check")
         with _client() as client:
             resp = client.post(
-                "/api/v1/hosts/ww1/vms/",
+                "/api/v1/hosts/kvm1/vms/",
                 json={"vm_target": "smoke-test-vm"},
                 # Intentionally no X-Agent-ID header
             )

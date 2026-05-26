@@ -1,0 +1,123 @@
+---
+# KVM Network Configuration
+
+- name: Check if default network exists
+  shell: |
+    if ! virsh net-list --all >/dev/null 2>&1; then
+      echo "virsh_failed"
+      exit 1
+    fi
+    virsh net-list --all | grep -q default && echo "network_exists" || echo "network_missing"
+  register: default_network_check
+  ignore_errors: yes
+  tags: kvm_network
+
+- name: Define default network if it doesn't exist
+  shell: virsh net-define /usr/share/libvirt/networks/default.xml
+  when: default_network_check.rc == 0 and default_network_check.stdout == "network_missing"
+  ignore_errors: yes
+  tags: kvm_network
+
+- name: Set default network to autostart
+  shell: virsh net-autostart default
+  when: default_network_check.rc == 0
+  ignore_errors: yes
+  tags: kvm_network
+
+- name: Check if default network is running
+  shell: virsh net-list | grep -q "default.*active"
+  register: default_network_running
+  ignore_errors: yes
+  tags: kvm_network
+
+- name: Start default network
+  shell: virsh net-start default
+  when: default_network_running is defined and default_network_running.rc != 0
+  ignore_errors: yes
+  tags: kvm_network
+
+- name: Create bridge network configuration script
+  copy:
+    dest: /tmp/setup_bridge.sh
+    content: |
+      #!/bin/bash
+      # Configure bridge networking for KVM (requires wired connection, modifies network config)
+      
+      # Check if we're using a wired connection
+      WIRED_INTERFACE=$(ip route | grep default | grep -E 'eth[0-9]|enp[0-9]' | awk '{print $5}' | head -1)
+      WIRELESS_INTERFACE=$(ip route | grep default | grep -E 'wl[0-9]|wlp[0-9]' | awk '{print $5}' | head -1)
+      
+      if [ ! -z "$WIRED_INTERFACE" ]; then
+        echo "Setting up bridge with wired interface: $WIRED_INTERFACE"
+        cat > /etc/netplan/01-netcfg.yaml <<EOF
+      network:
+        version: 2
+        renderer: networkd
+        ethernets:
+          $WIRED_INTERFACE:
+            dhcp4: no
+        bridges:
+          br0:
+            dhcp4: yes
+            interfaces:
+              - $WIRED_INTERFACE
+      EOF
+      else
+        echo "No wired interface found for bridging"
+        exit 1
+      fi
+      
+      chmod 600 /etc/netplan/01-netcfg.yaml
+      echo "Bridge configuration created. Run 'netplan try' to test and apply."
+    mode: '0755'
+    force: yes
+  tags: kvm_bridge
+
+- name: Verify installed packages
+  shell: |
+    vim --version && nano --version && git --version && python3 --version && pip3 --version
+  register: verify_output
+  ignore_errors: yes
+  tags: verify_kvm
+
+- name: Verify KVM installation
+  shell: |
+    virsh --version && qemu-kvm --version | head -1 && systemctl is-active libvirtd
+  register: kvm_verify_output
+  ignore_errors: yes
+  tags: verify_kvm
+
+- name: Check virtualization capabilities
+  shell: |
+    echo "=== CPU Virtualization Support ==="
+    grep -E '(vmx|svm)' /proc/cpuinfo | wc -l
+    echo "=== KVM Modules ==="
+    lsmod | grep kvm
+    echo "=== Nested Virtualization Status ==="
+    if [ -f /sys/module/kvm_intel/parameters/nested ]; then
+      echo "Intel nested: $(cat /sys/module/kvm_intel/parameters/nested)"
+    fi
+    if [ -f /sys/module/kvm_amd/parameters/nested ]; then
+      echo "AMD nested: $(cat /sys/module/kvm_amd/parameters/nested)"
+    fi
+    echo "=== Libvirt Networks ==="
+    virsh net-list --all || echo "Failed to list networks"
+  register: virt_capabilities
+  ignore_errors: yes
+  tags: verify_kvm
+
+- name: Show verification results
+  debug:
+    var: verify_output.stdout_lines
+  tags: verify_kvm
+
+- name: Show KVM verification results
+  debug:
+    var: kvm_verify_output.stdout_lines
+  tags: verify_kvm
+
+- name: Show virtualization capabilities
+  debug:
+    var: virt_capabilities.stdout_lines
+  tags: verify_kvm
+

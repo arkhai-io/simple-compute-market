@@ -107,7 +107,7 @@ class Host(Base):
 
     __tablename__ = "hosts"
 
-    name = Column(String, primary_key=True)  # Ansible alias, e.g. "ww1"
+    name = Column(String, primary_key=True)  # Ansible alias, e.g. "kvm1"
     kvm_host = Column(String, nullable=False)  # IP or hostname for SSH
     ssh_user = Column(String, nullable=False)  # SSH login user on the KVM host
     ssh_key_type = Column(String, nullable=False, default="path")  # "path" | "embedded"
@@ -125,7 +125,7 @@ class VmLease(Base):
     resources when leases expire — replacing the storefront's polling pattern.
 
     resource_id:
-        The storefront-assigned resource identifier (e.g. 'compute-ww1-001').
+        The storefront-assigned resource identifier (e.g. 'compute-kvm1-001').
         Stored as unvalidated TEXT; the provisioning service has no resources
         table, so no FK constraint is possible. Application-level FK enforced
         by the storefront (caller).

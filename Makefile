@@ -2,7 +2,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-runtime-images dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra dist-clean init init-prerequisites init-submodules init-dependencies init-zero-tier init-buyer init-storefront init-registry-service push-runtime-artifacts push-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: build build-runtime-images build-seller dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra dist-clean init init-prerequisites init-submodules init-dependencies init-zero-tier init-buyer init-storefront init-registry-service push-runtime-artifacts push-images push-helm push-wheels push-cli clobber-wheels
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -84,8 +84,24 @@ test-storefront:
 # build-runtime-images parallelizes the three independent service images.
 build: build-buyer build-market-contract-deployer build-test-env build-runtime-images build-test-image
 
-build-runtime-images: dist
+build-runtime-images: init-prerequisites dist
 	$(MAKE) -j3 build-registry build-storefront build-provisioning
+
+# Seller-only build: the two runtime images a seller actually needs
+# (`arkhai:storefront`, `arkhai:provisioning`) and just the wheels they
+# consume via --find-links. Skips `dist-infra` (operator-side CLI; not
+# consumed by either image) and `build-registry` (sellers point at someone
+# else's registry).
+build-seller: init-prerequisites dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service ## Build only what a seller needs: storefront + provisioning images.
+	$(MAKE) -j2 build-storefront build-provisioning
+
+# Same as build-seller, but the provisioning image's in-container appuser
+# is built with the current host user's UID/GID. Required on hosts where
+# the operator's UID isn't 1000 — otherwise the seller-provisioning
+# container can't read mode-0600 SSH keys bind-mounted from the operator's
+# home, and ansible falls over with `Permission denied (publickey)`.
+build-seller-for-host: ## build-seller with appuser UID/GID matching the current user
+	$(MAKE) build-seller APPUSER_UID=$(shell id -u) APPUSER_GID=$(shell id -g)
 
 build-buyer: init-prerequisites init-dependencies
 	cd buyer && make build
@@ -99,7 +115,7 @@ build-anvil-state:
 	-docker network create anvil
 	-mkdir shared-env
 	docker run -d --rm --network anvil --name anvil -p 8545:8545 -e ANVIL_IP_ADDR=0.0.0.0 -v ./test-env/state:/state --user root --entrypoint anvil ghcr.io/foundry-rs/foundry:${FOUNDRY_VERSION} --dump-state /state/state.json
-	docker run --rm --network anvil --name market-contracts-deploy -e ENV_FILE=/app/shared-env/.env -v ./shared-env:/app/shared-env/ arkhai:contract-deployer
+	docker run --rm --network anvil --name contracts-deploy -e ENV_FILE=/app/shared-env/.env -v ./shared-env:/app/shared-env/ arkhai:contract-deployer
 	echo "Todo: add a step here to verify contract deployment"
 	docker stop anvil
 	-docker network rm anvil

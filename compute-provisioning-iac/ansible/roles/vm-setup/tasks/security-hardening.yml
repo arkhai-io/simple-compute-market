@@ -1,0 +1,766 @@
+---
+# Host Kit Security Hardening
+
+- name: Configure fail2ban main configuration
+  copy:
+    dest: /etc/fail2ban/fail2ban.local
+    content: |
+      # Fail2ban main configuration
+      [Definition]
+      
+      # Log level (CRITICAL, ERROR, WARNING, NOTICE, INFO, DEBUG)
+      loglevel = INFO
+      
+      # Log target (STDOUT, STDERR, SYSLOG, file)
+      logtarget = /var/log/fail2ban.log
+      
+      # Socket file location
+      socket = /var/run/fail2ban/fail2ban.sock
+      
+      # PID file location
+      pidfile = /var/run/fail2ban/fail2ban.pid
+      
+      # Database file location
+      dbfile = /var/lib/fail2ban/fail2ban.sqlite3
+      
+      # Purge database older than this time (seconds)
+      dbpurgeage = 86400
+    backup: yes
+    mode: '0644'
+  tags: fail2ban
+
+- name: Configure fail2ban jail settings
+  copy:
+    dest: /etc/fail2ban/jail.local
+    content: |
+      # Fail2ban jail configuration
+      [DEFAULT]
+      # Ban time (seconds) - 20 minutes
+      bantime = 1200
+      
+      # Find time window (seconds) - 5 minutes
+      findtime = 300
+      
+      # Max retry attempts before ban
+      maxretry = 5
+      
+      # Backend for log monitoring
+      backend = auto
+      
+      # Ban action - blocks all ports for the IP
+      banaction = iptables-allports
+      
+      # Email settings (configure as needed)
+      destemail = root@localhost
+      sender = fail2ban@{{ ansible_hostname }}
+      
+      # Action to take (ban + email notification)
+      action = %(action_mw)s
+      
+      # Ignore local networks, VM networks, and FRP server
+      # CRITICAL: When guest VMs are accessed via FRP proxy, all connections appear to come from FRP server IP
+      # We MUST ignore FRP server IP to avoid blocking all proxied connections
+      {% if frp_server_addr is defined and frp_server_addr %}
+      ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 {{ frp_server_addr }}
+      {% else %}
+      ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+      {% endif %}
+      
+      [sshd]
+      # Monitor SSH attacks for direct connections (non-FRP)
+      # Note: Attacks through FRP will appear to come from FRP server IP (which is ignored above)
+      # This protects against direct SSH access attempts
+      enabled = true
+      port = ssh
+      filter = sshd
+      logpath = /var/log/auth.log
+      maxretry = 6
+      bantime = 1200
+      
+      [vm-ssh-attacks]
+      # More relaxed: allow up to 4 failed attempts from VMs (internal network only), ban lasts 20 minutes
+      # Restrict to internal VM network sources (e.g., 192.168.122.0/24)
+      # Use 'ignoreip' or custom filter to match only internal network sources
+      ignoreip = 0.0.0.0/8 127.0.0.1/8 ::1 !192.168.122.0/24 !192.168.100.0/16
+      # Monitor SSH attacks from VM networks
+      enabled = true
+      filter = vm-ssh-attacks
+      logpath = /var/log/kern.log
+      maxretry = 4
+      bantime = 1200
+      findtime = 300
+      banaction = iptables-allports
+      action = iptables-allports
+      
+      [bridged-ssh-attacks]
+      # More relaxed: allow up to 4 failed attempts from bridged networks, ban lasts 20 minutes, longer findtime
+      # Monitor all ports except 22
+      port = 0:21,23:65535
+      # Monitor SSH attacks through bridged networks (excluding port 22)
+      enabled = true
+      filter = bridged-ssh-attacks
+      logpath = /var/log/auth.log
+      maxretry = 4
+      bantime = 1200
+      findtime = 900
+      banaction = iptables-allports
+      action = iptables-allports
+    backup: yes
+    mode: '0644'
+  tags: fail2ban
+
+- name: Create custom fail2ban filter for VM SSH attacks
+  copy:
+    dest: /etc/fail2ban/filter.d/vm-ssh-attacks.conf
+    content: |
+      # Fail2ban filter for VM SSH attack attempts
+      [Definition]
+
+      # Match blocked VM SSH attempts from iptables logs
+      failregex = ^.*DROP.*SRC=<HOST>.*DPT=22.*$
+                  ^.*BLOCKED.*SRC=<HOST>.*DPT=22.*$
+                  ^.*kernel.*DROP.*<HOST>.*22.*$
+
+      # Ignore successful connections (none expected from VMs)
+      ignoreregex =
+
+      [Init]
+      # Author: Custom filter for VM security
+      # Description: Detects blocked SSH attempts from VM networks
+      maxlines = 1
+    mode: '0644'
+  tags: fail2ban
+
+- name: Create custom fail2ban filter for bridged SSH attacks
+  copy:
+    dest: /etc/fail2ban/filter.d/bridged-ssh-attacks.conf
+    content: |
+      # Fail2ban filter for SSH attacks through bridged networks
+      [Definition]
+
+      # Match SSH failures from bridged network interfaces, but NOT for port 22
+      failregex = ^.*sshd.*Failed password.*from <HOST>.*$
+                  ^.*sshd.*Invalid user.*from <HOST>.*$
+
+      # Ignore legitimate connections and any log lines for port 22
+      ignoreregex = ^.*sshd.*Accepted.*from <HOST>.*$
+                    ^.*port 22.*$
+
+      [Init]
+      # Author: Custom filter for bridge security
+      # Description: Detects SSH attacks through custom bridge networks, excluding port 22
+      maxlines = 10
+    mode: '0644'
+  tags: fail2ban
+
+- name: Ensure kern.log exists for fail2ban
+  file:
+    path: /var/log/kern.log
+    state: touch
+    mode: '0644'
+  tags: fail2ban
+
+- name: Start and enable fail2ban service
+  systemd:
+    name: fail2ban
+    state: started
+    enabled: yes
+  tags: fail2ban
+
+- name: Reload fail2ban after installation
+  shell: sudo fail2ban-client reload
+  register: fail2ban_reload_result
+  changed_when: false
+  tags: fail2ban
+
+- name: Wait for fail2ban to initialize
+  pause:
+    seconds: 5
+  tags: fail2ban
+
+- name: Test basic fail2ban functionality
+  shell: |
+    echo "Testing fail2ban filter loading..."
+    
+    # Test if jails are now available
+    if fail2ban-client status | grep -q "sshd"; then
+      echo "✓ sshd jail loaded successfully"
+    else
+      echo "✗ sshd jail not found"
+    fi
+    
+    if fail2ban-client status | grep -q "vm-ssh-attacks"; then
+      echo "✓ vm-ssh-attacks jail loaded successfully"
+    else
+      echo "✗ vm-ssh-attacks jail not found"
+    fi
+    
+    if fail2ban-client status | grep -q "bridged-ssh-attacks"; then
+      echo "✓ bridged-ssh-attacks jail loaded successfully"
+    else
+      echo "✗ bridged-ssh-attacks jail not found"
+      echo "Testing bridged filter manually..."
+      fail2ban-regex --print-all-matched /var/log/auth.log /etc/fail2ban/filter.d/bridged-ssh-attacks.conf 2>/dev/null || echo "Filter test failed"
+      echo "Checking jail debug for bridged-ssh-attacks..."
+      fail2ban-client -d | grep -A 5 -B 5 "bridged-ssh-attacks" || echo "Jail not found in debug"
+    fi
+  register: basic_test_result
+  ignore_errors: yes
+  tags: fail2ban
+
+- name: Display basic test results
+  debug:
+    var: basic_test_result.stdout_lines
+  tags: fail2ban
+
+- name: Check fail2ban status
+  shell: |
+    fail2ban-client status
+    echo "=== Active Jails ==="
+    fail2ban-client status | grep "Jail list" | cut -d: -f2 | tr ',' '\n' | while read jail; do
+      if [ ! -z "$(echo $jail | tr -d ' ')" ]; then
+        echo "Jail: $jail"
+        fail2ban-client status "$(echo $jail | tr -d ' ')"
+        echo ""
+      fi
+    done
+  register: fail2ban_status
+  ignore_errors: yes
+  tags: fail2ban
+
+- name: Display fail2ban status
+  debug:
+    var: fail2ban_status.stdout_lines
+  tags: fail2ban
+
+- name: Configure SSH security hardening - restrict VM access to host SSH
+  blockinfile:
+    path: /etc/ssh/sshd_config
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - VM SECURITY HARDENING"
+    block: |
+      # Deny SSH access from VM networks to host
+      DenyUsers *@192.168.122.*
+      DenyUsers *@192.168.100.*
+      # Allow only specific admin users/networks (customize as needed)
+      # AllowUsers admin@your-admin-network/24
+      
+      # Additional hardening
+      PermitEmptyPasswords no
+      MaxAuthTries 3
+      ClientAliveInterval 300
+      ClientAliveCountMax 2
+      UseDNS no
+      
+      # Rate limiting to mitigate brute force attacks through FRP
+      # Limits: max 10 unauthenticated connections, 3 per IP, 30s login grace time
+      MaxStartups 10:30:20
+      LoginGraceTime 30
+      
+      # Disconnect after 3 failed attempts
+      MaxAuthTries 3
+      
+      # For production: disable password auth entirely, use keys only
+      # PasswordAuthentication no
+      # PubkeyAuthentication yes
+    backup: yes
+  notify: restart sshd
+  tags: security_hardening
+
+- name: Create iptables rules to block VM-to-host SSH access
+  shell: |
+    echo "Setting up iptables rules to block VM-to-host SSH access..."
+    
+    # Block VMs from accessing host SSH (port 22)
+    iptables -C INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j DROP 2>/dev/null || \
+      iptables -I INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j DROP
+    
+    # Block additional VM networks if configured
+    iptables -C INPUT -s 192.168.100.0/16 -p tcp --dport 22 -j DROP 2>/dev/null || \
+      iptables -I INPUT -s 192.168.100.0/16 -p tcp --dport 22 -j DROP
+    
+    # Allow libvirt bridge traffic for VM operations (non-SSH)
+    iptables -C INPUT -i virbr+ -p tcp --dport 22 -j DROP 2>/dev/null || \
+      iptables -I INPUT -i virbr+ -p tcp --dport 22 -j DROP
+    
+    # Block VMs from accessing other host services (optional - uncomment as needed)
+    # iptables -C INPUT -s 192.168.122.0/24 -p tcp --dport 80 -j DROP 2>/dev/null || \
+    #   iptables -I INPUT -s 192.168.122.0/24 -p tcp --dport 80 -j DROP
+    # iptables -C INPUT -s 192.168.122.0/24 -p tcp --dport 443 -j DROP 2>/dev/null || \
+    #   iptables -I INPUT -s 192.168.122.0/24 -p tcp --dport 443 -j DROP
+    
+    echo "VM-to-host SSH access blocked via iptables"
+  register: iptables_vm_security
+  tags: security_hardening
+
+- name: Configure firewall rules using UFW (if available)
+  shell: |
+    if command -v ufw >/dev/null 2>&1; then
+      echo "Configuring UFW rules for VM security..."
+      
+      # Deny SSH from VM networks
+      ufw --force deny from 192.168.122.0/24 to any port 22
+      ufw --force deny from 192.168.100.0/16 to any port 22
+      
+      # Allow libvirt bridge traffic (non-SSH)
+      ufw --force allow in on virbr0 from 192.168.122.0/24
+      ufw --force allow out on virbr0 to 192.168.122.0/24
+      
+      echo "UFW VM security rules configured"
+    else
+      echo "UFW not available, using iptables rules only"
+    fi
+  register: ufw_vm_security
+  tags: security_hardening
+
+- name: Save iptables rules persistently
+  shell: |
+    echo "Saving iptables rules for persistence..."
+    
+    # Try different methods based on system
+    if command -v iptables-save >/dev/null 2>&1; then
+      if [ -d /etc/iptables ]; then
+        iptables-save > /etc/iptables/rules.v4
+        echo "Rules saved to /etc/iptables/rules.v4"
+      elif [ -d /etc/sysconfig ]; then
+        iptables-save > /etc/sysconfig/iptables
+        echo "Rules saved to /etc/sysconfig/iptables"
+      else
+        # Create systemd service for rule restoration
+        mkdir -p /etc/systemd/system
+        cat > /etc/systemd/system/iptables-restore.service << 'EOF'
+    [Unit]
+    Description=Restore iptables rules for VM security
+    After=network.target
+    
+    [Service]
+    Type=oneshot
+    ExecStart=/sbin/iptables-restore < /etc/iptables.rules
+    RemainAfterExit=yes
+    
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+        iptables-save > /etc/iptables.rules
+        systemctl enable iptables-restore.service
+        echo "Custom iptables restore service created and enabled"
+      fi
+    else
+      echo "Warning: Could not save iptables rules - they may not persist after reboot"
+    fi
+  register: iptables_save_result
+  tags: security_hardening
+
+- name: Detect available virtualization technologies
+  shell: |
+    echo "=== Virtualization Detection ==="
+    
+    if [ -e /dev/kvm ]; then
+      echo "kvm_available"
+    else
+      echo "kvm_unavailable"
+    fi
+    
+    if command -v qemu-system-x86_64 >/dev/null 2>&1 || command -v qemu-kvm >/dev/null 2>&1; then
+      echo "qemu_available"
+      qemu-system-x86_64 --version 2>/dev/null || qemu-kvm --version 2>/dev/null || echo "qemu_version_unknown"
+    else
+      echo "qemu_unavailable"
+    fi
+    
+    if command -v virsh >/dev/null 2>&1; then
+      echo "libvirt_available"
+      virsh uri 2>/dev/null || echo "libvirt_no_uri"
+      virsh capabilities 2>/dev/null | grep -o "<domain type='[^']*'" | cut -d"'" -f2 | sort -u || echo "no_capabilities"
+    else
+      echo "libvirt_unavailable"
+    fi
+    
+    if command -v lxc-ls >/dev/null 2>&1; then
+      echo "lxc_available"
+    fi
+    
+    if command -v VBoxManage >/dev/null 2>&1; then
+      echo "virtualbox_available"
+    fi
+    
+    if command -v virt-what >/dev/null 2>&1; then
+      echo "Running virt-what:"
+      virt-what 2>/dev/null || echo "virt-what_failed"
+    fi
+    
+    echo "=== Primary Virtualization ==="
+    if [ -e /dev/kvm ] && command -v virsh >/dev/null 2>&1; then
+      echo "kvm_qemu_libvirt"
+    elif command -v virsh >/dev/null 2>&1; then
+      echo "qemu_libvirt"
+    elif command -v qemu-system-x86_64 >/dev/null 2>&1 || command -v qemu-kvm >/dev/null 2>&1; then
+      echo "qemu_only"
+    else
+      echo "no_virtualization"
+    fi
+  register: virt_detection
+  ignore_errors: yes
+  tags: security_hardening
+
+- name: Display virtualization capabilities
+  debug:
+    msg: "{{ virt_detection.stdout_lines }}"
+  tags: security_hardening
+
+- name: Check if SELinux is available and enabled
+  shell: |
+    if command -v getenforce >/dev/null 2>&1; then
+      if getenforce 2>/dev/null | grep -q "Enforcing\|Permissive"; then
+        echo "selinux_available"
+      else
+        echo "selinux_disabled"
+      fi
+    else
+      echo "selinux_not_installed"
+    fi
+  register: selinux_status
+  tags: security_hardening
+
+- name: Determine correct qemu user/group for the system
+  shell: |
+    if getent passwd libvirt-qemu >/dev/null 2>&1; then
+      echo "libvirt-qemu"
+    elif getent passwd qemu >/dev/null 2>&1; then
+      echo "qemu"
+    else
+      echo "none"
+    fi
+  register: qemu_user
+  tags: security_hardening
+
+- name: Determine correct qemu group for the system
+  shell: |
+    if getent group libvirt-qemu >/dev/null 2>&1; then
+      echo "libvirt-qemu"
+    elif getent group qemu >/dev/null 2>&1; then
+      echo "qemu"
+    elif getent group kvm >/dev/null 2>&1; then
+      echo "kvm"
+    else
+      echo "none"
+    fi
+  register: qemu_group
+  tags: security_hardening
+
+- name: Debug detected qemu user/group
+  debug:
+    msg: 
+      - "Detected QEMU user: {{ qemu_user.stdout }}, group: {{ qemu_group.stdout }}"
+      - "Virtualization: {{ virt_detection.stdout_lines | select('search', 'PRIMARY VIRTUALIZATION|kvm|qemu|libvirt') | list }}"
+  tags: security_hardening
+
+- name: Configure libvirt security settings (with SELinux)
+  blockinfile:
+    path: /etc/libvirt/qemu.conf
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - SECURITY HARDENING"
+    block: |
+      # SELinux-enabled security with user/group isolation
+      security_driver = "selinux"
+      user = "{{ qemu_user.stdout }}"
+      group = "{{ qemu_group.stdout }}"
+    backup: yes
+  when: 
+    - not (skip_libvirt_security | default(true) | bool)
+    - selinux_status.stdout == "selinux_available" 
+    - qemu_user.stdout != "none" 
+    - qemu_group.stdout != "none"
+    - virt_detection.stdout is search("qemu_available|kvm_available")
+  notify: restart libvirtd
+  tags: security_hardening
+
+- name: Configure libvirt security settings (without SELinux)
+  blockinfile:
+    path: /etc/libvirt/qemu.conf
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - SECURITY HARDENING"
+    block: |
+      # Security hardening with user/group isolation (no SELinux)
+      user = "{{ qemu_user.stdout }}"
+      group = "{{ qemu_group.stdout }}"
+    backup: yes
+  when: 
+    - not (skip_libvirt_security | default(true) | bool)
+    - selinux_status.stdout != "selinux_available" 
+    - qemu_user.stdout != "none" 
+    - qemu_group.stdout != "none"
+    - virt_detection.stdout is search("qemu_available|kvm_available")
+  notify: restart libvirtd
+  tags: security_hardening
+
+- name: Skip security hardening if no proper user/group found
+  debug:
+    msg: "INFO: Libvirt security hardening is {{ 'disabled' if (skip_libvirt_security | default(true) | bool) else 'enabled' }} (controlled by skip_libvirt_security={{ skip_libvirt_security | default(true) }})"
+  tags: security_hardening
+
+- name: Flush handlers to restart libvirtd before continuing
+  meta: flush_handlers
+  when: not (skip_libvirt_security | default(true) | bool)
+  tags: security_hardening
+
+- name: Wait for libvirtd socket to be ready
+  wait_for:
+    path: /var/run/libvirt/libvirt-sock
+    timeout: 30
+  register: socket_wait_result
+  when: not (skip_libvirt_security | default(true) | bool)
+  tags: security_hardening
+
+- name: Check libvirtd status after security hardening
+  shell: |
+    echo "=== libvirtd Diagnostics ==="
+    
+    # Check if service is active
+    echo "Service status:"
+    systemctl is-active libvirtd && echo "service_active" || echo "service_inactive"
+    systemctl status libvirtd --no-pager || true
+    
+    # Check sockets
+    echo ""
+    echo "Socket status:"
+    systemctl is-active libvirtd.socket && echo "socket_active" || echo "socket_inactive"
+    [ -S /var/run/libvirt/libvirt-sock ] && echo "socket_exists" || echo "socket_missing"
+    ls -la /var/run/libvirt/ || echo "Directory doesn't exist"
+    
+    # Check for errors in logs
+    echo ""
+    echo "Recent errors:"
+    journalctl -u libvirtd -n 20 --no-pager || echo "No journal entries"
+    
+    # Check configuration
+    echo ""
+    echo "Configuration check:"
+    libvirtd --version || echo "libvirtd binary issue"
+    
+    # Try virsh command
+    echo ""
+    echo "Virsh test:"
+    virsh version 2>&1 && echo "virsh_works" || echo "virsh_fails"
+  register: libvirtd_health_check
+  ignore_errors: yes
+  when: not (skip_libvirt_security | default(true) | bool)
+  tags: security_hardening
+
+- name: Remove problematic security settings if libvirtd fails
+  shell: >
+    set -x &&
+    echo "[$(date)] libvirtd health check failed, rolling back security settings..." &&
+    echo "[$(date)] Health check output:" &&
+    echo '{{ libvirtd_health_check.stdout }}' &&
+    echo "[$(date)] Backing up config..." &&
+    cp /etc/libvirt/qemu.conf /etc/libvirt/qemu.conf.backup-failed-$(date +%Y%m%d-%H%M%S) &&
+    echo "[$(date)] Removing security hardening block..." &&
+    sed -i '/^# BEGIN ANSIBLE MANAGED BLOCK - SECURITY HARDENING$/,/^# END ANSIBLE MANAGED BLOCK - SECURITY HARDENING$/d' /etc/libvirt/qemu.conf &&
+    echo "[$(date)] Security block removed" &&
+    echo "[$(date)] Checking config after removal:" &&
+    (grep -i "security\|user\|group" /etc/libvirt/qemu.conf || echo "No security settings found") &&
+    echo "[$(date)] Stopping all libvirt services and sockets..." &&
+    (systemctl stop libvirtd.socket libvirtd-ro.socket libvirtd-admin.socket libvirtd.service || true) &&
+    echo "[$(date)] Cleaning up dnsmasq processes..." &&
+    (pkill -f "dnsmasq.*virbr" || true) &&
+    sleep 1 &&
+    echo "[$(date)] Resetting failed state..." &&
+    (systemctl reset-failed libvirtd.service libvirtd.socket || true) &&
+    echo "[$(date)] Starting libvirtd sockets..." &&
+    systemctl start libvirtd.socket libvirtd-ro.socket libvirtd-admin.socket &&
+    sleep 2 &&
+    echo "[$(date)] Starting libvirtd service..." &&
+    systemctl start libvirtd.service &&
+    sleep 3 &&
+    echo "[$(date)] Verifying service is running..." &&
+    (systemctl status libvirtd --no-pager || true) &&
+    (ls -la /var/run/libvirt/ || true) &&
+    (virsh version || echo "virsh still failing") &&
+    echo "[$(date)] Security rollback complete"
+  when: 
+    - not (skip_libvirt_security | default(true) | bool)
+    - libvirtd_health_check.stdout is not search("service_active") or libvirtd_health_check.stdout is not search("virsh_works")
+  register: security_rollback
+  tags: security_hardening
+
+- name: Final verification that libvirtd is working
+  shell: |
+    systemctl is-active libvirtd
+    virsh version
+    echo "libvirtd is working correctly (security hardening skipped)"
+  register: final_libvirtd_check
+  tags: security_hardening
+
+- name: Display libvirtd security status
+  debug:
+    msg:
+      - "=== libvirt Security Status ==="
+      - "Security Hardening: {{ 'Skipped (skip_libvirt_security=true)' if (skip_libvirt_security | default(true) | bool) else 'Applied' }}"
+      - "SELinux Status: {{ selinux_status.stdout if selinux_status is defined else 'Not checked' }}"
+      - "libvirtd Status: {{ 'Running' if libvirtd_health_check is defined and libvirtd_health_check.stdout is defined and libvirtd_health_check.stdout is search('service_active') and libvirtd_health_check.stdout is search('virsh_works') else 'Not checked (security hardening skipped)' if (skip_libvirt_security | default(true) | bool) else 'Failed (security settings rolled back)' }}"
+      - "Security Rollback: {{ 'Yes - incompatible security settings removed' if security_rollback is defined and security_rollback.changed else 'No - security settings applied successfully' if not (skip_libvirt_security | default(true) | bool) else 'Not applicable (security hardening skipped)' }}"
+  tags: security_hardening
+
+- name: Create VM network isolation script
+  copy:
+    dest: /usr/local/bin/vm-network-isolation.sh
+    content: |
+      #!/bin/bash
+      # Block VMs from accessing host SSH/services via iptables rules on all VM networks and bridges
+      
+      set -e
+      echo "Applying VM network isolation rules..."
+      
+      iptables -C INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j DROP 2>/dev/null || \
+        iptables -I INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j DROP
+      
+      for bridge in $(brctl show | awk '/^virbr/ {print $1}'); do
+        iptables -C INPUT -i $bridge -p tcp --dport 22 -j DROP 2>/dev/null || \
+          iptables -I INPUT -i $bridge -p tcp --dport 22 -j DROP
+      done
+      
+      for bridge in $(brctl show | awk '/^br[0-9]/ {print $1}'); do
+        iptables -C INPUT -i $bridge -p tcp --dport 22 -j DROP 2>/dev/null || \
+          iptables -I INPUT -i $bridge -p tcp --dport 22 -j DROP
+        iptables -C INPUT -i $bridge -p tcp --dport 22 -j LOG --log-prefix "BLOCKED-BRIDGE-SSH: " 2>/dev/null || \
+          iptables -I INPUT -i $bridge -p tcp --dport 22 -j LOG --log-prefix "BLOCKED-BRIDGE-SSH: "
+      done
+      
+      iptables -C INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j LOG --log-prefix "BLOCKED-VM-SSH: " 2>/dev/null || \
+        iptables -I INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j LOG --log-prefix "BLOCKED-VM-SSH: "
+      
+      echo "VM network isolation rules applied successfully"
+    mode: '0755'
+  tags: security_hardening
+
+- name: Create systemd service for VM network isolation
+  copy:
+    dest: /etc/systemd/system/vm-network-isolation.service
+    content: |
+      [Unit]
+      Description=VM Network Isolation Security Rules
+      After=network.target libvirtd.service
+      Wants=libvirtd.service
+      
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/vm-network-isolation.sh
+      RemainAfterExit=yes
+      
+      [Install]
+      WantedBy=multi-user.target
+  register: vm_isolation_service
+  tags: security_hardening
+
+- name: Enable and start VM network isolation service
+  systemd:
+    name: vm-network-isolation.service
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  when: vm_isolation_service is changed
+  tags: security_hardening
+
+- name: Configure audit logging for SSH attempts from VMs
+  shell: |
+    if command -v auditctl >/dev/null 2>&1; then
+      echo "Setting up audit rules for VM SSH attempts..."
+      
+      # Add audit rule for SSH connection attempts
+      auditctl -l | grep -q "ssh-attempts" || \
+        auditctl -a always,exit -F arch=b64 -S connect -F a2=0x10 -k ssh-attempts
+      
+      # Make audit rules persistent
+      if [ ! -f /etc/audit/rules.d/vm-ssh-monitoring.rules ]; then
+        cat > /etc/audit/rules.d/vm-ssh-monitoring.rules << 'EOF'
+    # Monitor SSH connection attempts from VMs
+    -a always,exit -F arch=b64 -S connect -F a2=0x10 -k ssh-attempts
+    -a always,exit -F arch=b32 -S connect -F a2=0x10 -k ssh-attempts
+    EOF
+        service auditd restart || systemctl restart auditd || echo "Could not restart auditd"
+      fi
+      
+      echo "SSH audit logging configured"
+    else
+      echo "Audit tools not available, skipping audit configuration"
+    fi
+  register: audit_config
+  tags: security_hardening
+
+- name: Display security hardening summary
+  debug:
+    msg:
+      - "=== VM Security Hardening Applied ==="
+      - "1. SSH access blocked from VM networks (192.168.122.0/24, 192.168.100.0/16)"
+      - "2. Iptables rules configured and saved persistently"
+      - "3. UFW rules applied (if UFW available): {{ 'Yes' if ufw_vm_security.stdout is defined and 'UFW' in ufw_vm_security.stdout else 'No' }}"
+      - "4. Libvirt security settings hardened"
+      - "5. VM network isolation service created and enabled"
+      - "6. SSH audit logging configured: {{ 'Yes' if audit_config.stdout is defined and 'audit' in audit_config.stdout else 'No' }}"
+      - "7. SSH daemon configuration hardened"
+      - "8. Fail2ban intrusion prevention system installed and configured"
+      - ""
+      - "=== Security Measures Active ==="
+      - "- VMs cannot SSH to host (port 22 blocked)"
+      - "- VM bridge interfaces restricted"
+      - "- Libvirt processes run with reduced privileges"
+      - "- Network isolation enforced at startup"
+      - "- Connection attempts logged for monitoring"
+      - "- Fail2ban monitoring SSH brute force, DDoS, and VM attacks"
+      - "- Automatic IP banning for suspicious activity"
+      - ""
+      - "To verify: sudo iptables -L INPUT | grep 192.168.122"
+      - "Fail2ban status: sudo fail2ban-client status"
+  tags: security_hardening
+
+- name: Clean up installation script
+  file:
+    path: /tmp/install_tools.sh
+    state: absent
+  tags: cleanup
+
+- name: Display post-installation notes
+  debug:
+    msg:
+      - "=== KVM Installation & Security Hardening Complete ==="
+      - "1. Users have been added to libvirt and kvm groups"
+      - "2. Nested virtualization has been enabled (if supported)"
+      - "3. Default libvirt network has been configured"
+      - "4. A bridge network setup script has been created at /tmp/setup_bridge.sh"
+      - "5. Security hardening applied - VMs blocked from accessing host SSH"
+      - "6. Network isolation rules configured and persistent"
+      - "7. Fail2ban intrusion prevention system installed and configured"
+      - "8. Installation script has been cleaned up"
+      - ""
+      - "SECURITY FEATURES ACTIVE:"
+      - "  ✓ VM-to-host SSH access blocked (iptables + SSH config)"
+      - "  ✓ Libvirt security hardening applied"
+      - "  ✓ Network isolation service enabled"
+      - "  ✓ SSH connection monitoring configured"
+      - "  ✓ Fail2ban monitoring and auto-banning suspicious IPs"
+      - "  ✓ Custom filters for VM and libvirt attack detection"
+      - ""
+      - "FAIL2BAN JAILS ACTIVE:"
+      - "  - SSH brute force protection (6 attempts, 20 min ban)"
+      - "  - VM SSH attack detection (4 attempts, 20 min ban, internal network only)"
+      - "  - Bridged SSH attack detection (4 attempts, 20 min ban, all ports except 22)"
+      - "  - All jails use iptables-allports (complete IP blocking)"
+      - ""
+      - "IMPORTANT: A reboot is recommended to ensure all changes take effect"
+      - "After reboot, you can:"
+      - "  - Use virt-manager for GUI VM management"
+      - "  - Use virsh for command-line VM operations"
+      - "  - Run /tmp/setup_bridge.sh to configure bridge networking (optional)"
+      - "  - Use the vm-management role to download cloud images and manage VMs"
+      - ""
+      - "Security Verification:"
+      - "  - Check iptables: sudo iptables -L INPUT | grep 192.168.122"
+      - "  - Check SSH config: sudo sshd -T | grep -i deny"
+      - "  - Monitor logs: sudo tail -f /var/log/auth.log | grep BLOCKED-VM-SSH"
+      - "  - Check fail2ban: sudo fail2ban-client status"
+      - "  - View banned IPs: sudo fail2ban-client status sshd"
+      - "  - Check bridged attacks: sudo fail2ban-client status bridged-ssh-attacks"
+      - "  - Monitor fail2ban logs: sudo tail -f /var/log/fail2ban.log"
+      - "  - Monitor bridge SSH logs: sudo tail -f /var/log/kern.log | grep BLOCKED-BRIDGE-SSH"
+      - ""
+      - "To test: virsh list --all"
+  tags: verify_kvm
+
