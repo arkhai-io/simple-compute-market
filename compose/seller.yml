@@ -38,26 +38,35 @@
 #   SELLER_RESOURCES_CSV     — path to inventory CSV (default: ../resources.csv)
 
 services:
-  # One-shot init container that chowns the named volumes to the runtime
-  # user (uid 1000, the appuser baked into both images). Docker creates
-  # fresh named volumes as root-owned; without this, the storefront's
-  # first start would crash with `sqlite3.OperationalError: unable to
-  # open database file` and the provisioning service's SQLite would
-  # likewise be unwritable. Exits successfully after one run; the
-  # restart: "no" + depends_on:service_completed_successfully wiring
-  # below makes the runtime services wait for it on every up but it's
-  # idempotent (chown -R is a no-op on already-correct ownership).
-  seller-data-init:
+  # One-shot init containers that chown the named volumes to the
+  # appuser baked into each image. Docker creates fresh named volumes
+  # as root-owned; without this, sqlite init crashes at first start
+  # with "unable to open database file".
+  #
+  # Split per-image because `make build-seller-for-host` builds the
+  # provisioning image with the host's `ubuntu` uid/gid (often != 1000)
+  # to match the bind-mounted SSH key, while the storefront image
+  # stays on the default 1000:1000. Chowning by username (appuser)
+  # picks up the right uid in each image's /etc/passwd.
+  #
+  # Both exit successfully after one run; idempotent (chown -R no-ops
+  # on already-correct ownership).
+  seller-agent-data-init:
     image: arkhai:storefront
     user: "0:0"
     entrypoint: ["sh", "-c"]
-    command:
-      - >
-        mkdir -p /agent-data /provisioning-data &&
-        chown -R 1000:1000 /agent-data /provisioning-data
+    command: ["chown -R appuser:appuser /data"]
     volumes:
-      - seller-agent-data:/agent-data
-      - seller-provisioning-data:/provisioning-data
+      - seller-agent-data:/data
+    restart: "no"
+
+  seller-provisioning-data-init:
+    image: arkhai:provisioning
+    user: "0:0"
+    entrypoint: ["sh", "-c"]
+    command: ["chown -R appuser:appuser /data"]
+    volumes:
+      - seller-provisioning-data:/data
     restart: "no"
 
   seller-agent:
@@ -73,7 +82,7 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     depends_on:
-      seller-data-init:
+      seller-agent-data-init:
         condition: service_completed_successfully
     volumes:
       - ${SELLER_CONFIG_PATH:-../config.seller.toml}:/etc/arkhai/storefront.toml:ro
@@ -89,7 +98,7 @@ services:
     ports:
       - "8081:8081"
     depends_on:
-      seller-data-init:
+      seller-provisioning-data-init:
         condition: service_completed_successfully
     environment:
       - ACTIVE_PROFILES=seller
