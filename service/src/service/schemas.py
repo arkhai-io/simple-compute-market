@@ -84,24 +84,12 @@ class ActionType(str, Enum):
     execute actions need to agree on the values.
     """
 
-    # Market entry
-    RESPOND_TO_ORDER = "respond_to_order"
-    IGNORE_ORDER = "ignore_order"
+    # Listing lifecycle
     MAKE_OFFER = "make_offer"
-
-    # Negotiation
-    ACCEPT_OFFER = "accept_offer"
-    REJECT_OFFER = "reject_offer"
-    COUNTER_OFFER = "counter_offer"
-    EXIT_NEGOTIATION = "exit_negotiation"
     CLOSE_ORDER = "close_order"
 
-    # Resource management
-    RESOLVE_INTERNALLY = "resolve_internally"
-    OUTSOURCE = "outsource"
-
-    # No-op
-    NOOP = "noop"
+    # Negotiation pre-flight guard veto
+    REJECT_OFFER = "reject_offer"
 
 
 class Resource(BaseModel):

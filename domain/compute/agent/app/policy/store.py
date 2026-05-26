@@ -1,19 +1,14 @@
 """Live policy callables for the compute domain.
 
-Three flows currently fan out from `PolicyService` through this module:
+Two listing-lifecycle actions fan out from `PolicyService` through this
+module:
   * `oc.action.make_offer_from_order_create` — `ListingCreatedEvent` → `MAKE_OFFER`
   * `oc.action.close_order`                  — `ListingClosedEvent`  → `CLOSE_ORDER`
-  * `ri.action.make_offer_from_resource`     — `ResourceImbalanceEvent` (surplus) → `MAKE_OFFER`
 
-Plus two guards used inside the resource-imbalance composite:
-  * `ri.guard.trigger_is_resource_imbalance`
-  * `ri.guard.resource_present`
+Plus negotiate-request guards (`negotiate.guard.*`).
 
-The legacy negotiation / accept-offer / fulfillment / arbitration callables
-were no-ops (`if True: return None`) since the listings rename refactor and
-have been removed. Negotiation round decisions go through
-`sync_negotiation.py` directly via `NegotiationStrategy`, not the
-`@policy_callable` chain.
+Negotiation round decisions go through `sync_negotiation.py` directly
+via `NegotiationStrategy`, not the `@policy_callable` chain.
 """
 
 from __future__ import annotations
@@ -33,7 +28,6 @@ from market_storefront.models.domain_models import (
 )
 from market_policy.registry import policy_callable
 from market_storefront.utils.config import settings
-from service.clients.token import resolve_token, TokenResolutionError
 
 logger = logging.getLogger(__name__)
 
@@ -253,27 +247,6 @@ def negotiate_guard_escrow_fields_strict_match(
 
 
 # ---------------------------------------------------------------------------
-# Resource-imbalance guards (used inside the resource_imbalance composite)
-# ---------------------------------------------------------------------------
-
-@policy_callable("ri.guard.trigger_is_resource_imbalance")
-def ri_guard_trigger_is_resource_imbalance(context: DecisionContext) -> DomainAction | None:
-    et = context.event.event_type
-    trigger = et.value if hasattr(et, "value") else str(et)
-    if trigger != "resource_imbalance":
-        return None
-    return None
-
-
-@policy_callable("ri.guard.resource_present")
-def ri_guard_resource_present(context: DecisionContext) -> DomainAction | None:
-    res = getattr(context.event, "resource", None)
-    if not res:
-        return None
-    return None
-
-
-# ---------------------------------------------------------------------------
 # Listing lifecycle actions
 # ---------------------------------------------------------------------------
 
@@ -325,79 +298,3 @@ def oc_action_close_order(context: DecisionContext) -> DomainAction | None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Resource-imbalance action
-# ---------------------------------------------------------------------------
-
-@policy_callable("ri.action.make_offer_from_resource")
-def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction | None:
-    """Build a MAKE_OFFER for a resource imbalance.
-
-    Only handles `surplus` (we have spare capacity, sell it). For any
-    other imbalance type the callable returns None — deficit alerts are
-    a buy-side concern that this storefront doesn't handle. The action
-    must carry full `offer` and `demand` parameters or
-    `action_executor.execute_action` will reject it on dispatch.
-    """
-    res = getattr(context.event, "resource", None)
-    if not res or not isinstance(res, ComputeResource):
-        return None
-
-    imbalance_type = getattr(context.event, "imbalance_type", "surplus")
-    if imbalance_type != "surplus":
-        return None
-
-    # Resolve the demand-side token from CONFIG defaults; same path the
-    # auto-publish loop uses when synthesising listings from the seller's
-    # resource portfolio.
-    if not settings.pricing.default_min_price:
-        logger.info(
-            "[RI POLICY] Skipping MAKE_OFFER for surplus alert: "
-            "[seller.pricing].default_min_price not configured"
-        )
-        return None
-    if not settings.pricing.default_token_address:
-        logger.info(
-            "[RI POLICY] Skipping MAKE_OFFER: "
-            "[seller.pricing].default_token_address not configured"
-        )
-        return None
-    if not settings.chain.rpc_url:
-        logger.warning(
-            "[RI POLICY] Skipping MAKE_OFFER: chain.rpc_url unset; "
-            "cannot resolve token decimals on chain"
-        )
-        return None
-    from market_storefront.utils.config import chain_id
-    try:
-        token_meta = resolve_token(
-            settings.pricing.default_token_address,
-            rpc_url=settings.chain.rpc_url,
-            chain_id=chain_id(),
-        )
-    except TokenResolutionError as exc:
-        logger.warning(
-            "[RI POLICY] Skipping MAKE_OFFER: cannot resolve default token %s: %s",
-            settings.pricing.default_token_address, exc,
-        )
-        return None
-
-    offer_payload = res.model_dump(mode="json")
-    demand_payload = {
-        "token": {
-            "symbol": token_meta.symbol,
-            "contract_address": token_meta.contract_address,
-            "decimals": token_meta.decimals,
-        },
-        "amount": float(settings.pricing.default_min_price),
-    }
-
-    return DomainAction(
-        action_type=DomainActionType.MAKE_OFFER,
-        parameters={
-            "offer": offer_payload,
-            "demand": demand_payload,
-            "max_duration_seconds": settings.pricing.default_max_duration_seconds or None,
-            "paused": False,
-        },
-    )

@@ -29,8 +29,7 @@ from service.clients.token import ERC20TokenMetadata
 # ├── CoreDomainEvent               Base event model
 # │   ├── DomainEvent               (alias for CoreDomainEvent)
 # │   ├── ListingCreatedEvent       order_create pipeline trigger
-# │   ├── ListingClosedEvent        order_close pipeline trigger
-# │   └── ResourceImbalanceEvent    alert pipeline trigger
+# │   └── ListingClosedEvent        order_close pipeline trigger
 # └── (other core types re-aliased below)
 #     ├── Action                    = CoreDomainAction
 #     ├── DecisionContext           = CoreDecisionContext
@@ -41,9 +40,7 @@ from service.clients.token import ERC20TokenMetadata
 # │   ├── offer_resource: ComputeResource | TokenResource
 # │   └── accepted_escrows: list[AcceptedEscrow] | None
 # ├── Host                          Physical host metadata (capacity, hardware)
-# ├── ComputeResourcePortfolio      Collection of ComputeResource slices
-# └── ResourceAlertRequest          HTTP input for POST /alerts/resource
-#         └── .to_resource_imbalance_event() → ResourceImbalanceEvent
+# └── ComputeResourcePortfolio      Collection of ComputeResource slices
 #
 # Enumerations
 # ├── GPUModel          Advisory string-enum of common NVIDIA models.
@@ -491,7 +488,6 @@ class EventType(str, Enum):
 
     ORDER_CREATE = "order_create"
     ORDER_CLOSE = "order_close"
-    RESOURCE_IMBALANCE = "resource_imbalance"
     # Pre-thread guard hook: fires from /negotiate/new before any state
     # mutation. The seeded policy composite runs guards (e.g. inventory
     # match) and emits REJECT_OFFER with a reason on veto, mapped to
@@ -581,167 +577,6 @@ class NegotiationRequestedEvent(DomainEvent):
             "fields, expiration_unix). None for legacy clients."
         ),
     )
-
-
-class ResourceAlertRequest(BaseModel):
-    """Request model for resource imbalance alerts from monitoring systems.
-    
-    Validates incoming alert structure and provides conversion to ResourceImbalanceEvent.
-    All fields are required - strict validation with no defaults.
-    """
-    
-    event_type: Literal["resource_imbalance"] = Field(
-        description="Type of event (must be resource_imbalance)"
-    )
-    resource: dict[str, Any] = Field(
-        description="Resource details with required fields: gpu_model, gpu_count, sla, region"
-    )
-    value: float = Field(
-        ge=0.0,
-        le=1.0,
-        description="Utilization value (0.0-1.0) that maps to severity"
-    )
-    label: str = Field(description="Alert label (e.g., 'LOW UTILIZATION')")
-    threshold: str = Field(description="Threshold string (e.g., '<=0.30')")
-    
-    @field_validator("resource")
-    @classmethod
-    def validate_resource(cls, v: dict[str, Any]) -> dict[str, Any]:
-        """Validate resource dict has all required fields."""
-        required_fields = ["gpu_model", "gpu_count", "sla", "region"]
-        missing = [field for field in required_fields if field not in v]
-        if missing:
-            raise ValueError(f"Resource dict missing required fields: {missing}")
-        return v
-    
-    def to_resource_imbalance_event(
-        self,
-        event_id: str | None = None,
-        source: str | None = None,
-    ) -> "ResourceImbalanceEvent":
-        """Convert alert to ResourceImbalanceEvent.
-        
-        Maps value -> severity, extracts resource fields, stores label/threshold in data.
-        """
-        # Extract resource fields (gpu_model/region are open strings; the
-        # indexer's filter-spec.yaml gates which values are actually
-        # publishable on the marketplace).
-        gpu_model = str(self.resource["gpu_model"])
-        gpu_count = int(self.resource["gpu_count"])
-        sla = float(self.resource["sla"])
-        region = str(self.resource["region"])
-        
-        # Create ComputeResource
-        compute_resource = ComputeResource(
-            gpu_model=gpu_model,
-            gpu_count=gpu_count,
-            sla=sla,
-            region=region,
-        )
-        
-        # Map value to severity
-        severity = self.value
-        
-        # Determine imbalance_type from label/value (policy can override)
-        # Default to 'surplus' for low utilization, 'deficit' for high
-        imbalance_type = "surplus" if "LOW" in self.label.upper() else "deficit"
-        
-        # Create event with label and threshold in data for policy access
-        return ResourceImbalanceEvent(
-            event_id=event_id or f"alert_{uuid.uuid4()}",
-            source=source or "resource-monitor",
-            resource=compute_resource,
-            imbalance_type=imbalance_type,
-            severity=severity,
-            data={
-                "gpu_model": gpu_model,
-                "gpu_count": gpu_count,
-                "region": region,
-                "sla": sla,
-                "imbalance_type": imbalance_type,
-                "severity": severity,
-                "label": self.label,
-                "threshold": self.threshold,
-                "value": self.value,
-            },
-        )
-
-
-class ResourceImbalanceEvent(DomainEvent):
-    """Event triggered when resource imbalance is detected"""
-
-    event_type: EventType = Field(default=EventType.RESOURCE_IMBALANCE)
-    resource: ComputeResource = Field(description="The imbalanced resource")
-    imbalance_type: str = Field(description="Type of imbalance: surplus or deficit")
-    severity: float = Field(description="Severity of imbalance (0.0-1.0)")
-
-    @model_validator(mode="before")
-    @classmethod
-    def parse_resource(cls, data: Any) -> Any:
-        """Parse resource from dict to ComputeResource if needed.
-        
-        Also extracts imbalance_type and severity from nested data dict if present.
-        """
-        if not isinstance(data, dict):
-            return data
-        
-        # Handle nested data structure - extract fields from data dict
-        if "data" in data and isinstance(data["data"], dict):
-            nested_data = data["data"]
-            
-            # Extract resource from nested data
-            if "resource" in nested_data:
-                resource_dict = nested_data["resource"]
-                if isinstance(resource_dict, dict):
-                    # Validate required fields
-                    required_fields = ["gpu_model", "gpu_count", "sla", "region"]
-                    missing = [f for f in required_fields if f not in resource_dict]
-                    if missing:
-                        raise ValueError(f"Resource missing required fields: {missing}")
-                    # Convert to ComputeResource
-                    data["resource"] = ComputeResource.model_validate(resource_dict)
-            
-            # Extract imbalance_type and severity from nested data if not at top level
-            if "imbalance_type" in nested_data and "imbalance_type" not in data:
-                data["imbalance_type"] = nested_data["imbalance_type"]
-            if "severity" in nested_data and "severity" not in data:
-                data["severity"] = nested_data["severity"]
-        
-        # If resource is at top level as dict, convert it
-        elif "resource" in data and isinstance(data["resource"], dict):
-            resource_dict = data["resource"]
-            required_fields = ["gpu_model", "gpu_count", "sla", "region"]
-            missing = [f for f in required_fields if f not in resource_dict]
-            if missing:
-                raise ValueError(f"Resource missing required fields: {missing}")
-            data["resource"] = ComputeResource.model_validate(resource_dict)
-        
-        return data
-
-    @classmethod
-    def create(
-        cls,
-        event_id: str,
-        source: str,
-        resource: ComputeResource,
-        imbalance_type: str,
-        severity: float,
-    ) -> "ResourceImbalanceEvent":
-        """Create a resource imbalance event"""
-        return cls(
-            event_id=event_id,
-            source=source,
-            resource=resource,
-            imbalance_type=imbalance_type,
-            severity=severity,
-            data={
-                "gpu_model": resource.gpu_model,
-                "gpu_count": resource.gpu_count,
-                "region": resource.region,
-                "imbalance_type": imbalance_type,
-                "severity": severity,
-            },
-        )
 
 
 # =============================

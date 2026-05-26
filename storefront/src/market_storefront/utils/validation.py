@@ -1,4 +1,4 @@
-"""Validation utilities for alerts, orders, and resource extraction.
+"""Validation utilities for orders and resource extraction.
 
 TODO(refactor): This module still includes compute-domain validation helpers.
 Split domain-specific checks into the compute domain package as refactor continues.
@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 from market_storefront.models.domain_models import (
-    ResourceAlertRequest,
     Listing,
     ComputeResource,
     ComputeDomainResource,
@@ -20,11 +19,6 @@ from market_storefront.models.domain_models import (
 def validate_model(model_cls: Any, payload: dict[str, Any]) -> Any:
     """Validate a dict payload against a model class exposing model_validate()."""
     return model_cls.model_validate(payload)
-
-
-def validate_alert(alert_dict: dict[str, Any]) -> ResourceAlertRequest:
-    """Validate and convert alert dictionary to ResourceAlertRequest."""
-    return validate_model(ResourceAlertRequest, alert_dict)
 
 
 def validate_market_order(order_dict: dict[str, Any]) -> Listing:

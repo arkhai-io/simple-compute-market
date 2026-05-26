@@ -14,8 +14,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from market_storefront.models.listing_models import (
-    AdminEvaluateCloseResponse,
-    AdminEvaluateCreateResponse,
     ArbitrateRequest,
     ClaimRequest,
     CloseListingResponse,
@@ -194,18 +192,6 @@ class ListingService:
             listing_id=listing_id,
         )
 
-    async def evaluate_create(
-        self, request: CreateListingRequest, policy_svc: "PolicyService"
-    ) -> AdminEvaluateCreateResponse:
-        offer, accepted_escrows = self._parse_offer_and_escrows(request)
-        action = await policy_svc.evaluate_create_listing_policy(
-            offer, accepted_escrows, request.max_duration_seconds, request.paused
-        )
-        return AdminEvaluateCreateResponse(
-            would_create=(action == "make_offer"),
-            action=action,
-        )
-
     async def close_listing(
         self, listing_id: str, policy_svc: "PolicyService"
     ) -> CloseListingResponse:
@@ -218,15 +204,6 @@ class ListingService:
         result = await policy_svc.execute_close_listing(listing_id)
         return CloseListingResponse(
             status=result.get("status", "closed"), listing_id=listing_id,
-        )
-
-    async def evaluate_close(
-        self, listing_id: str, policy_svc: "PolicyService"
-    ) -> AdminEvaluateCloseResponse:
-        action = await policy_svc.evaluate_close_listing_policy(listing_id)
-        return AdminEvaluateCloseResponse(
-            would_close=action in ("close_order", "close_listing"),
-            action=action, listing_id=listing_id,
         )
 
     async def evaluate_negotiate(

@@ -155,31 +155,6 @@ class ArbitrateResponse(BaseModel):
     note: str = ""
 
 
-class AdminEvaluateCreateResponse(BaseModel):
-    """Response for POST /api/v1/admin/listings/evaluate-create.
-
-    Returns what the policy pipeline *would* do for a given CreateListingRequest
-    without writing anything to SQLite or the registry.
-    """
-    would_create: bool
-    action: str
-    listing_id_preview: str | None = None
-    policy_used: str | None = None
-    reason: str | None = None
-
-
-class AdminEvaluateCloseResponse(BaseModel):
-    """Response for POST /api/v1/admin/listings/{listing_id}/evaluate-close.
-
-    Returns what the policy pipeline *would* do for a close event.
-    """
-    would_close: bool
-    action: str
-    listing_id: str
-    policy_used: str | None = None
-    reason: str | None = None
-
-
 class EvaluateNegotiateRequest(BaseModel):
     """Body for POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate."""
     their_proposed_price: float = Field(

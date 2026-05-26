@@ -141,9 +141,6 @@ async def execute_action(
                             buyers initiate negotiation themselves.
         CLOSE_ORDER       — mark an order closed locally + in the
                             registry.
-        RESOLVE_INTERNALLY — agent rebalances its own pool (noop-ish).
-        REJECT_OFFER      — no-op stub.
-        NOOP              — explicit no-op.
 
     Negotiation, settlement, fulfillment, and claim used to be policy-
     dispatched actions too; they're now either closed functions called
@@ -246,20 +243,6 @@ async def execute_action(
             outcome["result"] = result
             outcome["message"] = result.get("message", "Order closed")
 
-        case ActionType.RESOLVE_INTERNALLY.value:
-            rebalance_internal_resources()
-            outcome["result"] = {"rebalanced": True}
-            outcome["message"] = "Resources rebalanced internally"
-
-        case ActionType.REJECT_OFFER.value:
-            reject_offer()
-            outcome["result"] = {"rejected": True}
-            outcome["message"] = "Offer rejected"
-
-        case ActionType.NOOP.value:
-            outcome["result"] = None
-            outcome["message"] = "No operation"
-
         case _:
             logger.warning("[ACTION] Unhandled action type %s", action_type_str)
             outcome["result"] = None
@@ -268,26 +251,6 @@ async def execute_action(
 
     return outcome
 
-
-
-def rebalance_internal_resources() -> bool:
-    """Reallocate internal resources to optimize usage.
-
-    Returns:
-        True if the process was successfully initiated.
-    """
-    logger.info("[TOOL] Rebalancing resources...")
-    return True
-
-
-def reject_offer() -> bool:
-    """Reject a received offer.
-
-    Returns:
-        True if the rejection was successfully communicated.
-    """
-    logger.info("[TOOL] Rejecting received offer.")
-    return True
 
 
 async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any]:

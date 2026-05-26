@@ -48,11 +48,7 @@ class DealState:
     _resources_seeded: bool = False
     _alkahest_configured: bool = False
     _provisioning_storefront_ok: bool = False
-    # Phase 1 — policy pipeline
-    _policy_dry_run_passed: bool = False
-    _policies_seeded: bool = False
     # Phase 2 — listing creation (paused)
-    _evaluate_create_passed: bool = False
     seller_listing_id: Optional[str] = None
     # Phase 3 — registry publication
     _registry_validate_passed: bool = False

@@ -21,8 +21,6 @@ class ComputePolicySeeder:
                              action (registry publish, no fan-out)
         ORDER_CLOSE        — POST /listings/close  → policy → close_order
                              action (local + registry unpublish)
-        RESOURCE_IMBALANCE — POST /alerts/resource → policy → rebalance
-                             (resource poller / reactive rebalance path)
 
     Everything else (negotiation, settlement, fulfillment, claim) is now
     handled by dedicated sync endpoints (/negotiate/*, /settle/*,
@@ -31,7 +29,6 @@ class ComputePolicySeeder:
     """
 
     DEFAULT_POLICY_TRIGGERS = {
-        EventType.RESOURCE_IMBALANCE.value,
         EventType.ORDER_CREATE.value,
         EventType.ORDER_CLOSE.value,
         EventType.NEGOTIATION_REQUESTED.value,
@@ -44,25 +41,6 @@ class ComputePolicySeeder:
 
     async def ensure_default_policies(self) -> None:
         """Ensure default compute-domain policies are saved."""
-        try:
-            await self._policy_store.save_policy(
-                agent_id=self._agent_id,
-                policy_name="resource_imbalance_default_v1",
-                trigger_type=EventType.RESOURCE_IMBALANCE.value,
-                callable_ref="resource_imbalance.default.v1",
-            )
-            await self._sqlite_client.save_policy_composite(
-                agent_id=self._agent_id,
-                policy_name="resource_imbalance.default.v1",
-                components=[
-                    "ri.guard.trigger_is_resource_imbalance",
-                    "ri.guard.resource_present",
-                    "ri.action.make_offer_from_resource",
-                ],
-            )
-        except Exception as e:
-            logger.warning(f"[POLICY SEED] Failed to save resource_imbalance policy: {e}")
-
         try:
             await self._policy_store.save_policy(
                 agent_id=self._agent_id,

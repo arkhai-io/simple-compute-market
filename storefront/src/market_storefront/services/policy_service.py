@@ -24,9 +24,6 @@ evaluate_listing_create_policy_from_raw(offer_raw, demand_raw, max_duration)
     -> PolicyEvaluateResponse
     Dry-run policy evaluation from raw dicts. Used by
     POST /api/v1/system/policy/evaluate. No side effects.
-
-handle_resource_alert(alert_request) -> dict
-    Process a ResourceAlertRequest through policy dispatch.
 """
 from __future__ import annotations
 
@@ -44,7 +41,6 @@ from market_storefront.models.domain_models import (
     ListingClosedEvent,
     ListingCreatedEvent,
     NegotiationRequestedEvent,
-    ResourceAlertRequest,
 )
 from service.schemas import ActionType as DomainActionType
 from market_storefront.models.system_models import PolicyEvaluateResponse
@@ -305,35 +301,6 @@ class PolicyService:
             resolvable=True,
             reason=None,
         )
-
-    # ------------------------------------------------------------------
-    # Resource alert
-    # ------------------------------------------------------------------
-
-    async def handle_resource_alert(self, alert_request: ResourceAlertRequest) -> dict:
-        """Process a ResourceAlertRequest through policy dispatch."""
-        event_id = f"alert_{uuid.uuid4()}"
-        try:
-            event = alert_request.to_resource_imbalance_event(
-                event_id=event_id, source="resource-monitor"
-            )
-        except Exception as exc:
-            raise ValueError(f"Failed to build ResourceImbalanceEvent: {exc}") from exc
-
-        action = await self._consult_policy(event)
-        if not action:
-            response = alert_request.model_dump(mode="json")
-            response["root_agent_response"] = "No policy matched for resource alert."
-            return response
-
-        outcome = await execute_action(
-            action=action, ctx=None, alkahest_client=self._alkahest
-        )
-        await self._record_decision(event, action)
-
-        response = alert_request.model_dump(mode="json")
-        response["root_agent_response"] = outcome.get("message") or "Alert processed."
-        return response
 
     # ------------------------------------------------------------------
     # Private helpers

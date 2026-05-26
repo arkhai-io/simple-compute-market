@@ -4,7 +4,7 @@ arkhai_e2e_tests/models/agent.py
 Typed dataclasses for the storefront REST API request and response shapes.
 
 Derived from:
-  - pydantic_models.py  (ListingCreatedEvent, ListingClosedEvent, ResourceAlertRequest)
+  - pydantic_models.py  (ListingCreatedEvent, ListingClosedEvent)
   - agent.py            (_run_create_order_flow, _run_close_order_flow response dicts,
                          serve_erc8004_registration_file response shape)
 
@@ -17,7 +17,6 @@ for close_listing it is the listing_id string.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 
 # ---------------------------------------------------------------------------
@@ -57,49 +56,3 @@ class AgentOrderCloseRequest:
         return {"listing_id": self.listing_id}
 
 
-# ---------------------------------------------------------------------------
-# Resource alert  (POST /alerts/resource)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ResourceAlertRequest:
-    """
-    Request body for POST /alerts/resource.
-
-    Maps to ResourceAlertRequest in pydantic_models.py.
-    event_type must be "resource_imbalance".
-    value is a float 0.0-1.0; label / threshold describe the condition.
-    """
-    event_type: str
-    resource: dict[str, Any]   # keys: gpu_model, gpu_count, sla, region
-    value: float
-    label: str
-    threshold: str
-
-    def to_dict(self) -> dict:
-        return {
-            "event_type": self.event_type,
-            "resource": self.resource,
-            "value": self.value,
-            "label": self.label,
-            "threshold": self.threshold,
-        }
-
-    @classmethod
-    def surplus(
-        cls,
-        *,
-        gpu_model: str,
-        gpu_count: int,
-        sla: float,
-        region: str,
-        value: float = 0.1,
-    ) -> "ResourceAlertRequest":
-        """Convenience factory for a low-utilization (surplus) alert."""
-        return cls(
-            event_type="resource_imbalance",
-            resource={"gpu_model": gpu_model, "gpu_count": gpu_count, "sla": sla, "region": region},
-            value=value,
-            label="LOW UTILIZATION",
-            threshold="<=0.30",
-        )
