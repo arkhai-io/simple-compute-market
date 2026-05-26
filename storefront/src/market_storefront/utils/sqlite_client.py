@@ -3229,7 +3229,9 @@ class SQLiteClient:
                     "negotiation_id", "our_listing_id", "buyer_address",
                     "status", "terminal_state",
                     "requested_duration_seconds",
-                    "agreed_price", "agreed_duration_seconds",
+                    # Column stays ``agreed_price``; wire field is
+                    # ``agreed_amount`` (absolute amount in base units).
+                    "agreed_amount", "agreed_duration_seconds",
                     "agreed_at", "created_at", "updated_at",
                 ]
                 return [dict(zip(keys, row)) for row in cur.fetchall()]
@@ -3275,7 +3277,10 @@ class SQLiteClient:
                     "negotiation_id", "our_listing_id", "their_listing_id",
                     "our_agent_id", "their_agent_id", "status", "terminal_state",
                     "requested_duration_seconds",
-                    "agreed_price", "agreed_duration_seconds", "agreed_at",
+                    # Column is named ``agreed_price`` (kept from before the
+                    # per-hour → absolute refactor); the wire field is
+                    # ``agreed_amount`` since it holds an absolute amount.
+                    "agreed_amount", "agreed_duration_seconds", "agreed_at",
                     "created_at", "updated_at",
                 ]
                 thread = dict(zip(thread_keys, thread_row))

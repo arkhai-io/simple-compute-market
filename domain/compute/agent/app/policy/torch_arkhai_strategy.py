@@ -30,9 +30,11 @@ from market_policy.negotiation_middleware import (
     NegotiationDecision,
     NegotiationRound,
     NegotiationStep,
+    _amount_from_proposal,
     our_previous_counters,
     register_negotiation_middleware,
-    their_proposed_price,
+    their_last_proposal,
+    their_proposed_amount,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,10 +60,15 @@ class _RoundInput:
     Kept private to this module since the middleware framework's
     ``NegotiationContext`` carries the same information in a different
     layout; this struct is just an adapter for the model's input shape.
+
+    Amounts are absolute payment values in base units of the escrow's
+    payment token; the middleware framework converts any per-hour rate
+    to absolute at round 0 by multiplying by duration / 3600.
     """
     direction: str
-    our_reference_price: float
-    their_proposed_price: float | None
+    our_reference_amount: float
+    their_proposed_amount: float | None
+    their_pinned_proposal: dict[str, Any] | None
     history: list[NegotiationRound]
     max_rounds: int
 
@@ -170,10 +177,10 @@ class TorchArkhaiStrategy:
         # base + node_types + 3: negotiation_count_norm
         obs[0, base + node_types + 3] = min(1.0, round_num / 10.0)
 
-        # base + node_types + 4: price_ratio = their / our_reference,
+        # base + node_types + 4: amount_ratio = their / our_reference,
         # clipped [0, 2]. The most informative feature for negotiation.
-        if ri.their_proposed_price is not None and ri.our_reference_price > 0:
-            ratio = float(ri.their_proposed_price) / float(ri.our_reference_price)
+        if ri.their_proposed_amount is not None and ri.our_reference_amount > 0:
+            ratio = float(ri.their_proposed_amount) / float(ri.our_reference_amount)
             obs[0, base + node_types + 4] = min(2.0, max(0.0, ratio))
 
         return obs
@@ -183,9 +190,12 @@ class TorchArkhaiStrategy:
     # ------------------------------------------------------------------
 
     def decide(self, ri: _RoundInput) -> NegotiationDecision:
-        # Open with our reference on the very first call (no peer price yet).
-        if ri.their_proposed_price is None:
-            return NegotiationDecision(action="counter", price=ri.our_reference_price)
+        # Open with our reference on the very first call (no peer amount yet).
+        if ri.their_proposed_amount is None:
+            return NegotiationDecision(
+                action="counter",
+                proposal=_proposal_with_amount(ri.their_pinned_proposal, int(round(ri.our_reference_amount))),
+            )
 
         our_counters = ri.our_previous_counters
         if len(our_counters) >= ri.max_rounds:
@@ -220,32 +230,66 @@ class TorchArkhaiStrategy:
             logger.error("[NEGOTIATION][RL] Inference failed: %s", exc)
             return NegotiationDecision(action="exit", reason=f"inference_failed:{exc}")
 
-        price_idx, _sell_flag = extract_actions_from_logits(output)
-        proposed = ri.our_reference_price * (1.0 + _MULTIPLIERS[price_idx])
+        amount_idx, _sell_flag = extract_actions_from_logits(output)
+        proposed = ri.our_reference_amount * (1.0 + _MULTIPLIERS[amount_idx])
 
-        their = ri.their_proposed_price
-        our = ri.our_reference_price
+        their = ri.their_proposed_amount
+        our = ri.our_reference_amount
 
         if ri.direction == "maximize":
-            # Seller: peer price > our floor is good. Accept if close to
+            # Seller: peer amount > our floor is good. Accept if close to
             # proposed; counter if reasonable; exit if too low.
             if their >= proposed * (1 - self._conv):
-                return NegotiationDecision(action="accept", price=their, reason="convergence")
+                return NegotiationDecision(
+                    action="accept",
+                    proposal=_proposal_with_amount(ri.their_pinned_proposal, int(round(their))),
+                    reason="convergence",
+                )
             if their >= our / self._reasonable:
-                return NegotiationDecision(action="counter", price=proposed)
+                return NegotiationDecision(
+                    action="counter",
+                    proposal=_proposal_with_amount(ri.their_pinned_proposal, int(round(proposed))),
+                )
             return NegotiationDecision(action="exit", reason="price_unreasonable")
 
         if ri.direction == "minimize":
-            # Buyer: peer price < our ceiling is good. Cap counter at our ceiling.
+            # Buyer: peer amount < our ceiling is good. Cap counter at our ceiling.
             if their <= proposed * (1 + self._conv):
-                return NegotiationDecision(action="accept", price=their, reason="convergence")
+                return NegotiationDecision(
+                    action="accept",
+                    proposal=_proposal_with_amount(ri.their_pinned_proposal, int(round(their))),
+                    reason="convergence",
+                )
             if their <= our * self._reasonable:
                 if proposed > our:
                     proposed = our
-                return NegotiationDecision(action="counter", price=proposed)
+                return NegotiationDecision(
+                    action="counter",
+                    proposal=_proposal_with_amount(ri.their_pinned_proposal, int(round(proposed))),
+                )
             return NegotiationDecision(action="exit", reason="price_unreasonable")
 
         return NegotiationDecision(action="reject", reason=f"unknown_direction:{ri.direction!r}")
+
+
+def _proposal_with_amount(
+    skeleton: dict[str, Any] | None, amount: int,
+) -> dict[str, Any]:
+    """Build a proposal dict by overlaying ``amount`` on the peer's
+    skeleton.
+
+    Mirror of the helper in ``sync_negotiation`` / ``buyer_client``: the
+    seller (or buyer, on the buyer side) preserves every field the peer
+    set and only varies ``fields["amount"]``. Falls back to a minimal
+    ``{"fields": {"amount": …}}`` when no skeleton is available (e.g.
+    the very first opening counter before any peer proposal arrived).
+    """
+    if not isinstance(skeleton, dict):
+        return {"fields": {"amount": int(amount)}}
+    pinned_fields = skeleton.get("fields") if isinstance(skeleton.get("fields"), dict) else {}
+    merged = dict(pinned_fields) if isinstance(pinned_fields, dict) else {}
+    merged["amount"] = int(amount)
+    return {**skeleton, "fields": merged}
 
 
 _singleton: TorchArkhaiStrategy | None = None
@@ -272,8 +316,9 @@ def rl_middleware(
     """
     ri = _RoundInput(
         direction=context.direction,
-        our_reference_price=context.our_reference_price,
-        their_proposed_price=their_proposed_price(history),
+        our_reference_amount=context.our_reference_amount,
+        their_proposed_amount=their_proposed_amount(history),
+        their_pinned_proposal=their_last_proposal(history) or context.our_escrow_proposal,
         history=history,
         max_rounds=context.max_rounds,
     )

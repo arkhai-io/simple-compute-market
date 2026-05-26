@@ -679,17 +679,26 @@ class TestStage05a_EvaluateNegotiate:
 
         result = storefront_admin_client.evaluate_negotiate(
             deal_state.seller_listing_id,
-            their_proposed_price=BUYER_INITIAL_PRICE,
+            proposal={
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "0" * 40,
+                "fields": {
+                    "amount": BUYER_INITIAL_PRICE,
+                    "token": DEMAND_RESOURCE["token"]["contract_address"],
+                },
+                "expiration_unix": 2_000_000_000,
+            },
+            requested_duration_seconds=DURATION_HOURS * 3600,
             buyer_address=buyer_config["wallet_address"],
         )
         assert result.would_negotiate, (
             f"Strategy would exit at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}.\n"
             f"decision={result.decision!r} reason={result.decision_reason!r}\n"
-            f"our_reference_price={result.our_reference_price} "
-            f"their_proposed_price={result.their_proposed_price}\n"
+            f"our_reference_amount={result.our_reference_amount} "
+            f"their_proposed_amount={result.their_proposed_amount}\n"
             "If reason is 'torch_unavailable': set policy_mode='bisection' in config.toml.\n"
             "If reason is 'price_unreasonable': increase BUYER_INITIAL_PRICE to >= "
-            f"{result.our_reference_price} (seller floor)."
+            f"{result.our_reference_amount} (seller floor)."
         )
         assert result.decision == "counter", (
             f"Strategy accepted at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}. "
@@ -767,13 +776,13 @@ class TestStage05b_BuyerCliDrivesNegotiation:
             f"reason={terminal.get('reason')!r}"
         )
         neg_id = terminal.get("negotiation_id")
-        agreed_price = terminal.get("agreed_price")
+        agreed_amount = terminal.get("agreed_amount")
         assert neg_id, f"run_ended missing negotiation_id: {terminal!r}"
-        assert agreed_price is not None, f"run_ended missing agreed_price: {terminal!r}"
+        assert agreed_amount is not None, f"run_ended missing agreed_amount: {terminal!r}"
 
         deal_state.buyer_run_id = run.run_id
         deal_state.negotiation_id = str(neg_id)
-        deal_state.agreed_price = float(agreed_price)
+        deal_state.agreed_amount = int(agreed_amount)
         deal_state.negotiation_terminal_state = "success"
 
         # Seller-side sanity: the same round_decided event the synthetic
@@ -790,7 +799,7 @@ class TestStage05b_BuyerCliDrivesNegotiation:
         log.info(
             "[05b] `market negotiate` run=%s agreed at %s after %s round(s); "
             "seller stage events: %d round_decided",
-            run.run_id, agreed_price, terminal.get("rounds"), len(round_events),
+            run.run_id, agreed_amount, terminal.get("rounds"), len(round_events),
         )
 
 
@@ -815,7 +824,7 @@ class TestStage07_ArmProvisioningGate:
         escrow under the buyer's wallet, the same way a buyer would in
         production. The test verifies the resulting uid in 07b.
         """
-        require_state(deal_state, "negotiation_terminal_state", "agreed_price",
+        require_state(deal_state, "negotiation_terminal_state", "agreed_amount",
                       "_provisioning_mock_mode")
 
         provisioning_test_client.add_mock_rule(
@@ -899,13 +908,13 @@ class TestStage07b_VerifyEscrow:
         Exercises getRecordFromChain in isolation: reads the escrow from chain
         and confirms token, amount, and seller recipient match. No DB writes.
         """
-        require_state(deal_state, "real_escrow_uid", "seller_listing_id", "agreed_price",
+        require_state(deal_state, "real_escrow_uid", "seller_listing_id", "agreed_amount",
                       "_alkahest_configured")
 
         result = storefront_admin_client.verify_settle(
             deal_state.real_escrow_uid,
             seller_wallet=seller_wallet,
-            agreed_price=deal_state.agreed_price,
+            agreed_price=deal_state.agreed_amount,
             agreed_duration_seconds=DURATION_HOURS * 3600,
             listing_id=deal_state.seller_listing_id,
         )

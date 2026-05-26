@@ -58,7 +58,7 @@ class DealState:
     _evaluate_negotiate_passed: bool = False
     negotiation_id: Optional[str] = None
     negotiation_terminal_state: Optional[str] = None
-    agreed_price: Optional[float] = None
+    agreed_amount: Optional[int] = None
     # Buyer-CLI run-log identity from `market negotiate`; consumed by
     # `market settle --from <run_id>` in phase 08. Sentinel for the
     # "negotiation produced a usable agreed outcome" precondition.

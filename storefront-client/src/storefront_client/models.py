@@ -429,7 +429,7 @@ class NegotiationSummary:
     buyer_address: str = ""
     status: str = ""
     terminal_state: str | None = None
-    agreed_price: float | None = None
+    agreed_amount: int | None = None
     agreed_duration_seconds: int | None = None
     requested_duration_seconds: int | None = None
     created_at: str = ""
@@ -439,7 +439,7 @@ class NegotiationSummary:
     def from_dict(cls, d: dict) -> "NegotiationSummary":
         known = {
             "negotiation_id", "our_listing_id", "buyer_address", "status",
-            "terminal_state", "agreed_price", "agreed_duration_seconds",
+            "terminal_state", "agreed_amount", "agreed_duration_seconds",
             "requested_duration_seconds", "created_at",
         }
         return cls(
@@ -448,7 +448,7 @@ class NegotiationSummary:
             buyer_address=d.get("buyer_address", ""),
             status=d.get("status", ""),
             terminal_state=d.get("terminal_state"),
-            agreed_price=d.get("agreed_price"),
+            agreed_amount=int(d["agreed_amount"]) if d.get("agreed_amount") is not None else None,
             agreed_duration_seconds=d.get("agreed_duration_seconds"),
             requested_duration_seconds=d.get("requested_duration_seconds"),
             created_at=d.get("created_at", ""),
@@ -489,7 +489,7 @@ class NegotiationDetail:
     their_agent_id: str = ""
     status: str = ""
     terminal_state: str | None = None
-    agreed_price: float | None = None
+    agreed_amount: int | None = None
     agreed_duration_seconds: int | None = None
     requested_duration_seconds: int | None = None
     round_count: int = 0
@@ -502,7 +502,7 @@ class NegotiationDetail:
     def from_dict(cls, d: dict) -> "NegotiationDetail":
         known = {
             "negotiation_id", "our_listing_id", "their_agent_id", "status",
-            "terminal_state", "agreed_price", "agreed_duration_seconds",
+            "terminal_state", "agreed_amount", "agreed_duration_seconds",
             "requested_duration_seconds", "round_count", "messages", "stage_events",
             "escrows",
         }
@@ -512,7 +512,7 @@ class NegotiationDetail:
             their_agent_id=d.get("their_agent_id", ""),
             status=d.get("status", ""),
             terminal_state=d.get("terminal_state"),
-            agreed_price=d.get("agreed_price"),
+            agreed_amount=int(d["agreed_amount"]) if d.get("agreed_amount") is not None else None,
             agreed_duration_seconds=d.get("agreed_duration_seconds"),
             requested_duration_seconds=d.get("requested_duration_seconds"),
             round_count=d.get("round_count", 0),

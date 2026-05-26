@@ -667,17 +667,26 @@ class TestStage05a_EvaluateNegotiate:
 
         result = storefront_admin_client.evaluate_negotiate(
             deal_state.seller_listing_id,
-            their_proposed_price=BUYER_INITIAL_PRICE,
+            proposal={
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "0" * 40,
+                "fields": {
+                    "amount": BUYER_INITIAL_PRICE,
+                    "token": DEMAND_RESOURCE["token"]["contract_address"],
+                },
+                "expiration_unix": 2_000_000_000,
+            },
+            requested_duration_seconds=DURATION_HOURS * 3600,
             buyer_address=buyer_config["wallet_address"],
         )
         assert result.would_negotiate, (
             f"Strategy would exit at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}.\n"
             f"decision={result.decision!r} reason={result.decision_reason!r}\n"
-            f"our_reference_price={result.our_reference_price} "
-            f"their_proposed_price={result.their_proposed_price}\n"
+            f"our_reference_amount={result.our_reference_amount} "
+            f"their_proposed_amount={result.their_proposed_amount}\n"
             "If reason is 'torch_unavailable': set policy_mode='bisection' in config.toml.\n"
             "If reason is 'price_unreasonable': increase BUYER_INITIAL_PRICE to >= "
-            f"{result.our_reference_price} (seller floor)."
+            f"{result.our_reference_amount} (seller floor)."
         )
         assert result.decision == "counter", (
             f"Strategy accepted at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}. "
@@ -706,7 +715,7 @@ class TestStage05b_NegotiationStartsAndVisible:
         resp = storefront_client.negotiate_new(
             listing_id=deal_state.seller_listing_id,
             buyer_address=buyer_config["wallet_address"],
-            initial_price=BUYER_INITIAL_PRICE,
+            initial_amount=BUYER_INITIAL_PRICE,
             duration_seconds=DURATION_HOURS * 3600,
             token=DEMAND_RESOURCE["token"]["contract_address"],
         )
@@ -738,7 +747,7 @@ class TestStage05b_NegotiationStartsAndVisible:
         assert round0.data.get("decision") == "counter", (
             f"Expected seller to counter at round 0, got decision={round0.data.get('decision')!r}. "
             f"reason={round0.data.get('decision_reason')!r}. "
-            f"our_price={round0.data.get('our_price')} their_price={round0.data.get('their_price')}.\n"
+            f"our_price={round0.data.get('our_amount')} their_price={round0.data.get('their_amount')}.\n"
             "If decision='accept': BUYER_INITIAL_PRICE is at or above the seller's floor — "
             "lower it so round 0 counters rather than accepts immediately "
             "(force_accept in 06b will 409 on an already-terminal negotiation).\n"
@@ -787,15 +796,13 @@ class TestStage06b_ForceAcceptAndTerminal:
         )
 
         agreed = (BUYER_INITIAL_PRICE + BUYER_MAX_PRICE) // 2
-        result = storefront_admin_client.force_accept_negotiation(
-            deal_state.seller_listing_id,
+        result = storefront_admin_client.force_accept_negotiation(deal_state.seller_listing_id,
             deal_state.negotiation_id,
-            price=agreed,
-        )
+            amount=agreed,)
         assert result.action == "accept", (
             f"Unexpected action from force-accept: {result}"
         )
-        assert result.price == agreed
+        assert result.amount == agreed
 
         # Confirm terminal state
         detail = storefront_admin_client.get_negotiation(
@@ -804,13 +811,13 @@ class TestStage06b_ForceAcceptAndTerminal:
         assert detail.terminal_state == "success", (
             f"Expected terminal_state=success, got {detail.terminal_state!r}"
         )
-        assert detail.agreed_price == agreed
+        assert detail.agreed_amount == agreed
         # No escrow rows yet — settlement (phase 7+) is what writes them.
         assert detail.escrows == [], (
             f"Expected escrows=[] before phase 7, got {detail.escrows!r}"
         )
 
-        deal_state.agreed_price = agreed
+        deal_state.agreed_amount = agreed
         deal_state.negotiation_terminal_state = detail.terminal_state
         log.info("[06b] Force-accepted at price %d; terminal_state=%s",
                  agreed, detail.terminal_state)
@@ -842,7 +849,7 @@ class TestStage07_OnChainEscrowAndProvGate:
         job before it reports success, giving stage 08b a window to assert
         queued/running before stage 09a releases it.
         """
-        require_state(deal_state, "negotiation_terminal_state", "agreed_price",
+        require_state(deal_state, "negotiation_terminal_state", "agreed_amount",
                       "_provisioning_mock_mode")
 
         from tests.e2e.roles.scenarios.escrow_helper import create_buyer_escrow
@@ -850,7 +857,7 @@ class TestStage07_OnChainEscrowAndProvGate:
         escrow_uid = create_buyer_escrow(
             buyer_private_key=buyer_config["private_key"],
             seller_wallet_address=seller_wallet,
-            agreed_price=float(deal_state.agreed_price),
+            agreed_amount=int(deal_state.agreed_amount),
             duration_seconds=DURATION_HOURS * 3600,
             token_contract_address=DEMAND_RESOURCE["token"]["contract_address"],
             rpc_url=buyer_config["rpc_url"],
@@ -890,13 +897,13 @@ class TestStage07b_VerifyEscrow:
         Exercises getRecordFromChain in isolation: reads the escrow from chain
         and confirms token, amount, and seller recipient match. No DB writes.
         """
-        require_state(deal_state, "real_escrow_uid", "seller_listing_id", "agreed_price",
+        require_state(deal_state, "real_escrow_uid", "seller_listing_id", "agreed_amount",
                       "_alkahest_configured")
 
         result = storefront_admin_client.verify_settle(
             deal_state.real_escrow_uid,
             seller_wallet=seller_wallet,
-            agreed_price=deal_state.agreed_price,
+            agreed_price=deal_state.agreed_amount,
             agreed_duration_seconds=DURATION_HOURS * 3600,
             listing_id=deal_state.seller_listing_id,
         )

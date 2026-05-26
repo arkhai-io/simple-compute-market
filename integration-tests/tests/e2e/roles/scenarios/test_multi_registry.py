@@ -635,7 +635,7 @@ class TestStage06a_NegotiateWithBob:
             resp = buyer_to_bob.negotiate_new(
                 listing_id=mr_state.bob_listing_id,
                 buyer_address=buyer_config["wallet_address"],
-                initial_price=BUYER_INITIAL_PRICE,
+                initial_amount=BUYER_INITIAL_PRICE,
                 duration_seconds=DURATION_HOURS * 3600,
                 token=DEMAND_RESOURCE["token"]["contract_address"],
             )
@@ -677,7 +677,7 @@ class TestStage06b_NegotiateWithAlice:
             resp = buyer_to_alice.negotiate_new(
                 listing_id=mr_state.alice_listing_id,
                 buyer_address=buyer_config["wallet_address"],
-                initial_price=BUYER_INITIAL_PRICE,
+                initial_amount=BUYER_INITIAL_PRICE,
                 duration_seconds=DURATION_HOURS * 3600,
                 token=DEMAND_RESOURCE["token"]["contract_address"],
             )

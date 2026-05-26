@@ -329,7 +329,7 @@ class TestForceAccept:
         assert result.source == "admin_force_accept"
         detail = await c.get_negotiation("ord-fa2", "neg-fa2")
         assert detail.terminal_state == "success"
-        assert detail.agreed_price == 8500
+        assert detail.agreed_amount == 8500
 
     async def test_force_accept_missing_price_raises(self, client):
         c, db = client
