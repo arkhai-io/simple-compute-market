@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 BuildEscrowTermsFn = Callable[
     [EscrowProposal, str, int, int], list[EscrowTerms],
 ]
-"""``(proposal, seller_wallet, agreed_price, duration_seconds) -> list[EscrowTerms]``.
+"""``(proposal, seller_wallet, agreed_amount, duration_seconds) -> list[EscrowTerms]``.
 
 Materializes the seller-confirmed proposal (echoed back in the
 negotiation response) into the canonical EscrowTerms list. The list
@@ -65,7 +65,7 @@ def make_buyer_payment_escrow_terms_fn(
     chain_name: str,
     addr_config_path: Optional[str],
 ) -> BuildEscrowTermsFn:
-    """Build a ``(proposal, seller_wallet, agreed_price, duration_seconds)
+    """Build a ``(proposal, seller_wallet, agreed_amount, duration_seconds)
     -> [EscrowTerms]`` closure.
 
     The closure delegates to the canonical
@@ -77,11 +77,17 @@ def make_buyer_payment_escrow_terms_fn(
     supplies the token; ``fields["arbiter"]`` (when present) overrides
     the default ``recipient_arbiter``. The closure's chain config is
     purely local plumbing (how to talk to the chain), not negotiated.
+
+    ``agreed_amount`` is the absolute payment total in base units of the
+    payment token — the negotiated artifact, already multiplied out from
+    any per-hour rate. ``duration_seconds`` is carried into
+    ``AgreementContext`` for codecs that bind the lease window into
+    their demand.
     """
     def _build(
         proposal: EscrowProposal,
         seller_wallet_address: str,
-        agreed_price: float,
+        agreed_amount: int,
         duration_seconds: int,
     ) -> list[EscrowTerms]:
         # Late imports — alkahest is heavyweight; tests that mock this
@@ -109,7 +115,7 @@ def make_buyer_payment_escrow_terms_fn(
 
         obligation_data = build_payment_obligation_data(
             seller_wallet=seller_wallet_address,
-            agreed_price=agreed_price,
+            agreed_amount=int(agreed_amount),
             duration_seconds=duration_seconds,
             token_contract_address=token,
             chain_name=chain_name,

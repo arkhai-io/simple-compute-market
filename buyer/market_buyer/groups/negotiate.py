@@ -443,7 +443,7 @@ def register(app: typer.Typer) -> None:
         run_log.end(
             outcome.status,
             negotiation_id=outcome.negotiation_id,
-            agreed_price=outcome.agreed_price,
+            agreed_amount=outcome.agreed_amount,
             rounds=outcome.rounds,
             reason=outcome.reason,
         )
@@ -456,8 +456,8 @@ def register(app: typer.Typer) -> None:
         result_table.add_row("Status", outcome.status)
         if outcome.negotiation_id:
             result_table.add_row("Negotiation", outcome.negotiation_id)
-        if outcome.agreed_price is not None:
-            result_table.add_row("Agreed price", str(outcome.agreed_price))
+        if outcome.agreed_amount is not None:
+            result_table.add_row("Agreed price", str(outcome.agreed_amount))
         if outcome.reason:
             result_table.add_row("Reason", outcome.reason)
         result_table.add_row("Rounds", str(outcome.rounds))

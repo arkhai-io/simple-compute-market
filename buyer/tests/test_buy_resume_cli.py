@@ -111,12 +111,12 @@ def _seed_agreed_negotiation(seller_url: str, listing_id: str) -> str:
     log.event(
         "negotiation_completed",
         status="agreed",
-        agreed_price=70,
+        agreed_amount=70,
         rounds=0,
         negotiation_id="neg-done",
         listing_id=listing_id,
     )
-    log.end("agreed", negotiation_id="neg-done", agreed_price=70, rounds=0)
+    log.end("agreed", negotiation_id="neg-done", agreed_amount=70, rounds=0)
     return log.run_id
 
 
@@ -253,7 +253,7 @@ class TestBuyFrom:
         assert "negotiation_completed" in ev_names
         agreed = next(e for e in events if e["event"] == "negotiation_completed")
         assert agreed["status"] == "agreed"
-        assert agreed["agreed_price"] == 70
+        assert agreed["agreed_amount"] == 70
 
     def test_buy_from_already_agreed_skips_negotiation(self, runner, monkeypatch):
         """If the run-log shows an agreed outcome, --from goes

@@ -34,7 +34,7 @@ def _build_escrow_proposal():
     return lambda _match: _escrow_proposal()
 
 
-def _stub_build_escrow_terms(proposal, seller_wallet, agreed_price, duration_seconds):
+def _stub_build_escrow_terms(proposal, seller_wallet, agreed_amount, duration_seconds):
     return [EscrowTerms(
         maker="buyer",
         escrow_contract="0x" + "ee" * 20,
@@ -42,7 +42,7 @@ def _stub_build_escrow_terms(proposal, seller_wallet, agreed_price, duration_sec
             "arbiter": "0x" + "cd" * 20,
             "demand": "0x" + "00" * 32,
             "token": proposal.fields["token"],
-            "amount": int(float(agreed_price) * max(duration_seconds, 1) / 3600),
+            "amount": int(float(agreed_amount) * max(duration_seconds, 1) / 3600),
         },
         expiration_unix=proposal.expiration_unix,
     )]
@@ -146,7 +146,7 @@ class TestRunBuyDerivePrices:
             seen_prices.append((kwargs["initial_price"], kwargs["max_price"]))
             from market_buyer.buyer_client import NegotiationOutcome
             return NegotiationOutcome(
-                status="exited", agreed_price=None, rounds=1, reason="exited",
+                status="exited", agreed_amount=None, rounds=1, reason="exited",
                 negotiation_id="neg-1", duration_seconds=3600,
             )
 
@@ -237,7 +237,7 @@ def _agree_negotiate_factory(price: int = 100):
         provision_terms = kwargs.get("provision_terms")
         escrow_proposal = kwargs.get("escrow_proposal")
         return NegotiationOutcome(
-            status="agreed", agreed_price=price, rounds=2, reason=None,
+            status="agreed", agreed_amount=price, rounds=2, reason=None,
             negotiation_id="neg-id",
             duration_seconds=(
                 provision_terms.duration_seconds if provision_terms is not None else None
@@ -292,7 +292,7 @@ class TestConfirmSettlementGate:
 
         assert result.status == "exited"
         assert result.reason == "user_declined"
-        assert result.agreed_price == 100
+        assert result.agreed_amount == 100
         # Settlement-decline event was emitted; escrow_create_start was NOT.
         stages = [s for s, _ in events]
         assert "settlement_declined" in stages

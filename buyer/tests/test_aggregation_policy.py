@@ -74,7 +74,7 @@ def _build_escrow_proposal():
     return lambda _match: _escrow_proposal()
 
 
-def _build_escrow_terms_stub(proposal, seller_wallet, agreed_price, duration_seconds):
+def _build_escrow_terms_stub(proposal, seller_wallet, agreed_amount, duration_seconds):
     """Stub builder for aggregation tests — escrow terms aren't the point here."""
     return [EscrowTerms(
         maker="buyer",
@@ -83,7 +83,7 @@ def _build_escrow_terms_stub(proposal, seller_wallet, agreed_price, duration_sec
             "arbiter": "0x" + "cd" * 20,
             "demand": "0x" + "00" * 32,
             "token": proposal.fields["token"],
-            "amount": int(float(agreed_price) * max(duration_seconds, 1) / 3600),
+            "amount": int(float(agreed_amount) * max(duration_seconds, 1) / 3600),
         },
         expiration_unix=proposal.expiration_unix,
     )]
@@ -189,7 +189,7 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
         f"got status={result.status} reason={result.reason} attempts={result.attempts}"
     )
     assert result.seller_url == "http://seller-b:8001"
-    assert result.agreed_price == 60
+    assert result.agreed_amount == 60
     assert result.negotiation_id == "neg-b"
     seller_urls = {a.get("seller_url") for a in result.attempts}
     assert seller_urls == {"http://seller-a:8001", "http://seller-b:8001"}
@@ -239,7 +239,7 @@ def test_cheapest_first_preserves_first_agreed_semantics():
 
     assert result.status == "ready"
     assert result.seller_url == "http://seller-a:8001"
-    assert result.agreed_price == 50
+    assert result.agreed_amount == 50
     # Only seller-a was negotiated — cheapest_first short-circuited.
     seller_urls = {a.get("seller_url") for a in result.attempts}
     assert seller_urls == {"http://seller-a:8001"}
@@ -262,7 +262,7 @@ def test_custom_policy_can_short_circuit():
         return (matches[1], NegotiationOutcome(
             status="agreed",
             negotiation_id="synthetic-1",
-            agreed_price=42,
+            agreed_amount=42,
             duration_seconds=3600,
             accepted_provision_terms=_provision(),
             accepted_escrow_proposal=_escrow_proposal(),
@@ -299,7 +299,7 @@ def test_custom_policy_can_short_circuit():
 
     assert result.status == "ready"
     assert result.seller_url == "http://seller-b:8001"
-    assert result.agreed_price == 42
+    assert result.agreed_amount == 42
 
 
 def test_policy_returning_none_yields_exited():
@@ -340,7 +340,7 @@ def test_gather_outcomes_captures_exceptions_per_candidate():
         return NegotiationOutcome(
             status="agreed",
             negotiation_id=f"neg-{match['listing_id']}",
-            agreed_price=50,
+            agreed_amount=50,
         )
 
     candidates = [

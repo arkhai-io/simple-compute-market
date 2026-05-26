@@ -118,7 +118,7 @@ def test_load_resume_point_picks_up_negotiation_id_from_run_ended():
     log.event("negotiation_round", round=0,
               our_message={"action": "initial", "price": 50},
               their_reply={"negotiation_id": "neg-from-end", "action": "counter", "price": 60})
-    log.end("agreed", negotiation_id="neg-from-end", agreed_price=60, rounds=0)
+    log.end("agreed", negotiation_id="neg-from-end", agreed_amount=60, rounds=0)
 
     point = load_negotiation_resume_point(log.run_id)
     assert point.negotiation_id == "neg-from-end"
@@ -165,14 +165,14 @@ def test_is_negotiation_complete_false_for_mid_stream_run():
 def test_is_negotiation_complete_true_for_agreed_negotiation_completed():
     """`market buy`-style log ends with negotiation_completed agreed."""
     log = RunLog.start()
-    log.event("negotiation_completed", status="agreed", agreed_price=80)
+    log.event("negotiation_completed", status="agreed", agreed_amount=80)
     assert is_negotiation_complete(log.run_id) is True
 
 
 def test_is_negotiation_complete_true_for_agreed_run_ended():
     """`market negotiate`-style log ends with run_ended status=agreed."""
     log = RunLog.start()
-    log.end("agreed", negotiation_id="neg-1", agreed_price=70, rounds=2)
+    log.end("agreed", negotiation_id="neg-1", agreed_amount=70, rounds=2)
     assert is_negotiation_complete(log.run_id) is True
 
 

@@ -22,7 +22,7 @@ knows the comparison rule, so the orchestrator stays dumb.
 Built-in flavors:
 
 - ``best_price`` (default) — negotiate with *all* candidates in parallel,
-  pick the lowest agreed_price. The canonical "comparison shopping"
+  pick the lowest agreed_amount. The canonical "comparison shopping"
   example. Default because the sequential alternatives give up the
   comparison's headline benefit (cross-seller price discovery) in
   exchange for slightly less per-buy work; with ``max_matches_to_try``
@@ -354,7 +354,7 @@ async def _sequential_first_agreed(
     """Walk candidates in order; first ``status=="agreed"`` wins."""
     for c in candidates:
         outcome = await negotiate(c)
-        if outcome.status == "agreed" and outcome.agreed_price is not None:
+        if outcome.status == "agreed" and outcome.agreed_amount is not None:
             return (c, outcome)
     return None
 
@@ -450,18 +450,18 @@ def _resolve_best_price_timeout() -> float | None:
 def _pick_min_agreed(
     results: list[tuple[dict[str, Any], NegotiationOutcome | BaseException]],
 ) -> tuple[dict[str, Any], NegotiationOutcome] | None:
-    """Pick the candidate with the lowest agreed_price from a result set."""
+    """Pick the candidate with the lowest agreed_amount from a result set."""
     agreed: list[tuple[dict[str, Any], NegotiationOutcome]] = []
     for c, r in results:
         if (
             isinstance(r, NegotiationOutcome)
             and r.status == "agreed"
-            and r.agreed_price is not None
+            and r.agreed_amount is not None
         ):
             agreed.append((c, r))
     if not agreed:
         return None
-    return min(agreed, key=lambda p: p[1].agreed_price or 0)
+    return min(agreed, key=lambda p: p[1].agreed_amount or 0)
 
 
 @register_aggregation_policy("best_price")
@@ -558,7 +558,7 @@ async def _fastest_agreed(
                 if (
                     isinstance(outcome, NegotiationOutcome)
                     and outcome.status == "agreed"
-                    and outcome.agreed_price is not None
+                    and outcome.agreed_amount is not None
                 ):
                     return (c, outcome)
         return None

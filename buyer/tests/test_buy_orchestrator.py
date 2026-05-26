@@ -100,7 +100,7 @@ _ACCEPTED_ECHO = {
 }
 
 
-def _stub_escrow_terms(seller_wallet, agreed_price, duration_seconds):
+def _stub_escrow_terms(seller_wallet, agreed_amount, duration_seconds):
     """An ERC20-shaped EscrowTerms for tests that don't care about codec details."""
     return EscrowTerms(
         maker="buyer",
@@ -109,14 +109,14 @@ def _stub_escrow_terms(seller_wallet, agreed_price, duration_seconds):
             "arbiter": _RECIPIENT_ARBITER,
             "demand": "0x" + "00" * 31 + seller_wallet[2:].rjust(2, "0"),
             "token": _TOKEN,
-            "amount": int(float(agreed_price) * max(duration_seconds, 1) / 3600),
+            "amount": int(float(agreed_amount) * max(duration_seconds, 1) / 3600),
         },
         expiration_unix=1_800_000_000,
     )
 
 
-def _build_escrow_terms_ok(proposal, seller_wallet, agreed_price, duration_seconds):
-    return [_stub_escrow_terms(seller_wallet, agreed_price, duration_seconds)]
+def _build_escrow_terms_ok(proposal, seller_wallet, agreed_amount, duration_seconds):
+    return [_stub_escrow_terms(seller_wallet, agreed_amount, duration_seconds)]
 
 
 @dataclass
@@ -223,9 +223,9 @@ def test_happy_path_drives_to_ready():
     build_calls: list[tuple[EscrowProposal, str, int, int]] = []
     create_calls: list[list[EscrowTerms]] = []
 
-    def _build_escrow_terms(proposal, seller_wallet, agreed_price, duration_seconds):
-        build_calls.append((proposal, seller_wallet, agreed_price, duration_seconds))
-        return [_stub_escrow_terms(seller_wallet, agreed_price, duration_seconds)]
+    def _build_escrow_terms(proposal, seller_wallet, agreed_amount, duration_seconds):
+        build_calls.append((proposal, seller_wallet, agreed_amount, duration_seconds))
+        return [_stub_escrow_terms(seller_wallet, agreed_amount, duration_seconds)]
 
     def _create_escrow(escrows):
         create_calls.append(escrows)
@@ -253,7 +253,7 @@ def test_happy_path_drives_to_ready():
     assert result.fulfillment_uid == "0xattest"
     assert result.connection_details == "ssh alice@vm1"
     assert result.tenant_credentials == {"password": "hunter2"}
-    assert result.agreed_price == 50
+    assert result.agreed_amount == 50
     assert result.negotiation_id == "neg-1"
 
     # build_escrow_terms received the proposal echoed by the seller +
@@ -503,9 +503,9 @@ def test_always_accept_lets_seller_swap_token():
 
     build_calls = []
 
-    def _build(proposal, seller_wallet, agreed_price, duration_seconds):
+    def _build(proposal, seller_wallet, agreed_amount, duration_seconds):
         build_calls.append(proposal)
-        return [_stub_escrow_terms(seller_wallet, agreed_price, duration_seconds)]
+        return [_stub_escrow_terms(seller_wallet, agreed_amount, duration_seconds)]
 
     with patch(
         "market_buyer.buy_orchestrator.urllib.request.urlopen",
@@ -600,7 +600,7 @@ def test_to_dict_omits_none_fields():
         status="ready",
         negotiation_id="neg-1",
         seller_url=_SELLER_URL,
-        agreed_price=50,
+        agreed_amount=50,
         escrow_uid="0xescrow",
         fulfillment_uid="0xattest",
         connection_details="ssh alice@vm",
@@ -608,7 +608,7 @@ def test_to_dict_omits_none_fields():
     )
     d = r.to_dict()
     assert d["status"] == "ready"
-    assert d["agreed_price"] == 50
+    assert d["agreed_amount"] == 50
     assert "reason" not in d
     assert "tenant_credentials" not in d
 
@@ -660,11 +660,11 @@ def test_submit_settlement_does_not_retry_other_400s(monkeypatch):
         calls["n"] += 1
         raise RuntimeError(
             "POST .../settle/0xff... -> HTTP 400: "
-            "{\"detail\":\"agreed_price mismatch: 1000000 vs 2000000\"}"
+            "{\"detail\":\"agreed_amount mismatch: 1000000 vs 2000000\"}"
         )
 
     monkeypatch.setattr("market_buyer.buy_orchestrator._signed_json", fake_signed_json)
-    with pytest.raises(RuntimeError, match="agreed_price mismatch"):
+    with pytest.raises(RuntimeError, match="agreed_amount mismatch"):
         submit_settlement(**_settle_kwargs(), sleep=lambda _s: None)
     assert calls["n"] == 1
 

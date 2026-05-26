@@ -2,8 +2,10 @@
 
 The bisection logic is rule-based and deterministic; these tests pin
 its accept / counter / exit behavior in both directions plus the
-round-cap and stale-counter guards. They drive the middleware directly
-so the chain plumbing is exercised end-to-end.
+round-cap and stale-counter guards. Rounds carry full EscrowProposal
+dicts; the negotiated scalar is ``proposal["fields"]["amount"]`` (an
+absolute amount in base units — per-hour rates are a listing-broadcast
+concept, never on the wire during negotiation).
 """
 
 from __future__ import annotations
@@ -21,21 +23,44 @@ from market_policy.negotiation_middleware import (
 )
 
 
+_SKELETON = {
+    "chain_name": "anvil",
+    "escrow_address": "0x" + "cd" * 20,
+    "fields": {"token": "0x" + "ab" * 20},
+    "expiration_unix": 1_800_000_000,
+}
+
+
+def _proposal_with_amount(amount: int | float) -> dict:
+    """Test helper: a valid EscrowProposal dict with the given amount."""
+    return {
+        **_SKELETON,
+        "fields": {**_SKELETON["fields"], "amount": int(round(amount))},
+    }
+
+
+def _decision_amount(d: NegotiationDecision) -> int | None:
+    if d.proposal is None:
+        return None
+    return d.proposal.get("fields", {}).get("amount")
+
+
 # ---------------------------------------------------------------------------
-# minimize direction (buyer-shape: peer's price below ceiling = good)
+# minimize direction (buyer-shape: peer's amount below ceiling = good)
 # ---------------------------------------------------------------------------
 
 
-def _decide_minimize(their, our_price=100, history=None, max_rounds=10):
+def _decide_minimize(their, our_amount=100, history=None, max_rounds=10):
     history = list(history or [])
     if their is not None:
         history.append(NegotiationRound(
             round_number=len(history), sender="them", action="counter",
-            price=float(their),
+            proposal=_proposal_with_amount(their),
         ))
     ctx = NegotiationContext(
         direction="minimize",
-        our_reference_price=our_price,
+        our_reference_amount=our_amount,
+        our_escrow_proposal=_proposal_with_amount(our_amount),
         max_rounds=max_rounds,
     )
     return run_negotiation_chain([bisection_middleware], history, ctx)
@@ -44,7 +69,7 @@ def _decide_minimize(their, our_price=100, history=None, max_rounds=10):
 def test_minimize_accepts_under_ceiling():
     d = _decide_minimize(their=90)
     assert d.action == "accept"
-    assert d.price == 90
+    assert _decision_amount(d) == 90
 
 
 def test_minimize_accepts_at_convergence_boundary():
@@ -56,13 +81,13 @@ def test_minimize_counters_at_midpoint_when_reasonable():
     d = _decide_minimize(their=140)
     assert d.action == "counter"
     # midpoint(100, 140) = 120, but cap at our ceiling 100
-    assert d.price == 100
+    assert _decision_amount(d) == 100
 
 
 def test_minimize_clamps_counter_to_ceiling():
     d = _decide_minimize(their=110)
     assert d.action == "counter"
-    assert d.price == 100  # midpoint 105 > 100, clamp
+    assert _decision_amount(d) == 100  # midpoint 105 > 100, clamp
 
 
 def test_minimize_exits_when_peer_unreasonable():
@@ -72,18 +97,22 @@ def test_minimize_exits_when_peer_unreasonable():
 
 
 # ---------------------------------------------------------------------------
-# maximize direction (seller-shape: peer's price above floor = good)
+# maximize direction (seller-shape: peer's amount above floor = good)
 # ---------------------------------------------------------------------------
 
 
-def _decide_maximize(their, our_price=100, history=None):
+def _decide_maximize(their, our_amount=100, history=None):
     history = list(history or [])
     if their is not None:
         history.append(NegotiationRound(
             round_number=len(history), sender="them", action="counter",
-            price=float(their),
+            proposal=_proposal_with_amount(their),
         ))
-    ctx = NegotiationContext(direction="maximize", our_reference_price=our_price)
+    ctx = NegotiationContext(
+        direction="maximize",
+        our_reference_amount=our_amount,
+        our_escrow_proposal=_proposal_with_amount(our_amount),
+    )
     return run_negotiation_chain([bisection_middleware], history, ctx)
 
 
@@ -95,7 +124,7 @@ def test_maximize_accepts_above_floor():
 def test_maximize_counters_at_midpoint():
     d = _decide_maximize(their=80)
     assert d.action == "counter"
-    assert d.price == 90
+    assert _decision_amount(d) == 90
 
 
 def test_maximize_exits_when_peer_too_low():
@@ -109,9 +138,10 @@ def test_maximize_exits_when_peer_too_low():
 # ---------------------------------------------------------------------------
 
 
-def _our_counter(round_n, price):
+def _our_counter(round_n, amount):
     return NegotiationRound(
-        round_number=round_n, sender="us", action="counter", price=price,
+        round_number=round_n, sender="us", action="counter",
+        proposal=_proposal_with_amount(amount),
     )
 
 
@@ -136,15 +166,19 @@ def test_stale_guard_does_not_fire_when_counters_differ():
 
 
 # ---------------------------------------------------------------------------
-# First round (no peer price yet) opens with our reference
+# First round (no peer amount yet) opens with our reference
 # ---------------------------------------------------------------------------
 
 
 def test_first_round_opens_with_our_reference():
-    ctx = NegotiationContext(direction="minimize", our_reference_price=100)
+    ctx = NegotiationContext(
+        direction="minimize",
+        our_reference_amount=100,
+        our_escrow_proposal=_proposal_with_amount(100),
+    )
     d = run_negotiation_chain([bisection_middleware], [], ctx)
     assert d.action == "counter"
-    assert d.price == 100
+    assert _decision_amount(d) == 100
 
 
 # ---------------------------------------------------------------------------
@@ -156,11 +190,12 @@ def test_to_dict_omits_none_fields():
     d = NegotiationDecision(action="accept")
     assert d.to_dict() == {"action": "accept"}
 
-    d = NegotiationDecision(action="counter", price=42)
-    assert d.to_dict() == {"action": "counter", "price": 42}
+    p = _proposal_with_amount(42)
+    d = NegotiationDecision(action="counter", proposal=p)
+    assert d.to_dict() == {"action": "counter", "proposal": p}
 
-    d = NegotiationDecision(action="accept", price=42, reason="convergence")
-    assert d.to_dict() == {"action": "accept", "price": 42, "reason": "convergence"}
+    d = NegotiationDecision(action="accept", proposal=p, reason="convergence")
+    assert d.to_dict() == {"action": "accept", "proposal": p, "reason": "convergence"}
 
 
 # ---------------------------------------------------------------------------
@@ -178,16 +213,19 @@ def test_register_negotiation_middleware_makes_it_loadable():
     @register_negotiation_middleware("test.fake")
     def _fake(history, context):
         return (
-            NegotiationDecision(action="accept", price=context.our_reference_price),
+            NegotiationDecision(
+                action="accept",
+                proposal=_proposal_with_amount(context.our_reference_amount),
+            ),
             context,
         )
 
     chain = load_negotiation_chain(["test.fake"])
     assert len(chain) == 1
-    ctx = NegotiationContext(direction="maximize", our_reference_price=42)
+    ctx = NegotiationContext(direction="maximize", our_reference_amount=42)
     d = run_negotiation_chain(chain, [], ctx)
     assert d.action == "accept"
-    assert d.price == 42
+    assert _decision_amount(d) == 42
 
 
 def test_load_negotiation_chain_unknown_raises_with_actionable_message():
@@ -223,7 +261,7 @@ def test_chain_terminates_on_first_decision():
         calls.append("b")
         return NegotiationDecision(action="exit", reason="from-b"), context
 
-    ctx = NegotiationContext(direction="maximize", our_reference_price=100)
+    ctx = NegotiationContext(direction="maximize", our_reference_amount=100)
     d = run_negotiation_chain([mw_a, mw_b], [], ctx)
     assert d.reason == "from-a"
     assert calls == ["a"]
@@ -239,13 +277,13 @@ def test_chain_threads_context_when_middleware_defers():
         return (
             NegotiationDecision(
                 action="accept",
-                price=context.our_reference_price,
+                proposal=_proposal_with_amount(context.our_reference_amount),
                 reason=context.intermediate.get("recorded"),
             ),
             context,
         )
 
-    ctx = NegotiationContext(direction="maximize", our_reference_price=100)
+    ctx = NegotiationContext(direction="maximize", our_reference_amount=100)
     d = run_negotiation_chain([mw_record, mw_terminal], [], ctx)
     assert d.reason == "by_first"
 
@@ -255,6 +293,6 @@ def test_chain_exhausted_raises():
     def mw_defer(history, context):
         return None, context
 
-    ctx = NegotiationContext(direction="maximize", our_reference_price=100)
+    ctx = NegotiationContext(direction="maximize", our_reference_amount=100)
     with pytest.raises(RuntimeError, match="exhausted"):
         run_negotiation_chain([mw_defer], [], ctx)

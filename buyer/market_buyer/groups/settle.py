@@ -98,7 +98,7 @@ def run_settle_from_log(
     header.add_row("Run ID", run_id)
     header.add_row("Seller", deal.seller_url)
     header.add_row("Negotiation", deal.negotiation_id)
-    header.add_row("Agreed price (per hour)", str(deal.agreed_price))
+    header.add_row("Agreed price (per hour)", str(deal.agreed_amount))
     header.add_row("Duration (seconds)", str(effective_duration))
     header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
     if resolved_uid:
@@ -126,7 +126,7 @@ def run_settle_from_log(
             seller_wallet_address=seller_wallet,
             negotiation_id=deal.negotiation_id,
             listing_id=deal.listing_id,
-            agreed_price=deal.agreed_price,
+            agreed_amount=deal.agreed_amount,
             duration_seconds=effective_duration,
         )
         log.event("escrow_create_start", terms=terms.__dict__)
@@ -165,7 +165,7 @@ def run_settle_from_log(
         escrow_terms_list = build_terms(
             proposal,
             seller_wallet,
-            float(deal.agreed_price),
+            float(deal.agreed_amount),
             int(effective_duration),
         )
 

@@ -54,15 +54,17 @@ def _maybe_register_rl_middleware() -> None:
 
 
 def _load_buyer_chain(name: str | None = None) -> list[NegotiationMiddleware]:
-    """Load the buyer's negotiation chain. Single-middleware by default.
+    """Load the buyer's negotiation chain.
 
-    Buyer-side has no inventory or escrow guards — those are seller
-    concerns. Default is just the terminal strategy.
+    Default: ``[buyer_escrow_shape_guard, <terminal>]`` — the shape guard
+    vetoes if the seller silently mutates a buyer-pinned field of the
+    EscrowProposal (token swap, expiration push, escrow contract swap).
+    ``<terminal>`` is bisection unless overridden.
     """
     terminal = (name or "").strip() or DEFAULT_TERMINAL
     if terminal == "rl":
         _maybe_register_rl_middleware()
-    return load_negotiation_chain([terminal])
+    return load_negotiation_chain(["buyer_escrow_shape_guard", terminal])
 
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
@@ -78,10 +80,15 @@ class NegotiationOutcome:
     construction reads from these — using the *seller-confirmed* values
     rather than the buyer's local proposal protects against any
     drift between sides.
+
+    ``agreed_amount`` is the absolute total payment in base units of
+    the escrow's payment token (i.e. ``accepted_escrow_proposal.fields
+    ["amount"]``). Per-hour rates only exist as listing broadcasts;
+    once a negotiation starts everything is absolute.
     """
     status: str                     # "agreed" | "exited"
     negotiation_id: Optional[str]   # None only if /new itself failed
-    agreed_price: Optional[float] = None
+    agreed_amount: Optional[int] = None
     duration_seconds: Optional[float] = None  # echoed from buyer's negotiation-init ask
     reason: Optional[str] = None    # populated on exit
     rounds: int = 0
@@ -92,8 +99,8 @@ class NegotiationOutcome:
         d: dict[str, Any] = {"status": self.status, "rounds": self.rounds}
         if self.negotiation_id is not None:
             d["negotiation_id"] = self.negotiation_id
-        if self.agreed_price is not None:
-            d["agreed_price"] = self.agreed_price
+        if self.agreed_amount is not None:
+            d["agreed_amount"] = self.agreed_amount
         if self.duration_seconds is not None:
             d["duration_seconds"] = self.duration_seconds
         if self.reason is not None:
@@ -183,13 +190,13 @@ class ResumeState:
 
     Built by ``market negotiate --from <run_id>``: the run-log gives
     us the server-assigned ``negotiation_id``, the rounds we've
-    observed, and the seller's last-known price. We replay that into
-    the strategy and continue the round loop without going through
+    observed, and the seller's last-known proposal. We replay that
+    into the strategy and continue the round loop without going through
     ``/api/v1/negotiate/new`` again (the seller has the thread already).
     """
     negotiation_id: str
     transcript: list[NegotiationRound]
-    last_seller_price: float | None
+    last_seller_proposal: dict | None
     rounds_completed: int
 
 
@@ -237,7 +244,6 @@ def negotiate_with_seller(
     can use the agreed (not local-proposed) values.
     """
     seller_url = seller_url.rstrip("/")
-    our_counters: list[int] = []
     transcript: list[NegotiationRound] = []
     # Captured from the seller's round-0 response and threaded forward.
     # The seller commits to these at /negotiate/new (they're persisted on
@@ -248,13 +254,24 @@ def negotiate_with_seller(
     if chain is None:
         chain = _load_buyer_chain()
 
+    # Pinned proposal: the buyer's first-round proposal — every field
+    # set here is a buyer commitment the seller may not mutate. Used by
+    # ``buyer_escrow_shape_guard`` in the chain.
+    pinned_proposal: dict[str, Any] | None = None
+
+    def _amount(p: dict | None) -> int | None:
+        if not isinstance(p, dict):
+            return None
+        v = (p.get("fields") or {}).get("amount")
+        return int(v) if v is not None else None
+
     if resume is not None:
         # Resume mode: skip /api/v1/negotiate/new and the first counter exchange.
         # We trust the run-log's recorded transcript and the seller's last
-        # counter price; the strategy decides our next move from there.
-        if resume.last_seller_price is None:
+        # counter proposal; the strategy decides our next move from there.
+        if resume.last_seller_proposal is None:
             raise RuntimeError(
-                "Cannot resume — no seller counter price recorded in run-log."
+                "Cannot resume — no seller counter proposal recorded in run-log."
             )
         neg_id = resume.negotiation_id
         transcript = list(resume.transcript)
@@ -262,8 +279,13 @@ def negotiate_with_seller(
         reply: dict[str, Any] = {
             "negotiation_id": neg_id,
             "action": "counter",
-            "price": float(resume.last_seller_price),
+            "proposal": resume.last_seller_proposal,
         }
+        # Recover the buyer's first-pinned proposal from the transcript.
+        for entry in transcript:
+            if entry.sender == "us" and entry.proposal is not None:
+                pinned_proposal = entry.proposal
+                break
         round_idx = max(1, resume.rounds_completed)
     else:
         # --- Round 0: /api/v1/negotiate/new ---------------------------------------
@@ -278,12 +300,35 @@ def negotiate_with_seller(
                 "(chain_name + escrow_address + fields + expiration_unix)"
             )
         duration_seconds = provision_terms.duration_seconds
+        # Translate per-hour bounds → absolute amounts (× duration / 3600).
+        # Listings broadcast per-hour rates; once the duration is fixed,
+        # the whole negotiation runs on absolute totals.
+        if duration_seconds is None or duration_seconds <= 0:
+            raise RuntimeError(
+                "provision_terms.duration_seconds must be > 0 to translate "
+                "per-hour bounds into absolute amounts."
+            )
+        scale = float(duration_seconds) / 3600.0
+        initial_amount = int(round(float(initial_price) * scale))
+        ceiling_amount = float(max_price) * scale
+
+        # Pin the buyer's first proposal: chain + escrow contract + token
+        # came from the picked accepted_escrows entry; amount is round 0's
+        # absolute opening bid.
+        pinned_fields = dict(escrow_proposal.fields or {})
+        pinned_fields["amount"] = initial_amount
+        pinned_proposal = {
+            "chain_name": escrow_proposal.chain_name,
+            "escrow_address": escrow_proposal.escrow_address,
+            "fields": pinned_fields,
+            "expiration_unix": escrow_proposal.expiration_unix,
+        }
+
         new_body = {
             "listing_id": listing_id,
             "buyer_address": buyer_address,
-            "initial_price": float(initial_price),
             "provision_terms": provision_terms.model_dump(),
-            "escrow_proposal": escrow_proposal.model_dump(),
+            "proposal": pinned_proposal,
         }
         sig, ts = _sign(f"negotiate_new:{listing_id}", buyer_private_key)
         reply = _post(
@@ -301,7 +346,7 @@ def negotiate_with_seller(
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=neg_id,
-                agreed_price=float(reply.get("price", initial_price)),
+                agreed_amount=_amount(reply.get("proposal")) or initial_amount,
                 duration_seconds=duration_seconds,
                 rounds=0,
                 accepted_provision_terms=accepted_prov,
@@ -324,39 +369,43 @@ def negotiate_with_seller(
         if not neg_id:
             raise RuntimeError("/api/v1/negotiate/new returned counter but no negotiation_id")
 
-        our_counters.append(float(initial_price))
         transcript.append(NegotiationRound(
-            round_number=0, sender="us", action="initial", price=float(initial_price),
+            round_number=0, sender="us", action="initial",
+            proposal=pinned_proposal,
         ))
+        seller_round0_proposal = reply.get("proposal")
         transcript.append(NegotiationRound(
             round_number=0, sender="them", action="counter",
-            price=float(reply.get("price")) if reply.get("price") is not None else None,
+            proposal=seller_round0_proposal if isinstance(seller_round0_proposal, dict) else None,
         ))
         round_idx = 1
 
     # --- Rounds 1..N: /negotiate/{id} ----------------------------------
     while round_idx <= max_rounds:
-        seller_counter_price = reply.get("price")
-        if seller_counter_price is None:
-            raise RuntimeError(f"Seller counter without price: {reply!r}")
+        seller_counter_proposal = reply.get("proposal")
+        if not isinstance(seller_counter_proposal, dict):
+            raise RuntimeError(f"Seller counter without proposal: {reply!r}")
 
         # Append the seller's current counter to history so the chain
-        # sees it as their_proposed_price.
+        # sees it as their_last_proposal.
         round_history = list(transcript)
-        if seller_counter_price is not None and (
-            not round_history or round_history[-1].sender != "them"
-        ):
+        if not round_history or round_history[-1].sender != "them":
             round_history.append(NegotiationRound(
                 round_number=len(round_history),
                 sender="them",
                 action="counter",
-                price=float(seller_counter_price),
+                proposal=seller_counter_proposal,
             ))
+        ceiling_amount = (
+            float(max_price) * float(duration_seconds) / 3600.0
+            if duration_seconds is not None
+            else float(max_price)
+        )
         ctx = NegotiationContext(
             direction="minimize",
-            our_reference_price=float(max_price),
+            our_reference_amount=ceiling_amount,
             listing={},
-            escrow_proposal=None,
+            our_escrow_proposal=pinned_proposal,
             available_resources={},
             max_rounds=max_rounds,
         )
@@ -366,9 +415,13 @@ def negotiate_with_seller(
             "action": next_move.action,
             "buyer_address": buyer_address,
         }
-        if next_move.action == "counter":
-            body["price"] = float(next_move.price)
-        elif next_move.action == "exit":
+        if next_move.action in ("counter", "accept"):
+            if next_move.proposal is None:
+                raise RuntimeError(
+                    f"chain returned {next_move.action!r} without a proposal"
+                )
+            body["proposal"] = next_move.proposal
+        elif next_move.action in ("exit", "reject"):
             body["reason"] = next_move.reason or "buyer_exit"
 
         sig, ts = _sign(f"negotiate_continue:{neg_id}", buyer_private_key)
@@ -379,6 +432,17 @@ def negotiate_with_seller(
         if on_round:
             on_round(round_idx, body, reply)
 
+        # If our chain rejected (shape guard veto), the buyer terminates
+        # locally without trusting any seller reply.
+        if next_move.action == "reject":
+            return NegotiationOutcome(
+                status="exited",
+                negotiation_id=neg_id,
+                reason=next_move.reason or "buyer_reject",
+                duration_seconds=duration_seconds,
+                rounds=round_idx,
+            )
+
         # After we sent our move, the seller has replied with either
         # a matching terminal (accept/exit) or a further counter.
         if next_move.action == "accept":
@@ -387,7 +451,10 @@ def negotiate_with_seller(
                 return NegotiationOutcome(
                     status="agreed",
                     negotiation_id=neg_id,
-                    agreed_price=float(reply.get("price", seller_counter_price)),
+                    agreed_amount=(
+                        _amount(reply.get("proposal"))
+                        or _amount(next_move.proposal)
+                    ),
                     duration_seconds=duration_seconds,
                     rounds=round_idx,
                     accepted_provision_terms=accepted_prov,
@@ -410,19 +477,18 @@ def negotiate_with_seller(
                 rounds=round_idx,
             )
 
-        # next_move was counter → state appended, loop continues.
-        our_counters.append(float(next_move.price))
+        # next_move was counter → record both sides of this round.
         transcript.append(NegotiationRound(
-            round_number=round_idx, sender="us", action="counter", price=float(next_move.price),
+            round_number=round_idx, sender="us", action="counter",
+            proposal=next_move.proposal,
         ))
-        # Record the seller's reply to this round.
         seller_reply_action = reply.get("action") or "counter"
-        seller_reply_price = reply.get("price")
+        seller_reply_proposal = reply.get("proposal")
         transcript.append(NegotiationRound(
             round_number=round_idx,
             sender="them",
             action=seller_reply_action if seller_reply_action in ("counter", "accept", "exit", "reject") else "counter",
-            price=float(seller_reply_price) if seller_reply_price is not None else None,
+            proposal=seller_reply_proposal if isinstance(seller_reply_proposal, dict) else None,
         ))
 
         seller_action = reply.get("action")
@@ -430,7 +496,10 @@ def negotiate_with_seller(
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=neg_id,
-                agreed_price=float(reply.get("price", next_move.price)),
+                agreed_amount=(
+                    _amount(seller_reply_proposal)
+                    or _amount(next_move.proposal)
+                ),
                 duration_seconds=duration_seconds,
                 rounds=round_idx,
                 accepted_provision_terms=accepted_prov,

@@ -57,14 +57,14 @@ def _confirm_settlement_interactive(*, terms, listing: dict, console: Console) -
     can sanity-check the cost before committing.
     """
     duration_hours = terms.duration_seconds / 3600
-    total = terms.agreed_price * terms.duration_seconds // 3600
+    total = terms.agreed_amount * terms.duration_seconds // 3600
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold")
     table.add_column()
     table.add_row("Seller", str(terms.seller_url))
     table.add_row("Listing", str(terms.listing_id))
     table.add_row("Negotiation", str(terms.negotiation_id))
-    table.add_row("Agreed price", f"{terms.agreed_price} (per hour, raw token units)")
+    table.add_row("Agreed price", f"{terms.agreed_amount} (per hour, raw token units)")
     table.add_row("Duration", f"{terms.duration_seconds}s ({duration_hours:.4g}h)")
     table.add_row("Total payment", f"{total} (raw token units)")
     console.print(Panel(table, title="Confirm settlement", border_style="yellow"))
@@ -205,14 +205,14 @@ def _run_resume_from(
             "negotiation_completed",
             seller_url=resume_point.seller_url,
             status=outcome.status,
-            agreed_price=outcome.agreed_price,
+            agreed_amount=outcome.agreed_amount,
             rounds=outcome.rounds,
             reason=outcome.reason,
             negotiation_id=outcome.negotiation_id,
             listing_id=resume_point.listing_id,
         )
 
-        if outcome.status != "agreed" or outcome.agreed_price is None:
+        if outcome.status != "agreed" or outcome.agreed_amount is None:
             run_log.end(
                 outcome.status,
                 negotiation_id=outcome.negotiation_id,
@@ -228,7 +228,7 @@ def _run_resume_from(
             raise typer.Exit(4)
 
         console.print(
-            f"[green]negotiation agreed[/green]  price={outcome.agreed_price} "
+            f"[green]negotiation agreed[/green]  price={outcome.agreed_amount} "
             f"rounds={outcome.rounds}"
         )
 
@@ -717,7 +717,7 @@ def register(app: typer.Typer) -> None:
                 color = "green" if body.get("status") == "agreed" else "yellow"
                 console.print(
                     f"[{color}]negotiate ←[/{color}] {body.get('status')} "
-                    f"@ {body.get('agreed_price', '-')}  "
+                    f"@ {body.get('agreed_amount', '-')}  "
                     f"({body.get('rounds', '-')} rounds)"
                 )
             elif stage == "negotiation_failed":
@@ -773,7 +773,7 @@ def register(app: typer.Typer) -> None:
             result.status,
             seller_url=result.seller_url,
             negotiation_id=result.negotiation_id,
-            agreed_price=result.agreed_price,
+            agreed_amount=result.agreed_amount,
             escrow_uid=result.escrow_uid,
             fulfillment_uid=result.fulfillment_uid,
             reason=result.reason,
@@ -787,7 +787,7 @@ def register(app: typer.Typer) -> None:
         for label, val in (
             ("Seller", result.seller_url),
             ("Negotiation", result.negotiation_id),
-            ("Agreed price", result.agreed_price),
+            ("Agreed price", result.agreed_amount),
             ("Escrow UID", result.escrow_uid),
             ("Fulfillment UID", result.fulfillment_uid),
             ("Reason", result.reason),

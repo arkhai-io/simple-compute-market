@@ -89,7 +89,7 @@ def test_round_0_seller_accepts_immediately(mock_urlopen):
         max_price=100, provision_terms=_provision(3600), escrow_proposal=_escrow_proposal(),
     )
     assert outcome.status == "agreed"
-    assert outcome.agreed_price == 50
+    assert outcome.agreed_amount == 50
     assert outcome.rounds == 0
     assert outcome.negotiation_id == "neg-1"
 
@@ -123,7 +123,7 @@ def test_counter_loop_converges_to_accept(mock_urlopen):
         initial_price=50, max_price=100, provision_terms=_provision(3600), escrow_proposal=_escrow_proposal(),
     )
     assert outcome.status == "agreed"
-    assert outcome.agreed_price == 90
+    assert outcome.agreed_amount == 90
     assert outcome.rounds == 1
 
 
@@ -209,11 +209,11 @@ def test_on_round_hook_receives_each_round(mock_urlopen):
 
 def test_outcome_to_dict_shape():
     o = NegotiationOutcome(
-        status="agreed", negotiation_id="neg-1", agreed_price=99, rounds=3,
+        status="agreed", negotiation_id="neg-1", agreed_amount=99, rounds=3,
     )
     assert o.to_dict() == {
         "status": "agreed", "negotiation_id": "neg-1",
-        "agreed_price": 99, "rounds": 3,
+        "agreed_amount": 99, "rounds": 3,
     }
     assert NegotiationOutcome(status="exited", negotiation_id="neg-1",
                               reason="max_rounds", rounds=10).to_dict() == {

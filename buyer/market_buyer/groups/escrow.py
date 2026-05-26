@@ -308,7 +308,7 @@ def create_cmd(
         seller_wallet_address=seller_wallet,
         negotiation_id=deal.negotiation_id,
         listing_id=deal.listing_id,
-        agreed_price=deal.agreed_price,
+        agreed_amount=deal.agreed_amount,
         duration_seconds=effective_duration_seconds,
     )
     log.event("escrow_create_start", terms=terms.__dict__)
@@ -319,7 +319,7 @@ def create_cmd(
     header.add_row("Run ID", run_id)
     header.add_row("Seller", deal.seller_url)
     header.add_row("Seller wallet", seller_wallet)
-    header.add_row("Agreed price", str(deal.agreed_price))
+    header.add_row("Agreed price", str(deal.agreed_amount))
     header.add_row("Duration (seconds)", str(effective_duration_seconds))
     header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
     console.print(Panel(header, title="market escrow create", border_style="cyan"))

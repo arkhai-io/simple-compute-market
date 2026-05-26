@@ -1,6 +1,6 @@
 """Shared helpers for deal-recovery commands (`settle`, `escrow create`).
 
-Both pull deal context (seller_url, agreed_price, …) from a buyer
+Both pull deal context (seller_url, agreed_amount, …) from a buyer
 run-log JSONL, then feed `buy_orchestrator` stage helpers and
 `escrow_client.make_create_escrow_fn` to advance the deal.
 
@@ -25,7 +25,7 @@ class DealContext:
     seller_url: str
     listing_id: str
     negotiation_id: str
-    agreed_price: float
+    agreed_amount: float
     escrow_uid: Optional[str] = None
     # Buyer's lease ask, in seconds. Captured at /negotiate/new time and
     # echoed by the seller in the agreement; settlement multiplies the
@@ -58,7 +58,7 @@ def load_deal_context(run_id: str) -> DealContext:
     seller_url: Optional[str] = None
     listing_id: Optional[str] = None
     negotiation_id: Optional[str] = None
-    agreed_price: Optional[float] = None
+    agreed_amount: Optional[float] = None
     escrow_uid: Optional[str] = None
     duration_seconds: int = 3600
     seller_wallet_address: Optional[str] = None
@@ -69,19 +69,19 @@ def load_deal_context(run_id: str) -> DealContext:
     for ev in events:
         ev_type = ev.get("event")
 
-        # `negotiate` end carries the agreed_price + negotiation_id.
+        # `negotiate` end carries the agreed_amount + negotiation_id.
         if ev_type == "run_ended":
             last_status = ev.get("status")
-            if ev.get("agreed_price") is not None:
-                agreed_price = float(ev["agreed_price"])
+            if ev.get("agreed_amount") is not None:
+                agreed_amount = float(ev["agreed_amount"])
             if ev.get("negotiation_id"):
                 negotiation_id = str(ev["negotiation_id"])
 
         # `market buy`-style log.
         if ev_type == "negotiation_completed" and ev.get("status") == "agreed":
             seller_url = ev.get("seller_url") or seller_url
-            if ev.get("agreed_price") is not None:
-                agreed_price = float(ev["agreed_price"])
+            if ev.get("agreed_amount") is not None:
+                agreed_amount = float(ev["agreed_amount"])
             if ev.get("negotiation_id"):
                 negotiation_id = str(ev["negotiation_id"])
             if ev.get("listing_id"):
@@ -123,7 +123,7 @@ def load_deal_context(run_id: str) -> DealContext:
             ("seller_url", seller_url),
             ("listing_id", listing_id),
             ("negotiation_id", negotiation_id),
-            ("agreed_price", agreed_price),
+            ("agreed_amount", agreed_amount),
         ) if not v
     ]
     if missing:
@@ -137,7 +137,7 @@ def load_deal_context(run_id: str) -> DealContext:
         seller_url=seller_url,                # type: ignore[arg-type]
         listing_id=listing_id,                # type: ignore[arg-type]
         negotiation_id=negotiation_id,        # type: ignore[arg-type]
-        agreed_price=agreed_price,            # type: ignore[arg-type]
+        agreed_amount=agreed_amount,            # type: ignore[arg-type]
         escrow_uid=escrow_uid,
         duration_seconds=duration_seconds,
         seller_wallet_address=seller_wallet_address,

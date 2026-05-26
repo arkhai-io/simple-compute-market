@@ -145,7 +145,7 @@ def test_resume_buyer_accepts_recovered_seller_price(mock_urlopen):
     )
 
     assert outcome.status == "agreed"
-    assert outcome.agreed_price == 90
+    assert outcome.agreed_amount == 90
     assert outcome.negotiation_id == "neg-resumed"
     # We made exactly one HTTP call — to /negotiate/{id}, never to /new.
     assert len(seen) == 1
@@ -220,7 +220,7 @@ def test_resume_buyer_counters_then_seller_accepts(mock_urlopen):
     )
 
     assert outcome.status == "agreed"
-    assert outcome.agreed_price == 70
+    assert outcome.agreed_amount == 70
     assert outcome.negotiation_id == "neg-2"
     assert seen[0]["body"]["action"] == "counter"
     assert seen[0]["body"]["price"] == 70
