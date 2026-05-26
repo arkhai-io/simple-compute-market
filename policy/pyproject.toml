@@ -44,6 +44,11 @@ training = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.metadata]
+# Required for the ``pufferlib @ git+...`` direct reference in the
+# ``[training]`` extra. Hatchling refuses to build the wheel otherwise.
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/market_policy"]
 
