@@ -28,8 +28,7 @@ from service.clients.token import ERC20TokenMetadata
 # │       └── TokenResource         ERC-20 token payment (= CoreTokenResource alias)
 # ├── CoreDomainEvent               Base event model
 # │   ├── DomainEvent               (alias for CoreDomainEvent)
-# │   ├── ListingCreatedEvent       order_create pipeline trigger
-# │   └── ListingClosedEvent        order_close pipeline trigger
+# │   └── NegotiationRequestedEvent pre-thread guard pipeline trigger
 # └── (other core types re-aliased below)
 #     ├── Action                    = CoreDomainAction
 #     ├── DecisionContext           = CoreDecisionContext
@@ -484,60 +483,17 @@ class Listing(BaseModel):
 
 
 class EventType(str, Enum):
-    """Events that can be handled by the Agent"""
+    """Pre-thread guard hook: fires from /negotiate/new before any state
+    mutation. The seeded policy composite runs guards (e.g. inventory
+    match) and emits REJECT_OFFER with a reason on veto, mapped to
+    HTTP 409 (OfferUnfulfillableError) by the negotiate flow. Operators
+    who want to support non-immediate deals (futures, off-chain matched)
+    swap the composite's components for an empty list or an alternative
+    guard set.
+    """
 
-    ORDER_CREATE = "order_create"
-    ORDER_CLOSE = "order_close"
-    # Pre-thread guard hook: fires from /negotiate/new before any state
-    # mutation. The seeded policy composite runs guards (e.g. inventory
-    # match) and emits REJECT_OFFER with a reason on veto, mapped to
-    # HTTP 409 (OfferUnfulfillableError) by the negotiate flow. Operators
-    # who want to support non-immediate deals (futures, off-chain matched)
-    # swap the composite's components for an empty list or an alternative
-    # guard set.
     NEGOTIATION_REQUESTED = "negotiation_requested"
 DomainEvent = CoreDomainEvent
-
-
-class ListingCreatedEvent(DomainEvent):
-    """Event triggered when a local client requests order creation."""
-
-    event_type: EventType = Field(default=EventType.ORDER_CREATE)
-    offer: Union[ComputeResource, TokenResource] = Field(
-        description="Offered resource (compute or token)"
-    )
-    accepted_escrows: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description=(
-            "Escrow shapes the seller will accept for this listing — each "
-            "entry pins (chain_name, escrow_address) plus a partial "
-            "ObligationData advertisement via the fields map, with the "
-            "per-hour rate in price_per_hour."
-        ),
-    )
-    max_duration_seconds: int | None = Field(
-        default=None,
-        description=(
-            "Optional max lease duration in seconds (None = unlimited). "
-            "Buyer asks for an actual duration at negotiation init."
-        ),
-    )
-
-    @model_validator(mode="before")
-    @classmethod
-    def parse_resources(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        if "offer" in data:
-            data["offer"] = ComputeDomainResource.parse_from_dict(data["offer"])
-        return data
-
-
-class ListingClosedEvent(DomainEvent):
-    """Event triggered when a local client requests listing closure."""
-
-    event_type: EventType = Field(default=EventType.ORDER_CLOSE)
-    listing_id: str = Field(description="Listing ID to close")
 
 
 class NegotiationRequestedEvent(DomainEvent):

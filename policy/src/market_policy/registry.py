@@ -16,8 +16,8 @@ def policy_callable(name: str):
     """Decorator to register a callable policy under a stable name.
 
     Usage:
-        @policy_callable("oc.action.close_order")
-        def my_action(ctx: DecisionContext) -> DomainAction | None: ...
+        @policy_callable("negotiate.guard.has_matching_inventory")
+        def my_guard(ctx: DecisionContext) -> DomainAction | None: ...
     """
 
     def _wrap(fn: Callable[[DecisionContext], DomainAction | None]):

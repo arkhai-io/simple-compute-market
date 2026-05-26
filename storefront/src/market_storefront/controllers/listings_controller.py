@@ -153,12 +153,12 @@ class ListingsController:
     @router.post(
         "/listings/create",
         response_model=CreateListingResponse,
-        summary="Create a new listing via policy pipeline (seller auth)",
+        summary="Create a new listing (seller auth)",
         dependencies=[Depends(make_seller_auth_dep("create_listing"))],
     )
     async def create_listing(self, body: CreateListingRequest) -> CreateListingResponse:
         try:
-            result = await self._listing_svc.create_listing(body, self._policy_svc)
+            result = await self._listing_svc.create_listing(body)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:
@@ -174,7 +174,7 @@ class ListingsController:
     )
     async def close_listing(self, listing_id: str) -> CloseListingResponse:
         try:
-            result = await self._listing_svc.close_listing(listing_id, self._policy_svc)
+            result = await self._listing_svc.close_listing(listing_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:

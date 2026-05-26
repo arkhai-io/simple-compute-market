@@ -84,10 +84,6 @@ class ActionType(str, Enum):
     execute actions need to agree on the values.
     """
 
-    # Listing lifecycle
-    MAKE_OFFER = "make_offer"
-    CLOSE_ORDER = "close_order"
-
     # Negotiation pre-flight guard veto
     REJECT_OFFER = "reject_offer"
 

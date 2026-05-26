@@ -207,22 +207,6 @@ class TestPassesThroughWithoutVetoing:
         )
         assert negotiate_guard_escrow_fields_strict_match(ctx) is None
 
-    def test_unrelated_event_type_passes(self):
-        """The composite may be evaluated against other events during
-        registry seeding probes; non-matching events are a pass."""
-        from market_storefront.models.domain_models import ListingClosedEvent
-
-        event = ListingClosedEvent(
-            event_id="evt-x", source="seller", listing_id="L1",
-        )
-        ctx = DecisionContext(
-            event=event, agent_id="seller-1",
-            available_resources={}, market_state={},
-            negotiation_history=[], past_experiences=[],
-        )
-        assert negotiate_guard_escrow_fields_strict_match(ctx) is None
-
-
 class TestConsultPreNegotiationGuardsWiring:
     """Verify ``escrow_proposal`` round-trips through PolicyService into
     the event the policy callables see."""

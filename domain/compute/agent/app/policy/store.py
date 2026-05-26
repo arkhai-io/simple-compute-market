@@ -1,11 +1,9 @@
 """Live policy callables for the compute domain.
 
-Two listing-lifecycle actions fan out from `PolicyService` through this
-module:
-  * `oc.action.make_offer_from_order_create` — `ListingCreatedEvent` → `MAKE_OFFER`
-  * `oc.action.close_order`                  — `ListingClosedEvent`  → `CLOSE_ORDER`
-
-Plus negotiate-request guards (`negotiate.guard.*`).
+Pre-thread negotiate-request guards (`negotiate.guard.*`) — these run from
+`policy_service.consult_pre_negotiation_guards` against every incoming
+`POST /negotiate/new`. The composite chains guards; the first to return
+`REJECT_OFFER` short-circuits the negotiation with HTTP 409.
 
 Negotiation round decisions go through `sync_negotiation.py` directly
 via `NegotiationStrategy`, not the `@policy_callable` chain.
@@ -20,49 +18,11 @@ from market_storefront.models.domain_models import (
     Action as DomainAction,
     ActionType as DomainActionType,
     DecisionContext,
-    ListingCreatedEvent,
-    ListingClosedEvent,
     NegotiationRequestedEvent,
-    ComputeResource,
-    ComputeResourcePortfolio,
 )
 from market_policy.registry import policy_callable
-from market_storefront.utils.config import settings
 
 logger = logging.getLogger(__name__)
-
-
-def get_compute_resource_portfolio(
-    context: DecisionContext,
-) -> ComputeResourcePortfolio | None:
-    """Build a compute-only portfolio view from generic available resources."""
-    available_resources = context.available_resources
-    if not isinstance(available_resources, dict):
-        return None
-
-    raw_resources = available_resources.get("resources")
-    if not isinstance(raw_resources, list):
-        return None
-
-    compute_resources: list[dict[str, Any]] = []
-    for resource in raw_resources:
-        if isinstance(resource, ComputeResource):
-            compute_resources.append(resource.model_dump(mode="json"))
-            continue
-        if not isinstance(resource, dict):
-            continue
-        if "gpu_model" not in resource:
-            continue
-        compute_resources.append(resource)
-
-    if not compute_resources:
-        return None
-
-    try:
-        return ComputeResourcePortfolio.model_validate({"resources": compute_resources})
-    except Exception as exc:
-        logger.warning("[COMPUTE POLICY] Failed to validate compute portfolio: %s", exc)
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -244,57 +204,5 @@ def negotiate_guard_escrow_fields_strict_match(
                 },
             )
     return None
-
-
-# ---------------------------------------------------------------------------
-# Listing lifecycle actions
-# ---------------------------------------------------------------------------
-
-@policy_callable("oc.action.make_offer_from_order_create")
-def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAction | None:
-    if not isinstance(context.event, ListingCreatedEvent):
-        return None
-
-    offer = context.event.offer
-    accepted_escrows = context.event.accepted_escrows
-    max_duration_seconds = context.event.max_duration_seconds
-
-    # Enrich a bare ComputeResource offer (no resource_id) with the actual registered
-    # portfolio resource so that resource_id and vm_host are populated.
-    if isinstance(offer, ComputeResource) and offer.resource_id is None:
-        portfolio = get_compute_resource_portfolio(context)
-        if portfolio:
-            for resource in portfolio.resources:
-                if (
-                    resource.gpu_model == offer.gpu_model
-                    and resource.region == offer.region
-                    and resource.sla >= offer.sla
-                    and resource.gpu_count >= offer.gpu_count
-                ):
-                    offer = resource
-                    break
-
-    offer_payload = offer.model_dump(mode="json") if hasattr(offer, "model_dump") else offer
-
-    return DomainAction(
-        action_type=DomainActionType.MAKE_OFFER,
-        parameters={
-            "offer": offer_payload,
-            "accepted_escrows": list(accepted_escrows),
-            "max_duration_seconds": max_duration_seconds,
-            # Propagate paused flag so action_executor skips the registry publish.
-            "paused": bool(context.event.data.get("paused", False)) if isinstance(context.event.data, dict) else False,
-        },
-    )
-
-
-@policy_callable("oc.action.close_order")
-def oc_action_close_order(context: DecisionContext) -> DomainAction | None:
-    if not isinstance(context.event, ListingClosedEvent):
-        return None
-    return DomainAction(
-        action_type=DomainActionType.CLOSE_ORDER,
-        parameters={"listing_id": context.event.listing_id},
-    )
 
 

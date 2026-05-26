@@ -3,10 +3,8 @@ arkhai_e2e_tests/models/agent.py
 ---------------------------------
 Typed dataclasses for the storefront REST API request and response shapes.
 
-Derived from:
-  - pydantic_models.py  (ListingCreatedEvent, ListingClosedEvent)
-  - agent.py            (_run_create_order_flow, _run_close_order_flow response dicts,
-                         serve_erc8004_registration_file response shape)
+Derived from agent.py (_run_create_order_flow / _run_close_order_flow
+response dicts, serve_erc8004_registration_file response shape).
 
 Auth note: the storefront validates X-Signature / X-Timestamp headers using
 EIP-191 where the message is  "<operation>:<resource_id>:<timestamp>".

@@ -1,29 +1,11 @@
-"""PolicyService — the agent's policy evaluation and execution core.
+"""PolicyService — the agent's pre-negotiation guard pipeline.
 
-Owns the policy infrastructure (PolicyStore, PolicyManager, ComputePolicySeeder)
-and exposes named domain-language methods. Domain event construction is
-fully private — callers never touch events directly.
-
-Public API
-----------
-evaluate_create_listing_policy(offer, demand, max_duration, paused) -> str
-    Consult the policy about a listing creation. Returns the action_type
-    string ("make_offer" | "no_action" | ...). No side effects.
-
-execute_create_listing(offer, demand, max_duration, paused) -> str | None
-    Execute a listing creation: SQLite upsert + conditional registry publish.
-    Returns listing_id or None.
-
-evaluate_close_listing_policy(listing_id) -> str
-    Consult the policy about a listing close. No side effects.
-
-execute_close_listing(listing_id) -> dict
-    Execute a listing close: SQLite update + registry update.
-
-evaluate_listing_create_policy_from_raw(offer_raw, demand_raw, max_duration)
-    -> PolicyEvaluateResponse
-    Dry-run policy evaluation from raw dicts. Used by
-    POST /api/v1/system/policy/evaluate. No side effects.
+Holds the policy infrastructure (PolicyStore, PolicyManager,
+ComputePolicySeeder) used by the negotiate-request pre-flight guards.
+Listing CRUD now bypasses this entirely (see ``ListingService``); the
+per-round negotiation strategy is also a separate system (see
+``utils/sync_negotiation.py``). The only surviving policy hook
+``PolicyService`` serves today is ``consult_pre_negotiation_guards``.
 """
 from __future__ import annotations
 
@@ -36,26 +18,12 @@ from market_policy.identity import Identity
 from market_policy.manager import PolicyManager
 from market_policy.negotiation_thread import get_thread_store
 from market_policy.store import PolicyStore
-from market_storefront.models.domain_models import (
-    EventType,  # retained for future callers; not used in evaluate path
-    ListingClosedEvent,
-    ListingCreatedEvent,
-    NegotiationRequestedEvent,
-)
+from market_storefront.models.domain_models import NegotiationRequestedEvent
 from service.schemas import ActionType as DomainActionType
-from market_storefront.models.system_models import PolicyEvaluateResponse
 from market_storefront.policy.seeding import ComputePolicySeeder
 from market_storefront.utils.config import BASE_URL_OVERRIDE
-from market_storefront.utils.action_executor import (
-    _sender_id,
-    close_order,
-    create_order,
-    execute_action,
-    parse_resource_from_dict,
-    publish_order_to_registry,
-)
+from market_storefront.utils.action_executor import _sender_id
 from market_storefront.utils.serializer import serialize_context_for_storage
-from market_storefront.utils.sqlite_client import get_sqlite_client
 from service.schemas import DecisionContext
 
 logger = logging.getLogger(__name__)
@@ -87,93 +55,6 @@ class PolicyService:
             sqlite_client=sqlite_client,
             identity=Identity(agent_url=base_url, agent_id=agent_id),
         )
-
-    # ------------------------------------------------------------------
-    # Create listing
-    # ------------------------------------------------------------------
-
-    async def evaluate_create_listing_policy(
-        self,
-        offer: Any,
-        accepted_escrows: list[dict[str, Any]],
-        max_duration_seconds: int | None,
-        paused: bool,
-    ) -> str:
-        """Consult the policy about creating a listing. No side effects.
-
-        Returns the action_type string e.g. "make_offer" | "no_action".
-        """
-        event = self._build_listing_created_event(
-            offer, accepted_escrows, max_duration_seconds, paused
-        )
-        action = await self._consult_policy(event)
-        if not action:
-            return "no_action"
-        return (
-            action.action_type.value
-            if hasattr(action.action_type, "value")
-            else str(action.action_type)
-        )
-
-    async def execute_create_listing(
-        self,
-        offer: Any,
-        accepted_escrows: list[dict[str, Any]],
-        max_duration_seconds: int | None,
-        paused: bool,
-    ) -> str | None:
-        """Execute listing creation: SQLite upsert + conditional registry publish.
-
-        Returns the listing_id on success, or None if creation failed.
-        Records the decision for experience learning.
-        """
-        event = self._build_listing_created_event(
-            offer, accepted_escrows, max_duration_seconds, paused
-        )
-        action = await self._consult_policy(event)
-        if not action:
-            logger.warning("[POLICY] No action for create listing event %s", event.event_id)
-            return None
-
-        outcome = await execute_action(
-            action=action, ctx=None, alkahest_client=self._alkahest
-        )
-        await self._record_decision(event, action)
-        return outcome.get("listing_id")
-
-    # ------------------------------------------------------------------
-    # Close listing
-    # ------------------------------------------------------------------
-
-    async def evaluate_close_listing_policy(self, listing_id: str) -> str:
-        """Consult the policy about closing a listing. No side effects."""
-        event = self._build_listing_closed_event(listing_id)
-        action = await self._consult_policy(event)
-        if not action:
-            return "no_action"
-        return (
-            action.action_type.value
-            if hasattr(action.action_type, "value")
-            else str(action.action_type)
-        )
-
-    async def execute_close_listing(self, listing_id: str) -> dict:
-        """Execute listing close: SQLite update + registry update.
-
-        Records the decision for experience learning.
-        Returns the close result dict.
-        """
-        event = self._build_listing_closed_event(listing_id)
-        action = await self._consult_policy(event)
-        if not action:
-            logger.warning("[POLICY] No action for close listing %s", listing_id)
-            return {"status": "no_action", "listing_id": listing_id}
-
-        outcome = await execute_action(
-            action=action, ctx=None, alkahest_client=self._alkahest
-        )
-        await self._record_decision(event, action)
-        return outcome.get("result", {"status": "closed", "listing_id": listing_id})
 
     # ------------------------------------------------------------------
     # Pre-thread negotiation guards
@@ -222,114 +103,8 @@ class PolicyService:
         return None
 
     # ------------------------------------------------------------------
-    # Policy dry-run from raw dicts (for /api/v1/system/policy/evaluate)
-    # ------------------------------------------------------------------
-
-    async def evaluate_listing_create_policy_from_raw(
-        self,
-        offer_raw: dict,
-        accepted_escrows: list[dict[str, Any]] | None,
-        max_duration_seconds: int | None = None,
-        policy_components: list[str] | None = None,
-    ) -> PolicyEvaluateResponse:
-        """Dry-run a listing creation policy evaluation from raw offer + escrows.
-
-        Parses the offer resource, builds the event, checks that every component
-        in ``policy_components`` is present in ``CALLABLE_REGISTRY``, then runs
-        the callable pipeline.  No DB lookup is performed — this is a pure
-        data operation.  The caller is responsible for supplying the component
-        names (e.g. read from ``GET /api/v1/system/policy`` after seeding).
-        """
-        from market_policy.registry import CALLABLE_REGISTRY
-
-        if not policy_components:
-            return PolicyEvaluateResponse(
-                action="no_action",
-                policy_used=None,
-                components=[],
-                resolvable=False,
-                reason="policy_components must be provided; supply the callable names to evaluate.",
-            )
-
-        try:
-            offer_resource = parse_resource_from_dict(offer_raw)
-        except Exception as exc:
-            raise ValueError(f"Invalid offer resource: {exc}") from exc
-
-        event = self._build_listing_created_event(
-            offer_resource,
-            list(accepted_escrows or []),
-            max_duration_seconds,
-            paused=False,
-        )
-
-        unresolvable = [c for c in policy_components if c not in CALLABLE_REGISTRY]
-        if unresolvable:
-            return PolicyEvaluateResponse(
-                action="no_action",
-                policy_used=None,
-                components=policy_components,
-                resolvable=False,
-                reason=(
-                    f"Components not in CALLABLE_REGISTRY: {unresolvable}. "
-                    "Call POST /api/v1/admin/policy/seed to discover callables first."
-                ),
-            )
-
-        action = await self._consult_policy(event)
-        if action is None:
-            return PolicyEvaluateResponse(
-                action="no_action",
-                policy_used=None,
-                components=policy_components,
-                resolvable=len(CALLABLE_REGISTRY) > 0,
-                reason=(
-                    "Policy evaluated but returned no action. "
-                    f"CALLABLE_REGISTRY has {len(CALLABLE_REGISTRY)} entries."
-                ),
-            )
-
-        action_type = (
-            action.action_type.value
-            if hasattr(action.action_type, "value")
-            else str(action.action_type)
-        )
-        return PolicyEvaluateResponse(
-            action=action_type.lower(),
-            policy_used=None,
-            components=policy_components,
-            resolvable=True,
-            reason=None,
-        )
-
-    # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
-
-    def _build_listing_created_event(
-        self,
-        offer: Any,
-        accepted_escrows: list[dict[str, Any]],
-        max_duration_seconds: int | None,
-        paused: bool,
-    ) -> ListingCreatedEvent:
-        base_url = BASE_URL_OVERRIDE or ""
-        return ListingCreatedEvent(
-            event_id=f"listing_create_{uuid.uuid4()}",
-            source=base_url,
-            offer=offer,
-            accepted_escrows=accepted_escrows,
-            max_duration_seconds=max_duration_seconds,
-            data={"paused": paused},
-        )
-
-    def _build_listing_closed_event(self, listing_id: str) -> ListingClosedEvent:
-        base_url = BASE_URL_OVERRIDE or ""
-        return ListingClosedEvent(
-            event_id=f"listing_close_{uuid.uuid4()}",
-            source=base_url,
-            listing_id=listing_id,
-        )
 
     async def _consult_policy(self, domain_event) -> Any:
         event_type = domain_event.event_type

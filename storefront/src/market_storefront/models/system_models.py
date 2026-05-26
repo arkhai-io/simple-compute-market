@@ -15,15 +15,6 @@ class HealthResponse(BaseModel):
     resource_count: int | None = None
 
 
-class PolicyEvaluateResponse(BaseModel):
-    """Result of a dry-run policy evaluation (returned by PolicyService.evaluate_listing_create_policy_from_raw)."""
-    action: str
-    policy_used: str | None = None
-    components: list[str] = Field(default_factory=list)  # callable names
-    resolvable: bool = True
-    reason: str | None = None
-
-
 class AdminPauseResponse(BaseModel):
     paused: bool
     message: str = ""

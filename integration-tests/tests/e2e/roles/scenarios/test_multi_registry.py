@@ -119,7 +119,6 @@ _REGISTRY_DEAD = "http://localhost:9"  # reserved discard port; connection refus
 
 DURATION_HOURS = 1
 BUYER_INITIAL_PRICE = 7_000
-ORDER_CREATE_CALLABLE = "oc.action.make_offer_from_order_create"
 
 DEMAND_RESOURCE = {
     "token": {

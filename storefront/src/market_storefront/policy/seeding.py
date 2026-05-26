@@ -13,24 +13,14 @@ logger = logging.getLogger(__name__)
 class ComputePolicySeeder:
     """Compute-domain policy seeding.
 
-    After the A2A removal and the buyer-as-client refactor, the surviving
-    policy triggers are the *local* events a seller still reacts to via
-    `_process_event_with_pipeline`:
-
-        ORDER_CREATE       — POST /listings/create → policy → make_offer
-                             action (registry publish, no fan-out)
-        ORDER_CLOSE        — POST /listings/close  → policy → close_order
-                             action (local + registry unpublish)
-
-    Everything else (negotiation, settlement, fulfillment, claim) is now
-    handled by dedicated sync endpoints (/negotiate/*, /settle/*,
-    /orders/{claim,reclaim,refund,arbitrate}) without going through the
-    policy engine.
+    Only one policy hook survives in this refactor pass: the pre-thread
+    negotiation guard composite that runs at ``POST /negotiate/new``
+    before any thread state mutates. Listing CRUD, lease lifecycle, and
+    settlement all go through procedural endpoints (no policy layer).
+    Per-round negotiation decisions use ``NegotiationStrategy`` directly.
     """
 
     DEFAULT_POLICY_TRIGGERS = {
-        EventType.ORDER_CREATE.value,
-        EventType.ORDER_CLOSE.value,
         EventType.NEGOTIATION_REQUESTED.value,
     }
 
@@ -40,42 +30,12 @@ class ComputePolicySeeder:
         self._agent_id = agent_id
 
     async def ensure_default_policies(self) -> None:
-        """Ensure default compute-domain policies are saved."""
-        try:
-            await self._policy_store.save_policy(
-                agent_id=self._agent_id,
-                policy_name="order_create_default_v1",
-                trigger_type=EventType.ORDER_CREATE.value,
-                callable_ref="order_create.default.v1",
-            )
-            await self._sqlite_client.save_policy_composite(
-                agent_id=self._agent_id,
-                policy_name="order_create.default.v1",
-                components=["oc.action.make_offer_from_order_create"],
-            )
-        except Exception as e:
-            logger.warning(f"[POLICY SEED] Failed to save order_create policy: {e}")
+        """Ensure default negotiate-request guard composite is saved.
 
-        try:
-            await self._policy_store.save_policy(
-                agent_id=self._agent_id,
-                policy_name="order_close_default_v1",
-                trigger_type=EventType.ORDER_CLOSE.value,
-                callable_ref="order_close.default.v1",
-            )
-            await self._sqlite_client.save_policy_composite(
-                agent_id=self._agent_id,
-                policy_name="order_close.default.v1",
-                components=["oc.action.close_order"],
-            )
-        except Exception as e:
-            logger.warning(f"[POLICY SEED] Failed to save order_close policy: {e}")
-
-        # Pre-thread negotiation guard composite. The default for an
-        # immediate-deal seller checks inventory match. Operators running
-        # non-immediate (futures / off-chain matched) flows replace the
-        # composite's components in their seller config so the same
-        # /negotiate/new endpoint behaves differently without code changes.
+        Operators running non-immediate (futures / off-chain matched) flows
+        replace the composite's components in their seller config so the
+        same /negotiate/new endpoint behaves differently without code changes.
+        """
         try:
             await self._policy_store.save_policy(
                 agent_id=self._agent_id,
