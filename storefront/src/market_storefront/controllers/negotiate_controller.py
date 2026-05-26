@@ -63,9 +63,8 @@ class NegotiateController:
                 sqlite_client=self._db,
                 our_listing_id=body.listing_id,
                 buyer_address=body.buyer_address,
-                their_proposed_price=body.initial_price,
                 provision_terms=body.provision_terms,
-                escrow_proposal=body.escrow_proposal,
+                proposal=body.proposal,
                 our_base_url=base_url,
                 their_agent_url=body.buyer_agent_url or body.buyer_address,
             )
@@ -111,15 +110,15 @@ class NegotiateController:
 
         buyer_auth._verify(request, "negotiate_continue", neg_id, body.buyer_address)
 
-        if body.action == "counter" and body.price is None:
-            raise HTTPException(status_code=400, detail="'price' required as number for counter")
+        if body.action == "counter" and body.proposal is None:
+            raise HTTPException(status_code=400, detail="'proposal' required for counter")
 
         try:
             result = await continue_sync_negotiation(
                 sqlite_client=self._db,
                 neg_id=neg_id,
                 buyer_action=body.action,
-                buyer_price=body.price,
+                buyer_proposal=body.proposal,
                 buyer_reason=body.reason,
                 buyer_address=body.buyer_address,
             )
