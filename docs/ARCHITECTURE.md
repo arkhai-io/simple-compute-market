@@ -801,9 +801,9 @@ buyer/market_buyer/
 reads the agreed terms from the run-log JSONL, creates the on-chain escrow
 under the buyer's wallet via `make_create_escrow_fn`, then POSTs
 `/api/v1/settle/{uid}` and polls for fulfillment. The buyer's
-negotiation strategy is selected via `[buyer.negotiation].policy_mode` in the
-TOML, mirroring the seller's `[seller.negotiation].policy_mode` — default
-`bisection`; `rl` requires torch + a checkpoint.
+negotiation strategy is selected via `[negotiation].policy_mode` in
+`buyer.toml`, mirroring the seller's `[seller.negotiation].policy_mode` in
+`storefront.toml` — default `bisection`; `rl` requires torch + a checkpoint.
 
 ---
 

@@ -60,7 +60,7 @@ Three places ``load_aggregation_policy`` looks, in order:
 1. In-process ``_REGISTRY`` (built-ins + anything decorated with
    ``@register_aggregation_policy``).
 2. File-based: ``$XDG_CONFIG_HOME/arkhai/aggregation_policies/<name>/policy.py``
-   plus any folder added via ``[buyer.aggregation] extra_policy_paths``.
+   plus any folder added via ``[aggregation] extra_policy_paths``.
    Each subdir's name becomes the policy name. The file exports
    ``factory(cfg) -> AggregationPolicy``; ``cfg`` is the buyer's full
    TOML config so policies can read per-policy knobs without us baking
@@ -139,14 +139,14 @@ def _load_buyer_config() -> dict[str, Any]:
 def _resolve_extra_policy_paths(cfg: dict[str, Any]) -> list[str]:
     """Pull extra aggregation-policy directories out of TOML.
 
-    Accepts ``[buyer.aggregation] extra_policy_paths = [".../a", ...]``
+    Accepts ``[aggregation] extra_policy_paths = [".../a", ...]``
     (list) or a single string. Empty / unset → empty list.
     """
     try:
         from service.config_loader import get_dotted
     except Exception:
         return []
-    raw = get_dotted(cfg, "buyer.aggregation.extra_policy_paths")
+    raw = get_dotted(cfg, "aggregation.extra_policy_paths")
     if raw is None:
         return []
     if isinstance(raw, str):
@@ -426,7 +426,7 @@ async def _priceless_last(
 def _resolve_best_price_timeout() -> float | None:
     """Optional wall-clock budget for ``best_price`` (seconds).
 
-    Read from ``[buyer.aggregation] best_price_timeout`` in TOML. Unset,
+    Read from ``[aggregation] best_price_timeout`` in TOML. Unset,
     non-numeric, or non-positive → no timeout (the policy waits for
     every candidate). A positive value caps the comparison at the
     given number of seconds; any candidate still negotiating when the
@@ -437,7 +437,7 @@ def _resolve_best_price_timeout() -> float | None:
         from service.config_loader import get_dotted
     except Exception:
         return None
-    raw = get_dotted(cfg, "buyer.aggregation.best_price_timeout")
+    raw = get_dotted(cfg, "aggregation.best_price_timeout")
     if raw is None:
         return None
     try:
@@ -473,7 +473,7 @@ async def _best_price(
 
     The canonical "comparison shopping" example. Bound the candidate
     list upstream (``max_matches_to_try``) to control fan-out;
-    optionally cap wall time with ``[buyer.aggregation] best_price_timeout``
+    optionally cap wall time with ``[aggregation] best_price_timeout``
     so one slow seller can't hold up the whole buy.
 
     Without a timeout, costs N negotiations of wall time at most. With

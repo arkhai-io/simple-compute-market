@@ -127,11 +127,10 @@ _INIT_USER_TEMPLATE = """\
 # Free-form table of {url = "bearer-token"}. Keys must match `urls` above
 # verbatim (scheme, host, port, no trailing slash). Empty = public.
 
-[buyer]
 # default_token_address = "0x..."              # 0x ERC-20 address used when --token-contract is omitted.
                                                 # Decimals + symbol are resolved on chain via [chain].rpc_url.
 
-[buyer.aggregation]
+[aggregation]
 # policy = "best_price"                        # across-seller match policy: best_price (default) |
                                                 # fastest_agreed | cheapest_first | registry_order |
                                                 # random_shuffle | priceless_last | any custom name registered
@@ -147,7 +146,7 @@ _INIT_USER_TEMPLATE = """\
                                                 # deadline are cancelled and the lowest agreed price among
                                                 # those that completed wins. Unset = wait for all.
 
-[buyer.negotiation]
+[negotiation]
 # policy_mode = "bisection"                    # "bisection" (default; no ML deps) | "rl" (requires torch)
 """
 

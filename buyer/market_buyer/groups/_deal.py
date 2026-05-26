@@ -229,8 +229,8 @@ def resolve_chain_settings(
         tc = resolve_default_token_address()
         if not tc:
             typer.secho(
-                "No --token-contract given and [buyer].default_token_address "
-                "is unset in config.toml.",
+                "No --token-contract given and top-level default_token_address "
+                "is unset in buyer.toml.",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(2)

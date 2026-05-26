@@ -369,7 +369,7 @@ def register(app: typer.Typer) -> None:
         aggregate_by: Optional[str] = typer.Option(
             None, "--aggregate-by",
             help="Across-seller aggregation policy. Default: "
-                 "[buyer.aggregation].policy from config.toml, falling "
+                 "[aggregation].policy from buyer.toml, falling "
                  "back to 'best_price'. Built-ins: best_price, "
                  "fastest_agreed, cheapest_first, registry_order, "
                  "random_shuffle, priceless_last.",
@@ -508,8 +508,8 @@ def register(app: typer.Typer) -> None:
             tc = resolve_default_token_address()
             if not tc:
                 typer.secho(
-                    "No --token-contract given and [buyer].default_token_address "
-                    "is unset in config.toml.",
+                    "No --token-contract given and top-level default_token_address "
+                    "is unset in buyer.toml.",
                     err=True, fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
@@ -616,16 +616,16 @@ def register(app: typer.Typer) -> None:
                 # User aborted, or no listing carried a min_price.
                 raise typer.Exit(2)
 
-        # Resolve aggregation policy: --aggregate-by > [buyer.aggregation].policy > default.
+        # Resolve aggregation policy: --aggregate-by > [aggregation].policy > default.
         aggregation_policy = aggregate_by or resolve_config_value(
-            toml_path="buyer.aggregation.policy",
+            toml_path="aggregation.policy",
         ) or None
 
         # Counter policy is config-only — no CLI flag yet. Strict_echo
         # default rejects any seller modification to a buyer-pinned field;
         # operators who want to accept counters set the TOML key.
         counter_policy = resolve_config_value(
-            toml_path="buyer.counter_policy.policy",
+            toml_path="counter_policy.policy",
         ) or None
 
         config = BuyConfig(
@@ -732,12 +732,12 @@ def register(app: typer.Typer) -> None:
                     terms=terms, listing=listing, console=console,
                 )
 
-        # Honor [buyer.negotiation].policy_mode from config (mirrors
+        # Honor [negotiation].policy_mode from buyer.toml (mirrors
         # `market negotiate`). Without this, the buyer falls through to
         # the default terminal (RL needs torch — not installed in the
         # lean buyer wheel).
         chain = None
-        policy_mode = resolve_config_value(toml_path="buyer.negotiation.policy_mode")
+        policy_mode = resolve_config_value(toml_path="negotiation.policy_mode")
         if policy_mode:
             from market_buyer.buyer_client import _load_buyer_chain
             chain = _load_buyer_chain(policy_mode)
