@@ -1,6 +1,9 @@
 .vscode/
 
-# Local rehearsal params (private keys, RPC URLs, etc.)
+# Project-local scratch files, private notes, and generated diagnostics.
+.scm-local/
+
+# Legacy local rehearsal params (private keys, RPC URLs, etc.).
 .rehearsal-params.local.md
 .rehearsal-params.local.*
 
