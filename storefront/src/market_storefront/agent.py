@@ -17,13 +17,6 @@
 Module-level state (`_AGENT_ID`, `agent_card_data`, `ALERTS_USER_ID`) and
 the `_startup_tasks` coroutine are imported by `server.py` (lifespan) and
 `identity_controller.py`.
-
-The legacy `TraderAgent` class, the `_RootAgentShim`, the queue/Redis
-event-ingestion pipeline, and `_parse_domain_event` were removed in the
-event-system prune — none of them were reachable under the default config
-and the `_RootAgentShim` was forwarding to a non-existent
-`StorefrontService.process_event_with_pipeline`. Live event flows go
-through `services/policy_service.py` directly.
 """
 
 import asyncio

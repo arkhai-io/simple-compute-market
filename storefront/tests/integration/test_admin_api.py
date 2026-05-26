@@ -62,7 +62,6 @@ def reset_pause_state():
 async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
     _container.resolved_sqlite_client = db
     _container.resolved_system_service = SystemService(sqlite_client=db)
-    _container.resolved_policy_service = None  # not needed for most admin tests
 
     app = FastAPI()
     app.include_router(system_router)
@@ -77,14 +76,12 @@ async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
 
     _container.resolved_sqlite_client = None
     _container.resolved_system_service = None
-    _container.resolved_policy_service = None
 
 
 @pytest_asyncio.fixture
 async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
     _container.resolved_sqlite_client = db
     _container.resolved_system_service = SystemService(sqlite_client=db)
-    _container.resolved_policy_service = None
 
     app = FastAPI()
     app.include_router(system_router)
@@ -97,7 +94,6 @@ async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
 
     _container.resolved_sqlite_client = None
     _container.resolved_system_service = None
-    _container.resolved_policy_service = None
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,7 @@
 """Unit tests for SystemService.
 
-All tests inject a fake callable_registry so the global CALLABLE_REGISTRY
-singleton is never touched.  SQLite is a real in-process temp database
-(no mocking needed — it's fast and avoids mock complexity for DB reads).
+SQLite is a real in-process temp database (no mocking needed — it's fast
+and avoids mock complexity for DB reads).
 """
 
 from __future__ import annotations

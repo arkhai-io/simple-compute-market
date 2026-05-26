@@ -6,11 +6,6 @@ import uuid
 
 from service.schemas import (
     AcceptedEscrow,
-    ActionType,
-    Decision as CoreDecision,
-    DecisionContext as CoreDecisionContext,
-    DomainAction as CoreDomainAction,
-    DomainEvent as CoreDomainEvent,
     Resource as CoreResource,
     TokenResource as CoreTokenResource,
 )
@@ -22,14 +17,10 @@ from service.clients.token import ERC20TokenMetadata
 # =============================================================================
 #
 # service.schemas (external wheel — canonical base types)
-# ├── CoreResource                  Base resource model
-# │   └── ComputeDomainResource     Parse/coerce helper; extends CoreResource
-# │       ├── ComputeResource       A compute slice (GPU, CPU, RAM, region, ...)
-# │       └── TokenResource         ERC-20 token payment (= CoreTokenResource alias)
-# └── (other core types re-aliased below)
-#     ├── Action                    = CoreDomainAction
-#     ├── DecisionContext           = CoreDecisionContext
-#     └── Decision                  = CoreDecision
+# └── CoreResource                  Base resource model
+#     └── ComputeDomainResource     Parse/coerce helper; extends CoreResource
+#         ├── ComputeResource       A compute slice (GPU, CPU, RAM, region, ...)
+#         └── TokenResource         ERC-20 token payment (= CoreTokenResource alias)
 #
 # Marketplace-layer types (defined here)
 # ├── Listing                       A published marketplace listing
@@ -473,15 +464,3 @@ class Listing(BaseModel):
         return data
 
 
-# =============================
-# =============================
-# Decision and Action domain models — re-exported from service.schemas
-# for back-compat with callers that import via this module. Direct
-# producers/consumers are migrating off these; phase 4 deletes them.
-# =============================
-
-
-DomainEvent = CoreDomainEvent
-Action = CoreDomainAction
-DecisionContext = CoreDecisionContext
-Decision = CoreDecision

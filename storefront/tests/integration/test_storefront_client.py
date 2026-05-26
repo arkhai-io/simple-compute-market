@@ -62,7 +62,6 @@ async def orders_client(mock_svc, tmp_path) -> AsyncIterator[httpx.AsyncClient]:
     db = SQLiteClient(db_path=str(tmp_path / "orders_test.db"))
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = mock_svc
-    _container.resolved_policy_service = mock_svc
 
     app = FastAPI()
     app.include_router(listings_router)
@@ -73,7 +72,6 @@ async def orders_client(mock_svc, tmp_path) -> AsyncIterator[httpx.AsyncClient]:
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
-    _container.resolved_policy_service = None
 
 
 @pytest_asyncio.fixture

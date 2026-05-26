@@ -1,6 +1,7 @@
 # Refactor: policy → procedural (except negotiation)
 
-**Status:** in progress, multi-session.
+**Status:** phases 1–4 complete on `refactor/procedural-policy`; phase 5
+(docs/config) lands alongside the PR.
 
 The codebase used to be a state-machine interpreter: policies emitted
 `DomainAction` objects, an `action_executor` match-cased on
