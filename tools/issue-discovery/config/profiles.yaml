@@ -1,0 +1,32 @@
+schema_version: 1
+profiles:
+  - id: fresh-volumes
+    description: Reproduce fresh named-volume behavior without pre-chown.
+    phase_file: phases/local.yaml
+    phases:
+      - source_identity
+      - host_identity
+      - prerequisite_check
+      - build
+      - compose_preexisting_stack_check
+      - compose_start_strict
+      - readiness_checks
+      - teardown
+
+  - id: host-redis-conflict
+    description: Exercise strict compose startup with host Redis still published.
+    phase_file: phases/local.yaml
+    phases:
+      - source_identity
+      - host_identity
+      - prerequisite_check
+      - compose_preexisting_stack_check
+      - compose_start_strict
+      - teardown
+
+  - id: clean-ubuntu-bootstrap
+    description: Validate clean Ubuntu host bootstrap script behavior.
+    phase_file: phases/clean_ubuntu_bootstrap.yaml
+    phases:
+      - source_identity
+      - bootstrap_check

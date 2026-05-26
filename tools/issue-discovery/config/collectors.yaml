@@ -1,0 +1,69 @@
+schema_version: 1
+collectors:
+  - id: git_status
+    description: Current git state.
+    command: git status --short
+    output: context/git-status.txt
+
+  - id: tool_versions
+    description: Host tool versions.
+    command: |
+      docker --version || true
+      docker compose version || true
+      make --version || true
+      uv --version || true
+      python3 --version || true
+      jq --version || true
+      curl --version || true
+      helm version || true
+      ansible-playbook --version || true
+      zerotier-cli info || true
+    output: context/tool-versions.txt
+    redact: true
+
+  - id: docker_ps_all
+    description: All Docker containers.
+    command: docker ps -a
+    output: docker/docker-ps.txt
+
+  - id: compose_config
+    description: Rendered Docker Compose model.
+    command: docker compose -f docker-compose.yml config
+    output: docker/compose-config.yml
+    redact: true
+
+  - id: compose_ps
+    description: Compose container state.
+    command: docker compose -f docker-compose.yml ps --format json
+    output: docker/compose-ps.json
+
+  - id: compose_logs
+    description: Recent Compose logs.
+    command: docker compose -f docker-compose.yml logs --no-color --timestamps --tail=500
+    output: docker/compose-logs.txt
+    redact: true
+
+  - id: docker_volumes
+    description: Docker volume list.
+    command: docker volume ls
+    output: docker/volumes.txt
+
+  - id: health_registry
+    description: Registry health endpoint.
+    command: curl -fsS http://localhost:8080/health
+    output: health/registry-health.json
+
+  - id: health_bob
+    description: Bob storefront health endpoint.
+    command: curl -fsS http://localhost:8001/health
+    output: health/bob-health.json
+
+  - id: health_alice
+    description: Alice storefront health endpoint.
+    command: curl -fsS http://localhost:8002/health
+    output: health/alice-health.json
+
+  - id: health_provisioning
+    description: Provisioning health endpoint.
+    command: curl -fsS http://localhost:8081/health
+    output: health/provisioning-health.json

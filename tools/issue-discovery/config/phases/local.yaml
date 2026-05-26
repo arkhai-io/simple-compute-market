@@ -1,0 +1,354 @@
+schema_version: 1
+name: local
+description: Strict local issue-discovery workflow for the compose-based stack.
+phases:
+  - id: source_identity
+    name: Source identity
+    category: identity
+    blocking: true
+    commands:
+      - id: git_head
+        run: git rev-parse HEAD
+      - id: git_branch
+        run: git branch --show-current
+      - id: git_status
+        run: git status --short
+
+  - id: host_identity
+    name: Host and tool identity
+    category: identity
+    blocking: true
+    commands:
+      - id: os_release
+        run: test -f /etc/os-release && cat /etc/os-release || true
+      - id: docker_version
+        run: docker --version
+      - id: compose_version
+        run: docker compose version
+      - id: uv_version
+        run: uv --version
+      - id: python_version
+        run: python3 --version
+
+  - id: prerequisite_check
+    name: Required local prerequisites
+    category: prerequisite
+    blocking: true
+    commands:
+      - id: required_commands
+        run: command -v docker && command -v make && command -v uv && command -v jq && command -v curl && command -v git && command -v python3
+      - id: docker_daemon
+        run: docker info
+
+  - id: fixed_name_collision_check
+    name: Fixed Docker name collision check
+    category: prerequisite
+    blocking: true
+    commands:
+      - id: no_fixed_name_containers
+        run: |
+          existing=$(docker ps -aq \
+            --filter name='^/anvil$' \
+            --filter name='^/contracts-deploy$' \
+            --filter name='^/market-contracts-deploy$' \
+            --filter name='^/market-agent-sell$' \
+            --filter name='^/market-agent-buy$' \
+            --filter name='^/market-agent-alice$' \
+            --filter name='^/market-redis$' \
+            --filter name='^/market-provisioning$')
+          test -z "$existing"
+    collect_on_failure:
+      - docker_ps_all
+    classifiers:
+      - fixed_docker_name_collision
+
+  - id: build
+    name: Build repo artifacts and images
+    category: build
+    blocking: true
+    requires:
+      - prerequisite_check
+      - fixed_name_collision_check
+    commands:
+      - id: make_build
+        run: make build
+        timeout_seconds: 1800
+
+  - id: root_service_tests
+    name: Root service tests
+    category: code_test
+    blocking: false
+    requires:
+      - build
+    commands:
+      - id: make_test
+        run: make test
+        timeout_seconds: 900
+
+  - id: shared_service_tests
+    name: Shared service package tests
+    category: code_test
+    blocking: false
+    requires:
+      - build
+    commands:
+      - id: service_reinit
+        run: make reinit
+        workdir: service
+        timeout_seconds: 600
+      - id: service_test
+        run: make test
+        workdir: service
+        timeout_seconds: 600
+
+  - id: policy_tests
+    name: Policy package tests
+    category: code_test
+    blocking: false
+    requires:
+      - build
+    commands:
+      - id: policy_sync
+        run: uv sync --dev
+        workdir: policy
+        timeout_seconds: 600
+      - id: policy_pytest
+        run: uv run pytest tests/unit/ -v
+        workdir: policy
+        timeout_seconds: 600
+
+  - id: buyer_tests
+    name: Buyer package tests
+    category: code_test
+    blocking: false
+    requires:
+      - build
+    commands:
+      - id: buyer_sync
+        run: uv sync --python 3.12 --extra test
+        workdir: buyer
+        timeout_seconds: 600
+      - id: buyer_pytest
+        run: uv run pytest tests/ -v
+        workdir: buyer
+        timeout_seconds: 600
+      - id: buyer_smoke
+        run: make smoke-test
+        workdir: buyer
+        timeout_seconds: 120
+
+  - id: storefront_client_tests
+    name: Storefront client tests
+    category: code_test
+    blocking: false
+    requires:
+      - build
+    commands:
+      - id: storefront_client_sync
+        run: uv sync --dev
+        workdir: storefront-client
+        timeout_seconds: 600
+      - id: storefront_client_pytest
+        run: uv run pytest tests/ -v
+        workdir: storefront-client
+        timeout_seconds: 600
+
+  - id: iac_contract_tests
+    name: Compute provisioning IAC contract tests
+    category: code_test
+    blocking: false
+    requires:
+      - build
+    commands:
+      - id: iac_unittest
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+        workdir: compute-provisioning-iac
+
+  - id: integration_harness_unit_tests
+    name: Integration harness unit tests
+    category: code_test
+    blocking: false
+    requires:
+      - build
+    commands:
+      - id: integration_reinit
+        run: make reinit
+        workdir: integration-tests
+        timeout_seconds: 600
+      - id: integration_unit_pytest
+        run: .venv/bin/pytest tests/unit/ -v
+        workdir: integration-tests
+        timeout_seconds: 600
+
+  - id: compose_preexisting_stack_check
+    name: Pre-existing compose stack check
+    category: runtime
+    blocking: true
+    requires:
+      - build
+    commands:
+      - id: no_existing_compose_stack
+        run: |
+          existing=$(docker compose -f docker-compose.yml ps -q)
+          test -z "$existing"
+    collect_on_failure:
+      - compose_ps
+      - compose_logs
+    classifiers:
+      - preexisting_compose_stack
+
+  - id: compose_start_strict
+    name: Strict compose startup
+    category: runtime
+    blocking: true
+    requires:
+      - compose_preexisting_stack_check
+    commands:
+      - id: compose_up
+        run: PROVISIONING_MODE=mock docker compose -f docker-compose.yml up -d
+        timeout_seconds: 300
+    collect_on_failure:
+      - compose_config
+      - compose_ps
+      - compose_logs
+      - docker_volumes
+    classifiers:
+      - compose_start_failure
+      - redis_host_port_conflict
+      - storefront_volume_ownership
+
+  - id: readiness_checks
+    name: Application readiness checks
+    category: runtime
+    blocking: true
+    requires:
+      - compose_start_strict
+    commands:
+      - id: anvil_chain
+        run: |
+          curl -fsS http://localhost:8545 -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
+            | jq -e '.result == "0x7a69"'
+      - id: registry_health
+        run: |
+          curl -fsS http://localhost:8080/health | jq -e '.status == "ok"'
+      - id: bob_health
+        run: |
+          curl -fsS http://localhost:8001/health | jq -e '.status == "ok"'
+      - id: alice_health
+        run: |
+          curl -fsS http://localhost:8002/health | jq -e '.status == "ok"'
+      - id: provisioning_health
+        run: |
+          curl -fsS http://localhost:8081/health | jq -e '.status == "ok"'
+    collect_on_failure:
+      - compose_ps
+      - compose_logs
+      - health_registry
+      - health_bob
+      - health_alice
+      - health_provisioning
+    classifiers:
+      - readiness_failure
+
+  - id: mock_host_registration
+    name: Register mock provisioning host
+    category: runtime
+    blocking: true
+    requires:
+      - readiness_checks
+    commands:
+      - id: register_kvm1
+        run: |
+          if curl -fsS http://localhost:8081/api/v1/hosts/ | jq -e '.hosts[]? | select(.name == "kvm1")' >/dev/null; then
+            exit 0
+          fi
+          curl -fsS -X POST http://localhost:8081/api/v1/hosts/ \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"kvm1","kvm_host":"127.0.0.1","ssh_user":"appuser","ssh_key_type":"path","ssh_key_value":"/home/appuser/.ssh/id_ed25519","gpu_count":1,"enabled":true}' \
+            | jq .
+
+  - id: smoke_marker_tests
+    name: Smoke marker tests
+    category: stack_test
+    blocking: false
+    requires:
+      - mock_host_registration
+    commands:
+      - id: contracts
+        run: make test-module MODULE=contracts ACTIVE_PROFILES=local
+        workdir: integration-tests
+      - id: wallets
+        run: make test-module MODULE=wallets ACTIVE_PROFILES=local
+        workdir: integration-tests
+      - id: registry
+        run: make test-module MODULE=registry ACTIVE_PROFILES=local
+        workdir: integration-tests
+      - id: storefront
+        run: make test-module MODULE=storefront ACTIVE_PROFILES=local
+        workdir: integration-tests
+      - id: provisioning
+        run: make test-module MODULE=provisioning ACTIVE_PROFILES=local
+        workdir: integration-tests
+
+  - id: role_layer_marker_tests
+    name: Role layer marker tests
+    category: stack_test
+    blocking: false
+    requires:
+      - mock_host_registration
+    commands:
+      - id: roles_layer_external
+        run: make test-module MODULE=roles_layer_external ACTIVE_PROFILES=local
+        workdir: integration-tests
+      - id: roles_layer_registry
+        run: make test-module MODULE=roles_layer_registry ACTIVE_PROFILES=local
+        workdir: integration-tests
+      - id: roles_layer_seller
+        run: make test-module MODULE=roles_layer_seller ACTIVE_PROFILES=local
+        workdir: integration-tests
+    collect_on_failure:
+      - compose_logs
+    classifiers:
+      - stale_seller_layer_route
+
+  - id: e2e_marker_tests
+    name: E2E marker tests
+    category: stack_test
+    blocking: false
+    requires:
+      - mock_host_registration
+    commands:
+      - id: e2e_deal
+        run: make test-module MODULE=e2e_deal ACTIVE_PROFILES=local
+        workdir: integration-tests
+      - id: e2e_deal_buyer_cli
+        run: make test-module MODULE=e2e_deal_buyer_cli ACTIVE_PROFILES=local
+        workdir: integration-tests
+      - id: multi_registry
+        run: make test-module MODULE=multi_registry ACTIVE_PROFILES=local
+        workdir: integration-tests
+
+  - id: full_integration_sweep
+    name: Full unfiltered integration test sweep
+    category: stack_test
+    blocking: false
+    requires:
+      - mock_host_registration
+    commands:
+      - id: integration_full
+        run: make test ACTIVE_PROFILES=local
+        workdir: integration-tests
+    collect_on_failure:
+      - compose_logs
+    classifiers:
+      - full_integration_failure
+
+  - id: teardown
+    name: Tear down compose stack
+    category: teardown
+    blocking: false
+    always_run: true
+    commands:
+      - id: compose_down
+        run: docker compose -f docker-compose.yml down
