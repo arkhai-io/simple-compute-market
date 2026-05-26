@@ -7,15 +7,20 @@ being pushed back as a separate message.
 Shape:
 
     POST /negotiate/new
-      {seller_order_id, buyer_address, initial_price}
-      → {neg_id, action: "counter"|"accept"|"exit"|"reject", price?, reason?}
+      {listing_id, buyer_address, provision_terms, proposal}
+      → {neg_id, action: "counter"|"accept"|"exit"|"reject", proposal?, reason?}
 
     POST /negotiate/{neg_id}
-      {action: "counter"|"accept"|"exit", price?, reason?, buyer_address}
-      → {action, price?, reason?}
+      {action: "counter"|"accept"|"exit", proposal?, reason?, buyer_address}
+      → {action, proposal?, reason?}
 
 `action` in the request is what the buyer is proposing *in this round*.
-`action` in the response is the seller's resulting decision.
+`action` in the response is the seller's resulting decision. Every
+round carries a full EscrowProposal dict; the negotiated scalar (the
+absolute payment amount in base units of the escrow's payment token)
+lives in ``proposal.fields["amount"]``. Per-hour rates are a broadcast-
+only concept on listings; once a negotiation starts, the duration is
+fixed and amounts are absolute.
 
 Per-round decisions go through ``market_policy.negotiation_middleware``:
 the configured chain runs at round 0 (including pre-flight guards like
@@ -39,6 +44,7 @@ from market_policy.negotiation_middleware import (
     NegotiationMiddleware,
     NegotiationRound,
     NegotiationStep,
+    _amount_from_proposal,
     load_negotiation_chain,
     register_negotiation_middleware,
     run_negotiation_chain,
@@ -344,9 +350,89 @@ def _direction_from_strategy_label(strategy: str) -> str:
     raise ValueError(f"Unknown order strategy {strategy!r}")
 
 
-def _history_from_messages(messages: list[dict[str, Any]], our_sender: str) -> list[NegotiationRound]:
+def _proposal_with_amount(
+    pinned: dict[str, Any] | None, amount: int | float | None,
+) -> dict[str, Any] | None:
+    """Build a full EscrowProposal dict by overlaying ``amount`` onto the
+    buyer's pinned skeleton.
+
+    The buyer pins ``(chain_name, escrow_address, fields)`` at round 0;
+    every subsequent round only varies ``fields["amount"]``. This helper
+    reconstructs the per-round proposal from the thread's pinned skeleton
+    plus the per-row amount stored in the messages table.
+
+    Returns ``None`` when both pinned skeleton and amount are missing
+    (legacy rows pre-refactor); the strategies handle absent proposals
+    by falling back to the reference amount.
+    """
+    if pinned is None and amount is None:
+        return None
+    pinned_fields = (pinned or {}).get("fields") if isinstance(pinned, dict) else None
+    merged_fields: dict[str, Any] = (
+        dict(pinned_fields) if isinstance(pinned_fields, dict) else {}
+    )
+    if amount is not None:
+        merged_fields["amount"] = int(amount)
+    if pinned is None:
+        return {"fields": merged_fields}
+    return {**pinned, "fields": merged_fields}
+
+
+def _seller_reference_amount(
+    listing: Any, duration_seconds: int | None,
+) -> int:
+    """Compute the seller's absolute reference amount in base units.
+
+    Reads ``accepted_escrows[0].price_per_hour`` (the per-hour broadcast
+    rate from the listing) and scales it by the buyer-requested duration:
+    ``per_hour * duration_seconds / 3600``. Falls back to 1 hour when no
+    duration was provided.
+
+    Per-hour rates only live on the listing as a broadcast; once
+    negotiation begins, both sides reason in absolute base units, so
+    we convert at the boundary.
+    """
+    from market_storefront.utils.action_executor import _extract_initial_price_from_order
+
+    per_hour = float(_extract_initial_price_from_order(listing))
+    seconds = int(duration_seconds) if duration_seconds is not None else 3600
+    return int(round(per_hour * seconds / 3600.0))
+
+
+def _coerce_pinned_proposal(value: Any) -> dict[str, Any] | None:
+    """Parse a stored buyer_escrow_proposal value (dict or JSON string)
+    into a dict. Returns ``None`` on missing/unparseable values.
+    """
+    import json as _json
+
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = _json.loads(value)
+        except (ValueError, TypeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def _history_from_messages(
+    messages: list[dict[str, Any]],
+    our_sender: str,
+    *,
+    buyer_pinned_proposal: dict[str, Any] | None,
+) -> list[NegotiationRound]:
     """Convert the SQLite-flavored thread messages into the symmetric
-    NegotiationRound shape strategies consume."""
+    NegotiationRound shape strategies consume.
+
+    Per-round proposals are reconstructed from the buyer's pinned
+    skeleton (``thread.buyer_escrow_proposal``) overlaid with the
+    per-message amount stored in ``proposed_price``. The column name
+    is retained for migration symmetry; semantically it now holds the
+    absolute amount in base units.
+    """
     out: list[NegotiationRound] = []
     for i, m in enumerate(messages):
         sender = "us" if m.get("sender") == our_sender else "them"
@@ -361,12 +447,21 @@ def _history_from_messages(messages: list[dict[str, Any]], our_sender: str) -> l
             action = "exit"
         else:
             action = "counter"
-        price = m.get("proposed_price")
+        amount_raw = m.get("proposed_price")
+        try:
+            amount: int | None = int(float(amount_raw)) if amount_raw is not None else None
+        except (TypeError, ValueError):
+            amount = None
+        proposal = (
+            _proposal_with_amount(buyer_pinned_proposal, amount)
+            if amount is not None or buyer_pinned_proposal is not None
+            else None
+        )
         out.append(NegotiationRound(
             round_number=i,
             sender=sender,
             action=action,
-            price=float(price) if price is not None else None,
+            proposal=proposal,
         ))
     return out
 
@@ -381,10 +476,10 @@ async def _compute_round_zero_decision(
     *,
     sqlite_client: Any,
     listing: Any,
-    their_proposed_price: float,
-    escrow_proposal: dict[str, Any] | None = None,
+    their_proposal: dict[str, Any] | None,
+    requested_duration_seconds: int | None = None,
 ) -> tuple[int, str, str, str, NegotiationDecision]:
-    """Determine the seller's round-0 decision for a given buyer price.
+    """Determine the seller's round-0 decision for a given buyer proposal.
 
     Builds a ``NegotiationContext`` (listing snapshot + portfolio for the
     inventory guard + buyer escrow proposal for the shape guard), constructs
@@ -393,18 +488,16 @@ async def _compute_round_zero_decision(
     stage events are emitted — those remain the responsibility of the real
     flow in ``start_sync_negotiation``.
 
-    Returns ``(our_price, strategy_label, direction, chain_label, decision)``
-    so callers have all the context needed to emit events or build response
-    payloads without duplicating the extraction logic.
+    Returns ``(our_amount, strategy_label, direction, chain_label, decision)``
+    where ``our_amount`` is the seller's absolute reference (per-hour rate
+    scaled by the requested duration). Callers have everything they need
+    to emit events or build response payloads without duplicating extraction.
 
     Raises ``ValueError`` if the listing has no usable negotiation strategy
     (e.g. the offer/demand resources don't declare one).
     """
-    from market_storefront.utils.action_executor import (
-        _extract_initial_price_from_order,
-        determine_strategy_from_order,
-    )
     from market_storefront.models.domain_models import Listing
+    from market_storefront.utils.action_executor import determine_strategy_from_order
 
     strategy_label = determine_strategy_from_order(listing)
     if not strategy_label:
@@ -412,31 +505,41 @@ async def _compute_round_zero_decision(
             f"Listing {getattr(listing, 'listing_id', repr(listing))} "
             "has no usable strategy for negotiation"
         )
-    our_price = _extract_initial_price_from_order(listing)
-    direction = _direction_from_strategy_label(strategy_label)
-
-    chain = _load_storefront_chain()
-
+    # Compute the seller reference from the Listing model (or original
+    # dict) BEFORE dumping. The model_dump'd dict is consumed by the
+    # chain's context and shouldn't be passed back through
+    # ``_extract_initial_price_from_order`` — that helper re-validates
+    # dicts as Listings, and the ``parse_resources`` model_validator
+    # mutates the input dict in place (replaces offer_resource with a
+    # ComputeDomainResource object). Mutating the listing_dict here
+    # would break downstream guards that expect plain dicts.
+    our_amount = _seller_reference_amount(listing, requested_duration_seconds)
     listing_dict = (
         listing.model_dump(mode="json") if isinstance(listing, Listing) else listing
     )
+    direction = _direction_from_strategy_label(strategy_label)
+
+    chain = _load_storefront_chain()
     resources = await sqlite_client.list_resources()
     context = NegotiationContext(
         direction=direction,
-        our_reference_price=our_price,
+        our_reference_amount=float(our_amount),
         listing=listing_dict if isinstance(listing_dict, dict) else {},
-        escrow_proposal=escrow_proposal,
+        our_escrow_proposal=their_proposal,
         available_resources={"resources": resources or []},
     )
     history = [NegotiationRound(
         round_number=0,
         sender="them",
         action="initial",
-        price=float(their_proposed_price),
+        proposal=their_proposal,
     )]
     decision = run_negotiation_chain(chain, history, context)
-    chain_label = ",".join(type(mw).__name__ if not hasattr(mw, "__name__") else mw.__name__ for mw in chain)
-    return our_price, strategy_label, direction, chain_label, decision
+    chain_label = ",".join(
+        type(mw).__name__ if not hasattr(mw, "__name__") else mw.__name__
+        for mw in chain
+    )
+    return our_amount, strategy_label, direction, chain_label, decision
 
 
 # ---------------------------------------------------------------------------
@@ -449,9 +552,8 @@ async def start_sync_negotiation(
     sqlite_client: Any,
     our_listing_id: str,
     buyer_address: str,
-    their_proposed_price: float,
+    proposal: EscrowProposal | None = None,
     provision_terms: Any = None,
-    escrow_proposal: Any = None,
     our_base_url: str,
     their_agent_url: str,
 ) -> dict[str, Any]:
@@ -463,13 +565,14 @@ async def start_sync_negotiation(
     canonical id is server-assigned, not client-derived.
 
     ``provision_terms`` carries the buyer's lease duration, ssh key, and
-    eventually compute spec. ``escrow_proposal`` is the buyer's on-chain
-    escrow shape proposal — picks a ``(chain_name, escrow_address)``
-    entry from the listing's ``accepted_escrows`` and supplies the
-    buyer-committable EscrowData fields. Both are validated against the
-    listing's acceptance set; the seller-confirmed values are persisted
-    on the negotiation thread and echoed back so settlement-time escrow
-    construction can use them.
+    eventually compute spec. ``proposal`` is the buyer's full
+    EscrowProposal — picks a ``(chain_name, escrow_address)`` entry from
+    the listing's ``accepted_escrows``, supplies the buyer-committable
+    fields, and carries the absolute opening amount in
+    ``fields["amount"]`` (base units of the payment token). Both are
+    validated against the listing's acceptance set; the seller-confirmed
+    values are persisted on the negotiation thread and echoed back so
+    settlement-time escrow construction can use them.
 
     Raises ``ValueError`` if ``our_listing_id`` isn't in the local DB
     (seller must have published; no ad-hoc negotiations without a
@@ -497,10 +600,6 @@ async def start_sync_negotiation(
     if not our_order_dict:
         raise ValueError(f"Order {our_listing_id} not found locally; seller has no matching listing")
 
-    # Listing-state-machine invariant — kept as infrastructure rather
-    # than policy. Accepting a negotiation against a closed/in-flight
-    # listing breaks consistency with whatever flow already owns it
-    # (settlement, refund, etc.); operators don't get to opt out.
     listing_status = (our_order_dict.get("status") or "").strip()
     if listing_status not in _LIVE_LISTING_STATUSES:
         raise OfferUnfulfillableError(
@@ -508,10 +607,6 @@ async def start_sync_negotiation(
             listing_id=our_listing_id,
         )
 
-    # Validate the buyer's duration ask against the listing's advertised
-    # ceiling. NULL on the listing means "unlimited" — accept any positive
-    # duration. A buyer ask exceeding the cap is rejected before any thread
-    # state is written.
     listing_max_seconds = our_order_dict.get("max_duration_seconds")
     if (
         requested_duration_seconds is not None
@@ -523,35 +618,32 @@ async def start_sync_negotiation(
             f"listing's max_duration_seconds={listing_max_seconds}s"
         )
 
-    # Validate the buyer's escrow proposal against the listing's
-    # accepted_escrows set: the proposal must reference one of the
-    # advertised (chain, escrow_address) tuples and every seller-set
-    # field on that entry must equal the buyer's value.
-    _accepted_escrow_proposal = _validate_escrow_proposal(
-        proposal=escrow_proposal,
+    accepted_proposal = _validate_escrow_proposal(
+        proposal=proposal,
         listing=our_order_dict,
     )
 
+    proposal_dict = (
+        proposal.model_dump()
+        if proposal is not None and hasattr(proposal, "model_dump")
+        else proposal
+    )
+    their_amount = _amount_from_proposal(proposal_dict)
+    if their_amount is None:
+        raise OfferUnfulfillableError(
+            "missing_amount: buyer's escrow proposal has no fields.amount",
+            listing_id=our_listing_id,
+        )
+    their_amount = int(their_amount)
+
     our_order = Listing.model_validate(our_order_dict)
 
-    # Pure compute: resolve strategy and run the chain for the round-0
-    # decision without writing anything. The chain includes pre-flight
-    # guards (inventory match, escrow shape); a guard veto returns
-    # ``action="reject"`` which we map to a 409 OfferUnfulfillableError.
-    # The terminal strategy uses ``action="exit"`` for its own
-    # exits (max_rounds, price_unreasonable) — those flow through as
-    # normal negotiation responses.
-    proposal_dict = (
-        escrow_proposal.model_dump()
-        if escrow_proposal is not None and hasattr(escrow_proposal, "model_dump")
-        else escrow_proposal
-    )
     try:
-        our_price, strategy, direction, _chain_label, decision = await _compute_round_zero_decision(
+        our_amount, strategy, direction, _chain_label, decision = await _compute_round_zero_decision(
             sqlite_client=sqlite_client,
             listing=our_order,
-            their_proposed_price=their_proposed_price,
-            escrow_proposal=proposal_dict,
+            their_proposal=proposal_dict,
+            requested_duration_seconds=requested_duration_seconds,
         )
     except ValueError as exc:
         if "price-less" in str(exc) or "default_min_price" in str(exc):
@@ -576,58 +668,59 @@ async def start_sync_negotiation(
             their_listing_id="",  # buyer has no listing; engine column kept for symmetric schema
             our_agent_id=our_base_url,
             their_agent_id=their_agent_url,
-            our_initial_price=our_price,
+            our_initial_price=our_amount,  # column name retained; stores absolute amount
             our_strategy=strategy,
             requested_duration_seconds=requested_duration_seconds,
             buyer_escrow_proposal=(
-                _accepted_escrow_proposal.model_dump()
-                if _accepted_escrow_proposal is not None
+                accepted_proposal.model_dump()
+                if accepted_proposal is not None
                 else None
             ),
         )
-        # Round-0 record of the buyer's opening proposal.
         await txn.add_message(
             negotiation_id=neg_id,
             sender=their_agent_url or buyer_address,
-            our_price=our_price,
-            their_price=their_proposed_price,
-            proposed_price=their_proposed_price,
+            our_price=our_amount,
+            their_price=their_amount,
+            proposed_price=their_amount,
             action_taken="make_offer",
             message_type="offer",
         )
 
-    await _record_seller_decision(neg_id=neg_id, our_price=our_price,
-                                  their_price=their_proposed_price,
-                                  decision=decision)
+    await _record_seller_decision(
+        neg_id=neg_id,
+        our_amount=our_amount,
+        their_amount=their_amount,
+        decision=decision,
+    )
+    decision_amount = _amount_from_proposal(decision.proposal)
     if decision.action == "accept":
         agreed_duration_seconds = (
             requested_duration_seconds
             or our_order_dict.get("max_duration_seconds")
             or 3600
         )
+        agreed_amount = decision_amount if decision_amount is not None else our_amount
         await sqlite_client.commit_agreed_terms(
             negotiation_id=neg_id,
-            agreed_price=float(decision.price),
+            agreed_price=int(agreed_amount),
             agreed_duration_seconds=int(agreed_duration_seconds),
         )
     stage_event(
         "negotiation", "round_decided",
         negotiation_id=neg_id,
         round=0,
-        our_price=our_price,
-        their_price=their_proposed_price,
+        our_amount=our_amount,
+        their_amount=their_amount,
         decision=decision.action,
-        decision_price=decision.price,
+        decision_amount=int(decision_amount) if decision_amount is not None else None,
         decision_reason=decision.reason,
     )
     response: dict[str, Any] = {"negotiation_id": neg_id, **decision.to_dict()}
-    # Echo back what the seller validated so settlement-time escrow
-    # construction can use the seller-confirmed values. Skipped on
-    # rejection paths (which raise before reaching here).
     if provision_terms is not None:
         response["accepted_provision_terms"] = provision_terms.model_dump()
-    if _accepted_escrow_proposal is not None:
-        response["accepted_escrow_proposal"] = _accepted_escrow_proposal.model_dump()
+    if accepted_proposal is not None:
+        response["accepted_escrow_proposal"] = accepted_proposal.model_dump()
     return response
 
 
@@ -636,24 +729,22 @@ async def continue_sync_negotiation(
     sqlite_client: Any,
     neg_id: str,
     buyer_action: str,
-    buyer_price: float | None,
+    buyer_proposal: dict[str, Any] | None,
     buyer_reason: str | None,
     buyer_address: str,
 ) -> dict[str, Any]:
     """Drive one further round against an existing thread.
 
     `buyer_action` is the action the buyer is proposing this round:
-      - "counter" with `buyer_price`: the buyer's new price offer.
+      - "counter" with `buyer_proposal`: the buyer's new full EscrowProposal,
+        with the absolute amount in ``fields["amount"]``.
       - "accept": the buyer accepts the seller's last counter; we
         commit agreed_terms and return action=accept in response.
       - "exit": the buyer is walking away; we mark the thread terminal.
     """
     from market_policy.negotiation_thread import NegotiationThreadTransaction
     from market_storefront.models.domain_models import Listing
-    from market_storefront.utils.action_executor import (
-        _extract_initial_price_from_order,
-        determine_strategy_from_order,
-    )
+    from market_storefront.utils.action_executor import determine_strategy_from_order
     from market_storefront.utils.stage_log import stage_event
 
     thread = await sqlite_client.load_negotiation_thread_row(negotiation_id=neg_id)
@@ -671,63 +762,63 @@ async def continue_sync_negotiation(
         raise ValueError(f"Seller's order {our_listing_id} is gone from local DB")
     our_order = Listing.model_validate(our_order_dict)
     strategy = determine_strategy_from_order(our_order)
-    our_price = _extract_initial_price_from_order(our_order)
+    requested_duration_seconds = thread.get("requested_duration_seconds")
+    our_amount = _seller_reference_amount(our_order_dict, requested_duration_seconds)
+    buyer_pinned_proposal = _coerce_pinned_proposal(thread.get("buyer_escrow_proposal"))
 
     messages = await sqlite_client.load_negotiation_thread(negotiation_id=neg_id)
     our_previous_counters = [
-        float(m["proposed_price"])
-        for m in messages
+        m for m in messages
         if m.get("action_taken") == "counter_offer"
         and m.get("proposed_price") is not None
+        and m.get("sender") != buyer_address
     ]
 
     # Buyer-declared action short-circuits (accept / exit). No policy call.
     if buyer_action == "accept":
-        # The buyer is accepting our last offered price. Commit terms.
-        last_seller_price = next(
-            (float(m["proposed_price"]) for m in reversed(messages)
+        last_seller_amount = next(
+            (int(float(m["proposed_price"])) for m in reversed(messages)
              if m.get("action_taken") == "counter_offer" and m.get("sender") != buyer_address),
-            our_price,
+            our_amount,
         )
         async with NegotiationThreadTransaction("SYNC_NEGOTIATE_ACCEPT") as txn:
             await txn.add_message(
                 negotiation_id=neg_id,
                 sender=buyer_address,
-                our_price=our_price,
-                their_price=last_seller_price,
-                proposed_price=last_seller_price,
+                our_price=our_amount,
+                their_price=last_seller_amount,
+                proposed_price=last_seller_amount,
                 action_taken="accept_offer",
                 message_type="accepted",
             )
             await txn.mark_terminal(neg_id, "success")
-        # The buyer's lease ask was captured on /negotiate/new and lives on
-        # the thread row; echo it as the agreed duration. Falls back to the
-        # listing's max ceiling, then 1h, only for legacy threads with no
-        # recorded request (would mean a /negotiate/new from before this slice).
         agreed_duration_seconds = (
-            thread.get("requested_duration_seconds")
+            requested_duration_seconds
             or our_order_dict.get("max_duration_seconds")
             or 3600
         )
         await sqlite_client.commit_agreed_terms(
             negotiation_id=neg_id,
-            agreed_price=last_seller_price,
+            agreed_price=int(last_seller_amount),
             agreed_duration_seconds=int(agreed_duration_seconds),
         )
         stage_event(
             "negotiation", "accepted",
             negotiation_id=neg_id,
-            agreed_price=last_seller_price,
-            our_initial_price=our_price,
+            agreed_amount=last_seller_amount,
+            our_initial_amount=our_amount,
         )
-        return {"action": "accept", "price": last_seller_price}
+        return {
+            "action": "accept",
+            "proposal": _proposal_with_amount(buyer_pinned_proposal, last_seller_amount),
+        }
 
     if buyer_action == "exit":
         async with NegotiationThreadTransaction("SYNC_NEGOTIATE_EXIT") as txn:
             await txn.add_message(
                 negotiation_id=neg_id,
                 sender=buyer_address,
-                our_price=our_price,
+                our_price=our_amount,
                 their_price=None,
                 proposed_price=None,
                 action_taken="exit_negotiation",
@@ -741,69 +832,72 @@ async def continue_sync_negotiation(
         )
         return {"action": "exit", "reason": "buyer_exit"}
 
-    # Counter: call the policy.
     if buyer_action != "counter":
         raise ValueError(f"Unsupported buyer action {buyer_action!r}")
-    if buyer_price is None:
-        raise ValueError("counter requires 'price'")
+    raw_amount = _amount_from_proposal(buyer_proposal)
+    if raw_amount is None:
+        raise ValueError("counter requires 'proposal' with fields.amount")
+    buyer_amount = int(raw_amount)
 
-    # Record the buyer's counter before deciding — symmetric with round-0
-    # recording in start_sync_negotiation.
     async with NegotiationThreadTransaction("SYNC_NEGOTIATE_BUYER_COUNTER") as txn:
         await txn.add_message(
             negotiation_id=neg_id,
             sender=buyer_address,
-            our_price=our_price,
-            their_price=float(buyer_price),
-            proposed_price=float(buyer_price),
+            our_price=our_amount,
+            their_price=buyer_amount,
+            proposed_price=buyer_amount,
             action_taken="counter_offer",
             message_type="counter_proposal",
         )
 
     from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
     our_sender = BASE_URL_OVERRIDE or "seller"
-    history = _history_from_messages(messages, our_sender)
+    history = _history_from_messages(
+        messages, our_sender, buyer_pinned_proposal=buyer_pinned_proposal,
+    )
     # The buyer's just-recorded counter isn't in `messages` (loaded before
-    # the txn) — append it so the chain sees it as their_proposed_price.
+    # the txn) — append it so the chain sees it as their proposal.
     history.append(NegotiationRound(
         round_number=len(history),
         sender="them",
         action="counter",
-        price=float(buyer_price),
+        proposal=_proposal_with_amount(buyer_pinned_proposal, buyer_amount),
     ))
     chain = _load_storefront_chain()
     resources = await sqlite_client.list_resources()
     context = NegotiationContext(
         direction=_direction_from_strategy_label(strategy),
-        our_reference_price=our_price,
+        our_reference_amount=float(our_amount),
         listing=our_order_dict,
-        escrow_proposal=thread.get("buyer_escrow_proposal"),
+        our_escrow_proposal=buyer_pinned_proposal,
         available_resources={"resources": resources or []},
     )
     decision = run_negotiation_chain(chain, history, context)
     await _record_seller_decision(
-        neg_id=neg_id, our_price=our_price,
-        their_price=float(buyer_price), decision=decision,
+        neg_id=neg_id, our_amount=our_amount,
+        their_amount=buyer_amount, decision=decision,
     )
+    decision_amount = _amount_from_proposal(decision.proposal)
     if decision.action == "accept":
         agreed_duration_seconds = (
-            thread.get("requested_duration_seconds")
+            requested_duration_seconds
             or our_order_dict.get("max_duration_seconds")
             or 3600
         )
+        agreed_amount = decision_amount if decision_amount is not None else our_amount
         await sqlite_client.commit_agreed_terms(
             negotiation_id=neg_id,
-            agreed_price=float(decision.price),
+            agreed_price=int(agreed_amount),
             agreed_duration_seconds=int(agreed_duration_seconds),
         )
     stage_event(
         "negotiation", "round_decided",
         negotiation_id=neg_id,
         round=len(our_previous_counters) + 1,
-        our_price=our_price,
-        their_price=float(buyer_price),
+        our_amount=our_amount,
+        their_amount=buyer_amount,
         decision=decision.action,
-        decision_price=decision.price,
+        decision_amount=int(decision_amount) if decision_amount is not None else None,
         decision_reason=decision.reason,
     )
     return decision.to_dict()
@@ -812,13 +906,18 @@ async def continue_sync_negotiation(
 async def _record_seller_decision(
     *,
     neg_id: str,
-    our_price: float,
-    their_price: float,
+    our_amount: int,
+    their_amount: int,
     decision: NegotiationDecision,
 ) -> None:
-    """Persist the seller's decision as a message + terminal state if applicable."""
+    """Persist the seller's decision as a message + terminal state if applicable.
+
+    ``proposed_price`` column on the messages table stores the absolute
+    amount (in base units) — the column name is retained for migration
+    symmetry; semantically it now holds the amount, not a per-hour rate.
+    """
     from market_policy.negotiation_thread import NegotiationThreadTransaction
-    from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
+    from market_storefront.utils.config import BASE_URL_OVERRIDE
 
     sender = BASE_URL_OVERRIDE or "seller"
     action_taken_map = {
@@ -834,14 +933,18 @@ async def _record_seller_decision(
         "exit": "exit",
         "reject": "exit",
     }
+    decision_amount = _amount_from_proposal(decision.proposal)
+    stored_amount = (
+        int(decision_amount) if decision_amount is not None else their_amount
+    )
 
     async with NegotiationThreadTransaction("SYNC_NEGOTIATE_SELLER_DECISION") as txn:
         await txn.add_message(
             negotiation_id=neg_id,
             sender=sender,
-            our_price=our_price,
-            their_price=their_price,
-            proposed_price=decision.price if decision.price is not None else their_price,
+            our_price=our_amount,
+            their_price=their_amount,
+            proposed_price=stored_amount,
             action_taken=action_taken,
             message_type=message_type_map[decision.action],
         )

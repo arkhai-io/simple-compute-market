@@ -369,11 +369,12 @@ class SystemService:
             chain = _load_storefront_chain()
             label = f"chain[{len(chain)}]"
             history = [NegotiationRound(
-                round_number=0, sender="them", action="initial", price=10_000,
+                round_number=0, sender="them", action="initial",
+                proposal={"fields": {"amount": 10_000}},
             )]
             context = NegotiationContext(
                 direction="maximize",
-                our_reference_price=10_000,
+                our_reference_amount=10_000.0,
             )
             probe = run_negotiation_chain(chain, history, context)
             if probe.action in ("exit", "reject"):

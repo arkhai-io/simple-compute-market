@@ -250,7 +250,10 @@ class ListingService:
         )
 
     async def evaluate_negotiate(
-        self, listing_id: str, their_proposed_price: float
+        self,
+        listing_id: str,
+        proposal: dict[str, Any],
+        requested_duration_seconds: int | None = None,
     ) -> EvaluateNegotiateResponse:
         """Dry-run the round-0 negotiation decision without creating a thread.
 
@@ -262,6 +265,7 @@ class ListingService:
         Raises ``ValueError`` if the listing doesn't exist or has no usable
         negotiation strategy. The controller converts these to HTTP 404.
         """
+        from market_policy.negotiation_middleware import _amount_from_proposal
         from market_storefront.models.domain_models import Listing
         from market_storefront.utils.sync_negotiation import _compute_round_zero_decision
 
@@ -269,21 +273,30 @@ class ListingService:
         if not row:
             raise ValueError(f"Listing {listing_id} not found")
         listing = Listing.model_validate(row)
-        our_price, _strategy_label, direction, strategy_name, decision = (
+        their_amount_raw = _amount_from_proposal(proposal)
+        if their_amount_raw is None:
+            raise ValueError(
+                "proposal must include fields.amount (absolute amount in base units)"
+            )
+        their_amount = int(their_amount_raw)
+        our_amount, _strategy_label, direction, strategy_name, decision = (
             await _compute_round_zero_decision(
                 sqlite_client=self._db,
                 listing=listing,
-                their_proposed_price=their_proposed_price,
+                their_proposal=proposal,
+                requested_duration_seconds=requested_duration_seconds,
             )
         )
+        decision_amount = _amount_from_proposal(decision.proposal)
         return EvaluateNegotiateResponse(
             listing_id=listing_id,
-            our_reference_price=our_price,
-            their_proposed_price=their_proposed_price,
+            our_reference_amount=int(our_amount),
+            their_proposed_amount=their_amount,
             direction=direction,
             strategy=strategy_name,
             decision=decision.action,
-            decision_price=decision.price,
+            decision_amount=int(decision_amount) if decision_amount is not None else None,
+            decision_proposal=decision.proposal,
             decision_reason=decision.reason,
             would_negotiate=(decision.action != "exit"),
         )

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from market_policy.negotiation_middleware import (
     NegotiationContext,
+    NegotiationRound,
     escrow_shape_guard,
 )
 
@@ -20,14 +21,29 @@ def _ctx(
     *,
     listing: dict,
     escrow_proposal: dict | None,
-) -> NegotiationContext:
-    return NegotiationContext(
+) -> tuple[list[NegotiationRound], NegotiationContext]:
+    """Build (history, context) for the seller-side escrow_shape_guard.
+
+    The guard reads the buyer's proposal from the latest "them" round in
+    history (not from context). Tests pass the proposal in via this
+    helper, which wraps it as a round-0 ``initial`` entry. ``None``
+    means the buyer didn't include a proposal (legacy client).
+    """
+    history: list[NegotiationRound] = []
+    if escrow_proposal is not None:
+        history.append(NegotiationRound(
+            round_number=0,
+            sender="them",
+            action="initial",
+            proposal=escrow_proposal,
+        ))
+    context = NegotiationContext(
         direction="maximize",
-        our_reference_price=1000.0,
+        our_reference_amount=1000.0,
         listing=listing,
-        escrow_proposal=escrow_proposal,
         available_resources={},
     )
+    return history, context
 
 
 _ADDR = "0x" + "11" * 20
@@ -53,7 +69,7 @@ def _listing_with_one_escrow(**field_overrides) -> dict:
 
 class TestPassesWhenAllFieldsMatch:
     def test_strict_equality_passes(self):
-        ctx = _ctx(
+        history, ctx = _ctx(
             listing=_listing_with_one_escrow(),
             escrow_proposal={
                 "chain_name": "anvil",
@@ -61,7 +77,7 @@ class TestPassesWhenAllFieldsMatch:
                 "fields": {"token": _TOKEN},
             },
         )
-        decision, _ctx_out = escrow_shape_guard([], ctx)
+        decision, _ctx_out = escrow_shape_guard(history, ctx)
         assert decision is None
 
     def test_address_case_insensitive(self):
@@ -70,7 +86,7 @@ class TestPassesWhenAllFieldsMatch:
         to their lowercase form to avoid spurious vetoes."""
         mixed_addr = "0x" + _ADDR[2:].upper()
         mixed_token = "0x" + _TOKEN[2:].upper()
-        ctx = _ctx(
+        history, ctx = _ctx(
             listing=_listing_with_one_escrow(),
             escrow_proposal={
                 "chain_name": "anvil",
@@ -78,7 +94,7 @@ class TestPassesWhenAllFieldsMatch:
                 "fields": {"token": mixed_token},
             },
         )
-        decision, _ = escrow_shape_guard([], ctx)
+        decision, _ = escrow_shape_guard(history, ctx)
         assert decision is None
 
     def test_accepted_escrows_serialized_as_json_string(self):
@@ -87,7 +103,7 @@ class TestPassesWhenAllFieldsMatch:
         import json
         listing = _listing_with_one_escrow()
         listing["accepted_escrows"] = json.dumps(listing["accepted_escrows"])
-        ctx = _ctx(
+        history, ctx = _ctx(
             listing=listing,
             escrow_proposal={
                 "chain_name": "anvil",
@@ -95,13 +111,13 @@ class TestPassesWhenAllFieldsMatch:
                 "fields": {"token": _TOKEN},
             },
         )
-        decision, _ = escrow_shape_guard([], ctx)
+        decision, _ = escrow_shape_guard(history, ctx)
         assert decision is None
 
 
 class TestRejectsWhenFieldDiverges:
     def test_token_mismatch(self):
-        ctx = _ctx(
+        history, ctx = _ctx(
             listing=_listing_with_one_escrow(),
             escrow_proposal={
                 "chain_name": "anvil",
@@ -109,7 +125,7 @@ class TestRejectsWhenFieldDiverges:
                 "fields": {"token": _OTHER_TOKEN},
             },
         )
-        decision, _ = escrow_shape_guard([], ctx)
+        decision, _ = escrow_shape_guard(history, ctx)
         assert decision is not None
         assert decision.action == "reject"
         assert "escrow_field_mismatch" in (decision.reason or "")
@@ -118,7 +134,7 @@ class TestRejectsWhenFieldDiverges:
     def test_buyer_omits_a_required_field(self):
         """When the seller pinned a field but the buyer didn't include
         it, the guard still vetoes (None ≠ pinned value)."""
-        ctx = _ctx(
+        history, ctx = _ctx(
             listing=_listing_with_one_escrow(arbiter="0x" + "44" * 20),
             escrow_proposal={
                 "chain_name": "anvil",
@@ -126,7 +142,7 @@ class TestRejectsWhenFieldDiverges:
                 "fields": {"token": _TOKEN},  # no arbiter
             },
         )
-        decision, _ = escrow_shape_guard([], ctx)
+        decision, _ = escrow_shape_guard(history, ctx)
         assert decision is not None
         assert decision.action == "reject"
         assert "'arbiter'" in (decision.reason or "")
@@ -140,17 +156,17 @@ class TestPassesThroughWithoutVetoing:
     def test_no_proposal_passes(self):
         """Legacy buyer client without an escrow_proposal — the field
         check has nothing to compare against."""
-        ctx = _ctx(
+        history, ctx = _ctx(
             listing=_listing_with_one_escrow(),
             escrow_proposal=None,
         )
-        decision, _ = escrow_shape_guard([], ctx)
+        decision, _ = escrow_shape_guard(history, ctx)
         assert decision is None
 
     def test_listing_with_no_accepted_escrows_passes(self):
         """Publish-time synthesis couldn't resolve a chain — pinning
         nothing means the buyer is free to propose anything."""
-        ctx = _ctx(
+        history, ctx = _ctx(
             listing={"listing_id": "L1", "accepted_escrows": []},
             escrow_proposal={
                 "chain_name": "anvil",
@@ -158,14 +174,14 @@ class TestPassesThroughWithoutVetoing:
                 "fields": {"token": _TOKEN},
             },
         )
-        decision, _ = escrow_shape_guard([], ctx)
+        decision, _ = escrow_shape_guard(history, ctx)
         assert decision is None
 
     def test_zero_address_passes(self):
         """Legacy buyer client sends the zero placeholder for
         escrow_address; structural match in sync_negotiation skips it,
         and so do we."""
-        ctx = _ctx(
+        history, ctx = _ctx(
             listing=_listing_with_one_escrow(),
             escrow_proposal={
                 "chain_name": "anvil",
@@ -173,7 +189,7 @@ class TestPassesThroughWithoutVetoing:
                 "fields": {"token": _TOKEN},
             },
         )
-        decision, _ = escrow_shape_guard([], ctx)
+        decision, _ = escrow_shape_guard(history, ctx)
         assert decision is None
 
     def test_address_advertised_but_not_in_set_passes(self):
@@ -181,7 +197,7 @@ class TestPassesThroughWithoutVetoing:
         in sync_negotiation._match_accepted_escrow. The middleware
         declines to double-report — that would surface confusing
         error messages."""
-        ctx = _ctx(
+        history, ctx = _ctx(
             listing=_listing_with_one_escrow(),
             escrow_proposal={
                 "chain_name": "anvil",
@@ -189,5 +205,5 @@ class TestPassesThroughWithoutVetoing:
                 "fields": {"token": _TOKEN},
             },
         )
-        decision, _ = escrow_shape_guard([], ctx)
+        decision, _ = escrow_shape_guard(history, ctx)
         assert decision is None

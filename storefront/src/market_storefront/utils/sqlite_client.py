@@ -2209,8 +2209,12 @@ class SQLiteClient:
         run (or be retried) as a separate step by reading these columns,
         without replaying the round-by-round message history.
 
-        ``agreed_duration_seconds`` echoes the buyer's negotiation-init ask;
-        total payment = agreed_price (per-hour) × agreed_duration_seconds / 3600.
+        ``agreed_price`` is the absolute payment amount in base units of
+        the payment token (the column name is retained from before the
+        per-hour → absolute refactor; semantically it now holds the
+        amount, not a per-hour rate). ``agreed_duration_seconds`` echoes
+        the buyer's negotiation-init ask and is used by settlement-time
+        arbiter codecs that bind the seller's delivery window.
         """
         def _save() -> None:
             now = datetime.now().isoformat()

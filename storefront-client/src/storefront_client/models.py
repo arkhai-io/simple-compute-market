@@ -525,24 +525,32 @@ class NegotiationDetail:
 
 @dataclass
 class NegotiationActionResponse:
-    """Response from POST .../advance or .../force-accept."""
+    """Response from POST .../advance or .../force-accept.
+
+    ``proposal`` is the full EscrowProposal-shaped dict returned by the
+    seller's counter / accept decisions (with ``fields["amount"]``
+    carrying the absolute amount in base units). ``amount`` is the
+    convenience scalar returned by force-accept.
+    """
 
     neg_id: str = ""
     listing_id: str = ""
     action: str = ""
-    price: float | None = None
+    proposal: dict[str, Any] | None = None
+    amount: int | None = None
     reason: str | None = None
     source: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "NegotiationActionResponse":
-        known = {"neg_id", "listing_id", "action", "price", "reason", "source"}
+        known = {"neg_id", "listing_id", "action", "proposal", "amount", "reason", "source"}
         return cls(
             neg_id=d.get("neg_id", ""),
             listing_id=d.get("listing_id", ""),
             action=d.get("action", ""),
-            price=d.get("price"),
+            proposal=d.get("proposal"),
+            amount=int(d["amount"]) if d.get("amount") is not None else None,
             reason=d.get("reason"),
             source=d.get("source"),
             extra={k: v for k, v in d.items() if k not in known},
@@ -595,12 +603,13 @@ class EvaluateNegotiateResponse:
     """Response from POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate."""
 
     listing_id: str = ""
-    our_reference_price: float = 0
-    their_proposed_price: float = 0
+    our_reference_amount: int = 0
+    their_proposed_amount: int = 0
     direction: str = ""
     strategy: str = ""
     decision: str = ""
-    decision_price: float | None = None
+    decision_amount: int | None = None
+    decision_proposal: dict[str, Any] | None = None
     decision_reason: str | None = None
     would_negotiate: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
@@ -608,18 +617,19 @@ class EvaluateNegotiateResponse:
     @classmethod
     def from_dict(cls, d: dict) -> "EvaluateNegotiateResponse":
         known = {
-            "listing_id", "our_reference_price", "their_proposed_price",
-            "direction", "strategy", "decision", "decision_price",
-            "decision_reason", "would_negotiate",
+            "listing_id", "our_reference_amount", "their_proposed_amount",
+            "direction", "strategy", "decision", "decision_amount",
+            "decision_proposal", "decision_reason", "would_negotiate",
         }
         return cls(
             listing_id=d.get("listing_id", ""),
-            our_reference_price=float(d.get("our_reference_price", 0)),
-            their_proposed_price=float(d.get("their_proposed_price", 0)),
+            our_reference_amount=int(d.get("our_reference_amount", 0)),
+            their_proposed_amount=int(d.get("their_proposed_amount", 0)),
             direction=d.get("direction", ""),
             strategy=d.get("strategy", ""),
             decision=d.get("decision", ""),
-            decision_price=d.get("decision_price"),
+            decision_amount=int(d["decision_amount"]) if d.get("decision_amount") is not None else None,
+            decision_proposal=d.get("decision_proposal"),
             decision_reason=d.get("decision_reason"),
             would_negotiate=bool(d.get("would_negotiate", False)),
             extra={k: v for k, v in d.items() if k not in known},

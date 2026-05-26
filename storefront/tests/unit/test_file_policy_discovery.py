@@ -44,7 +44,7 @@ def _force_rediscover():
 
 
 def _ctx() -> NegotiationContext:
-    return NegotiationContext(direction="maximize", our_reference_price=100.0)
+    return NegotiationContext(direction="maximize", our_reference_amount=100.0)
 
 
 def test_extra_policy_paths_register_each_subdir(tmp_path):

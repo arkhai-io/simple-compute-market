@@ -180,9 +180,12 @@ async def verify_escrow_for_settlement(
         Our wallet address; participates in the expected obligation_data
         via the RecipientArbiter demand encoding.
     agreed_price, agreed_duration_seconds:
-        From the negotiation thread; together with the proposal's token +
-        arbiter and the chain config they determine the entire expected
-        obligation_data dict.
+        From the negotiation thread; ``agreed_price`` is the absolute
+        payment amount in base units (the DB column name is retained
+        from before the per-hour → absolute refactor — semantically it
+        is now the amount, not a rate). Together with the proposal's
+        token + arbiter and the chain config they determine the entire
+        expected obligation_data dict.
     listing:
         The seller's listing row (after ``load_listing``); used as the
         fallback source for the payment token when no proposal is
@@ -282,7 +285,7 @@ async def verify_escrow_for_settlement(
     try:
         expected_obligation_raw = build_obligation_data_fn(
             seller_wallet=seller_wallet,
-            agreed_price=float(agreed_price),
+            agreed_amount=int(agreed_price),
             duration_seconds=int(agreed_duration_seconds),
             token_contract_address=effective_token,
             chain_name=chain_name,
