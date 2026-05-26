@@ -70,6 +70,10 @@ def _escrow_proposal() -> EscrowProposal:
     )
 
 
+def _build_escrow_proposal():
+    return lambda _match: _escrow_proposal()
+
+
 def _build_escrow_terms_stub(proposal, seller_wallet, agreed_price, duration_seconds):
     """Stub builder for aggregation tests — escrow terms aren't the point here."""
     return [EscrowTerms(
@@ -175,7 +179,7 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
             config=_config(aggregation_policy="best_price"),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -227,7 +231,7 @@ def test_cheapest_first_preserves_first_agreed_semantics():
             config=_config(aggregation_policy="cheapest_first"),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -287,7 +291,7 @@ def test_custom_policy_can_short_circuit():
             config=_config(aggregation_policy="pick_second_no_negotiate"),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -315,7 +319,7 @@ def test_policy_returning_none_yields_exited():
             config=_config(aggregation_policy="always_none"),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xnever"],
             sleep=lambda _: None,

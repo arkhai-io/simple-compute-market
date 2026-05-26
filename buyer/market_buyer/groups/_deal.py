@@ -225,15 +225,14 @@ def resolve_chain_settings(
     tc = token_contract
     decimals: Optional[int] = token_decimals
     if not tc:
-        from ..common import resolve_default_token_address
-        tc = resolve_default_token_address()
-        if not tc:
-            typer.secho(
-                "No --token-contract given and top-level default_token_address "
-                "is unset in buyer.toml.",
-                err=True, fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
+        typer.secho(
+            "No --token-contract given and no token recorded on the run-log. "
+            "Pass --token-contract or resume from a run-log that captured the "
+            "negotiated token (`market buy` / `market negotiate` log it as "
+            "part of round 0).",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
     if decimals is None:
         # No explicit --token-decimals — resolve on chain.
         from ..common import resolve_chain_id

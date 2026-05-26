@@ -77,6 +77,11 @@ def _escrow_proposal() -> EscrowProposal:
     )
 
 
+def _build_escrow_proposal():
+    """Test-fixture factory: returns the same proposal regardless of match."""
+    return lambda _match: _escrow_proposal()
+
+
 # Seller-echoed accept-time terms: must be included in /negotiate/new mock
 # replies so _settle_one can read outcome.accepted_escrow_proposal
 # and dispatch escrow construction off it.
@@ -160,7 +165,7 @@ def test_no_matches_returns_no_matches_status():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xnever"],
         )
@@ -182,7 +187,7 @@ def test_matches_can_be_preseeded_skipping_registry_query():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xnever"],
             matches=[{"listing_id": "seller-1", "seller": _SELLER_URL}],
@@ -236,7 +241,7 @@ def test_happy_path_drives_to_ready():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms,
             create_escrow=_create_escrow,
             on_event=lambda name, body: events.append((name, body)),
@@ -320,7 +325,7 @@ def test_first_match_exits_second_agrees():
             config=config,
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -355,7 +360,7 @@ def test_escrow_hook_failure_returns_exited_with_reason():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=_broken_escrow,
             sleep=lambda _: None,
@@ -385,7 +390,7 @@ def test_provisioning_failed_returns_failed_status():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -450,7 +455,7 @@ def test_strict_echo_default_rejects_token_swap_before_settle():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xnever"],
             on_event=lambda name, body: events.append((name, body)),
@@ -510,7 +515,7 @@ def test_always_accept_lets_seller_swap_token():
             config=config,
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -540,7 +545,7 @@ def test_strict_echo_default_rejects_missing_seller_echo():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xnever"],
             sleep=lambda _: None,
@@ -574,7 +579,7 @@ def test_settlement_timeout_returns_timeout_status():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xescrow"],
             settlement_poll_interval=0.01,

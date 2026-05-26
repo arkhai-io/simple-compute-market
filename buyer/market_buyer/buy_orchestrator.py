@@ -72,6 +72,14 @@ class BuyConfig:
     counter_policy: Optional[str] = None
 
 
+# Factory: build the EscrowProposal for a specific candidate listing.
+# Returns None when the listing carries no accepted_escrows entry
+# compatible with the buyer's chain + filters — the orchestrator then
+# skips that candidate. The caller closes over chain config + selection
+# rules; the orchestrator just invokes per match.
+BuildEscrowProposalFn = Callable[[dict[str, Any]], Optional["EscrowProposal"]]
+
+
 @dataclass
 class BuyConstraints:
     """Price bounds the buyer enforces locally during negotiation.
@@ -514,7 +522,7 @@ def run_buy(
     config: BuyConfig,
     constraints: BuyConstraints,
     provision: ProvisionTerms,
-    escrow_proposal: EscrowProposal,
+    build_escrow_proposal: BuildEscrowProposalFn,
     build_escrow_terms: BuildEscrowTermsFn,
     create_escrow: CreateEscrowFn,
     matches: Optional[list[dict[str, Any]]] = None,
@@ -532,14 +540,16 @@ def run_buy(
 
     Parameters
     ----------
-    config, constraints, provision, escrow_proposal
-        Buyer identity + price bounds + what to provision + the on-chain
-        escrow shape the buyer proposes. Immutable for this call.
-        ``provision.duration_seconds`` is the lease window;
-        ``provision.ssh_public_key`` is sent in the settle request;
-        ``escrow_proposal`` (chain_name + escrow_address + fields +
-        expiration_unix) goes on the negotiate-init request and the
-        seller validates it against the listing's accepted_escrows.
+    config, constraints, provision, build_escrow_proposal
+        Buyer identity + price bounds + what to provision + a factory
+        that yields the on-chain escrow shape *per candidate listing*.
+        Immutable for this call. ``provision.duration_seconds`` is the
+        lease window; ``provision.ssh_public_key`` is sent in the settle
+        request. ``build_escrow_proposal(match) -> EscrowProposal | None``
+        picks one entry from ``match.accepted_escrows`` (token / escrow
+        contract / chain come from the listing); ``None`` skips the
+        candidate when no entry is compatible with the buyer's chain
+        and token filters.
     build_escrow_terms
         Materializes the agreed negotiation into the canonical
         ``list[EscrowTerms]`` (the escrow specs that will be submitted
@@ -617,6 +627,22 @@ def run_buy(
                 status="exited",
                 negotiation_id=None,
                 reason="missing_seller_url_or_listing_id",
+            )
+
+        # Per-candidate escrow proposal: token, escrow contract, and chain
+        # come from the listing's accepted_escrows. None ⇒ no entry on
+        # the buyer's chain (or no entry matching --token-contract).
+        escrow_proposal = build_escrow_proposal(match)
+        if escrow_proposal is None:
+            attempts.append({
+                "seller_url": seller_url,
+                "listing_id": listing_id,
+                "error": "no_compatible_accepted_escrow",
+            })
+            return NegotiationOutcome(
+                status="exited",
+                negotiation_id=None,
+                reason="no_compatible_accepted_escrow",
             )
 
         neg_ctx: dict[str, Any] = {"listing_id": listing_id}

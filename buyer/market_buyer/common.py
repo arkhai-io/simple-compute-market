@@ -213,21 +213,6 @@ def resolve_chain_id(rpc_url: str) -> int:
         ) from exc
 
 
-def resolve_default_token_address() -> str | None:
-    """Pick the buyer's default token contract address.
-
-    Reads top-level ``default_token_address`` from the user config — a 0x
-    ERC-20 address. Returns None when unset; callers must then fall back to
-    ``--token-contract``. Decimals are resolved on chain via
-    ``service.clients.token.resolve_token`` at the call site.
-    """
-    from service.config_loader import get_dotted, load_user_config
-    v = get_dotted(load_user_config(), "default_token_address")
-    if isinstance(v, str) and v.strip().startswith("0x"):
-        return v.strip()
-    return None
-
-
 def resolve_storefront_url(
     agent_url: str | None,
     default_port: int = 8000,

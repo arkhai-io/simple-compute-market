@@ -127,9 +127,6 @@ _INIT_USER_TEMPLATE = """\
 # Free-form table of {url = "bearer-token"}. Keys must match `urls` above
 # verbatim (scheme, host, port, no trailing slash). Empty = public.
 
-# default_token_address = "0x..."              # 0x ERC-20 address used when --token-contract is omitted.
-                                                # Decimals + symbol are resolved on chain via [chain].rpc_url.
-
 [aggregation]
 # policy = "best_price"                        # across-seller match policy: best_price (default) |
                                                 # fastest_agreed | cheapest_first | registry_order |
