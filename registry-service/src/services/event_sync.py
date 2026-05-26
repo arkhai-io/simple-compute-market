@@ -91,7 +91,7 @@ class EventSyncService:
         any agent registers.
         """
         try:
-            current_block = self.identity_registry.w3.eth.block_number
+            current_block = await asyncio.to_thread(lambda: self.identity_registry.w3.eth.block_number)
 
             if settings.start_block is not None:
                 start_block = max(0, settings.start_block)
@@ -121,7 +121,7 @@ class EventSyncService:
         """Sync latest events since last sync"""
         async with self._sync_lock:
             try:
-                current_block = self.identity_registry.w3.eth.block_number
+                current_block = await asyncio.to_thread(lambda: self.identity_registry.w3.eth.block_number)
 
                 if self.last_synced_block == 0:
                     await self.sync_from_start()
@@ -167,8 +167,9 @@ class EventSyncService:
 
                 try:
                     # Get Registered events (official ERC-8004 event name)
-                    registered_events = self.identity_registry.get_past_agent_registered_events(
-                        current_from, current_to
+                    registered_events = await asyncio.to_thread(
+                        self.identity_registry.get_past_agent_registered_events,
+                        current_from, current_to,
                     )
 
                     for event in registered_events:
@@ -198,11 +199,15 @@ class EventSyncService:
                             token_uri = None
                             owner_address = None
                             try:
-                                token_uri = self.identity_registry.get_token_uri(onchain_agent_id)
+                                token_uri = await asyncio.to_thread(
+                                    self.identity_registry.get_token_uri, onchain_agent_id,
+                                )
                             except Exception as e:
                                 logger.warning(f"[EventSync] Could not fetch token URI for agent {onchain_agent_id}: {e}")
                             try:
-                                owner_address = self.identity_registry.get_owner(onchain_agent_id)
+                                owner_address = await asyncio.to_thread(
+                                    self.identity_registry.get_owner, onchain_agent_id,
+                                )
                             except Exception as e:
                                 logger.warning(f"[EventSync] Could not fetch owner for agent {onchain_agent_id}: {e}")
 
@@ -292,8 +297,9 @@ class EventSyncService:
                             continue
 
                     # Get MetadataSet events (official ERC-8004 event name)
-                    metadata_events = self.identity_registry.get_past_metadata_set_events(
-                        current_from, current_to
+                    metadata_events = await asyncio.to_thread(
+                        self.identity_registry.get_past_metadata_set_events,
+                        current_from, current_to,
                     )
 
                     for event in metadata_events:
@@ -324,7 +330,9 @@ class EventSyncService:
 
                             # Get the metadata value from contract (returns bytes)
                             try:
-                                value_bytes = self.identity_registry.get_metadata(onchain_agent_id, key)
+                                value_bytes = await asyncio.to_thread(
+                                    self.identity_registry.get_metadata, onchain_agent_id, key,
+                                )
                                 
                                 # Decode bytes to string if it's UTF-8 encoded
                                 try:
@@ -414,8 +422,9 @@ class EventSyncService:
                             continue
 
                     # Get UriUpdated events (official ERC-8004 event name)
-                    uri_updated_events = self.identity_registry.get_past_uri_updated_events(
-                        current_from, current_to
+                    uri_updated_events = await asyncio.to_thread(
+                        self.identity_registry.get_past_uri_updated_events,
+                        current_from, current_to,
                     )
 
                     for event in uri_updated_events:
