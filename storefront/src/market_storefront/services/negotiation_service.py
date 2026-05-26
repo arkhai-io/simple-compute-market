@@ -105,7 +105,7 @@ class NegotiationService:
         listing_id: str,
         neg_id: str,
         action: str,
-        price: float | None,
+        proposal: dict[str, Any] | None,
         reason: str | None,
     ) -> dict[str, Any]:
         """Drive one negotiation round as the admin (no buyer signature required).
@@ -115,7 +115,7 @@ class NegotiationService:
         attribution stays consistent.
 
         Raises:
-            NegotiationServiceError(400) — invalid action or missing price
+            NegotiationServiceError(400) — invalid action or missing proposal
             NegotiationServiceError(404) — thread not found / wrong order
             NegotiationServiceError(409) — thread already terminal
         """
@@ -123,9 +123,9 @@ class NegotiationService:
             raise NegotiationServiceError(
                 "action must be 'counter'|'accept'|'exit'", status_code=400
             )
-        if action == "counter" and price is None:
+        if action == "counter" and proposal is None:
             raise NegotiationServiceError(
-                "'price' required as number for counter", status_code=400
+                "'proposal' required for counter", status_code=400
             )
 
         thread = await self._load_and_validate_thread(
@@ -137,7 +137,7 @@ class NegotiationService:
                 sqlite_client=self._db,
                 neg_id=neg_id,
                 buyer_action=action,
-                buyer_price=price,
+                buyer_proposal=proposal,
                 buyer_reason=reason,
                 # Use thread's counterparty so message attribution is consistent.
                 buyer_address=thread.get("their_agent_id") or "admin",
@@ -157,12 +157,13 @@ class NegotiationService:
         *,
         listing_id: str,
         neg_id: str,
-        price: float,
+        amount: int,
     ) -> dict[str, Any]:
-        """Commit a negotiation as terminal-success at the given price.
+        """Commit a negotiation as terminal-success at the given amount.
 
-        Bypasses the strategy entirely.  The caller (admin) is responsible
-        for choosing a price that makes business sense.
+        Bypasses the strategy entirely. The caller (admin) is responsible
+        for choosing an amount that makes business sense. The amount is
+        the absolute payment in base units of the escrow's payment token.
 
         Raises:
             NegotiationServiceError(404) — thread not found / wrong order
@@ -191,9 +192,9 @@ class NegotiationService:
         await self._db.save_negotiation_message(
             negotiation_id=neg_id,
             sender="admin",
-            our_price=price,
-            their_price=price,
-            proposed_price=price,
+            our_price=amount,
+            their_price=amount,
+            proposed_price=amount,
             action_taken="accept_offer",
             message_type="accepted",
             timestamp=_dt.now().isoformat(),
@@ -205,7 +206,7 @@ class NegotiationService:
 
         await self._db.commit_agreed_terms(
             negotiation_id=neg_id,
-            agreed_price=price,
+            agreed_price=int(amount),
             agreed_duration_seconds=int(agreed_duration_seconds),
         )
 
@@ -213,7 +214,7 @@ class NegotiationService:
             "negotiation", "force_accepted",
             negotiation_id=neg_id,
             listing_id=listing_id,
-            agreed_price=price,
+            agreed_amount=int(amount),
             source="admin",
         )
 
@@ -221,7 +222,7 @@ class NegotiationService:
             "neg_id": neg_id,
             "listing_id": listing_id,
             "action": "accept",
-            "price": price,
+            "amount": int(amount),
             "source": "admin_force_accept",
         }
 

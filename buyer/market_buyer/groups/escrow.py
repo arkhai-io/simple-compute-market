@@ -308,7 +308,7 @@ def create_cmd(
         seller_wallet_address=seller_wallet,
         negotiation_id=deal.negotiation_id,
         listing_id=deal.listing_id,
-        agreed_price=deal.agreed_price,
+        agreed_amount=deal.agreed_amount,
         duration_seconds=effective_duration_seconds,
     )
     log.event("escrow_create_start", terms=terms.__dict__)
@@ -319,7 +319,7 @@ def create_cmd(
     header.add_row("Run ID", run_id)
     header.add_row("Seller", deal.seller_url)
     header.add_row("Seller wallet", seller_wallet)
-    header.add_row("Agreed price", str(deal.agreed_price))
+    header.add_row("Agreed price", str(deal.agreed_amount))
     header.add_row("Duration (seconds)", str(effective_duration_seconds))
     header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
     console.print(Panel(header, title="market escrow create", border_style="cyan"))
@@ -411,7 +411,7 @@ def show_cmd(
         override=addr_config, toml_path="chain.alkahest_address_config_path",
     )
     private_key = resolve_config_value(
-        override=None, toml_path="buyer.private_key",
+        override=None, toml_path="wallet.private_key",
     )
     if not rpc:
         typer.secho(
@@ -421,7 +421,7 @@ def show_cmd(
         raise typer.Exit(2)
     if not private_key:
         typer.secho(
-            "Missing buyer.private_key in config.toml — alkahest_py "
+            "Missing wallet.private_key in buyer.toml — alkahest_py "
             "requires a wallet key even for read-only inspection.",
             err=True, fg=typer.colors.RED,
         )

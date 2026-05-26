@@ -223,57 +223,29 @@ class SQLiteClient:
                     except sqlite3.OperationalError:
                         pass
 
-            # Policies table (callable-only)
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS policies (
-                  agent_id TEXT NOT NULL,
-                  name TEXT NOT NULL,
-                  trigger_type TEXT NOT NULL,
-                  callable_ref TEXT,
-                  PRIMARY KEY(agent_id, name)
-                )
-                """
-            )
-            # Policy composites (ordered components per policy)
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS policy_composites (
-                  agent_id TEXT NOT NULL,
-                  policy_name TEXT NOT NULL,
-                  position INTEGER NOT NULL,
-                  component_name TEXT NOT NULL,
-                  PRIMARY KEY(agent_id, policy_name, position),
-                  FOREIGN KEY(agent_id, policy_name) REFERENCES policies(agent_id, name)
-                )
-                """
-            )
-            # Decisions table
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS decisions (
-                  decision_id TEXT PRIMARY KEY,
-                  event_id TEXT NOT NULL,
-                  event_type TEXT NOT NULL,
-                  agent_id TEXT NOT NULL,
-                  policy_used TEXT,
-                  action_type TEXT NOT NULL,
-                  timestamp TEXT NOT NULL,
-                  context_json TEXT
-                )
-                """
-            )
-            # Decision outcomes table
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS decision_outcomes (
-                  decision_id TEXT PRIMARY KEY,
-                  outcome_json TEXT,
-                  timestamp TEXT NOT NULL,
-                  FOREIGN KEY(decision_id) REFERENCES decisions(decision_id)
-                )
-                """
-            )
+            # Drop legacy policy / decision tables (procedural-policy refactor).
+            # Idempotent: noop once the tables are gone.
+            for legacy_table in (
+                "decision_outcomes",
+                "decisions",
+                "policy_composites",
+                "policies",
+            ):
+                try:
+                    cur.execute(f"DROP TABLE IF EXISTS {legacy_table}")
+                except sqlite3.OperationalError:
+                    pass
+            for legacy_idx in (
+                "idx_decisions_event_id",
+                "idx_decisions_event_type",
+                "idx_decisions_timestamp",
+                "idx_decisions_agent_id",
+            ):
+                try:
+                    cur.execute(f"DROP INDEX IF EXISTS {legacy_idx}")
+                except sqlite3.OperationalError:
+                    pass
+
             # Negotiation threads table. ``buyer`` / ``matched_offer_id``
             # capture the buyer↔seller pairing — they were previously stored
             # on the listings row (one buyer per listing), but multi-escrow
@@ -653,19 +625,6 @@ class SQLiteClient:
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_credentials_listing_granted ON credentials(listing_id, granted_to)"
-            )
-            # Create indexes
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_decisions_event_id ON decisions(event_id)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_decisions_event_type ON decisions(event_type)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_decisions_agent_id ON decisions(agent_id)"
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_negotiation_messages_negotiation_id ON negotiation_messages(negotiation_id)"
@@ -2081,251 +2040,6 @@ class SQLiteClient:
         return await asyncio.to_thread(_load)
 
 
-    async def save_policy(
-        self,
-        *,
-        agent_id: str,
-        name: str,
-        trigger_type: str,
-        callable_ref: str | None,
-    ) -> None:
-        def _save() -> None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    INSERT INTO policies(agent_id, name, trigger_type, callable_ref)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(agent_id, name) DO UPDATE SET
-                        trigger_type=excluded.trigger_type,
-                        callable_ref=excluded.callable_ref
-                    """,
-                    (agent_id, name, trigger_type, callable_ref),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-        await asyncio.to_thread(_save)
-
-    async def load_policies_by_trigger(self, *, agent_id: str, trigger_type: str) -> list[dict[str, Any]]:
-        def _load() -> list[dict[str, Any]]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    "SELECT name, callable_ref FROM policies WHERE agent_id=? AND trigger_type=?",
-                    (agent_id, trigger_type),
-                )
-                rows = cur.fetchall()
-                result: list[dict[str, Any]] = []
-                for (name, callable_ref) in rows:
-                    result.append(
-                        {
-                            "name": name,
-                            "callable_ref": callable_ref,
-                        }
-                    )
-                return result
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_load)
-
-    async def save_policy_composite(self, *, agent_id: str, policy_name: str, components: list[str]) -> None:
-        """Persist ordered component names for a composite policy."""
-        def _save() -> None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                # Clear existing components to avoid duplicates
-                cur.execute(
-                    "DELETE FROM policy_composites WHERE agent_id=? AND policy_name=?",
-                    (agent_id, policy_name),
-                )
-                # Insert ordered components
-                for idx, comp in enumerate(components):
-                    cur.execute(
-                        """
-                        INSERT INTO policy_composites(agent_id, policy_name, position, component_name)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (agent_id, policy_name, idx, comp),
-                    )
-                conn.commit()
-            finally:
-                conn.close()
-
-        await asyncio.to_thread(_save)
-
-    async def load_policy_composite(self, *, agent_id: str, policy_name: str) -> list[str]:
-        def _load() -> list[str]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT component_name from policy_composites
-                    WHERE agent_id=? AND policy_name=?
-                    ORDER BY position ASC
-                    """,
-                    (agent_id, policy_name),
-                )
-                return [row[0] for row in cur.fetchall()]
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_load)
-
-    async def list_seeded_policies(self) -> list[dict]:
-        """Return all seeded policies joined with their ordered components.
-
-        Used by the system controller's policy diagnostic and dry-run endpoints.
-        Each row has: policy_name, trigger_type, callable_ref, components (list[str]).
-
-        Note: policy_composites rows are keyed by callable_ref (the indirection
-        pointer stored in the policies.callable_ref column), NOT by policies.name.
-        """
-        def _list() -> list[dict]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT p.name, p.trigger_type, p.callable_ref,
-                           GROUP_CONCAT(pc.component_name, '||') as components_concat
-                    FROM policies p
-                    LEFT JOIN policy_composites pc
-                           ON pc.agent_id = p.agent_id
-                           AND pc.policy_name = p.callable_ref
-                    GROUP BY p.agent_id, p.name, p.trigger_type, p.callable_ref
-                    ORDER BY p.name
-                    """
-                )
-                rows = []
-                for name, trigger_type, callable_ref, components_concat in cur.fetchall():
-                    components = (
-                        components_concat.split("||") if components_concat else []
-                    )
-                    rows.append({
-                        "policy_name": name,
-                        "trigger_type": trigger_type,
-                        "callable_ref": callable_ref,
-                        "components": components,
-                    })
-                return rows
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_list)
-
-    async def save_decision(
-        self,
-        *,
-        decision_id: str,
-        event_id: str,
-        event_type: str,
-        agent_id: str,
-        policy_used: str,
-        action_type: str,
-        timestamp: str,
-        context_json: str | None,
-    ) -> None:
-        """Save a decision record."""
-        def _save() -> None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    INSERT INTO decisions(decision_id, event_id, event_type, agent_id, policy_used, action_type, timestamp, context_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (decision_id, event_id, event_type, agent_id, policy_used, action_type, timestamp, context_json),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        
-        await asyncio.to_thread(_save)
-    
-    async def save_decision_outcome(
-        self,
-        *,
-        decision_id: str,
-        outcome_json: str | None,
-        timestamp: str,
-    ) -> None:
-        """Save a decision outcome record."""
-        def _save() -> None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    INSERT OR REPLACE INTO decision_outcomes(decision_id, outcome_json, timestamp)
-                    VALUES (?, ?, ?)
-                    """,
-                    (decision_id, outcome_json, timestamp),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        
-        await asyncio.to_thread(_save)
-    
-    async def load_recent_decisions(
-        self,
-        *,
-        agent_id: str,
-        limit: int = 10,
-        event_type: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Load recent decisions for context building (without heavy context_json payloads)."""
-        def _load() -> list[dict[str, Any]]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                if event_type:
-                    cur.execute(
-                        """
-                        SELECT decision_id, event_id, event_type, policy_used, action_type, timestamp
-                        FROM decisions
-                        WHERE agent_id = ? AND event_type = ?
-                        ORDER BY timestamp DESC
-                        LIMIT ?
-                        """,
-                        (agent_id, event_type, limit),
-                    )
-                else:
-                    cur.execute(
-                        """
-                        SELECT decision_id, event_id, event_type, policy_used, action_type, timestamp
-                        FROM decisions
-                        WHERE agent_id = ?
-                        ORDER BY timestamp DESC
-                        LIMIT ?
-                        """,
-                        (agent_id, limit),
-                    )
-                rows = cur.fetchall()
-                result = []
-                for row in rows:
-                    result.append({
-                        "decision_id": row[0],
-                        "event_id": row[1],
-                        "event_type": row[2],
-                        "policy_used": row[3],
-                        "action_type": row[4],
-                        "timestamp": row[5],
-                    })
-                return result
-            finally:
-                conn.close()
-        
-        return await asyncio.to_thread(_load)
-    
     async def save_negotiation_message(
         self,
         *,
@@ -2495,8 +2209,12 @@ class SQLiteClient:
         run (or be retried) as a separate step by reading these columns,
         without replaying the round-by-round message history.
 
-        ``agreed_duration_seconds`` echoes the buyer's negotiation-init ask;
-        total payment = agreed_price (per-hour) × agreed_duration_seconds / 3600.
+        ``agreed_price`` is the absolute payment amount in base units of
+        the payment token (the column name is retained from before the
+        per-hour → absolute refactor; semantically it now holds the
+        amount, not a per-hour rate). ``agreed_duration_seconds`` echoes
+        the buyer's negotiation-init ask and is used by settlement-time
+        arbiter codecs that bind the seller's delivery window.
         """
         def _save() -> None:
             now = datetime.now().isoformat()
@@ -3511,7 +3229,9 @@ class SQLiteClient:
                     "negotiation_id", "our_listing_id", "buyer_address",
                     "status", "terminal_state",
                     "requested_duration_seconds",
-                    "agreed_price", "agreed_duration_seconds",
+                    # Column stays ``agreed_price``; wire field is
+                    # ``agreed_amount`` (absolute amount in base units).
+                    "agreed_amount", "agreed_duration_seconds",
                     "agreed_at", "created_at", "updated_at",
                 ]
                 return [dict(zip(keys, row)) for row in cur.fetchall()]
@@ -3557,7 +3277,10 @@ class SQLiteClient:
                     "negotiation_id", "our_listing_id", "their_listing_id",
                     "our_agent_id", "their_agent_id", "status", "terminal_state",
                     "requested_duration_seconds",
-                    "agreed_price", "agreed_duration_seconds", "agreed_at",
+                    # Column is named ``agreed_price`` (kept from before the
+                    # per-hour → absolute refactor); the wire field is
+                    # ``agreed_amount`` since it holds an absolute amount.
+                    "agreed_amount", "agreed_duration_seconds", "agreed_at",
                     "created_at", "updated_at",
                 ]
                 thread = dict(zip(thread_keys, thread_row))

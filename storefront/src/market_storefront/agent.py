@@ -17,13 +17,6 @@
 Module-level state (`_AGENT_ID`, `agent_card_data`, `ALERTS_USER_ID`) and
 the `_startup_tasks` coroutine are imported by `server.py` (lifespan) and
 `identity_controller.py`.
-
-The legacy `TraderAgent` class, the `_RootAgentShim`, the queue/Redis
-event-ingestion pipeline, and `_parse_domain_event` were removed in the
-event-system prune — none of them were reachable under the default config
-and the `_RootAgentShim` was forwarding to a non-existent
-`StorefrontService.process_event_with_pipeline`. Live event flows go
-through `services/policy_service.py` directly.
 """
 
 import asyncio
@@ -354,11 +347,24 @@ async def _startup_tasks():
     # which crashes the startup and surfaces as a clear pod CrashLoopBackOff.
     await _ensure_agent_identity()
 
+    # Initialize the global NegotiationThreadStore so any subsequent
+    # request handler can call NegotiationThreadTransaction (which
+    # reaches into get_thread_store() with no args). Must run before
+    # any request can hit /api/v1/negotiate/*.
+    import market_storefront.container as _container
+    from market_policy.identity import Identity
+    from market_policy.negotiation_thread import get_thread_store
+    _agent_url = BASE_URL_OVERRIDE or f"http://localhost:{settings.port}"
+    get_thread_store(
+        sqlite_client=_container.resolved_sqlite_client,
+        identity=Identity(agent_url=_agent_url),
+    )
+    logger.info("[STARTUP] Negotiation thread store initialized (agent_url=%s)", _agent_url)
+
     # Seed the resources table on startup if it is empty. Source priority:
     # inline CSV content (Helm Secret injection) > explicit resources_csv_path
     # > auto-discovery of /app/resources.csv (compose bind-mount default).
     # Must run before the resource poller so the poller has rows to query.
-    import market_storefront.container as _container
     try:
         result = await _container.resolved_system_service.seed_resources_if_empty(
             csv_inline=settings.resources_csv_inline,

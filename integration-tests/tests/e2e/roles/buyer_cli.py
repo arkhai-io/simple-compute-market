@@ -406,7 +406,7 @@ def buyer_cli(buyer_cli_binary: Path, tmp_path_factory) -> BuyerCli:
             "[registry]",
             f"urls = [{_toml_quote(registry_url)}]",
             "",
-            "[buyer.negotiation]",
+            "[negotiation]",
             "# The buyer wheel installs without torch by default — the RL",
             "# strategy self-register would fail at module import. Force",
             "# bisection so the negotiation engine matches the seller's",

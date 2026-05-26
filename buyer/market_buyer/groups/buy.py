@@ -57,14 +57,14 @@ def _confirm_settlement_interactive(*, terms, listing: dict, console: Console) -
     can sanity-check the cost before committing.
     """
     duration_hours = terms.duration_seconds / 3600
-    total = terms.agreed_price * terms.duration_seconds // 3600
+    total = terms.agreed_amount * terms.duration_seconds // 3600
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold")
     table.add_column()
     table.add_row("Seller", str(terms.seller_url))
     table.add_row("Listing", str(terms.listing_id))
     table.add_row("Negotiation", str(terms.negotiation_id))
-    table.add_row("Agreed price", f"{terms.agreed_price} (per hour, raw token units)")
+    table.add_row("Agreed price", f"{terms.agreed_amount} (per hour, raw token units)")
     table.add_row("Duration", f"{terms.duration_seconds}s ({duration_hours:.4g}h)")
     table.add_row("Total payment", f"{total} (raw token units)")
     console.print(Panel(table, title="Confirm settlement", border_style="yellow"))
@@ -128,9 +128,9 @@ def _run_resume_from(
         # buyer ceiling of "2" against 6-decimal USDC means $2/hr → 2_000_000.
         # Resolve token_decimals via the user override or on-chain decimals().
         if token_decimals is None:
-            from ..common import resolve_default_token_address, resolve_chain_id
+            from ..common import resolve_chain_id
             from service.clients.token import resolve_token, TokenResolutionError
-            tc_for_decimals = token_contract or resolve_default_token_address()
+            tc_for_decimals = token_contract
             if tc_for_decimals:
                 try:
                     meta = resolve_token(
@@ -191,7 +191,7 @@ def _run_resume_from(
                 resume=ResumeState(
                     negotiation_id=resume_point.negotiation_id,
                     transcript=resume_point.transcript,
-                    last_seller_price=resume_point.last_seller_price,
+                    last_seller_proposal=resume_point.last_seller_proposal,
                     rounds_completed=resume_point.rounds_completed,
                 ),
             )
@@ -205,14 +205,14 @@ def _run_resume_from(
             "negotiation_completed",
             seller_url=resume_point.seller_url,
             status=outcome.status,
-            agreed_price=outcome.agreed_price,
+            agreed_amount=outcome.agreed_amount,
             rounds=outcome.rounds,
             reason=outcome.reason,
             negotiation_id=outcome.negotiation_id,
             listing_id=resume_point.listing_id,
         )
 
-        if outcome.status != "agreed" or outcome.agreed_price is None:
+        if outcome.status != "agreed" or outcome.agreed_amount is None:
             run_log.end(
                 outcome.status,
                 negotiation_id=outcome.negotiation_id,
@@ -228,7 +228,7 @@ def _run_resume_from(
             raise typer.Exit(4)
 
         console.print(
-            f"[green]negotiation agreed[/green]  price={outcome.agreed_price} "
+            f"[green]negotiation agreed[/green]  price={outcome.agreed_amount} "
             f"rounds={outcome.rounds}"
         )
 
@@ -369,7 +369,7 @@ def register(app: typer.Typer) -> None:
         aggregate_by: Optional[str] = typer.Option(
             None, "--aggregate-by",
             help="Across-seller aggregation policy. Default: "
-                 "[buyer.aggregation].policy from config.toml, falling "
+                 "[aggregation].policy from buyer.toml, falling "
                  "back to 'best_price'. Built-ins: best_price, "
                  "fastest_agreed, cheapest_first, registry_order, "
                  "random_shuffle, priceless_last.",
@@ -502,43 +502,37 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(2)
 
+        # --token-contract acts as a filter on each candidate listing's
+        # accepted_escrows. Without it, listings on the buyer's chain
+        # using any token are eligible — but explicit --initial-price /
+        # --max-price would be ambiguous (which token's decimals to scale
+        # by?), so we require it when those are set.
         tc = token_contract
-        if not tc:
-            from ..common import resolve_default_token_address
-            tc = resolve_default_token_address()
-            if not tc:
-                typer.secho(
-                    "No --token-contract given and [buyer].default_token_address "
-                    "is unset in config.toml.",
-                    err=True, fg=typer.colors.RED,
-                )
-                raise typer.Exit(2)
-        if token_decimals is None:
-            # Token resolved either from --token-contract or the config
-            # default; look up decimals on chain unless the user pinned them.
-            from ..common import resolve_chain_id
-            from service.clients.token import resolve_token, TokenResolutionError
-            try:
-                meta = resolve_token(
-                    tc, rpc_url=rpc, chain_id=resolve_chain_id(rpc),
-                )
-                token_decimals = meta.decimals
-            except (TokenResolutionError, RuntimeError) as exc:
-                typer.secho(
-                    f"Could not resolve token {tc} on chain — pass "
-                    f"--token-decimals or check chain.rpc_url. ({exc})",
-                    err=True, fg=typer.colors.RED,
-                )
-                raise typer.Exit(2)
-
-        # Scale user-provided --initial-price / --max-price from human /
-        # whole-token units to on-chain base units. Sellers publish
-        # ``price_per_hour`` already in base units (see
-        # storefront's cli_publish scaling), so explicit buyer prices
-        # need the same scaling to compare apples-to-apples. Auto-derived
-        # prices (when not explicit) come straight from the seller's
-        # listing and are already in base units — no scaling needed.
+        if explicit_prices and not tc:
+            typer.secho(
+                "--initial-price and --max-price require --token-contract "
+                "so prices can be scaled to the right decimals. Without it, "
+                "drop the explicit price flags and let prices anchor on each "
+                "listing's advertised price_per_hour.",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
         if explicit_prices:
+            if token_decimals is None:
+                from ..common import resolve_chain_id
+                from service.clients.token import resolve_token, TokenResolutionError
+                try:
+                    meta = resolve_token(
+                        tc, rpc_url=rpc, chain_id=resolve_chain_id(rpc),
+                    )
+                    token_decimals = meta.decimals
+                except (TokenResolutionError, RuntimeError) as exc:
+                    typer.secho(
+                        f"Could not resolve token {tc} on chain — pass "
+                        f"--token-decimals or check chain.rpc_url. ({exc})",
+                        err=True, fg=typer.colors.RED,
+                    )
+                    raise typer.Exit(2)
             scale = 10 ** int(token_decimals)
             initial_price = initial_price * scale
             max_price = max_price * scale
@@ -616,16 +610,16 @@ def register(app: typer.Typer) -> None:
                 # User aborted, or no listing carried a min_price.
                 raise typer.Exit(2)
 
-        # Resolve aggregation policy: --aggregate-by > [buyer.aggregation].policy > default.
+        # Resolve aggregation policy: --aggregate-by > [aggregation].policy > default.
         aggregation_policy = aggregate_by or resolve_config_value(
-            toml_path="buyer.aggregation.policy",
+            toml_path="aggregation.policy",
         ) or None
 
         # Counter policy is config-only — no CLI flag yet. Strict_echo
         # default rejects any seller modification to a buyer-pinned field;
         # operators who want to accept counters set the TOML key.
         counter_policy = resolve_config_value(
-            toml_path="buyer.counter_policy.policy",
+            toml_path="counter_policy.policy",
         ) or None
 
         config = BuyConfig(
@@ -645,24 +639,35 @@ def register(app: typer.Typer) -> None:
             duration_seconds=duration_seconds,
             ssh_public_key=ssh,
         )
-        # Buyer's escrow shape proposal — picks the canonical
-        # ERC20 non-tierable escrow on the configured chain and fills
-        # fields["token"] with the resolved token contract.
-        # The seller validates against its listing's accepted_escrows
-        # set; today that's the same single shape per listing.
+        # Per-candidate escrow proposal: every matched listing carries
+        # its own accepted_escrows entries (chain, escrow contract, token,
+        # advertised price). The closure runs once per candidate inside
+        # the aggregation loop and picks one entry — multi-token listings
+        # prompt the user (interactive) or auto-pick by ERC20 balance
+        # (--yes). Returning None skips the candidate when no entry is
+        # on the buyer's chain or matches --token-contract.
         import time as _time
-        from service.clients.alkahest import (
-            get_erc20_escrow_obligation_nontierable,
-        )
-        _escrow_addr = get_erc20_escrow_obligation_nontierable(
-            chain, config_path=addr_cfg or None,
-        )
-        escrow_proposal = EscrowProposal(
-            chain_name=chain,
-            escrow_address=_escrow_addr,
-            fields={"token": tc},
-            expiration_unix=int(_time.time()) + int(expiration_seconds),
-        )
+        from ..escrow_selection import select_escrow_entry
+
+        def build_escrow_proposal_for_match(match: dict) -> EscrowProposal | None:
+            entry = select_escrow_entry(
+                match,
+                chain_name=chain,
+                token_contract_filter=tc,
+                assume_yes=assume_yes,
+                rpc_url=rpc,
+                buyer_address=addr,
+                console=console,
+            )
+            if entry is None:
+                return None
+            entry_fields = entry.get("fields") or {}
+            return EscrowProposal(
+                chain_name=entry.get("chain_name", chain),
+                escrow_address=entry["escrow_address"],
+                fields={"token": entry_fields.get("token")},
+                expiration_unix=int(_time.time()) + int(expiration_seconds),
+            )
 
         run_log = RunLog.start(
             command="market buy",
@@ -712,7 +717,7 @@ def register(app: typer.Typer) -> None:
                 color = "green" if body.get("status") == "agreed" else "yellow"
                 console.print(
                     f"[{color}]negotiate ←[/{color}] {body.get('status')} "
-                    f"@ {body.get('agreed_price', '-')}  "
+                    f"@ {body.get('agreed_amount', '-')}  "
                     f"({body.get('rounds', '-')} rounds)"
                 )
             elif stage == "negotiation_failed":
@@ -732,22 +737,22 @@ def register(app: typer.Typer) -> None:
                     terms=terms, listing=listing, console=console,
                 )
 
-        # Honor [buyer.negotiation].policy_mode from config (mirrors
+        # Honor [negotiation].policy_mode from buyer.toml (mirrors
         # `market negotiate`). Without this, the buyer falls through to
-        # the RL strategy default, which needs torch — not installed in
-        # the lean buyer wheel.
-        strategy = None
-        policy_mode = resolve_config_value(toml_path="buyer.negotiation.policy_mode")
+        # the default terminal (RL needs torch — not installed in the
+        # lean buyer wheel).
+        chain = None
+        policy_mode = resolve_config_value(toml_path="negotiation.policy_mode")
         if policy_mode:
-            from market_policy.negotiation_strategy import load_strategy
-            strategy = load_strategy(policy_mode)
+            from market_buyer.buyer_client import _load_buyer_chain
+            chain = _load_buyer_chain(policy_mode)
 
         try:
             result = run_buy(
                 config=config,
                 constraints=constraints,
                 provision=provision,
-                escrow_proposal=escrow_proposal,
+                build_escrow_proposal=build_escrow_proposal_for_match,
                 build_escrow_terms=build_escrow_terms,
                 create_escrow=create_escrow,
                 matches=matches,
@@ -757,7 +762,7 @@ def register(app: typer.Typer) -> None:
                 settlement_total_timeout=settlement_timeout,
                 on_event=_observe,
                 confirm_settlement=confirm_settlement_cb,
-                strategy=strategy,
+                chain=chain,
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))
@@ -768,7 +773,7 @@ def register(app: typer.Typer) -> None:
             result.status,
             seller_url=result.seller_url,
             negotiation_id=result.negotiation_id,
-            agreed_price=result.agreed_price,
+            agreed_amount=result.agreed_amount,
             escrow_uid=result.escrow_uid,
             fulfillment_uid=result.fulfillment_uid,
             reason=result.reason,
@@ -782,7 +787,7 @@ def register(app: typer.Typer) -> None:
         for label, val in (
             ("Seller", result.seller_url),
             ("Negotiation", result.negotiation_id),
-            ("Agreed price", result.agreed_price),
+            ("Agreed price", result.agreed_amount),
             ("Escrow UID", result.escrow_uid),
             ("Fulfillment UID", result.fulfillment_uid),
             ("Reason", result.reason),

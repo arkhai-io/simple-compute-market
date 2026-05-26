@@ -1,8 +1,9 @@
 """ListingService — synchronous listing lifecycle orchestrator.
 
-Each public method is a named sequence of steps. Policy consultation and
-execution are delegated to PolicyService via named methods — no event
-terminology is visible here.
+Each public method is a procedural sequence of steps directly against
+SQLite + the registry client. No policy layer for listing CRUD — the
+seller's intent (offer + accepted escrows + duration + paused flag) is
+the only input the storefront needs to act on.
 
 Startup validation: config prerequisites for escrow operations are checked
 at construction time so failures are visible immediately rather than per-call.
@@ -10,12 +11,11 @@ at construction time so failures are visible immediately rather than per-call.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from market_storefront.models.listing_models import (
-    AdminEvaluateCloseResponse,
-    AdminEvaluateCreateResponse,
     ArbitrateRequest,
     ClaimRequest,
     CloseListingResponse,
@@ -27,9 +27,6 @@ from market_storefront.models.listing_models import (
 )
 from market_storefront.resources import parse_resource_from_dict
 from market_storefront.utils.stage_log import stage_event
-
-if TYPE_CHECKING:
-    from market_storefront.services.policy_service import PolicyService
 
 logger = logging.getLogger(__name__)
 
@@ -175,62 +172,88 @@ class ListingService:
         return offer_resource, list(request.accepted_escrows)
 
     async def create_listing(
-        self, request: CreateListingRequest, policy_svc: "PolicyService"
+        self, request: CreateListingRequest
     ) -> CreateListingResponse:
+        """Validate the seller's create request, mint a listing_id, write the
+        local row, and (unless paused) publish to the registry.
+
+        ``paused=True`` writes the local row with ``paused=1`` and skips the
+        registry publish; the operator unblocks via
+        ``POST /api/v1/listings/{id}/resume`` which clears the flag and runs
+        the same ``publish_order_to_registry`` path.
+        """
+        from market_storefront.models.domain_models import Listing
+        from market_storefront.utils.action_executor import publish_order_to_registry
+        from market_storefront.utils.config import BASE_URL_OVERRIDE
+
         offer, accepted_escrows = self._parse_offer_and_escrows(request)
-        action = await policy_svc.evaluate_create_listing_policy(
-            offer, accepted_escrows, request.max_duration_seconds, request.paused
+
+        listing = Listing(
+            listing_id=str(uuid.uuid4()),
+            seller=BASE_URL_OVERRIDE,
+            offer_resource=offer,
+            accepted_escrows=accepted_escrows,
+            max_duration_seconds=request.max_duration_seconds,
+            oracle_address=None,
         )
-        if action != "make_offer":
-            return CreateListingResponse(
-                status="no_action",
-                root_agent_response=f"Policy returned: {action}",
+        listing_dict = listing.model_dump(mode="json")
+        listing_id = listing.listing_id
+
+        now_iso = datetime.now().isoformat()
+        try:
+            await self._db.upsert_listing(
+                listing_id=listing_id,
+                status="open",
+                created_at=now_iso,
+                updated_at=now_iso,
+                offer_resource=listing_dict.get("offer_resource"),
+                accepted_escrows=listing_dict.get("accepted_escrows"),
+                fulfillment_resource=None,
+                max_duration_seconds=listing_dict.get("max_duration_seconds"),
+                seller=listing_dict.get("seller") or BASE_URL_OVERRIDE,
+                oracle_address=listing_dict.get("oracle_address"),
+                paused=bool(request.paused),
             )
-        listing_id = await policy_svc.execute_create_listing(
-            offer, accepted_escrows, request.max_duration_seconds, request.paused
-        )
+        except Exception as exc:
+            logger.error("[LISTINGS] upsert_listing %s failed: %s", listing_id, exc)
+            raise
+
+        if request.paused:
+            logger.info(
+                "[LISTINGS] %s created locally with paused=True; skipping registry publish",
+                listing_id,
+            )
+            return CreateListingResponse(status="created", listing_id=listing_id)
+
+        publish_result = await publish_order_to_registry(listing_dict)
         return CreateListingResponse(
-            status="created" if listing_id else "no_action",
+            status="created",
             listing_id=listing_id,
+            root_agent_response=publish_result.get(
+                "message", f"Listing {listing_id} ({publish_result.get('status')})"
+            ),
         )
 
-    async def evaluate_create(
-        self, request: CreateListingRequest, policy_svc: "PolicyService"
-    ) -> AdminEvaluateCreateResponse:
-        offer, accepted_escrows = self._parse_offer_and_escrows(request)
-        action = await policy_svc.evaluate_create_listing_policy(
-            offer, accepted_escrows, request.max_duration_seconds, request.paused
-        )
-        return AdminEvaluateCreateResponse(
-            would_create=(action == "make_offer"),
-            action=action,
-        )
+    async def close_listing(self, listing_id: str) -> CloseListingResponse:
+        """Mark the listing closed locally; if registry discovery is enabled,
+        send the same status update to every registry the listing was published to.
 
-    async def close_listing(
-        self, listing_id: str, policy_svc: "PolicyService"
-    ) -> CloseListingResponse:
-        action = await policy_svc.evaluate_close_listing_policy(listing_id)
-        if action not in ("close_order", "close_listing"):
-            return CloseListingResponse(
-                status="no_action", listing_id=listing_id,
-                root_agent_response=f"Policy returned: {action}",
-            )
-        result = await policy_svc.execute_close_listing(listing_id)
+        Local close is best-effort: a registry-update failure logs but does not
+        roll back the SQLite write — the seller's local state is the source of
+        truth for what's available to negotiate against.
+        """
+        from market_storefront.utils.action_executor import close_order
+
+        result = await close_order({"listing_id": listing_id})
         return CloseListingResponse(
             status=result.get("status", "closed"), listing_id=listing_id,
         )
 
-    async def evaluate_close(
-        self, listing_id: str, policy_svc: "PolicyService"
-    ) -> AdminEvaluateCloseResponse:
-        action = await policy_svc.evaluate_close_listing_policy(listing_id)
-        return AdminEvaluateCloseResponse(
-            would_close=action in ("close_order", "close_listing"),
-            action=action, listing_id=listing_id,
-        )
-
     async def evaluate_negotiate(
-        self, listing_id: str, their_proposed_price: float
+        self,
+        listing_id: str,
+        proposal: dict[str, Any],
+        requested_duration_seconds: int | None = None,
     ) -> EvaluateNegotiateResponse:
         """Dry-run the round-0 negotiation decision without creating a thread.
 
@@ -242,6 +265,7 @@ class ListingService:
         Raises ``ValueError`` if the listing doesn't exist or has no usable
         negotiation strategy. The controller converts these to HTTP 404.
         """
+        from market_policy.negotiation_middleware import _amount_from_proposal
         from market_storefront.models.domain_models import Listing
         from market_storefront.utils.sync_negotiation import _compute_round_zero_decision
 
@@ -249,20 +273,30 @@ class ListingService:
         if not row:
             raise ValueError(f"Listing {listing_id} not found")
         listing = Listing.model_validate(row)
-        our_price, _strategy_label, direction, strategy_name, decision = (
-            _compute_round_zero_decision(
+        their_amount_raw = _amount_from_proposal(proposal)
+        if their_amount_raw is None:
+            raise ValueError(
+                "proposal must include fields.amount (absolute amount in base units)"
+            )
+        their_amount = int(their_amount_raw)
+        our_amount, _strategy_label, direction, strategy_name, decision = (
+            await _compute_round_zero_decision(
+                sqlite_client=self._db,
                 listing=listing,
-                their_proposed_price=their_proposed_price,
+                their_proposal=proposal,
+                requested_duration_seconds=requested_duration_seconds,
             )
         )
+        decision_amount = _amount_from_proposal(decision.proposal)
         return EvaluateNegotiateResponse(
             listing_id=listing_id,
-            our_reference_price=our_price,
-            their_proposed_price=their_proposed_price,
+            our_reference_amount=int(our_amount),
+            their_proposed_amount=their_amount,
             direction=direction,
             strategy=strategy_name,
             decision=decision.action,
-            decision_price=decision.price,
+            decision_amount=int(decision_amount) if decision_amount is not None else None,
+            decision_proposal=decision.proposal,
             decision_reason=decision.reason,
             would_negotiate=(decision.action != "exit"),
         )

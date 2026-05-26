@@ -52,14 +52,9 @@ async def db(tmp_path) -> SQLiteClient:
 
 @pytest_asyncio.fixture
 async def client(db) -> AsyncIterator[StorefrontClient]:
-    """StorefrontClient (async) wired to an in-process FastAPI app.
-
-    ``policy_service`` is not needed for the system controller endpoints
-    under test here, so it is left as None.
-    """
+    """StorefrontClient (async) wired to an in-process FastAPI app."""
     _container.resolved_sqlite_client = db
     _container.resolved_system_service = SystemService(sqlite_client=db)
-    _container.resolved_policy_service = None
 
     app = FastAPI()
     app.include_router(system_router)
@@ -73,7 +68,6 @@ async def client(db) -> AsyncIterator[StorefrontClient]:
 
     _container.resolved_sqlite_client = None
     _container.resolved_system_service = None
-    _container.resolved_policy_service = None
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +122,6 @@ class TestWaitForRegistryAgent:
         """Endpoint returns 403 when X-Admin-Key is absent or wrong."""
         _container.resolved_sqlite_client = db
         _container.resolved_system_service = SystemService(sqlite_client=db)
-        _container.resolved_policy_service = None
 
         app = FastAPI()
         app.include_router(system_router)
@@ -146,7 +139,6 @@ class TestWaitForRegistryAgent:
 
         _container.resolved_sqlite_client = None
         _container.resolved_system_service = None
-        _container.resolved_policy_service = None
 
 
 # ---------------------------------------------------------------------------

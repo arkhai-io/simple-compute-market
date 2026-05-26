@@ -15,12 +15,7 @@ Phase 0 — E2E readiness (all services healthy, no state changes)
   00h  Provisioning→storefront: GET provisioning /api/v1/system/status →
                                 checks.storefront=ok, checks.storefront_auth=ok
 
-Phase 1 — Policy pipeline ready
-  01a  Policy dry-run:  POST /api/v1/system/policy/evaluate → action=make_offer
-  01b  Policy seed:     POST /admin/policy/seed → callable_count > 0
-
 Phase 2 — Listing creation (paused)
-  02a  Evaluate-create dry-run: POST /api/v1/admin/listings/evaluate-create → would_create=True
   02b  Create listing paused + confirm:
          POST /listings/create paused=True → listing_id
          GET /api/v1/listings/{id} → status=open, paused=True
@@ -151,11 +146,6 @@ E2E_RESOURCE_ID = "compute-e2e-deal-001"
 E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
 compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm1
 """
-
-# Canonical callable name registered in domain/compute/agent/app/policy/store.py.
-# Used by test_01a (pure dry-run) and verified by test_01b (seed read-back).
-ORDER_CREATE_CALLABLE = "oc.action.make_offer_from_order_create"
-
 
 # ===========================================================================
 # Phase 0 — E2E readiness
@@ -430,132 +420,8 @@ class TestStage00h_ProvisioningStorefrontLink:
 
 
 # ===========================================================================
-# Phase 1 — Policy pipeline ready
-# ===========================================================================
-
-class TestStage01a_PolicyDryRun:
-    def test_01a_policy_evaluate_returns_make_offer(
-        self, storefront_admin_client, deal_state: DealState
-    ):
-        """POST /api/v1/system/policy/evaluate → action=make_offer (pure dry-run).
-
-        Evaluates the known order_create callable directly against the offer/demand
-        spec — no DB lookup, no seeding required. Confirms the callable pipeline
-        produces make_offer for this resource spec independently of DB state.
-
-        If this fails with resolvable=False, the callable is not in CALLABLE_REGISTRY
-        — call POST /api/v1/admin/policy/seed first (or check the domain import path).
-        """
-        require_state(deal_state, "_negotiation_strategy_viable")
-        result = storefront_admin_client.policy_evaluate(
-            offer=OFFER_RESOURCE,
-            accepted_escrows=ACCEPTED_ESCROWS,
-            max_duration_seconds=DURATION_HOURS * 3600,
-            policy_components=[ORDER_CREATE_CALLABLE],
-        )
-        assert isinstance(result, dict), f"Unexpected response type: {result}"
-        assert result.get("resolvable") is True, (
-            f"Callable {ORDER_CREATE_CALLABLE!r} not in CALLABLE_REGISTRY. "
-            f"reason={result.get('reason')!r}\n"
-            "Call POST /api/v1/admin/policy/seed to discover callables first."
-        )
-        action = result.get("action", "")
-        assert "make_offer" in action.lower(), (
-            f"Expected action=make_offer, got {action!r}. Full response: {result}"
-        )
-        deal_state._policy_dry_run_passed = True
-        log.info("[01a] Policy dry-run: action=%s resolvable=%s",
-                 action, result.get("resolvable"))
-
-
-class TestStage01b_PolicySeed:
-    def test_01b_admin_seeds_policies(
-        self, storefront_admin_client, deal_state: DealState
-    ):
-        """POST /admin/policy/seed → callable_count > 0; read-back confirms integrity.
-
-        Idempotent advance — discovers @policy_callable decorators and writes
-        default DB rows. After seeding, reads GET /api/v1/system/policy to
-        confirm the seeded order_create policy references the expected callable.
-        This verifies the seed wrote correctly and that our dry-run callable
-        name constant matches what the system actually seeded.
-        """
-        require_state(deal_state, "_policy_dry_run_passed")
-        result = storefront_admin_client.policy_seed()
-        assert isinstance(result, dict), f"Unexpected response: {result}"
-
-        import_errors = result.get("import_errors", [])
-        if import_errors:
-            log.warning("[01b] %d module(s) failed to import during seed:", len(import_errors))
-            for err in import_errors:
-                log.warning("  %s: %s", err.get("module"), err.get("error"))
-
-        callable_count = result.get("callable_registry_count", 0)
-        assert callable_count > 0, (
-            f"CALLABLE_REGISTRY still empty after seed.\n"
-            f"Import errors ({len(import_errors)}):\n"
-            + "\n".join(f"  {e['module']}: {e['error']}" for e in import_errors)
-            + f"\nFull response: {result}"
-        )
-        seeded = result.get("seeded_policies", [])
-        assert any("order_create" in p for p in seeded), (
-            f"order_create policy not seeded. Got: {seeded}"
-        )
-
-        # Read back from /api/v1/system/policy to verify seeded policy integrity
-        policy_status = storefront_admin_client.policy_status()
-        assert isinstance(policy_status, dict), f"Unexpected policy_status response: {policy_status}"
-        seeded_policies = policy_status.get("seeded_policies", [])
-        oc_policies = [p for p in seeded_policies if "order_create" in p.get("policy_name", "")]
-        assert oc_policies, (
-            f"order_create policy absent from GET /api/v1/system/policy after seed. "
-            f"seeded_policies={seeded_policies}"
-        )
-        oc_policy = oc_policies[0]
-        oc_components = oc_policy.get("components", [])
-        assert ORDER_CREATE_CALLABLE in oc_components, (
-            f"Expected callable {ORDER_CREATE_CALLABLE!r} in seeded order_create policy. "
-            f"Got components: {oc_components}\n"
-            "This means the ORDER_CREATE_CALLABLE constant in test_full_deal.py "
-            "doesn't match the name registered in domain/compute/agent/app/policy/store.py."
-        )
-
-        deal_state._policies_seeded = True
-        log.info("[01b] Policy seed: callable_count=%d seeded=%s import_errors=%d "
-                 "order_create_components=%s",
-                 callable_count, seeded, len(import_errors), oc_components)
-
-
-# ===========================================================================
 # Phase 2 — Listing creation (paused)
 # ===========================================================================
-
-class TestStage02a_EvaluateCreate:
-    def test_02a_evaluate_create_would_create(
-        self, storefront_admin_client, deal_state: DealState
-    ):
-        """POST /api/v1/admin/listings/evaluate-create → would_create=True (dry-run).
-
-        Validates the offer/demand spec against the policy pipeline without
-        writing to SQLite or the registry. If this fails, listing creation
-        in 02b will also fail.
-        """
-        require_state(deal_state, "_policies_seeded", "_resources_seeded")
-        result = storefront_admin_client.evaluate_create_listing(
-            offer=OFFER_RESOURCE,
-            accepted_escrows=ACCEPTED_ESCROWS,
-            max_duration_seconds=DURATION_HOURS * 3600,
-            paused=True,
-        )
-        assert isinstance(result, dict), f"Unexpected response: {result}"
-        assert result.get("would_create") is True, (
-            f"evaluate-create returned would_create=False. action={result.get('action')!r}. "
-            f"reason={result.get('reason')!r}. Ensure stage 01b (policy seed) passed."
-        )
-        deal_state._evaluate_create_passed = True
-        log.info("[02a] Evaluate-create: would_create=%s action=%s",
-                 result.get("would_create"), result.get("action"))
-
 
 class TestStage02b_CreateListingPaused:
     def test_02b_create_listing_paused_local_only(
@@ -569,7 +435,7 @@ class TestStage02b_CreateListingPaused:
           2. local GET shows status=open, paused=True
           3. registry GET does NOT contain the listing
         """
-        require_state(deal_state, "_evaluate_create_passed", "_registry_reachable")
+        require_state(deal_state, "_resources_seeded", "_registry_reachable")
 
         resp = storefront_admin_client.create_listing(
             agent_wallet_address=seller_wallet,
@@ -580,9 +446,9 @@ class TestStage02b_CreateListingPaused:
         )
         listing_id = resp.listing_id
         assert listing_id, (
-            f"No listing_id in response — policy pipeline returned no action.\n"
+            f"No listing_id in response — listing-create returned no id.\n"
             f"Response: {resp}\n"
-            f"Ensure stage 01b (policy seed) passed."
+            f"Check storefront logs for create_listing errors."
         )
 
         # Confirm locally visible with paused=True
@@ -801,17 +667,26 @@ class TestStage05a_EvaluateNegotiate:
 
         result = storefront_admin_client.evaluate_negotiate(
             deal_state.seller_listing_id,
-            their_proposed_price=BUYER_INITIAL_PRICE,
+            proposal={
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "0" * 40,
+                "fields": {
+                    "amount": BUYER_INITIAL_PRICE,
+                    "token": DEMAND_RESOURCE["token"]["contract_address"],
+                },
+                "expiration_unix": 2_000_000_000,
+            },
+            requested_duration_seconds=DURATION_HOURS * 3600,
             buyer_address=buyer_config["wallet_address"],
         )
         assert result.would_negotiate, (
             f"Strategy would exit at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}.\n"
             f"decision={result.decision!r} reason={result.decision_reason!r}\n"
-            f"our_reference_price={result.our_reference_price} "
-            f"their_proposed_price={result.their_proposed_price}\n"
+            f"our_reference_amount={result.our_reference_amount} "
+            f"their_proposed_amount={result.their_proposed_amount}\n"
             "If reason is 'torch_unavailable': set policy_mode='bisection' in config.toml.\n"
             "If reason is 'price_unreasonable': increase BUYER_INITIAL_PRICE to >= "
-            f"{result.our_reference_price} (seller floor)."
+            f"{result.our_reference_amount} (seller floor)."
         )
         assert result.decision == "counter", (
             f"Strategy accepted at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}. "
@@ -840,7 +715,7 @@ class TestStage05b_NegotiationStartsAndVisible:
         resp = storefront_client.negotiate_new(
             listing_id=deal_state.seller_listing_id,
             buyer_address=buyer_config["wallet_address"],
-            initial_price=BUYER_INITIAL_PRICE,
+            initial_amount=BUYER_INITIAL_PRICE,
             duration_seconds=DURATION_HOURS * 3600,
             token=DEMAND_RESOURCE["token"]["contract_address"],
         )
@@ -872,7 +747,7 @@ class TestStage05b_NegotiationStartsAndVisible:
         assert round0.data.get("decision") == "counter", (
             f"Expected seller to counter at round 0, got decision={round0.data.get('decision')!r}. "
             f"reason={round0.data.get('decision_reason')!r}. "
-            f"our_price={round0.data.get('our_price')} their_price={round0.data.get('their_price')}.\n"
+            f"our_price={round0.data.get('our_amount')} their_price={round0.data.get('their_amount')}.\n"
             "If decision='accept': BUYER_INITIAL_PRICE is at or above the seller's floor — "
             "lower it so round 0 counters rather than accepts immediately "
             "(force_accept in 06b will 409 on an already-terminal negotiation).\n"
@@ -921,15 +796,13 @@ class TestStage06b_ForceAcceptAndTerminal:
         )
 
         agreed = (BUYER_INITIAL_PRICE + BUYER_MAX_PRICE) // 2
-        result = storefront_admin_client.force_accept_negotiation(
-            deal_state.seller_listing_id,
+        result = storefront_admin_client.force_accept_negotiation(deal_state.seller_listing_id,
             deal_state.negotiation_id,
-            price=agreed,
-        )
+            amount=agreed,)
         assert result.action == "accept", (
             f"Unexpected action from force-accept: {result}"
         )
-        assert result.price == agreed
+        assert result.amount == agreed
 
         # Confirm terminal state
         detail = storefront_admin_client.get_negotiation(
@@ -938,13 +811,13 @@ class TestStage06b_ForceAcceptAndTerminal:
         assert detail.terminal_state == "success", (
             f"Expected terminal_state=success, got {detail.terminal_state!r}"
         )
-        assert detail.agreed_price == agreed
+        assert detail.agreed_amount == agreed
         # No escrow rows yet — settlement (phase 7+) is what writes them.
         assert detail.escrows == [], (
             f"Expected escrows=[] before phase 7, got {detail.escrows!r}"
         )
 
-        deal_state.agreed_price = agreed
+        deal_state.agreed_amount = agreed
         deal_state.negotiation_terminal_state = detail.terminal_state
         log.info("[06b] Force-accepted at price %d; terminal_state=%s",
                  agreed, detail.terminal_state)
@@ -976,7 +849,7 @@ class TestStage07_OnChainEscrowAndProvGate:
         job before it reports success, giving stage 08b a window to assert
         queued/running before stage 09a releases it.
         """
-        require_state(deal_state, "negotiation_terminal_state", "agreed_price",
+        require_state(deal_state, "negotiation_terminal_state", "agreed_amount",
                       "_provisioning_mock_mode")
 
         from tests.e2e.roles.scenarios.escrow_helper import create_buyer_escrow
@@ -984,7 +857,7 @@ class TestStage07_OnChainEscrowAndProvGate:
         escrow_uid = create_buyer_escrow(
             buyer_private_key=buyer_config["private_key"],
             seller_wallet_address=seller_wallet,
-            agreed_price=float(deal_state.agreed_price),
+            agreed_amount=int(deal_state.agreed_amount),
             duration_seconds=DURATION_HOURS * 3600,
             token_contract_address=DEMAND_RESOURCE["token"]["contract_address"],
             rpc_url=buyer_config["rpc_url"],
@@ -1024,13 +897,13 @@ class TestStage07b_VerifyEscrow:
         Exercises getRecordFromChain in isolation: reads the escrow from chain
         and confirms token, amount, and seller recipient match. No DB writes.
         """
-        require_state(deal_state, "real_escrow_uid", "seller_listing_id", "agreed_price",
+        require_state(deal_state, "real_escrow_uid", "seller_listing_id", "agreed_amount",
                       "_alkahest_configured")
 
         result = storefront_admin_client.verify_settle(
             deal_state.real_escrow_uid,
             seller_wallet=seller_wallet,
-            agreed_price=deal_state.agreed_price,
+            agreed_price=deal_state.agreed_amount,
             agreed_duration_seconds=DURATION_HOURS * 3600,
             listing_id=deal_state.seller_listing_id,
         )

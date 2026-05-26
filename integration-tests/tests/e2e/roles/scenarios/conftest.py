@@ -48,11 +48,7 @@ class DealState:
     _resources_seeded: bool = False
     _alkahest_configured: bool = False
     _provisioning_storefront_ok: bool = False
-    # Phase 1 — policy pipeline
-    _policy_dry_run_passed: bool = False
-    _policies_seeded: bool = False
     # Phase 2 — listing creation (paused)
-    _evaluate_create_passed: bool = False
     seller_listing_id: Optional[str] = None
     # Phase 3 — registry publication
     _registry_validate_passed: bool = False
@@ -62,7 +58,7 @@ class DealState:
     _evaluate_negotiate_passed: bool = False
     negotiation_id: Optional[str] = None
     negotiation_terminal_state: Optional[str] = None
-    agreed_price: Optional[float] = None
+    agreed_amount: Optional[int] = None
     # Buyer-CLI run-log identity from `market negotiate`; consumed by
     # `market settle --from <run_id>` in phase 08. Sentinel for the
     # "negotiation produced a usable agreed outcome" precondition.
@@ -238,6 +234,75 @@ def provisioning_test_client():
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
     with ProvisioningTestClient(base_url=url, timeout=20.0) as client:
         yield client
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _ensure_provisioning_host_registered():
+    """Idempotently register the e2e ``kvm1`` host in the provisioning service.
+
+    The scenario's seeded resource row declares ``attribute.vm_host=kvm1``,
+    so phase 08c's ``/test/evaluate-job`` lookup requires a matching row
+    in the provisioning ``hosts`` table. Compose-launched provisioning
+    starts with an empty inventory (no ``inventory_ini``/``inventory_path``
+    configured); production deployments seed the table via Helm secret
+    or a bind-mounted IaC inventory. Inserting the row here keeps the
+    e2e scenario hermetic and idempotent across re-runs.
+
+    The credentials are stub values (path-type, fake path) — mock
+    provisioning never SSHes into the host, so they never get used.
+    Real-host integration tests use a real key path; this fixture is
+    only relevant when ``ACTIVE_PROFILES=mock``.
+    """
+    import urllib.error
+    import urllib.request
+    import json as _json
+
+    url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
+    base = url.rstrip("/")
+    host_name = "kvm1"
+
+    # Probe existence — provisioning's GET /hosts/{name} returns 404 when absent.
+    try:
+        with urllib.request.urlopen(
+            f"{base}/api/v1/hosts/{host_name}", timeout=5,
+        ) as resp:
+            if resp.status == 200:
+                log.info("[conftest] Provisioning host %r already registered", host_name)
+                return
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            pytest.skip(
+                f"Could not probe provisioning host {host_name!r}: "
+                f"{exc.code} {exc.reason}"
+            )
+    except urllib.error.URLError as exc:
+        pytest.skip(f"Could not reach provisioning service at {base}: {exc}")
+
+    body = {
+        "name": host_name,
+        "kvm_host": "127.0.0.1",
+        "ssh_user": "stub",
+        "ssh_key_type": "path",
+        "ssh_key_value": "/tmp/stub-e2e-key",
+        "gpu_count": 1,
+        "enabled": True,
+    }
+    req = urllib.request.Request(
+        f"{base}/api/v1/hosts/",
+        data=_json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            resp.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")
+        pytest.skip(
+            f"Could not register provisioning host {host_name!r}: "
+            f"{exc.code} {exc.reason} — {detail}"
+        )
+    log.info("[conftest] Registered provisioning host %r", host_name)
 
 
 @pytest.fixture(scope="module")

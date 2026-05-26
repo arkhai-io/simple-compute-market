@@ -158,7 +158,7 @@ def register(app: typer.Typer) -> None:
             resume_state = ResumeState(
                 negotiation_id=resume_point.negotiation_id,
                 transcript=resume_point.transcript,
-                last_seller_price=resume_point.last_seller_price,
+                last_seller_proposal=resume_point.last_seller_proposal,
                 rounds_completed=resume_point.rounds_completed,
             )
 
@@ -170,9 +170,11 @@ def register(app: typer.Typer) -> None:
         deadline = resolve_discovery_timeout(override=discovery_timeout)
         reg_auth = resolve_indexer_auth()
 
-        # Auto-resolve --seller from the registries given --listing-id.
-        # First registry that knows the listing wins.
-        if listing_id and not seller_url:
+        # Fetch the listing — needed for both --seller auto-resolution
+        # and picking an accepted_escrows entry. Skipped in resume mode
+        # (the saved run-log carries the prior commitments).
+        listing_dict: Optional[dict] = None
+        if listing_id and resume_state is None:
             from ..buy_orchestrator import fetch_listing_dict_multi
             try:
                 listing_dict = fetch_listing_dict_multi(
@@ -191,16 +193,17 @@ def register(app: typer.Typer) -> None:
                     err=True, fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
-            seller_url = listing_dict.get("seller")
             if not seller_url:
-                typer.secho(
-                    f"Listing {listing_id} has no `seller` field; pass --seller explicitly.",
-                    err=True, fg=typer.colors.RED,
-                )
-                raise typer.Exit(2)
+                seller_url = listing_dict.get("seller")
+                if not seller_url:
+                    typer.secho(
+                        f"Listing {listing_id} has no `seller` field; pass --seller explicitly.",
+                        err=True, fg=typer.colors.RED,
+                    )
+                    raise typer.Exit(2)
             # Auto-derive prices from the listing's min_price when caller
             # didn't supply them. Same precedent as `market buy`.
-            if resume_state is None and (initial_price is None or max_price is None):
+            if initial_price is None or max_price is None:
                 derived_initial, derived_max = resolve_prices_from_matches(
                     matches=[listing_dict],
                     console=console,
@@ -237,6 +240,42 @@ def register(app: typer.Typer) -> None:
             int(round(duration_hours * 3600)) if duration_hours is not None else None
         )
 
+        # Pick one accepted_escrows entry — token, escrow contract, and
+        # chain all come from the listing. ``--token-contract`` (when
+        # set) filters entries to one ERC-20.
+        from ..escrow_selection import select_escrow_entry
+        picked_entry: Optional[dict] = None
+        if listing_dict is not None:
+            _chain_for_pick = resolve_config_value(
+                toml_path="chain.name", default="ethereum_sepolia",
+            )
+            _rpc_for_pick = resolve_config_value(
+                toml_path="chain.rpc_url", default="",
+            )
+            picked_entry = select_escrow_entry(
+                listing_dict,
+                chain_name=_chain_for_pick,
+                token_contract_filter=token_contract,
+                assume_yes=assume_yes,
+                rpc_url=_rpc_for_pick or "",
+                buyer_address=addr,
+                console=console,
+            )
+            if picked_entry is None:
+                msg = (
+                    f"Listing {listing_id!r} has no accepted_escrows entry on "
+                    f"chain {_chain_for_pick!r}"
+                )
+                if token_contract:
+                    msg += f" with token {token_contract}"
+                typer.secho(msg + ".", err=True, fg=typer.colors.RED)
+                raise typer.Exit(2)
+            entry_token = (picked_entry.get("fields") or {}).get("token")
+            if isinstance(entry_token, str) and entry_token.startswith("0x"):
+                # Surface the picked token back to the run-log + the
+                # downstream price-scaling step.
+                token_contract = entry_token
+
         # Scale explicit --initial-price / --max-price from human /
         # whole-token units to base units. Sellers publish
         # ``price_per_hour`` in base units; buyer ceilings need the
@@ -247,14 +286,12 @@ def register(app: typer.Typer) -> None:
                 int(token_decimals) if token_decimals is not None else None
             )
             if decimals is None:
-                from ..common import (
-                    resolve_chain_id, resolve_default_token_address,
-                )
+                from ..common import resolve_chain_id
                 from service.clients.token import (
                     resolve_token, TokenResolutionError,
                 )
                 rpc = resolve_config_value(toml_path="chain.rpc_url")
-                tc = token_contract or resolve_default_token_address()
+                tc = token_contract
                 if tc and rpc:
                     try:
                         meta = resolve_token(
@@ -352,47 +389,36 @@ def register(app: typer.Typer) -> None:
         # (the seller still validates it). Resume mode skips the
         # round-0 send and these fields are ignored.
         from service.schemas import EscrowProposal, ProvisionTerms
-        from service.clients.alkahest import (
-            get_erc20_escrow_obligation_nontierable,
-        )
         import time as _time
         provision_terms: Optional[ProvisionTerms] = None
         escrow_proposal: Optional[EscrowProposal] = None
         if resume_state is None:
             assert duration_seconds is not None  # gated above
+            assert picked_entry is not None  # listing fetched + entry picked above
             provision_terms = ProvisionTerms(
                 duration_seconds=int(duration_seconds),
                 ssh_public_key="",  # negotiate-only flow; settle is a separate command
             )
-            _chain = resolve_config_value(
-                toml_path="chain.name", default="ethereum_sepolia",
-            )
-            _addr_cfg = resolve_config_value(
-                toml_path="chain.alkahest_address_config_path",
-            )
-            _escrow_addr = get_erc20_escrow_obligation_nontierable(
-                _chain, config_path=_addr_cfg or None,
-            )
+            _entry_fields = picked_entry.get("fields") or {}
             escrow_proposal = EscrowProposal(
-                chain_name=_chain,
-                escrow_address=_escrow_addr,
-                fields={"token": token_contract or ("0x" + "0" * 40)},
+                chain_name=picked_entry.get("chain_name"),
+                escrow_address=picked_entry["escrow_address"],
+                fields={"token": _entry_fields.get("token")},
                 expiration_unix=int(_time.time()) + 3600,
             )
 
-        # Honor an optional [buyer.negotiation].policy_mode override in
-        # config.toml, mirroring the seller's [seller.negotiation]
-        # policy_mode knob. The buyer wheel installs without torch by
-        # default — set "bisection" to avoid the RL self-register path
-        # blowing up. When unset, falls through to negotiate_with_seller's
-        # own DEFAULT_STRATEGY behavior.
-        strategy = None
+        # Honor an optional [negotiation].policy_mode override in
+        # buyer.toml, mirroring the seller's [negotiation] knob. The
+        # buyer wheel installs without torch by default — set "bisection"
+        # to avoid the RL self-register path blowing up. When unset,
+        # falls through to negotiate_with_seller's default chain.
+        chain = None
         policy_mode = resolve_config_value(
-            toml_path="buyer.negotiation.policy_mode",
+            toml_path="negotiation.policy_mode",
         )
         if policy_mode:
-            from market_policy.negotiation_strategy import load_strategy
-            strategy = load_strategy(policy_mode)
+            from market_buyer.buyer_client import _load_buyer_chain
+            chain = _load_buyer_chain(policy_mode)
 
         try:
             outcome = negotiate_with_seller(
@@ -407,7 +433,7 @@ def register(app: typer.Typer) -> None:
                 max_rounds=max_rounds,
                 on_round=_observe,
                 resume=resume_state,
-                strategy=strategy,
+                chain=chain,
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))
@@ -417,7 +443,7 @@ def register(app: typer.Typer) -> None:
         run_log.end(
             outcome.status,
             negotiation_id=outcome.negotiation_id,
-            agreed_price=outcome.agreed_price,
+            agreed_amount=outcome.agreed_amount,
             rounds=outcome.rounds,
             reason=outcome.reason,
         )
@@ -430,8 +456,8 @@ def register(app: typer.Typer) -> None:
         result_table.add_row("Status", outcome.status)
         if outcome.negotiation_id:
             result_table.add_row("Negotiation", outcome.negotiation_id)
-        if outcome.agreed_price is not None:
-            result_table.add_row("Agreed price", str(outcome.agreed_price))
+        if outcome.agreed_amount is not None:
+            result_table.add_row("Agreed price", str(outcome.agreed_amount))
         if outcome.reason:
             result_table.add_row("Reason", outcome.reason)
         result_table.add_row("Rounds", str(outcome.rounds))

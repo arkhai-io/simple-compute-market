@@ -1,51 +1,22 @@
-"""SystemService — business logic for policy seeding, status, and dry-run evaluation.
+"""SystemService — business logic for storefront health and connectivity checks.
 
 Extracted from SystemController so that the logic is independently testable
 without an HTTP request/response cycle.
-
-Three responsibilities:
-  seed_policies()          — discover @policy_callable decorators + seed DB rows
-  get_policy_status()      — read callable registry + seeded policies with resolvability
-None of these methods write to the registry or produce side-effects beyond SQLite
-(seed_policies writes policy rows; all other methods are read-only).
 """
 
 from __future__ import annotations
 
 import asyncio
 import httpx
-import importlib
 import logging
 import os
-import pkgutil
-import sys
 import time
 from typing import Any
 
 import market_storefront.container as _container
-from market_policy.registry import CALLABLE_REGISTRY
-from market_policy.store import PolicyStore
-from market_storefront.policy.seeding import ComputePolicySeeder
-from market_storefront.models.system_models import (
-    ImportErrorResponse,
-    PolicyStatusResponse,
-    SeededPolicyInfo,
-    SeedPoliciesResponse,
-)
 from market_storefront.utils.config import settings, chain_id, AGENT_ID
 
 logger = logging.getLogger(__name__)
-
-
-# Internal transfer object used only within _get_seeded_policies_detail
-class _PolicyInfoInternal:
-    __slots__ = ("policy_name", "trigger_type", "callable_ref", "components", "components_resolvable")
-    def __init__(self, policy_name, trigger_type, callable_ref, components, components_resolvable):
-        self.policy_name = policy_name
-        self.trigger_type = trigger_type
-        self.callable_ref = callable_ref
-        self.components = components
-        self.components_resolvable = components_resolvable
 
 
 # ---------------------------------------------------------------------------
@@ -53,174 +24,16 @@ class _PolicyInfoInternal:
 # ---------------------------------------------------------------------------
 
 class SystemService:
-    """Business logic for system-level policy operations.
-
-    Parameters
-    ----------
-    sqlite_client:
-        The storefront SQLiteClient instance — used for policy row reads/writes.
-    agent_id:
-        Agent identifier used as the key for policy DB rows.
-    callable_registry:
-        Override for the module-level CALLABLE_REGISTRY.  Inject a plain dict
-        in unit tests to avoid touching the real global singleton.
-    """
-
-    # Package walked during seed.  Named here so tests can patch it.
-    POLICY_PACKAGE = "domain.compute.agent.app.policy"
+    """Business logic for storefront health and connectivity checks."""
 
     def __init__(
         self,
         *,
         sqlite_client,
         agent_id: str | None = None,
-        callable_registry: dict | None = None,
     ) -> None:
         self._db = sqlite_client
         self._agent_id = agent_id or AGENT_ID or "agent"
-        # Injected registry lets tests work without touching the global singleton.
-        self._registry: dict = callable_registry if callable_registry is not None else CALLABLE_REGISTRY
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _make_policy_store(self) -> PolicyStore:
-        """Create a PolicyStore wired with the current callable registry.
-
-        PolicyStore.__init__ starts with an empty self._registry.  Callers
-        that use evaluate_policy must first call register_callables — this is
-        what PolicyManager.initialize() does at startup.
-        """
-        store = PolicyStore(self._db)
-        store.register_callables(self._registry)
-        return store
-
-    async def _get_seeded_policies_detail(self) -> list[_PolicyInfoInternal]:
-        """Load seeded policy rows from SQLite with per-policy resolvability."""
-        try:
-            rows = await self._db.list_seeded_policies()
-        except Exception:
-            return []
-        result = []
-        for row in rows:
-            components: list[str] = row.get("components") or []
-            resolvable = all(c in self._registry for c in components)
-            result.append(_PolicyInfoInternal(
-                policy_name=row.get("policy_name", ""),
-                trigger_type=row.get("trigger_type"),
-                callable_ref=row.get("callable_ref"),
-                components=components,
-                components_resolvable=resolvable,
-            ))
-        return result
-
-    @staticmethod
-    def _ensure_domain_on_sys_path() -> None:
-        """Add the app root to sys.path if domain/ is not yet importable.
-
-        Primary fix is ENV PYTHONPATH=/app in the Dockerfile.  This is
-        defence-in-depth for environments where that env var is absent.
-        """
-        controllers_dir = os.path.dirname(os.path.abspath(__file__))
-        # services/ → market_storefront/ → src/ → (app root)
-        app_root_candidate = os.path.dirname(  # src/
-            os.path.dirname(  # market_storefront/
-                os.path.dirname(controllers_dir)  # services/
-            )
-        )
-        for candidate in ["/app", os.getcwd(), app_root_candidate]:
-            if os.path.isdir(os.path.join(candidate, "domain")) and candidate not in sys.path:
-                sys.path.insert(0, candidate)
-                logger.info("[POLICY SEED] Added %s to sys.path for domain import", candidate)
-                return
-
-    # ------------------------------------------------------------------
-    # seed_policies
-    # ------------------------------------------------------------------
-
-    async def seed_policies(self) -> SeedPoliciesResponse:
-        """Discover @policy_callable decorators and seed default policies to SQLite.
-
-        Step 1: Ensure domain/ is on sys.path, then walk
-                ``domain.compute.agent.app.policy`` submodules so every
-                @policy_callable decorator fires and populates CALLABLE_REGISTRY.
-                Per-module import failures are collected (not raised) so one bad
-                optional dependency like ``gymnasium`` doesn't block the rest.
-
-        Step 2: Run ComputePolicySeeder.ensure_default_policies() to write the
-                policy DB rows if absent.  Idempotent — safe to call repeatedly.
-
-        Returns
-        -------
-        SeedResult
-            Includes any per-module import errors so callers can surface them
-            without reading container logs.
-        """
-        self._ensure_domain_on_sys_path()
-
-        import_errors: list[ImportErrorResponse] = []
-        try:
-            pkg = importlib.import_module(self.POLICY_PACKAGE)
-            if hasattr(pkg, "__path__"):
-                for mod_info in pkgutil.walk_packages(pkg.__path__, pkg.__name__ + "."):
-                    try:
-                        importlib.import_module(mod_info.name)
-                    except Exception as mod_exc:
-                        import_errors.append(ImportErrorResponse(
-                            module=mod_info.name, error=str(mod_exc)
-                        ))
-                        logger.warning(
-                            "[POLICY SEED] Failed to import %s: %s", mod_info.name, mod_exc
-                        )
-        except Exception as exc:
-            logger.error("[POLICY SEED] Failed to import package %s: %s", self.POLICY_PACKAGE, exc)
-            raise RuntimeError(f"Failed to import {self.POLICY_PACKAGE}: {exc}") from exc
-
-        seeder = ComputePolicySeeder(
-            policy_store=PolicyStore(self._db),
-            sqlite_client=self._db,
-            agent_id=self._agent_id,
-        )
-        await seeder.ensure_default_policies()
-
-        seeded_names = [
-            p.policy_name for p in await self._get_seeded_policies_detail()
-        ]
-
-        result = SeedPoliciesResponse(
-            callable_registry_count=len(self._registry),
-            callables=sorted(self._registry.keys()),
-            seeded_policies=seeded_names,
-            import_errors=import_errors,
-        )
-        logger.info(
-            "[POLICY SEED] callable_count=%d seeded=%s import_errors=%d",
-            result.callable_registry_count, seeded_names, len(import_errors),
-        )
-        return result
-
-    # ------------------------------------------------------------------
-    # get_policy_status
-    # ------------------------------------------------------------------
-
-    async def get_policy_status(self) -> PolicyStatusResponse:
-        """Return the callable registry contents and seeded policies with resolvability."""
-        callables = sorted(self._registry.keys())
-        seeded = await self._get_seeded_policies_detail()
-        return PolicyStatusResponse(
-            callable_count=len(callables),
-            callable_registry={k: k for k in callables},
-            seeded_policies=[
-                SeededPolicyInfo(
-                    policy_name=p.policy_name,
-                    trigger_type=p.trigger_type or "",
-                    components=p.components,
-                    components_resolvable=p.components_resolvable,
-                )
-                for p in seeded
-            ],
-        )
 
     # ------------------------------------------------------------------
     # Health / connectivity checks
@@ -531,29 +344,42 @@ class SystemService:
         return {"seeded": True, "imported_count": imported, "source": source}
 
     def negotiation_strategy_check(self) -> str:
-        """Probe the configured negotiation strategy. Returns a viability string.
+        """Probe the configured negotiation chain. Returns a viability string.
+
+        Runs the chain against a synthetic round-0 input (buyer matching
+        seller price exactly, no listing context) and reports whether the
+        terminal middleware would accept/counter (viable) or exit (broken
+        config). Guard middlewares fire first; their veto produces
+        ``exit_on_probe`` with the guard's reason — operator can read the
+        reason to see whether the chain is misconfigured for their setup.
 
         Possible values:
-          'bisection'                    — BisectionStrategy loaded; always viable
-          'rl (viable)'                  — RL strategy loaded; torch is available
-          '<name> (exit_on_probe: <r>)'  — strategy exits every round; will fail
-          'unknown: <msg>'               — load_strategy raised
+          '<chain> (count=N)'            — chain produced a non-exit decision
+          '<chain> (exit_on_probe: <r>)' — chain returned an exit/reject
+          'error: <msg>'                 — load or run failed
         """
         try:
-            from market_policy.negotiation_strategy import NegotiationRoundInput
-            from market_storefront.utils.sync_negotiation import _load_storefront_strategy
+            from market_policy.negotiation_middleware import (
+                NegotiationContext,
+                NegotiationRound,
+                run_negotiation_chain,
+            )
+            from market_storefront.utils.sync_negotiation import _load_storefront_chain
 
-            strategy = _load_storefront_strategy()
-            name = type(strategy).__name__
-            probe = strategy.decide(NegotiationRoundInput(
+            chain = _load_storefront_chain()
+            label = f"chain[{len(chain)}]"
+            history = [NegotiationRound(
+                round_number=0, sender="them", action="initial",
+                proposal={"fields": {"amount": 10_000}},
+            )]
+            context = NegotiationContext(
                 direction="maximize",
-                our_reference_price=10_000,
-                their_proposed_price=10_000,
-                history=[],
-            ))
-            if probe.action == "exit":
-                return f"{name} (exit_on_probe: {probe.reason})"
-            return name.lower().replace("strategy", "").strip() or name
+                our_reference_amount=10_000.0,
+            )
+            probe = run_negotiation_chain(chain, history, context)
+            if probe.action in ("exit", "reject"):
+                return f"{label} (exit_on_probe: {probe.reason})"
+            return f"{label} (count={len(chain)})"
         except KeyError as exc:
             return f"unknown: {exc}"
         except Exception as exc:

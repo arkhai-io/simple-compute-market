@@ -122,7 +122,7 @@ def test_recipient_codec_encode_demand_is_abi_encoded_address():
     codec = RecipientArbiterCodec()
     agreement = AgreementContext(
         seller_wallet=_SELLER_WALLET,
-        agreed_price=1000,
+        agreed_amount=1000,
         duration_seconds=3600,
     )
     demand = codec.encode_demand(agreement)
@@ -136,7 +136,7 @@ def test_recipient_codec_encode_matches_legacy_helper():
     codec = RecipientArbiterCodec()
     agreement = AgreementContext(
         seller_wallet=_SELLER_WALLET,
-        agreed_price=999,
+        agreed_amount=999,
         duration_seconds=1800,
     )
     assert codec.encode_demand(agreement) == encode_recipient_demand(_SELLER_WALLET)
@@ -145,7 +145,7 @@ def test_recipient_codec_encode_matches_legacy_helper():
 def test_recipient_codec_ignores_price_and_duration():
     """RecipientArbiter binds none of the negotiated provision details
     into the demand — only the seller's wallet. Same wallet → same
-    demand regardless of price or duration."""
+    demand regardless of amount or duration."""
     codec = RecipientArbiterCodec()
     a = codec.encode_demand(AgreementContext(_SELLER_WALLET, 100, 60))
     b = codec.encode_demand(AgreementContext(_SELLER_WALLET, 999999, 3600 * 24 * 30))
@@ -178,7 +178,7 @@ def test_build_payment_obligation_data_dispatches_through_codec(restore_registry
 
     obligation_data = build_payment_obligation_data(
         seller_wallet=_SELLER_WALLET,
-        agreed_price=500,
+        agreed_amount=500,
         duration_seconds=7200,
         token_contract_address=_TOKEN,
         chain_name="some_chain",
@@ -188,7 +188,7 @@ def test_build_payment_obligation_data_dispatches_through_codec(restore_registry
     # Dispatch happened.
     assert captured["resolve"] == ("some_chain", "/tmp/addrs.json")
     assert captured["agreement"].seller_wallet == _SELLER_WALLET
-    assert captured["agreement"].agreed_price == 500
+    assert captured["agreement"].agreed_amount == 500
     assert captured["agreement"].duration_seconds == 7200
 
     # Codec's outputs landed in the obligation_data dict.
@@ -196,14 +196,15 @@ def test_build_payment_obligation_data_dispatches_through_codec(restore_registry
     assert obligation_data["demand"] == "0xcafebabe"
     # Non-codec fields still come from the builder.
     assert obligation_data["token"] == _TOKEN
-    assert obligation_data["amount"] == 500 * 7200 // 3600
+    # agreed_amount is the absolute payment in base units — no further scaling.
+    assert obligation_data["amount"] == 500
 
 
 def test_build_payment_obligation_data_raises_for_unknown_arbiter_kind():
     with pytest.raises(ValueError, match="trusted_oracle_arbiter"):
         build_payment_obligation_data(
             seller_wallet=_SELLER_WALLET,
-            agreed_price=1000,
+            agreed_amount=1000,
             duration_seconds=3600,
             token_contract_address=_TOKEN,
             chain_name="some_chain",
@@ -212,8 +213,8 @@ def test_build_payment_obligation_data_raises_for_unknown_arbiter_kind():
 
 
 def test_build_payment_obligation_data_amount_unchanged_by_codec_swap(restore_registry):
-    """The amount formula (price × duration / 3600) lives outside the
-    codec — swapping arbiters doesn't change it."""
+    """The amount comes straight from the negotiated agreed_amount —
+    swapping arbiters doesn't change it."""
     class _NoopCodec:
         kind = "recipient_arbiter"
 
@@ -226,10 +227,9 @@ def test_build_payment_obligation_data_amount_unchanged_by_codec_swap(restore_re
     register_arbiter_codec(_NoopCodec())
     result = build_payment_obligation_data(
         seller_wallet=_SELLER_WALLET,
-        agreed_price=1000,
+        agreed_amount=500,
         duration_seconds=1800,
         token_contract_address=_TOKEN,
         chain_name="some_chain",
     )
-    # 1000 × 1800 / 3600 = 500
     assert result["amount"] == 500

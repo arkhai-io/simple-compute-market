@@ -85,7 +85,7 @@ def _good_obligation(**overrides: Any) -> dict[str, Any]:
 def _canonical_obligation_data(
     *,
     seller_wallet: str = SELLER,
-    agreed_price: float = 1000,
+    agreed_amount: int = 1000,
     duration_seconds: int = 3600,
     token_contract_address: str = TOKEN,
     arbiter_address: str = ARBITER,
@@ -93,12 +93,14 @@ def _canonical_obligation_data(
 ) -> dict[str, Any]:
     """Same shape ``build_payment_obligation_data`` produces. Test seam
     feeds this back to the verifier so we don't need the real alkahest
-    chain config lookups."""
+    chain config lookups. ``agreed_amount`` is the absolute payment in
+    base units of the payment token (already multiplied out from any
+    per-hour rate during negotiation)."""
     return {
         "arbiter": arbiter_address,
         "demand": "0x" + _encode_recipient(seller_wallet).hex(),
         "token": token_contract_address,
-        "amount": int(float(agreed_price) * max(duration_seconds, 1) / 3600),
+        "amount": int(agreed_amount),
     }
 
 
@@ -106,12 +108,12 @@ def _make_seams(decoded: dict[str, Any]) -> dict[str, Any]:
     async def _get_obligation(client, uid):
         return decoded
 
-    def _build(*, seller_wallet, agreed_price, duration_seconds,
+    def _build(*, seller_wallet, agreed_amount, duration_seconds,
                token_contract_address, chain_name, addr_config_path=None,
                arbiter_kind="recipient"):
         return _canonical_obligation_data(
             seller_wallet=seller_wallet,
-            agreed_price=agreed_price,
+            agreed_amount=agreed_amount,
             duration_seconds=duration_seconds,
             token_contract_address=token_contract_address,
         )

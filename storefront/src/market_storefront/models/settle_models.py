@@ -41,7 +41,14 @@ class VerifyEscrowRequest(BaseModel):
     test getRecordFromChain in isolation before committing to settle.
     """
     seller_wallet: str = Field(description="Expected seller wallet address (recipient on-chain)")
-    agreed_price: float = Field(description="Expected agreed price in base token units per hour")
+    agreed_price: float = Field(
+        description=(
+            "Expected absolute payment amount in base units of the payment "
+            "token (the field name is retained from before the per-hour → "
+            "absolute refactor; semantically it now holds the amount, not "
+            "a rate)."
+        ),
+    )
     agreed_duration_seconds: int = Field(description="Expected lease duration in seconds")
     listing_id: str = Field(description="Listing ID — used to extract token contract from DB")
 

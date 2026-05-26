@@ -97,15 +97,6 @@ def chain_check(
     if identity_registry:
         addresses["identity_registry"] = identity_registry
 
-    # Default token contract — buyer transfers it during settle.
-    from ..common import resolve_default_token_address
-    default_address = resolve_default_token_address()
-    if default_address:
-        from service.clients.token import resolve_token_cached
-        cached = resolve_token_cached(default_address)
-        label = f"token.{cached.symbol}" if cached and cached.symbol else f"token.{default_address[:10]}"
-        addresses[label] = default_address
-
     if not addresses:
         typer.secho(
             "No contract addresses to probe. Configure chain.alkahest_address_config_path "

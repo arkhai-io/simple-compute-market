@@ -1,9 +1,9 @@
-"""File-based negotiation policy discovery.
+"""File-based negotiation middleware discovery.
 
 Verifies that subdirectories of ``$XDG_CONFIG_HOME/arkhai/policies/``
 and ``[negotiation] extra_policy_paths`` are picked up as
-strategies named after the folder. Each subdir is expected to expose
-``policy.py`` with a callable ``factory(cfg) -> NegotiationStrategy``.
+middlewares named after the folder. Each subdir is expected to expose
+``policy.py`` with a callable ``middleware(history, context) -> (decision, context)``.
 """
 
 from __future__ import annotations
@@ -11,28 +11,24 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-from market_policy.negotiation_strategy import (
+from market_policy.negotiation_middleware import (
+    NegotiationContext,
     NegotiationDecision,
-    NegotiationRoundInput,
+    NegotiationRound,
     _REGISTRY,
-    load_strategy,
+    load_negotiation_chain,
 )
 from market_storefront.utils import sync_negotiation
 from tests._settings_overrides import settings_overrides
 
 
 _STUB_POLICY = textwrap.dedent("""
-    from market_policy.negotiation_strategy import NegotiationDecision
+    from market_policy.negotiation_middleware import NegotiationDecision
 
-    class _Stub:
-        def __init__(self, marker):
-            self._marker = marker
+    _MARKER = "stub-default"
 
-        def decide(self, ri):
-            return NegotiationDecision(action="exit", reason=self._marker)
-
-    def factory(cfg):
-        return _Stub(marker=cfg.get("marker", "stub-default"))
+    def middleware(history, context):
+        return NegotiationDecision(action="exit", reason=_MARKER), context
 """)
 
 
@@ -45,6 +41,10 @@ def _write_policy(root: Path, name: str, body: str = _STUB_POLICY) -> Path:
 
 def _force_rediscover():
     sync_negotiation._FILE_POLICIES_DISCOVERED = False
+
+
+def _ctx() -> NegotiationContext:
+    return NegotiationContext(direction="maximize", our_reference_amount=100.0)
 
 
 def test_extra_policy_paths_register_each_subdir(tmp_path):
@@ -61,15 +61,11 @@ def test_extra_policy_paths_register_each_subdir(tmp_path):
     assert "myfast" in _REGISTRY
     assert "myslow" in _REGISTRY
 
-    strat = load_strategy("myfast", config={"marker": "via-extra"})
-    decision = strat.decide(NegotiationRoundInput(
-        direction="maximize",
-        our_reference_price=100,
-        their_proposed_price=10,
-    ))
+    chain = load_negotiation_chain(["myfast"])
+    decision, _ = chain[0]([], _ctx())
     assert isinstance(decision, NegotiationDecision)
     assert decision.action == "exit"
-    assert decision.reason == "via-extra"
+    assert decision.reason == "stub-default"
 
 
 def test_xdg_default_path_is_discovered(tmp_path, monkeypatch):
@@ -87,7 +83,7 @@ def test_xdg_default_path_is_discovered(tmp_path, monkeypatch):
 
 
 def test_file_policy_overrides_builtin(tmp_path):
-    # A folder named "bisection" should overwrite the built-in factory
+    # A folder named "bisection" should overwrite the built-in middleware
     # — that's the local-tuning override UX.
     body = _STUB_POLICY.replace("stub-default", "from-file")
     _write_policy(tmp_path, "bisection", body=body)
@@ -98,12 +94,8 @@ def test_file_policy_overrides_builtin(tmp_path):
         with settings_overrides(**{"negotiation.extra_policy_paths": [str(tmp_path)]}):
             sync_negotiation._discover_file_policies()
 
-        strat = load_strategy("bisection")
-        decision = strat.decide(NegotiationRoundInput(
-            direction="maximize",
-            our_reference_price=100,
-            their_proposed_price=10,
-        ))
+        chain = load_negotiation_chain(["bisection"])
+        decision, _ = chain[0]([], _ctx())
         assert decision.reason == "from-file"
     finally:
         if original is not None:
@@ -113,7 +105,7 @@ def test_file_policy_overrides_builtin(tmp_path):
 
 def test_broken_policy_does_not_block_siblings(tmp_path):
     _write_policy(tmp_path, "good")
-    # Missing factory.
+    # Missing middleware.
     broken = tmp_path / "bad"
     broken.mkdir()
     (broken / "policy.py").write_text("x = 1\n")
