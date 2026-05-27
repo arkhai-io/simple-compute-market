@@ -333,22 +333,31 @@ on-chain escrow calldata rather than as a typed `TokenResource`.
 
 **Listing-side advertisement — `accepted_escrows`:** Each listing carries a
 JSON column `accepted_escrows: list[AcceptedEscrow]`. One entry pins the
-`(chain_name, escrow_address)` tuple plus a partial advertisement of the
-on-chain `ObligationData` struct via a `fields` map. The seller is saying "I
-will accept payment via *these* escrow contracts on *these* chains, with
-*these* field values pinned." Multiple entries allow multi-chain or
-multi-contract offers (e.g. mainnet ERC20 + a Base Sepolia ERC20 alongside a
-hypothetical ERC721 escrow). Each entry also carries a `price_per_hour` —
-this is the price column the negotiation strategy reads as the seller's
-floor.
+`(chain_name, escrow_address)` tuple plus `literal_fields: dict` (the
+obligation-data keys the seller has fixed: `token`, `arbiter`, etc.) and
+`rates: list[RateValue]` (every rate-bearing obligation field with its
+`per` unit and rate `value` in base units). The seller is saying "I will
+accept payment via *these* escrow contracts on *these* chains, with
+*these* field values pinned, at *these* rates." Multiple entries allow
+multi-chain or multi-contract offers (mainnet ERC20 + a Base Sepolia
+ERC20 alongside a hypothetical ERC721 escrow).
 
-`fields` is **shape-only** — present keys are advertised values; absent keys
-are open for the buyer to propose. Whether an advertised value is a hard
-constraint or a negotiable default is the seller's negotiation policy's
-concern, not protocol infrastructure. `amount` is never in `fields`: the
-on-chain `ObligationData.amount` is derived at settlement from
-`price_per_hour × duration_seconds / 3600` after the negotiation agrees a rate
-and duration.
+`literal_fields` is **shape-only** — present keys are advertised values;
+absent keys are open for the buyer to propose. Whether an advertised
+value is a hard constraint or a negotiable default is the seller's
+negotiation policy's concern, not protocol infrastructure. A rate-bearing
+field (e.g. `amount` for ERC20) is never in `literal_fields` — it lives
+in `rates` so duration scaling stays explicit. The on-chain
+`ObligationData.amount` is derived at settlement as
+`primary_rate × duration_seconds / 3600` after the negotiation agrees a
+rate and duration. Empty `rates` = hidden reserve (the seller publishes
+no advertised rate; negotiation establishes one via the strategy's
+`default_min_price`).
+
+Readers use the `primary_rate_value` / `accepted_token_address` helpers
+in `service.schemas` rather than touching the dict keys directly; both
+helpers work against either a `AcceptedEscrow` model or a raw JSON dict
+(the shape coming off SQLite or the wire).
 
 **Round-0 wire shape:** `POST /api/v1/negotiate/new` carries two structured
 fields:
@@ -358,29 +367,35 @@ fields:
   seller's settlement/provisioning pipeline as the single source of truth for
   what to provision.
 - `escrow_proposal: EscrowProposal` — `{chain_name, escrow_address, fields,
-  expiration_unix}`. The buyer picks one of the listing's `accepted_escrows`
-  by `(chain_name, escrow_address)` and supplies the buyer-committable
-  `ObligationData` keys in `fields`. `amount` is intentionally **not** on the
-  proposal — it's derived at settlement.
+  literal_fields, rates, expiration_unix}`. The buyer picks one of the
+  listing's `accepted_escrows` by `(chain_name, escrow_address)` and supplies
+  its literal pins in `literal_fields` (e.g. `{"token": …}`). The proposal
+  retains a `fields` dict as the carrier for the per-round negotiation
+  amount (`fields["amount"]`) — rate-bearing values negotiate as a single
+  absolute scalar once the duration is fixed at round 0. `amount` is
+  intentionally **not** on the listing-side advertisement: it's derived at
+  settlement from `primary_rate × duration / 3600`.
 
 The seller validates the proposal in `_validate_escrow_proposal`: match the
 `(chain_name, escrow_address)` against an entry in the listing's
-`accepted_escrows`, then field-equality-check every seller-advertised value
-on the matched entry. On non-rejection paths, `NegotiateNewResponse` echoes
-both as `accepted_provision_terms` and `accepted_escrow_proposal` — settlement
-code on both sides reconstructs the same on-chain `obligation_data` from
-those echoed values.
+`accepted_escrows`, then field-equality-check every seller-advertised
+literal on the matched entry's `literal_fields`. On non-rejection paths,
+`NegotiateNewResponse` echoes both as `accepted_provision_terms` and
+`accepted_escrow_proposal` — settlement code on both sides reconstructs the
+same on-chain `obligation_data` from those echoed values.
 
 **Settlement is a byte-compare, not a dispatch:** `EscrowTerms`
 (`service.schemas.EscrowTerms`) is the negotiated artifact — a flat mirror of
 the alkahest `ObligationData` struct: `{maker, escrow_contract,
 obligation_data, expiration_unix}`. The settlement verifier reads the
 on-chain obligation by UID and byte-compares against the negotiated
-`EscrowTerms.obligation_data`. New escrow kinds (ERC721, native, bundle,
-attestation) add no code: they only change which keys appear in
-`obligation_data`. The alkahest **slot lookup** (address-to-kind reverse
-map, configured per chain) resolves escrow contract addresses to their kind
-— adding a new escrow contract is a config change, not a code change.
+`EscrowTerms.obligation_data`. Adding a new escrow kind (ERC721, native,
+bundle, attestation) is a codec-registration change: the buyer-side
+builder and seller-side verifier resolve `(chain, escrow_address)` to a
+codec via `service.clients.alkahest.get_escrow_codec_for`, then refuse
+unsupported kinds with `NotImplementedError` carrying the kind + address.
+Today only `erc20_escrow_obligation_nontierable` is registered; wiring
+another kind is a builder + verifier addition with no schema change.
 
 A negotiation produces `list[EscrowTerms]` so multi-escrow designs (payment
 + seller penalty deposit, block-by-block schedules) are expressible without
@@ -394,8 +409,21 @@ signatures (`PolicyService.evaluate_create_listing_policy`,
 `oc.action.make_offer_from_order_create` domain callable emits
 `parameters["accepted_escrows"]`; `action_executor`'s MAKE_OFFER handler
 threads it directly to `create_order`. `_extract_initial_price_from_order`
-reads from `accepted_escrows[0].price_per_hour`; its hidden-reserve
-fallback is `[seller.pricing].default_min_price`.
+reads the primary rate via `primary_rate_value(accepted_escrows[0])`;
+its hidden-reserve fallback (empty `rates`) is
+`[seller.pricing].default_min_price`.
+
+**Escrow templates (CSV → `accepted_escrows`):** sellers populate
+`accepted_escrows` per-resource via the templates DSL in the resource CSV:
+`escrow_templates.<name>` blocks in `storefront.toml` declare the
+`(chain, escrow_address, literal_fields, rate_slots)` shape; the CSV
+references templates by name with per-slot rate values
+(`"usdc_anvil:amount=150; eth_pool:eth=0.001"`, or the single-slot sugar
+`"usdc_anvil=150"`). The importer materializes one `accepted_escrows`
+entry per template at import time; `cli_publish._publish_round` scales
+rate values by the token's decimals before publishing. The legacy
+"broadcast min_price across every CHAINS entry" path remains as the
+fallback for rows without a templates cell.
 
 ---
 
@@ -419,7 +447,7 @@ fallback is `[seller.pricing].default_min_price`.
 - Counter at `(our_price + their_price) // 2` if `their_price >= our_price / 1.5`
 - Exit with `reason="price_unreasonable"` otherwise
 
-`our_price` is extracted from `accepted_escrows[0].price_per_hour` via `_extract_initial_price_from_order()` in `action_executor.py`. This is the seller's price floor — the buyer's opening offer must be at or above this value for the seller to counter rather than exit immediately.
+`our_price` is extracted via `_extract_initial_price_from_order()` in `action_executor.py`, which reads `primary_rate_value(accepted_escrows[0])`. This is the seller's price floor — the buyer's opening offer must be at or above this value for the seller to counter rather than exit immediately.
 
 **`checks.negotiation_strategy` in system status:** `GET /api/v1/system/status` includes a `negotiation_strategy` check that instantiates the configured strategy and runs a synthetic maximize probe. If the strategy would exit on the probe (e.g. `"TorchArkhaiStrategy (exit_on_probe: torch_unavailable)"`), the check surfaces this before any negotiation is attempted. The smoke test (`test_negotiation_strategy_viable`) and e2e stage 00d both assert on this field.
 
@@ -668,7 +696,7 @@ All negotiation events are written to `stage_events` with `stage="negotiation"` 
 | `price_unreasonable` | RL | RL policy evaluated and rejected the offer |
 
 **Key invariants:**
-- `our_price` in every `round_decided` event equals `accepted_escrows[0].price_per_hour` from the listing (the seller's floor; stored in uint256-domain base units — decimal-scaled at advertisement time, not at read time)
+- `our_price` in every `round_decided` event equals `primary_rate_value(accepted_escrows[0])` from the listing (the seller's floor; stored in uint256-domain base units — decimal-scaled at advertisement time, not at read time)
 - A `round_decided` with `decision=exit` means the negotiation is already in terminal `failure` state — `force-accept` will return 409
 - The `round` field in messages is 0-indexed for the buyer's initial offer; the seller's response is round 1, subsequent buyer counters are round 2, etc.
 ```
@@ -2045,7 +2073,7 @@ selection.
 
 `POST /test/evaluate-job` on the provisioning service's test controller. Accepts `{host, vm_target, ssh_pubkey, vm_action}`, returns `{params_valid, host_exists, rule_matched, would_pause, errors}`. Checks host existence in inventory and which mock rule (if any) would match the job params. No job is created. Used by e2e stage 9a.
 
-**`/api/v1/negotiate/new` signing and escrow terms:** `StorefrontClient.negotiate_new()` and `SyncStorefrontClient.negotiate_new()` add EIP-191 `X-Signature` and `X-Timestamp` headers automatically. They accept `listing_id`, `buyer_address`, `initial_price`, `duration_seconds`, `buyer_agent_url`, `ssh_public_key`, `token`, and `escrow_expiration_unix`, then build the structured `provision_terms` and `escrow_terms_proposal` body required by the server. The buyer proposal's `fields["token"]` must match one of the listing's `accepted_escrows[i].fields.token` advertisements; omitting it makes the helper send the zero address, which is only valid for listings without a typed payment token. If an e2e test raises `TypeError: SyncStorefrontClient.negotiate_new() got an unexpected keyword argument 'token'`, the runtime is importing a stale `arkhai-storefront-client` install. Rebuild the wheel and reinstall consumers with `make reinit` so `uv.lock` is re-resolved against the current `.dist/` wheel.
+**`/api/v1/negotiate/new` signing and escrow terms:** `StorefrontClient.negotiate_new()` and `SyncStorefrontClient.negotiate_new()` add EIP-191 `X-Signature` and `X-Timestamp` headers automatically. They accept `listing_id`, `buyer_address`, `initial_price`, `duration_seconds`, `buyer_agent_url`, `ssh_public_key`, `token`, and `escrow_expiration_unix`, then build the structured `provision_terms` and `escrow_terms_proposal` body required by the server. The buyer proposal's `literal_fields["token"]` must match one of the listing's `accepted_escrows[i].literal_fields.token` advertisements; omitting it makes the helper send the zero address, which is only valid for listings without a typed payment token. If an e2e test raises `TypeError: SyncStorefrontClient.negotiate_new() got an unexpected keyword argument 'token'`, the runtime is importing a stale `arkhai-storefront-client` install. Rebuild the wheel and reinstall consumers with `make reinit` so `uv.lock` is re-resolved against the current `.dist/` wheel.
 
 **Current full-deal details:** stage 03c uses the storefront's
 `GET /api/v1/system/wait-for-registry-agent` long-poll, not a direct
