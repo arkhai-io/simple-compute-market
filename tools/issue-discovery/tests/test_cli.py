@@ -5,6 +5,10 @@ from pathlib import Path
 from issue_discovery.cli import build_parser, main
 
 
+def repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
 def test_parser_requires_subcommand() -> None:
     parser = build_parser()
     try:
@@ -15,13 +19,14 @@ def test_parser_requires_subcommand() -> None:
         raise AssertionError("parser accepted missing subcommand")
 
 
-def test_strict_dry_run_prints_repo_root(tmp_path: Path, capsys) -> None:
-    code = main(["--repo-root", str(tmp_path), "--dry-run", "strict"])
+def test_strict_dry_run_prints_repo_root(capsys) -> None:
+    root = repo_root()
+    code = main(["--repo-root", str(root), "--dry-run", "strict"])
 
     captured = capsys.readouterr()
     assert code == 0
     assert "issue-discovery command: strict" in captured.out
-    assert f"repo_root: {tmp_path}" in captured.out
+    assert f"repo_root: {root}" in captured.out
     assert "dry_run: yes" in captured.out
 
 

@@ -25,6 +25,10 @@
           "type": "array",
           "items": { "$ref": "#/$defs/command" }
         },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
         "skip_phases": {
           "type": "array",
           "items": { "$ref": "#/$defs/id" },

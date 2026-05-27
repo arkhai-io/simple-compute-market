@@ -5,6 +5,8 @@ workarounds:
     issue: null
     reason: Disable Redis host-port publication when port 6379 is already occupied.
     removal_condition: Root compose no longer publishes Redis on host 6379 by default.
+    env:
+      ISSUE_DISCOVERY_COMPOSE_ARGS: -f docker-compose.yml -f /tmp/scm-no-redis-port.yml
     commands:
       - id: write_redis_override
         run: |

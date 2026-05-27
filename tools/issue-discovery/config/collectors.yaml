@@ -28,18 +28,18 @@ collectors:
 
   - id: compose_config
     description: Rendered Docker Compose model.
-    command: docker compose -f docker-compose.yml config
+    command: docker compose ${ISSUE_DISCOVERY_COMPOSE_ARGS:--f docker-compose.yml} config
     output: docker/compose-config.yml
     redact: true
 
   - id: compose_ps
     description: Compose container state.
-    command: docker compose -f docker-compose.yml ps --format json
+    command: docker compose ${ISSUE_DISCOVERY_COMPOSE_ARGS:--f docker-compose.yml} ps --format json
     output: docker/compose-ps.json
 
   - id: compose_logs
     description: Recent Compose logs.
-    command: docker compose -f docker-compose.yml logs --no-color --timestamps --tail=500
+    command: docker compose ${ISSUE_DISCOVERY_COMPOSE_ARGS:--f docker-compose.yml} logs --no-color --timestamps --tail=500
     output: docker/compose-logs.txt
     redact: true
 

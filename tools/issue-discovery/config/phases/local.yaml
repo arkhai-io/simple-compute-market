@@ -189,7 +189,7 @@ phases:
     commands:
       - id: no_existing_compose_stack
         run: |
-          existing=$(docker compose -f docker-compose.yml ps -q)
+          existing=$(docker compose ${ISSUE_DISCOVERY_COMPOSE_ARGS:--f docker-compose.yml} ps -q)
           test -z "$existing"
     collect_on_failure:
       - compose_ps
@@ -205,7 +205,7 @@ phases:
       - compose_preexisting_stack_check
     commands:
       - id: compose_up
-        run: PROVISIONING_MODE=mock docker compose -f docker-compose.yml up -d
+        run: PROVISIONING_MODE=mock docker compose ${ISSUE_DISCOVERY_COMPOSE_ARGS:--f docker-compose.yml} up -d
         timeout_seconds: 300
     collect_on_failure:
       - compose_config
@@ -351,4 +351,4 @@ phases:
     always_run: true
     commands:
       - id: compose_down
-        run: docker compose -f docker-compose.yml down
+        run: docker compose ${ISSUE_DISCOVERY_COMPOSE_ARGS:--f docker-compose.yml} down
