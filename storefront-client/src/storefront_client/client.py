@@ -17,7 +17,6 @@ Usage (async)::
 
     client = StorefrontClient("http://seller-storefront:8001", private_key="0x...")
     async with client:
-        reg = await client.get_registration()
         resp = await client.create_listing(
             agent_wallet_address="0xSellerWallet",
             offer={...},
@@ -30,7 +29,7 @@ Usage (sync, e.g. smoke tests)::
     from storefront_client import SyncStorefrontClient
 
     client = SyncStorefrontClient("http://seller-storefront:8001", private_key="0x...")
-    reg = client.get_registration()
+    health = client.get_health()
     client.close()
 """
 
@@ -48,7 +47,6 @@ from storefront_client.models import (
     StorefrontListingCloseResponse,
     StorefrontListingCreateResponse,
     StorefrontListingRefundResponse,
-    ERC8004RegistrationFile,
     HealthResponse,
     ListingListResponse,
     ListingSummary,
@@ -619,12 +617,6 @@ class StorefrontClient(_StorefrontClientBase):
         )
 
 
-
-    async def get_registration(self) -> ERC8004RegistrationFile:
-        """GET /.well-known/erc-8004-registration.json"""
-        return ERC8004RegistrationFile.from_dict(
-            await self._get("/.well-known/erc-8004-registration.json")
-        )
 
     async def create_listing(
         self,
@@ -1395,12 +1387,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
         )
 
 
-
-    def get_registration(self) -> ERC8004RegistrationFile:
-        """GET /.well-known/erc-8004-registration.json"""
-        return ERC8004RegistrationFile.from_dict(
-            self._get("/.well-known/erc-8004-registration.json")
-        )
 
     def create_listing(
         self,

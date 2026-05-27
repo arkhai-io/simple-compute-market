@@ -113,44 +113,25 @@ class TestRegistryAgents:
 
         log.info("GET /agents responded successfully (agents_in_page=%d)", len(result.agents))
 
-    def test_at_least_one_agent_registered(self, registry_client: RegistryClient) -> None:
-        """
-        The registry must contain at least one registered agent.
+    def test_list_agents_response_shape(self, registry_client: RegistryClient) -> None:
+        """GET /agents returns a parseable AgentListResponse.
 
-        In a test-env deployment this is satisfied by the sentinel agent
-        registered on-chain during build-anvil-state (Anvil account #3,
-        unrelated to buyer/seller agents).  In production this is satisfied
-        by the seller agent registering on startup.
-
-        An empty registry indicates either:
-          - the sentinel registration or agent startup failed, or
-          - the event sync did not replay the Registered event on startup.
+        Post-pluggable-identity (Phase 4) agent rows are created lazily on
+        first signed publish_listing — the registry is empty on a fresh
+        stack until a storefront publishes. Smoke tests verify the
+        endpoint contract, not data flow; the populated-registry assertion
+        lives in the e2e suite where the seller publishes as part of the
+        scenario.
         """
         try:
-            result = registry_client.list_agents(limit=1)
+            result = registry_client.list_agents(limit=5)
         except RegistryClientError as exc:
-            pytest.fail(f"GET /agents failed — cannot verify agent population.\n{exc}")
+            pytest.fail(f"GET /agents failed — route may be misconfigured.\n{exc}")
 
         log.info(
-            "Agent registry population — agents_in_page=%d total=%s",
+            "GET /agents responded — agents_in_page=%d total=%s",
             len(result.agents),
             result.total,
-        )
-
-        assert len(result.agents) >= 1, (
-            "No agents found in the registry.\n"
-            "Expected at least one registered agent in a healthy deployment.\n"
-            "In test-env: check that build-anvil-state ran seed_agent.py successfully.\n"
-            "In production: check that the seller agent registered on startup.\n"
-            f"Response: total={result.total} agents_in_page={len(result.agents)}"
-        )
-
-        first = result.agents[0]
-        log.info(
-            "✓ Registry contains agents — first: id=%s name=%s owner=%s",
-            first.agent_id or first.id,
-            first.name,
-            first.owner,
         )
 
 
