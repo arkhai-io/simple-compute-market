@@ -53,7 +53,7 @@ mode          = "http"
 poll_interval = 1
 
 [negotiation]
-chain = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
+policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 
 [pricing]
 default_min_price            = "100"

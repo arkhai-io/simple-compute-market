@@ -729,15 +729,18 @@ def register(app: typer.Typer) -> None:
                     terms=terms, listing=listing, console=console,
                 )
 
-        # Honor [negotiation].policy_mode from buyer.toml (mirrors
-        # `market negotiate`). Without this, the buyer falls through to
-        # the default terminal (RL needs torch — not installed in the
-        # lean buyer wheel).
+        # Honor [negotiation] policies / policy_mode from buyer.toml
+        # (mirrors `market negotiate` and the seller's [negotiation] knob).
+        # `policies` is the explicit ordered list; `policy_mode` is the
+        # legacy single-terminal key that synthesizes the default chain.
+        # Without either, the buyer falls through to the default terminal
+        # (RL needs torch — not installed in the lean buyer wheel).
         chain = None
+        policies = resolve_config_value(toml_path="negotiation.policies")
         policy_mode = resolve_config_value(toml_path="negotiation.policy_mode")
-        if policy_mode:
+        if policies or policy_mode:
             from market_buyer.buyer_client import _load_buyer_chain
-            chain = _load_buyer_chain(policy_mode)
+            chain = _load_buyer_chain(policies=policies, policy_mode=policy_mode)
 
         try:
             result = run_buy(

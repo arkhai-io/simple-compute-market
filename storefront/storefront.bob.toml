@@ -59,12 +59,12 @@ mode        = "http"
 poll_interval = 1
 
 [negotiation]
-# Ordered chain of middlewares run per round. Guards short-circuit with
-# `reject`/`exit` when their preconditions fail; the terminal middleware
+# Ordered policies run per round. Guards short-circuit with
+# `reject`/`exit` when their preconditions fail; the terminal policy
 # (`bisection` here; `rl` requires torch and isn't installed in the test
 # env) always returns a counter/accept/exit. The legacy `policy_mode`
 # key still works (synthesizes the same default chain).
-chain = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
+policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 
 [pricing]
 # Defaults applied to inventory rows that don't carry their own

@@ -414,18 +414,21 @@ def register(app: typer.Typer) -> None:
                 expiration_unix=int(_time.time()) + 3600,
             )
 
-        # Honor an optional [negotiation].policy_mode override in
-        # buyer.toml, mirroring the seller's [negotiation] knob. The
-        # buyer wheel installs without torch by default — set "bisection"
-        # to avoid the RL self-register path blowing up. When unset,
-        # falls through to negotiate_with_seller's default chain.
+        # Honor optional [negotiation] policies / policy_mode overrides
+        # in buyer.toml, mirroring the seller's [negotiation] knob.
+        # `policies` is the explicit ordered list; `policy_mode` is the
+        # legacy single-terminal key. The buyer wheel installs without
+        # torch by default — set "bisection" to avoid the RL self-register
+        # path blowing up. When both are unset, negotiate_with_seller
+        # falls through to its default chain.
         chain = None
+        policies = resolve_config_value(toml_path="negotiation.policies")
         policy_mode = resolve_config_value(
             toml_path="negotiation.policy_mode",
         )
-        if policy_mode:
+        if policies or policy_mode:
             from market_buyer.buyer_client import _load_buyer_chain
-            chain = _load_buyer_chain(policy_mode)
+            chain = _load_buyer_chain(policies=policies, policy_mode=policy_mode)
 
         try:
             outcome = negotiate_with_seller(

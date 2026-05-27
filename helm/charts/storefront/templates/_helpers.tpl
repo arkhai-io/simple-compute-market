@@ -214,8 +214,8 @@ poll_interval = {{ $prov.pollInterval | int }}
 {{- end }}
 
 [negotiation]
-{{- if $neg.chain }}
-chain = [{{ range $i, $mw := $neg.chain }}{{ if $i }}, {{ end }}{{ $mw | quote }}{{ end }}]
+{{- if $neg.policies }}
+policies = [{{ range $i, $mw := $neg.policies }}{{ if $i }}, {{ end }}{{ $mw | quote }}{{ end }}]
 {{- else if $neg.policyMode }}
 policy_mode = {{ $neg.policyMode | quote }}
 {{- end }}

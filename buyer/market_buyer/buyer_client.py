@@ -53,18 +53,29 @@ def _maybe_register_rl_middleware() -> None:
         pass
 
 
-def _load_buyer_chain(name: str | None = None) -> list[NegotiationMiddleware]:
+def _load_buyer_chain(
+    *,
+    policies: list[str] | None = None,
+    policy_mode: str | None = None,
+) -> list[NegotiationMiddleware]:
     """Load the buyer's negotiation chain.
 
-    Default: ``[buyer_escrow_shape_guard, <terminal>]`` — the shape guard
-    vetoes if the seller silently mutates a buyer-pinned field of the
-    EscrowProposal (token swap, expiration push, escrow contract swap).
-    ``<terminal>`` is bisection unless overridden.
+    If ``policies`` is provided (from `[negotiation] policies = [...]`
+    in `buyer.toml`), uses the explicit ordered list. Otherwise
+    synthesizes the default chain `[buyer_escrow_shape_guard, <terminal>]`
+    — the shape guard vetoes if the seller silently mutates a buyer-pinned
+    field of the EscrowProposal (token swap, expiration push, escrow
+    contract swap). ``<terminal>`` is `policy_mode` if set, else
+    ``DEFAULT_TERMINAL`` (`"bisection"`).
     """
-    terminal = (name or "").strip() or DEFAULT_TERMINAL
-    if terminal == "rl":
+    if policies:
+        names = [str(p).strip() for p in policies if str(p).strip()]
+    else:
+        terminal = (policy_mode or "").strip() or DEFAULT_TERMINAL
+        names = ["buyer_escrow_shape_guard", terminal]
+    if "rl" in names:
         _maybe_register_rl_middleware()
-    return load_negotiation_chain(["buyer_escrow_shape_guard", terminal])
+    return load_negotiation_chain(names)
 
 
 DEFAULT_TIMEOUT_SECONDS = 30.0

@@ -316,8 +316,8 @@ _DEFAULT_TERMINAL = "bisection"
 def _load_storefront_chain():
     """Resolve the storefront's configured negotiation middleware chain.
 
-    Reads ``[negotiation].chain`` from TOML. Back-compat fallback: if
-    ``chain`` is absent, synthesize one from the legacy ``policy_mode``
+    Reads ``[negotiation].policies`` from TOML. Back-compat fallback: if
+    ``policies`` is absent, synthesize one from the legacy ``policy_mode``
     key — `["has_matching_inventory_guard", "escrow_shape_guard", policy_mode]`.
     """
     from market_storefront.utils.config import settings
@@ -325,15 +325,15 @@ def _load_storefront_chain():
     _discover_file_policies()
 
     negotiation_cfg = getattr(settings, "negotiation", None)
-    chain_names = list(getattr(negotiation_cfg, "chain", []) or [])
-    if not chain_names:
+    policy_names = list(getattr(negotiation_cfg, "policies", []) or [])
+    if not policy_names:
         policy_mode = (getattr(negotiation_cfg, "policy_mode", "") or "").strip() or _DEFAULT_TERMINAL
-        chain_names = _DEFAULT_GUARDS + [policy_mode]
+        policy_names = _DEFAULT_GUARDS + [policy_mode]
 
-    if "rl" in chain_names:
+    if "rl" in policy_names:
         _maybe_register_rl_middleware()
 
-    return load_negotiation_chain(chain_names)
+    return load_negotiation_chain(policy_names)
 
 
 def _direction_from_strategy_label(strategy: str) -> str:

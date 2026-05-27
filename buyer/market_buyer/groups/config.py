@@ -155,7 +155,11 @@ _INIT_USER_TEMPLATE = """\
                                                 # those that completed wins. Unset = wait for all.
 
 [negotiation]
-# policy_mode = "bisection"                    # "bisection" (default; no ML deps) | "rl" (requires torch)
+# policies = ["buyer_escrow_shape_guard", "bisection"]
+#                                              # ordered policy chain; terminal policy is
+#                                              # `bisection` (default; no ML deps) or `rl` (torch + checkpoint)
+# policy_mode = "bisection"                    # legacy single-terminal key (synthesizes the default chain
+#                                              # when `policies` is absent)
 """
 
 

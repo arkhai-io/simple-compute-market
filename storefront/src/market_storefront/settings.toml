@@ -98,13 +98,13 @@ frp_domain             = ""
 frp_dashboard_password = ""
 
 [negotiation]
-# Ordered chain of middlewares run per round. Guards short-circuit
-# (`reject`/`exit`) when their preconditions fail; the terminal middleware
-# (typically `bisection` or `rl`) always returns a counter/accept/exit.
-# `rl` requires torch + the pufferlib checkpoint. The legacy
+# Ordered policies run per round. Guards short-circuit (`reject`/`exit`)
+# when their preconditions fail; the terminal policy (typically
+# `bisection` or `rl`) always returns a counter/accept/exit. `rl`
+# requires torch + the pufferlib checkpoint. The legacy
 # `policy_mode = "bisection"` key still works and synthesizes the same
 # default chain (kept for back-compat).
-chain              = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
+policies           = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 seller_model_path  = "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt"
 buyer_model_path   = "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt"
 extra_policy_paths = []

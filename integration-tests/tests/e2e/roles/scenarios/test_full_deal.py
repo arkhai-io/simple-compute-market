@@ -227,7 +227,7 @@ class TestStage00d_NegotiationStrategy:
         """GET /api/v1/system/status → checks.negotiation_strategy not exit-on-probe.
 
         Catches the rl-strategy-but-no-torch failure mode before any negotiation
-        attempt. If this fails, set [seller.negotiation] policy_mode = 'bisection'
+        attempt. If this fails, set [seller.negotiation] policies = ['has_matching_inventory_guard', 'escrow_shape_guard', 'bisection']
         in config.toml and restart the storefront.
         """
         require_state(deal_state, "_storefront_healthy", "_registry_reachable")
@@ -239,7 +239,7 @@ class TestStage00d_NegotiationStrategy:
         )
         assert "exit_on_probe" not in strat, (
             f"Negotiation strategy would exit every round: {strat!r}\n"
-            "Set [seller.negotiation] policy_mode = 'bisection' in config.toml "
+            "Set [seller.negotiation] policies = ['has_matching_inventory_guard', 'escrow_shape_guard', 'bisection'] in config.toml "
             "and restart the storefront."
         )
         deal_state._negotiation_strategy_viable = True
@@ -676,7 +676,7 @@ class TestStage05a_EvaluateNegotiate:
             f"decision={result.decision!r} reason={result.decision_reason!r}\n"
             f"our_reference_amount={result.our_reference_amount} "
             f"their_proposed_amount={result.their_proposed_amount}\n"
-            "If reason is 'torch_unavailable': set policy_mode='bisection' in config.toml.\n"
+            "If reason is 'torch_unavailable': set policies=['has_matching_inventory_guard', 'escrow_shape_guard', 'bisection'] in config.toml.\n"
             "If reason is 'price_unreasonable': increase BUYER_INITIAL_PRICE to >= "
             f"{result.our_reference_amount} (seller floor)."
         )

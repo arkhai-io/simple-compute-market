@@ -179,7 +179,7 @@ class TestStorefrontRegistration:
         )
         assert "exit_on_probe" not in strat, (
             f"Negotiation strategy would exit on every round: {strat!r}\n"
-            "Fix: set [seller.negotiation] policy_mode = 'bisection' in config.toml,\n"
+            "Fix: set [seller.negotiation] policies = ['has_matching_inventory_guard', 'escrow_shape_guard', 'bisection'] in config.toml,\n"
             "or install torch in the container if rl is required."
         )
         log.info("✓ Negotiation strategy viable: %s", strat)

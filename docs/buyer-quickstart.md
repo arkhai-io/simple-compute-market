@@ -67,8 +67,12 @@ urls = ["http://<INDEXER_HOST>:8080"]
 "http://<INDEXER_HOST>:8080" = "<your-token>"
 
 [negotiation]
-# Bisection avoids a ~1GB torch download. Switch to "rl" if you want it.
-policy_mode = "bisection"
+# Ordered policy chain run per round. The buyer's default chain pairs
+# `buyer_escrow_shape_guard` (vetoes if the seller mutates a buyer-
+# pinned field) with the `bisection` terminal. Switch the terminal to
+# `"rl"` for the trained pufferlib checkpoint (~1GB torch download).
+# See docs/configuration.md for the full reference.
+policies = ["buyer_escrow_shape_guard", "bisection"]
 ```
 
 ## 3. Browse

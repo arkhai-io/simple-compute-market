@@ -72,11 +72,11 @@ agents:
         provisioning:
           mode: "mock"
         negotiation:
-          # Ordered middleware chain. Terminal middleware is "bisection" (no
+          # Ordered list of policies. Terminal policy is "bisection" (no
           # ML deps) or "rl" (torch + checkpoint). The legacy `policyMode`
           # key still works (rendered as `policy_mode = "<value>"`) and the
           # storefront synthesizes the default chain from it.
-          chain:
+          policies:
             - "has_matching_inventory_guard"
             - "escrow_shape_guard"
             - "bisection"

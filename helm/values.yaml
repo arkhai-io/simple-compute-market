@@ -123,7 +123,7 @@ storefront:
           provisioning:
             mode: "mock"
           negotiation:
-            chain:
+            policies:
               - "has_matching_inventory_guard"
               - "escrow_shape_guard"
               - "bisection"

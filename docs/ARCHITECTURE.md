@@ -70,7 +70,7 @@ discovers seller orders from `registry-service`, then issues
 synchronous signed POSTs against the seller's storefront
 (`/negotiate`, `/listings/...`, `/settle/{escrow_uid}`). The seller's
 storefront runs the request through a per-round middleware chain
-(configured in `[negotiation] chain`), decides counter/accept/exit, and
+(configured in `[negotiation] policies`), decides counter/accept/exit, and
 returns the next round inline. There are no push messages and no
 symmetric agent-to-agent protocol — the buyer drives every round.
 
@@ -438,12 +438,13 @@ The two places where policy plugs in are:
   listing candidates. Built-ins: `best_price`, `cheapest_first`,
   `registry_order`. Custom strategies plug in via entry-point or file
   discovery.
-- **Seller-side per-round negotiation chain** (seller-only) — a list of
-  middlewares with signature `(history, context) -> (Maybe<Response>, Context)`.
-  Guards short-circuit with `reject`/`exit` when their preconditions
-  fail; the terminal middleware (`bisection` or `rl`) always returns
+- **Seller-side per-round negotiation policies** (seller-only) — an
+  ordered list of middlewares with signature
+  `(history, context) -> (Maybe<Response>, Context)`. Guards short-
+  circuit with `reject`/`exit` when their preconditions fail; the
+  terminal policy (`bisection` or `rl`) always returns
   `counter`/`accept`/`exit`. Configured per-storefront in
-  `[negotiation] chain = [...]` in `storefront.toml`.
+  `[negotiation] policies = [...]` in `storefront.toml`.
 
 Both hooks live in `market-policy` (package: `policy/`, import:
 `market_policy`); the buyer and seller import from the same wheel. The
@@ -484,13 +485,16 @@ Seller offering `ComputeResource` → direction `"maximize"` (highest
 price the buyer will pay). The buyer's CLI runs in `"minimize"` from the
 other side.
 
-**Chain loader:** `_load_storefront_chain()` in `sync_negotiation.py`
-reads `[negotiation] chain` from `storefront.toml` and resolves the
-names via `load_negotiation_chain()`. Back-compat: if `chain` is absent
-and the legacy `policy_mode` is set, synthesize
+**Policy loader:** `_load_storefront_chain()` in `sync_negotiation.py`
+reads `[negotiation] policies` from `storefront.toml` and resolves the
+names via `load_negotiation_chain()`. Back-compat: if `policies` is
+absent and the legacy `policy_mode` is set, synthesize
 `["has_matching_inventory_guard", "escrow_shape_guard", policy_mode]`.
 Custom middlewares are picked up by file discovery via
-`[negotiation] extra_policy_paths = [...]`.
+`[negotiation] extra_policy_paths = [...]`. See
+[docs/configuration.md](./configuration.md) for the full reference
+including built-in policies, the buyer's aggregation policy, and how
+to write a custom one.
 
 **`our_price` source:** the terminal middleware reads it via
 `_extract_initial_price_from_order()` in `action_executor.py`, which
@@ -839,11 +843,13 @@ buyer/market_buyer/
 `market settle --from <run_id>` is the post-agreement half of the flow: it
 reads the agreed terms from the run-log JSONL, creates the on-chain escrow
 under the buyer's wallet via `make_create_escrow_fn`, then POSTs
-`/api/v1/settle/{uid}` and polls for fulfillment. The buyer picks its
-terminal middleware via `[negotiation].policy_mode` in `buyer.toml`
-(`bisection` default; `rl` requires torch + a checkpoint). The seller
-configures the full ordered chain via `[negotiation].chain` in
-`storefront.toml`.
+`/api/v1/settle/{uid}` and polls for fulfillment. Both buyer and seller
+configure the negotiation chain via `[negotiation].policies` (ordered
+list) in their respective TOMLs; the buyer's default
+(`["buyer_escrow_shape_guard", "bisection"]`) and the seller's
+(`["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]`)
+differ in the appropriate guards. Both honour the legacy
+`policy_mode = "bisection"|"rl"` key for back-compat.
 
 ---
 
