@@ -77,6 +77,19 @@ sessions.
   ignore the row's `min_price`/`token` columns entirely (templates are
   the source of truth). 13 unit tests in
   `tests/unit/test_publish_round_with_templates.py`.
+- Phase 5: buyer dispatch in
+  `buyer/market_buyer/escrow_client.py:make_buyer_payment_escrow_terms_fn`
+  switches the token reader to `service.schemas.accepted_token_address`
+  (literal_fields-first, legacy-fields fallback) and gates the build on
+  the resolved escrow-kind codec — only `erc20_escrow_obligation_nontierable`
+  proceeds; everything else raises `NotImplementedError` with the
+  chain + escrow address in the message. `EscrowProposal` gained
+  forward-looking `literal_fields` + `rates` optional siblings (mirrors
+  the Phase 2a treatment of `AcceptedEscrow`); the proposal builders in
+  `buy.py` and `settle.py` now populate `literal_fields={"token": …}`
+  alongside the legacy `fields`. 8 new tests in
+  `buyer/tests/test_escrow_client_dispatch.py` + 2 schema tests in
+  `service/tests/unit/test_escrow_proposal.py`.
 
 ## Why staged as siblings, not a rename
 
@@ -94,21 +107,6 @@ in the staging plan drops the legacy fields cleanly once every reader
 is on the helpers.
 
 ## What's left (staging plan)
-
-### Phase 5 — Buyer dispatch
-
-`buyer/market_buyer/escrow_client.py:make_buyer_payment_escrow_terms_fn`
-swaps "look at `fields.token` + `price_per_hour`" for "evaluate
-`literal_fields` + (rate × duration) per rate, build obligation_data".
-
-For ERC20 only, dispatch stays on `alkahest_py.erc20_escrow.do_obligation`.
-Other obligation kinds raise NotImplementedError loudly with the
-escrow_address in the message — design doc's "deferred" pattern.
-
-The negotiation engine in `market-policy` does NOT need to change.
-Per-round message bodies still carry absolute `fields.amount`; the
-rate ↔ amount conversion happens at the listing/proposal boundaries
-only. See "Negotiation invariant" below.
 
 ### Phase 6 — Seller verify
 
@@ -209,7 +207,8 @@ integration-tests/tests/e2e/roles/       Phase 3/4 (CSV fixtures)
 - ~~Phase 2c~~ — landed `f4b0770` (helper fallback prep in `df79caa`).
 - ~~Phase 3~~ — CSV importer + storage.
 - ~~Phase 4~~ — cli_publish reads materialized templates from the row.
-- Phase 5 + 6: 1 session (buyer/seller dispatch + verify; ERC20-only path).
+- ~~Phase 5~~ — buyer dispatch + ERC20-only NotImplementedError gate.
+- Phase 6: 1 session (seller verify; ERC20-only decode path).
 - Phase 7: 1 session (drop legacy fields + bulk test rewrites).
 
 So ~2 sessions left to fully land. Each is committable independently

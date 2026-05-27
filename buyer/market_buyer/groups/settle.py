@@ -201,6 +201,7 @@ def run_settle_from_log(
             chain_name=chain.chain_name,
             escrow_address=escrow_address,
             fields={"token": chain.token_contract},
+            literal_fields={"token": chain.token_contract},
             expiration_unix=int(_time.time()) + expiration_seconds,
         )
 

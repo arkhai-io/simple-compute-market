@@ -522,6 +522,25 @@ class EscrowProposal(BaseModel):
             "which are derived at settlement."
         ),
     )
+    literal_fields: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Forward-looking sibling of ``fields`` for the generic-escrow "
+            "migration. When set, mirrors ``fields`` (literal obligation-"
+            "data keys the buyer commits to). Readers should prefer the "
+            "canonical accessor ``accepted_token_address`` which handles "
+            "either shape."
+        ),
+    )
+    rates: list[RateValue] | None = Field(
+        default=None,
+        description=(
+            "Forward-looking sibling for multi-rate templates. Today "
+            "negotiation produces a single scalar amount that becomes the "
+            "primary rate-bearing field at settlement; future TokenBundle "
+            "proposals carry one ``RateValue`` per rate-bearing field."
+        ),
+    )
     expiration_unix: int = Field(
         gt=0,
         description=(

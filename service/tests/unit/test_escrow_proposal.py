@@ -87,3 +87,31 @@ def test_accepted_escrow_roundtrip():
     )
     restored = AcceptedEscrow.model_validate(original.model_dump())
     assert restored == original
+
+
+def test_proposal_literal_fields_and_rates_optional_default_none():
+    p = EscrowProposal(
+        chain_name="anvil",
+        escrow_address=_ESCROW,
+        fields={"token": _TOKEN},
+        expiration_unix=1_800_000_000,
+    )
+    assert p.literal_fields is None
+    assert p.rates is None
+
+
+def test_proposal_literal_fields_and_rates_roundtrip():
+    original = EscrowProposal(
+        chain_name="base_sepolia",
+        escrow_address=_ESCROW,
+        fields={"arbiter": _ARBITER, "token": _TOKEN},
+        literal_fields={"arbiter": _ARBITER, "token": _TOKEN},
+        rates=[{"field": "amount", "per": "hour", "value": "1500000"}],
+        expiration_unix=1_800_000_000,
+    )
+    restored = EscrowProposal.model_validate(original.model_dump())
+    assert restored == original
+    assert restored.literal_fields == {"arbiter": _ARBITER, "token": _TOKEN}
+    assert restored.rates is not None
+    assert restored.rates[0].value == 1_500_000
+    assert restored.rates[0].field == "amount"

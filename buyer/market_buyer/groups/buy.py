@@ -652,10 +652,15 @@ def register(app: typer.Typer) -> None:
             if entry is None:
                 return None
             entry_fields = entry.get("fields") or {}
+            entry_literal = entry.get("literal_fields") or {}
+            # Prefer the entry's literal_fields token (generic-escrow shape);
+            # fall back to legacy fields["token"] for pre-cutover entries.
+            token = entry_literal.get("token") or entry_fields.get("token")
             return EscrowProposal(
                 chain_name=entry.get("chain_name", chain),
                 escrow_address=entry["escrow_address"],
-                fields={"token": entry_fields.get("token")},
+                fields={"token": token},
+                literal_fields={"token": token},
                 expiration_unix=int(_time.time()) + int(expiration_seconds),
             )
 
