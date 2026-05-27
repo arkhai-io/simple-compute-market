@@ -120,9 +120,8 @@ _INIT_USER_TEMPLATE = """\
 
 # agent_id = "alice"                           # must be a valid Python identifier
 # agent_name = "Alice"                         # display name (any string)
-# onchain_agent_id = ""                        # pin after first successful registration; otherwise the
-                                                # storefront auto-registers a fresh agent on every boot (gas).
-# auto_register = true                         # set false to refuse to start without a pinned onchain_agent_id
+# auto_register = true                         # set false to refuse to start when a chain has no
+                                                # pinned onchain_agent_id in its [chains.<name>] table
 
 # ---------------------------------------------------------------------------
 # HTTP server
@@ -170,18 +169,29 @@ _INIT_USER_TEMPLATE = """\
 # private_key = "0x..."
 # ssh_public_key = "ssh-ed25519 AAAA... user@host"
 
-[chain]
-# name = "ethereum_sepolia"                    # auto-derived from rpc_url via eth_chainId when omitted
-                                                # (anvil | base_sepolia | ethereum_sepolia | ethereum_mainnet
-                                                # | filecoin_calibration). Set explicitly for unknown chain IDs.
-# rpc_url = "https://sepolia.base.org"
+# One [chains.<name>] table per chain the storefront serves listings on.
+# The startup task resolves a separate on-chain identity per chain (writes
+# the discovered ID back to onchain_agent_id below). Listings emit one
+# accepted_escrows entry per configured chain at publish time.
+
+[chains.ethereum_sepolia]
+# rpc_url = "https://sepolia.infura.io/v3/<project_id>"
+# chain_id = 11155111                          # optional; auto-fills for the canonical chain names
+                                                # (anvil | base_sepolia | ethereum_sepolia |
+                                                # ethereum_mainnet | filecoin_calibration).
 # alkahest_address_config_path = "/path/to/alkahest.json"  # required for anvil
+# identity_registry_address = "0x..."          # ERC-8004 IdentityRegistry; defaults to the
+                                                # canonical CREATE2 vanity address. Set for
+                                                # non-canonical deployments.
+# onchain_agent_id = 0                         # pin after first successful registration; the startup
+                                                # identity task fills this in automatically on fresh boots.
+
+# Add additional chains by uncommenting and customizing:
+# [chains.base_sepolia]
+# rpc_url = "https://sepolia.base.org"
 
 [registry]
 # urls = ["http://localhost:8080"]             # one or more indexer URLs; publishes fan out to each.
-# identity_registry_address = "0x..."          # ERC-8004 IdentityRegistry. Auto-defaults from chain.name
-                                                # to the canonical CREATE2 vanity address; set only for
-                                                # non-canonical deployments.
 
 [registry.auth]
 # Free-form table of {url = "bearer-token"}. Keys must match urls above

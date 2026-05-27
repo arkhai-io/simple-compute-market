@@ -110,18 +110,29 @@ _INIT_USER_TEMPLATE = """\
 # private_key = "0x..."
 # ssh_public_key = "ssh-ed25519 AAAA... user@host"
 
-[chain]
-# name = "ethereum_sepolia"                    # auto-derived from rpc_url via eth_chainId when omitted
-                                                # (anvil | base_sepolia | ethereum_sepolia | ethereum_mainnet
-                                                # | filecoin_calibration). Set explicitly for unknown chain IDs.
-# rpc_url = "https://sepolia.base.org"
+# One [chains.<name>] table per chain the buyer wants to transact on.
+# A single buy/negotiate run targets one chain — the buyer picks it from
+# the intersection of this config and the listing's accepted_escrows,
+# either interactively or via `--chain <name>` (required with --yes when
+# there's more than one match). The table key is the canonical name used
+# in alkahest_py + the registry's accepted_escrows[].chain_name field.
+
+[chains.ethereum_sepolia]
+# rpc_url = "https://sepolia.infura.io/v3/<project_id>"
+# chain_id = 11155111                          # optional; auto-fills for the canonical chain names
+                                                # (anvil | base_sepolia | ethereum_sepolia |
+                                                # ethereum_mainnet | filecoin_calibration).
 # alkahest_address_config_path = "/path/to/alkahest.json"  # required for anvil
+# identity_registry_address = "0x..."          # ERC-8004 IdentityRegistry; defaults to the
+                                                # canonical CREATE2 vanity address. Set for
+                                                # non-canonical deployments.
+
+# Add additional chains by uncommenting and customizing:
+# [chains.base_sepolia]
+# rpc_url = "https://sepolia.base.org"
 
 [registry]
 # urls = ["http://localhost:8080"]             # one or more indexer URLs to discover listings from.
-# identity_registry_address = "0x..."          # ERC-8004 IdentityRegistry. Auto-defaults from chain.name
-                                                # to the canonical CREATE2 vanity address; set only for
-                                                # non-canonical deployments.
 
 [registry.auth]
 # Free-form table of {url = "bearer-token"}. Keys must match `urls` above

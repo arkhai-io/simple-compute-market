@@ -314,39 +314,30 @@ class TestStage00g_AlkahestConfigured:
     def test_00g_alkahest_is_configured(
         self, storefront_admin_client, deal_state: DealState
     ):
-        """GET /api/v1/system/status → checks.alkahest=ok.
+        """GET /api/v1/system/status → checks.alkahest reports configured chain names.
 
         Alkahest must be configured before the on-chain escrow phases (07/07b).
         If this fails with alkahest='unconfigured', the storefront config.toml
-        is missing the [chain] section or the alkahest address config path.
+        is missing all [chains.<name>] entries or none initialised successfully.
+        After the multi-chain refactor, ``checks.alkahest`` is a comma-joined
+        list of chain names ("anvil,base_sepolia"); the test only requires that
+        the expected chain (``anvil`` for this e2e) is present in that list.
 
-        Common cause on Helm deployments: the values.yaml key under
-        agents[].config.chain uses snake_case ``alkahest_address_config_path``
-        but the _helpers.tpl template reads the camelCase
-        ``alkahestAddressConfigPath`` key — so the path is never written into
-        config.toml.
+        Fix for docker-compose, ensure config.bob.toml contains::
 
-        Fix: use camelCase in helm/values.yaml::
-
-            chain:
-              name: "anvil"
-              alkahestAddressConfigPath: "/app/src/.../alkahest_anvil_addresses.json"
-
-        For docker-compose, ensure config.bob.toml contains::
-
-            [chain]
+            [chains.anvil]
+            rpc_url = "http://anvil:8545"
             alkahest_address_config_path = "/app/src/.../alkahest_anvil_addresses.json"
         """
         require_state(deal_state, "_storefront_healthy")
         status = storefront_admin_client.get_system_status()
         alkahest_check = (status.checks or {}).get("alkahest", "absent")
-        assert alkahest_check == "ok", (
-            f"Storefront alkahest client is not configured: checks.alkahest={alkahest_check!r}\n"
+        assert "anvil" in alkahest_check, (
+            f"Storefront alkahest client is not configured for anvil: "
+            f"checks.alkahest={alkahest_check!r}\n"
             "The on-chain escrow phases (07, 07b) will fail without a working AlkahestClient.\n"
-            "Fix for Helm: use camelCase key 'alkahestAddressConfigPath' in values.yaml "
-            "under agents[].config.chain.\n"
-            "Fix for docker-compose: set alkahest_address_config_path in config.bob.toml "
-            "under [chain]."
+            "Fix for docker-compose: ensure [chains.anvil] in config.bob.toml has "
+            "rpc_url + alkahest_address_config_path set."
         )
         deal_state._alkahest_configured = True
         log.info("[00g] Alkahest configured: checks.alkahest=%s", alkahest_check)
