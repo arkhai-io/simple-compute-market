@@ -48,6 +48,8 @@ def test_multipass_wrapper_delegates_sequence_to_bootstrap() -> None:
     assert "SCM_MULTIPASS_TRANSFER_DIR" in script
     assert 'mktemp -p "$TRANSFER_DIR"' in script
     assert "mktemp -t" not in script
+    assert "SCM_BUNDLE_REF" in script
+    assert 'git clone --branch "$SCM_BUNDLE_REF"' in script
     assert "SCM_VALIDATION_COMMAND" not in script
     assert "local_stack_build_without_zerotier" not in script
     assert "redis_no_host_port" not in script

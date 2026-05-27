@@ -71,18 +71,17 @@ require_git_repo() {
 
 create_bundle() {
   local bundle="$1"
-  local branch
-  branch="$(git -C "$ROOT_DIR" branch --show-current)"
+  local ref="$2"
   if ! git -C "$ROOT_DIR" diff --quiet || ! git -C "$ROOT_DIR" diff --cached --quiet; then
     log "warning: uncommitted tracked changes are not included in the clean-room bundle"
   fi
   if [ -n "$(git -C "$ROOT_DIR" ls-files --others --exclude-standard)" ]; then
     log "warning: untracked files are not included in the clean-room bundle"
   fi
-  if [ -n "$branch" ]; then
-    git -C "$ROOT_DIR" bundle create "$bundle" "$branch" >/dev/null
-  else
+  if [ "$ref" = "HEAD" ]; then
     git -C "$ROOT_DIR" bundle create "$bundle" HEAD >/dev/null
+  else
+    git -C "$ROOT_DIR" bundle create "$bundle" "$ref" >/dev/null
   fi
 }
 
@@ -129,7 +128,9 @@ mkdir -p "$TRANSFER_DIR"
 bundle="$(mktemp -p "$TRANSFER_DIR" scm-issue-discovery.XXXXXX.bundle)"
 rm -f "$bundle"
 trap 'rm -f "$bundle"; cleanup' EXIT
-create_bundle "$bundle"
+checkout_ref="$(git -C "$ROOT_DIR" branch --show-current)"
+checkout_ref="${checkout_ref:-HEAD}"
+create_bundle "$bundle" "$checkout_ref"
 
 log "launching VM $NAME ($IMAGE, cpus=$CPUS, memory=$MEMORY, disk=$DISK)"
 multipass launch "$IMAGE" --name "$NAME" --cpus "$CPUS" --memory "$MEMORY" --disk "$DISK"
@@ -142,10 +143,14 @@ log "transferring git bundle"
 multipass transfer "$bundle" "$NAME:/tmp/simple-compute-market.bundle"
 
 log "cloning bundle"
-multipass exec "$NAME" -- bash -lc '
+multipass exec "$NAME" -- env "SCM_BUNDLE_REF=$checkout_ref" bash -lc '
   set -euo pipefail
   rm -rf /home/ubuntu/simple-compute-market
-  git clone /tmp/simple-compute-market.bundle /home/ubuntu/simple-compute-market
+  if [ "$SCM_BUNDLE_REF" = "HEAD" ]; then
+    git clone /tmp/simple-compute-market.bundle /home/ubuntu/simple-compute-market
+  else
+    git clone --branch "$SCM_BUNDLE_REF" /tmp/simple-compute-market.bundle /home/ubuntu/simple-compute-market
+  fi
   sudo chown -R ubuntu:ubuntu /home/ubuntu/simple-compute-market
 '
 
