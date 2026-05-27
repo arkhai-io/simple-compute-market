@@ -24,6 +24,8 @@ More concretely, this repo packages a marketplace architecture inspired by Arkha
 - `compose/` — Docker Compose stacks for the seller side
 - `infra/zerotier/` — ZeroTier controller scripts
 - `docs/` — Operator quickstarts and architecture notes
+- `scripts/` — Repo-root wrappers for build, install, validation, and clean-room workflows
+- `tools/` — Repo-owned developer and validation tools
 
 ## Quickstarts
 
@@ -33,6 +35,12 @@ Pick the role you're standing up:
 - **Sell compute** → [`docs/seller-quickstart.md`](./docs/seller-quickstart.md)
 - **Run your own indexer registry** → [`docs/indexer-quickstart.md`](./docs/indexer-quickstart.md)
 - **Add FRP reverse-proxy for VM subdomains** → [`docs/seller-frp-setup.md`](./docs/seller-frp-setup.md)
+
+Validation and issue-discovery docs:
+
+- **Manual validation runbook** → [`docs/VALIDATION_RUNBOOK.md`](./docs/VALIDATION_RUNBOOK.md)
+- **Issue discovery harness** → [`docs/ISSUE_DISCOVERY.md`](./docs/ISSUE_DISCOVERY.md)
+- **Repo tooling overview** → [`tools/README.md`](./tools/README.md)
 
 ## Publishing Artifacts to Artifact Registry
 
