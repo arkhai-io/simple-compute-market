@@ -37,6 +37,11 @@ _CLASSIFIER_PATTERNS = {
         "sqlite3.operationalerror",
         "permission denied",
     ),
+    "registry-agent-indexing-race": (
+        "no agents found in the registry",
+        "expected at least one registered agent",
+        "agents_in_page=0",
+    ),
     "stale-seller-layer-route": (
         'status=404 body={"detail":"not found"}',
         "storefront at http://localhost:8001 not reachable",
@@ -95,12 +100,16 @@ class IssuePacketGenerator:
         collectors: list[dict[str, Any]],
     ) -> list[IssueCandidate]:
         candidates: list[IssueCandidate] = []
+        seen_fingerprints: set[str] = set()
         for phase in phases:
             if phase.get("status") != "failed":
                 continue
             evidence = _evidence_for_phase(self.run_dir, phase, collectors)
             fingerprints = _fingerprints_for_phase(self.run_dir, phase, evidence)
             for fingerprint in fingerprints:
+                if fingerprint in seen_fingerprints:
+                    continue
+                seen_fingerprints.add(fingerprint)
                 body_file = self.issue_dir / f"{fingerprint}.md"
                 body_file.write_text(
                     _render_body(
@@ -376,8 +385,11 @@ def _reproduction_command(manifest: dict[str, Any]) -> str:
     if mode == "strict":
         return "./scripts/issue-discovery strict"
     if mode == "continue":
-        workaround = (manifest.get("workaround") or {}).get("id")
-        return f"./scripts/issue-discovery continue --with {workaround}"
+        workarounds = _workarounds_for_manifest(manifest)
+        if not workarounds:
+            return "./scripts/issue-discovery continue"
+        args = " ".join(f"--with {workaround.get('id')}" for workaround in workarounds)
+        return f"./scripts/issue-discovery continue {args}"
     if mode.startswith("profile:"):
         return f"./scripts/issue-discovery profile {mode.split(':', 1)[1]}"
     return f"./scripts/issue-discovery {mode}"

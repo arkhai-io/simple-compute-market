@@ -290,6 +290,8 @@ phases:
       - id: provisioning
         run: make test-module MODULE=provisioning ACTIVE_PROFILES=local
         workdir: integration-tests
+    classifiers:
+      - registry_agent_indexing_race
 
   - id: role_layer_marker_tests
     name: Role layer marker tests
@@ -342,6 +344,7 @@ phases:
     collect_on_failure:
       - compose_logs
     classifiers:
+      - stale_seller_layer_route
       - full_integration_failure
 
   - id: teardown
