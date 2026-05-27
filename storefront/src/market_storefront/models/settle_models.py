@@ -10,6 +10,13 @@ class SettleRequest(BaseModel):
     negotiation_id: str
     ssh_public_key: str
     buyer_address: str
+    chain_name: str = Field(
+        description=(
+            "Chain name from the accepted escrow proposal — the storefront "
+            "uses it to pick the matching AlkahestClient out of its "
+            "per-chain dispatch table."
+        ),
+    )
 
 
 class SettleResponse(BaseModel):
@@ -51,6 +58,12 @@ class VerifyEscrowRequest(BaseModel):
     )
     agreed_duration_seconds: int = Field(description="Expected lease duration in seconds")
     listing_id: str = Field(description="Listing ID — used to extract token contract from DB")
+    chain_name: str = Field(
+        description=(
+            "Chain name to dispatch the on-chain read on. The storefront "
+            "verifies the escrow against its [chains.<name>] entry."
+        ),
+    )
 
 
 class VerifyEscrowResponse(BaseModel):

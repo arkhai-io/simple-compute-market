@@ -34,8 +34,9 @@ def _normalize_to_dict(value: Any) -> dict[str, Any] | None:
 def synthesize_accepted_escrows_from_demand(
     demand_resource: Any,
 ) -> list[dict[str, Any]] | None:
-    """Build a single-entry ``accepted_escrows`` list from a legacy
-    ``demand_resource`` payload (``{token: {contract_address, ...}, amount}``).
+    """Build an ``accepted_escrows`` list from a legacy ``demand_resource``
+    payload (``{token: {contract_address, ...}, amount}``), one entry per
+    configured chain.
 
     Used by:
       * the one-shot schema-init backfill (pre-cutover rows still carrying
@@ -43,10 +44,12 @@ def synthesize_accepted_escrows_from_demand(
       * action_executor's MAKE_OFFER entry point (policy layer still emits
         ``demand``; storefront converts at the boundary before persisting).
 
-    Returns ``None`` when the demand can't be mapped (no token, missing
-    contract_address, or alkahest config can't resolve the erc20 escrow
-    obligation address for the configured chain).
+    Returns ``None`` when the demand can't be mapped to any chain (no
+    token, missing contract_address, or every chain's alkahest config
+    fails to resolve the erc20 escrow obligation address).
     """
+    from market_storefront.utils.config import CHAINS
+
     normalized = _normalize_to_dict(demand_resource)
     if not normalized:
         return None
@@ -56,20 +59,7 @@ def synthesize_accepted_escrows_from_demand(
     contract_address = token.get("contract_address")
     if not isinstance(contract_address, str) or not contract_address:
         return None
-    try:
-        from service.clients.alkahest import (
-            get_erc20_escrow_obligation_nontierable,
-        )
-        escrow_address = get_erc20_escrow_obligation_nontierable(
-            settings.chain.name,
-            config_path=settings.chain.alkahest_address_config_path,
-        )
-    except Exception as exc:
-        logger.debug(
-            "Skipping accepted_escrows synthesis for chain %r: %s",
-            settings.chain.name, exc,
-        )
-        return None
+
     amount = normalized.get("amount")
     # ``price_per_hour`` is uint256-domain (base units) — emit as a
     # decimal-digit string on the stored/wire JSON to stay safe past
@@ -84,12 +74,28 @@ def synthesize_accepted_escrows_from_demand(
         price_per_hour = s if s.isdigit() else None
     else:
         price_per_hour = None
-    return [{
-        "chain_name": settings.chain.name,
-        "escrow_address": escrow_address.lower(),
-        "fields": {"token": contract_address},
-        "price_per_hour": price_per_hour,
-    }]
+
+    from service.clients.alkahest import get_erc20_escrow_obligation_nontierable
+
+    entries: list[dict[str, Any]] = []
+    for name, cc in CHAINS.items():
+        try:
+            escrow_address = get_erc20_escrow_obligation_nontierable(
+                name,
+                config_path=cc.alkahest_address_config_path,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Skipping accepted_escrows synthesis for chain %r: %s", name, exc,
+            )
+            continue
+        entries.append({
+            "chain_name": name,
+            "escrow_address": escrow_address.lower(),
+            "fields": {"token": contract_address},
+            "price_per_hour": price_per_hour,
+        })
+    return entries or None
 
 
 def _publication_row_to_dict(row: tuple) -> dict[str, Any]:

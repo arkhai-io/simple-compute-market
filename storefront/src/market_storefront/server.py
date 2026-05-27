@@ -68,18 +68,17 @@ async def lifespan(_: FastAPI):
     from market_storefront.services.system_service import SystemService
 
     sqlite_client = get_sqlite_client()
-    alkahest_client = alkahest_service.build_client()
+    alkahest_clients = alkahest_service.build_clients()
 
     listing_svc = ListingService(
         sqlite_client=sqlite_client,
-        alkahest_client=alkahest_client,
+        alkahest_clients=alkahest_clients,
     )
     negotiation_svc = NegotiationService(sqlite_client=sqlite_client)
     system_svc = SystemService(sqlite_client=sqlite_client, agent_id=AGENT_ID)
 
     _container.resolved_sqlite_client = sqlite_client
-    _container.resolved_alkahest_client = alkahest_client
-    _container.resolved_alkahest_configured = alkahest_client is not None
+    _container.resolved_alkahest_clients = alkahest_clients
     _container.resolved_listing_service = listing_svc
     _container.resolved_negotiation_service = negotiation_svc
     _container.resolved_system_service = system_svc

@@ -71,15 +71,21 @@ class SystemService:
         # agent_not_found is a transient post-registration state (registry indexing lag)
         # and is not a service degradation. Only hard errors cause degraded status.
         # alkahest configured?
-        checks["alkahest"] = "ok" if _container.resolved_alkahest_configured else "unconfigured"
+        configured = _container.configured_chain_names()
+        if configured:
+            checks["alkahest"] = ",".join(sorted(configured))
+        else:
+            checks["alkahest"] = "unconfigured"
 
         def _check_is_healthy(key: str, value: str) -> bool:
             """Return True if this check value does not indicate a service degradation.
 
             The ``negotiation_strategy`` check returns a human-readable strategy
             name (e.g. ``"bisection"``) on success rather than the literal ``"ok"``,
-            so it gets its own rule: healthy unless the value contains the
-            ``exit_on_probe`` marker or starts with a known error prefix.
+            so it gets its own rule. The ``alkahest`` check returns the
+            comma-joined list of configured chain names (e.g.
+            ``"base_sepolia,ethereum_sepolia"``) when at least one chain is
+            up — also handled with its own rule.
             """
             _ok_literals = {"ok", "unconfigured", "agent_not_found", "indexing"}
             if value in _ok_literals:
@@ -88,6 +94,8 @@ class SystemService:
                 return "exit_on_probe" not in value and not value.startswith(
                     ("unknown:", "error:")
                 )
+            if key == "alkahest":
+                return bool(value) and not value.startswith(("unknown:", "error:"))
             return False
 
         all_ok = all(_check_is_healthy(k, v) for k, v in checks.items())
