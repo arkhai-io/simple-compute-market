@@ -1,24 +1,35 @@
-"""Buyer-side TOML config, XDG-aware.
+"""Buyer- and storefront-side TOML config, XDG-aware.
 
-Canonical location: `$XDG_CONFIG_HOME/arkhai/buyer.toml`, defaulting to
-`~/.config/arkhai/buyer.toml` when XDG is unset. Read by the buyer's
-`market` CLI; the storefront's server + `market-storefront` CLI use a
-separate `storefront.toml` in the same dir (see :func:`storefront_config_file`).
+Canonical locations:
 
-The shape is small and deliberately flat-ish:
+* buyer:      ``$XDG_CONFIG_HOME/arkhai/buyer.toml``
+* storefront: ``$XDG_CONFIG_HOME/arkhai/storefront.toml``
+
+Both default to ``~/.config/arkhai/`` when XDG is unset.
+
+Schema (storefront and buyer share wallet/chains/registry tables):
 
     [wallet]
     address = "0x..."
-    private_key = "0x..."            # or leave out & set AGENT_PRIV_KEY env
-    ssh_public_key = "ssh-ed25519 …" # used as the pubkey delivered at settle
+    private_key = "0x..."            # one key signs for every configured chain
+    ssh_public_key = "ssh-ed25519 ..." # used as the pubkey delivered at settle
 
-    [chain]
-    name = "ethereum_sepolia"        # ethereum_sepolia | base_sepolia | anvil
+    # One [chains.<name>] table per chain the operator wants to transact
+    # on. Listings advertise their accepted chains via the
+    # accepted_escrows[].chain_name tuples; the runtime picks the matching
+    # entry here when settling.
+    [chains.ethereum_sepolia]
     rpc_url = "https://..."
-    alkahest_address_config_path = "/etc/arkhai/alkahest.json"  # anvil only
+    chain_id = 11155111
+    # alkahest_address_config_path = "/etc/arkhai/alkahest.json"  # anvil only
+    # identity_registry_address = "0x..."     # defaults from KNOWN_IDENTITY_REGISTRY
+
+    [chains.base_sepolia]
+    rpc_url = "https://..."
+    chain_id = 84532
 
     [registry]
-    url = "http://localhost:8080"
+    urls = ["http://localhost:8080"]
 
     [seller]                         # optional; seller-specific overrides
     port = 8000
@@ -37,6 +48,7 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, TypeVar
 
@@ -44,6 +56,22 @@ import tomllib
 
 
 T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class ChainConfig:
+    """One entry from the operator's ``[chains.<name>]`` config table.
+
+    ``name`` is the table key — the dict returned by
+    :func:`chains_from_config` is keyed by this exact value, and listings
+    advertise it in their ``accepted_escrows[].chain_name`` tuples.
+    """
+
+    name: str
+    rpc_url: str
+    chain_id: int
+    alkahest_address_config_path: Optional[str] = None
+    identity_registry_address: Optional[str] = None
 
 
 def user_config_dir() -> Path:
@@ -343,38 +371,6 @@ def ssh_public_key(flag: Optional[str] = None,
     )
 
 
-def chain_name(flag: Optional[str] = None,
-               config: Optional[dict[str, Any]] = None,
-               default: str = "ethereum_sepolia") -> str:
-    return resolve_value(
-        flag=flag,
-        env_name="CHAIN_NAME",
-        toml_path="chain.name",
-        default=default,
-        config=config,
-    )  # type: ignore[return-value]
-
-
-def chain_rpc_url(flag: Optional[str] = None,
-                  config: Optional[dict[str, Any]] = None) -> Optional[str]:
-    return resolve_value(
-        flag=flag,
-        env_name="CHAIN_RPC_URL",
-        toml_path="chain.rpc_url",
-        config=config,
-    )
-
-
-def alkahest_address_config_path(flag: Optional[str] = None,
-                                 config: Optional[dict[str, Any]] = None) -> Optional[str]:
-    return resolve_value(
-        flag=flag,
-        env_name="ALKAHEST_ADDRESS_CONFIG_PATH",
-        toml_path="chain.alkahest_address_config_path",
-        config=config,
-    )
-
-
 # Canonical ERC-8004 v0.1 IdentityRegistry CREATE2 vanity address. The
 # alkahest deployer uses the same salt across every chain it deploys to,
 # so for the canonical deployment this address is the same on every chain.
@@ -479,35 +475,58 @@ def chain_name_for_rpc(
     return CHAIN_NAME_BY_ID.get(cid)
 
 
-def identity_registry_address(
-    flag: Optional[str] = None,
+def chains_from_config(
     config: Optional[dict[str, Any]] = None,
-) -> Optional[str]:
-    """Resolve the ERC-8004 IdentityRegistry contract address.
+) -> dict[str, ChainConfig]:
+    """Return every ``[chains.<name>]`` table from the merged TOML config.
 
-    Hierarchy: flag > ``IDENTITY_REGISTRY_ADDRESS`` env > TOML
-    ``registry.identity_registry_address`` > per-chain known default
-    (looked up by ``chain.name``).
+    Resolves each entry to a :class:`ChainConfig`. ``chain_id`` falls
+    back to :data:`KNOWN_CHAIN_IDS` lookup by name when the table
+    omits it; ``identity_registry_address`` falls back to
+    :data:`KNOWN_IDENTITY_REGISTRY`. Empty or malformed entries
+    (missing ``rpc_url``) are dropped silently — operators get one
+    warning surface (the empty dict) rather than a partial-load that
+    pretends to succeed.
 
-    The canonical deployment uses a CREATE2 vanity address that's the
-    same on every chain — so for the standard ``base_sepolia`` /
-    ``ethereum_sepolia`` / ``anvil`` setups the user doesn't need to
-    set the address explicitly. Custom deployments override via the
-    TOML key.
-
-    Returns ``None`` only when neither resolution nor chain-name
-    lookup yields an address — callers decide whether that's fatal.
+    The dict's iteration order matches TOML order (Python 3.7+).
+    Callers that want a deterministic default chain pick
+    ``next(iter(chains.values()))``.
     """
-    resolved = resolve_value(
-        flag=flag,
-        env_name="IDENTITY_REGISTRY_ADDRESS",
-        toml_path="registry.identity_registry_address",
-        config=config,
-    )
-    if resolved:
-        return resolved
-    chain = chain_name(config=config)
-    return KNOWN_IDENTITY_REGISTRY.get(chain)
+    cfg = config if config is not None else load_user_config()
+    raw = cfg.get("chains")
+    if not isinstance(raw, dict):
+        return {}
+
+    out: dict[str, ChainConfig] = {}
+    for name, sub in raw.items():
+        if not isinstance(name, str) or not isinstance(sub, dict):
+            continue
+        rpc_url = str(sub.get("rpc_url", "") or "").strip()
+        if not rpc_url:
+            continue
+
+        chain_id = int(sub.get("chain_id", 0) or 0)
+        if not chain_id:
+            chain_id = KNOWN_CHAIN_IDS.get(name, 0)
+
+        identity_reg = (
+            str(sub.get("identity_registry_address", "") or "").strip()
+            or KNOWN_IDENTITY_REGISTRY.get(name)
+        )
+
+        alkahest_path = (
+            str(sub.get("alkahest_address_config_path", "") or "").strip()
+            or None
+        )
+
+        out[name] = ChainConfig(
+            name=name,
+            rpc_url=rpc_url,
+            chain_id=chain_id,
+            alkahest_address_config_path=alkahest_path,
+            identity_registry_address=identity_reg,
+        )
+    return out
 
 
 def registry_urls(

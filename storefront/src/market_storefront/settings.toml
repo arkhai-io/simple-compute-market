@@ -56,11 +56,18 @@ address        = ""
 private_key    = ""
 ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess demo@example"
 
-[chain]
-name     = ""                   # ethereum_sepolia | base_sepolia | anvil — auto-derived from rpc_url via eth_chainId when empty
-rpc_url  = ""
-chain_id = 0                    # 0 means unset — chain_id() falls back to live eth_chainId
-alkahest_address_config_path = ""
+# [chains.<name>] tables — one per chain the operator wants to transact
+# on. The operator provides these via storefront.toml; no defaults ship
+# here (the storefront refuses to start with zero configured chains, so
+# the absent-key state has a clear error path). Each entry supports:
+#   rpc_url                       (required)
+#   chain_id                      (optional, defaults to KNOWN_CHAIN_IDS lookup by name)
+#   alkahest_address_config_path  (optional, anvil-style file deployments only)
+#   identity_registry_address     (optional, defaults to the canonical
+#                                  CREATE2 vanity address per KNOWN_IDENTITY_REGISTRY)
+# Listings advertise their accepted chains via
+# accepted_escrows[].chain_name tuples; the runtime dispatches to the
+# matching [chains.<name>] entry when settling.
 
 [registry]
 # Leave empty by default. Any user-supplied list at a higher overlay
@@ -68,9 +75,8 @@ alkahest_address_config_path = ""
 # a default URL here, dynaconf's merge_enabled=True would *append* the
 # user's list onto the default, leaving the storefront heartbeating to
 # both registries.
-urls                      = []
-discovery_timeout         = 5.0
-identity_registry_address = ""
+urls              = []
+discovery_timeout = 5.0
 
 [registry.auth]
 # Free-form table of {url = "bearer-token"} pairs for private registries.

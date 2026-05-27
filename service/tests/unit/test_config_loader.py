@@ -219,49 +219,94 @@ def test_load_storefront_config_returns_empty_when_neither_file_present(monkeypa
 
 
 # ---------------------------------------------------------------------------
-# identity_registry_address — chain-name fallback to the canonical CREATE2
-# vanity address. Saves users from having to copy a fixed hex string into
-# every config for the standard chains.
+# chains_from_config — the [chains.<name>] tables become ChainConfig
+# entries keyed by chain name. Each entry inherits per-chain defaults
+# (KNOWN_CHAIN_IDS for chain_id, KNOWN_IDENTITY_REGISTRY for identity
+# registry) when the table omits them, so the standard chains need
+# only ``rpc_url`` set.
 # ---------------------------------------------------------------------------
 
 
-def test_identity_registry_address_uses_explicit_toml_value():
-    cfg = {"registry": {"identity_registry_address": "0xCUSTOM"}, "chain": {"name": "base_sepolia"}}
-    assert config_loader.identity_registry_address(config=cfg) == "0xCUSTOM"
+def test_chains_from_config_returns_empty_when_no_chains_table():
+    assert config_loader.chains_from_config({}) == {}
+    assert config_loader.chains_from_config({"chains": "not a dict"}) == {}
 
 
-def test_identity_registry_address_falls_back_to_chain_name_default():
-    """No address in config → use canonical CREATE2 vanity for known chain."""
-    cfg = {"chain": {"name": "base_sepolia"}}
+def test_chains_from_config_skips_entries_without_rpc_url():
+    cfg = {"chains": {"orphan": {"chain_id": 1}}}
+    assert config_loader.chains_from_config(cfg) == {}
+
+
+def test_chains_from_config_explicit_identity_registry_is_kept():
+    cfg = {"chains": {"base_sepolia": {
+        "rpc_url": "https://sepolia.base.org",
+        "identity_registry_address": "0xCUSTOM",
+    }}}
+    chains = config_loader.chains_from_config(cfg)
+    assert chains["base_sepolia"].identity_registry_address == "0xCUSTOM"
+
+
+def test_chains_from_config_identity_registry_falls_back_to_known_default():
+    cfg = {"chains": {"base_sepolia": {"rpc_url": "https://sepolia.base.org"}}}
+    chains = config_loader.chains_from_config(cfg)
     canonical = config_loader.KNOWN_IDENTITY_REGISTRY["base_sepolia"]
-    assert config_loader.identity_registry_address(config=cfg) == canonical
+    assert chains["base_sepolia"].identity_registry_address == canonical
 
 
-def test_identity_registry_address_known_chains_all_match():
-    """base_sepolia, ethereum_sepolia, and anvil all share the canonical
-    CREATE2 deployment, so the default should be the same address."""
-    addresses = {
-        chain: config_loader.identity_registry_address(config={"chain": {"name": chain}})
-        for chain in ("base_sepolia", "ethereum_sepolia", "anvil")
-    }
-    assert len(set(addresses.values())) == 1
+def test_chains_from_config_known_chains_share_canonical_identity_registry():
+    cfg = {"chains": {
+        name: {"rpc_url": f"https://{name}.example"}
+        for name in ("base_sepolia", "ethereum_sepolia", "anvil")
+    }}
+    chains = config_loader.chains_from_config(cfg)
+    addresses = {c.identity_registry_address for c in chains.values()}
+    assert len(addresses) == 1
 
 
-def test_identity_registry_address_unknown_chain_returns_none():
-    cfg = {"chain": {"name": "some_random_chain"}}
-    assert config_loader.identity_registry_address(config=cfg) is None
+def test_chains_from_config_unknown_chain_identity_registry_is_none():
+    cfg = {"chains": {"some_random_chain": {"rpc_url": "https://x"}}}
+    chains = config_loader.chains_from_config(cfg)
+    assert chains["some_random_chain"].identity_registry_address is None
 
 
-def test_identity_registry_address_flag_overrides_everything(monkeypatch):
-    monkeypatch.setenv("IDENTITY_REGISTRY_ADDRESS", "0xENV")
-    cfg = {"registry": {"identity_registry_address": "0xTOML"}, "chain": {"name": "base_sepolia"}}
-    assert config_loader.identity_registry_address(flag="0xFLAG", config=cfg) == "0xFLAG"
+def test_chains_from_config_chain_id_explicit_wins():
+    cfg = {"chains": {"base_sepolia": {
+        "rpc_url": "https://x",
+        "chain_id": 999999,
+    }}}
+    chains = config_loader.chains_from_config(cfg)
+    assert chains["base_sepolia"].chain_id == 999999
 
 
-def test_identity_registry_address_env_beats_toml(monkeypatch):
-    monkeypatch.setenv("IDENTITY_REGISTRY_ADDRESS", "0xENV")
-    cfg = {"registry": {"identity_registry_address": "0xTOML"}, "chain": {"name": "base_sepolia"}}
-    assert config_loader.identity_registry_address(config=cfg) == "0xENV"
+def test_chains_from_config_chain_id_falls_back_to_known_table():
+    cfg = {"chains": {"base_sepolia": {"rpc_url": "https://x"}}}
+    chains = config_loader.chains_from_config(cfg)
+    assert chains["base_sepolia"].chain_id == config_loader.KNOWN_CHAIN_IDS["base_sepolia"]
+
+
+def test_chains_from_config_chain_id_zero_when_unknown_and_omitted():
+    cfg = {"chains": {"some_random_chain": {"rpc_url": "https://x"}}}
+    chains = config_loader.chains_from_config(cfg)
+    assert chains["some_random_chain"].chain_id == 0
+
+
+def test_chains_from_config_alkahest_path_preserved():
+    cfg = {"chains": {"anvil": {
+        "rpc_url": "http://localhost:8545",
+        "alkahest_address_config_path": "/etc/arkhai/alkahest.json",
+    }}}
+    chains = config_loader.chains_from_config(cfg)
+    assert chains["anvil"].alkahest_address_config_path == "/etc/arkhai/alkahest.json"
+
+
+def test_chains_from_config_name_field_matches_dict_key():
+    cfg = {"chains": {
+        "base_sepolia": {"rpc_url": "https://x"},
+        "anvil": {"rpc_url": "http://localhost:8545"},
+    }}
+    chains = config_loader.chains_from_config(cfg)
+    for key, entry in chains.items():
+        assert entry.name == key
 
 
 def test_deep_merge_recurses_into_nested_tables():
@@ -442,7 +487,7 @@ def test_write_escapes_quotes_and_backslashes(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Structured shortcuts (wallet_address, chain_name, etc.)
+# Structured shortcuts (wallet_address, etc.)
 # ---------------------------------------------------------------------------
 
 
@@ -456,11 +501,6 @@ def test_wallet_address_falls_back_to_toml(monkeypatch):
     monkeypatch.delenv("AGENT_WALLET_ADDRESS", raising=False)
     cfg = {"wallet": {"address": "0xfromtoml"}}
     assert config_loader.wallet_address(config=cfg) == "0xfromtoml"
-
-
-def test_chain_name_default_when_everything_missing(monkeypatch):
-    monkeypatch.delenv("CHAIN_NAME", raising=False)
-    assert config_loader.chain_name(config={}) == "ethereum_sepolia"
 
 
 # ---------------------------------------------------------------------------
