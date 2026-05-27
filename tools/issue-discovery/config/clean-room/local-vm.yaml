@@ -1,0 +1,29 @@
+schema_version: 1
+sequences:
+  - id: local-vm
+    description: Laddered clean local VM discovery sequence.
+    steps:
+      - id: strict
+        mode: strict
+        continue_on_failure: true
+
+      - id: continue-build-without-zerotier
+        mode: continue
+        workarounds:
+          - local_stack_build_without_zerotier
+        continue_on_failure: true
+
+      - id: continue-build-and-redis
+        mode: continue
+        workarounds:
+          - local_stack_build_without_zerotier
+          - redis_no_host_port
+        continue_on_failure: true
+
+      - id: continue-build-redis-and-storefront-volume
+        mode: continue
+        workarounds:
+          - local_stack_build_without_zerotier
+          - redis_no_host_port
+          - storefront_volume_chown
+        continue_on_failure: true

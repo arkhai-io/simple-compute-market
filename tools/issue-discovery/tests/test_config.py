@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from jsonschema import ValidationError
+
 from issue_discovery.config import ToolPaths, load_yaml, validate_config
 from issue_discovery.phases import load_phase_file
 from issue_discovery.runner import _select_phases
@@ -24,6 +27,10 @@ def test_tracked_configs_match_schemas() -> None:
         (paths.config_dir / "profiles.yaml", paths.schema_dir / "profiles.schema.json"),
         (paths.config_dir / "workarounds.yaml", paths.schema_dir / "workarounds.schema.json"),
         (paths.config_dir / "redactions.yaml", paths.schema_dir / "redactions.schema.json"),
+        (
+            paths.config_dir / "clean-room" / "local-vm.yaml",
+            paths.schema_dir / "clean-room.schema.json",
+        ),
     ]
 
     for config_path, schema_path in cases:
@@ -73,3 +80,70 @@ def test_build_phase_can_use_explicit_continuation_command() -> None:
     assert build.commands[0].run == "${ISSUE_DISCOVERY_BUILD_COMMAND:-make build}"
     assert "local_stack_build_without_zerotier" in workarounds
     assert "ISSUE_DISCOVERY_BUILD_COMMAND" in workarounds["local_stack_build_without_zerotier"].env
+
+
+def test_clean_room_local_vm_sequence_is_laddered() -> None:
+    paths = ToolPaths(repo_root())
+    config = load_yaml(paths.config_dir / "clean-room" / "local-vm.yaml")
+    sequences = {sequence["id"]: sequence for sequence in config["sequences"]}
+    steps = sequences["local-vm"]["steps"]
+
+    assert steps[0]["mode"] == "strict"
+    assert "workarounds" not in steps[0]
+    assert [step["workarounds"] for step in steps[1:]] == [
+        ["local_stack_build_without_zerotier"],
+        ["local_stack_build_without_zerotier", "redis_no_host_port"],
+        [
+            "local_stack_build_without_zerotier",
+            "redis_no_host_port",
+            "storefront_volume_chown",
+        ],
+    ]
+    assert all(step["continue_on_failure"] for step in steps)
+    assert not any("run" in step or "command" in step or "commands" in step for step in steps)
+
+
+@pytest.mark.parametrize(
+    "bad_yaml",
+    [
+        """
+schema_version: 1
+sequences:
+  - id: bad
+    steps:
+      - id: unknown
+        mode: repair
+        continue_on_failure: true
+""",
+        """
+schema_version: 1
+sequences:
+  - id: bad
+    steps:
+      - id: empty-continuation
+        mode: continue
+        workarounds: []
+        continue_on_failure: true
+""",
+        """
+schema_version: 1
+sequences:
+  - id: bad
+    steps:
+      - id: embedded-shell
+        mode: continue
+        workarounds:
+          - redis_no_host_port
+        commands:
+          - docker compose up
+        continue_on_failure: true
+""",
+    ],
+)
+def test_clean_room_schema_rejects_invalid_sequence_steps(tmp_path: Path, bad_yaml: str) -> None:
+    paths = ToolPaths(repo_root())
+    config_path = tmp_path / "bad-clean-room.yaml"
+    config_path.write_text(bad_yaml.lstrip(), encoding="utf-8")
+
+    with pytest.raises(ValidationError):
+        validate_config(config_path, paths.schema_dir / "clean-room.schema.json")
