@@ -14,7 +14,12 @@ import time
 from typing import Any
 
 import market_storefront.container as _container
-from market_storefront.utils.config import CHAINS, settings, AGENT_ID
+from market_storefront.utils.config import (
+    CHAINS,
+    ESCROW_TEMPLATES,
+    settings,
+    AGENT_ID,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -441,13 +446,18 @@ class SystemService:
             report = await self._db.upsert_resources_from_csv_content(
                 csv_content=csv_inline,
                 source_label="resources_csv_inline (config)",
+                templates=ESCROW_TEMPLATES,
             )
             source = "resources_csv_inline (config)"
         elif csv_path:
-            report = await self._db.upsert_resources_from_csv(csv_path=csv_path)
+            report = await self._db.upsert_resources_from_csv(
+                csv_path=csv_path, templates=ESCROW_TEMPLATES,
+            )
             source = csv_path
         elif os.path.exists(self._DEFAULT_CSV_PATH):
-            report = await self._db.upsert_resources_from_csv(csv_path=self._DEFAULT_CSV_PATH)
+            report = await self._db.upsert_resources_from_csv(
+                csv_path=self._DEFAULT_CSV_PATH, templates=ESCROW_TEMPLATES,
+            )
             source = f"{self._DEFAULT_CSV_PATH} (auto-discovered)"
         else:
             logger.info("[RESOURCE SEED] No resource source configured — starting with empty inventory")

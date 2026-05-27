@@ -48,6 +48,24 @@ sessions.
   `_extract_listing_token`, `_extract_token_contract_from_listing`,
   `_print_publish_table`. `_seller_reference_amount` migrates
   transitively.
+- Phase 3: CSV importer learns the
+  `template:slot=value,slot=value;template2:...` DSL via
+  `parse_accepted_escrows_cell()` in
+  `storefront/src/market_storefront/utils/resource_csv_importer.py`.
+  The cell is materialized at import time (not at publish) — each
+  entry stored on the row is the same `{chain_name, escrow_address,
+  literal_fields, rates}` shape `accepted_escrows` carries on the
+  wire. This keeps the row flat and self-contained: cli_publish reads
+  the column straight without needing the template catalog at publish
+  time. New `accepted_escrows TEXT` column on `resources`, with idempotent
+  ALTER-ADD migration. `ESCROW_TEMPLATES` module-level constant in
+  `utils/config.py` mirrors `CHAINS`; threaded into the two top-level
+  CSV callers (`system_service.seed_resources_if_empty`,
+  `admin_controller.import_resources`). Single-slot sugar (`name=value`)
+  and zero-slot attestation form (`name`) both validate against the
+  template's rate-slot count at parse time. 17 unit tests in
+  `tests/unit/test_accepted_escrows_csv_dsl.py` + 3 end-to-end tests
+  in `test_resource_csv_importer.py`.
 
 ## Why staged as siblings, not a rename
 
@@ -65,18 +83,6 @@ in the staging plan drops the legacy fields cleanly once every reader
 is on the helpers.
 
 ## What's left (staging plan)
-
-### Phase 3 — CSV DSL
-
-`storefront/src/market_storefront/utils/resource_csv_importer.py`
-(or whichever importer owns the `accepted_escrows` column today)
-learns the `template:slot=value,slot=value;template2:...` DSL with
-single-slot ergonomic sugar (bare `template=value`) and zero-slot
-attestation form (bare `template`).
-
-Touches the CSV examples in `storefront/storefront.{bob,alice}.toml`
-provisioning paths and the test fixtures in
-`integration-tests/tests/e2e/roles/`.
 
 ### Phase 4 — `cli_publish` switches to template iteration
 
@@ -202,7 +208,8 @@ integration-tests/tests/e2e/roles/       Phase 3/4 (CSV fixtures)
 
 - ~~Phase 2b~~ — landed `6c8bb5b`.
 - ~~Phase 2c~~ — landed `f4b0770` (helper fallback prep in `df79caa`).
-- Phase 3 + 4: 1 session (CSV DSL + cli_publish refactor land together because they need the same templates wired in).
+- ~~Phase 3~~ — CSV importer + storage. Landing in this session.
+- Phase 4: 1 session (cli_publish iterates parsed entries instead of building from min_price/token).
 - Phase 5 + 6: 1 session (buyer/seller dispatch + verify; ERC20-only path).
 - Phase 7: 1 session (drop legacy fields + bulk test rewrites).
 

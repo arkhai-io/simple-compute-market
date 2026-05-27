@@ -24,6 +24,7 @@ from market_storefront.models.system_models import (
     ResourcePatchResponse,
 )
 from market_storefront.server import _set_globally_paused
+from market_storefront.utils.config import ESCROW_TEMPLATES
 from market_storefront.utils.stage_log import stage_event
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,7 @@ class AdminController:
             report = await self._db.upsert_resources_from_csv_content(
                 csv_content=csv_content,
                 source_label=f"admin-import:{file.filename or 'upload'}",
+                templates=ESCROW_TEMPLATES,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))

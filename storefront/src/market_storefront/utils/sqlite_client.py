@@ -519,6 +519,7 @@ class SQLiteClient:
                   min_price TEXT,
                   token TEXT,
                   max_duration_seconds INTEGER,
+                  accepted_escrows TEXT,
                   created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
                   updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
                 )
@@ -531,6 +532,7 @@ class SQLiteClient:
                 "ALTER TABLE resources ADD COLUMN min_price TEXT",
                 "ALTER TABLE resources ADD COLUMN token TEXT",
                 "ALTER TABLE resources ADD COLUMN max_duration_seconds INTEGER",
+                "ALTER TABLE resources ADD COLUMN accepted_escrows TEXT",
             ):
                 try:
                     cur.execute(col_ddl)
@@ -1034,6 +1036,7 @@ class SQLiteClient:
         min_price: str | None = None,
         token: str | None = None,
         max_duration_seconds: int | None = None,
+        accepted_escrows: list[dict[str, Any]] | None = None,
     ) -> None:
         """Create or update a generic resource snapshot row.
 
@@ -1067,9 +1070,9 @@ class SQLiteClient:
                     """
                     INSERT INTO resources(
                       resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                      min_price, token, max_duration_seconds, created_at, updated_at
+                      min_price, token, max_duration_seconds, accepted_escrows, created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(resource_id) DO UPDATE SET
                       resource_type=excluded.resource_type,
                       resource_subtype=excluded.resource_subtype,
@@ -1080,6 +1083,7 @@ class SQLiteClient:
                       min_price=excluded.min_price,
                       token=excluded.token,
                       max_duration_seconds=excluded.max_duration_seconds,
+                      accepted_escrows=excluded.accepted_escrows,
                       updated_at=excluded.updated_at
                     """,
                     (
@@ -1093,6 +1097,7 @@ class SQLiteClient:
                         min_price,
                         token,
                         max_duration_seconds,
+                        json.dumps(accepted_escrows) if accepted_escrows is not None else None,
                         now_iso,
                         now_iso,
                     ),
@@ -1129,7 +1134,7 @@ class SQLiteClient:
                 cur.execute(
                     f"""
                     SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                           min_price, token, max_duration_seconds, created_at, updated_at
+                           min_price, token, max_duration_seconds, accepted_escrows, created_at, updated_at
                     FROM resources
                     {where_clause}
                     ORDER BY updated_at DESC
@@ -1149,6 +1154,7 @@ class SQLiteClient:
                     row_min_price,
                     row_token,
                     row_max_duration_seconds,
+                    row_accepted_escrows,
                     row_created_at,
                     row_updated_at,
                 ) in rows:
@@ -1160,6 +1166,14 @@ class SQLiteClient:
                                 attrs = parsed
                         except Exception:
                             attrs = {}
+                    accepted: list[dict[str, Any]] | None = None
+                    if isinstance(row_accepted_escrows, str) and row_accepted_escrows.strip():
+                        try:
+                            parsed_ae = json.loads(row_accepted_escrows)
+                            if isinstance(parsed_ae, list):
+                                accepted = parsed_ae
+                        except Exception:
+                            accepted = None
                     result.append(
                         {
                             "resource_id": row_resource_id,
@@ -1172,6 +1186,7 @@ class SQLiteClient:
                             "min_price": row_min_price,
                             "token": row_token,
                             "max_duration_seconds": row_max_duration_seconds,
+                            "accepted_escrows": accepted,
                             "created_at": row_created_at,
                             "updated_at": row_updated_at,
                         }
@@ -1269,12 +1284,14 @@ class SQLiteClient:
         *,
         csv_path: str,
         dry_run: bool = False,
+        templates: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Import resources from CSV file and upsert rows into the resources table."""
         report = await upsert_resources_from_csv(
             csv_path=csv_path,
             sqlite_client=self,
             dry_run=dry_run,
+            templates=templates,
         )
         return report.to_dict()
 
@@ -1284,6 +1301,7 @@ class SQLiteClient:
         csv_content: str,
         source_label: str = "<inline>",
         dry_run: bool = False,
+        templates: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Import resources from a CSV string and upsert rows into the resources table.
 
@@ -1296,6 +1314,7 @@ class SQLiteClient:
             source_label=source_label,
             sqlite_client=self,
             dry_run=dry_run,
+            templates=templates,
         )
         return report.to_dict()
 

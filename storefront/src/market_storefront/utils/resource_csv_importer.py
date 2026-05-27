@@ -11,6 +11,7 @@ from market_storefront.resources import get_resource_adapter
 
 if TYPE_CHECKING:
     from market_storefront.utils.sqlite_client import SQLiteClient
+    from service.config_loader import EscrowTemplate
 
 
 CORE_COLUMNS = {
@@ -23,9 +24,154 @@ CORE_COLUMNS = {
     "min_price",
     "token",
     "max_duration_seconds",
+    "accepted_escrows",
 }
 
 ATTRIBUTE_PREFIX = "attribute."
+
+
+def parse_accepted_escrows_cell(
+    cell: str,
+    templates: dict[str, "EscrowTemplate"],
+) -> list[dict[str, Any]]:
+    """Parse one ``accepted_escrows`` CSV cell into materialized entries.
+
+    Grammar (whitespace tolerant)::
+
+        cell  = entry (";" entry)*
+        entry = name [":" slot ("," slot)* | "=" value]
+        slot  = slot_name "=" value
+
+    Three reference forms map onto template rate-slot counts:
+
+    - ``name:s1=v1,s2=v2``  — explicit named slots (any slot count)
+    - ``name=v``            — single-slot ergonomic sugar
+                              (template must have exactly one rate slot)
+    - ``name``              — zero-slot attestation form
+                              (template must have zero rate slots)
+
+    Each parsed entry expands into the same wire shape ``cli_publish`` /
+    ``synthesize_accepted_escrows_from_demand`` emit: ``chain_name``,
+    ``escrow_address``, ``literal_fields``, ``rates``. Errors mean the
+    cell is rejected wholesale (the CSV row marks invalid); we don't
+    half-publish a row with one good entry and one bad.
+    """
+    out: list[dict[str, Any]] = []
+    raw = (cell or "").strip()
+    if not raw:
+        return out
+    for piece in raw.split(";"):
+        entry = piece.strip()
+        if not entry:
+            continue
+        out.append(_materialize_entry(entry, templates))
+    return out
+
+
+def _materialize_entry(
+    entry: str,
+    templates: dict[str, "EscrowTemplate"],
+) -> dict[str, Any]:
+    colon = entry.find(":")
+    equals = entry.find("=")
+    has_colon = colon != -1 and (equals == -1 or colon < equals)
+    if has_colon:
+        name = entry[:colon].strip()
+        slot_blob = entry[colon + 1 :].strip()
+        slot_values = _parse_slot_list(name, slot_blob)
+    elif equals != -1:
+        name = entry[:equals].strip()
+        value = entry[equals + 1 :].strip()
+        slot_values = {"__sugar__": value}
+    else:
+        name = entry.strip()
+        slot_values = {}
+
+    if not name:
+        raise ValueError(f"accepted_escrows entry missing template name: {entry!r}")
+    template = templates.get(name)
+    if template is None:
+        raise ValueError(
+            f"accepted_escrows: unknown template {name!r}; "
+            f"known templates: {sorted(templates)}"
+        )
+
+    rate_slots = template.rate_slots
+    if "__sugar__" in slot_values:
+        if len(rate_slots) != 1:
+            raise ValueError(
+                f"accepted_escrows: bare value form '{name}=...' requires "
+                f"the template to have exactly one rate slot "
+                f"(template {name!r} has {len(rate_slots)})"
+            )
+        sole_slot = next(iter(rate_slots))
+        slot_values = {sole_slot: slot_values["__sugar__"]}
+    elif not slot_values and rate_slots:
+        raise ValueError(
+            f"accepted_escrows: bare template form {name!r} requires zero "
+            f"rate slots (template {name!r} has {len(rate_slots)}: "
+            f"{sorted(rate_slots)})"
+        )
+
+    extra = set(slot_values) - set(rate_slots)
+    if extra:
+        raise ValueError(
+            f"accepted_escrows: template {name!r} got unknown slot(s) "
+            f"{sorted(extra)}; expected {sorted(rate_slots)}"
+        )
+    missing = set(rate_slots) - set(slot_values)
+    if missing:
+        raise ValueError(
+            f"accepted_escrows: template {name!r} missing slot(s) "
+            f"{sorted(missing)}; expected {sorted(rate_slots)}"
+        )
+
+    rates: list[dict[str, Any]] = []
+    for slot_name, slot in rate_slots.items():
+        rates.append({
+            "field": slot.field,
+            "per": slot.per,
+            "value": slot_values[slot_name],
+        })
+    return {
+        "chain_name": template.chain,
+        "escrow_address": template.escrow_address.lower(),
+        "literal_fields": dict(template.literal_fields),
+        "rates": rates,
+    }
+
+
+def _parse_slot_list(template_name: str, slot_blob: str) -> dict[str, str]:
+    if not slot_blob:
+        raise ValueError(
+            f"accepted_escrows: template {template_name!r} has ':' but no "
+            f"slot assignments"
+        )
+    out: dict[str, str] = {}
+    for piece in slot_blob.split(","):
+        slot = piece.strip()
+        if not slot:
+            continue
+        if "=" not in slot:
+            raise ValueError(
+                f"accepted_escrows: template {template_name!r} slot {slot!r} "
+                f"is missing '='"
+            )
+        key, value = slot.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            raise ValueError(
+                f"accepted_escrows: template {template_name!r} has empty "
+                f"slot name in {piece!r}"
+            )
+        if key in out:
+            raise ValueError(
+                f"accepted_escrows: template {template_name!r} slot {key!r} "
+                f"specified more than once"
+            )
+        out[key] = value
+    return out
 
 
 @dataclass
@@ -99,7 +245,10 @@ def _parse_attribute_value(raw: str) -> Any:
         return raw
 
 
-def _build_db_resource_from_csv_row(row: dict[str, Any]) -> dict[str, Any]:
+def _build_db_resource_from_csv_row(
+    row: dict[str, Any],
+    templates: dict[str, "EscrowTemplate"] | None = None,
+) -> dict[str, Any]:
     resource_id = _clean_cell(row.get("resource_id"))
     resource_type = _clean_cell(row.get("resource_type"))
     if not resource_id:
@@ -149,6 +298,19 @@ def _build_db_resource_from_csv_row(row: dict[str, Any]) -> dict[str, Any]:
             continue
         attributes[attr_key] = _parse_attribute_value(cell)
 
+    accepted_escrows_raw = _clean_cell(row.get("accepted_escrows"))
+    accepted_escrows: list[dict[str, Any]] | None = None
+    if accepted_escrows_raw:
+        if templates is None:
+            raise ValueError(
+                "accepted_escrows column present but no escrow_templates "
+                "configured; add [escrow_templates.<name>] entries to the "
+                "storefront config or drop the column"
+            )
+        accepted_escrows = parse_accepted_escrows_cell(
+            accepted_escrows_raw, templates,
+        )
+
     return {
         "resource_id": resource_id,
         "resource_type": resource_type,
@@ -160,6 +322,7 @@ def _build_db_resource_from_csv_row(row: dict[str, Any]) -> dict[str, Any]:
         "min_price": min_price_raw or None,
         "token": token_raw or None,
         "max_duration_seconds": max_duration_seconds,
+        "accepted_escrows": accepted_escrows,
     }
 
 
@@ -168,6 +331,7 @@ async def upsert_resources_from_csv(
     csv_path: str,
     sqlite_client: "SQLiteClient",
     dry_run: bool = False,
+    templates: dict[str, "EscrowTemplate"] | None = None,
 ) -> ImportReport:
     path = Path(csv_path)
     if not path.exists():
@@ -181,6 +345,7 @@ async def upsert_resources_from_csv(
         source_label=str(path),
         sqlite_client=sqlite_client,
         dry_run=dry_run,
+        templates=templates,
     )
 
 
@@ -190,6 +355,7 @@ async def upsert_resources_from_csv_content(
     source_label: str = "<inline>",
     sqlite_client: "SQLiteClient",
     dry_run: bool = False,
+    templates: dict[str, "EscrowTemplate"] | None = None,
 ) -> ImportReport:
     """Import resources from a CSV string and upsert rows into the resources table.
 
@@ -217,7 +383,7 @@ async def upsert_resources_from_csv_content(
             schema_status="invalid",
         )
         try:
-            db_resource = _build_db_resource_from_csv_row(raw_row)
+            db_resource = _build_db_resource_from_csv_row(raw_row, templates)
             row_result.resource_id = str(db_resource["resource_id"])
             row_result.resource_type = str(db_resource["resource_type"])
 
@@ -247,6 +413,7 @@ async def upsert_resources_from_csv_content(
                     min_price=db_resource.get("min_price"),
                     token=db_resource.get("token"),
                     max_duration_seconds=db_resource.get("max_duration_seconds"),
+                    accepted_escrows=db_resource.get("accepted_escrows"),
                 )
             else:
                 row_result.warnings.append("Dry-run mode: row validated but not persisted.")

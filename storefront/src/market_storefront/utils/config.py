@@ -34,8 +34,10 @@ from typing import Any
 from dynaconf import Dynaconf
 from service.config_loader import (  # type: ignore[import-not-found]
     ChainConfig,
+    EscrowTemplate,
     chains_from_config,
     derive_wallet_address,
+    escrow_templates_from_config,
     storefront_config_files,
 )
 
@@ -112,8 +114,43 @@ def _build_chains(s: Dynaconf) -> dict[str, ChainConfig]:
     return chains_from_config({"chains": _coerce_chains_table(raw)})
 
 
+def _coerce_templates_table(raw: Any) -> dict[str, dict[str, Any]]:
+    """Materialise dynaconf's ``settings.escrow_templates`` into a plain dict.
+
+    Mirror of :func:`_coerce_chains_table`. The values can include nested
+    ``literal`` / ``rates`` sub-tables, so recurse one level deep — that's
+    enough for the current schema (no four-level nesting).
+    """
+    if raw is None or not hasattr(raw, "items"):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for name, sub in raw.items():
+        if not isinstance(name, str) or not hasattr(sub, "items"):
+            continue
+        coerced: dict[str, Any] = {}
+        for k, v in sub.items():
+            if hasattr(v, "items") and not isinstance(v, dict):
+                coerced[k] = {sk: sv for sk, sv in v.items()}
+            else:
+                coerced[k] = v
+        out[name] = coerced
+    return out
+
+
+def _build_escrow_templates(
+    s: Dynaconf, chains: dict[str, ChainConfig]
+) -> dict[str, EscrowTemplate]:
+    """Build the typed ESCROW_TEMPLATES dict from merged dynaconf settings."""
+    raw = s.get("escrow_templates")
+    return escrow_templates_from_config(
+        {"escrow_templates": _coerce_templates_table(raw)},
+        chains=chains,
+    )
+
+
 settings: Dynaconf = _build_settings()
 CHAINS: dict[str, ChainConfig] = _build_chains(settings)
+ESCROW_TEMPLATES: dict[str, EscrowTemplate] = _build_escrow_templates(settings, CHAINS)
 
 if not CHAINS:
     logger.warning(
