@@ -70,6 +70,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Print the gh command/body path without creating an issue.",
     )
+    issue_create.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Allow creation for candidates that are not marked ready_to_file.",
+    )
     issue_create.set_defaults(handler=_issue_create)
 
     clean_room = subparsers.add_parser("clean-room", help="Plan clean-room discovery runs.")
@@ -124,6 +130,7 @@ def _issue_create(args: argparse.Namespace) -> int:
         _run_dir(args),
         args.fingerprint,
         dry_run=args.dry_run,
+        force=args.force,
     )
 
 

@@ -111,11 +111,9 @@ def assert_tracking_flow(
         ]
     )
     create_output = capsys.readouterr().out
-    assert create_code == 0
-    assert f"cd {repo_root}" in create_output
-    assert "gh issue create" in create_output
-    assert f"--body-file {run_dir}/issue-candidates/{expected_fingerprint}.md" in create_output
-    assert "--label runtime" in create_output
+    assert create_code == 2
+    assert "not ready_to_file" in create_output
+    assert "gh issue create" not in create_output
     assert "super-secret-admin-key" not in create_output
 
 

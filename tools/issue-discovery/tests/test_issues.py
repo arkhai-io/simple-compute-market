@@ -82,6 +82,7 @@ def write_candidate(run_dir: Path) -> None:
                 "phase": "phase",
                 "body_file": "issue-candidates/candidate.md",
                 "evidence": [],
+                "state": "ready_to_file",
             }
         ],
     )
@@ -328,8 +329,17 @@ def test_issue_create_runs_gh_from_repo_root(tmp_path: Path, monkeypatch) -> Non
     write_candidate(run_dir)
     calls = []
 
-    def fake_run(command: list[str], *, check: bool, text: bool, cwd: Path) -> subprocess.CompletedProcess[str]:
+    def fake_run(
+        command: list[str],
+        *,
+        check: bool,
+        text: bool,
+        cwd: Path,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
         calls.append({"command": command, "check": check, "text": text, "cwd": cwd})
+        if command[:3] == ["gh", "issue", "list"]:
+            return subprocess.CompletedProcess(command, 0, stdout="[]")
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr("issue_discovery.issues.subprocess.run", fake_run)
@@ -337,4 +347,115 @@ def test_issue_create_runs_gh_from_repo_root(tmp_path: Path, monkeypatch) -> Non
     code = IssueRepository(run_dir, repo_root=repo_root).create("fingerprint", dry_run=False)
 
     assert code == 0
-    assert calls[0]["cwd"] == repo_root
+    assert calls[0]["command"][:3] == ["gh", "issue", "list"]
+    assert calls[1]["command"][:3] == ["gh", "issue", "create"]
+    assert calls[1]["cwd"] == repo_root
+
+
+def test_issue_create_blocks_non_ready_candidate_without_force(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "run"
+    repo_root = tmp_path / "repo"
+    run_dir.mkdir()
+    repo_root.mkdir()
+    write_candidate(run_dir)
+    candidate_path = run_dir / "issue-candidates" / "candidates.jsonl"
+    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+    candidate["state"] = "needs_targeted_repro"
+    candidate_path.write_text(json.dumps(candidate) + "\n", encoding="utf-8")
+
+    def fake_run(*args, **kwargs) -> subprocess.CompletedProcess[str]:  # pragma: no cover
+        raise AssertionError("non-ready issue should not call gh")
+
+    monkeypatch.setattr("issue_discovery.issues.subprocess.run", fake_run)
+
+    code = IssueRepository(run_dir, repo_root=repo_root).create("fingerprint", dry_run=True)
+
+    assert code == 2
+
+
+def test_issue_create_force_allows_non_ready_candidate_dry_run(tmp_path: Path, capsys) -> None:
+    run_dir = tmp_path / "run"
+    repo_root = tmp_path / "repo"
+    run_dir.mkdir()
+    repo_root.mkdir()
+    write_candidate(run_dir)
+    candidate_path = run_dir / "issue-candidates" / "candidates.jsonl"
+    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+    candidate["state"] = "needs_targeted_repro"
+    candidate_path.write_text(json.dumps(candidate) + "\n", encoding="utf-8")
+
+    code = IssueRepository(run_dir, repo_root=repo_root).create("fingerprint", dry_run=True, force=True)
+
+    assert code == 0
+    assert "--body-file" in capsys.readouterr().out
+
+
+def test_issue_create_skips_duplicate_issue(tmp_path: Path, monkeypatch, capsys) -> None:
+    run_dir = tmp_path / "run"
+    repo_root = tmp_path / "repo"
+    run_dir.mkdir()
+    repo_root.mkdir()
+    write_candidate(run_dir)
+    calls = []
+
+    def fake_run(
+        command: list[str],
+        *,
+        check: bool,
+        text: bool,
+        cwd: Path,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        if command[:3] == ["gh", "issue", "list"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout='[{"number":1,"title":"Candidate","state":"OPEN","url":"https://example.test/1"}]',
+            )
+        raise AssertionError("duplicate should skip gh issue create")
+
+    monkeypatch.setattr("issue_discovery.issues.subprocess.run", fake_run)
+
+    code = IssueRepository(run_dir, repo_root=repo_root).create("fingerprint", dry_run=False)
+
+    assert code == 0
+    assert len(calls) == 1
+    assert "duplicate issue exists" in capsys.readouterr().out
+
+
+def test_issue_create_blocks_unredacted_body_before_gh(tmp_path: Path, monkeypatch, capsys) -> None:
+    run_dir = tmp_path / "run"
+    repo_root = tmp_path / "repo"
+    run_dir.mkdir()
+    repo_root.mkdir()
+    config_dir = repo_root / "tools" / "issue-discovery" / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "redactions.yaml").write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "patterns:",
+                "  - id: admin_key",
+                '    regex: "(?i)((?:x-admin-key|admin[_-]?key)\\\\s*[:=]\\\\s*)[^\\\\s]+"',
+                "    replacement: '\\\\1<redacted-admin-key>'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    write_candidate(run_dir)
+    (run_dir / "issue-candidates" / "candidate.md").write_text(
+        "# Candidate\n\nadmin_key=secret-value\n",
+        encoding="utf-8",
+    )
+
+    def fake_run(*args, **kwargs) -> subprocess.CompletedProcess[str]:  # pragma: no cover
+        raise AssertionError("unredacted issue should not call gh")
+
+    monkeypatch.setattr("issue_discovery.issues.subprocess.run", fake_run)
+
+    code = IssueRepository(run_dir, repo_root=repo_root).create("fingerprint", dry_run=False)
+
+    assert code == 2
+    assert "unredacted data" in capsys.readouterr().out

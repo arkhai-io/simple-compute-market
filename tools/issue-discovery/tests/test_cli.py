@@ -55,7 +55,7 @@ def test_issue_create_has_independent_dry_run(tmp_path: Path, capsys) -> None:
     (issue_dir / "candidates.jsonl").write_text(
         '{"fingerprint":"fingerprint","title":"Candidate","labels":["bug"],'
         '"classification":"test","phase":"phase","body_file":"issue-candidates/candidate.md",'
-        '"evidence":[]}\n',
+        '"evidence":[],"state":"ready_to_file"}\n',
         encoding="utf-8",
     )
 
@@ -78,6 +78,36 @@ def test_issue_create_has_independent_dry_run(tmp_path: Path, capsys) -> None:
     assert "--body-file" in captured.out
 
 
+def test_issue_create_force_allows_non_ready_dry_run(tmp_path: Path, capsys) -> None:
+    run_dir = tmp_path / "run"
+    issue_dir = run_dir / "issue-candidates"
+    issue_dir.mkdir(parents=True)
+    (issue_dir / "candidate.md").write_text("# Candidate\n", encoding="utf-8")
+    (issue_dir / "candidates.jsonl").write_text(
+        '{"fingerprint":"fingerprint","title":"Candidate","labels":["bug"],'
+        '"classification":"test","phase":"phase","body_file":"issue-candidates/candidate.md",'
+        '"evidence":[],"state":"needs_targeted_repro"}\n',
+        encoding="utf-8",
+    )
+
+    code = main(
+        [
+            "--repo-root",
+            str(tmp_path),
+            "issue",
+            "create",
+            str(run_dir),
+            "fingerprint",
+            "--dry-run",
+            "--force",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "gh issue create" in captured.out
+
+
 def test_issue_commands_resolve_relative_run_dir_from_repo_root(
     tmp_path: Path,
     capsys,
@@ -91,7 +121,7 @@ def test_issue_commands_resolve_relative_run_dir_from_repo_root(
     (issue_dir / "candidates.jsonl").write_text(
         '{"fingerprint":"fingerprint","title":"Candidate","labels":["bug"],'
         '"classification":"test","phase":"phase","body_file":"issue-candidates/candidate.md",'
-        '"evidence":[]}\n',
+        '"evidence":[],"state":"ready_to_file"}\n',
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)

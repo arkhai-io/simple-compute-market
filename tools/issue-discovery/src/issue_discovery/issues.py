@@ -6,6 +6,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from issue_discovery.redaction import Redactor
+
 
 _CLASSIFIER_PATTERNS = {
     "fixed-docker-name-collision": (
@@ -244,8 +246,16 @@ class IssueRepository:
         candidate = self.get(fingerprint)
         return self.run_dir / str(candidate["body_file"])
 
-    def create(self, fingerprint: str, dry_run: bool) -> int:
+    def create(self, fingerprint: str, dry_run: bool, force: bool = False) -> int:
         candidate = self.get(fingerprint)
+        state = str(candidate.get("state", "unknown"))
+        if state != "ready_to_file" and not force:
+            print(
+                f"candidate {fingerprint} is {state}, not ready_to_file; "
+                "rerun with --force to override"
+            )
+            return 2
+
         body_path = self.run_dir / str(candidate["body_file"])
         command = [
             "gh",
@@ -264,8 +274,63 @@ class IssueRepository:
                 + " ".join(_shell_quote(part) for part in command)
             )
             return 0
+
+        if not self._body_is_redacted(body_path):
+            return 2
+
+        duplicate = self._find_duplicate(candidate)
+        if duplicate is None:
+            return 2
+        if duplicate:
+            print(f"duplicate issue exists: {duplicate.get('url') or duplicate.get('title')}")
+            return 0
+
         completed = subprocess.run(command, check=False, text=True, cwd=self.repo_root)
         return completed.returncode
+
+    def _find_duplicate(self, candidate: dict[str, Any]) -> dict[str, Any] | bool | None:
+        command = [
+            "gh",
+            "issue",
+            "list",
+            "--state",
+            "all",
+            "--search",
+            f"{candidate['fingerprint']} in:title,body",
+            "--json",
+            "number,title,state,url",
+            "--limit",
+            "10",
+        ]
+        completed = subprocess.run(
+            command,
+            check=False,
+            text=True,
+            cwd=self.repo_root,
+            capture_output=True,
+        )
+        if completed.returncode != 0:
+            print("duplicate issue check failed")
+            return None
+        try:
+            issues = json.loads(completed.stdout or "[]")
+        except json.JSONDecodeError:
+            print("duplicate issue check returned invalid JSON")
+            return None
+        if not isinstance(issues, list):
+            print("duplicate issue check returned unexpected JSON")
+            return None
+        return issues[0] if issues else False
+
+    def _body_is_redacted(self, body_path: Path) -> bool:
+        redactions_path = self.repo_root / "tools" / "issue-discovery" / "config" / "redactions.yaml"
+        if not redactions_path.exists():
+            return True
+        body = body_path.read_text(encoding="utf-8")
+        if Redactor.from_file(redactions_path).redact(body) == body:
+            return True
+        print("issue body still contains unredacted data; refusing to create issue")
+        return False
 
 
 def _render_body(

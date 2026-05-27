@@ -105,9 +105,9 @@ class DiscoveryRunner:
         print(body_path.read_text(encoding="utf-8"), end="")
         return 0
 
-    def issue_create(self, run_dir: Path, fingerprint: str, dry_run: bool) -> int:
+    def issue_create(self, run_dir: Path, fingerprint: str, dry_run: bool, force: bool = False) -> int:
         repository = IssueRepository(run_dir.resolve(), repo_root=self.repo_root)
-        return repository.create(fingerprint, dry_run=dry_run)
+        return repository.create(fingerprint, dry_run=dry_run, force=force)
 
     def clean_room_plan(self, sequence_name: str) -> int:
         sequence = self._load_clean_room_sequence(sequence_name)
