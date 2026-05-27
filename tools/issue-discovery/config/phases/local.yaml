@@ -73,6 +73,8 @@ phases:
       - id: make_build
         run: ${ISSUE_DISCOVERY_BUILD_COMMAND:-make build}
         timeout_seconds: 1800
+    classifiers:
+      - zerotier_build_path
 
   - id: root_service_tests
     name: Root service tests

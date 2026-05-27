@@ -82,6 +82,7 @@ def test_build_phase_can_use_explicit_continuation_command() -> None:
     workarounds = load_workarounds(paths.config_dir / "workarounds.yaml")
 
     assert build.commands[0].run == "${ISSUE_DISCOVERY_BUILD_COMMAND:-make build}"
+    assert "zerotier_build_path" in build.classifiers
     assert "local_stack_build_without_zerotier" in workarounds
     assert "ISSUE_DISCOVERY_BUILD_COMMAND" in workarounds["local_stack_build_without_zerotier"].env
     assert workarounds["local_stack_build_without_zerotier"].start_phase == "build"
