@@ -14,7 +14,7 @@ import time
 from typing import Any
 
 import market_storefront.container as _container
-from market_storefront.utils.config import settings, chain_id, AGENT_ID
+from market_storefront.utils.config import CHAINS, settings, AGENT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -104,20 +104,35 @@ class SystemService:
 
         if include_registry:
             # Populate top-level diagnostic fields — not checks, just facts.
+            # Per-chain: emit one (chain_name -> canonical_id) entry per chain
+            # where the agent has resolved an ID. The single-chain shape
+            # (top-level ``agent_id`` / ``chain_id``) is replaced because
+            # there is no single canonical truth in a multi-chain world.
             try:
-                from market_storefront.agent import _AGENT_ID as _live_agent_id
-                onchain_id = _live_agent_id or settings.onchain_agent_id
-                if onchain_id:
-                    from market_storefront.utils.action_executor import _canonical_agent_id
-                    result["agent_id"] = _canonical_agent_id()
-                else:
-                    result["agent_id"] = None
+                from market_storefront.agent import _AGENT_IDS
+                from service.clients.erc8004.blockchain import build_erc8004_canonical_id
+                identities: dict[str, dict[str, Any]] = {}
+                for name, chain in CHAINS.items():
+                    aid = _AGENT_IDS.get(name)
+                    if aid is None or not chain.identity_registry_address:
+                        identities[name] = {
+                            "chain_id": chain.chain_id,
+                            "agent_id": None,
+                            "canonical_id": None,
+                        }
+                        continue
+                    identities[name] = {
+                        "chain_id": chain.chain_id,
+                        "agent_id": aid,
+                        "canonical_id": build_erc8004_canonical_id(
+                            chain_id=chain.chain_id,
+                            identity_registry=chain.identity_registry_address,
+                            agent_id=aid,
+                        ),
+                    }
+                result["identities"] = identities
             except Exception:
-                result["agent_id"] = None
-            try:
-                result["chain_id"] = chain_id()
-            except Exception:
-                result["chain_id"] = None
+                result["identities"] = {}
             try:
                 resources = await self._db.list_resources()
                 result["resource_count"] = len(resources)
@@ -170,28 +185,39 @@ class SystemService:
         return results[-1]
 
     async def registry_auth_check(self) -> str:
-        """Verify this agent's wallet owns its configured on-chain agent ID.
+        """Verify this agent's wallet owns its on-chain agent ID(s).
 
-        Probes every configured registry concurrently. Returns 'ok' if
-        at least one registry confirms the agent's owner matches our
-        wallet. ``agent_not_found`` only when *every* registry reports
-        404 (none have indexed us yet). Other definitive non-ok
-        results win over agent_not_found because they're more
-        actionable for the operator.
+        Probes every configured registry concurrently. In a multi-chain
+        setup the storefront has one canonical ID per chain; this check
+        picks the **first** configured chain that has a resolved ID and
+        probes that. The Phase-3 simplification reflects that a chain
+        whose ID hasn't resolved yet would just report ``unconfigured``
+        until the startup task finishes.
+
+        Returns 'ok' if at least one registry confirms the agent's
+        owner matches our wallet. ``agent_not_found`` only when *every*
+        registry reports 404 (none have indexed us yet). Other
+        definitive non-ok results win over agent_not_found.
         """
         urls = [u.rstrip("/") for u in (settings.registry.urls or []) if u]
         if not urls:
             return "unconfigured"
         auth = settings.registry.auth or {}
-        # Read the live runtime ID (set by _ensure_agent_identity at startup),
-        # not the config-file value (which may be stale or absent when auto_register=True).
-        from market_storefront.agent import _AGENT_ID as _live_agent_id
-        onchain_id = _live_agent_id or settings.onchain_agent_id
-        if not onchain_id:
+        from market_storefront.agent import _AGENT_IDS
+        from service.clients.erc8004.blockchain import build_erc8004_canonical_id
+        canonical: str | None = None
+        for name, chain in CHAINS.items():
+            aid = _AGENT_IDS.get(name)
+            if aid is None or not chain.identity_registry_address:
+                continue
+            canonical = build_erc8004_canonical_id(
+                chain_id=chain.chain_id,
+                identity_registry=chain.identity_registry_address,
+                agent_id=aid,
+            )
+            break
+        if canonical is None:
             return "unconfigured"
-        resolved_chain_id = chain_id()
-        identity_addr = (settings.registry.identity_registry_address or "").lower()
-        canonical = f"eip155:{resolved_chain_id}:{identity_addr}:{onchain_id}"
         wallet = (settings.wallet.address or "").lower()
 
         async def _probe(url: str) -> str:

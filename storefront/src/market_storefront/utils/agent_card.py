@@ -47,34 +47,32 @@ def build_agent_card_data(
 
 def build_erc8004_registration_file(
     agent_card_data: dict,
-    agent_id: Optional[int] = None,
-    chain_id: Optional[int] = None,
-    identity_registry: Optional[str] = None,
+    registrations: Optional[list[tuple[int, int, str]]] = None,
     supported_trust: Optional[list] = None
 ) -> dict:
     """
     Build ERC-8004 registration file JSON as per ERC-8004 spec.
-    
+
     The registration file MUST have:
     - type: "https://eips.ethereum.org/EIPS/eip-8004#registration-v1"
     - name, description, image (for ERC-721 compatibility)
     - endpoints: array with A2A endpoint pointing to agent card
     - registrations: array with agentId and agentRegistry (if registered on-chain)
     - supportedTrust: array (optional)
-    
+
     Args:
         agent_card_data: Agent card JSON data (from build_agent_card_data)
-        agent_id: Optional on-chain numeric agent ID
-        chain_id: Optional chain ID for registrations array
-        identity_registry: Optional registry address for registrations array
+        registrations: list of (agent_id, chain_id, identity_registry) triples,
+            one per chain the agent is registered on. The spec allows multiple
+            entries so a single agent can advertise its presence on N chains.
         supported_trust: Optional list of supported trust models (e.g., ["reputation"])
-    
+
     Returns:
         ERC-8004 registration file JSON dict
     """
     base_url = agent_card_data.get("url", "")
     agent_card_url = f"{base_url.rstrip('/')}/.well-known/agent-card.json"
-    
+
     # Build endpoints array - A2A endpoint points to agent card
     endpoints = [
         {
@@ -83,15 +81,17 @@ def build_erc8004_registration_file(
             "version": agent_card_data.get("version", "0.1.0")
         }
     ]
-    
+
     # Add capabilities if available (for MCP endpoints)
     if agent_card_data.get("capabilities"):
         endpoints[0]["capabilities"] = agent_card_data["capabilities"]
-    
+
     # Build registrations array if we have on-chain registration info
-    registrations = []
-    if agent_id is not None and chain_id is not None and identity_registry:
-        registrations.append({
+    registrations_out: list[dict] = []
+    for agent_id, chain_id, identity_registry in registrations or []:
+        if agent_id is None or chain_id is None or not identity_registry:
+            continue
+        registrations_out.append({
             "agentId": agent_id,
             "agentRegistry": f"eip155:{chain_id}:{identity_registry.lower()}"
         })
@@ -110,8 +110,8 @@ def build_erc8004_registration_file(
         registration_file["image"] = agent_card_data["image"]
     
     # Add registrations array if we have on-chain info (SHOULD have at least one per spec)
-    if registrations:
-        registration_file["registrations"] = registrations
+    if registrations_out:
+        registration_file["registrations"] = registrations_out
     
     # Add supportedTrust if provided (OPTIONAL per spec)
     if supported_trust:

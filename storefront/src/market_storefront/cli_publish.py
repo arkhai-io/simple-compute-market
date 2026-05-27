@@ -288,12 +288,27 @@ def _publish_round(
             ))
             continue
         from service.clients.token import resolve_token, TokenResolutionError
-        try:
-            token_meta = resolve_token(
-                token_address, rpc_url=rpc_url, chain_id=chain_id,
-            )
-        except TokenResolutionError as exc:
-            failed.append((res, f"chain resolve failed for {token_address}: {exc}"))
+        from .utils.config import CHAINS
+        if not CHAINS:
+            failed.append((res, "no [chains.<name>] tables configured"))
+            continue
+        token_meta = None
+        token_resolve_errors: list[str] = []
+        for chain in CHAINS.values():
+            try:
+                token_meta = resolve_token(
+                    token_address, rpc_url=chain.rpc_url, chain_id=chain.chain_id,
+                )
+                break
+            except TokenResolutionError as exc:
+                token_resolve_errors.append(f"{chain.name}: {exc}")
+                continue
+        if token_meta is None:
+            failed.append((
+                res,
+                f"chain resolve failed for {token_address}: "
+                + "; ".join(token_resolve_errors),
+            ))
             continue
         token_address = token_meta.contract_address.lower()
         token_decimals = token_meta.decimals
@@ -347,25 +362,30 @@ def _publish_round(
             "region": res["region"],
         }
         from service.clients.alkahest import get_erc20_escrow_obligation_nontierable
-        from .utils.config import settings
-        try:
-            escrow_address = get_erc20_escrow_obligation_nontierable(
-                settings.chain.name,
-                config_path=settings.chain.alkahest_address_config_path,
-            )
-        except Exception as exc:
+        accepted_escrows: list[dict] = []
+        per_chain_errors: list[str] = []
+        for chain in CHAINS.values():
+            try:
+                escrow_address = get_erc20_escrow_obligation_nontierable(
+                    chain.name,
+                    config_path=chain.alkahest_address_config_path,
+                )
+            except Exception as exc:
+                per_chain_errors.append(f"{chain.name}: {exc}")
+                continue
+            accepted_escrows.append({
+                "chain_name": chain.name,
+                "escrow_address": escrow_address.lower(),
+                "fields": {"token": token_address},
+                "price_per_hour": advertised_amount,
+            })
+        if not accepted_escrows:
             failed.append((
                 res,
-                f"alkahest config could not resolve ERC20 escrow address on "
-                f"chain {settings.chain.name!r}: {exc}",
+                "alkahest config could not resolve ERC20 escrow address on any "
+                f"configured chain: {'; '.join(per_chain_errors)}",
             ))
             continue
-        accepted_escrows = [{
-            "chain_name": settings.chain.name,
-            "escrow_address": escrow_address.lower(),
-            "fields": {"token": token_address},
-            "price_per_hour": advertised_amount,
-        }]
         try:
             resp = _publish_offer(
                 base_url, offer, accepted_escrows, max_duration_seconds,
@@ -566,17 +586,22 @@ def register(app: typer.Typer) -> None:
             else settings.pricing.default_max_duration_seconds
         )
 
-        from .utils.config import chain_id as _resolve_chain_id
-        rpc_url = settings.chain.rpc_url
-        if not rpc_url:
+        from .utils.config import CHAINS
+        if not CHAINS:
             typer.secho(
-                "chain.rpc_url is not configured — required to resolve "
-                "ERC-20 token decimals on chain. Set chain.rpc_url in "
-                "config.toml.",
+                "No [chains.<name>] tables configured — required to resolve "
+                "ERC-20 token metadata on chain. Add at least one chain "
+                "entry to storefront.toml.",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(1)
-        chain_id = _resolve_chain_id()
+        # The publish loop iterates CHAINS internally; rpc_url / chain_id
+        # are kept on the watch-loop signature for back-compat but use the
+        # first configured chain as a generic resolution target. Per-chain
+        # token resolution happens inside _publish_round.
+        first_chain = next(iter(CHAINS.values()))
+        rpc_url = first_chain.rpc_url
+        chain_id = first_chain.chain_id
 
         # Mode: abort-all is mutually exclusive with the publish flags.
         if abort_all:

@@ -65,6 +65,12 @@ class ChainConfig:
     ``name`` is the table key — the dict returned by
     :func:`chains_from_config` is keyed by this exact value, and listings
     advertise it in their ``accepted_escrows[].chain_name`` tuples.
+
+    ``onchain_agent_id`` is the storefront's ERC-8004 agent ID **for this
+    chain** — every chain has its own identity registry, so an agent has
+    one ID per chain. Auto-populated by the startup identity task on
+    fresh boots (and written back to TOML); operators can also pin it
+    manually to bring an identity from elsewhere.
     """
 
     name: str
@@ -72,6 +78,7 @@ class ChainConfig:
     chain_id: int
     alkahest_address_config_path: Optional[str] = None
     identity_registry_address: Optional[str] = None
+    onchain_agent_id: Optional[int] = None
 
 
 def user_config_dir() -> Path:
@@ -519,12 +526,21 @@ def chains_from_config(
             or None
         )
 
+        raw_agent_id = sub.get("onchain_agent_id")
+        agent_id: Optional[int] = None
+        if raw_agent_id not in (None, "", 0):
+            try:
+                agent_id = int(raw_agent_id)
+            except (TypeError, ValueError):
+                agent_id = None
+
         out[name] = ChainConfig(
             name=name,
             rpc_url=rpc_url,
             chain_id=chain_id,
             alkahest_address_config_path=alkahest_path,
             identity_registry_address=identity_reg,
+            onchain_agent_id=agent_id,
         )
     return out
 

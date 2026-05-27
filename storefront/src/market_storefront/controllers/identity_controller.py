@@ -27,20 +27,24 @@ class IdentityController:
     )
     async def erc8004_registration(self) -> dict[str, Any]:
         from market_storefront.agent import (
-            _AGENT_ID,
+            _AGENT_IDS,
             agent_card_data,
         )
         from market_storefront.utils.agent_card import build_erc8004_registration_file
-        from market_storefront.utils.config import settings
+        from market_storefront.utils.config import CHAINS
 
-        registration_file = build_erc8004_registration_file(
+        registrations: list[tuple[int, int, str]] = []
+        for name, chain in CHAINS.items():
+            agent_id = _AGENT_IDS.get(name)
+            if agent_id is None or not chain.identity_registry_address:
+                continue
+            registrations.append((agent_id, chain.chain_id, chain.identity_registry_address))
+
+        return build_erc8004_registration_file(
             agent_card_data=agent_card_data,
-            agent_id=_AGENT_ID,
-            chain_id=settings.chain.chain_id,
-            identity_registry=settings.registry.identity_registry_address,
+            registrations=registrations,
             supported_trust=[],
         )
-        return registration_file
 
     @router.get(
         "/.well-known/agent-card.json",

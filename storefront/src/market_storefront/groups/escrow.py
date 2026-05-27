@@ -220,19 +220,21 @@ def show_cmd(
         ..., "--escrow-uid", "-u",
         help="0x-prefixed escrow UID to inspect.",
     ),
+    chain_name: str = typer.Option(
+        None, "--chain",
+        help="Chain name (matching a [chains.<name>] table). Required when "
+             "more than one chain is configured; defaults to the only chain "
+             "otherwise.",
+    ),
 ) -> None:
     """Read an escrow attestation from chain state.
 
-    Inputs come from CONFIG (chain.rpc_url, chain.name,
-    chain.alkahest_address_config_path) — same TOML the seller uses
-    at runtime. Symmetric with `market escrow show` on the buyer side.
-
-    The EAS contract address is read from the alkahest address config
-    (no longer overridable from the CLI — the alkahest SDK keeps every
-    obligation/EAS/arbiter address in one config object).
+    Symmetric with ``market escrow show`` on the buyer side. The chain is
+    selected by ``--chain`` (or implicit when only one is configured); the
+    EAS contract address is read from that chain's alkahest address config.
     """
     import asyncio
-    from ..utils.config import settings
+    from ..utils.config import CHAINS, settings
     from service.clients.alkahest import (
         get_alkahest_network,
         prewarm_alkahest_address_config_cache,
@@ -240,26 +242,44 @@ def show_cmd(
     )
     from alkahest_py import AlkahestClient
 
-    rpc = settings.chain.rpc_url
-    if not rpc:
+    if not CHAINS:
         typer.secho(
-            "Missing chain.rpc_url in config.toml.",
+            "No [chains.<name>] tables configured in storefront.toml.",
             err=True, fg=typer.colors.RED,
         )
         raise typer.Exit(2)
+
+    if chain_name is None:
+        if len(CHAINS) == 1:
+            chain_name = next(iter(CHAINS))
+        else:
+            typer.secho(
+                f"Multiple chains configured ({sorted(CHAINS)}); pass --chain to pick one.",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+
+    chain = CHAINS.get(chain_name)
+    if chain is None:
+        typer.secho(
+            f"Chain {chain_name!r} not configured. Available: {sorted(CHAINS)}",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
+
     if not settings.wallet.private_key:
         typer.secho(
-            "Missing seller.private_key in config.toml — alkahest_py "
+            "Missing wallet.private_key in storefront.toml — alkahest_py "
             "requires a wallet key even for read-only inspection.",
             err=True, fg=typer.colors.RED,
         )
         raise typer.Exit(2)
 
     try:
-        prewarm_alkahest_address_config_cache(settings.chain.alkahest_address_config_path)
+        prewarm_alkahest_address_config_cache(chain.alkahest_address_config_path)
         address_config = resolve_alkahest_address_config(
-            get_alkahest_network(settings.chain.name),
-            config_path=settings.chain.alkahest_address_config_path,
+            get_alkahest_network(chain.name),
+            config_path=chain.alkahest_address_config_path,
         )
     except Exception as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
@@ -267,7 +287,7 @@ def show_cmd(
 
     client = AlkahestClient(
         private_key=settings.wallet.private_key,
-        rpc_url=rpc,
+        rpc_url=chain.rpc_url,
         address_config=address_config,
     )
 

@@ -11,13 +11,14 @@ from __future__ import annotations
 import traceback
 from urllib.parse import urlparse
 
-from market_storefront.utils.config import settings, AGENT_ID, AGENT_NAME
+from market_storefront.utils.config import CHAINS, settings, AGENT_ID, AGENT_NAME
 from market_storefront.utils.zerotier import (
     BaseUrlResolutionError,
     await_base_url_resolution,
     get_zerotier_node_id,
     join_zerotier_network,
 )
+from service.config_loader import ChainConfig
 from service.clients.erc8004.blockchain import build_erc8004_canonical_id
 from service.clients.erc8004.registration import (
     RegisterOnchainConfig,
@@ -72,26 +73,24 @@ async def _resolve_base_url(port: int, base_url_raw: str | None, zerotier_networ
     return f"http://localhost:{port}"
 
 
-async def perform_registration(chain_id: int) -> int:
-    """Register the agent on-chain and return the numeric agent ID.
+async def perform_registration_for_chain(chain: ChainConfig) -> int:
+    """Register the agent on a specific chain and return the numeric agent ID.
 
-    This is the shared core used by both the ``market-storefront register``
-    CLI verb and the ``serve`` startup hook.  It reads all inputs from the
-    module-level CONFIG singleton.
+    Per-chain entry point. The storefront has N identities (one per
+    configured chain); this is the unit of work for one of them. Reads
+    wallet credentials + base-URL config from ``settings`` and the chain-
+    specific RPC + identity-registry from ``chain``.
 
-    Raises ``RuntimeError`` on any unrecoverable failure so callers can
-    treat it as a hard crash signal (serve startup) or catch and exit with
-    a non-zero code (CLI verb).
-
-    Returns the numeric agent ID (always a positive int on success).
+    Raises ``RuntimeError`` on unrecoverable failure. Returns the numeric
+    agent ID (always positive on success).
     """
     base_url_raw = settings.base_url
     zerotier_network = settings.zerotier_network
     port = settings.port
-    identity_registry_address = settings.registry.identity_registry_address
+    identity_registry_address = chain.identity_registry_address
     agent_wallet_address = settings.wallet.address
-    chain_rpc_url = settings.chain.rpc_url
-    onchain_agent_id = settings.onchain_agent_id
+    chain_rpc_url = chain.rpc_url
+    onchain_agent_id = chain.onchain_agent_id
 
     resolved_base_url = await _resolve_base_url(port, base_url_raw, zerotier_network)
     if resolved_base_url is None:
@@ -101,13 +100,13 @@ async def perform_registration(chain_id: int) -> int:
     registration_file_url = build_registration_file_url(resolved_base_url)
 
     print("=" * 70)
-    print("🔗 On-Chain Registration")
+    print(f"🔗 On-Chain Registration — chain={chain.name}")
     print("=" * 70)
     print(f"Agent Card URL: {agent_card_url}")
     print(f"Registration File URL (tokenURI): {registration_file_url}")
     print(f"Identity Registry: {identity_registry_address}")
     print(f"Chain RPC: {chain_rpc_url}")
-    print(f"Chain ID: {chain_id}")
+    print(f"Chain ID: {chain.chain_id}")
     print(f"Wallet Address: {agent_wallet_address}")
     if onchain_agent_id:
         print(f"Existing Agent ID: {onchain_agent_id}")
@@ -119,8 +118,8 @@ async def perform_registration(chain_id: int) -> int:
     missing = [
         k for k, v in {
             "wallet.private_key": agent_priv_key,
-            "chain.rpc_url": chain_rpc_url,
-            "registry.identity_registry_address": identity_registry_address,
+            f"chains.{chain.name}.rpc_url": chain_rpc_url,
+            f"chains.{chain.name}.identity_registry_address": identity_registry_address,
             "wallet.address": agent_wallet_address,
         }.items()
         if not v
@@ -137,7 +136,7 @@ async def perform_registration(chain_id: int) -> int:
             wallet_address=agent_wallet_address,
             base_url=resolved_base_url,
             agent_name=agent_name,
-            explicit_agent_id=onchain_agent_id,
+            explicit_agent_id=str(onchain_agent_id) if onchain_agent_id else None,
         ))
     except ValueError as exc:
         raise RuntimeError(str(exc)) from exc
@@ -150,7 +149,7 @@ async def perform_registration(chain_id: int) -> int:
 
     tx_hash, numeric_agent_id, updates_dict = result
     canonical_id = build_erc8004_canonical_id(
-        chain_id=chain_id,
+        chain_id=chain.chain_id,
         identity_registry=identity_registry_address,
         agent_id=numeric_agent_id,
     )
@@ -185,21 +184,38 @@ async def perform_registration(chain_id: int) -> int:
     print()
 
     if onchain_agent_id is None:
-        print("💡 Pin this in your config.toml to skip registration on next start:")
-        print(f"   [seller]\n   onchain_agent_id = \"{numeric_agent_id}\"")
+        print("💡 Pin this in your storefront.toml to skip registration on next start:")
+        print(f"   [chains.{chain.name}]\n   onchain_agent_id = {numeric_agent_id}")
 
     return numeric_agent_id
 
 
-async def run_register(chain_id: int = 1337) -> int:
+async def run_register(chain_name: str | None = None) -> int:
     """CLI entry point for ``market-storefront register``.
 
-    Thin wrapper around ``perform_registration`` that translates exceptions
-    to shell-style exit codes (0 = success, 1 = failure).
+    Registers on every configured chain (or only the named one when
+    ``chain_name`` is given). Returns 0 if every targeted registration
+    succeeded, else 1. Per-chain failures do not abort the rest of the
+    sweep — operator gets a summary line per chain.
     """
-    try:
-        await perform_registration(chain_id)
-        return 0
-    except RuntimeError as exc:
-        print(f"❌ {exc}")
+    if chain_name is not None:
+        target = CHAINS.get(chain_name)
+        if target is None:
+            print(f"❌ chain {chain_name!r} not configured. Available: {sorted(CHAINS)}")
+            return 1
+        chains_to_register = {chain_name: target}
+    else:
+        chains_to_register = dict(CHAINS)
+
+    if not chains_to_register:
+        print("❌ No [chains.<name>] tables configured. Add at least one to storefront.toml.")
         return 1
+
+    rc = 0
+    for name, chain in chains_to_register.items():
+        try:
+            await perform_registration_for_chain(chain)
+        except RuntimeError as exc:
+            print(f"❌ chain={name}: {exc}")
+            rc = 1
+    return rc

@@ -29,7 +29,7 @@ from market_storefront.resources import parse_resource_from_dict
 
 import httpx
 
-from market_storefront.utils.config import settings, chain_id, AGENT_ID, BASE_URL_OVERRIDE
+from market_storefront.utils.config import CHAINS, settings, AGENT_ID, BASE_URL_OVERRIDE
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
 from service.clients.erc8004.blockchain import build_erc8004_canonical_id  # type: ignore[import-not-found]
 from market_storefront.utils.sqlite_client import get_sqlite_client
@@ -271,46 +271,55 @@ async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> d
     return job.result or {}
 
 
-@functools.lru_cache(maxsize=1)
-def _canonical_agent_id() -> str | None:
-    """Return the full ERC-8004 canonical ID for this agent (eip155:<chain>:0x<contract>:<id>).
+def _canonical_agent_id(chain_name: str | None = None) -> str | None:
+    """Return the ERC-8004 canonical ID for this agent on a specific chain.
 
-    The provisioning service's X-Agent-ID header requires the canonical form, not the raw
-    numeric ONCHAIN_AGENT_ID.  If the ID is already canonical (starts with 'eip155:') it is
-    returned as-is; otherwise it is built from IDENTITY_REGISTRY_ADDRESS + ONCHAIN_AGENT_ID.
+    Format: ``eip155:<chain_id>:<identity_registry>:<agent_id>``.
 
-    Resolution order:
-      1. settings.onchain_agent_id — explicit pin in config.toml (highest priority)
-      2. agent._AGENT_ID — set at startup by perform_registration when no pin is present
-      3. None — falls back to AGENT_ID in callers (last resort)
+    When ``chain_name`` is omitted, picks the first configured chain that
+    has a resolved agent ID — used by call sites that identify the
+    storefront generically (provisioning service X-Agent-ID header,
+    registry CRUD where the registry is chain-agnostic). Callers that
+    know the chain (e.g. on-chain settle handlers) should pass it.
 
-    Returns None if no agent ID is available.
+    Returns ``None`` when no chain has a resolved ID.
     """
-    raw = settings.onchain_agent_id
-    if not raw:
-        # Fall back to the in-memory ID set by perform_registration at startup.
-        # This covers the case where onchain_agent_id is not pinned in config.toml
-        # but the agent successfully registered and stored the result in agent._AGENT_ID.
+    from market_storefront.agent import _AGENT_IDS
+
+    candidates: list[tuple[str, int]]
+    if chain_name is not None:
+        chain = CHAINS.get(chain_name)
+        if chain is None or not chain.identity_registry_address:
+            return None
+        aid = _AGENT_IDS.get(chain_name)
+        if aid is None:
+            return None
+        candidates = [(chain_name, aid)]
+    else:
+        candidates = []
+        for name, chain in CHAINS.items():
+            if not chain.identity_registry_address:
+                continue
+            aid = _AGENT_IDS.get(name)
+            if aid is None:
+                continue
+            candidates.append((name, aid))
+
+    for name, aid in candidates:
+        chain = CHAINS[name]
         try:
-            from market_storefront.agent import _AGENT_ID as _runtime_id
-            if _runtime_id is not None:
-                raw = str(_runtime_id)
-        except Exception:
-            pass
-    if not raw:
-        return None
-    if isinstance(raw, str) and raw.startswith("eip155:"):
-        return raw
-    try:
-        resolved_chain_id = chain_id()
-        return build_erc8004_canonical_id(
-            chain_id=resolved_chain_id,
-            identity_registry=settings.registry.identity_registry_address,
-            agent_id=int(raw),
-        )
-    except Exception as exc:
-        logger.warning("[PROVISIONING] Could not build canonical agent ID from %r: %s", raw, exc)
-        return str(raw)
+            return build_erc8004_canonical_id(
+                chain_id=chain.chain_id,
+                identity_registry=chain.identity_registry_address,
+                agent_id=aid,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[PROVISIONING] Could not build canonical agent ID for chain=%s: %s",
+                name, exc,
+            )
+            continue
+    return None
 
 
 def _make_registry_client() -> "MultiRegistryClient":
@@ -889,7 +898,7 @@ async def fulfill_compute_obligation(
             )
             async with ProvisioningClient(
                 settings.provisioning.service_url,
-                agent_id=str(settings.onchain_agent_id or ""),
+                agent_id=_canonical_agent_id() or "",
                 timeout=10,
             ) as prov_client:
                 await prov_client.register_lease(
