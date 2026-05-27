@@ -545,6 +545,250 @@ def chains_from_config(
     return out
 
 
+# ---------------------------------------------------------------------------
+# Escrow templates — operator-defined shapes for accepted_escrows entries
+# ---------------------------------------------------------------------------
+# A template captures the part of an escrow that doesn't change between
+# resources: the chain it lives on, the escrow contract address, every
+# literal field on the obligation data (token addresses, tokenIds,
+# array indices), and a named slot for each field whose value scales per
+# unit of negotiated quantity (the canonical case is `amount per hour`).
+#
+# CSV rows reference templates by name and supply rate values via a
+# `template:slot=value` DSL — the per-resource override surface is just
+# numbers, never contract field paths.
+#
+# Wire-format mapping at publish time (cli_publish):
+#   literal_fields      ← template.literal_fields
+#   rates[i].field      ← template.rate_slots[name].field
+#   rates[i].per        ← template.rate_slots[name].per
+#   rates[i].value      ← per-resource CSV cell (multiplied by duration
+#                          on the buyer side)
+
+
+@dataclass(frozen=True)
+class RateSlot:
+    """One rate-bearing field on an escrow template.
+
+    ``field`` is the dotted/indexed path into the obligation data
+    (``"amount"``, ``"erc20Amounts[0]"``). ``per`` is the unit the
+    rate scales by (``"hour"`` is the only one wired through today;
+    ``"request"``, ``"kWh"``, etc. are reserved for later).
+    """
+
+    field: str
+    per: str = "hour"
+
+
+@dataclass(frozen=True)
+class EscrowTemplate:
+    """One ``[escrow_templates.<name>]`` table.
+
+    ``name`` is the TOML table key — CSV cells reference templates by
+    this identifier. ``chain`` must match a configured ``[chains.<name>]``
+    entry. ``escrow_address`` is resolved at config-load time: a literal
+    ``0x...`` string passes through; an ``auto:<obligation-kind>`` value
+    routes through the chain's alkahest address config (override JSON
+    when present, alkahest-py SDK default otherwise).
+
+    ``literal_fields`` covers obligation-data keys whose values are
+    fixed by the operator. ``rate_slots`` covers fields whose values
+    scale per ``per`` unit; the dict is order-preserving so single-slot
+    ergonomic sugar (drop the slot name in the CSV cell when only one
+    slot exists) has a well-defined target.
+    """
+
+    name: str
+    chain: str
+    escrow_address: str
+    literal_fields: dict[str, Any]
+    rate_slots: dict[str, RateSlot]
+
+
+# Maps the ``auto:<obligation-kind>`` suffix to ``(category_attr, field)``
+# on the alkahest address config tree. Keep in sync with
+# ``service.clients.alkahest._ADDRESS_CATEGORIES``. Tierable/nontierable
+# split mirrors the contract names; attestation v2 lives in the same
+# ``attestation_addresses`` category as v1.
+_AUTO_ESCROW_LOOKUP: dict[str, tuple[str, str]] = {
+    "erc20_nontierable":         ("erc20_addresses", "escrow_obligation_nontierable"),
+    "erc20_tierable":            ("erc20_addresses", "escrow_obligation_tierable"),
+    "erc721_nontierable":        ("erc721_addresses", "escrow_obligation_nontierable"),
+    "erc721_tierable":           ("erc721_addresses", "escrow_obligation_tierable"),
+    "erc1155_nontierable":       ("erc1155_addresses", "escrow_obligation_nontierable"),
+    "erc1155_tierable":          ("erc1155_addresses", "escrow_obligation_tierable"),
+    "native_token_nontierable":  ("native_token_addresses", "escrow_obligation_nontierable"),
+    "native_token_tierable":     ("native_token_addresses", "escrow_obligation_tierable"),
+    "token_bundle_nontierable":  ("token_bundle_addresses", "escrow_obligation_nontierable"),
+    "token_bundle_tierable":     ("token_bundle_addresses", "escrow_obligation_tierable"),
+    "attestation_nontierable":   ("attestation_addresses", "escrow_obligation"),
+    "attestation2_nontierable":  ("attestation_addresses", "escrow_obligation2"),
+}
+
+
+def _resolve_auto_escrow(
+    auto_key: str,
+    chain: ChainConfig,
+) -> str:
+    """Resolve an ``auto:<obligation-kind>`` reference to a concrete address.
+
+    Raises ``ValueError`` when the auto key is unrecognised, the chain
+    lacks alkahest support, or the resolved address slot is the zero
+    address (contract not deployed on this chain).
+    """
+    if auto_key not in _AUTO_ESCROW_LOOKUP:
+        valid = ", ".join(sorted(_AUTO_ESCROW_LOOKUP))
+        raise ValueError(
+            f"unknown auto: escrow kind {auto_key!r}; expected one of: {valid}"
+        )
+    category, field = _AUTO_ESCROW_LOOKUP[auto_key]
+    from service.clients.alkahest import (
+        _load_override_config,
+        _sdk_addresses_for_chain,
+        get_alkahest_network,
+        NETWORK_ANVIL,
+    )
+
+    override = _load_override_config(chain.alkahest_address_config_path)
+    if override is not None:
+        cat = override.get(category)
+        if not isinstance(cat, dict) or field not in cat:
+            raise ValueError(
+                f"auto:{auto_key} not present in {chain.alkahest_address_config_path} "
+                f"(missing {category}.{field})"
+            )
+        addr = str(cat[field])
+    else:
+        selected = get_alkahest_network(chain.name)
+        if selected == NETWORK_ANVIL:
+            raise ValueError(
+                f"auto:{auto_key} on chain {chain.name!r}: anvil requires "
+                f"alkahest_address_config_path"
+            )
+        cfg = _sdk_addresses_for_chain(selected)
+        category_obj = getattr(cfg, category, None)
+        if category_obj is None or not hasattr(category_obj, field):
+            raise ValueError(
+                f"auto:{auto_key}: alkahest SDK has no {category}.{field} for "
+                f"chain {chain.name!r}"
+            )
+        addr = str(getattr(category_obj, field))
+    if not addr.startswith("0x") or int(addr, 16) == 0:
+        raise ValueError(
+            f"auto:{auto_key} on chain {chain.name!r}: resolved to zero address "
+            "(contract not deployed)"
+        )
+    return addr
+
+
+def escrow_templates_from_config(
+    config: Optional[dict[str, Any]] = None,
+    *,
+    chains: Optional[dict[str, ChainConfig]] = None,
+) -> dict[str, EscrowTemplate]:
+    """Return every ``[escrow_templates.<name>]`` table from the merged TOML.
+
+    Each template's ``chain`` must match a key in ``chains``; templates
+    referencing an unknown chain are dropped with a stderr warning so a
+    typo never silently changes which escrow the publish path picks.
+    ``escrow_address`` values starting with ``auto:`` resolve through the
+    chain's alkahest address config; literal ``0x...`` values pass
+    through unchanged.
+
+    Invalid templates (missing chain, unresolvable auto: key, malformed
+    rates) are dropped with a warning rather than raising, so a bad
+    template never prevents the operator from starting the storefront.
+    """
+    cfg = config if config is not None else load_user_config()
+    raw = cfg.get("escrow_templates")
+    if not isinstance(raw, dict):
+        return {}
+    if chains is None:
+        chains = chains_from_config(cfg)
+
+    out: dict[str, EscrowTemplate] = {}
+    for name, sub in raw.items():
+        if not isinstance(name, str) or not isinstance(sub, dict):
+            continue
+        chain_name = str(sub.get("chain", "") or "").strip()
+        if not chain_name:
+            print(
+                f"[config] escrow_templates.{name}: missing 'chain'; skipping",
+                file=sys.stderr,
+            )
+            continue
+        chain_cfg = chains.get(chain_name)
+        if chain_cfg is None:
+            print(
+                f"[config] escrow_templates.{name}: unknown chain {chain_name!r}; "
+                f"skipping",
+                file=sys.stderr,
+            )
+            continue
+        raw_addr = str(sub.get("escrow_address", "") or "").strip()
+        if not raw_addr:
+            print(
+                f"[config] escrow_templates.{name}: missing 'escrow_address'; "
+                f"skipping",
+                file=sys.stderr,
+            )
+            continue
+        if raw_addr.startswith("auto:"):
+            try:
+                escrow_address = _resolve_auto_escrow(raw_addr[len("auto:"):], chain_cfg)
+            except ValueError as exc:
+                print(
+                    f"[config] escrow_templates.{name}: {exc}; skipping",
+                    file=sys.stderr,
+                )
+                continue
+        else:
+            escrow_address = raw_addr
+        literal_raw = sub.get("literal") or {}
+        if not isinstance(literal_raw, dict):
+            print(
+                f"[config] escrow_templates.{name}: 'literal' must be a table; skipping",
+                file=sys.stderr,
+            )
+            continue
+        literal_fields = dict(literal_raw)
+
+        rates_raw = sub.get("rates") or {}
+        if not isinstance(rates_raw, dict):
+            print(
+                f"[config] escrow_templates.{name}: 'rates' must be a table; skipping",
+                file=sys.stderr,
+            )
+            continue
+        rate_slots: dict[str, RateSlot] = {}
+        slot_ok = True
+        for slot_name, slot_sub in rates_raw.items():
+            if not isinstance(slot_name, str) or not isinstance(slot_sub, dict):
+                continue
+            field_name = str(slot_sub.get("field", "") or "").strip()
+            if not field_name:
+                print(
+                    f"[config] escrow_templates.{name}.rates.{slot_name}: "
+                    f"missing 'field'; skipping template",
+                    file=sys.stderr,
+                )
+                slot_ok = False
+                break
+            per_unit = str(slot_sub.get("per", "hour") or "hour").strip() or "hour"
+            rate_slots[slot_name] = RateSlot(field=field_name, per=per_unit)
+        if not slot_ok:
+            continue
+
+        out[name] = EscrowTemplate(
+            name=name,
+            chain=chain_name,
+            escrow_address=escrow_address,
+            literal_fields=literal_fields,
+            rate_slots=rate_slots,
+        )
+    return out
+
+
 def registry_urls(
     config: Optional[dict[str, Any]] = None,
 ) -> list[str]:

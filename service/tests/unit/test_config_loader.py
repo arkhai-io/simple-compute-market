@@ -309,6 +309,133 @@ def test_chains_from_config_name_field_matches_dict_key():
         assert entry.name == key
 
 
+# ---------------------------------------------------------------------------
+# escrow_templates_from_config — [escrow_templates.<name>] tables become
+# EscrowTemplate entries. ``auto:`` escrow addresses route through the
+# chain's alkahest address config; literal ``0x...`` addresses pass
+# through unchanged.
+# ---------------------------------------------------------------------------
+
+
+def test_escrow_templates_returns_empty_when_no_table():
+    assert config_loader.escrow_templates_from_config({}) == {}
+    assert config_loader.escrow_templates_from_config(
+        {"escrow_templates": "not a dict"}
+    ) == {}
+
+
+def test_escrow_templates_skips_template_with_unknown_chain(capsys):
+    cfg = {
+        "chains": {"anvil": {"rpc_url": "http://localhost:8545"}},
+        "escrow_templates": {
+            "ghost": {"chain": "polygon", "escrow_address": "0x" + "ab" * 20},
+        },
+    }
+    out = config_loader.escrow_templates_from_config(cfg)
+    assert out == {}
+    captured = capsys.readouterr()
+    assert "unknown chain 'polygon'" in captured.err
+
+
+def test_escrow_templates_literal_address_passes_through():
+    cfg = {
+        "chains": {"anvil": {
+            "rpc_url": "http://localhost:8545",
+            "alkahest_address_config_path": None,
+        }},
+        "escrow_templates": {
+            "usdc": {
+                "chain": "anvil",
+                "escrow_address": "0xDEADBEEF" + "00" * 16,
+                "literal": {"token": "0xCAFEBABE" + "00" * 16},
+                "rates": {
+                    "amount": {"field": "amount", "per": "hour"},
+                },
+            },
+        },
+    }
+    out = config_loader.escrow_templates_from_config(cfg)
+    tpl = out["usdc"]
+    assert tpl.chain == "anvil"
+    assert tpl.escrow_address.lower() == ("0xDEADBEEF" + "00" * 16).lower()
+    assert tpl.literal_fields == {"token": "0xCAFEBABE" + "00" * 16}
+    assert "amount" in tpl.rate_slots
+    assert tpl.rate_slots["amount"].field == "amount"
+    assert tpl.rate_slots["amount"].per == "hour"
+
+
+def test_escrow_templates_skips_when_field_missing(capsys):
+    cfg = {
+        "chains": {"anvil": {"rpc_url": "http://localhost:8545"}},
+        "escrow_templates": {
+            "bad": {
+                "chain": "anvil",
+                "escrow_address": "0x" + "ab" * 20,
+                "rates": {"x": {"per": "hour"}},
+            },
+        },
+    }
+    out = config_loader.escrow_templates_from_config(cfg)
+    assert out == {}
+    err = capsys.readouterr().err
+    assert "missing 'field'" in err
+
+
+def test_escrow_templates_preserves_rate_slot_order():
+    cfg = {
+        "chains": {"anvil": {"rpc_url": "http://localhost:8545"}},
+        "escrow_templates": {
+            "bundle": {
+                "chain": "anvil",
+                "escrow_address": "0x" + "ab" * 20,
+                "rates": {
+                    "usdc":    {"field": "erc20Amounts[0]", "per": "hour"},
+                    "credits": {"field": "erc20Amounts[1]", "per": "hour"},
+                    "eth":     {"field": "nativeAmount",    "per": "hour"},
+                },
+            },
+        },
+    }
+    tpl = config_loader.escrow_templates_from_config(cfg)["bundle"]
+    assert list(tpl.rate_slots) == ["usdc", "credits", "eth"]
+
+
+def test_escrow_templates_zero_rate_slots_is_legal():
+    """Attestation escrows have no rate-bearing fields."""
+    cfg = {
+        "chains": {"anvil": {"rpc_url": "http://localhost:8545"}},
+        "escrow_templates": {
+            "svc": {
+                "chain": "anvil",
+                "escrow_address": "0x" + "ab" * 20,
+                "literal": {"attestationUid": "0x" + "cd" * 32},
+            },
+        },
+    }
+    tpl = config_loader.escrow_templates_from_config(cfg)["svc"]
+    assert tpl.rate_slots == {}
+    assert tpl.literal_fields == {"attestationUid": "0x" + "cd" * 32}
+
+
+def test_escrow_templates_unknown_auto_key_drops_template(capsys):
+    cfg = {
+        "chains": {"anvil": {
+            "rpc_url": "http://localhost:8545",
+            "alkahest_address_config_path": None,
+        }},
+        "escrow_templates": {
+            "weird": {
+                "chain": "anvil",
+                "escrow_address": "auto:nonsense_kind",
+            },
+        },
+    }
+    out = config_loader.escrow_templates_from_config(cfg)
+    assert out == {}
+    err = capsys.readouterr().err
+    assert "unknown auto:" in err
+
+
 def test_deep_merge_recurses_into_nested_tables():
     base = {
         "seller": {
