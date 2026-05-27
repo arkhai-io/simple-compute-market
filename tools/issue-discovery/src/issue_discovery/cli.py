@@ -85,17 +85,23 @@ def _run_profile(args: argparse.Namespace) -> int:
     return _runner(args).run_profile(args.name)
 
 
+def _run_dir(args: argparse.Namespace) -> Path:
+    if args.run_dir.is_absolute():
+        return args.run_dir
+    return args.repo_root / args.run_dir
+
+
 def _issue_list(args: argparse.Namespace) -> int:
-    return DiscoveryRunner(repo_root=args.repo_root).issue_list(args.run_dir)
+    return DiscoveryRunner(repo_root=args.repo_root).issue_list(_run_dir(args))
 
 
 def _issue_show(args: argparse.Namespace) -> int:
-    return DiscoveryRunner(repo_root=args.repo_root).issue_show(args.run_dir, args.fingerprint)
+    return DiscoveryRunner(repo_root=args.repo_root).issue_show(_run_dir(args), args.fingerprint)
 
 
 def _issue_create(args: argparse.Namespace) -> int:
     return DiscoveryRunner(repo_root=args.repo_root).issue_create(
-        args.run_dir,
+        _run_dir(args),
         args.fingerprint,
         dry_run=args.dry_run,
     )
