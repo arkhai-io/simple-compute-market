@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -100,16 +100,29 @@ class IssuePacketGenerator:
         collectors: list[dict[str, Any]],
     ) -> list[IssueCandidate]:
         candidates: list[IssueCandidate] = []
-        seen_fingerprints: set[str] = set()
+        candidate_indexes: dict[str, int] = {}
+        primary_phases: dict[str, dict[str, Any]] = {}
         for phase in phases:
             if phase.get("status") != "failed":
                 continue
             evidence = _evidence_for_phase(self.run_dir, phase, collectors)
             fingerprints = _fingerprints_for_phase(self.run_dir, phase, evidence)
             for fingerprint in fingerprints:
-                if fingerprint in seen_fingerprints:
+                if fingerprint in candidate_indexes:
+                    index = candidate_indexes[fingerprint]
+                    existing = candidates[index]
+                    merged_evidence = _merge_evidence(existing.evidence, evidence)
+                    existing.body_file.write_text(
+                        _render_body(
+                            manifest=manifest,
+                            phase=primary_phases[fingerprint],
+                            fingerprint=fingerprint,
+                            evidence=list(merged_evidence),
+                        ),
+                        encoding="utf-8",
+                    )
+                    candidates[index] = replace(existing, evidence=merged_evidence)
                     continue
-                seen_fingerprints.add(fingerprint)
                 body_file = self.issue_dir / f"{fingerprint}.md"
                 body_file.write_text(
                     _render_body(
@@ -131,6 +144,8 @@ class IssuePacketGenerator:
                         evidence=tuple(evidence),
                     )
                 )
+                candidate_indexes[fingerprint] = len(candidates) - 1
+                primary_phases[fingerprint] = phase
         return candidates
 
     def _from_workaround_failure(self, manifest: dict[str, Any]) -> IssueCandidate:
@@ -366,6 +381,10 @@ def _evidence_for_phase(
             if collector.get("stderr"):
                 evidence.append(str(collector["stderr"]))
     return sorted(dict.fromkeys(item for item in evidence if (run_dir / item).exists()))
+
+
+def _merge_evidence(existing: tuple[str, ...], new: list[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys([*existing, *new]))
 
 
 def _title_for_phase(phase: dict[str, Any], fingerprint: str) -> str:

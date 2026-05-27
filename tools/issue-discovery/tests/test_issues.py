@@ -261,6 +261,9 @@ def test_issue_generator_deduplicates_repeated_fingerprints(tmp_path: Path) -> N
     candidates = IssuePacketGenerator(run_dir).generate()
 
     assert [candidate.fingerprint for candidate in candidates] == ["stale-seller-layer-route"]
+    assert "commands/full_integration_sweep/integration_full.stdout.txt" in candidates[0].evidence
+    body = (run_dir / candidates[0].body_file.relative_to(run_dir)).read_text(encoding="utf-8")
+    assert "commands/full_integration_sweep/integration_full.stdout.txt" in body
 
 
 def test_issue_create_runs_gh_from_repo_root(tmp_path: Path, monkeypatch) -> None:
