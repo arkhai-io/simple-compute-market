@@ -30,6 +30,24 @@ sessions.
   Both helpers accept either a Pydantic model or a plain dict. Their
   point is to give consumers a single line to change per call site
   rather than coupling them to wire-format details.
+- `6c8bb5b` — Phase 2b: both `accepted_escrows` emitters
+  (`cli_publish._publish_round` and
+  `sqlite_client.synthesize_accepted_escrows_from_demand`) now
+  populate `literal_fields` + `rates` alongside the legacy fields.
+  Hidden-reserve case emits `rates=[]` to preserve the shape.
+- `df79caa` — Phase 2c prep: `primary_rate_value` /
+  `accepted_token_address` now fall back to the legacy shape when
+  the new fields are missing, so individual call sites can migrate
+  one at a time without breaking on pre-cutover entries in SQLite
+  or on the wire. 20 new helper tests in
+  `service/tests/unit/test_rate_helpers.py`.
+- `f4b0770` — Phase 2c: 6 production-code reader sites swap from
+  inline parsing to the helpers (net −31 LOC, semantics unchanged):
+  `_extract_initial_price_from_order`,
+  `_token_resource_from_accepted_escrow`, `get_refund_terms`,
+  `_extract_listing_token`, `_extract_token_contract_from_listing`,
+  `_print_publish_table`. `_seller_reference_amount` migrates
+  transitively.
 
 ## Why staged as siblings, not a rename
 
@@ -47,63 +65,6 @@ in the staging plan drops the legacy fields cleanly once every reader
 is on the helpers.
 
 ## What's left (staging plan)
-
-### Phase 2b — Emit the new shape (small, isolated)
-
-`cli_publish.py:_publish_round` builds `accepted_escrows` entries
-directly. Change it to populate both shapes:
-
-```python
-accepted_escrows.append({
-    "chain_name": chain.name,
-    "escrow_address": escrow_address.lower(),
-    "fields": {"token": token_address},           # legacy reader
-    "price_per_hour": advertised_amount,          # legacy reader
-    "literal_fields": {"token": token_address},   # new
-    "rates": [{"field": "amount", "per": "hour", "value": advertised_amount}],
-})
-```
-
-Test surface: `test_accepted_escrows_synthesis.py`, `test_cli_publish_helpers.py`,
-`test_publications_wiring.py`, `test_listing_token_extraction.py`,
-`test_extract_initial_price.py`. Add assertions on the new fields;
-leave the legacy assertions in place.
-
-### Phase 2c — Migrate readers to helpers (medium, mechanical)
-
-Every place that reads `escrow.price_per_hour` or
-`escrow.fields.get("token")` swaps to the helper:
-
-- `storefront/src/market_storefront/utils/action_executor.py:373-413,566`
-  — `_extract_initial_price_from_order`, `_token_resource_from_accepted_escrow`.
-- `storefront/src/market_storefront/utils/refund.py:161-185` — refund
-  amount derivation.
-- `storefront/src/market_storefront/utils/sync_negotiation.py:386` —
-  `_seller_reference_amount` (already calls `_extract_initial_price_from_order`
-  internally, so changes flow through once the latter migrates).
-- `storefront/src/market_storefront/cli_publish.py:500` — display only.
-- `storefront/src/market_storefront/groups/escrow.py:152` — CLI default
-  computation.
-- `storefront/src/market_storefront/utils/escrow_verification.py` —
-  check `fields.token` reads.
-- `storefront/src/market_storefront/utils/sqlite_client.py:96` —
-  storage/retrieval shape.
-
-Pattern:
-
-```python
-# before
-amount = escrow.get("price_per_hour")
-token = (escrow.get("fields") or {}).get("token")
-
-# after
-from service.schemas import primary_rate_value, accepted_token_address
-amount = primary_rate_value(escrow)
-token = accepted_token_address(escrow)
-```
-
-Tests at this stage: production code reads land cleanly because the
-emitter still populates legacy fields. No test rewrites needed yet.
 
 ### Phase 3 — CSV DSL
 
@@ -239,11 +200,11 @@ integration-tests/tests/e2e/roles/       Phase 3/4 (CSV fixtures)
 
 ## Estimated session count
 
-- Phase 2b: 1 session (small, isolated).
-- Phase 2c: 1 session (mechanical migration of ~6 production files + spot test updates).
+- ~~Phase 2b~~ — landed `6c8bb5b`.
+- ~~Phase 2c~~ — landed `f4b0770` (helper fallback prep in `df79caa`).
 - Phase 3 + 4: 1 session (CSV DSL + cli_publish refactor land together because they need the same templates wired in).
 - Phase 5 + 6: 1 session (buyer/seller dispatch + verify; ERC20-only path).
 - Phase 7: 1 session (drop legacy fields + bulk test rewrites).
 
-So ~5 sessions to fully land. Each is committable independently and
-keeps the branch green.
+So ~3 sessions left to fully land. Each is committable independently
+and keeps the branch green.
