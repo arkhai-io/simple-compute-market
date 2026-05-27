@@ -16,6 +16,8 @@ from typing import Any
 
 import pytest
 
+from service.schemas import EscrowProposal
+
 from market_storefront.utils.escrow_verification import (
     EscrowVerificationError,
     _extract_token_contract_from_listing,
@@ -496,3 +498,305 @@ class TestVerifyRejections:
                 now_unix=1_700_000_000,
                 **_make_seams(att),
             )
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — proposal-path codec dispatch + literal_fields token reader
+# ---------------------------------------------------------------------------
+
+
+_ERC20_ESCROW_ADDR = "0x" + "11" * 20
+_NATIVE_ESCROW_ADDR = "0x" + "22" * 20
+_TOKEN_LEGACY = "0x" + "BB" * 20
+
+
+@pytest.fixture
+def patched_codec_lookup(monkeypatch):
+    """Stub ``get_escrow_codec_for`` + ``address_to_slot`` so proposal-path
+    verifies don't need a real chain config. Returns a capture dict the
+    tests inspect."""
+    from service.clients import alkahest as alkahest_mod
+
+    captured: dict = {}
+
+    class _StubErc20Codec:
+        kind = "erc20_escrow_obligation_nontierable"
+
+        def resolve_address(self, chain_name, *, config_path):
+            return _ERC20_ESCROW_ADDR
+
+    class _StubNativeCodec:
+        kind = "native_token_escrow_obligation_nontierable"
+
+        def resolve_address(self, chain_name, *, config_path):
+            return _NATIVE_ESCROW_ADDR
+
+    def _stub_codec_for(chain_name, escrow_address, *, config_path=None):
+        captured.setdefault("codec_lookups", []).append(
+            (chain_name, escrow_address, config_path)
+        )
+        if escrow_address.lower() == _ERC20_ESCROW_ADDR.lower():
+            return _StubErc20Codec()
+        if escrow_address.lower() == _NATIVE_ESCROW_ADDR.lower():
+            return _StubNativeCodec()
+        raise ValueError(f"no stub codec for address {escrow_address!r}")
+
+    def _stub_address_to_slot(chain_name, address, *, config_path=None):
+        if address.lower() == ARBITER.lower():
+            return "recipient_arbiter"
+        return None
+
+    monkeypatch.setattr(
+        alkahest_mod, "get_escrow_codec_for", _stub_codec_for,
+    )
+    monkeypatch.setattr(
+        alkahest_mod, "address_to_slot", _stub_address_to_slot,
+    )
+    return captured
+
+
+def _build_seams_capturing_token():
+    """Variant of _make_seams that captures the token actually passed to
+    the obligation builder, so tests can assert which token the verifier
+    sourced."""
+    captured: dict = {}
+
+    async def _get_obligation(client, uid):
+        return _good_obligation()
+
+    def _build(*, seller_wallet, agreed_amount, duration_seconds,
+               token_contract_address, chain_name, addr_config_path=None,
+               arbiter_kind="recipient_arbiter"):
+        captured["token"] = token_contract_address
+        captured["arbiter_kind"] = arbiter_kind
+        return _canonical_obligation_data(
+            seller_wallet=seller_wallet,
+            agreed_amount=agreed_amount,
+            duration_seconds=duration_seconds,
+            token_contract_address=token_contract_address,
+        )
+
+    return {
+        "get_obligation_fn": _get_obligation,
+        "build_obligation_data_fn": _build,
+    }, captured
+
+
+def _erc20_proposal(*, fields=None, literal_fields=None):
+    return EscrowProposal(
+        chain_name=CHAIN,
+        escrow_address=_ERC20_ESCROW_ADDR,
+        fields=fields or {},
+        literal_fields=literal_fields,
+        expiration_unix=1_800_000_000,
+    )
+
+
+class TestVerifyProposalDispatch:
+    @pytest.mark.asyncio
+    async def test_reads_token_from_literal_fields(self, patched_codec_lookup):
+        seams, captured = _build_seams_capturing_token()
+        await verify_escrow_for_settlement(
+            escrow_uid="0xdead",
+            seller_wallet=SELLER,
+            agreed_price=1000,
+            agreed_duration_seconds=3600,
+            listing=_good_listing(),
+            alkahest_client=_DUMMY_CLIENT,
+            chain_name=CHAIN,
+            alkahest_address_config_path=CONFIG_PATH,
+            escrow_proposal=_erc20_proposal(literal_fields={"token": TOKEN}),
+            now_unix=1_700_000_000,
+            **seams,
+        )
+        assert captured["token"] == TOKEN
+
+    @pytest.mark.asyncio
+    async def test_literal_fields_wins_over_legacy_fields(self, patched_codec_lookup):
+        seams, captured = _build_seams_capturing_token()
+        await verify_escrow_for_settlement(
+            escrow_uid="0xdead",
+            seller_wallet=SELLER,
+            agreed_price=1000,
+            agreed_duration_seconds=3600,
+            listing=_good_listing(),
+            alkahest_client=_DUMMY_CLIENT,
+            chain_name=CHAIN,
+            alkahest_address_config_path=CONFIG_PATH,
+            escrow_proposal=_erc20_proposal(
+                fields={"token": _TOKEN_LEGACY},
+                literal_fields={"token": TOKEN},
+            ),
+            now_unix=1_700_000_000,
+            **seams,
+        )
+        assert captured["token"] == TOKEN
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_legacy_fields_when_literal_unset(self, patched_codec_lookup):
+        """A proposal persisted before the Phase 5 cutover only carries
+        ``fields`` — verifier must still find the token."""
+        seams, captured = _build_seams_capturing_token()
+        await verify_escrow_for_settlement(
+            escrow_uid="0xdead",
+            seller_wallet=SELLER,
+            agreed_price=1000,
+            agreed_duration_seconds=3600,
+            listing=_good_listing(),
+            alkahest_client=_DUMMY_CLIENT,
+            chain_name=CHAIN,
+            alkahest_address_config_path=CONFIG_PATH,
+            escrow_proposal=_erc20_proposal(fields={"token": TOKEN}),
+            now_unix=1_700_000_000,
+            **seams,
+        )
+        assert captured["token"] == TOKEN
+
+    @pytest.mark.asyncio
+    async def test_raises_when_proposal_has_no_token(self, patched_codec_lookup):
+        seams, _captured = _build_seams_capturing_token()
+        with pytest.raises(EscrowVerificationError, match="omitted token"):
+            await verify_escrow_for_settlement(
+                escrow_uid="0xdead",
+                seller_wallet=SELLER,
+                agreed_price=1000,
+                agreed_duration_seconds=3600,
+                listing=_good_listing(),
+                alkahest_client=_DUMMY_CLIENT,
+                chain_name=CHAIN,
+                alkahest_address_config_path=CONFIG_PATH,
+                escrow_proposal=_erc20_proposal(fields={}, literal_fields={}),
+                now_unix=1_700_000_000,
+                **seams,
+            )
+
+    @pytest.mark.asyncio
+    async def test_raises_not_implemented_for_non_erc20(self, patched_codec_lookup):
+        """Phase 6 ships ERC20 only; other kinds raise loudly with chain
+        + address + kind in the message."""
+        seams, _captured = _build_seams_capturing_token()
+        proposal = EscrowProposal(
+            chain_name=CHAIN,
+            escrow_address=_NATIVE_ESCROW_ADDR,
+            fields={},
+            literal_fields={"token": TOKEN},
+            expiration_unix=1_800_000_000,
+        )
+        with pytest.raises(NotImplementedError) as exc_info:
+            await verify_escrow_for_settlement(
+                escrow_uid="0xdead",
+                seller_wallet=SELLER,
+                agreed_price=1000,
+                agreed_duration_seconds=3600,
+                listing=_good_listing(),
+                alkahest_client=_DUMMY_CLIENT,
+                chain_name=CHAIN,
+                alkahest_address_config_path=CONFIG_PATH,
+                escrow_proposal=proposal,
+                now_unix=1_700_000_000,
+                **seams,
+            )
+        msg = str(exc_info.value)
+        assert "native_token_escrow_obligation_nontierable" in msg
+        assert _NATIVE_ESCROW_ADDR in msg
+        assert CHAIN in msg
+
+    @pytest.mark.asyncio
+    async def test_dispatch_gate_runs_before_token_validation(self, patched_codec_lookup):
+        """If the escrow address is non-ERC20, NotImplementedError fires
+        even when the proposal omits the token — codec lookup is the
+        first gate."""
+        seams, _captured = _build_seams_capturing_token()
+        proposal = EscrowProposal(
+            chain_name=CHAIN,
+            escrow_address=_NATIVE_ESCROW_ADDR,
+            fields={},
+            expiration_unix=1_800_000_000,
+        )
+        with pytest.raises(NotImplementedError):
+            await verify_escrow_for_settlement(
+                escrow_uid="0xdead",
+                seller_wallet=SELLER,
+                agreed_price=1000,
+                agreed_duration_seconds=3600,
+                listing=_good_listing(),
+                alkahest_client=_DUMMY_CLIENT,
+                chain_name=CHAIN,
+                alkahest_address_config_path=CONFIG_PATH,
+                escrow_proposal=proposal,
+                now_unix=1_700_000_000,
+                **seams,
+            )
+
+    @pytest.mark.asyncio
+    async def test_raises_verification_error_when_codec_lookup_fails(self, patched_codec_lookup):
+        """If the address isn't registered on any codec (misconfigured
+        chain config or stale tag), surface an EscrowVerificationError —
+        the seller would have to abort and reconcile config off-chain."""
+        seams, _captured = _build_seams_capturing_token()
+        bogus = "0x" + "ff" * 20
+        proposal = EscrowProposal(
+            chain_name=CHAIN,
+            escrow_address=bogus,
+            fields={},
+            literal_fields={"token": TOKEN},
+            expiration_unix=1_800_000_000,
+        )
+        with pytest.raises(EscrowVerificationError, match="Cannot resolve escrow codec"):
+            await verify_escrow_for_settlement(
+                escrow_uid="0xdead",
+                seller_wallet=SELLER,
+                agreed_price=1000,
+                agreed_duration_seconds=3600,
+                listing=_good_listing(),
+                alkahest_client=_DUMMY_CLIENT,
+                chain_name=CHAIN,
+                alkahest_address_config_path=CONFIG_PATH,
+                escrow_proposal=proposal,
+                now_unix=1_700_000_000,
+                **seams,
+            )
+
+    @pytest.mark.asyncio
+    async def test_arbiter_override_via_literal_fields(self, patched_codec_lookup):
+        """Arbiter override on the proposal participates regardless of
+        which sibling it lives on. The stub address_to_slot recognizes
+        ARBITER → "recipient_arbiter"."""
+        seams, captured = _build_seams_capturing_token()
+        await verify_escrow_for_settlement(
+            escrow_uid="0xdead",
+            seller_wallet=SELLER,
+            agreed_price=1000,
+            agreed_duration_seconds=3600,
+            listing=_good_listing(),
+            alkahest_client=_DUMMY_CLIENT,
+            chain_name=CHAIN,
+            alkahest_address_config_path=CONFIG_PATH,
+            escrow_proposal=_erc20_proposal(
+                literal_fields={"token": TOKEN, "arbiter": ARBITER},
+            ),
+            now_unix=1_700_000_000,
+            **seams,
+        )
+        assert captured["arbiter_kind"] == "recipient_arbiter"
+
+    @pytest.mark.asyncio
+    async def test_codec_lookup_uses_proposal_chain_and_address(self, patched_codec_lookup):
+        """Sanity check: the codec-resolve call gets the proposal's
+        (chain, address, config_path) — not the listing's or kwarg's."""
+        seams, _captured = _build_seams_capturing_token()
+        await verify_escrow_for_settlement(
+            escrow_uid="0xdead",
+            seller_wallet=SELLER,
+            agreed_price=1000,
+            agreed_duration_seconds=3600,
+            listing=_good_listing(),
+            alkahest_client=_DUMMY_CLIENT,
+            chain_name=CHAIN,
+            alkahest_address_config_path=CONFIG_PATH,
+            escrow_proposal=_erc20_proposal(literal_fields={"token": TOKEN}),
+            now_unix=1_700_000_000,
+            **seams,
+        )
+        lookups = patched_codec_lookup["codec_lookups"]
+        assert lookups == [(CHAIN, _ERC20_ESCROW_ADDR, CONFIG_PATH)]

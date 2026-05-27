@@ -194,9 +194,13 @@ async def verify_escrow_for_settlement(
         addresses for the chain (a static config lookup, not an RPC call).
     escrow_proposal:
         The buyer's ``EscrowProposal``, persisted on the negotiation
-        thread at /negotiate/new. When present, supplies the payment
-        token via ``fields["token"]`` and the escrow slot via
-        the ``(chain_name, escrow_address)`` reverse lookup. None for
+        thread at /negotiate/new. When present, the verifier resolves
+        the escrow-kind codec from ``(chain_name, escrow_address)`` and
+        refuses to verify anything other than
+        ``erc20_escrow_obligation_nontierable`` with
+        ``NotImplementedError``. Token is read via
+        ``accepted_token_address`` (literal_fields-first, legacy fields
+        fallback). Arbiter override accepts either shape too. None for
         legacy threads — verifier falls back to the listing-derived
         token and the ``escrow_kind`` default.
     escrow_kind:
@@ -229,26 +233,52 @@ async def verify_escrow_for_settlement(
 
     # The proposal (when present) is the source of truth: its
     # (chain_name, escrow_address) identifies the escrow contract and
-    # its fields["token"] / fields["arbiter"] supply the
-    # buyer-committed values. Legacy threads with no proposal fall
-    # back to the kwarg defaults + a listing-derived token.
+    # its literal_fields / fields supply the buyer-committed values.
+    # Legacy threads with no proposal fall back to the kwarg defaults
+    # + a listing-derived token.
+    from service.schemas import accepted_token_address
+
     effective_arbiter_kind = "recipient_arbiter"
+    _codec = None
     if escrow_proposal is not None:
-        from service.clients.alkahest import address_to_slot
-        slot = address_to_slot(
-            escrow_proposal.chain_name,
-            escrow_proposal.escrow_address,
-            config_path=alkahest_address_config_path,
+        from service.clients.alkahest import (
+            address_to_slot,
+            get_escrow_codec_for,
         )
-        effective_escrow_kind = slot or escrow_kind
-        proposal_token = escrow_proposal.fields.get("token")
-        if not isinstance(proposal_token, str):
+        try:
+            _codec = get_escrow_codec_for(
+                escrow_proposal.chain_name,
+                escrow_proposal.escrow_address,
+                config_path=alkahest_address_config_path,
+            )
+        except ValueError as exc:
             raise EscrowVerificationError(
-                f"escrow proposal for {escrow_uid} omitted "
-                f"fields['token']; cannot verify against chain"
+                f"Cannot resolve escrow codec for proposal "
+                f"(chain={escrow_proposal.chain_name!r}, "
+                f"address={escrow_proposal.escrow_address!r}): {exc}"
+            ) from exc
+        if _codec.kind != "erc20_escrow_obligation_nontierable":
+            raise NotImplementedError(
+                f"Seller verify not implemented for escrow kind "
+                f"{_codec.kind!r} at address "
+                f"{escrow_proposal.escrow_address!r} "
+                f"(chain {escrow_proposal.chain_name!r}); "
+                f"ERC20 non-tierable only."
+            )
+        effective_escrow_kind = _codec.kind
+        proposal_token = accepted_token_address(escrow_proposal)
+        if not isinstance(proposal_token, str) or not proposal_token:
+            raise EscrowVerificationError(
+                f"escrow proposal for {escrow_uid} omitted token "
+                f"(checked literal_fields['token'] and fields['token']); "
+                f"cannot verify against chain"
             )
         effective_token = proposal_token
-        proposal_arbiter = escrow_proposal.fields.get("arbiter")
+        proposal_literal = escrow_proposal.literal_fields or {}
+        proposal_arbiter = (
+            proposal_literal.get("arbiter")
+            or escrow_proposal.fields.get("arbiter")
+        )
         if isinstance(proposal_arbiter, str) and proposal_arbiter:
             arbiter_slot = address_to_slot(
                 escrow_proposal.chain_name, proposal_arbiter,
@@ -262,12 +292,13 @@ async def verify_escrow_for_settlement(
 
     if get_obligation_fn is None:
         from service.clients.alkahest import get_escrow_kind_codec
-        try:
-            _codec = get_escrow_kind_codec(effective_escrow_kind)
-        except ValueError as exc:
-            raise EscrowVerificationError(
-                f"Cannot read escrow {escrow_uid}: {exc}"
-            ) from exc
+        if _codec is None:
+            try:
+                _codec = get_escrow_kind_codec(effective_escrow_kind)
+            except ValueError as exc:
+                raise EscrowVerificationError(
+                    f"Cannot read escrow {escrow_uid}: {exc}"
+                ) from exc
 
         async def get_obligation_fn(client, uid):  # type: ignore[no-redef]
             return await _codec.get_obligation(client, uid)

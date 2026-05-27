@@ -90,6 +90,17 @@ sessions.
   alongside the legacy `fields`. 8 new tests in
   `buyer/tests/test_escrow_client_dispatch.py` + 2 schema tests in
   `service/tests/unit/test_escrow_proposal.py`.
+- Phase 6: seller verify in
+  `storefront/src/market_storefront/utils/escrow_verification.py:verify_escrow_for_settlement`
+  applies the same ERC20-only dispatch gate as Phase 5 on the
+  proposal-present path. Codec resolution moved from `address_to_slot`
+  (slot-name only) to `get_escrow_codec_for` (full codec); the resolved
+  codec is also reused for `get_obligation` (no double-lookup). Token
+  reader switched to `accepted_token_address` (literal-fields-first,
+  legacy-fields fallback); arbiter override now accepts the literal
+  sibling on equal footing with the legacy `fields["arbiter"]`. The
+  legacy no-proposal path is unchanged. 9 new tests in
+  `storefront/tests/unit/test_escrow_verification.py::TestVerifyProposalDispatch`.
 
 ## Why staged as siblings, not a rename
 
@@ -107,13 +118,6 @@ in the staging plan drops the legacy fields cleanly once every reader
 is on the helpers.
 
 ## What's left (staging plan)
-
-### Phase 6 — Seller verify
-
-`storefront/src/market_storefront/utils/escrow_verification.py:verify_escrow_for_settlement`
-reads on-chain obligation data per kind (`alkahest_py.erc20_escrow.get_obligation`
-etc.) and reconciles against the negotiated `literal_fields` plus
-computed rate values. Same ERC20-only dispatch as Phase 5.
 
 ### Phase 7 — Drop legacy fields
 
@@ -208,8 +212,8 @@ integration-tests/tests/e2e/roles/       Phase 3/4 (CSV fixtures)
 - ~~Phase 3~~ — CSV importer + storage.
 - ~~Phase 4~~ — cli_publish reads materialized templates from the row.
 - ~~Phase 5~~ — buyer dispatch + ERC20-only NotImplementedError gate.
-- Phase 6: 1 session (seller verify; ERC20-only decode path).
+- ~~Phase 6~~ — seller verify + ERC20-only NotImplementedError gate.
 - Phase 7: 1 session (drop legacy fields + bulk test rewrites).
 
-So ~2 sessions left to fully land. Each is committable independently
+So ~1 session left to fully land. Each is committable independently
 and keeps the branch green.
