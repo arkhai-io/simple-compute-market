@@ -238,6 +238,134 @@ class EscrowTerms(BaseModel):
     )
 
 
+# ---------------------------------------------------------------------------
+# Rate slots: per-unit-time (or per-unit-anything) rates on obligation fields.
+# A rate carries the field path on the obligation data plus the unit it
+# scales by; the value is in the payment token's base units (uint256 domain).
+# At settlement time both sides compute the final field value as
+# ``value * duration_quantum // PER_UNIT_QUANTUM[per]`` (integer division;
+# sub-unit fractions truncate, matching the prior single-rate semantics).
+# ---------------------------------------------------------------------------
+
+# Allowed values for ``RateValue.per`` and the seconds-per-unit divisor used
+# at settlement. ``hour`` is the only one wired end-to-end today;
+# ``request`` / ``kWh`` etc. are reserved for the design's "non-time rate
+# units" open question — adding one is a single dict entry plus negotiated
+# quantity (request_count, energy_kwh) carried on the deal.
+PER_UNIT_SECONDS: dict[str, int] = {
+    "hour": 3600,
+}
+
+
+class RateValue(BaseModel):
+    """One rate-bearing slot on an accepted escrow / proposal.
+
+    ``field`` is the dotted/indexed path into the obligation data
+    (``"amount"`` for ERC-20 escrows; ``"erc20Amounts[0]"``,
+    ``"nativeAmount"`` etc. for TokenBundle). ``per`` is the unit the
+    rate scales by — ``"hour"`` for the time-rate case. ``value`` is
+    the rate itself in base units, uint256-domain (decimal-digit string
+    on the wire, Python int internally).
+
+    Negotiation pressure points at ``value``; ``field`` and ``per``
+    come from the seller's escrow template and are non-negotiable.
+    """
+
+    field: str = Field(description="Obligation-data field path the rate populates.")
+    per: str = Field(default="hour", description="Unit the rate scales by.")
+    value: int = Field(description="Rate amount in payment-token base units (uint256).")
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _parse_value(cls, v: Any) -> int:
+        parsed = _parse_uint256_str(v, "value")
+        if parsed is None:
+            raise ValueError("RateValue.value must not be null")
+        return parsed
+
+    @field_serializer("value")
+    def _serialize_value(self, v: int) -> str:
+        return _serialize_uint256_str(v) or "0"
+
+
+def compute_rate_total(rate: RateValue, duration_seconds: int) -> int:
+    """Multiply a rate by the negotiated duration.
+
+    Returns the final on-chain field value for ``rate.field``. Uses
+    integer division so sub-unit fractions truncate, matching the prior
+    ``price_per_hour × duration / 3600`` semantics.
+    """
+    divisor = PER_UNIT_SECONDS.get(rate.per)
+    if divisor is None:
+        raise ValueError(f"unknown rate.per unit: {rate.per!r}")
+    return rate.value * duration_seconds // divisor
+
+
+# ---------------------------------------------------------------------------
+# AcceptedEscrow / EscrowProposal accessors
+# ---------------------------------------------------------------------------
+# Generic-escrow templates introduce ``literal_fields`` + ``rates`` in
+# place of the legacy ``fields`` + ``price_per_hour`` pair. Most consumers
+# treat an accepted_escrows entry as a JSON dict (after a round-trip
+# through SQLite or the wire); these accessors operate on either a
+# Pydantic model OR a dict, so the only change at the call site is the
+# accessor name.
+
+
+def primary_rate_value(accepted_or_proposal: Any) -> int | None:
+    """Return the headline rate's value for negotiation/display.
+
+    Today's negotiation engine treats every escrow as having a single
+    rate — that's true for ERC-20 (the ``amount`` rate) and ``None`` for
+    pure-attestation escrows. Multi-rate templates (TokenBundle) return
+    the *first* rate; vector negotiation is a deferred extension.
+
+    Returns ``None`` when the escrow advertises no rates (hidden-reserve
+    listings, attestation one-shots). Callers translate ``None`` into
+    either a hidden-reserve fallback (negotiation strategies) or a
+    "no scaling" path (settlement of pure-literal escrows).
+    """
+    rates = _rates_of(accepted_or_proposal)
+    if not rates:
+        return None
+    first = rates[0]
+    if isinstance(first, dict):
+        v = first.get("value")
+        if isinstance(v, str) and v.strip().isdigit():
+            return int(v.strip())
+        if isinstance(v, int) and not isinstance(v, bool):
+            return v
+        return None
+    return getattr(first, "value", None)
+
+
+def accepted_token_address(accepted_or_proposal: Any) -> str | None:
+    """Return the payment-token address from an ERC-20-style entry.
+
+    Reads ``literal_fields["token"]`` — the canonical place ERC-20 and
+    ERC-1155 escrows pin their payment-token. Returns ``None`` for
+    escrow kinds (NativeToken, TokenBundle, attestation) that don't
+    have a single ``token`` literal.
+    """
+    literals = _literal_fields_of(accepted_or_proposal)
+    val = literals.get("token") if isinstance(literals, dict) else None
+    return val if isinstance(val, str) and val else None
+
+
+def _rates_of(entry: Any) -> list[Any]:
+    if isinstance(entry, dict):
+        out = entry.get("rates")
+        return out if isinstance(out, list) else []
+    return list(getattr(entry, "rates", []) or [])
+
+
+def _literal_fields_of(entry: Any) -> dict[str, Any]:
+    if isinstance(entry, dict):
+        out = entry.get("literal_fields")
+        return out if isinstance(out, dict) else {}
+    return dict(getattr(entry, "literal_fields", {}) or {})
+
+
 class AcceptedEscrow(BaseModel):
     """One escrow shape the seller will accept for this listing.
 
@@ -256,6 +384,13 @@ class AcceptedEscrow(BaseModel):
     settlement from ``price_per_hour * duration_seconds / 3600``. The
     advertised per-hour rate lives in the sibling ``price_per_hour``
     field so ``fields`` stays a pure Partial<ObligationData>.
+
+    Forward-looking shape (per docs/design-generic-escrow-templates.md):
+    ``literal_fields`` + ``rates`` are first-class siblings that
+    generalize beyond single-rate ERC20. ``fields`` and ``price_per_hour``
+    remain the canonical readers until the generic-escrow migration
+    completes; emitters MAY populate ``literal_fields`` + ``rates`` in
+    addition for forward compat.
     """
 
     chain_name: str = Field(
@@ -291,6 +426,24 @@ class AcceptedEscrow(BaseModel):
             "``None`` = hidden reserve (seller did not publish a rate; "
             "negotiation must establish one via the strategy's "
             "``default_min_price``)."
+        ),
+    )
+    literal_fields: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Forward-looking sibling of ``fields`` for the generic-escrow "
+            "migration. When set, mirrors ``fields`` (literal obligation "
+            "data keys the seller has fixed). Readers should prefer the "
+            "canonical accessors in this module (``primary_rate_value``, "
+            "``accepted_token_address``) which handle either shape."
+        ),
+    )
+    rates: list[RateValue] | None = Field(
+        default=None,
+        description=(
+            "Forward-looking sibling of ``price_per_hour`` for the "
+            "generic-escrow migration. When set, lists every rate-bearing "
+            "field on the obligation. Readers should prefer ``primary_rate_value``."
         ),
     )
 
