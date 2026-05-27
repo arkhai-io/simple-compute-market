@@ -89,17 +89,9 @@ Until then: the `indexed: bool` field stays as a no-op in the loader so the YAML
 
 **Status:** Planned. Test file was on the original split-plan TODO and never landed.
 
-**Problem:** When the provider subcommands moved from the buyer CLI to `market_storefront.cli` (commit `a48ffb1`), the provider-side `register`/`serve`/`publish`/`portfolio` command tests were dropped from `buyer/tests/` and not re-added on the storefront side. `storefront/tests/unit/test_cli_publish_helpers.py` and `test_cli_serve.py` cover slices, but there's no umbrella `test_cli_admin.py` exercising the full subcommand surface.
+**Problem:** When the provider subcommands moved from the buyer CLI to `market_storefront.cli`, the provider-side command tests were dropped from `buyer/tests/` and not re-added on the storefront side. `storefront/tests/unit/test_cli_publish_helpers.py` and `test_cli_serve.py` cover slices, but there's no umbrella `test_cli_admin.py` exercising the full subcommand surface.
 
-**Planned fix:** add `storefront/tests/unit/test_cli_admin.py` covering each `market_storefront.cli` subcommand: argument parsing, config-file resolution, the `register` → `serve` → `publish` happy path against a mocked storefront, and the error cases for missing wallet / missing config / unreachable chain.
-
----
-
-### EVM-Level Registration Test
-
-**Status:** Planned. No EVM-level test for the `register_onchain_from_config` logic — detecting existing agents, idempotent updates, event parsing — beyond what the storefront integration tests cover indirectly.
-
-**Planned fix:** add `eth-tester[py-evm]` to `service` dev deps; fixture that deploys the IdentityRegistry bytecode into `EthereumTesterProvider`; tests for `register_onchain_from_config` against the local EVM. Requires bytecode in the repo (currently only ABI is vendored). Evaluate after `erc-8004-contracts` compilation artifacts are stable.
+**Planned fix:** add `storefront/tests/unit/test_cli_admin.py` covering each `market_storefront.cli` subcommand: argument parsing, config-file resolution, the `serve` → `publish` happy path against a mocked storefront, and the error cases for missing wallet / missing config / unreachable chain.
 
 ---
 

@@ -1179,7 +1179,7 @@ provisioning-service/src/
 ├── services/                   # For internal business logic
 ├── models/                     # Request and Response objects for controllers
 ├── middleware/
-│   ├── auth.py                 # AgentAuthMiddleware (ERC-8004 X-Agent-ID enforcement)
+│   ├── auth.py                 # AgentAuthMiddleware (X-Agent-ID enforcement; eip191 or eip155 form)
 │   └── rate_limit.py           # AgentRateLimitMiddleware (sliding window per agent)
 ├── db/
 │   ├── models.py               # AnsibleJob + Credential SQLAlchemy models (table: ansible_jobs)
@@ -1945,7 +1945,7 @@ This section defines the testing conventions for the Arkhai Market Stack. It exi
 
 **External boundary definition:** Any I/O that crosses a process boundary. In this codebase that means:
 - Ansible subprocess invocations — mocked at `AnsibleService` (replace `start_playbook` / `wait_for_playbook` / `check_connectivity`)
-- The ERC-8004 registry HTTP call in `AgentAuthMiddleware` — bypassed by disabling auth (`enable_auth=false` in test settings)
+- The optional registry-lookup HTTP call in `AgentAuthMiddleware` (verifies the caller's X-Agent-ID against an external registry) — bypassed by disabling auth (`enable_auth=false` in test settings)
 
 **Test setup pattern:** Use `httpx.AsyncClient` with `ASGITransport` against the real `app` instance, injected via the canonical `FooClient(transport=...)` constructor. Override container providers for `AnsibleService` before the test and restore them after. See `src/tests/integration/conftest.py` for the full fixture implementation.
 
