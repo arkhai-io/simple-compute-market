@@ -93,7 +93,8 @@ class DiscoveryRunner:
         for candidate in repository.list():
             labels = ",".join(candidate.get("labels", []))
             print(
-                f"{candidate['fingerprint']}\t{candidate['classification']}\t"
+                f"{candidate['fingerprint']}\t{candidate.get('state', 'unknown')}\t"
+                f"{candidate['classification']}\t"
                 f"{candidate['phase']}\t{labels}\t{candidate['title']}"
             )
         return 0

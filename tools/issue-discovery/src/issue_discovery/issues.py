@@ -51,6 +51,13 @@ _CLASSIFIER_PATTERNS = {
 
 
 @dataclass(frozen=True)
+class CandidateReadiness:
+    state: str
+    confidence: str
+    reason: str
+
+
+@dataclass(frozen=True)
 class IssueCandidate:
     fingerprint: str
     title: str
@@ -59,6 +66,9 @@ class IssueCandidate:
     phase: str
     body_file: Path
     evidence: tuple[str, ...]
+    state: str
+    confidence: str
+    state_reason: str
 
     def to_json(self, run_dir: Path) -> dict[str, Any]:
         return {
@@ -69,6 +79,9 @@ class IssueCandidate:
             "phase": self.phase,
             "body_file": str(self.body_file.relative_to(run_dir)),
             "evidence": list(self.evidence),
+            "state": self.state,
+            "confidence": self.confidence,
+            "state_reason": self.state_reason,
         }
 
 
@@ -108,6 +121,7 @@ class IssuePacketGenerator:
             evidence = _evidence_for_phase(self.run_dir, phase, collectors)
             fingerprints = _fingerprints_for_phase(self.run_dir, phase, evidence)
             for fingerprint in fingerprints:
+                readiness = _readiness_for(fingerprint)
                 if fingerprint in candidate_indexes:
                     index = candidate_indexes[fingerprint]
                     existing = candidates[index]
@@ -118,6 +132,7 @@ class IssuePacketGenerator:
                             phase=primary_phases[fingerprint],
                             fingerprint=fingerprint,
                             evidence=list(merged_evidence),
+                            readiness=readiness,
                         ),
                         encoding="utf-8",
                     )
@@ -130,6 +145,7 @@ class IssuePacketGenerator:
                         phase=phase,
                         fingerprint=fingerprint,
                         evidence=evidence,
+                        readiness=readiness,
                     ),
                     encoding="utf-8",
                 )
@@ -142,6 +158,9 @@ class IssuePacketGenerator:
                         phase=str(phase["id"]),
                         body_file=body_file,
                         evidence=tuple(evidence),
+                        state=readiness.state,
+                        confidence=readiness.confidence,
+                        state_reason=readiness.reason,
                     )
                 )
                 candidate_indexes[fingerprint] = len(candidates) - 1
@@ -151,11 +170,21 @@ class IssuePacketGenerator:
     def _from_workaround_failure(self, manifest: dict[str, Any]) -> IssueCandidate:
         raw = str(manifest["blocking_failure"])
         fingerprint = _slug(raw.replace(":", "-"))
+        readiness = CandidateReadiness(
+            state="harness_gap",
+            confidence="medium",
+            reason="The issue-discovery workaround failed before product/runtime evidence could be gathered.",
+        )
         body_file = self.issue_dir / f"{fingerprint}.md"
         body_file.write_text(
             "\n".join(
                 [
                     f"# Explicit workaround failed: `{raw}`",
+                    "",
+                    "## Filing Readiness",
+                    f"- State: `{readiness.state}`",
+                    f"- Confidence: `{readiness.confidence}`",
+                    f"- Reason: {readiness.reason}",
                     "",
                     "## Summary",
                     "An explicit issue-discovery continuation workaround failed before the workflow could continue.",
@@ -183,6 +212,9 @@ class IssuePacketGenerator:
             phase=raw,
             body_file=body_file,
             evidence=("manifest.json", "workarounds.jsonl"),
+            state=readiness.state,
+            confidence=readiness.confidence,
+            state_reason=readiness.reason,
         )
 
 
@@ -237,12 +269,18 @@ def _render_body(
     phase: dict[str, Any],
     fingerprint: str,
     evidence: list[str],
+    readiness: CandidateReadiness,
 ) -> str:
     failed_commands = _failed_commands_for_phase(phase)
     primary_failed_command = failed_commands[0] if failed_commands else None
     command_records = phase.get("commands") or []
     lines = [
         f"# {_title_for_phase(phase, fingerprint)}",
+        "",
+        "## Filing Readiness",
+        f"- State: `{readiness.state}`",
+        f"- Confidence: `{readiness.confidence}`",
+        f"- Reason: {readiness.reason}",
         "",
         "## Summary",
         f"`{phase['id']}` failed during `{manifest.get('mode')}` issue discovery.",
@@ -310,6 +348,60 @@ def _workarounds_for_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
         return [item for item in workarounds if isinstance(item, dict)]
     workaround = manifest.get("workaround")
     return [workaround] if isinstance(workaround, dict) else []
+
+
+def _readiness_for(fingerprint: str) -> CandidateReadiness:
+    ready_reasons = {
+        "root-service-tests-make-test": (
+            "The repo-level test command fails directly and has command-level evidence."
+        ),
+        "registry-agent-indexing-race": (
+            "The registry smoke failure has a known fingerprint and direct evidence from stack tests."
+        ),
+        "stale-seller-layer-route": (
+            "The seller role-layer route mismatch has a known fingerprint and direct evidence."
+        ),
+    }
+    if fingerprint in ready_reasons:
+        return CandidateReadiness(
+            state="ready_to_file",
+            confidence="high",
+            reason=ready_reasons[fingerprint],
+        )
+
+    targeted_repro_reasons = {
+        "redis-host-port-conflict": (
+            "Host Redis conflicts need a targeted strict failure and workaround-success repro."
+        ),
+        "storefront-volume-ownership": (
+            "Storefront volume ownership needs a targeted fresh-volume repro before filing."
+        ),
+        "zerotier-build-path": (
+            "ZeroTier build behavior needs an isolated build-path repro before filing."
+        ),
+        "e2e-marker-tests-e2e-deal": (
+            "This e2e marker failure disappeared after continuation and needs targeted confirmation."
+        ),
+    }
+    if fingerprint in targeted_repro_reasons:
+        return CandidateReadiness(
+            state="needs_targeted_repro",
+            confidence="medium",
+            reason=targeted_repro_reasons[fingerprint],
+        )
+
+    if fingerprint in {"fixed-docker-name-collision", "preexisting-compose-stack"}:
+        return CandidateReadiness(
+            state="environment_only",
+            confidence="medium",
+            reason="This finding describes local environment state that should not be filed as a repo bug by default.",
+        )
+
+    return CandidateReadiness(
+        state="needs_targeted_repro",
+        confidence="low",
+        reason="Generic phase failures need targeted reproduction before they are fileable.",
+    )
 
 
 def _fingerprints_for_phase(run_dir: Path, phase: dict[str, Any], evidence: list[str]) -> list[str]:

@@ -88,12 +88,14 @@ def assert_tracking_flow(
     assert expected_fingerprint in list_output
     assert "runtime" in list_output
     assert "compose_start_strict" in list_output
+    assert "needs_targeted_repro" in list_output
 
     show_code = main(["--repo-root", str(repo_root), "issue", "show", str(run_dir), expected_fingerprint])
     show_output = capsys.readouterr().out
     assert show_code == 0
     assert "Run `./scripts/issue-discovery strict`." in show_output
     assert "The phase failed at command `compose_up`." in show_output
+    assert "State: `needs_targeted_repro`" in show_output
     assert "`commands/compose_start_strict/compose_up.stderr.txt`" in show_output
     assert "super-secret-admin-key" not in show_output
 

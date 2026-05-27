@@ -105,6 +105,8 @@ def test_issue_generator_uses_generic_fingerprint_when_classifier_evidence_does_
     candidates = IssuePacketGenerator(run_dir).generate()
 
     assert [candidate.fingerprint for candidate in candidates] == ["compose-start-strict-compose-up"]
+    assert candidates[0].state == "needs_targeted_repro"
+    assert candidates[0].confidence == "low"
 
 
 def test_issue_generator_uses_matching_classifier_for_known_root_cause(tmp_path: Path) -> None:
@@ -122,6 +124,8 @@ def test_issue_generator_uses_matching_classifier_for_known_root_cause(tmp_path:
     candidates = IssuePacketGenerator(run_dir).generate()
 
     assert [candidate.fingerprint for candidate in candidates] == ["storefront-volume-ownership"]
+    assert candidates[0].state == "needs_targeted_repro"
+    assert candidates[0].confidence == "medium"
 
 
 def test_issue_generator_matches_docker_redis_port_conflict_text(tmp_path: Path) -> None:
@@ -143,6 +147,8 @@ def test_issue_generator_matches_docker_redis_port_conflict_text(tmp_path: Path)
     candidates = IssuePacketGenerator(run_dir).generate()
 
     assert [candidate.fingerprint for candidate in candidates] == ["redis-host-port-conflict"]
+    assert candidates[0].state == "needs_targeted_repro"
+    assert candidates[0].confidence == "medium"
 
 
 def test_issue_generator_matches_registry_agent_indexing_race(tmp_path: Path) -> None:
@@ -159,6 +165,8 @@ def test_issue_generator_matches_registry_agent_indexing_race(tmp_path: Path) ->
     candidates = IssuePacketGenerator(run_dir).generate()
 
     assert [candidate.fingerprint for candidate in candidates] == ["registry-agent-indexing-race"]
+    assert candidates[0].state == "ready_to_file"
+    assert candidates[0].confidence == "high"
 
 
 def test_issue_generator_renders_all_continue_workarounds_in_reproduction(tmp_path: Path) -> None:
@@ -261,9 +269,37 @@ def test_issue_generator_deduplicates_repeated_fingerprints(tmp_path: Path) -> N
     candidates = IssuePacketGenerator(run_dir).generate()
 
     assert [candidate.fingerprint for candidate in candidates] == ["stale-seller-layer-route"]
+    assert candidates[0].state == "ready_to_file"
+    assert candidates[0].confidence == "high"
     assert "commands/full_integration_sweep/integration_full.stdout.txt" in candidates[0].evidence
     body = (run_dir / candidates[0].body_file.relative_to(run_dir)).read_text(encoding="utf-8")
     assert "commands/full_integration_sweep/integration_full.stdout.txt" in body
+    assert "State: `ready_to_file`" in body
+    assert "Confidence: `high`" in body
+
+
+def test_issue_generator_marks_root_service_test_failure_ready_to_file(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_run(
+        run_dir,
+        phase_id="root_service_tests",
+        command_id="make_test",
+        stderr_text="make test failed",
+        classifiers=[],
+    )
+
+    candidates = IssuePacketGenerator(run_dir).generate()
+    candidate_json = json.loads(
+        (run_dir / "issue-candidates" / "candidates.jsonl").read_text(encoding="utf-8").strip()
+    )
+
+    assert [candidate.fingerprint for candidate in candidates] == ["root-service-tests-make-test"]
+    assert candidates[0].state == "ready_to_file"
+    assert candidates[0].confidence == "high"
+    assert candidate_json["state"] == "ready_to_file"
+    assert candidate_json["confidence"] == "high"
+    assert candidate_json["state_reason"]
 
 
 def test_issue_create_runs_gh_from_repo_root(tmp_path: Path, monkeypatch) -> None:
