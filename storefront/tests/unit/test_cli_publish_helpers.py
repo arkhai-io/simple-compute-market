@@ -254,6 +254,11 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     entry = calls[0]["accepted_escrows"][0]
     assert entry["fields"]["token"] == _MOCK_ADDRESS
     assert entry["price_per_hour"] == "100"
+    # New sibling shape (escrow templates wire format) ships alongside the
+    # legacy fields. Readers can migrate to primary_rate_value() /
+    # accepted_token_address() without an emitter switchover.
+    assert entry["literal_fields"] == {"token": _MOCK_ADDRESS}
+    assert entry["rates"] == [{"field": "amount", "per": "hour", "value": "100"}]
 
 
 def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):

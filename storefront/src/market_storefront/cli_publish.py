@@ -378,6 +378,12 @@ def _publish_round(
                 "escrow_address": escrow_address.lower(),
                 "fields": {"token": token_address},
                 "price_per_hour": advertised_amount,
+                "literal_fields": {"token": token_address},
+                "rates": [{
+                    "field": "amount",
+                    "per": "hour",
+                    "value": advertised_amount,
+                }],
             })
         if not accepted_escrows:
             failed.append((

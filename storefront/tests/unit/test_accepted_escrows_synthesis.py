@@ -87,6 +87,9 @@ def test_synthesize_from_token_demand(stub_alkahest_address):
     assert entry["price_per_hour"] == "1000000"
     # chain_name comes from CONFIG; just assert presence + type.
     assert isinstance(entry["chain_name"], str) and entry["chain_name"]
+    # Sibling shape (escrow templates wire format) ships alongside legacy.
+    assert entry["literal_fields"] == {"token": _TOKEN_ADDR}
+    assert entry["rates"] == [{"field": "amount", "per": "hour", "value": "1000000"}]
 
 
 def test_synthesize_from_token_demand_uint256_amount(stub_alkahest_address):
@@ -125,6 +128,10 @@ def test_synthesize_from_token_demand_hidden_reserve(stub_alkahest_address):
     assert result is not None
     assert result[0]["price_per_hour"] is None
     assert result[0]["fields"] == {"token": _TOKEN_ADDR}
+    # Hidden reserve produces no rates (no numeric value to advertise),
+    # but literal_fields are still emitted so readers see a consistent shape.
+    assert result[0]["literal_fields"] == {"token": _TOKEN_ADDR}
+    assert result[0]["rates"] == []
 
 
 def test_synthesize_accepts_json_string(stub_alkahest_address):

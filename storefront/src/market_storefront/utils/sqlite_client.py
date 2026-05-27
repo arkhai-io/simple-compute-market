@@ -94,6 +94,12 @@ def synthesize_accepted_escrows_from_demand(
             "escrow_address": escrow_address.lower(),
             "fields": {"token": contract_address},
             "price_per_hour": price_per_hour,
+            "literal_fields": {"token": contract_address},
+            "rates": [{
+                "field": "amount",
+                "per": "hour",
+                "value": price_per_hour,
+            }] if price_per_hour is not None else [],
         })
     return entries or None
 
