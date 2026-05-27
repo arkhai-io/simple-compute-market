@@ -5,6 +5,7 @@ from pathlib import Path
 from issue_discovery.config import ToolPaths, load_yaml, validate_config
 from issue_discovery.phases import load_phase_file
 from issue_discovery.runner import _select_phases
+from issue_discovery.workarounds import load_workarounds
 
 
 def repo_root() -> Path:
@@ -61,3 +62,14 @@ def test_profiles_expand_required_dependencies_in_order() -> None:
             assert set(phase.requires).issubset(seen), profile["id"]
             seen.add(phase.id)
         assert set(profile["phases"]).issubset(seen)
+
+
+def test_build_phase_can_use_explicit_continuation_command() -> None:
+    paths = ToolPaths(repo_root())
+    phase_file = load_phase_file(paths.config_dir / "phases" / "local.yaml")
+    build = next(phase for phase in phase_file.phases if phase.id == "build")
+    workarounds = load_workarounds(paths.config_dir / "workarounds.yaml")
+
+    assert build.commands[0].run == "${ISSUE_DISCOVERY_BUILD_COMMAND:-make build}"
+    assert "local_stack_build_without_zerotier" in workarounds
+    assert "ISSUE_DISCOVERY_BUILD_COMMAND" in workarounds["local_stack_build_without_zerotier"].env

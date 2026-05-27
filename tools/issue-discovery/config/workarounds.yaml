@@ -16,6 +16,14 @@ workarounds:
               ports: !reset []
           YAML
 
+  - id: local_stack_build_without_zerotier
+    status: active
+    issue: null
+    reason: Continue local stack discovery when top-level make build blocks on non-interactive ZeroTier installation.
+    removal_condition: Top-level make build no longer runs sudo ZeroTier installation as part of local image/artifact builds.
+    env:
+      ISSUE_DISCOVERY_BUILD_COMMAND: make build-runtime-images build-market-contract-deployer build-test-env build-test-image
+
   - id: storefront_volume_chown
     status: active
     issue: null

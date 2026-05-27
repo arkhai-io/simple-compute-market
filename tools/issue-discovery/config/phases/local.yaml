@@ -71,7 +71,7 @@ phases:
       - fixed_name_collision_check
     commands:
       - id: make_build
-        run: make build
+        run: ${ISSUE_DISCOVERY_BUILD_COMMAND:-make build}
         timeout_seconds: 1800
 
   - id: root_service_tests
