@@ -7,6 +7,9 @@ TARGET_USER="${SUDO_USER:-${USER:-ubuntu}}"
 TARGET_HOME="$(getent passwd "$TARGET_USER" 2>/dev/null | cut -d: -f6 || true)"
 TARGET_HOME="${TARGET_HOME:-${HOME:-/home/$TARGET_USER}}"
 VALIDATION_COMMAND="${SCM_VALIDATION_COMMAND:-./scripts/issue-discovery strict}"
+VALIDATION_SCRIPT="${SCM_VALIDATION_SCRIPT:-}"
+CLEAN_ROOM_SEQUENCE="${SCM_CLEAN_ROOM_SEQUENCE:-}"
+CLEAN_ROOM_SCRIPT_PATH="${SCM_CLEAN_ROOM_SCRIPT_PATH:-.scm-local/clean-room/run.sh}"
 RUN_VALIDATION="${SCM_RUN_VALIDATION:-1}"
 SKIP_ZEROTIER="${SCM_BOOTSTRAP_SKIP_ZEROTIER:-0}"
 export PATH="$TARGET_HOME/.local/bin:$PATH"
@@ -21,6 +24,10 @@ need_sudo() {
   else
     sudo "$@"
   fi
+}
+
+shell_quote() {
+  printf '%q' "$1"
 }
 
 require_command() {
@@ -137,22 +144,65 @@ check_tools() {
   return 1
 }
 
+log_version_command() {
+  label="$1"
+  shift
+  if "$@" >/tmp/scm-bootstrap-version.out 2>&1; then
+    while IFS= read -r line; do
+      log "$label: $line"
+    done </tmp/scm-bootstrap-version.out
+  else
+    log "$label: unavailable"
+  fi
+  rm -f /tmp/scm-bootstrap-version.out
+}
+
+log_tool_versions() {
+  log "tool versions"
+  log_version_command git git --version
+  log_version_command make make --version
+  log_version_command curl curl --version
+  log_version_command jq jq --version
+  log_version_command python3 python3 --version
+  log_version_command uv uv --version
+  log_version_command docker docker --version
+  log_version_command docker-compose docker compose version
+}
+
+validation_command_text() {
+  if [ -n "$VALIDATION_SCRIPT" ]; then
+    printf 'bash %s' "$(shell_quote "$VALIDATION_SCRIPT")"
+    return
+  fi
+  if [ -n "$CLEAN_ROOM_SEQUENCE" ]; then
+    script_dir="$(dirname "$CLEAN_ROOM_SCRIPT_PATH")"
+    printf 'mkdir -p %s && ./scripts/issue-discovery clean-room script %s > %s && bash %s' \
+      "$(shell_quote "$script_dir")" \
+      "$(shell_quote "$CLEAN_ROOM_SEQUENCE")" \
+      "$(shell_quote "$CLEAN_ROOM_SCRIPT_PATH")" \
+      "$(shell_quote "$CLEAN_ROOM_SCRIPT_PATH")"
+    return
+  fi
+  printf '%s' "$VALIDATION_COMMAND"
+}
+
 run_validation() {
   if [ "$RUN_VALIDATION" != "1" ]; then
     log "validation disabled by SCM_RUN_VALIDATION=$RUN_VALIDATION"
     return
   fi
 
-  log "running validation: $VALIDATION_COMMAND"
+  command_text="$(validation_command_text)"
+  log "running validation: $command_text"
   if [ "${EUID}" -eq 0 ] && id "$TARGET_USER" >/dev/null 2>&1; then
-    sudo -iu "$TARGET_USER" bash -lc "cd '$REPO_ROOT' && export PATH=\"\$HOME/.local/bin:\$PATH\" && $VALIDATION_COMMAND"
+    sudo -iu "$TARGET_USER" bash -lc "cd '$REPO_ROOT' && export PATH=\"\$HOME/.local/bin:\$PATH\" && $command_text"
   else
     cd "$REPO_ROOT"
     export PATH="$HOME/.local/bin:$PATH"
     if docker info >/dev/null 2>&1; then
-      bash -lc "$VALIDATION_COMMAND"
+      bash -lc "$command_text"
     elif command -v sg >/dev/null 2>&1 && getent group docker >/dev/null 2>&1; then
-      sg docker -c "cd '$REPO_ROOT' && export PATH=\"\$HOME/.local/bin:\$PATH\" && $VALIDATION_COMMAND"
+      sg docker -c "cd '$REPO_ROOT' && export PATH=\"\$HOME/.local/bin:\$PATH\" && $command_text"
     else
       log "docker is not accessible to the current user; rerun after starting a new docker-group session"
       return 1
@@ -171,6 +221,7 @@ case "$MODE" in
     install_uv
     install_zerotier
     check_tools
+    log_tool_versions
     run_validation
     ;;
   *)
