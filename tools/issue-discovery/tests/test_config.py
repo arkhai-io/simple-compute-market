@@ -130,12 +130,16 @@ def test_targeted_repro_profiles_are_minimal_and_explicit() -> None:
     assert profiles["fresh-volumes"]["phases"] == [
         "source_identity",
         "host_identity",
+        "redis_no_host_port_override",
         "fresh_volume_reset",
         "compose_preexisting_stack_check",
         "compose_start_strict",
         "readiness_checks",
         "teardown",
     ]
+    assert profiles["fresh-volumes"]["env"] == {
+        "ISSUE_DISCOVERY_COMPOSE_ARGS": "-f docker-compose.yml -f /tmp/scm-no-redis-port.yml"
+    }
     assert profiles["zerotier-build-path"]["phases"] == [
         "source_identity",
         "host_identity",

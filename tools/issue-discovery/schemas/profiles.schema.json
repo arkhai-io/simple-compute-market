@@ -19,6 +19,10 @@
         "id": { "$ref": "#/$defs/id" },
         "description": { "type": "string" },
         "phase_file": { "type": "string", "minLength": 1 },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
         "phases": {
           "type": "array",
           "items": { "$ref": "#/$defs/id" },

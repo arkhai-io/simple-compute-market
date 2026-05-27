@@ -3,9 +3,12 @@ profiles:
   - id: fresh-volumes
     description: Reproduce fresh named-volume behavior without pre-chown.
     phase_file: phases/targeted_repros.yaml
+    env:
+      ISSUE_DISCOVERY_COMPOSE_ARGS: -f docker-compose.yml -f /tmp/scm-no-redis-port.yml
     phases:
       - source_identity
       - host_identity
+      - redis_no_host_port_override
       - fresh_volume_reset
       - compose_preexisting_stack_check
       - compose_start_strict

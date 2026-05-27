@@ -71,6 +71,21 @@ def test_runtime_continuation_dry_run_starts_at_runtime_scope(capsys) -> None:
     assert "  - root_service_tests" not in phase_lines
 
 
+def test_profile_dry_run_prints_profile_env(capsys) -> None:
+    root = repo_root()
+    code = main(["--repo-root", str(root), "--dry-run", "profile", "fresh-volumes"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "issue-discovery command: profile:fresh-volumes" in captured.out
+    assert "profile_env:" in captured.out
+    assert (
+        "ISSUE_DISCOVERY_COMPOSE_ARGS=-f docker-compose.yml -f /tmp/scm-no-redis-port.yml"
+        in captured.out
+    )
+    assert "  - redis_no_host_port_override" in captured.out
+
+
 def test_issue_create_has_independent_dry_run(tmp_path: Path, capsys) -> None:
     run_dir = tmp_path / "run"
     issue_dir = run_dir / "issue-candidates"

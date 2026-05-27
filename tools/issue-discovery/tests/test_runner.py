@@ -248,6 +248,38 @@ phases:
     assert [item["id"] for item in workaround_records] == ["first", "second"]
 
 
+def test_runner_applies_profile_env_and_records_it(tmp_path: Path) -> None:
+    phase_file = tmp_path / "phases.yaml"
+    phase_file.write_text(
+        """
+schema_version: 1
+name: test
+phases:
+  - id: env_check
+    name: Env check
+    category: test
+    blocking: true
+    commands:
+      - id: check_env
+        run: test "$PROFILE_ONLY" = "profile"
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / "run"
+
+    code = DiscoveryRunner(repo_root=repo_root(), output_dir=run_dir)._run_phase_file(
+        mode="profile:test",
+        phase_path=phase_file,
+        selected_phase_ids=None,
+        workaround=None,
+        profile_env={"PROFILE_ONLY": "profile"},
+    )
+
+    assert code == 0
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["profile_env"] == {"PROFILE_ONLY": "profile"}
+
+
 def test_continuation_start_phase_assumes_prior_dependencies(tmp_path: Path) -> None:
     phase_file = tmp_path / "phases.yaml"
     phase_file.write_text(

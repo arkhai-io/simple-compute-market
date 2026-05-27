@@ -81,11 +81,13 @@ class DiscoveryRunner:
             return 2
         phase_path = self.paths.config_dir / str(selected["phase_file"])
         phase_ids = tuple(str(item) for item in selected.get("phases", []))
+        profile_env = {str(key): str(value) for key, value in (selected.get("env") or {}).items()}
         return self._run_phase_file(
             mode=f"profile:{name}",
             phase_path=phase_path,
             selected_phase_ids=phase_ids,
             workaround=None,
+            profile_env=profile_env,
         )
 
     def issue_list(self, run_dir: Path) -> int:
@@ -132,6 +134,7 @@ class DiscoveryRunner:
         phase_path: Path,
         selected_phase_ids: tuple[str, ...] | None,
         workaround: WorkaroundSpec | tuple[WorkaroundSpec, ...] | None,
+        profile_env: dict[str, str] | None = None,
     ) -> int:
         phase_file = load_phase_file(phase_path)
         workarounds = _normalize_workarounds(workaround)
@@ -141,7 +144,8 @@ class DiscoveryRunner:
         else:
             phases = _select_phases(phase_file, selected_phase_ids)
             assumed_phase_ids = ()
-        env = _merged_workaround_env(workarounds)
+        profile_env = profile_env or {}
+        env = {**profile_env, **_merged_workaround_env(workarounds)}
         skip_phases = {phase_id for spec in workarounds for phase_id in spec.skip_phases}
 
         if self.dry_run:
@@ -153,6 +157,7 @@ class DiscoveryRunner:
                 skip_phases,
                 phase_scope_start,
                 assumed_phase_ids,
+                profile_env,
             )
             return 0
 
@@ -175,6 +180,7 @@ class DiscoveryRunner:
             "selected_phases": [phase.id for phase in phases],
             "phase_scope_start": phase_scope_start,
             "assumed_passed_phases": list(assumed_phase_ids),
+            "profile_env": profile_env,
             "workaround": _workaround_json(workarounds[0]) if len(workarounds) == 1 else None,
             "workarounds": [_workaround_json(spec) for spec in workarounds],
             "output_dir": str(store.run_dir),
@@ -435,6 +441,7 @@ class DiscoveryRunner:
         skip_phases: set[str],
         phase_scope_start: str | None,
         assumed_phase_ids: tuple[str, ...],
+        profile_env: dict[str, str],
     ) -> None:
         output = self.output_dir if self.output_dir is not None else self.paths.default_output_root
         print(f"issue-discovery command: {mode}")
@@ -451,6 +458,10 @@ class DiscoveryRunner:
             print("workarounds:")
             for workaround in workarounds:
                 print(f"  - {workaround.id}")
+        if profile_env:
+            print("profile_env:")
+            for key in sorted(profile_env):
+                print(f"  {key}={profile_env[key]}")
         print("phases:")
         for phase in phases:
             suffix = " (skipped by workaround)" if phase.id in skip_phases else ""

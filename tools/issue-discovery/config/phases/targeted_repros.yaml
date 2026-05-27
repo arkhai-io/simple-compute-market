@@ -67,6 +67,19 @@ phases:
           done
           exit 1
 
+  - id: redis_no_host_port_override
+    name: Redis no-host-port override
+    category: repro_setup
+    blocking: true
+    commands:
+      - id: write_redis_override
+        run: |
+          cat >/tmp/scm-no-redis-port.yml <<'YAML'
+          services:
+            redis:
+              ports: !reset []
+          YAML
+
   - id: fresh_volume_reset
     name: Fresh storefront volume reset
     category: repro_setup
