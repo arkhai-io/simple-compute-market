@@ -252,6 +252,7 @@ phases:
       - health_provisioning
     classifiers:
       - readiness_failure
+      - storefront_volume_ownership
 
   - id: mock_host_registration
     name: Register mock provisioning host
@@ -292,8 +293,11 @@ phases:
       - id: provisioning
         run: make test-module MODULE=provisioning ACTIVE_PROFILES=local
         workdir: integration-tests
+    collect_on_failure:
+      - compose_logs
     classifiers:
       - registry_agent_indexing_race
+      - storefront_volume_ownership
 
   - id: role_layer_marker_tests
     name: Role layer marker tests
@@ -315,6 +319,7 @@ phases:
       - compose_logs
     classifiers:
       - stale_seller_layer_route
+      - storefront_volume_ownership
 
   - id: e2e_marker_tests
     name: E2E marker tests
@@ -332,6 +337,10 @@ phases:
       - id: multi_registry
         run: make test-module MODULE=multi_registry ACTIVE_PROFILES=local
         workdir: integration-tests
+    collect_on_failure:
+      - compose_logs
+    classifiers:
+      - storefront_volume_ownership
 
   - id: full_integration_sweep
     name: Full unfiltered integration test sweep
@@ -347,6 +356,7 @@ phases:
       - compose_logs
     classifiers:
       - stale_seller_layer_route
+      - storefront_volume_ownership
       - full_integration_failure
 
   - id: teardown

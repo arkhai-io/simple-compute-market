@@ -46,8 +46,6 @@ _CLASSIFIER_PATTERNS = {
     ),
     "stale-seller-layer-route": (
         'status=404 body={"detail":"not found"}',
-        "storefront at http://localhost:8001 not reachable",
-        "test_seller.py",
     ),
     "zerotier-build-path": (
         "zerotier",

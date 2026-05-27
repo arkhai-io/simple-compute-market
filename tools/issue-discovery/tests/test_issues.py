@@ -317,6 +317,87 @@ def test_issue_generator_deduplicates_repeated_fingerprints(tmp_path: Path) -> N
     assert "Confidence: `high`" in body
 
 
+def test_issue_generator_uses_compose_logs_for_storefront_volume_crash(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    command_dir = run_dir / "commands" / "role_layer_marker_tests"
+    command_dir.mkdir(parents=True)
+    (command_dir / "roles_layer_seller.stdout.txt").write_text(
+        "tests/e2e/roles/layers/test_seller.py::TestSellerNode::test_storefront_reachable\n"
+        "AssertionError: Storefront at http://localhost:8001 not reachable: "
+        "status=0 body=<urlopen error [Errno 111] Connection refused>\n",
+        encoding="utf-8",
+    )
+    (command_dir / "roles_layer_seller.stderr.txt").write_text("", encoding="utf-8")
+    (command_dir / "roles_layer_seller.meta.json").write_text(
+        json.dumps({"exit_code": 1, "timed_out": False}),
+        encoding="utf-8",
+    )
+    docker_dir = run_dir / "docker"
+    docker_dir.mkdir()
+    (docker_dir / "compose-logs.txt").write_text(
+        "simple-compute-market-bob-storefront-1 | sqlite3.OperationalError: "
+        "unable to open database file\n",
+        encoding="utf-8",
+    )
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "test-run",
+                "mode": "continue",
+                "status": "failed",
+                "phase_file": "test.yaml",
+                "output_dir": str(run_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    write_jsonl(
+        run_dir / "phases.jsonl",
+        [
+            {
+                "id": "role_layer_marker_tests",
+                "name": "Role layer marker tests",
+                "category": "stack_test",
+                "status": "failed",
+                "failed_command": "roles_layer_seller",
+                "failed_commands": ["roles_layer_seller"],
+                "classifiers": [
+                    "stale_seller_layer_route",
+                    "storefront_volume_ownership",
+                ],
+                "commands": [
+                    {
+                        "id": "roles_layer_seller",
+                        "exit_code": 1,
+                        "timed_out": False,
+                        "stdout": "commands/role_layer_marker_tests/roles_layer_seller.stdout.txt",
+                        "stderr": "commands/role_layer_marker_tests/roles_layer_seller.stderr.txt",
+                        "meta": "commands/role_layer_marker_tests/roles_layer_seller.meta.json",
+                    }
+                ],
+            }
+        ],
+    )
+    write_jsonl(
+        run_dir / "collectors.jsonl",
+        [
+            {
+                "id": "compose_logs",
+                "reason": "phase_failed:role_layer_marker_tests",
+                "output": "docker/compose-logs.txt",
+            }
+        ],
+    )
+
+    candidates = IssuePacketGenerator(run_dir).generate()
+
+    assert [candidate.fingerprint for candidate in candidates] == ["storefront-volume-ownership"]
+    assert "docker/compose-logs.txt" in candidates[0].evidence
+
+
 def test_issue_generator_marks_root_service_test_failure_ready_to_file(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir()

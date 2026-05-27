@@ -90,6 +90,23 @@ def test_build_phase_can_use_explicit_continuation_command() -> None:
     assert workarounds["storefront_volume_chown"].start_phase == "compose_start_strict"
 
 
+def test_stack_test_failures_collect_compose_logs_for_runtime_crashes() -> None:
+    paths = ToolPaths(repo_root())
+    phase_file = load_phase_file(paths.config_dir / "phases" / "local.yaml")
+    phases = {phase.id: phase for phase in phase_file.phases}
+
+    for phase_id in (
+        "readiness_checks",
+        "smoke_marker_tests",
+        "role_layer_marker_tests",
+        "e2e_marker_tests",
+        "full_integration_sweep",
+    ):
+        phase = phases[phase_id]
+        assert "storefront_volume_ownership" in phase.classifiers
+        assert "compose_logs" in phase.collect_on_failure
+
+
 def test_clean_room_local_vm_sequence_is_laddered() -> None:
     paths = ToolPaths(repo_root())
     config = load_yaml(paths.config_dir / "clean-room" / "local-vm.yaml")
