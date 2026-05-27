@@ -42,7 +42,9 @@ def _stub_resolve_token(monkeypatch):
     The publish path now eth_calls ``symbol()``/``decimals()`` for every
     token address it sees. Unit tests don't have an RPC, so we stub the
     resolver to return canned metadata for the two addresses these tests
-    use.
+    use. Also injects a synthetic [chains.anvil] entry + stubs the alkahest
+    escrow-address lookup so the per-chain accepted_escrows iteration
+    produces at least one row.
     """
     def fake_resolve(address: str, *, rpc_url: str, chain_id: int, refresh: bool = False):
         key = address.lower()
@@ -61,6 +63,28 @@ def _stub_resolve_token(monkeypatch):
     # patch the source module too.
     monkeypatch.setattr(
         "service.clients.token.resolve_token", fake_resolve,
+    )
+    from service.clients import alkahest as alkahest_mod
+    monkeypatch.setattr(
+        alkahest_mod, "get_erc20_escrow_obligation_nontierable",
+        lambda chain_name, *, config_path=None: "0x" + "cd" * 20,
+    )
+    from service.config_loader import ChainConfig
+    from market_storefront.utils import config as agent_config
+    monkeypatch.setattr(
+        agent_config,
+        "CHAINS",
+        {
+            "anvil": ChainConfig(
+                name="anvil",
+                rpc_url="http://localhost:8545",
+                chain_id=31337,
+                alkahest_address_config_path=None,
+                identity_registry_address="0x" + "11" * 20,
+                onchain_agent_id=None,
+            ),
+        },
+        raising=False,
     )
 
 

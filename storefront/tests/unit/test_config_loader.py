@@ -1,15 +1,14 @@
 """Unit tests for the storefront's dynaconf-backed configuration.
 
 Exercises the layered load (``settings.toml`` defaults + XDG overlay files)
-and the composite functions (``AGENT_ID``, ``BASE_URL_OVERRIDE``,
-``chain_id()``). No live RPC, no real network — tests build dynaconf
-instances from in-memory dicts or temp files.
+and the composite functions (``AGENT_ID``, ``BASE_URL_OVERRIDE``, ``CHAINS``).
+No live RPC, no real network — tests build dynaconf instances from in-memory
+dicts or temp files.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 from dynaconf import Dynaconf
@@ -26,7 +25,6 @@ from market_storefront.utils import config as agent_config
 def test_settings_toml_provides_baseline_defaults():
     s = agent_config.settings
     assert s.port == 8000
-    assert s.chain.name == "ethereum_sepolia"
     # registry.urls intentionally defaults to [] — see settings.toml. Shipping
     # a non-empty default would cause dynaconf's merge_enabled=True to *append*
     # any user-supplied list rather than replace it, leaving the storefront
@@ -87,37 +85,52 @@ def test_base_url_override_uses_settings_default_when_zerotier_absent():
 
 
 # ---------------------------------------------------------------------------
-# chain_id() — explicit value wins; RPC fallback when zero; raises when
-# neither chain.chain_id nor chain.rpc_url is set.
+# CHAINS — built from the [chains.<name>] overlay tables, keyed by name.
 # ---------------------------------------------------------------------------
 
 
-def test_chain_id_returns_explicit_value_when_set():
-    from tests._settings_overrides import settings_overrides
+def test_chains_dict_built_from_overlay(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text(
+        """
+[chains.anvil]
+rpc_url = "http://localhost:8545"
 
-    with settings_overrides(**{"chain.chain_id": 31337}):
-        assert agent_config.chain_id() == 31337
+[chains.base_sepolia]
+rpc_url = "https://sepolia.base.org"
+chain_id = 84532
+"""
+    )
+    s = agent_config._build_settings()
+    chains = agent_config._build_chains(s)
+    assert set(chains) == {"anvil", "base_sepolia"}
+    assert chains["anvil"].rpc_url == "http://localhost:8545"
+    assert chains["anvil"].chain_id == 31337  # from KNOWN_CHAIN_IDS
+    assert chains["base_sepolia"].chain_id == 84532
 
 
-def test_chain_id_calls_rpc_when_explicit_is_zero():
-    from tests._settings_overrides import settings_overrides
-
-    mock_w3 = MagicMock()
-    mock_w3.eth.chain_id = 42161
-    with settings_overrides(**{
-        "chain.chain_id": 0,
-        "chain.rpc_url": "http://localhost:8545",
-    }):
-        with patch.object(agent_config, "Web3", return_value=mock_w3):
-            assert agent_config.chain_id() == 42161
+def test_chains_dict_empty_when_no_chains_section(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    s = agent_config._build_settings()
+    assert agent_config._build_chains(s) == {}
 
 
-def test_chain_id_raises_when_zero_and_no_rpc():
-    from tests._settings_overrides import settings_overrides
-
-    with settings_overrides(**{"chain.chain_id": 0, "chain.rpc_url": ""}):
-        with pytest.raises(RuntimeError, match="chain.chain_id is not set"):
-            agent_config.chain_id()
+def test_chains_dict_reads_onchain_agent_id(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text(
+        """
+[chains.anvil]
+rpc_url = "http://localhost:8545"
+onchain_agent_id = 42
+"""
+    )
+    s = agent_config._build_settings()
+    chains = agent_config._build_chains(s)
+    assert chains["anvil"].onchain_agent_id == 42
 
 
 # ---------------------------------------------------------------------------
@@ -151,14 +164,12 @@ def test_storefront_toml_overlay_wins_over_settings_defaults(tmp_path):
     overlay.write_text("""
 port = 8001
 
-[chain]
-name = "anvil"
+[chains.anvil]
 rpc_url = "http://localhost:8545"
 """)
     cfg = _build_isolated(tmp_path, [overlay])
     assert cfg.port == 8001
-    assert cfg.chain.name == "anvil"
-    assert cfg.chain.rpc_url == "http://localhost:8545"
+    assert cfg.chains.anvil.rpc_url == "http://localhost:8545"
     # Untouched key still has its settings.toml default.
     assert cfg.negotiation.policy_mode == "bisection"
 
@@ -190,12 +201,12 @@ def test_env_var_wins_over_overlay_files(tmp_path, monkeypatch):
 
 
 def test_nested_env_var_via_double_underscore(tmp_path, monkeypatch):
-    """STOREFRONT_CHAIN__RPC_URL → settings.chain.rpc_url. The double
-    underscore separator is dynaconf's nested-key convention.
+    """STOREFRONT_CHAINS__ANVIL__RPC_URL → settings.chains.anvil.rpc_url.
+    The double underscore separator is dynaconf's nested-key convention.
     """
-    monkeypatch.setenv("STOREFRONT_CHAIN__RPC_URL", "http://env-host:8545")
+    monkeypatch.setenv("STOREFRONT_CHAINS__ANVIL__RPC_URL", "http://env-host:8545")
     cfg = _build_isolated(tmp_path, [])
-    assert cfg.chain.rpc_url == "http://env-host:8545"
+    assert cfg.chains.anvil.rpc_url == "http://env-host:8545"
 
 
 # ---------------------------------------------------------------------------
@@ -252,62 +263,38 @@ def test_build_settings_skips_derivation_when_both_unset(tmp_path, monkeypatch):
     assert cfg.wallet.private_key == ""
 
 
-def test_build_settings_derives_chain_name_from_rpc(tmp_path, monkeypatch):
-    """When chain.name is empty but chain.rpc_url is set, the builder
-    asks the RPC for chain_id and reverse-maps to the canonical name."""
+def test_build_chains_uses_known_chain_id_when_omitted(tmp_path, monkeypatch):
+    """A [chains.<name>] table that omits chain_id falls back to the
+    KNOWN_CHAIN_IDS lookup by name — operators don't have to repeat
+    canonical values like 31337 for anvil."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     cfg_dir = tmp_path / "arkhai"
     cfg_dir.mkdir(parents=True)
-    (cfg_dir / "storefront.toml").write_text("""
-[chain]
+    (cfg_dir / "storefront.toml").write_text(
+        """
+[chains.anvil]
 rpc_url = "http://localhost:8545"
-""")
-
-    def _urlopen(req, timeout=None):
-        import json
-        payload = json.dumps({"jsonrpc": "2.0", "id": 1, "result": "0x14a34"}).encode()  # 84532
-
-        class _R:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *a):
-                return False
-
-            def read(self):
-                return payload
-
-        return _R()
-
-    monkeypatch.setattr("urllib.request.urlopen", _urlopen)
-    cfg = agent_config._build_settings()
-    assert cfg.chain.name == "base_sepolia"
+"""
+    )
+    s = agent_config._build_settings()
+    chains = agent_config._build_chains(s)
+    assert chains["anvil"].chain_id == 31337
 
 
-def test_build_settings_chain_name_falls_back_when_rpc_unreachable(
-    tmp_path, monkeypatch,
-):
-    """If chain.name is empty and the eth_chainId call fails, the
-    builder uses 'ethereum_sepolia' as the legacy default rather than
-    leaving chain.name empty (which would break downstream switches)."""
+def test_build_chains_explicit_chain_id_wins(tmp_path, monkeypatch):
+    """An explicit chain_id in [chains.<name>] overrides the KNOWN
+    table — useful for chains the storefront doesn't ship a default
+    for, or for operators running a custom fork."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     cfg_dir = tmp_path / "arkhai"
     cfg_dir.mkdir(parents=True)
-    (cfg_dir / "storefront.toml").write_text("""
-[chain]
-rpc_url = "http://broken.example"
-""")
-
-    def _raise(*a, **kw):
-        raise OSError("network down")
-
-    monkeypatch.setattr("urllib.request.urlopen", _raise)
-    cfg = agent_config._build_settings()
-    assert cfg.chain.name == "ethereum_sepolia"
-
-
-def test_build_settings_chain_name_no_rpc_uses_default(tmp_path, monkeypatch):
-    """No rpc_url, no explicit chain.name → fall back to 'ethereum_sepolia'."""
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    cfg = agent_config._build_settings()
-    assert cfg.chain.name == "ethereum_sepolia"
+    (cfg_dir / "storefront.toml").write_text(
+        """
+[chains.anvil]
+rpc_url = "http://localhost:8545"
+chain_id = 999999
+"""
+    )
+    s = agent_config._build_settings()
+    chains = agent_config._build_chains(s)
+    assert chains["anvil"].chain_id == 999999

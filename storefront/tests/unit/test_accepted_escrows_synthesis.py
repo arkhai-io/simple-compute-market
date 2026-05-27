@@ -42,12 +42,31 @@ def tmp_db_path():
 def stub_alkahest_address(monkeypatch):
     """Stub ``get_erc20_escrow_obligation_nontierable`` to return a known
     address regardless of which chain is configured — tests don't need a
-    real alkahest network up."""
+    real alkahest network up. Also injects a synthetic ``[chains.anvil]``
+    entry so the function's per-chain iteration produces at least one row.
+    """
     from service.clients import alkahest as alkahest_mod
+    from service.config_loader import ChainConfig
+    from market_storefront.utils import config as agent_config
 
     monkeypatch.setattr(
         alkahest_mod, "get_erc20_escrow_obligation_nontierable",
         lambda chain_name, *, config_path=None: _ESCROW_ADDR,
+    )
+    monkeypatch.setattr(
+        agent_config,
+        "CHAINS",
+        {
+            "anvil": ChainConfig(
+                name="anvil",
+                rpc_url="http://localhost:8545",
+                chain_id=31337,
+                alkahest_address_config_path=None,
+                identity_registry_address="0x" + "11" * 20,
+                onchain_agent_id=None,
+            ),
+        },
+        raising=False,
     )
     yield
 
