@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from issue_discovery.config import ToolPaths, validate_config
+from issue_discovery.config import ToolPaths, load_yaml, validate_config
 from issue_discovery.phases import load_phase_file
+from issue_discovery.runner import _select_phases
 
 
 def repo_root() -> Path:
@@ -46,3 +47,17 @@ def test_phase_ids_are_unique() -> None:
     ids = [phase.id for phase in phase_file.phases]
 
     assert len(ids) == len(set(ids))
+
+
+def test_profiles_expand_required_dependencies_in_order() -> None:
+    paths = ToolPaths(repo_root())
+    profiles = load_yaml(paths.config_dir / "profiles.yaml")["profiles"]
+
+    for profile in profiles:
+        phase_file = load_phase_file(paths.config_dir / profile["phase_file"])
+        phases = _select_phases(phase_file, tuple(profile["phases"]))
+        seen: set[str] = set()
+        for phase in phases:
+            assert set(phase.requires).issubset(seen), profile["id"]
+            seen.add(phase.id)
+        assert set(profile["phases"]).issubset(seen)

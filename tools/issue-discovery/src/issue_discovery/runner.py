@@ -362,7 +362,27 @@ def _select_phases(phase_file: PhaseFile, selected_phase_ids: tuple[str, ...] | 
     missing = [phase_id for phase_id in selected_phase_ids if phase_id not in by_id]
     if missing:
         raise ValueError(f"unknown phase ids in {phase_file.name}: {', '.join(missing)}")
-    return tuple(by_id[phase_id] for phase_id in selected_phase_ids)
+    included: set[str] = set()
+    visiting: set[str] = set()
+
+    def include_with_dependencies(phase_id: str) -> None:
+        if phase_id in included:
+            return
+        if phase_id in visiting:
+            raise ValueError(f"cyclic phase dependency in {phase_file.name}: {phase_id}")
+        phase = by_id.get(phase_id)
+        if phase is None:
+            raise ValueError(f"unknown required phase id in {phase_file.name}: {phase_id}")
+        visiting.add(phase_id)
+        for required in phase.requires:
+            include_with_dependencies(required)
+        visiting.remove(phase_id)
+        included.add(phase_id)
+
+    for phase_id in selected_phase_ids:
+        include_with_dependencies(phase_id)
+
+    return tuple(phase for phase in phase_file.phases if phase.id in included)
 
 
 def _workaround_json(workaround: WorkaroundSpec | None) -> dict[str, Any] | None:
