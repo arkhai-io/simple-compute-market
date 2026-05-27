@@ -324,19 +324,32 @@ def primary_rate_value(accepted_or_proposal: Any) -> int | None:
     listings, attestation one-shots). Callers translate ``None`` into
     either a hidden-reserve fallback (negotiation strategies) or a
     "no scaling" path (settlement of pure-literal escrows).
+
+    Falls back to the legacy ``price_per_hour`` field for entries
+    written before the templates wire-shape cutover. Phase 7 drops the
+    fallback when no legacy data remains in SQLite or on the wire.
     """
     rates = _rates_of(accepted_or_proposal)
-    if not rates:
+    if rates:
+        first = rates[0]
+        if isinstance(first, dict):
+            v = first.get("value")
+            if isinstance(v, str) and v.strip().isdigit():
+                return int(v.strip())
+            if isinstance(v, int) and not isinstance(v, bool):
+                return v
+        else:
+            v = getattr(first, "value", None)
+            if isinstance(v, int) and not isinstance(v, bool):
+                return v
+    legacy = _legacy_price_per_hour(accepted_or_proposal)
+    if legacy is None:
         return None
-    first = rates[0]
-    if isinstance(first, dict):
-        v = first.get("value")
-        if isinstance(v, str) and v.strip().isdigit():
-            return int(v.strip())
-        if isinstance(v, int) and not isinstance(v, bool):
-            return v
-        return None
-    return getattr(first, "value", None)
+    if isinstance(legacy, int) and not isinstance(legacy, bool):
+        return legacy
+    if isinstance(legacy, str) and legacy.strip().isdigit():
+        return int(legacy.strip())
+    return None
 
 
 def accepted_token_address(accepted_or_proposal: Any) -> str | None:
@@ -346,10 +359,31 @@ def accepted_token_address(accepted_or_proposal: Any) -> str | None:
     ERC-1155 escrows pin their payment-token. Returns ``None`` for
     escrow kinds (NativeToken, TokenBundle, attestation) that don't
     have a single ``token`` literal.
+
+    Falls back to the legacy ``fields["token"]`` shape for entries
+    written before the templates wire-shape cutover. Phase 7 drops the
+    fallback when no legacy data remains.
     """
     literals = _literal_fields_of(accepted_or_proposal)
     val = literals.get("token") if isinstance(literals, dict) else None
-    return val if isinstance(val, str) and val else None
+    if isinstance(val, str) and val:
+        return val
+    legacy_fields = _legacy_fields(accepted_or_proposal)
+    legacy = legacy_fields.get("token") if isinstance(legacy_fields, dict) else None
+    return legacy if isinstance(legacy, str) and legacy else None
+
+
+def _legacy_price_per_hour(entry: Any) -> Any:
+    if isinstance(entry, dict):
+        return entry.get("price_per_hour")
+    return getattr(entry, "price_per_hour", None)
+
+
+def _legacy_fields(entry: Any) -> dict[str, Any]:
+    if isinstance(entry, dict):
+        out = entry.get("fields")
+        return out if isinstance(out, dict) else {}
+    return dict(getattr(entry, "fields", {}) or {})
 
 
 def _rates_of(entry: Any) -> list[Any]:
