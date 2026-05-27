@@ -137,14 +137,15 @@ def _match_accepted_escrow(
 
 
 def _extract_listing_token(listing: dict[str, Any]) -> str | None:
-    """Pull the payment-token contract address from a listing's
-    ``accepted_escrows[0].fields.token`` advertisement.
+    """Pull the payment-token contract address from a listing's primary
+    accepted-escrow entry.
 
     Returns ``None`` when no entry is advertised (compute-for-compute
     listings, or rows where synthesis at publish time couldn't resolve
     an escrow address).
     """
     import json as _json
+    from service.schemas import accepted_token_address
 
     accepted = listing.get("accepted_escrows")
     if isinstance(accepted, str):
@@ -153,13 +154,7 @@ def _extract_listing_token(listing: dict[str, Any]) -> str | None:
         except (ValueError, TypeError):
             return None
     if isinstance(accepted, list) and accepted:
-        first = accepted[0]
-        if isinstance(first, dict):
-            fields = first.get("fields")
-            if isinstance(fields, dict):
-                addr = fields.get("token")
-                if isinstance(addr, str) and addr:
-                    return addr
+        return accepted_token_address(accepted[0])
     return None
 
 

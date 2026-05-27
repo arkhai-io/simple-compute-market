@@ -499,12 +499,13 @@ def _print_publish_table(console: Console, published: list[dict], failed: list[t
     summary.add_column("Price/hr × Token")
     summary.add_column("Listing ID", overflow="fold")
     summary.add_column("Status")
+    from service.schemas import accepted_token_address, primary_rate_value
     for entry in published:
         res = entry["resource"]
         resp = entry["response"]
         first_escrow = (entry["accepted_escrows"] or [{}])[0]
-        price = first_escrow.get("price_per_hour")
-        token = (first_escrow.get("fields") or {}).get("token", "-")
+        price = primary_rate_value(first_escrow)
+        token = accepted_token_address(first_escrow) or "-"
         summary.add_row(
             res["resource_id"],
             f"{res['gpu_model']} x{res['gpu_count']}",

@@ -369,8 +369,7 @@ def extract_compute_from_order(order: dict) -> dict:
 
 
 def _extract_initial_price_from_order(order: Listing | dict) -> float:
-    """Extract the initial negotiation floor from a listing's
-    ``accepted_escrows[0].price_per_hour``.
+    """Extract the initial negotiation floor from a listing's primary rate.
 
     Tristate semantics on the advertised price:
       * ``> 0`` — public price; returned directly.
@@ -381,13 +380,14 @@ def _extract_initial_price_from_order(order: Listing | dict) -> float:
         floor. If that's also unset, raises ``ValueError`` — the caller
         (sync_negotiation) translates that to a 409 refusal.
     """
+    from service.schemas import primary_rate_value
+
     if isinstance(order, dict):
         order = Listing.model_validate(order)
 
-    advertised: float | None = None
+    advertised: int | None = None
     if order.accepted_escrows:
-        first = order.accepted_escrows[0]
-        advertised = first.price_per_hour
+        advertised = primary_rate_value(order.accepted_escrows[0])
 
     # 0 is a meaningful value (free); only None falls through to the fallback.
     if advertised is not None:
@@ -563,18 +563,9 @@ def _token_resource_from_accepted_escrow(
             contract_address=token,
             decimals=0,
         )
-    price_per_hour = accepted_escrow.get("price_per_hour")
-    # price_per_hour is uint256-domain — decimal-digit string on the wire,
-    # int internally. Accept either form; treat anything else (None,
-    # malformed, bool) as 0.
-    if isinstance(price_per_hour, bool):
-        amount = 0
-    elif isinstance(price_per_hour, int):
-        amount = price_per_hour
-    elif isinstance(price_per_hour, str) and price_per_hour.strip().isdigit():
-        amount = int(price_per_hour.strip())
-    else:
-        amount = 0
+    from service.schemas import primary_rate_value
+
+    amount = primary_rate_value(accepted_escrow) or 0
     return TokenResource(token=meta, amount=amount)
 
 

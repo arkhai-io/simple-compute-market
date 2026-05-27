@@ -88,13 +88,14 @@ def _normalize_bytes(value: Any) -> str | None:
 
 def _extract_token_contract_from_listing(listing: dict[str, Any]) -> str:
     """Pull the negotiated token contract address from the seller's
-    listing's ``accepted_escrows[0].fields.token``.
+    listing's primary accepted-escrow entry.
 
     Used as the fallback when the buyer didn't include an
     ``escrow_proposal`` on the negotiation thread. With a proposal in
-    hand the verifier reads ``proposal.fields["token"]``
-    directly.
+    hand the verifier reads ``proposal.fields["token"]`` directly.
     """
+    from service.schemas import accepted_token_address
+
     accepted = listing.get("accepted_escrows")
     if isinstance(accepted, str):
         try:
@@ -102,16 +103,12 @@ def _extract_token_contract_from_listing(listing: dict[str, Any]) -> str:
         except Exception:
             accepted = None
     if isinstance(accepted, list) and accepted:
-        first = accepted[0]
-        if isinstance(first, dict):
-            fields = first.get("fields")
-            if isinstance(fields, dict):
-                addr = fields.get("token")
-                if isinstance(addr, str) and addr:
-                    return addr
+        addr = accepted_token_address(accepted[0])
+        if addr:
+            return addr
     raise EscrowVerificationError(
         "Cannot extract token contract address from listing — "
-        "no accepted_escrows[0].fields.token"
+        "no accepted_escrows[0] token literal"
     )
 
 
