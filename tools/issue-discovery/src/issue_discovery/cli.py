@@ -72,6 +72,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     issue_create.set_defaults(handler=_issue_create)
 
+    clean_room = subparsers.add_parser("clean-room", help="Plan clean-room discovery runs.")
+    clean_room_subparsers = clean_room.add_subparsers(dest="clean_room_command", required=True)
+
+    clean_room_plan = clean_room_subparsers.add_parser("plan", help="Print a clean-room run plan.")
+    clean_room_plan.add_argument("sequence", help="Clean-room sequence id.")
+    clean_room_plan.set_defaults(handler=_clean_room_plan)
+
+    clean_room_script = clean_room_subparsers.add_parser(
+        "script",
+        help="Print an executable clean-room run script.",
+    )
+    clean_room_script.add_argument("sequence", help="Clean-room sequence id.")
+    clean_room_script.set_defaults(handler=_clean_room_script)
+
     return parser
 
 
@@ -111,6 +125,14 @@ def _issue_create(args: argparse.Namespace) -> int:
         args.fingerprint,
         dry_run=args.dry_run,
     )
+
+
+def _clean_room_plan(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).clean_room_plan(args.sequence)
+
+
+def _clean_room_script(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).clean_room_script(args.sequence)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

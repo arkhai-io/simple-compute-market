@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from issue_discovery.artifacts import ArtifactStore, utc_now_iso
+from issue_discovery.clean_room import (
+    CleanRoomSequence,
+    load_clean_room_sequence,
+    render_clean_room_script,
+    render_step_command,
+)
 from issue_discovery.collectors import CollectorRunner, load_collectors
 from issue_discovery.commands import CommandResult, run_shell_command
 from issue_discovery.config import ToolPaths, load_yaml
@@ -100,6 +107,22 @@ class DiscoveryRunner:
     def issue_create(self, run_dir: Path, fingerprint: str, dry_run: bool) -> int:
         repository = IssueRepository(run_dir.resolve(), repo_root=self.repo_root)
         return repository.create(fingerprint, dry_run=dry_run)
+
+    def clean_room_plan(self, sequence_name: str) -> int:
+        sequence = self._load_clean_room_sequence(sequence_name)
+        if sequence is None:
+            return 2
+        print(f"clean-room sequence: {sequence.id}")
+        for index, step in enumerate(sequence.steps, start=1):
+            print(f"{index}. {step.id}: {shlex.join(render_step_command(step))}")
+        return 0
+
+    def clean_room_script(self, sequence_name: str) -> int:
+        sequence = self._load_clean_room_sequence(sequence_name)
+        if sequence is None:
+            return 2
+        print(render_clean_room_script(sequence), end="")
+        return 0
 
     def _run_phase_file(
         self,
@@ -335,6 +358,23 @@ class DiscoveryRunner:
             return str(path.relative_to(self.paths.config_dir))
         except ValueError:
             return str(path)
+
+    def _load_clean_room_sequence(self, sequence_name: str) -> CleanRoomSequence | None:
+        sequence_dir = self.paths.config_dir / "clean-room"
+        sequence_path = sequence_dir / f"{sequence_name}.yaml"
+        if not sequence_path.exists():
+            print(f"unknown clean-room sequence: {sequence_name}")
+            available = sorted(path.stem for path in sequence_dir.glob("*.yaml"))
+            if available:
+                print("available clean-room sequences:")
+                for name in available:
+                    print(f"  - {name}")
+            return None
+        try:
+            return load_clean_room_sequence(sequence_path, sequence_name)
+        except KeyError:
+            print(f"unknown clean-room sequence: {sequence_name}")
+            return None
 
     def _print_plan(
         self,

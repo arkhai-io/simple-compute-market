@@ -109,3 +109,36 @@ def test_issue_commands_resolve_relative_run_dir_from_repo_root(
     captured = capsys.readouterr()
     assert code == 0
     assert "fingerprint" in captured.out
+
+
+def test_clean_room_plan_prints_ladder(capsys) -> None:
+    code = main(["--repo-root", str(repo_root()), "clean-room", "plan", "local-vm"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "clean-room sequence: local-vm" in captured.out
+    assert "strict: ./scripts/issue-discovery strict" in captured.out
+    assert (
+        "continue-build-redis-and-storefront-volume: "
+        "./scripts/issue-discovery continue --with local_stack_build_without_zerotier "
+        "--with redis_no_host_port --with storefront_volume_chown"
+        in captured.out
+    )
+
+
+def test_clean_room_script_prints_executable_shell(capsys) -> None:
+    code = main(["--repo-root", str(repo_root()), "clean-room", "script", "local-vm"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out.startswith("#!/usr/bin/env bash")
+    assert "run_step strict true ./scripts/issue-discovery strict" in captured.out
+    assert "SCM_CLEAN_ROOM_STATUS_FILE" in captured.out
+
+
+def test_clean_room_unknown_sequence_exits_nonzero(capsys) -> None:
+    code = main(["--repo-root", str(repo_root()), "clean-room", "plan", "missing"])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "unknown clean-room sequence: missing" in captured.out
