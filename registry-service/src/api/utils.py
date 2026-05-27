@@ -329,6 +329,66 @@ async def refresh_agent_owner(db: Session, agent: Agent) -> Agent:
     return agent
 
 
+def find_agent_by_identity(db: Session, identity: Identity) -> Optional[Agent]:
+    """Look up an Agent row by scheme-tagged identity (Phase 3).
+
+    The canonical lookup post-migration. Returns ``None`` when no row
+    matches; callers handle 404 / lazy-create / JIT-index themselves.
+    """
+    return db.query(Agent).filter(
+        Agent.scheme == identity.scheme,
+        Agent.identifier == identity.identifier,
+    ).first()
+
+
+def ensure_agent_for_eip191(
+    db: Session,
+    identifier: str,
+) -> Agent:
+    """Find or create an Agent row for an EIP-191 identity.
+
+    Used by the publication path for sellers identifying via ``eip191``:
+    the signed request is the trust anchor — successful signature
+    recovery proves the publisher controls the wallet at ``identifier``,
+    so we create the row on first sighting. No on-chain lookup needed.
+
+    Pre-condition: signature verification has already passed. Calling
+    this without verifying first creates rows for arbitrary callers.
+
+    Returns the row (existing or newly created).
+    """
+    identity = Identity(scheme="eip191", identifier=identifier)
+    agent = find_agent_by_identity(db, identity)
+    if agent is not None:
+        return agent
+
+    # The legacy `chain_id` + `registry_address` columns are NOT NULL but
+    # meaningless for an eip191 agent. Pre-Phase-4 we fill them with
+    # placeholders; Phase 4 drops these columns entirely.
+    agent = Agent(
+        scheme=identity.scheme,
+        identifier=identity.identifier,
+        owner=identity.identifier,
+        chain_id=0,
+        registry_address="",
+        identity_registry=None,
+        onchain_agent_id=None,
+    )
+    db.add(agent)
+    try:
+        db.commit()
+        db.refresh(agent)
+    except IntegrityError:
+        # Concurrent insert raced us — re-query.
+        db.rollback()
+        return find_agent_by_identity(db, identity)  # type: ignore[return-value]
+
+    logger.info(
+        f"[Phase3] Created eip191 agent row identifier={identity.identifier}"
+    )
+    return agent
+
+
 def find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
     """Find agent by ID.
 

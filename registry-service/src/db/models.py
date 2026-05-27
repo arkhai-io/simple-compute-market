@@ -17,22 +17,32 @@ Base = declarative_base()
 
 class Agent(Base):
     __tablename__ = "agents"
-    
+
     # Integer primary key for internal DB use
     id = Column(Integer, primary_key=True, autoincrement=True)
 
+    # ---- Pluggable identity (Phase 3 of the pluggable-identity refactor) ----
+    # Logical key is now (scheme, identifier). The defaults are nullable so
+    # the migration can leave legacy owner-less rows untagged until Phase 4
+    # cleanup. New rows must always set both — the ux_agents_scheme_identifier
+    # unique index enforces uniqueness among populated pairs.
+    scheme = Column(String, nullable=True)
+    identifier = Column(String, nullable=True)
+    scheme_metadata = Column(JSON, nullable=True)
+
+    # ---- Legacy ERC-8004 columns (deprecated; Phase 4 drops them) ----------
     # ERC-8004 canonical identifier: eip155:{chainId}:{identityRegistry}:{agentId}
-    # This is the single source of truth for agent identity
+    # Still consulted for back-compat lookups (URL paths shaped as eip155:...).
     agent_id = Column(String, nullable=True, unique=True)
-    
+
     # Components of canonical ID for querying
     chain_id = Column(Integer, nullable=False)
     identity_registry = Column(String, nullable=True)  # Registry contract address
     onchain_agent_id = Column(Integer, nullable=True)  # Numeric ERC-721 tokenId
-    
+
     # Legacy field name for backward compatibility (maps to identity_registry)
     registry_address = Column(String, nullable=False)
-    
+
     owner = Column(String, nullable=True)  # Wallet address of agent owner (for signature verification)
     token_uri = Column(Text, nullable=True)
     metadata_json = Column("metadata", JSON, default=dict)  # Database column is "metadata", Python attr is "metadata_json" to avoid SQLAlchemy conflict
@@ -40,11 +50,11 @@ class Agent(Base):
     last_heartbeat = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # Relationships
     metadata_entries = relationship("AgentMetadataEntry", back_populates="agent", cascade="all, delete-orphan")
     health_checks = relationship("HealthCheck", back_populates="agent", cascade="all, delete-orphan")
-    
+
     __table_args__ = (
         Index("idx_agents_chain_id", "chain_id"),
         Index("idx_agents_health_status", "health_status"),
@@ -53,6 +63,8 @@ class Agent(Base):
         Index("idx_agents_identity_registry", "identity_registry"),
         Index("idx_agents_onchain_agent_id", "onchain_agent_id"),
         Index("ux_agents_chain_registry_onchain", "chain_id", "identity_registry", "onchain_agent_id", unique=True),
+        Index("idx_agents_scheme", "scheme"),
+        Index("ux_agents_scheme_identifier", "scheme", "identifier", unique=True),
     )
 
 
