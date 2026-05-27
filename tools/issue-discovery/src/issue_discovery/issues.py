@@ -128,7 +128,7 @@ class IssuePacketGenerator:
             evidence = _evidence_for_phase(self.run_dir, phase, collectors)
             fingerprints = _fingerprints_for_phase(self.run_dir, phase, evidence)
             for fingerprint in fingerprints:
-                readiness = _readiness_for(fingerprint)
+                readiness = _readiness_for(fingerprint, manifest=manifest)
                 if fingerprint in candidate_indexes:
                     index = candidate_indexes[fingerprint]
                     existing = candidates[index]
@@ -420,7 +420,31 @@ def _workarounds_for_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return [workaround] if isinstance(workaround, dict) else []
 
 
-def _readiness_for(fingerprint: str) -> CandidateReadiness:
+def _readiness_for(
+    fingerprint: str,
+    *,
+    manifest: dict[str, Any] | None = None,
+) -> CandidateReadiness:
+    mode = str((manifest or {}).get("mode", ""))
+    targeted_ready_reasons = {
+        ("profile:host-redis-conflict", "redis-host-port-conflict"): (
+            "The targeted host Redis conflict profile reproduced the local compose port conflict."
+        ),
+        ("profile:fresh-volumes", "storefront-volume-ownership"): (
+            "The targeted fresh-volume profile reproduced the storefront volume ownership failure."
+        ),
+        ("profile:zerotier-build-path", "zerotier-build-path"): (
+            "The targeted ZeroTier build-path profile reproduced the non-interactive build failure."
+        ),
+    }
+    targeted_reason = targeted_ready_reasons.get((mode, fingerprint))
+    if targeted_reason is not None:
+        return CandidateReadiness(
+            state="ready_to_file",
+            confidence="high",
+            reason=targeted_reason,
+        )
+
     ready_reasons = {
         "root-service-tests-make-test": (
             "The repo-level test command fails directly and has command-level evidence."

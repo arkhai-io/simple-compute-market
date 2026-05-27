@@ -188,6 +188,26 @@ def test_issue_generator_matches_zerotier_build_path(tmp_path: Path) -> None:
     assert candidates[0].confidence == "medium"
 
 
+def test_targeted_profile_promotes_matching_candidate_to_ready(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_run(
+        run_dir,
+        phase_id="zerotier_build_path",
+        command_id="make_build",
+        stderr_text="sudo: a terminal is required while installing zerotier-one",
+        classifiers=["zerotier_build_path"],
+        manifest_extra={"mode": "profile:zerotier-build-path"},
+    )
+
+    candidates = IssuePacketGenerator(run_dir).generate()
+
+    assert [candidate.fingerprint for candidate in candidates] == ["zerotier-build-path"]
+    assert candidates[0].state == "ready_to_file"
+    assert candidates[0].confidence == "high"
+    assert "targeted ZeroTier build-path profile" in candidates[0].state_reason
+
+
 def test_issue_generator_renders_all_continue_workarounds_in_reproduction(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir()
