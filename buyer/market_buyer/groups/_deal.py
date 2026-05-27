@@ -11,12 +11,15 @@ chain-config resolution between the two commands.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 import typer
 
 from ..common import resolve_config_value
 from ..run_log import RunLog, read_run
+
+if TYPE_CHECKING:
+    from service.config_loader import ChainConfig
 
 
 @dataclass
@@ -169,43 +172,35 @@ def resolve_chain_settings(
     buyer_address: Optional[str],
     buyer_private_key: Optional[str],
     ssh_public_key: Optional[str],
-    rpc_url: Optional[str],
-    chain_name: Optional[str],
-    alkahest_addr_config: Optional[str],
+    chain: "ChainConfig",
     token_contract: Optional[str],
     token_decimals: Optional[int],
     require_ssh: bool = True,
 ) -> ChainSettings:
-    """Resolve chain/token flags + config.toml fallbacks.
+    """Resolve wallet/SSH/token credentials around a pre-selected ChainConfig.
 
-    Mirrors `market buy`'s resolution. Default token is "MOCK" via the
-    bundled token registry; explicit `--token-contract` skips the
-    lookup. Errors with typer.Exit(2) on missing required values.
+    Callers pick the chain first — via :func:`select_chain_for_listing` (buy /
+    negotiate), :func:`chain_by_name` (escrow ops with --chain), or by
+    looking it up from the run-log (settle --from). This function only
+    validates the wallet/ssh credentials and resolves token decimals against
+    the chosen chain's RPC.
 
-    `require_ssh=False` skips the SSH-key check for commands that
-    don't submit settlement (the SSH key only matters for the seller's
-    provisioning step).
+    `require_ssh=False` skips the SSH-key check for commands that don't
+    submit settlement.
     """
-    from ..common import resolve_buyer_wallet, resolve_chain_name, resolve_ssh_public_key
+    from ..common import resolve_buyer_wallet, resolve_ssh_public_key
 
     addr, pk = resolve_buyer_wallet(
         override_addr=buyer_address, override_pk=buyer_private_key,
     )
     ssh = resolve_ssh_public_key(override=ssh_public_key)
-    rpc = resolve_config_value(override=rpc_url, toml_path="chain.rpc_url")
-    chain = resolve_chain_name(override=chain_name, rpc_url=rpc)
-    addr_cfg = resolve_config_value(
-        override=alkahest_addr_config, toml_path="chain.alkahest_address_config_path",
-    )
 
     _key_for = {
         "buyer_priv_key": "wallet.private_key",
-        "rpc_url": "chain.rpc_url",
         "ssh_public_key": "wallet.ssh_public_key",
     }
     missing = [n for n, v in (
         ("buyer_priv_key", pk),
-        ("rpc_url", rpc),
     ) if not v]
     if require_ssh and not ssh:
         missing.append("ssh_public_key")
@@ -234,18 +229,16 @@ def resolve_chain_settings(
         )
         raise typer.Exit(2)
     if decimals is None:
-        # No explicit --token-decimals — resolve on chain.
-        from ..common import resolve_chain_id
         from service.clients.token import resolve_token, TokenResolutionError
         try:
             meta = resolve_token(
-                tc, rpc_url=rpc, chain_id=resolve_chain_id(rpc),
+                tc, rpc_url=chain.rpc_url, chain_id=chain.chain_id,
             )
             decimals = meta.decimals
         except (TokenResolutionError, RuntimeError) as exc:
             typer.secho(
-                f"Could not resolve token {tc} on chain — pass "
-                f"--token-decimals or check chain.rpc_url. ({exc})",
+                f"Could not resolve token {tc} on chain {chain.name!r} — pass "
+                f"--token-decimals or check the chain's rpc_url. ({exc})",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(2)
@@ -254,9 +247,9 @@ def resolve_chain_settings(
         buyer_address=addr,
         buyer_private_key=pk,
         ssh_public_key=ssh,
-        rpc_url=rpc,
-        chain_name=chain,
-        alkahest_addr_config=addr_cfg or None,
+        rpc_url=chain.rpc_url,
+        chain_name=chain.name,
+        alkahest_addr_config=chain.alkahest_address_config_path,
         token_contract=tc,
         token_decimals=decimals,
     )

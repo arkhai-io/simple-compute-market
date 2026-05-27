@@ -343,6 +343,7 @@ def submit_settlement(
     ssh_public_key: str,
     buyer_address: str,
     buyer_private_key: str,
+    chain_name: str,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
     max_attempts: int = 6,
     retry_backoff: float = 3.0,
@@ -355,12 +356,17 @@ def submit_settlement(
     public RPC nodes can lag the just-mined create-escrow tx by 5-15s,
     surfacing as ``"buffer overrun while deserializing"`` / "Failed to
     read escrow" detail. Non-matching errors bubble up immediately.
+
+    ``chain_name`` tells the seller which configured ``[chains.<name>]``
+    entry to dispatch the on-chain verify against — required since the
+    seller may serve multiple chains.
     """
     url = seller_url.rstrip("/") + f"/api/v1/settle/{escrow_uid}"
     body = {
         "negotiation_id": negotiation_id,
         "ssh_public_key": ssh_public_key,
         "buyer_address": buyer_address,
+        "chain_name": chain_name,
     }
     last_exc: RuntimeError | None = None
     for attempt in range(1, max_attempts + 1):
@@ -943,7 +949,14 @@ def _settle_one(
             attempts=attempts,
         )
     escrow_uid = escrow_uids[0]
-    on_event("escrow_created", {"escrow_uid": escrow_uid, "all_uids": escrow_uids})
+    on_event(
+        "escrow_created",
+        {
+            "escrow_uid": escrow_uid,
+            "all_uids": escrow_uids,
+            "chain_name": accepted_proposal.chain_name,
+        },
+    )
 
     submit_settlement(
         seller_url=seller_url,
@@ -952,6 +965,7 @@ def _settle_one(
         ssh_public_key=provision.ssh_public_key,
         buyer_address=config.buyer_address,
         buyer_private_key=config.buyer_private_key,
+        chain_name=accepted_proposal.chain_name,
     )
     on_event("settlement_submitted", {"escrow_uid": escrow_uid})
 

@@ -113,6 +113,12 @@ def register(app: typer.Typer) -> None:
             help="Payment token decimals. Logged for downstream "
                  "`market settle` / `escrow create`.",
         ),
+        chain_name: Optional[str] = typer.Option(
+            None, "--chain",
+            help="Which [chains.<name>] entry to negotiate against. When "
+                 "omitted the buyer prompts; required when --yes is set "
+                 "and the listing accepts more than one chain you have configured.",
+        ),
     ) -> None:
         """Drive a synchronous negotiation with one seller, round-by-round.
 
@@ -244,27 +250,26 @@ def register(app: typer.Typer) -> None:
         # chain all come from the listing. ``--token-contract`` (when
         # set) filters entries to one ERC-20.
         from ..escrow_selection import select_escrow_entry
+        from ..common import select_chain_for_listing
         picked_entry: Optional[dict] = None
+        chain_cfg = None
         if listing_dict is not None:
-            _chain_for_pick = resolve_config_value(
-                toml_path="chain.name", default="ethereum_sepolia",
-            )
-            _rpc_for_pick = resolve_config_value(
-                toml_path="chain.rpc_url", default="",
+            chain_cfg = select_chain_for_listing(
+                listing=listing_dict, override=chain_name, yes=assume_yes,
             )
             picked_entry = select_escrow_entry(
                 listing_dict,
-                chain_name=_chain_for_pick,
+                chain_name=chain_cfg.name,
                 token_contract_filter=token_contract,
                 assume_yes=assume_yes,
-                rpc_url=_rpc_for_pick or "",
+                rpc_url=chain_cfg.rpc_url,
                 buyer_address=addr,
                 console=console,
             )
             if picked_entry is None:
                 msg = (
                     f"Listing {listing_id!r} has no accepted_escrows entry on "
-                    f"chain {_chain_for_pick!r}"
+                    f"chain {chain_cfg.name!r}"
                 )
                 if token_contract:
                     msg += f" with token {token_contract}"
@@ -286,16 +291,14 @@ def register(app: typer.Typer) -> None:
                 int(token_decimals) if token_decimals is not None else None
             )
             if decimals is None:
-                from ..common import resolve_chain_id
                 from service.clients.token import (
                     resolve_token, TokenResolutionError,
                 )
-                rpc = resolve_config_value(toml_path="chain.rpc_url")
                 tc = token_contract
-                if tc and rpc:
+                if tc and chain_cfg is not None:
                     try:
                         meta = resolve_token(
-                            tc, rpc_url=rpc, chain_id=resolve_chain_id(rpc),
+                            tc, rpc_url=chain_cfg.rpc_url, chain_id=chain_cfg.chain_id,
                         )
                         decimals = meta.decimals
                     except (TokenResolutionError, RuntimeError):
@@ -303,8 +306,8 @@ def register(app: typer.Typer) -> None:
             if decimals is None:
                 typer.secho(
                     "Could not resolve token decimals to scale prices. "
-                    "Pass --token-decimals or set chain.rpc_url + a token "
-                    "contract.",
+                    "Pass --token-decimals or ensure the listing's accepted "
+                    "chain is configured in [chains.<name>].",
                     err=True, fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
