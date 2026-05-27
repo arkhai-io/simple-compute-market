@@ -110,6 +110,7 @@ Useful modes:
 
 ```bash
 ./scripts/bootstrap-clean-host-ubuntu.sh check
+SCM_BOOTSTRAP_SKIP_ZEROTIER=1 ./scripts/bootstrap-clean-host-ubuntu.sh check
 sudo SCM_RUN_VALIDATION=0 ./scripts/bootstrap-clean-host-ubuntu.sh run
 sudo SCM_VALIDATION_COMMAND='./scripts/issue-discovery profile fresh-volumes' ./scripts/bootstrap-clean-host-ubuntu.sh run
 ```

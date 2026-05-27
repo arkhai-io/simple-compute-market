@@ -23,6 +23,13 @@ need_sudo() {
   fi
 }
 
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    log "missing required command: $1"
+    return 1
+  fi
+}
+
 check_ubuntu() {
   if [ ! -r /etc/os-release ]; then
     log "missing /etc/os-release"
@@ -107,14 +114,27 @@ install_zerotier() {
 
 check_tools() {
   check_ubuntu
-  command -v git
-  command -v make
-  command -v curl
-  command -v jq
-  command -v python3
-  command -v uv
-  command -v docker
+  require_command git
+  require_command make
+  require_command curl
+  require_command jq
+  require_command python3
+  require_command uv
+  require_command docker
+  if [ "$SKIP_ZEROTIER" != "1" ]; then
+    require_command zerotier-cli
+  fi
   docker compose version
+  if docker info >/dev/null 2>&1; then
+    return
+  fi
+  if command -v sg >/dev/null 2>&1 && getent group docker >/dev/null 2>&1; then
+    if sg docker -c 'docker info >/dev/null 2>&1'; then
+      return
+    fi
+  fi
+  log "docker daemon is not accessible to the current user"
+  return 1
 }
 
 run_validation() {
