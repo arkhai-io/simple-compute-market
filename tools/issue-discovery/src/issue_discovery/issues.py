@@ -47,6 +47,11 @@ _CLASSIFIER_PATTERNS = {
         "storefront at http://localhost:8001 not reachable",
         "test_seller.py",
     ),
+    "zerotier-build-path": (
+        "zerotier",
+        "install.zerotier.com",
+        "zerotier-one",
+    ),
 }
 
 

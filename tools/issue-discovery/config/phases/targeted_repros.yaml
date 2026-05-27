@@ -1,0 +1,171 @@
+schema_version: 1
+name: targeted-repros
+description: Targeted issue repro workflows for ambiguous local blockers.
+phases:
+  - id: source_identity
+    name: Source identity
+    category: identity
+    blocking: true
+    commands:
+      - id: git_head
+        run: git rev-parse HEAD
+      - id: git_branch
+        run: git branch --show-current
+      - id: git_status
+        run: git status --short
+
+  - id: host_identity
+    name: Host and tool identity
+    category: identity
+    blocking: true
+    commands:
+      - id: docker_version
+        run: docker --version
+      - id: compose_version
+        run: docker compose version
+      - id: python_version
+        run: python3 --version
+
+  - id: redis_port_conflict_setup
+    name: Redis port conflict setup
+    category: repro_setup
+    blocking: true
+    commands:
+      - id: occupy_redis_port
+        timeout_seconds: 30
+        run: |
+          rm -f /tmp/scm-redis-port-holder.pid /tmp/scm-redis-port-holder.external
+          python3 - <<'PY' &
+          import os
+          import pathlib
+          import socket
+          import time
+
+          pid_path = pathlib.Path("/tmp/scm-redis-port-holder.pid")
+          external_path = pathlib.Path("/tmp/scm-redis-port-holder.external")
+          sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+          sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          try:
+              sock.bind(("0.0.0.0", 6379))
+          except OSError:
+              external_path.write_text("6379 already occupied\n", encoding="utf-8")
+              raise SystemExit(0)
+          sock.listen(1)
+          pid_path.write_text(str(os.getpid()), encoding="utf-8")
+          time.sleep(900)
+          PY
+          holder=$!
+          for _ in $(seq 1 50); do
+            if [ -s /tmp/scm-redis-port-holder.pid ] || [ -f /tmp/scm-redis-port-holder.external ]; then
+              exit 0
+            fi
+            if ! kill -0 "$holder" 2>/dev/null; then
+              wait "$holder"
+              exit $?
+            fi
+            sleep 0.1
+          done
+          exit 1
+
+  - id: fresh_volume_reset
+    name: Fresh storefront volume reset
+    category: repro_setup
+    blocking: true
+    commands:
+      - id: reset_storefront_volumes
+        timeout_seconds: 120
+        run: |
+          docker compose ${ISSUE_DISCOVERY_COMPOSE_ARGS:--f docker-compose.yml} down -v
+          docker volume rm \
+            simple-compute-market_bob-storefront-data \
+            simple-compute-market_alice-storefront-data \
+            2>/dev/null || true
+
+  - id: compose_preexisting_stack_check
+    name: Pre-existing compose stack check
+    category: runtime
+    blocking: true
+    commands:
+      - id: no_existing_compose_stack
+        run: |
+          existing=$(docker compose ${ISSUE_DISCOVERY_COMPOSE_ARGS:--f docker-compose.yml} ps -q)
+          test -z "$existing"
+    collect_on_failure:
+      - compose_ps
+      - compose_logs
+    classifiers:
+      - preexisting_compose_stack
+
+  - id: compose_start_strict
+    name: Strict compose startup
+    category: runtime
+    blocking: true
+    requires:
+      - compose_preexisting_stack_check
+    commands:
+      - id: compose_up
+        run: PROVISIONING_MODE=mock docker compose ${ISSUE_DISCOVERY_COMPOSE_ARGS:--f docker-compose.yml} up -d
+        timeout_seconds: 300
+    collect_on_failure:
+      - compose_config
+      - compose_ps
+      - compose_logs
+      - docker_volumes
+    classifiers:
+      - compose_start_failure
+      - redis_host_port_conflict
+      - storefront_volume_ownership
+
+  - id: readiness_checks
+    name: Application readiness checks
+    category: runtime
+    blocking: true
+    requires:
+      - compose_start_strict
+    commands:
+      - id: bob_health
+        run: |
+          curl -fsS http://localhost:8001/health | jq -e '.status == "ok"'
+      - id: alice_health
+        run: |
+          curl -fsS http://localhost:8002/health | jq -e '.status == "ok"'
+    collect_on_failure:
+      - compose_ps
+      - compose_logs
+      - health_bob
+      - health_alice
+    classifiers:
+      - storefront_volume_ownership
+
+  - id: zerotier_build_path
+    name: ZeroTier build path
+    category: build
+    blocking: true
+    commands:
+      - id: make_build
+        run: make build
+        timeout_seconds: 1800
+    classifiers:
+      - zerotier_build_path
+
+  - id: redis_port_conflict_cleanup
+    name: Redis port conflict cleanup
+    category: teardown
+    blocking: false
+    always_run: true
+    commands:
+      - id: release_redis_port
+        run: |
+          if [ -s /tmp/scm-redis-port-holder.pid ]; then
+            kill "$(cat /tmp/scm-redis-port-holder.pid)" 2>/dev/null || true
+          fi
+          rm -f /tmp/scm-redis-port-holder.pid /tmp/scm-redis-port-holder.external
+
+  - id: teardown
+    name: Tear down compose stack
+    category: teardown
+    blocking: false
+    always_run: true
+    commands:
+      - id: compose_down
+        run: docker compose ${ISSUE_DISCOVERY_COMPOSE_ARGS:--f docker-compose.yml} down

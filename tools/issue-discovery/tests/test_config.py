@@ -23,6 +23,10 @@ def test_tracked_configs_match_schemas() -> None:
             paths.config_dir / "phases" / "clean_ubuntu_bootstrap.yaml",
             paths.schema_dir / "phases.schema.json",
         ),
+        (
+            paths.config_dir / "phases" / "targeted_repros.yaml",
+            paths.schema_dir / "phases.schema.json",
+        ),
         (paths.config_dir / "collectors.yaml", paths.schema_dir / "collectors.schema.json"),
         (paths.config_dir / "profiles.yaml", paths.schema_dir / "profiles.schema.json"),
         (paths.config_dir / "workarounds.yaml", paths.schema_dir / "workarounds.schema.json"),
@@ -101,6 +105,39 @@ def test_clean_room_local_vm_sequence_is_laddered() -> None:
     ]
     assert all(step["continue_on_failure"] for step in steps)
     assert not any("run" in step or "command" in step or "commands" in step for step in steps)
+
+
+def test_targeted_repro_profiles_are_minimal_and_explicit() -> None:
+    paths = ToolPaths(repo_root())
+    profiles = {profile["id"]: profile for profile in load_yaml(paths.config_dir / "profiles.yaml")["profiles"]}
+
+    assert set(["host-redis-conflict", "fresh-volumes", "zerotier-build-path"]).issubset(profiles)
+    assert profiles["host-redis-conflict"]["phase_file"] == "phases/targeted_repros.yaml"
+    assert profiles["fresh-volumes"]["phase_file"] == "phases/targeted_repros.yaml"
+    assert profiles["zerotier-build-path"]["phase_file"] == "phases/targeted_repros.yaml"
+    assert profiles["host-redis-conflict"]["phases"] == [
+        "source_identity",
+        "host_identity",
+        "redis_port_conflict_setup",
+        "compose_preexisting_stack_check",
+        "compose_start_strict",
+        "redis_port_conflict_cleanup",
+        "teardown",
+    ]
+    assert profiles["fresh-volumes"]["phases"] == [
+        "source_identity",
+        "host_identity",
+        "fresh_volume_reset",
+        "compose_preexisting_stack_check",
+        "compose_start_strict",
+        "readiness_checks",
+        "teardown",
+    ]
+    assert profiles["zerotier-build-path"]["phases"] == [
+        "source_identity",
+        "host_identity",
+        "zerotier_build_path",
+    ]
 
 
 @pytest.mark.parametrize(

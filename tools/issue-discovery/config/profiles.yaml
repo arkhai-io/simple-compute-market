@@ -2,12 +2,11 @@ schema_version: 1
 profiles:
   - id: fresh-volumes
     description: Reproduce fresh named-volume behavior without pre-chown.
-    phase_file: phases/local.yaml
+    phase_file: phases/targeted_repros.yaml
     phases:
       - source_identity
       - host_identity
-      - prerequisite_check
-      - build
+      - fresh_volume_reset
       - compose_preexisting_stack_check
       - compose_start_strict
       - readiness_checks
@@ -15,14 +14,23 @@ profiles:
 
   - id: host-redis-conflict
     description: Exercise strict compose startup with host Redis still published.
-    phase_file: phases/local.yaml
+    phase_file: phases/targeted_repros.yaml
     phases:
       - source_identity
       - host_identity
-      - prerequisite_check
+      - redis_port_conflict_setup
       - compose_preexisting_stack_check
       - compose_start_strict
+      - redis_port_conflict_cleanup
       - teardown
+
+  - id: zerotier-build-path
+    description: Exercise the build path that invokes ZeroTier installation.
+    phase_file: phases/targeted_repros.yaml
+    phases:
+      - source_identity
+      - host_identity
+      - zerotier_build_path
 
   - id: clean-ubuntu-bootstrap
     description: Validate clean Ubuntu host bootstrap script behavior.

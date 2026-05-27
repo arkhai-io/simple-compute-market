@@ -169,6 +169,24 @@ def test_issue_generator_matches_registry_agent_indexing_race(tmp_path: Path) ->
     assert candidates[0].confidence == "high"
 
 
+def test_issue_generator_matches_zerotier_build_path(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_run(
+        run_dir,
+        phase_id="zerotier_build_path",
+        command_id="make_build",
+        stderr_text="curl -s https://install.zerotier.com | bash failed installing zerotier-one",
+        classifiers=["zerotier_build_path"],
+    )
+
+    candidates = IssuePacketGenerator(run_dir).generate()
+
+    assert [candidate.fingerprint for candidate in candidates] == ["zerotier-build-path"]
+    assert candidates[0].state == "needs_targeted_repro"
+    assert candidates[0].confidence == "medium"
+
+
 def test_issue_generator_renders_all_continue_workarounds_in_reproduction(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir()
