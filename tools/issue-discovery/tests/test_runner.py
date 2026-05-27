@@ -4,8 +4,10 @@ import json
 from pathlib import Path
 
 from issue_discovery.commands import run_shell_command
+from issue_discovery.phases import CommandSpec
 from issue_discovery.redaction import Redactor
 from issue_discovery.runner import DiscoveryRunner
+from issue_discovery.workarounds import WorkaroundSpec
 
 
 def repo_root() -> Path:
@@ -195,3 +197,52 @@ phases:
     assert runner.issue_show(run_dir, "fail-fast-fail") == 0
     shown = capsys.readouterr().out
     assert "# Fail fast failed" in shown
+
+
+def test_runner_applies_multiple_workarounds_in_order(tmp_path: Path) -> None:
+    phase_file = tmp_path / "phases.yaml"
+    phase_file.write_text(
+        """
+schema_version: 1
+name: test
+phases:
+  - id: env_check
+    name: Env check
+    category: test
+    blocking: true
+    commands:
+      - id: check_env
+        run: test "$FIRST" = "1" && test "$SECOND" = "2"
+""".lstrip(),
+        encoding="utf-8",
+    )
+    first = WorkaroundSpec(
+        id="first",
+        status="active",
+        reason="first",
+        removal_condition="remove first",
+        env={"FIRST": "1"},
+        commands=(CommandSpec(id="first_command", run="echo first"),),
+    )
+    second = WorkaroundSpec(
+        id="second",
+        status="active",
+        reason="second",
+        removal_condition="remove second",
+        env={"SECOND": "2"},
+        commands=(CommandSpec(id="second_command", run="echo second"),),
+    )
+    run_dir = tmp_path / "run"
+
+    code = DiscoveryRunner(repo_root=repo_root(), output_dir=run_dir)._run_phase_file(
+        mode="continue",
+        phase_path=phase_file,
+        selected_phase_ids=None,
+        workaround=(first, second),
+    )
+
+    assert code == 0
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert [item["id"] for item in manifest["workarounds"]] == ["first", "second"]
+    workaround_records = read_jsonl(run_dir / "workarounds.jsonl")
+    assert [item["id"] for item in workaround_records] == ["first", "second"]

@@ -78,7 +78,8 @@ class IssuePacketGenerator:
         phases = _read_jsonl(self.run_dir / "phases.jsonl")
         collectors = _read_jsonl(self.run_dir / "collectors.jsonl")
         candidates = self._from_failed_phases(manifest, phases, collectors)
-        if not candidates and manifest.get("blocking_failure", "").startswith("workaround:"):
+        blocking_failure = manifest.get("blocking_failure") or ""
+        if not candidates and str(blocking_failure).startswith("workaround:"):
             candidates = [self._from_workaround_failure(manifest)]
 
         jsonl_path = self.issue_dir / "candidates.jsonl"
@@ -252,16 +253,17 @@ def _render_body(
     lines.extend(["", "## Evidence"])
     for item in evidence:
         lines.append(f"- `{item}`")
-    workaround = manifest.get("workaround")
-    if workaround:
+    workarounds = _workarounds_for_manifest(manifest)
+    if workarounds:
         lines.extend(
             [
                 "",
                 "## Continuation Context",
-                f"This run used explicit workaround `{workaround.get('id')}`.",
-                f"Reason: {workaround.get('reason')}",
+                "This run used explicit workaround(s):",
             ]
         )
+        for workaround in workarounds:
+            lines.append(f"- `{workaround.get('id')}`: {workaround.get('reason')}")
     lines.extend(
         [
             "",
@@ -276,6 +278,14 @@ def _render_body(
         ]
     )
     return "\n".join(lines)
+
+
+def _workarounds_for_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    workarounds = manifest.get("workarounds") or []
+    if isinstance(workarounds, list) and workarounds:
+        return [item for item in workarounds if isinstance(item, dict)]
+    workaround = manifest.get("workaround")
+    return [workaround] if isinstance(workaround, dict) else []
 
 
 def _fingerprints_for_phase(run_dir: Path, phase: dict[str, Any], evidence: list[str]) -> list[str]:

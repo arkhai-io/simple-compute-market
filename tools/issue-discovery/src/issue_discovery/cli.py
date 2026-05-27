@@ -35,8 +35,14 @@ def build_parser() -> argparse.ArgumentParser:
     strict = subparsers.add_parser("strict", help="Run strict local discovery without workarounds.")
     strict.set_defaults(handler=_run_strict)
 
-    cont = subparsers.add_parser("continue", help="Continue discovery with one named workaround.")
-    cont.add_argument("--with", dest="workaround", required=True, help="Workaround id to apply.")
+    cont = subparsers.add_parser("continue", help="Continue discovery with named workaround(s).")
+    cont.add_argument(
+        "--with",
+        dest="workarounds",
+        action="append",
+        required=True,
+        help="Workaround id to apply. Repeat to apply multiple workarounds in order.",
+    )
     cont.set_defaults(handler=_run_continue)
 
     profile = subparsers.add_parser("profile", help="Run a named discovery profile.")
@@ -78,7 +84,7 @@ def _run_strict(args: argparse.Namespace) -> int:
 
 
 def _run_continue(args: argparse.Namespace) -> int:
-    return _runner(args).run_continue(args.workaround)
+    return _runner(args).run_continue(tuple(args.workarounds))
 
 
 def _run_profile(args: argparse.Namespace) -> int:

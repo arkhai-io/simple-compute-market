@@ -40,6 +40,13 @@ def test_continue_requires_workaround() -> None:
         raise AssertionError("parser accepted continuation without workaround")
 
 
+def test_continue_accepts_multiple_workarounds() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["continue", "--with", "one", "--with", "two"])
+
+    assert args.workarounds == ["one", "two"]
+
+
 def test_issue_create_has_independent_dry_run(tmp_path: Path, capsys) -> None:
     run_dir = tmp_path / "run"
     issue_dir = run_dir / "issue-candidates"

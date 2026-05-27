@@ -42,21 +42,25 @@ class DiscoveryRunner:
             workaround=None,
         )
 
-    def run_continue(self, workaround: str) -> int:
-        workarounds = load_workarounds(self.paths.config_dir / "workarounds.yaml")
-        spec = workarounds.get(workaround)
-        if spec is None:
-            print(f"unknown workaround: {workaround}")
+    def run_continue(self, workaround_ids: tuple[str, ...]) -> int:
+        if not workaround_ids:
+            print("at least one workaround is required")
+            return 2
+        available = load_workarounds(self.paths.config_dir / "workarounds.yaml")
+        missing = [workaround_id for workaround_id in workaround_ids if workaround_id not in available]
+        if missing:
+            print(f"unknown workaround: {', '.join(missing)}")
             print("available workarounds:")
-            for key in sorted(workarounds):
+            for key in sorted(available):
                 print(f"  - {key}")
             return 2
+        specs = tuple(available[workaround_id] for workaround_id in workaround_ids)
         phase_path = self.paths.config_dir / "phases" / "local.yaml"
         return self._run_phase_file(
             mode="continue",
             phase_path=phase_path,
             selected_phase_ids=None,
-            workaround=spec,
+            workaround=specs,
         )
 
     def run_profile(self, name: str) -> int:
@@ -103,15 +107,16 @@ class DiscoveryRunner:
         mode: str,
         phase_path: Path,
         selected_phase_ids: tuple[str, ...] | None,
-        workaround: WorkaroundSpec | None,
+        workaround: WorkaroundSpec | tuple[WorkaroundSpec, ...] | None,
     ) -> int:
         phase_file = load_phase_file(phase_path)
         phases = _select_phases(phase_file, selected_phase_ids)
-        env = workaround.env if workaround and workaround.env else {}
-        skip_phases = set(workaround.skip_phases if workaround else ())
+        workarounds = _normalize_workarounds(workaround)
+        env = _merged_workaround_env(workarounds)
+        skip_phases = {phase_id for spec in workarounds for phase_id in spec.skip_phases}
 
         if self.dry_run:
-            self._print_plan(mode, phase_path, phases, workaround, skip_phases)
+            self._print_plan(mode, phase_path, phases, workarounds, skip_phases)
             return 0
 
         store = self._create_store()
@@ -131,7 +136,8 @@ class DiscoveryRunner:
             "repo_root": str(self.repo_root),
             "phase_file": self._display_path(phase_path),
             "selected_phases": [phase.id for phase in phases],
-            "workaround": _workaround_json(workaround),
+            "workaround": _workaround_json(workarounds[0]) if len(workarounds) == 1 else None,
+            "workarounds": [_workaround_json(spec) for spec in workarounds],
             "output_dir": str(store.run_dir),
             "started_at": utc_now_iso(),
         }
@@ -142,9 +148,11 @@ class DiscoveryRunner:
         collectors.collect_many(["git_status", "tool_versions"], reason="run_start")
 
         state = RunState()
-        if workaround is not None and not self._apply_workaround(workaround, store, redactor, env):
-            state.blocking_failure = f"workaround:{workaround.id}"
-        else:
+        for spec in workarounds:
+            if not self._apply_workaround(spec, store, redactor, env):
+                state.blocking_failure = f"workaround:{spec.id}"
+                break
+        if state.blocking_failure is None:
             self._run_phases(phases, store, redactor, collectors, state, env, skip_phases)
 
         status = "failed" if state.failed else "passed"
@@ -333,7 +341,7 @@ class DiscoveryRunner:
         mode: str,
         phase_path: Path,
         phases: tuple[PhaseSpec, ...],
-        workaround: WorkaroundSpec | None,
+        workarounds: tuple[WorkaroundSpec, ...],
         skip_phases: set[str],
     ) -> None:
         output = self.output_dir if self.output_dir is not None else self.paths.default_output_root
@@ -342,8 +350,10 @@ class DiscoveryRunner:
         print(f"output: {output}")
         print("dry_run: yes")
         print(f"phase_file: {phase_path}")
-        if workaround is not None:
-            print(f"workaround: {workaround.id}")
+        if workarounds:
+            print("workarounds:")
+            for workaround in workarounds:
+                print(f"  - {workaround.id}")
         print("phases:")
         for phase in phases:
             suffix = " (skipped by workaround)" if phase.id in skip_phases else ""
@@ -400,3 +410,20 @@ def _workaround_json(workaround: WorkaroundSpec | None) -> dict[str, Any] | None
         "skip_phases": workaround.skip_phases,
         "env": workaround.env or {},
     }
+
+
+def _normalize_workarounds(
+    workaround: WorkaroundSpec | tuple[WorkaroundSpec, ...] | None,
+) -> tuple[WorkaroundSpec, ...]:
+    if workaround is None:
+        return ()
+    if isinstance(workaround, tuple):
+        return workaround
+    return (workaround,)
+
+
+def _merged_workaround_env(workarounds: tuple[WorkaroundSpec, ...]) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for workaround in workarounds:
+        env.update(workaround.env or {})
+    return env
