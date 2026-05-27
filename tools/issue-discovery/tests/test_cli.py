@@ -67,4 +67,5 @@ def test_issue_create_has_independent_dry_run(tmp_path: Path, capsys) -> None:
     captured = capsys.readouterr()
     assert code == 0
     assert "gh issue create" in captured.out
+    assert f"cd {tmp_path}" in captured.out
     assert "--body-file" in captured.out

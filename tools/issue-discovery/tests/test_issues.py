@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
-from issue_discovery.issues import IssuePacketGenerator
+from issue_discovery.issues import IssuePacketGenerator, IssueRepository
 
 
 def write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
@@ -67,6 +68,26 @@ def write_run(
     write_jsonl(run_dir / "collectors.jsonl", [])
 
 
+def write_candidate(run_dir: Path) -> None:
+    issue_dir = run_dir / "issue-candidates"
+    issue_dir.mkdir(parents=True)
+    (issue_dir / "candidate.md").write_text("# Candidate\n", encoding="utf-8")
+    write_jsonl(
+        issue_dir / "candidates.jsonl",
+        [
+            {
+                "fingerprint": "fingerprint",
+                "title": "Candidate",
+                "labels": ["bug"],
+                "classification": "test",
+                "phase": "phase",
+                "body_file": "issue-candidates/candidate.md",
+                "evidence": [],
+            }
+        ],
+    )
+
+
 def test_issue_generator_uses_generic_fingerprint_when_classifier_evidence_does_not_match(
     tmp_path: Path,
 ) -> None:
@@ -102,3 +123,23 @@ def test_issue_generator_uses_matching_classifier_for_known_root_cause(tmp_path:
     candidates = IssuePacketGenerator(run_dir).generate()
 
     assert [candidate.fingerprint for candidate in candidates] == ["storefront-volume-ownership"]
+
+
+def test_issue_create_runs_gh_from_repo_root(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "run"
+    repo_root = tmp_path / "repo"
+    run_dir.mkdir()
+    repo_root.mkdir()
+    write_candidate(run_dir)
+    calls = []
+
+    def fake_run(command: list[str], *, check: bool, text: bool, cwd: Path) -> subprocess.CompletedProcess[str]:
+        calls.append({"command": command, "check": check, "text": text, "cwd": cwd})
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("issue_discovery.issues.subprocess.run", fake_run)
+
+    code = IssueRepository(run_dir, repo_root=repo_root).create("fingerprint", dry_run=False)
+
+    assert code == 0
+    assert calls[0]["cwd"] == repo_root

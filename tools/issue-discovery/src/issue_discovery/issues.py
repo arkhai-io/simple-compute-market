@@ -160,8 +160,9 @@ class IssuePacketGenerator:
 
 
 class IssueRepository:
-    def __init__(self, run_dir: Path) -> None:
+    def __init__(self, run_dir: Path, repo_root: Path | None = None) -> None:
         self.run_dir = run_dir
+        self.repo_root = repo_root.resolve() if repo_root is not None else Path.cwd().resolve()
         self.candidates_path = run_dir / "issue-candidates" / "candidates.jsonl"
 
     def list(self) -> list[dict[str, Any]]:
@@ -194,9 +195,12 @@ class IssueRepository:
         for label in candidate.get("labels", []):
             command.extend(["--label", str(label)])
         if dry_run:
-            print(" ".join(_shell_quote(part) for part in command))
+            print(
+                f"cd {_shell_quote(str(self.repo_root))} && "
+                + " ".join(_shell_quote(part) for part in command)
+            )
             return 0
-        completed = subprocess.run(command, check=False, text=True)
+        completed = subprocess.run(command, check=False, text=True, cwd=self.repo_root)
         return completed.returncode
 
 

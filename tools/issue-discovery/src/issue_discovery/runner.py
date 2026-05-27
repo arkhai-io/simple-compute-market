@@ -78,7 +78,7 @@ class DiscoveryRunner:
         )
 
     def issue_list(self, run_dir: Path) -> int:
-        repository = IssueRepository(run_dir.resolve())
+        repository = IssueRepository(run_dir.resolve(), repo_root=self.repo_root)
         for candidate in repository.list():
             labels = ",".join(candidate.get("labels", []))
             print(
@@ -88,13 +88,13 @@ class DiscoveryRunner:
         return 0
 
     def issue_show(self, run_dir: Path, fingerprint: str) -> int:
-        repository = IssueRepository(run_dir.resolve())
+        repository = IssueRepository(run_dir.resolve(), repo_root=self.repo_root)
         body_path = repository.body_path(fingerprint)
         print(body_path.read_text(encoding="utf-8"), end="")
         return 0
 
     def issue_create(self, run_dir: Path, fingerprint: str, dry_run: bool) -> int:
-        repository = IssueRepository(run_dir.resolve())
+        repository = IssueRepository(run_dir.resolve(), repo_root=self.repo_root)
         return repository.create(fingerprint, dry_run=dry_run)
 
     def _run_phase_file(

@@ -88,7 +88,7 @@ Create the issue after reviewing the body:
 ./scripts/issue-discovery issue create .scm-local/issue-discovery/runs/<run-id> <fingerprint>
 ```
 
-The create command uses `gh issue create`, so it requires the GitHub CLI to be installed and authenticated.
+The create command uses `gh issue create` from the repository root selected by the wrapper or `--repo-root`, so it requires the GitHub CLI to be installed and authenticated for that repository.
 
 ## Marker Suites And Full Sweep
 
