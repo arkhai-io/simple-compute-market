@@ -7,6 +7,42 @@ from pathlib import Path
 from typing import Any
 
 
+_CLASSIFIER_PATTERNS = {
+    "fixed-docker-name-collision": (
+        "anvil",
+        "contracts-deploy",
+        "market-agent-sell",
+        "market-agent-buy",
+        "market-agent-alice",
+        "market-redis",
+        "market-provisioning",
+    ),
+    "preexisting-compose-stack": (
+        "simple-compute-market",
+        "bob-storefront",
+        "alice-storefront",
+        "registry",
+        "provisioning",
+    ),
+    "redis-host-port-conflict": (
+        "port is already allocated",
+        "bind for 0.0.0.0:6379",
+        "listen tcp 0.0.0.0:6379",
+    ),
+    "storefront-volume-ownership": (
+        "unable to open database file",
+        "attempt to write a readonly database",
+        "sqlite3.operationalerror",
+        "permission denied",
+    ),
+    "stale-seller-layer-route": (
+        'status=404 body={"detail":"not found"}',
+        "storefront at http://localhost:8001 not reachable",
+        "test_seller.py",
+    ),
+}
+
+
 @dataclass(frozen=True)
 class IssueCandidate:
     fingerprint: str
@@ -59,12 +95,9 @@ class IssuePacketGenerator:
         for phase in phases:
             if phase.get("status") != "failed":
                 continue
-            classifiers = phase.get("classifiers") or []
-            if not classifiers:
-                classifiers = [f"{phase['id']}-{phase.get('failed_command') or 'failure'}"]
-            for classifier in classifiers:
-                fingerprint = _slug(str(classifier))
-                evidence = _evidence_for_phase(self.run_dir, phase, collectors)
+            evidence = _evidence_for_phase(self.run_dir, phase, collectors)
+            fingerprints = _fingerprints_for_phase(self.run_dir, phase, evidence)
+            for fingerprint in fingerprints:
                 body_file = self.issue_dir / f"{fingerprint}.md"
                 body_file.write_text(
                     _render_body(
@@ -174,9 +207,9 @@ def _render_body(
     fingerprint: str,
     evidence: list[str],
 ) -> str:
-    failed_command = phase.get("failed_command")
+    failed_commands = _failed_commands_for_phase(phase)
+    primary_failed_command = failed_commands[0] if failed_commands else None
     command_records = phase.get("commands") or []
-    failed_record = next((item for item in command_records if item.get("id") == failed_command), None)
     lines = [
         f"# {_title_for_phase(phase, fingerprint)}",
         "",
@@ -190,11 +223,19 @@ def _render_body(
         "The phase completes without blocking the local issue-discovery workflow.",
         "",
         "## Actual",
-        f"The phase failed at command `{failed_command}`.",
+        f"The phase failed at command `{primary_failed_command}`.",
     ]
-    if failed_record:
+    if len(failed_commands) > 1:
+        lines.append(
+            "Additional failed commands: "
+            + ", ".join(f"`{command_id}`" for command_id in failed_commands[1:])
+            + "."
+        )
+    for failed_record in _failed_command_records(command_records, failed_commands):
         lines.extend(
             [
+                "",
+                f"### Command `{failed_record.get('id')}`",
                 f"- Exit code: `{failed_record.get('exit_code')}`",
                 f"- Timed out: `{failed_record.get('timed_out')}`",
                 f"- Stdout: `{failed_record.get('stdout')}`",
@@ -229,6 +270,54 @@ def _render_body(
         ]
     )
     return "\n".join(lines)
+
+
+def _fingerprints_for_phase(run_dir: Path, phase: dict[str, Any], evidence: list[str]) -> list[str]:
+    evidence_text = _evidence_text(run_dir, evidence)
+    fingerprints = []
+    for classifier in phase.get("classifiers") or []:
+        fingerprint = _slug(str(classifier))
+        if _classifier_matches(fingerprint, evidence_text):
+            fingerprints.append(fingerprint)
+    if fingerprints:
+        return sorted(dict.fromkeys(fingerprints))
+    return [_generic_fingerprint_for_phase(phase)]
+
+
+def _generic_fingerprint_for_phase(phase: dict[str, Any]) -> str:
+    failed_commands = _failed_commands_for_phase(phase)
+    failed_command = failed_commands[0] if failed_commands else "failure"
+    return _slug(f"{phase['id']}-{failed_command}")
+
+
+def _classifier_matches(fingerprint: str, evidence_text: str) -> bool:
+    patterns = _CLASSIFIER_PATTERNS.get(fingerprint, ())
+    return any(pattern in evidence_text for pattern in patterns)
+
+
+def _evidence_text(run_dir: Path, evidence: list[str]) -> str:
+    chunks = []
+    for item in evidence:
+        path = run_dir / item
+        if path.is_file():
+            chunks.append(path.read_text(encoding="utf-8", errors="replace"))
+    return "\n".join(chunks).lower()
+
+
+def _failed_commands_for_phase(phase: dict[str, Any]) -> list[str]:
+    failed_commands = phase.get("failed_commands") or []
+    if failed_commands:
+        return [str(command_id) for command_id in failed_commands]
+    failed_command = phase.get("failed_command")
+    return [str(failed_command)] if failed_command else []
+
+
+def _failed_command_records(
+    command_records: list[dict[str, Any]],
+    failed_commands: list[str],
+) -> list[dict[str, Any]]:
+    failed = set(failed_commands)
+    return [record for record in command_records if str(record.get("id")) in failed]
 
 
 def _evidence_for_phase(

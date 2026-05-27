@@ -49,7 +49,7 @@ Runs write to:
 Important files:
 
 - `manifest.json`: run identity, selected phases, status, workaround context.
-- `phases.jsonl`: ordered phase outcomes, failed commands, log paths, classifiers.
+- `phases.jsonl`: ordered phase outcomes, failed commands, log paths, and classifier hints.
 - `commands/<phase>/<command>.*`: stdout, stderr, and command metadata.
 - `collectors.jsonl`: collector outcomes and evidence paths.
 - `context/git-status.txt`: source tree state for the run.
@@ -57,6 +57,8 @@ Important files:
 - `docker/`, `health/`: compose and service diagnostics when collected.
 - `issue-candidates/candidates.jsonl`: generated issue metadata.
 - `issue-candidates/*.md`: Markdown bodies suitable for GitHub issues.
+
+Classifier hints are only used when the collected evidence matches the known fingerprint. If no known fingerprint matches, the harness generates a generic phase/command issue candidate instead of guessing a root cause.
 
 Generated run outputs are intentionally under `.scm-local/` and are not committed.
 
