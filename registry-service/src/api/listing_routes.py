@@ -21,18 +21,16 @@ from src.api.filter_spec import compute_etag, get_loaded_spec
 from src.api.utils import (
     Identity,
     ensure_agent_for_eip191,
-    ensure_agent_indexed,
     find_agent_by_id,
     find_agent_by_identity,
     order_to_dict,
-    refresh_agent_owner,
     validate_order_status,
     verify_order_signature,
 )
 
 
 def _looks_like_eip191_address(s: str) -> bool:
-    """Heuristic: a raw 0x-prefixed 42-character hex string is an EVM address."""
+    """A raw 0x-prefixed 42-character hex string is an EVM address."""
     if not s.startswith("0x") or len(s) != 42:
         return False
     try:
@@ -54,65 +52,55 @@ router = APIRouter()
 
 @router.post("/agents/{agent_id}/listings", status_code=201)
 async def publish_listing(
-    agent_id: str = Path(..., description="Agent ID (eip155:... or 0x... wallet address)"),
+    agent_id: str = Path(..., description="EIP-191 wallet address (0x...)"),
     body: dict = Body(..., description="Marketplace listing data"),
     db: Session = Depends(get_db),
 ):
     """Publish a marketplace listing to the registry.
 
-    ``agent_id`` accepts two shapes after Phase 3:
-
-    * ``eip155:{chain}:{registry}:{id}`` — the legacy ERC-8004 canonical
-      form. Triggers JIT chain-walk via ``ensure_agent_indexed``.
-    * ``0x...`` — an EIP-191 wallet address. The signed publication
-      itself is the trust anchor; a missing row is created lazily after
-      the signature verifies (no on-chain lookup needed).
+    ``agent_id`` is an EIP-191 wallet address. The signed publication
+    itself is the trust anchor — a missing row is created lazily after
+    the signature verifies (no on-chain lookup needed).
     """
     signature = body.pop("signature", None)
     timestamp = body.pop("timestamp", None)
 
     if _looks_like_eip191_address(agent_id):
-        # EIP-191 path: don't auto-create yet — verify signature first.
+        # EIP-191 path: signature recovery is the trust anchor; row is
+        # created lazily after the signature verifies.
         identity = Identity(scheme="eip191", identifier=agent_id)
-        existing = find_agent_by_identity(db, identity)
-        if existing is not None and existing.owner:
-            if not signature or timestamp is None:
-                raise HTTPException(status_code=401, detail="Signature and timestamp required for authenticated agents")
-            _check_timestamp(timestamp)
-            if not verify_order_signature(
-                "create_listing", identity.identifier, timestamp, signature, identity,
-            ):
-                raise HTTPException(status_code=401, detail="Invalid signature")
-            agent = existing
-        else:
-            # No row yet — sig verify against the claimed identity, then create.
-            if not signature or timestamp is None:
-                raise HTTPException(status_code=401, detail="Signature and timestamp required for authenticated agents")
-            _check_timestamp(timestamp)
-            if not verify_order_signature(
-                "create_listing", identity.identifier, timestamp, signature, identity,
-            ):
-                raise HTTPException(status_code=401, detail="Invalid signature")
-            agent = ensure_agent_for_eip191(db, identity.identifier)
+        if not signature or timestamp is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Signature and timestamp required for authenticated agents",
+            )
+        _check_timestamp(timestamp)
+        if not verify_order_signature(
+            "create_listing", identity.identifier, timestamp, signature, identity,
+        ):
+            raise HTTPException(status_code=401, detail="Invalid signature")
+        agent = ensure_agent_for_eip191(db, identity.identifier)
     else:
-        agent = await ensure_agent_indexed(db, agent_id)
+        # Legacy back-compat: agents pre-Phase-4 backfilled rows carry an
+        # eip155:... canonical agent_id. Look up by that column and verify
+        # against the cached owner.
+        agent = find_agent_by_id(db, agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
-
         if agent.owner:
             if not signature or timestamp is None:
-                raise HTTPException(status_code=401, detail="Signature and timestamp required for authenticated agents")
+                raise HTTPException(
+                    status_code=401,
+                    detail="Signature and timestamp required for authenticated agents",
+                )
             _check_timestamp(timestamp)
-            if not verify_order_signature("create_listing", agent.agent_id, timestamp, signature, agent.owner):
-                # Owner may have changed on-chain since we cached it. Refresh once and retry.
-                agent = await refresh_agent_owner(db, agent)
-                if not verify_order_signature("create_listing", agent.agent_id, timestamp, signature, agent.owner):
-                    raise HTTPException(status_code=401, detail="Invalid signature")
+            if not verify_order_signature(
+                "create_listing", agent.agent_id, timestamp, signature, agent.owner,
+            ):
+                raise HTTPException(status_code=401, detail="Invalid signature")
 
-    # Listings still FK on the legacy `agent_id` column for back-compat with
-    # the existing wire shape; eip191-lazy-created rows get a synthetic
-    # `agent_id` so the FK constraint can hold. Phase 4 collapses this onto
-    # the scheme/identifier composite key directly.
+    # Listings FK on the ``agents.agent_id`` column. Lazy-created eip191
+    # rows get a synthetic ``eip191:<identifier>`` value so the FK holds.
     if agent.agent_id is None:
         agent.agent_id = f"eip191:{agent.identifier}"
         db.commit()
@@ -172,14 +160,14 @@ async def publish_listing(
 
 @router.get("/agents/{agent_id}/listings")
 async def get_agent_listings(
-    agent_id: str = Path(..., description="Agent ID (canonical eip155:... format)"),
+    agent_id: str = Path(..., description="EIP-191 wallet address (0x...) or legacy canonical ID"),
     status: Optional[str] = Query(None, description="Filter by listing status"),
     limit: int = Query(50, ge=1, le=200, description="Maximum results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     db: Session = Depends(get_db),
 ):
     """List marketplace listings for a specific agent."""
-    agent = await ensure_agent_indexed(db, agent_id)
+    agent = find_agent_by_id(db, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
@@ -291,9 +279,7 @@ async def update_listing(
             raise HTTPException(status_code=403, detail="Only the listing seller can update after a buyer is assigned")
 
         if not verify_order_signature("update_listing", listing_id, timestamp, signature, signer_agent.owner):
-            signer_agent = await refresh_agent_owner(db, signer_agent)
-            if not verify_order_signature("update_listing", listing_id, timestamp, signature, signer_agent.owner):
-                raise HTTPException(status_code=401, detail="Invalid signature")
+            raise HTTPException(status_code=401, detail="Invalid signature")
 
     if "status" in body:
         listing.status = validate_order_status(body["status"])
@@ -353,9 +339,7 @@ async def delete_listing(
             raise HTTPException(status_code=401, detail="Signature and timestamp required for authenticated listings")
         _check_timestamp(timestamp)
         if not verify_order_signature("delete_listing", listing_id, timestamp, signature, seller_agent.owner):
-            seller_agent = await refresh_agent_owner(db, seller_agent)
-            if not verify_order_signature("delete_listing", listing_id, timestamp, signature, seller_agent.owner):
-                raise HTTPException(status_code=401, detail="Invalid signature")
+            raise HTTPException(status_code=401, detail="Invalid signature")
 
     db.delete(listing)
     db.commit()

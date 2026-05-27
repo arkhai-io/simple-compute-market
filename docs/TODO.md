@@ -10,14 +10,13 @@ Pending architectural work and known operational issues for the Arkhai market st
 
 **Status:** Planned. CLI surface exists; the underlying deployer scripts still ignore it.
 
-**Problem:** The `market-infra chain deploy-contracts` CLI accepts `--rpc-url`, `--deployer-key`, and per-suite flags (`--erc8004/--alkahest/--eas`) and exports `RPC_URL` / `ANVIL_RPC_URL` into the deployer subprocess environment. But `market-contract-deployer/deploy_alkahest.py:22` still has `RPC_URL = "http://anvil:8545"` as a module-level constant, line 27 uses Anvil account #0 (`0xf39Fd6…`) as the deployer, and `deploy-local.sh:12-14` hardcodes the ERC-8004 CREATE2 vanity addresses (`0x8004A8…`, `0x8004B6…`, `0x8004Cb…`) that are deterministic only on chain id 31337. The script does not read the env vars the CLI plumbs through, so passing `--rpc-url` to `market-infra` has no effect on the actual deployment.
+**Problem:** The `market-infra chain deploy-contracts` CLI accepts `--rpc-url`, `--deployer-key`, and `--alkahest/--eas` flags and exports `RPC_URL` / `ANVIL_RPC_URL` into the deployer subprocess environment. But `market-contract-deployer/deploy_alkahest.py:22` still has `RPC_URL = "http://anvil:8545"` as a module-level constant and uses Anvil account #0 (`0xf39Fd6…`) as the deployer. The script does not read the env vars the CLI plumbs through, so passing `--rpc-url` to `market-infra` has no effect on the actual deployment.
 
 **Planned fix:**
 - Make `deploy_alkahest.py` actually read `RPC_URL` / `ANVIL_RPC_URL` and a deployer key from env (with sensible Anvil defaults preserved for the local-dev path).
-- Drop the CREATE2 vanity-address requirement in `deploy-local.sh`, or accept per-chain addresses passed in via flag/env so ERC-8004 contracts deploy at whatever address the deployer key gets.
 - The `--no-eas --alkahest` separation in `market-infra chain deploy-contracts` is upstream-blocked: the alkahest deploy fixture currently always bundles EAS. Until alkahest accepts an externally-deployed EAS address, the flags are coupled and the CLI warns when toggled apart.
 
-This closes the bootstrapping path for a market operator standing up the stack against a real chain — the wiring is mostly in place, only `deploy_alkahest.py` and `deploy-local.sh` need to honour what the CLI already exposes.
+This closes the bootstrapping path for a market operator standing up the stack against a real chain — the wiring is mostly in place, only `deploy_alkahest.py` needs to honour what the CLI already exposes.
 
 ---
 
@@ -53,9 +52,9 @@ The `orders → listings` rename is already done; the plan's older framing of "d
 
 **Status:** Planned. The user-facing rename (CLI flags, wire JSON keys, table names, doc surfaces) is done; internal terminology has residue.
 
-**Context:** "agent" in this codebase has two meanings — the ERC-8004 protocol concept (`agent_card`, `agent_id` as on-chain numeric ID, `IdentityRegistry`, `AgentRegistered`, `register_onchain`, `agent_heartbeat`) and historical references to the seller's runtime process from the ADK era. The first set is protocol-defined and stays. The second set should be `storefront`. The user-facing pass (`market-storefront provide` → `publish`, `--agent-url` CLI flag → `--storefront-url`, `agent_settings` test fixtures) is done; the remaining items are internal:
+**Context:** "agent" in this codebase used to refer to two distinct things — the ERC-8004 protocol concept and historical references to the seller's runtime process from the ADK era. With ERC-8004 deleted in Phase 4 of the pluggable-identity refactor, the term now only ever means "seller's runtime process", which should be `storefront`. The user-facing rename is done; internal residue:
 
-- **`storefront/src/market_storefront/agent.py`** — residual startup-helpers module (docstring: "Storefront startup/background-task helpers"). A sibling `server.py` already exists; this file should be folded into `server.py` or renamed to something purpose-named (e.g. `startup.py`). Importers: `server.py` (lifespan), `identity_controller.py`.
+- **`storefront/src/market_storefront/agent.py`** — residual startup-helpers module (docstring: "Storefront startup hooks"). A sibling `server.py` already exists; this file should be folded into `server.py` or renamed to something purpose-named (e.g. `startup.py`). Importers: `server.py` (lifespan).
 
 **Not worth chasing:** the internal `agent_url` parameter name in `cli_publish.py`, `groups/escrow.py`, `action_executor.py`, `sync_negotiation.py`, `negotiation_models.py` (`buyer_agent_url`), etc. It's pervasive, internal-only (no wire surface), and the value plumbed through is consistently a storefront URL. Rename opportunistically; don't sweep.
 
@@ -138,12 +137,6 @@ Genuine pending fixes — distinct from the operational gotchas in the [Known Is
 
 ---
 
-### `perform_registration` logs "Invalid explicit agent ID" when `ownerOf()` returns a tuple
-
-On the local Anvil state, `identityRegistry.ownerOf(agent_id).call()` returns a 2-tuple instead of a plain address string (ABI mismatch). The `except Exception` block in `registration.py` catches this, sets `agent_id = None`, and falls through to blockchain event search which recovers correctly. The `[REGISTRATION] Invalid explicit agent ID N: (addr, addr)` log line is expected and non-fatal.
-
-**Fix:** handle tuple returns explicitly in `registration.py` by unpacking `owner = result[0] if isinstance(result, (list, tuple)) else result`.
-
 ---
 
 ## Known Issues & Areas of Concern
@@ -151,8 +144,6 @@ On the local Anvil state, `identityRegistry.ownerOf(agent_id).call()` returns a 
 Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes](#latent-bug-fixes) above (which need code changes) and from [Planned Rework](#core-stack) (which needs design + code). Expand as investigation proceeds.
 
 - **Agent SQLite statefulness:** The agent carries significant local state in SQLite (policy configs, negotiation history, resource portfolio). Behavior around container restarts, state migration, and concurrent access is a known problem area. Details TBD.
-
-- **`ONCHAIN_AGENT_ID` clearing:** Both compose files explicitly clear `ONCHAIN_AGENT_ID=` to force re-registration on every fresh Anvil restart. This indicates the agent does not cleanly detect stale on-chain registrations on its own.
 
 - **Negotiation orphans:** The existence of `negotiation_watchdog.py` implies negotiations can get stuck. The trigger conditions and recovery behavior need documentation.
 
@@ -163,10 +154,6 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 - **Global pause state persists across e2e test runs:** The storefront's `_GLOBALLY_PAUSED` flag (toggled by `POST /admin/pause` — distinct from per-listing `paused=True`) is in-process memory, not reset between `pytest` sessions. Neither full-deal scenario currently calls global `admin_pause` (storefront integration tests do, but those have their own teardown). The risk is a developer or external script having toggled it manually; the next `/negotiate/new` then 503s with `{"reason": "global"}` regardless of any per-listing state. The `ensure_storefront_resumed` autouse fixture in `integration-tests/tests/e2e/roles/scenarios/conftest.py` mitigates this by calling `admin_resume()` in module teardown. If running against a live environment that may have been left paused, execute `curl -X POST http://localhost:8001/admin/resume -H "X-Admin-Key: <key>"` before running.
 
 - **Resource CSV importer DB path:** `scripts/import_resources_csv.py` resolves the target SQLite path via `--db-path` CLI arg → `STOREFRONT_DB_PATH` env var → `CONFIG.db_path`, in that order. If the importer writes to a different path than the server reads (e.g. via an unset `STOREFRONT_DB_PATH` falling through to a wrong default), the server starts with zero resources and rejects all `/negotiate/new` calls with `409 no_matching_inventory`. `compose/seller.yml` pins `--db-path src/market_storefront/data/storefront/agent.db` explicitly. **Detection:** `GET /api/v1/system/status` exposes `resource_count` as a top-level field; a value of `0` signals this misconfiguration. The smoke test `test_resource_portfolio_seeded` in `test_storefront_smoke.py` asserts `resource_count > 0` and fails with a remediation command.
-
-- **Registry indexer cold-start gate:** Agent rows are indexed just-in-time on the publish/heartbeat/lookup path (`registry-service/src/api/utils.py::ensure_agent_indexed`) — the indexer never pre-walks the chain. A fresh on-chain registration becomes queryable as soon as the indexer's RPC node has the tx mined. `GET /api/v1/system/sync/wait-for-agent` is a server-side long-poll that hammers JIT lookups until they succeed, used by stage 03c (`TestStage03c_SellerAgentIndexed`) to gate negotiation stages on chain visibility. **`wait-for-agent` is the canonical pattern for this class of problem**: when a test needs to gate on an async condition (chain mining, queue drain, etc.), add an admin/system endpoint that blocks server-side until the condition is met. Avoids client-side polling loops (fragile, sleep-based) and makes the wait observable.
-
-- **`settings.SELLER.AGENT_ID` in e2e config files can drift:** The e2e config files (`config/config-local.yml`, `config/config-docker.yml`) hard-code `seller.agent_id` to e.g. `"eip155:31337:...:2"`. The numeric suffix depends on chain state — on a fresh Anvil the sentinel agent registers as ID 0 and the seller as ID 1, so `:2` is stale. Stage 03c uses `storefront.wait_for_registry_agent_ready()` (live runtime agent ID), but `SyncProvisioningClient` (as the `X-Agent-ID` header) and smoke tests still consume `SELLER.AGENT_ID`. Update it to match `curl http://localhost:8080/agents` output for the seller's wallet when rebuilding the Anvil state.
 
 - **E2e test dependency graph is not mechanically verified:** The `require_state(deal_state, "field")` chain between stages is enforced by convention only. A field set by one stage but not consumed by `require_state` in any downstream stage is a silent gap — the first failure cascades to a skip rather than a fail in the stage that actually needed it. A field name typo in a `require_state` call produces the same symptom: `getattr(deal_state, "nonexistent_field", None)` silently returns `None` and the test skips regardless of pipeline state. **Rule:** when adding a new `DealState` field, always verify that at least one downstream `require_state` call consumes it, and that the field name in `require_state` exactly matches the attribute name on `DealState`. This gap class cannot be caught by unit or integration tests — it is a property of the test's own dependency graph.
 
@@ -181,23 +168,6 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 **Problem:** The `registry-service` is currently deployed as a subchart of the `arkhai-node-operator` Helm chart, implying it is part of every provider node's deployment. In practice the registry is a shared marketplace service — there is one per market, not one per provider. Multiple seller nodes should all register with and publish orders to the same registry instance run by the marketplace operator. Bundling it with the provider chart conflates the marketplace operator role with the provider role.
 
 **Planned fix:** Make `registry` an optional subchart (add `condition: registry.enabled`, default `false`). Provider deployments point at an externally-operated registry via `global.registry.api_url`. Only marketplace operator deployments enable the subchart. Document the two deployment topologies (operator vs. provider) in the Helm `values.yaml` and in `ARCHITECTURE.md`.
-
----
-
-### `/agents/register` HTTP endpoint removed
-
-**Status:** Done. Removed in the JIT switch.
-
-**Context:** The endpoint accepted a caller-provided `owner` field (with
-signature verification against that claimed owner) but never cross-checked
-against `ownerOf` on chain. That made it possible to register an agent row
-under a fake owner — subsequent legitimate publishes from the real on-chain
-owner would then fail signature verification against the cached fake owner.
-JIT lookup is strictly safer: every agent record sources `owner` from a
-fresh `ownerOf` call on chain. Note for the broader ERC-8004 keep/remove
-decision: if ERC-8004 stays, JIT covers the registration path completely;
-if it goes, agent identification collapses to wallet-address-as-seller and
-the whole `agents` table can be dropped.
 
 ---
 

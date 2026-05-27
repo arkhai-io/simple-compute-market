@@ -163,34 +163,21 @@ class SystemService:
             # entry per configured chain. The single-chain shape
             # (top-level ``agent_id`` / ``chain_id``) is replaced because
             # there is no single canonical truth in a multi-chain world.
-            try:
-                from market_storefront.agent import _AGENT_IDS
-                from service.clients.erc8004.blockchain import build_erc8004_canonical_id
-                identities: dict[str, dict[str, Any]] = {}
-                for name, chain in CHAINS.items():
-                    aid = _AGENT_IDS.get(name)
-                    auth_status = per_chain_auth.get(name, "unconfigured")
-                    if aid is None or not chain.identity_registry_address:
-                        identities[name] = {
-                            "chain_id": chain.chain_id,
-                            "agent_id": None,
-                            "canonical_id": None,
-                            "auth_status": auth_status,
-                        }
-                        continue
-                    identities[name] = {
-                        "chain_id": chain.chain_id,
-                        "agent_id": aid,
-                        "canonical_id": build_erc8004_canonical_id(
-                            chain_id=chain.chain_id,
-                            identity_registry=chain.identity_registry_address,
-                            agent_id=aid,
-                        ),
-                        "auth_status": auth_status,
-                    }
-                result["identities"] = identities
-            except Exception:
-                result["identities"] = {}
+            # Post-pluggable-identity: identity is the wallet, not a
+            # per-chain ERC-8004 NFT. Emit one entry per configured chain
+            # carrying the wallet identifier so the diagnostic shape stays
+            # consumer-compatible.
+            wallet = (settings.wallet.address or "").lower() or None
+            identities: dict[str, dict[str, Any]] = {}
+            for name, chain in CHAINS.items():
+                auth_status = per_chain_auth.get(name, "unconfigured")
+                identities[name] = {
+                    "chain_id": chain.chain_id,
+                    "identity": wallet,
+                    "scheme": "eip191" if wallet else None,
+                    "auth_status": auth_status,
+                }
+            result["identities"] = identities
             try:
                 resources = await self._db.list_resources()
                 result["resource_count"] = len(resources)
@@ -262,24 +249,21 @@ class SystemService:
     async def _registry_auth_per_chain(self) -> dict[str, str]:
         """Probe registry-auth for every configured chain, concurrently.
 
-        For each chain in ``CHAINS``:
+        Identity is now chain-agnostic (the EIP-191 wallet address), so
+        the per-chain probe is effectively the same lookup repeated for
+        each configured ``[chains.<name>]`` table — the chain key is
+        retained in the response shape because consumers want a per-chain
+        status field (e.g. ``"ok"`` vs ``"unreachable"`` for a specific
+        registry that happens to be paired with that chain in the
+        operator's setup).
 
-        - If the chain has no resolved agent ID yet (startup task still
-          running) → ``"agent_not_resolved"`` (pending state).
-        - If the chain has no ``identity_registry_address`` → ``"unconfigured"``.
-        - Otherwise probe every configured registry URL concurrently and
-          pick the best result for that chain: ``"ok"`` wins; then
-          definitive non-ok beats ``"agent_not_found"``; otherwise
-          ``"agent_not_found"``.
-
-        Wallet missing → ``"wallet_unconfigured"`` for every chain. No
-        configured chains → empty dict (callers aggregate to
-        ``"unconfigured"``).
+        ``"ok"`` wins; definitive non-ok beats ``"agent_not_found"``;
+        otherwise ``"agent_not_found"``. Wallet missing →
+        ``"wallet_unconfigured"`` for every chain. No registries
+        configured → ``"unconfigured"``.
         """
         if not CHAINS:
             return {}
-        from market_storefront.agent import _AGENT_IDS
-        from service.clients.erc8004.blockchain import build_erc8004_canonical_id
 
         urls = [u.rstrip("/") for u in (settings.registry.urls or []) if u]
         auth = settings.registry.auth or {}
@@ -314,19 +298,13 @@ class SystemService:
                 return f"error: {exc}"
 
         async def _check_chain(name: str) -> tuple[str, str]:
-            chain = CHAINS[name]
-            aid = _AGENT_IDS.get(name)
-            if aid is None:
-                return name, "agent_not_resolved"
-            if not chain.identity_registry_address:
-                return name, "unconfigured"
+            # Identity is now chain-agnostic — the wallet address is the
+            # canonical lookup key for every configured chain.
+            if not wallet:
+                return name, "wallet_unconfigured"
             if not urls:
                 return name, "unconfigured"
-            canonical = build_erc8004_canonical_id(
-                chain_id=chain.chain_id,
-                identity_registry=chain.identity_registry_address,
-                agent_id=aid,
-            )
+            canonical = wallet
             results = await asyncio.gather(*[_probe_one(u, canonical) for u in urls])
             if "ok" in results:
                 return name, "ok"

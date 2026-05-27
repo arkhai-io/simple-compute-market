@@ -22,16 +22,15 @@ health_check: HealthCheckService | None = None
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown.
 
-    No background chain-event scanner — agent rows are indexed just-in-time
-    when a publish/heartbeat/lookup references a canonical_id not yet in the
-    DB. See ``api/utils.py::ensure_agent_indexed``.
+    Post-pluggable-identity (Phase 4): no chain-walk, no ERC-8004 contract
+    probes. Agent rows are created lazily on first signed publication via
+    ``api/utils.py::ensure_agent_for_eip191``; legacy rows backfilled by
+    migration 012 sit alongside.
     """
     global health_check
 
-    # Startup
-    logger.info("Starting ERC-8004 Indexer service...")
+    logger.info("Starting registry indexer service...")
 
-    # Initialize database
     init_db()
     logger.info("Database initialized")
 
@@ -52,33 +51,18 @@ async def lifespan(app: FastAPI):
             else:
                 logger.info("[BOOTSTRAP] api_keys table not empty; bootstrap key ignored")
 
-    # Probe the three ERC-8004 registry addresses for bytecode. Logs a
-    # warning naming any that have nothing deployed on the configured
-    # RPC. Doesn't crash startup — operators may want the registry HTTP
-    # surface running while they fix the config.
-    from src.services.chain_probe import probe_addresses
-    await probe_addresses(
-        settings.rpc_url,
-        {
-            "identity_registry": settings.identity_registry_address,
-            "reputation_registry": settings.reputation_registry_address,
-            "validation_registry": settings.validation_registry_address,
-        },
-    )
-
     # Start health check service (opt-in)
     health_check = HealthCheckService()
     if settings.enable_health_checks:
         await health_check.start(settings.health_check_interval)
-        logger.info("Health check service started (Indexer-initiated health checks enabled)")
+        logger.info("Health check service started")
     else:
-        logger.info("Health check service disabled (Agent-initiated heartbeats are the default)")
+        logger.info("Health check service disabled (agent-initiated heartbeats are the default)")
 
-    logger.info(f"🚀 ERC-8004 Indexer server ready on {settings.host}:{settings.port}")
+    logger.info(f"🚀 Registry indexer server ready on {settings.host}:{settings.port}")
 
     yield
 
-    # Shutdown
     logger.info("Shutting down...")
     if health_check:
         await health_check.stop()
@@ -87,7 +71,7 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="ERC-8004 Indexer",
+    title="Registry Indexer",
     version="0.1.0",
     lifespan=lifespan,
     root_path=settings.root_path,

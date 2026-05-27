@@ -31,7 +31,6 @@ ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAc
 rpc_url = "ws://anvil:8545"
 chain_id = 31337
 alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
-identity_registry_address = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
 
 [registry]
 # Single-registry topology — Alice only publishes to the public

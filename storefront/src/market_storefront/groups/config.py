@@ -120,8 +120,6 @@ _INIT_USER_TEMPLATE = """\
 
 # agent_id = "alice"                           # must be a valid Python identifier
 # agent_name = "Alice"                         # display name (any string)
-# auto_register = true                         # set false to refuse to start when a chain has no
-                                                # pinned onchain_agent_id in its [chains.<name>] table
 
 # ---------------------------------------------------------------------------
 # HTTP server
@@ -170,9 +168,8 @@ _INIT_USER_TEMPLATE = """\
 # ssh_public_key = "ssh-ed25519 AAAA... user@host"
 
 # One [chains.<name>] table per chain the storefront serves listings on.
-# The startup task resolves a separate on-chain identity per chain (writes
-# the discovered ID back to onchain_agent_id below). Listings emit one
-# accepted_escrows entry per configured chain at publish time.
+# Identity is the wallet (above); listings emit one accepted_escrows entry
+# per configured chain at publish time.
 
 [chains.ethereum_sepolia]
 # rpc_url = "https://sepolia.infura.io/v3/<project_id>"
@@ -180,11 +177,6 @@ _INIT_USER_TEMPLATE = """\
                                                 # (anvil | base_sepolia | ethereum_sepolia |
                                                 # ethereum_mainnet | filecoin_calibration).
 # alkahest_address_config_path = "/path/to/alkahest.json"  # required for anvil
-# identity_registry_address = "0x..."          # ERC-8004 IdentityRegistry; defaults to the
-                                                # canonical CREATE2 vanity address. Set for
-                                                # non-canonical deployments.
-# onchain_agent_id = 0                         # pin after first successful registration; the startup
-                                                # identity task fills this in automatically on fresh boots.
 
 # Add additional chains by uncommenting and customizing:
 # [chains.base_sepolia]

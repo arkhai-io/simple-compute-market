@@ -55,8 +55,6 @@ def _anvil_chain(monkeypatch):
                 rpc_url="http://localhost:8545",
                 chain_id=31337,
                 alkahest_address_config_path=None,
-                identity_registry_address="0x" + "11" * 20,
-                onchain_agent_id=None,
             ),
         },
         raising=False,

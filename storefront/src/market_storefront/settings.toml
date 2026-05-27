@@ -13,8 +13,6 @@
 # Identity
 agent_id        = ""        # must be a Python identifier; empty → "root_agent"
 agent_name      = ""        # display name; falls back to agent_id
-onchain_agent_id = ""       # pin after first successful registration
-auto_register   = true      # if onchain_agent_id is empty, register at startup
 
 # HTTP server
 port            = 8000
@@ -63,8 +61,6 @@ ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAc
 #   rpc_url                       (required)
 #   chain_id                      (optional, defaults to KNOWN_CHAIN_IDS lookup by name)
 #   alkahest_address_config_path  (optional, anvil-style file deployments only)
-#   identity_registry_address     (optional, defaults to the canonical
-#                                  CREATE2 vanity address per KNOWN_IDENTITY_REGISTRY)
 # Listings advertise their accepted chains via
 # accepted_escrows[].chain_name tuples; the runtime dispatches to the
 # matching [chains.<name>] entry when settling.

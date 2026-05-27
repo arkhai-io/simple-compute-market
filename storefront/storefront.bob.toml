@@ -6,7 +6,6 @@
 # XDG_CONFIG_HOME=/etc tells dynaconf to look here.
 
 agent_id            = "bob"
-# onchain_agent_id    = "1"
 port                = 8001
 base_url            = "http://bob-storefront:8001/"
 db_path             = "./src/market_storefront/data/storefront/agent.db"
@@ -28,11 +27,6 @@ ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAc
 rpc_url = "ws://anvil:8545"
 chain_id = 31337
 alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
-# Deterministic CREATE2 vanity address — same value every time the
-# contract-deployer runs (see market-contract-deployer/deploy-local.sh).
-identity_registry_address = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
-# onchain_agent_id is auto-persisted on first successful registration
-# by the storefront startup task; pin it explicitly to skip the lookup.
 
 [registry]
 # Two registry instances: ``registry`` is the public one,

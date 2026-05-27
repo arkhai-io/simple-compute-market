@@ -1,8 +1,7 @@
 import os
 from typing import Literal
-from pydantic import Field, field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from web3 import Web3
 
 
 class Settings(BaseSettings):
@@ -11,36 +10,13 @@ class Settings(BaseSettings):
         env_file=[".env.local", ".env", "/app/shared-env/.env"],
         env_file_encoding="utf-8",
         case_sensitive=False,
+        # Tolerate stale env vars left over from the ERC-8004 era so the
+        # registry boots cleanly against pre-Phase-4 .env files.
+        extra="ignore",
     )
     
     database_url: str = "sqlite:///./indexer.db"
 
-    # Blockchain configuration — override CHAIN_ID + RPC_URL per chain.
-    chain_id: int = Field(default=1337, env="CHAIN_ID")
-    rpc_url: str = "https://sepolia.base.org"
-
-    # ERC-8004 contract addresses. CREATE2 vanity deployments — same on every chain.
-    identity_registry_address: str = "0x8004AA63c570c570eBF15376c0dB199918BFe9Fb"
-    reputation_registry_address: str = "0x8004bd8daB57f14Ed299135749a5CB5c42d341BF"
-    validation_registry_address: str = "0x8004C269D0A5647E51E121FeB226200ECE932d55"
-    
-    @field_validator(
-        "identity_registry_address",
-        "reputation_registry_address",
-        "validation_registry_address",
-        mode="before"
-    )
-    @classmethod
-    def convert_to_checksum_address(cls, v: str) -> str:
-        """Convert Ethereum address to checksum format (EIP-55)"""
-        if v and isinstance(v, str) and v.startswith("0x") and len(v) == 42:
-            try:
-                return Web3.to_checksum_address(v)
-            except (ValueError, AttributeError):
-                # If web3 is not available or address is invalid, return as-is
-                return v
-        return v
-    
     # Server Configuration
     port: int = 8080
     host: str = "0.0.0.0"

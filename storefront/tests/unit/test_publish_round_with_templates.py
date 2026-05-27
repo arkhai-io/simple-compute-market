@@ -35,8 +35,6 @@ def _chain(name: str, chain_id: int) -> ChainConfig:
         rpc_url=f"http://rpc.{name}",
         chain_id=chain_id,
         alkahest_address_config_path=None,
-        identity_registry_address="0x" + "11" * 20,
-        onchain_agent_id=None,
     )
 
 

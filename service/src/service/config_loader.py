@@ -22,7 +22,6 @@ Schema (storefront and buyer share wallet/chains/registry tables):
     rpc_url = "https://..."
     chain_id = 11155111
     # alkahest_address_config_path = "/etc/arkhai/alkahest.json"  # anvil only
-    # identity_registry_address = "0x..."     # defaults from KNOWN_IDENTITY_REGISTRY
 
     [chains.base_sepolia]
     rpc_url = "https://..."
@@ -66,19 +65,16 @@ class ChainConfig:
     :func:`chains_from_config` is keyed by this exact value, and listings
     advertise it in their ``accepted_escrows[].chain_name`` tuples.
 
-    ``onchain_agent_id`` is the storefront's ERC-8004 agent ID **for this
-    chain** — every chain has its own identity registry, so an agent has
-    one ID per chain. Auto-populated by the startup identity task on
-    fresh boots (and written back to TOML); operators can also pin it
-    manually to bring an identity from elsewhere.
+    Identity is no longer carried per-chain: after the pluggable-identity
+    refactor the storefront's identity is its EIP-191 wallet address,
+    advertised once at the registry layer and reused across every chain
+    it supports.
     """
 
     name: str
     rpc_url: str
     chain_id: int
     alkahest_address_config_path: Optional[str] = None
-    identity_registry_address: Optional[str] = None
-    onchain_agent_id: Optional[int] = None
 
 
 def user_config_dir() -> Path:
@@ -378,19 +374,6 @@ def ssh_public_key(flag: Optional[str] = None,
     )
 
 
-# Canonical ERC-8004 v0.1 IdentityRegistry CREATE2 vanity address. The
-# alkahest deployer uses the same salt across every chain it deploys to,
-# so for the canonical deployment this address is the same on every chain.
-# Custom deployments override via ``[registry] identity_registry_address``
-# in the TOML.
-_CANONICAL_IDENTITY_REGISTRY = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
-KNOWN_IDENTITY_REGISTRY: dict[str, str] = {
-    "base_sepolia":     _CANONICAL_IDENTITY_REGISTRY,
-    "ethereum_sepolia": _CANONICAL_IDENTITY_REGISTRY,
-    "anvil":            _CANONICAL_IDENTITY_REGISTRY,
-}
-
-
 def derive_wallet_address(private_key: Optional[str]) -> Optional[str]:
     """Compute the checksummed EVM address from an ECDSA private key.
 
@@ -489,11 +472,9 @@ def chains_from_config(
 
     Resolves each entry to a :class:`ChainConfig`. ``chain_id`` falls
     back to :data:`KNOWN_CHAIN_IDS` lookup by name when the table
-    omits it; ``identity_registry_address`` falls back to
-    :data:`KNOWN_IDENTITY_REGISTRY`. Empty or malformed entries
-    (missing ``rpc_url``) are dropped silently — operators get one
-    warning surface (the empty dict) rather than a partial-load that
-    pretends to succeed.
+    omits it. Empty or malformed entries (missing ``rpc_url``) are
+    dropped silently — operators get one warning surface (the empty
+    dict) rather than a partial-load that pretends to succeed.
 
     The dict's iteration order matches TOML order (Python 3.7+).
     Callers that want a deterministic default chain pick
@@ -516,31 +497,16 @@ def chains_from_config(
         if not chain_id:
             chain_id = KNOWN_CHAIN_IDS.get(name, 0)
 
-        identity_reg = (
-            str(sub.get("identity_registry_address", "") or "").strip()
-            or KNOWN_IDENTITY_REGISTRY.get(name)
-        )
-
         alkahest_path = (
             str(sub.get("alkahest_address_config_path", "") or "").strip()
             or None
         )
-
-        raw_agent_id = sub.get("onchain_agent_id")
-        agent_id: Optional[int] = None
-        if raw_agent_id not in (None, "", 0):
-            try:
-                agent_id = int(raw_agent_id)
-            except (TypeError, ValueError):
-                agent_id = None
 
         out[name] = ChainConfig(
             name=name,
             rpc_url=rpc_url,
             chain_id=chain_id,
             alkahest_address_config_path=alkahest_path,
-            identity_registry_address=identity_reg,
-            onchain_agent_id=agent_id,
         )
     return out
 

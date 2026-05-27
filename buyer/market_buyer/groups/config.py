@@ -123,9 +123,6 @@ _INIT_USER_TEMPLATE = """\
                                                 # (anvil | base_sepolia | ethereum_sepolia |
                                                 # ethereum_mainnet | filecoin_calibration).
 # alkahest_address_config_path = "/path/to/alkahest.json"  # required for anvil
-# identity_registry_address = "0x..."          # ERC-8004 IdentityRegistry; defaults to the
-                                                # canonical CREATE2 vanity address. Set for
-                                                # non-canonical deployments.
 
 # Add additional chains by uncommenting and customizing:
 # [chains.base_sepolia]

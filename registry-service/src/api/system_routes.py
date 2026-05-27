@@ -96,11 +96,6 @@ async def health_check(db: Session = Depends(get_db)) -> JSONResponse:
 )
 def system_config() -> ConfigResponse:
     return ConfigResponse(
-        chain_id=settings.chain_id,
-        rpc_url=settings.rpc_url,
-        identity_registry_address=settings.identity_registry_address,
-        reputation_registry_address=settings.reputation_registry_address,
-        validation_registry_address=settings.validation_registry_address,
         enable_health_checks=settings.enable_health_checks,
         heartbeat_ttl_secs=settings.heartbeat_ttl_secs,
     )
@@ -147,16 +142,13 @@ def system_sync() -> SyncResponse:
 @_system_router.get(
     "/sync/wait-for-agent",
     response_model=AgentIndexedResponse,
-    summary="Long-poll until an agent is on-chain (test/admin helper)",
+    summary="Long-poll until an agent row is present in the DB (test helper)",
     description=(
-        "Blocks (server-side) until the specified canonical agent ID can be "
-        "resolved on chain, or until *timeout* seconds elapse. Returns "
-        "``indexed=True`` as soon as the JIT lookup succeeds (and the agent "
-        "row gets cached); ``indexed=False`` on timeout. Intended for e2e "
-        "test suites that need to gate on a freshly-broadcast on-chain "
-        "registration tx being mined and visible to this indexer's RPC "
-        "node, before proceeding with heartbeat and listing-publish calls. "
-        "Poll interval is 500 ms."
+        "Blocks (server-side) until the specified agent ID resolves to a "
+        "row in the registry DB, or until *timeout* seconds elapse. Agent "
+        "rows are created lazily on first signed publication, so this "
+        "polls ``find_agent_by_id`` rather than walking chain. Poll "
+        "interval is 500 ms; ``timeout`` is hard-capped at 120 s."
     ),
 )
 async def wait_for_agent_indexed(
@@ -167,17 +159,17 @@ async def wait_for_agent_indexed(
     import asyncio
     import time as _time
 
-    from src.api.utils import ensure_agent_indexed
+    from src.api.utils import find_agent_by_id
 
     if timeout > 120.0:
-        timeout = 120.0  # hard cap — protect the server from indefinite holds
+        timeout = 120.0
 
     poll_interval = 0.5
     start = _time.monotonic()
     deadline = start + timeout
 
     while True:
-        agent = await ensure_agent_indexed(db, agent_id)
+        agent = find_agent_by_id(db, agent_id)
         if agent is not None:
             elapsed_ms = int((_time.monotonic() - start) * 1000)
             return AgentIndexedResponse(

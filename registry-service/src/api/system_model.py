@@ -18,18 +18,12 @@ class HealthResponse(BaseModel):
 
 
 class ConfigResponse(BaseModel):
-    """Active chain and contract configuration.
+    """Active registry service configuration.
 
-    These values are read from the running Settings instance — useful for
-    confirming that a deployment is pointed at the correct chain and
-    contract addresses without needing to inspect pod environment variables.
+    Post-pluggable-identity (Phase 4): the registry no longer reads on-chain
+    contracts, so this response only carries operational flags.
     """
 
-    chain_id: int
-    rpc_url: str = Field(description="Full RPC URL (safe to expose within the cluster network)")
-    identity_registry_address: str
-    reputation_registry_address: str
-    validation_registry_address: str
     enable_health_checks: bool = Field(
         description="Whether the registry-initiated agent health check service is running"
     )
@@ -46,12 +40,7 @@ class HealthCheckServiceStatus(BaseModel):
 
 
 class SyncResponse(BaseModel):
-    """Liveness of the background services started at application startup.
-
-    Agent indexing happens just-in-time on the request path (see
-    ``api/utils.py::ensure_agent_indexed``); there is no event-sync
-    background service to report on here.
-    """
+    """Liveness of the background services started at application startup."""
 
     health_check: HealthCheckServiceStatus
 

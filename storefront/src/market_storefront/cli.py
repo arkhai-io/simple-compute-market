@@ -76,31 +76,6 @@ def main(
 
 
 # ---------------------------------------------------------------------------
-# register — one-shot on-chain registration
-# ---------------------------------------------------------------------------
-
-
-@app.command("register")
-def register_cmd(
-    chain: str = typer.Option(
-        None, "--chain",
-        help="Chain name (matching a [chains.<name>] table) to register on. "
-             "When omitted, registers on every configured chain.",
-    ),
-) -> None:
-    """Register the storefront on-chain via ERC-8004.
-
-    Inputs come from storefront.toml (TOML-only — no env vars or .env
-    files). One identity per ``[chains.<name>]`` table. Run this before
-    ``market-storefront serve`` on a fresh deployment; idempotent on
-    subsequent runs and skipped automatically by the serve startup hook
-    when ``auto_register`` is enabled.
-    """
-    from .commands.register import run_register
-    raise typer.Exit(asyncio.run(run_register(chain_name=chain)))
-
-
-# ---------------------------------------------------------------------------
 # serve — run the storefront HTTP server in-process
 # ---------------------------------------------------------------------------
 

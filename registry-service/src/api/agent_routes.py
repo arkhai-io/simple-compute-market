@@ -14,8 +14,6 @@ from src.db.database import get_db
 from src.db.models import Agent, AgentMetadataEntry
 from src.types import HeartbeatRequest
 from src.api.utils import (
-    ensure_agent_indexed,
-    refresh_agent_owner,
     verify_heartbeat_signature,
     find_agent_by_id,
 )
@@ -84,7 +82,7 @@ async def get_agent(
     (ownerOf + tokenURI). Returns 404 only if the agent isn't registered
     on-chain at all or is outside this indexer's (chain, registry) scope.
     """
-    agent = await ensure_agent_indexed(db, agent_id)
+    agent = find_agent_by_id(db, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
@@ -207,7 +205,7 @@ async def heartbeat(
     # FastAPI should automatically URL-decode path parameters, but ensure it's decoded
     agent_id = urllib.parse.unquote(agent_id)
 
-    agent = await ensure_agent_indexed(db, agent_id)
+    agent = find_agent_by_id(db, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
     
@@ -234,13 +232,7 @@ async def heartbeat(
             )
 
         if not verify_heartbeat_signature(canonical_id_for_sig, timestamp, signature, agent.owner):
-            # Owner may have changed on-chain since we cached it. Refresh once and retry.
-            agent = await refresh_agent_owner(db, agent)
-            if not verify_heartbeat_signature(canonical_id_for_sig, timestamp, signature, agent.owner):
-                raise HTTPException(
-                    status_code=401,
-                    detail="Invalid signature"
-                )
+            raise HTTPException(status_code=401, detail="Invalid signature")
     elif signature or timestamp:
         # Signature provided but agent has no owner - warn but allow
         logger.warning(f"[Heartbeat] Agent {agent_id} has no owner but signature provided")

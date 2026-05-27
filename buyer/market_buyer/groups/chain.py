@@ -91,9 +91,6 @@ def chain_check(
                 if isinstance(obj, str) and obj.strip():
                     addresses[label] = obj
 
-        if chain.identity_registry_address:
-            addresses["identity_registry"] = chain.identity_registry_address
-
         if not addresses:
             typer.secho(
                 f"chain={name!r}: no contract addresses to probe.",

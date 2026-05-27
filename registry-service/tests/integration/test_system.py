@@ -47,22 +47,6 @@ class TestHealth:
 
 
 class TestSystemConfig:
-    async def test_returns_chain_id_and_contract_addresses(self, registry_client):
-        config = await registry_client.get_system_config()
-        assert isinstance(config, SystemConfigResponse)
-        assert isinstance(config.chain_id, int)
-        for field in (
-            "identity_registry_address",
-            "reputation_registry_address",
-            "validation_registry_address",
-        ):
-            addr = getattr(config, field)
-            assert addr.startswith("0x"), f"{field} not an address: {addr!r}"
-
-    async def test_rpc_url_non_empty(self, registry_client):
-        config = await registry_client.get_system_config()
-        assert config.rpc_url
-
     async def test_heartbeat_ttl_positive(self, registry_client):
         config = await registry_client.get_system_config()
         assert isinstance(config.heartbeat_ttl_secs, int)

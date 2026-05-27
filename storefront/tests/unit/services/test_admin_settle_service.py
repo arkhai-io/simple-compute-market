@@ -39,8 +39,6 @@ def _stub_chains(monkeypatch):
                 rpc_url="http://anvil:8545",
                 chain_id=31337,
                 alkahest_address_config_path="/fake/alkahest.json",
-                identity_registry_address="0x" + "11" * 20,
-                onchain_agent_id=None,
             ),
         },
         raising=False,

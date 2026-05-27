@@ -8,8 +8,9 @@ services:
     environment:
       - ANVIL_IP_ADDR=0.0.0.0
 
-  # 2. One-shot contract deployer — writes IDENTITY_REGISTRY_ADDRESS to shared-env/.env, then exits.
-  #    registry and agents depend on this completing before they start.
+  # 2. One-shot contract deployer — writes alkahest contract addresses to
+  #    shared-env/.env, then exits. Agents depend on this completing before
+  #    they start (registry no longer reads on-chain addresses).
   contracts-deploy:
     image: arkhai:contract-deployer
     depends_on:

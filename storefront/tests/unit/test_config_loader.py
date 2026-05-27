@@ -40,7 +40,6 @@ def test_settings_toml_provides_baseline_defaults():
         "escrow_shape_guard",
         "bisection",
     ]
-    assert s.auto_register is True
     assert s.pricing.publish_priceless is False
 
 
@@ -119,22 +118,6 @@ def test_chains_dict_empty_when_no_chains_section(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     s = agent_config._build_settings()
     assert agent_config._build_chains(s) == {}
-
-
-def test_chains_dict_reads_onchain_agent_id(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    cfg_dir = tmp_path / "arkhai"
-    cfg_dir.mkdir(parents=True)
-    (cfg_dir / "storefront.toml").write_text(
-        """
-[chains.anvil]
-rpc_url = "http://localhost:8545"
-onchain_agent_id = 42
-"""
-    )
-    s = agent_config._build_settings()
-    chains = agent_config._build_chains(s)
-    assert chains["anvil"].onchain_agent_id == 42
 
 
 # ---------------------------------------------------------------------------

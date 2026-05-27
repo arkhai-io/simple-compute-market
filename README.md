@@ -17,7 +17,6 @@ Compute is the concrete domain. The architectural pattern — userland buyer, st
 - `policy/` — Shared negotiation middleware machinery
 - `registry-service/` — Listings registry / indexer API (FastAPI)
 - `registry-client/` — Async + sync Python client for the registry HTTP API
-- `erc-8004-contracts/` — Identity/Reputation/Validation registries (Hardhat)
 - `compose/` — Docker Compose stacks for the seller side
 - `helm/` — Kubernetes/Helm charts for production seller + registry deployments
 - `infra/zerotier/` — ZeroTier controller scripts

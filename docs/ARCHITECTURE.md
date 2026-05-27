@@ -17,7 +17,7 @@ The stack is designed so that in production, multiple independent seller nodes e
 | Concern | Technology |
 |---|---|
 | On-chain settlement / escrow | [Alkahest](https://github.com/arkhai-io/alkahest) contracts |
-| Agent identity & discovery | [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) (ERC-721-based agent registry) |
+| Seller identity | Pluggable scheme registry (EIP-191 wallet by default; see `service.identity`) |
 | Buyer ↔ seller protocol | Plain HTTP request/response, EIP-191-signed bodies |
 | Seller server framework | FastAPI / Starlette + uvicorn |
 | Buyer | Pure HTTP client — `market` CLI, no server |
@@ -33,8 +33,7 @@ The stack is designed so that in production, multiple independent seller nodes e
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        EVM Chain (Alkahest)                         │
-│   IdentityRegistry · ReputationRegistry · ValidationRegistry       │
-│   Alkahest escrow contracts                                         │
+│   Alkahest escrow obligation + arbiter contracts                    │
 └──────────────────┬──────────────────────┬───────────────────────────┘
                    │ events / txns         │ events / txns
          ┌─────────▼──────────┐   ┌───────▼─────────────────┐
@@ -95,9 +94,9 @@ In production this component is absent — the agent and registry configs point 
 
 ### `registry-service`
 
-**Role:** Off-chain indexer and discovery service for on-chain agent/order state.
+**Role:** Listings registry — discovery surface for the marketplace.
 
-FastAPI service that watches the EVM chain for ERC-8004 events (`AgentRegistered`, `MetadataSet`, `UriUpdated`) and maintains a queryable local database. Also serves the **Orders API** — agents publish open orders here so counterparties can discover them.
+FastAPI service that stores published listings and serves them through a filter-spec-driven `GET /listings` query API. Sellers publish via signed `POST /agents/{wallet}/listings`; buyers fetch via the discovery query. Agent rows are created lazily on first signed publication — the signature is the trust anchor, so no chain-walk is needed.
 
 **Ports:** `8080` (default)
 
@@ -162,21 +161,19 @@ Loaded once at import via `lru_cache`; path overridable via
 the image, mount the new YAML over the baked one and restart the registry;
 buyers detect the change via the ETag on the next `/filter-spec` fetch.
 
-**Agent identity format (ERC-8004 canonical):**
-```
-eip155:{chainId}:{identityRegistryAddress}:{numericAgentId}
-```
-Example: `eip155:1337:0x21df544947ba3e8b3c32561399e88b52dc8b2823:22`
-
-The agent id for a seller/storefront can be found in the status endpoint.
+**Agent identity format:** scheme-tagged `(scheme, identifier)` pairs.
+The default and only built-in scheme is `eip191`, whose identifier is
+the lowercase 0x hex wallet address. Listings are published under
+`/agents/{wallet}/listings` and the registry creates agent rows lazily
+on first signed publication. Custom schemes register via
+`service.identity.register_identity_scheme(verifier)`.
 
 **Source layout:**
 ```
 registry-service/src/
-├── api/             # FastAPI routes (agent_routes, order_routes)
-├── contracts/       # ABI + web3.py interaction layer
-├── db/              # SQLAlchemy models + Alembic migrations (7 versions so far)
-├── services/        # chain_client.py (shared web3 client), health_check.py
+├── api/             # FastAPI routes (agent_routes, listing_routes, system_routes)
+├── db/              # SQLAlchemy models + Alembic migrations
+├── services/        # health_check.py
 ├── types/
 └── main.py
 ```
@@ -188,7 +185,7 @@ registry-service/src/
 
 **Role:** The seller's HTTP server. Hosts the `/listings/...`,
 `/negotiate`, `/settle/{escrow_uid}`, `/alerts/resource`, and
-`.well-known/erc-8004-registration.json` endpoints that buyers and the
+`.well-known/agent-wallet.json` endpoints that buyers and the
 provisioning service call. Runs as `market-storefront serve` (uvicorn,
 FastAPI/Starlette). Internally it uses Alkahest for on-chain escrow
 operations.
@@ -196,22 +193,14 @@ operations.
 **Ports:** `8001` (default seller port; `port` in storefront.toml).
 
 **Startup sequence:** `entrypoint.sh` starts the ZeroTier daemon,
-then `exec market-storefront serve`. On `@app.on_event("startup")` the
-server joins the configured ZeroTier network if any, then runs
-`_ensure_agent_identity()`:
+then `exec market-storefront serve`. The lifespan hook joins the
+configured ZeroTier network if any, initializes the negotiation
+thread store, seeds resources from CSV if the table is empty, probes
+the configured alkahest contract addresses on each chain, starts the
+negotiation watchdog, and preflights the provisioning service.
 
-- If `seller.onchain_agent_id` is set in config (fast path) — use that
-  ID directly, no chain interaction.
-- If `seller.auto_register = true` (default) and no ID is set — call
-  `perform_registration()`, hold the resolved numeric ID in the
-  module-level `_AGENT_ID` for the process lifetime, and log a hint to
-  pin it in config.
-- If `seller.auto_register = false` and no ID is set — raise
-  `RuntimeError` immediately. The pod crashes with a clear message
-  rather than silently minting a new on-chain identity.
-
-After identity is resolved, the heartbeat sender, resource poller, and
-negotiation watchdog are started as background tasks.
+Identity is the wallet address (`settings.wallet.address`) — no
+per-chain on-chain registration step.
 
 The `market-storefront register` console verb delegates to the same
 `perform_registration()` helper used at startup. Operators can run it
@@ -951,8 +940,8 @@ running ──▶ cancelled (SIGTERM sent to ansible-playbook PID, stored in job
 | `logs` | Raw Ansible stdout+stderr, updated every ~2s while running; credentials redacted |
 | `process_id` | PID of the running `ansible-playbook` subprocess — useful for host-level inspection |
 | `retry_count / max_retries / next_retry_at` | Retry state |
-| `agent_id` | ERC-8004 ID of the seller who submitted the job |
-| `buyer_agent_id` | ERC-8004 ID of the buyer (tenant) — controls credential visibility |
+| `agent_id` | Identity of the seller who submitted the job (wallet address or legacy canonical) |
+| `buyer_agent_id` | Identity of the buyer (tenant) — controls credential visibility |
 
 **Credentials** are stored separately in the `credentials` table (joined to job by `job_id`), split by role:
 - `root` — granted to seller only; includes root password and SSH key path on host
@@ -1597,7 +1586,7 @@ localhost:8081  → provisioning API (also handles ansible inventory + connectiv
 
 **Persistence:**
 - Storefront agents, registry, and provisioning each back their SQLite onto a per-service ReadWriteOnce PVC: `/var/lib/arkhai` (storefront, per-agent), `/var/lib/arkhai-registry` (registry), `/app/data` (provisioning). This preserves negotiation history, registry index, and lease state across pod restarts. Each chart pins `strategy: Recreate` (RWO can't have two pods attached), sets `securityContext.fsGroup: 1000` so `appuser` can write the freshly-mounted volume, and annotates the PVC with `helm.sh/resource-policy: keep` so `helm uninstall` doesn't reap the disk. A `persistence.enabled` toggle in each subchart's `values.yaml` falls back to `emptyDir` for kind/CI/local-iteration without a StorageClass.
-- Agent ID persistence across pod restarts is handled by `seller.onchain_agent_id` in config (a Helm value). On first deploy with `agentId: ""` and `autoRegister: true`, the service registers and logs the assigned ID. Operators pin that ID in `values.yaml` and flip `autoRegister: false` to prevent accidental re-registration. In the compose flow, clearing `ONCHAIN_AGENT_ID=` in the env forces re-registration on a fresh Anvil.
+- Agent identity persistence across pod restarts is trivial: the storefront's identity is its EIP-191 wallet address from `[wallet]` in storefront.toml. No per-chain on-chain registration, no ID to pin.
 
 **Storefront chart layout — ConfigMap + Secret split:** `helm/charts/storefront/`
 emits two artifacts per agent:
@@ -1843,7 +1832,7 @@ This section records design decisions reached through implementation experience.
 
 **Context:** The split plan proposed a single `market-infra` package absorbing chain/alkahest/registry-indexer clients, `config_loader.py`, `role.py`, and shared schemas — anything a participant needs to "talk to the shared infra."
 
-**What shipped instead:** the shared-library responsibilities landed in the existing `market-service` wheel (`service/src/service/` — `config_loader.py`, `role.py`, `schemas.py`, `clients/{alkahest, erc8004, indexer, …}`). A separate `market-infra` wheel exists at `infra/`, but its scope is *operator bring-up*: deploy ERC-8004 + Alkahest contracts, run the registry indexer, manage ZeroTier. It's a CLI for the market operator, not a library every participant pulls in.
+**What shipped instead:** the shared-library responsibilities landed in the existing `market-service` wheel (`service/src/service/` — `config_loader.py`, `role.py`, `schemas.py`, `identity/`, `clients/{alkahest, indexer, …}`). A separate `market-infra` wheel exists at `infra/`, but its scope is *operator bring-up*: deploy Alkahest contracts, run the registry indexer, manage ZeroTier. It's a CLI for the market operator, not a library every participant pulls in.
 
 **Why:** rolling everything into one wheel would have meant the buyer CLI pulling in operator-only deps (terraform/Ansible glue, ZeroTier admin) just to get `config_loader`. Keeping them split lets the buyer wheel stay small and the operator wheel carry whatever it needs. The naming is unfortunate — `market-service` reads like a service binary, but it's the shared-client wheel — and worth revisiting if the wheel gets renamed for the public release.
 
@@ -2440,11 +2429,10 @@ The wheel ships `EvaluateNegotiateResponse`, `SettleResponse`, and
 | Term | Meaning |
 |---|---|
 | Alkahest | Arkhai's smart contract suite for peer-to-peer agreements and escrow |
-| ERC-8004 | Ethereum standard for on-chain agent identity (ERC-721-based) |
 | Storefront | The seller-side HTTP server (`market-storefront serve`); the only running agent process in the negotiation flow |
-| Canonical agent ID | `eip155:{chainId}:{registryAddress}:{tokenId}` |
+| Identity | Scheme-tagged `(scheme, identifier)` pair; default scheme is `eip191` with the wallet address as identifier |
 | FRP | Fast Reverse Proxy — used to give buyers network access to their VMs |
 | Anvil | Local EVM testnet node from Foundry |
-| EIP-191 | Personal-message signature scheme used to authenticate buyer→seller HTTP request bodies |
+| EIP-191 | Personal-message signature scheme used to authenticate buyer↔seller HTTP request bodies |
 | Policy callable | A registered function that evaluates a negotiation event and may return an action |
 | Order | A published offer in the registry; carries `offer_resource`, `accepted_escrows`, status. The listing-create API requires `accepted_escrows` directly. |

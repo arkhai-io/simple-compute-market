@@ -237,38 +237,6 @@ def test_chains_from_config_skips_entries_without_rpc_url():
     assert config_loader.chains_from_config(cfg) == {}
 
 
-def test_chains_from_config_explicit_identity_registry_is_kept():
-    cfg = {"chains": {"base_sepolia": {
-        "rpc_url": "https://sepolia.base.org",
-        "identity_registry_address": "0xCUSTOM",
-    }}}
-    chains = config_loader.chains_from_config(cfg)
-    assert chains["base_sepolia"].identity_registry_address == "0xCUSTOM"
-
-
-def test_chains_from_config_identity_registry_falls_back_to_known_default():
-    cfg = {"chains": {"base_sepolia": {"rpc_url": "https://sepolia.base.org"}}}
-    chains = config_loader.chains_from_config(cfg)
-    canonical = config_loader.KNOWN_IDENTITY_REGISTRY["base_sepolia"]
-    assert chains["base_sepolia"].identity_registry_address == canonical
-
-
-def test_chains_from_config_known_chains_share_canonical_identity_registry():
-    cfg = {"chains": {
-        name: {"rpc_url": f"https://{name}.example"}
-        for name in ("base_sepolia", "ethereum_sepolia", "anvil")
-    }}
-    chains = config_loader.chains_from_config(cfg)
-    addresses = {c.identity_registry_address for c in chains.values()}
-    assert len(addresses) == 1
-
-
-def test_chains_from_config_unknown_chain_identity_registry_is_none():
-    cfg = {"chains": {"some_random_chain": {"rpc_url": "https://x"}}}
-    chains = config_loader.chains_from_config(cfg)
-    assert chains["some_random_chain"].identity_registry_address is None
-
-
 def test_chains_from_config_chain_id_explicit_wins():
     cfg = {"chains": {"base_sepolia": {
         "rpc_url": "https://x",

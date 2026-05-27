@@ -31,7 +31,6 @@ import httpx
 
 from market_storefront.utils.config import CHAINS, settings, AGENT_ID, BASE_URL_OVERRIDE
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
-from service.clients.erc8004.blockchain import build_erc8004_canonical_id  # type: ignore[import-not-found]
 from market_storefront.utils.sqlite_client import get_sqlite_client
 from client.provisioning_client import ProvisioningClient, ProvisioningError
 from models.vm_request_model import CreateVmRequest, ScheduleVmExpiryRequest
@@ -272,54 +271,19 @@ async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> d
 
 
 def _canonical_agent_id(chain_name: str | None = None) -> str | None:
-    """Return the ERC-8004 canonical ID for this agent on a specific chain.
+    """Return the storefront's identity for downstream services.
 
-    Format: ``eip155:<chain_id>:<identity_registry>:<agent_id>``.
+    Post-pluggable-identity (Phase 4): the storefront's identity is the
+    EIP-191 wallet address (``settings.wallet.address``, lowercased).
+    The ``chain_name`` argument is accepted for back-compat with callers
+    that previously dispatched per-chain but no longer affects the
+    returned value — identity is chain-agnostic.
 
-    When ``chain_name`` is omitted, picks the first configured chain that
-    has a resolved agent ID — used by call sites that identify the
-    storefront generically (provisioning service X-Agent-ID header,
-    registry CRUD where the registry is chain-agnostic). Callers that
-    know the chain (e.g. on-chain settle handlers) should pass it.
-
-    Returns ``None`` when no chain has a resolved ID.
+    Returns ``None`` when no wallet is configured.
     """
-    from market_storefront.agent import _AGENT_IDS
-
-    candidates: list[tuple[str, int]]
-    if chain_name is not None:
-        chain = CHAINS.get(chain_name)
-        if chain is None or not chain.identity_registry_address:
-            return None
-        aid = _AGENT_IDS.get(chain_name)
-        if aid is None:
-            return None
-        candidates = [(chain_name, aid)]
-    else:
-        candidates = []
-        for name, chain in CHAINS.items():
-            if not chain.identity_registry_address:
-                continue
-            aid = _AGENT_IDS.get(name)
-            if aid is None:
-                continue
-            candidates.append((name, aid))
-
-    for name, aid in candidates:
-        chain = CHAINS[name]
-        try:
-            return build_erc8004_canonical_id(
-                chain_id=chain.chain_id,
-                identity_registry=chain.identity_registry_address,
-                agent_id=aid,
-            )
-        except Exception as exc:
-            logger.warning(
-                "[PROVISIONING] Could not build canonical agent ID for chain=%s: %s",
-                name, exc,
-            )
-            continue
-    return None
+    del chain_name  # back-compat shim; identity is chain-agnostic now
+    address = (settings.wallet.address or "").strip().lower()
+    return address or None
 
 
 def _make_registry_client() -> "MultiRegistryClient":

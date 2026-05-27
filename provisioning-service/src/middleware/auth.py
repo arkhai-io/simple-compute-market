@@ -15,6 +15,7 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 ERC8004_PATTERN = re.compile(r"^eip155:\d+:0x[0-9a-fA-F]{40}:\d+$")
+EIP191_ADDRESS_PATTERN = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
 # Caches both positive and negative registry lookups.
 _registry_cache: TTLCache = TTLCache(
@@ -26,8 +27,13 @@ EXCLUDED_PATHS = frozenset({"/health", "/docs", "/openapi.json", "/redoc"})
 
 
 def validate_erc8004_agent_id(agent_id: str) -> bool:
-    """Return True if agent_id matches the ERC-8004 canonical format."""
-    return bool(ERC8004_PATTERN.match(agent_id))
+    """Return True if ``agent_id`` is an accepted identity form.
+
+    After the pluggable-identity refactor the storefront identifies as
+    a raw EIP-191 wallet address. The legacy ERC-8004 canonical form
+    stays accepted for back-compat with already-deployed clients.
+    """
+    return bool(ERC8004_PATTERN.match(agent_id) or EIP191_ADDRESS_PATTERN.match(agent_id))
 
 
 async def verify_agent_with_registry(registry_url: str, agent_id: str) -> bool:
