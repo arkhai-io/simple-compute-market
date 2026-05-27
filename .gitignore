@@ -3,6 +3,9 @@
 # Project-local scratch files, private notes, and generated diagnostics.
 .scm-local/
 
+# Visible transfer staging for snap-confined tools such as Multipass.
+scm-clean-room-transfer/
+
 # Legacy local rehearsal params (private keys, RPC URLs, etc.).
 .rehearsal-params.local.md
 .rehearsal-params.local.*

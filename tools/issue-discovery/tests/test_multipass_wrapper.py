@@ -20,6 +20,7 @@ def test_multipass_dry_run_prints_clean_room_plan_without_multipass(tmp_path: Pa
             "PATH": env.get("PATH", ""),
             "SCM_MULTIPASS_NAME": "scm-dry-run-test",
             "SCM_MULTIPASS_ARTIFACT_DEST": str(tmp_path / "artifacts"),
+            "SCM_MULTIPASS_TRANSFER_DIR": str(tmp_path / "transfer"),
         }
     )
 
@@ -36,6 +37,7 @@ def test_multipass_dry_run_prints_clean_room_plan_without_multipass(tmp_path: Pa
     assert "dry run only; multipass will not be invoked" in result.stdout
     assert "clean-room sequence: local-vm" in result.stdout
     assert "SCM_CLEAN_ROOM_SEQUENCE=local-vm" in result.stdout
+    assert f"would stage git bundle under {tmp_path / 'transfer'}" in result.stdout
     assert "scm-dry-run-test" in result.stdout
 
 
@@ -43,6 +45,9 @@ def test_multipass_wrapper_delegates_sequence_to_bootstrap() -> None:
     script = multipass_script().read_text(encoding="utf-8")
 
     assert "SCM_CLEAN_ROOM_SEQUENCE" in script
+    assert "SCM_MULTIPASS_TRANSFER_DIR" in script
+    assert 'mktemp -p "$TRANSFER_DIR"' in script
+    assert "mktemp -t" not in script
     assert "SCM_VALIDATION_COMMAND" not in script
     assert "local_stack_build_without_zerotier" not in script
     assert "redis_no_host_port" not in script

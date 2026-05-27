@@ -149,6 +149,8 @@ For a local disposable Ubuntu VM:
 
 The wrapper creates a Multipass VM, transfers the current branch as a git bundle, runs the clean Ubuntu bootstrap inside the VM with `SCM_CLEAN_ROOM_SEQUENCE=local-vm` by default, fetches `.scm-local/` artifacts back under `.scm-local/clean-room-runs/<vm-name>/`, and deletes the VM unless `KEEP_VM=1` is set.
 
+The git bundle is staged under `scm-clean-room-transfer/` by default. This directory is intentionally not dot-prefixed because snap-confined Multipass can fail to read bundles from `/tmp` or hidden home paths.
+
 Common overrides:
 
 ```bash
@@ -156,6 +158,7 @@ SCM_MULTIPASS_IMAGE=24.04 \
 SCM_MULTIPASS_CPUS=6 \
 SCM_MULTIPASS_MEMORY=12G \
 SCM_CLEAN_ROOM_SEQUENCE=local-vm \
+SCM_MULTIPASS_TRANSFER_DIR=scm-clean-room-transfer \
 ./scripts/clean-room/multipass-run.sh
 ```
 

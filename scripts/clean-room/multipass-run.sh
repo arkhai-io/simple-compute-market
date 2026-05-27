@@ -10,6 +10,7 @@ DISK="${SCM_MULTIPASS_DISK:-40G}"
 KEEP_VM="${KEEP_VM:-0}"
 SEQUENCE="${SCM_CLEAN_ROOM_SEQUENCE:-local-vm}"
 ARTIFACT_DEST="${SCM_MULTIPASS_ARTIFACT_DEST:-$ROOT_DIR/.scm-local/clean-room-runs/$NAME}"
+TRANSFER_DIR="${SCM_MULTIPASS_TRANSFER_DIR:-$ROOT_DIR/scm-clean-room-transfer}"
 DRY_RUN=0
 
 log() {
@@ -28,6 +29,7 @@ Environment:
   SCM_MULTIPASS_DISK           VM disk. Defaults to 40G.
   SCM_CLEAN_ROOM_SEQUENCE      issue-discovery clean-room sequence. Defaults to local-vm.
   SCM_MULTIPASS_ARTIFACT_DEST  Host artifact destination.
+  SCM_MULTIPASS_TRANSFER_DIR   Host git bundle staging directory.
   KEEP_VM                      Keep the VM instead of deleting it.
 USAGE
 }
@@ -99,6 +101,7 @@ fetch_artifacts() {
 dry_run() {
   log "dry run only; multipass will not be invoked"
   log "would launch VM $NAME ($IMAGE, cpus=$CPUS, memory=$MEMORY, disk=$DISK)"
+  log "would stage git bundle under $TRANSFER_DIR"
   log "would transfer current git branch as a bundle"
   log "would run bootstrap with SCM_CLEAN_ROOM_SEQUENCE=$SEQUENCE"
   log "would fetch artifacts to $ARTIFACT_DEST"
@@ -122,7 +125,9 @@ command -v multipass >/dev/null 2>&1 || {
 
 require_git_repo
 
-bundle="$(mktemp -t scm-issue-discovery.XXXXXX.bundle)"
+mkdir -p "$TRANSFER_DIR"
+bundle="$(mktemp -p "$TRANSFER_DIR" scm-issue-discovery.XXXXXX.bundle)"
+rm -f "$bundle"
 trap 'rm -f "$bundle"; cleanup' EXIT
 create_bundle "$bundle"
 
