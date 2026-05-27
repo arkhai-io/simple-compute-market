@@ -15,6 +15,7 @@ class WorkaroundSpec:
     reason: str
     removal_condition: str
     issue: str | None = None
+    start_phase: str | None = None
     commands: tuple[CommandSpec, ...] = ()
     skip_phases: tuple[str, ...] = ()
     env: dict[str, str] | None = None
@@ -47,6 +48,7 @@ def _parse_workaround(raw: dict[str, Any]) -> WorkaroundSpec:
         reason=str(raw["reason"]),
         removal_condition=str(raw["removal_condition"]),
         issue=str(issue) if issue is not None else None,
+        start_phase=str(raw["start_phase"]) if raw.get("start_phase") is not None else None,
         commands=commands,
         skip_phases=tuple(raw.get("skip_phases", [])),
         env={str(key): str(value) for key, value in env.items()} if isinstance(env, dict) else None,

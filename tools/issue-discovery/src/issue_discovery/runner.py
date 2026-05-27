@@ -134,13 +134,26 @@ class DiscoveryRunner:
         workaround: WorkaroundSpec | tuple[WorkaroundSpec, ...] | None,
     ) -> int:
         phase_file = load_phase_file(phase_path)
-        phases = _select_phases(phase_file, selected_phase_ids)
         workarounds = _normalize_workarounds(workaround)
+        phase_scope_start = _earliest_start_phase(phase_file, workarounds)
+        if selected_phase_ids is None and phase_scope_start is not None:
+            phases, assumed_phase_ids = _select_phases_from_start(phase_file, phase_scope_start)
+        else:
+            phases = _select_phases(phase_file, selected_phase_ids)
+            assumed_phase_ids = ()
         env = _merged_workaround_env(workarounds)
         skip_phases = {phase_id for spec in workarounds for phase_id in spec.skip_phases}
 
         if self.dry_run:
-            self._print_plan(mode, phase_path, phases, workarounds, skip_phases)
+            self._print_plan(
+                mode,
+                phase_path,
+                phases,
+                workarounds,
+                skip_phases,
+                phase_scope_start,
+                assumed_phase_ids,
+            )
             return 0
 
         store = self._create_store()
@@ -160,6 +173,8 @@ class DiscoveryRunner:
             "repo_root": str(self.repo_root),
             "phase_file": self._display_path(phase_path),
             "selected_phases": [phase.id for phase in phases],
+            "phase_scope_start": phase_scope_start,
+            "assumed_passed_phases": list(assumed_phase_ids),
             "workaround": _workaround_json(workarounds[0]) if len(workarounds) == 1 else None,
             "workarounds": [_workaround_json(spec) for spec in workarounds],
             "output_dir": str(store.run_dir),
@@ -177,6 +192,7 @@ class DiscoveryRunner:
                 state.blocking_failure = f"workaround:{spec.id}"
                 break
         if state.blocking_failure is None:
+            self._record_assumed_phases(phase_file, assumed_phase_ids, store, state)
             self._run_phases(phases, store, redactor, collectors, state, env, skip_phases)
 
         status = "failed" if state.failed else "passed"
@@ -230,7 +246,11 @@ class DiscoveryRunner:
         if phase.id in skip_phases:
             self._record_skip(store, state, phase, "workaround_skip")
             return
-        missing = [required for required in phase.requires if state.phase_status.get(required) != "passed"]
+        missing = [
+            required
+            for required in phase.requires
+            if not _dependency_satisfied(state.phase_status.get(required))
+        ]
         if missing and not phase.always_run:
             self._record_skip(store, state, phase, "dependency_not_passed", {"missing": missing})
             return
@@ -272,6 +292,34 @@ class DiscoveryRunner:
             "classifiers": phase.classifiers if status == "failed" else (),
         }
         store.append_jsonl("phases.jsonl", redactor.redact_mapping(record))
+
+    def _record_assumed_phases(
+        self,
+        phase_file: PhaseFile,
+        assumed_phase_ids: tuple[str, ...],
+        store: ArtifactStore,
+        state: RunState,
+    ) -> None:
+        if not assumed_phase_ids:
+            return
+        assumed = set(assumed_phase_ids)
+        for phase in phase_file.phases:
+            if phase.id not in assumed:
+                continue
+            state.phase_status[phase.id] = "assumed_passed"
+            store.append_jsonl(
+                "phases.jsonl",
+                {
+                    "id": phase.id,
+                    "name": phase.name,
+                    "category": phase.category,
+                    "blocking": phase.blocking,
+                    "status": "assumed_passed",
+                    "reason": "continuation_scope",
+                    "commands": [],
+                    "completed_at": utc_now_iso(),
+                },
+            )
 
     def _run_command(
         self,
@@ -316,6 +364,7 @@ class DiscoveryRunner:
                     "status": "passed" if ok else "failed",
                     "reason": workaround.reason,
                     "removal_condition": workaround.removal_condition,
+                    "start_phase": workaround.start_phase,
                     "commands": results,
                     "env": env,
                     "skip_phases": workaround.skip_phases,
@@ -384,6 +433,8 @@ class DiscoveryRunner:
         phases: tuple[PhaseSpec, ...],
         workarounds: tuple[WorkaroundSpec, ...],
         skip_phases: set[str],
+        phase_scope_start: str | None,
+        assumed_phase_ids: tuple[str, ...],
     ) -> None:
         output = self.output_dir if self.output_dir is not None else self.paths.default_output_root
         print(f"issue-discovery command: {mode}")
@@ -391,6 +442,11 @@ class DiscoveryRunner:
         print(f"output: {output}")
         print("dry_run: yes")
         print(f"phase_file: {phase_path}")
+        if phase_scope_start is not None:
+            print(f"phase_scope_start: {phase_scope_start}")
+            print("assumed_passed_phases:")
+            for phase_id in assumed_phase_ids:
+                print(f"  - {phase_id}")
         if workarounds:
             print("workarounds:")
             for workaround in workarounds:
@@ -439,6 +495,71 @@ def _select_phases(phase_file: PhaseFile, selected_phase_ids: tuple[str, ...] | 
     return tuple(phase for phase in phase_file.phases if phase.id in included)
 
 
+def _select_phases_from_start(
+    phase_file: PhaseFile,
+    start_phase: str,
+) -> tuple[tuple[PhaseSpec, ...], tuple[str, ...]]:
+    phase_ids = [phase.id for phase in phase_file.phases]
+    try:
+        start_index = phase_ids.index(start_phase)
+    except ValueError as exc:
+        raise ValueError(f"unknown continuation start phase in {phase_file.name}: {start_phase}") from exc
+    selected = tuple(phase_file.phases[start_index:])
+    assumed = _dependency_closure_outside_selection(phase_file, selected)
+    return selected, assumed
+
+
+def _earliest_start_phase(
+    phase_file: PhaseFile,
+    workarounds: tuple[WorkaroundSpec, ...],
+) -> str | None:
+    phase_indexes = {phase.id: index for index, phase in enumerate(phase_file.phases)}
+    starts = []
+    for workaround in workarounds:
+        if workaround.start_phase is None:
+            continue
+        if workaround.start_phase not in phase_indexes:
+            raise ValueError(
+                f"unknown continuation start phase for {workaround.id}: {workaround.start_phase}"
+            )
+        starts.append(workaround.start_phase)
+    if not starts:
+        return None
+    return min(starts, key=lambda phase_id: phase_indexes[phase_id])
+
+
+def _dependency_satisfied(status: str | None) -> bool:
+    return status in {"passed", "assumed_passed"}
+
+
+def _dependency_closure_outside_selection(
+    phase_file: PhaseFile,
+    selected: tuple[PhaseSpec, ...],
+) -> tuple[str, ...]:
+    by_id = {phase.id: phase for phase in phase_file.phases}
+    selected_ids = {phase.id for phase in selected}
+    required: set[str] = set()
+    visiting: set[str] = set()
+
+    def visit(phase_id: str) -> None:
+        if phase_id in visiting:
+            raise ValueError(f"cyclic phase dependency in {phase_file.name}: {phase_id}")
+        phase = by_id.get(phase_id)
+        if phase is None:
+            raise ValueError(f"unknown required phase id in {phase_file.name}: {phase_id}")
+        visiting.add(phase_id)
+        for required_id in phase.requires:
+            if required_id not in selected_ids:
+                required.add(required_id)
+                visit(required_id)
+        visiting.remove(phase_id)
+
+    for phase in selected:
+        visit(phase.id)
+
+    return tuple(phase.id for phase in phase_file.phases if phase.id in required)
+
+
 def _workaround_json(workaround: WorkaroundSpec | None) -> dict[str, Any] | None:
     if workaround is None:
         return None
@@ -446,6 +567,7 @@ def _workaround_json(workaround: WorkaroundSpec | None) -> dict[str, Any] | None
         "id": workaround.id,
         "status": workaround.status,
         "issue": workaround.issue,
+        "start_phase": workaround.start_phase,
         "reason": workaround.reason,
         "removal_condition": workaround.removal_condition,
         "skip_phases": workaround.skip_phases,

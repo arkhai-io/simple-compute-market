@@ -19,6 +19,7 @@
         "id": { "$ref": "#/$defs/id" },
         "status": { "enum": ["active", "retired"] },
         "issue": { "type": ["string", "null"] },
+        "start_phase": { "$ref": "#/$defs/id" },
         "reason": { "type": "string", "minLength": 1 },
         "removal_condition": { "type": "string", "minLength": 1 },
         "commands": {

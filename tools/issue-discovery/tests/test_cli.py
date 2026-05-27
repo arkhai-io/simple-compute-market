@@ -47,6 +47,30 @@ def test_continue_accepts_multiple_workarounds() -> None:
     assert args.workarounds == ["one", "two"]
 
 
+def test_runtime_continuation_dry_run_starts_at_runtime_scope(capsys) -> None:
+    root = repo_root()
+    code = main(
+        [
+            "--repo-root",
+            str(root),
+            "--dry-run",
+            "continue",
+            "--with",
+            "redis_no_host_port",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "phase_scope_start: compose_preexisting_stack_check" in captured.out
+    assert "assumed_passed_phases:" in captured.out
+    assert "  - build" in captured.out
+    assert "  - root_service_tests" not in captured.out
+    assert "  - compose_preexisting_stack_check" in captured.out
+    phase_lines = captured.out.split("\nphases:\n", 1)[1]
+    assert "  - root_service_tests" not in phase_lines
+
+
 def test_issue_create_has_independent_dry_run(tmp_path: Path, capsys) -> None:
     run_dir = tmp_path / "run"
     issue_dir = run_dir / "issue-candidates"

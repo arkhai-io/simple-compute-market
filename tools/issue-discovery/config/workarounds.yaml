@@ -5,6 +5,7 @@ workarounds:
     issue: null
     reason: Disable Redis host-port publication when port 6379 is already occupied.
     removal_condition: Root compose no longer publishes Redis on host 6379 by default.
+    start_phase: compose_preexisting_stack_check
     env:
       ISSUE_DISCOVERY_COMPOSE_ARGS: -f docker-compose.yml -f /tmp/scm-no-redis-port.yml
     commands:
@@ -21,6 +22,7 @@ workarounds:
     issue: null
     reason: Continue local stack discovery when top-level make build blocks on non-interactive ZeroTier installation.
     removal_condition: Top-level make build no longer runs sudo ZeroTier installation as part of local image/artifact builds.
+    start_phase: build
     env:
       ISSUE_DISCOVERY_BUILD_COMMAND: make build-runtime-images build-market-contract-deployer build-test-env build-test-image
 
@@ -29,6 +31,7 @@ workarounds:
     issue: null
     reason: Fresh storefront named volumes may be root-owned and not writable by appuser.
     removal_condition: Strict fresh-volume profile passes without this workaround.
+    start_phase: compose_start_strict
     commands:
       - id: chown_storefront_volumes
         run: |

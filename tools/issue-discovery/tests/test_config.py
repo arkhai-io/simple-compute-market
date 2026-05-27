@@ -84,6 +84,9 @@ def test_build_phase_can_use_explicit_continuation_command() -> None:
     assert build.commands[0].run == "${ISSUE_DISCOVERY_BUILD_COMMAND:-make build}"
     assert "local_stack_build_without_zerotier" in workarounds
     assert "ISSUE_DISCOVERY_BUILD_COMMAND" in workarounds["local_stack_build_without_zerotier"].env
+    assert workarounds["local_stack_build_without_zerotier"].start_phase == "build"
+    assert workarounds["redis_no_host_port"].start_phase == "compose_preexisting_stack_check"
+    assert workarounds["storefront_volume_chown"].start_phase == "compose_start_strict"
 
 
 def test_clean_room_local_vm_sequence_is_laddered() -> None:

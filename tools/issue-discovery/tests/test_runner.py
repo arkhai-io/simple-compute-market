@@ -246,3 +246,85 @@ phases:
     assert [item["id"] for item in manifest["workarounds"]] == ["first", "second"]
     workaround_records = read_jsonl(run_dir / "workarounds.jsonl")
     assert [item["id"] for item in workaround_records] == ["first", "second"]
+
+
+def test_continuation_start_phase_assumes_prior_dependencies(tmp_path: Path) -> None:
+    phase_file = tmp_path / "phases.yaml"
+    phase_file.write_text(
+        """
+schema_version: 1
+name: test
+phases:
+  - id: setup
+    name: Setup
+    category: test
+    blocking: true
+    commands:
+      - id: setup
+        run: echo setup
+  - id: build
+    name: Build
+    category: build
+    blocking: true
+    requires:
+      - setup
+    commands:
+      - id: build
+        run: echo build
+  - id: runtime
+    name: Runtime
+    category: runtime
+    blocking: true
+    requires:
+      - build
+    commands:
+      - id: runtime
+        run: echo runtime
+  - id: stack_tests
+    name: Stack tests
+    category: stack_test
+    blocking: false
+    requires:
+      - runtime
+    commands:
+      - id: stack_tests
+        run: echo stack tests
+  - id: teardown
+    name: Teardown
+    category: teardown
+    blocking: false
+    always_run: true
+    commands:
+      - id: teardown
+        run: echo teardown
+""".lstrip(),
+        encoding="utf-8",
+    )
+    runtime_workaround = WorkaroundSpec(
+        id="runtime_workaround",
+        status="active",
+        reason="runtime workaround",
+        removal_condition="runtime fixed",
+        start_phase="runtime",
+    )
+    run_dir = tmp_path / "run"
+
+    code = DiscoveryRunner(repo_root=repo_root(), output_dir=run_dir)._run_phase_file(
+        mode="continue",
+        phase_path=phase_file,
+        selected_phase_ids=None,
+        workaround=runtime_workaround,
+    )
+
+    assert code == 0
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["phase_scope_start"] == "runtime"
+    assert manifest["assumed_passed_phases"] == ["setup", "build"]
+    records = read_jsonl(run_dir / "phases.jsonl")
+    assert [(item["id"], item["status"]) for item in records] == [
+        ("setup", "assumed_passed"),
+        ("build", "assumed_passed"),
+        ("runtime", "passed"),
+        ("stack_tests", "passed"),
+        ("teardown", "passed"),
+    ]

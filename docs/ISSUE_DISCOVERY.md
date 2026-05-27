@@ -46,6 +46,8 @@ Strict mode does not apply hidden fixes. It verifies prerequisites, builds the r
 
 Continuation mode records that one or more workarounds were used before continuing. Later evidence in that run depends on those workarounds and should be interpreted that way. Use continuation runs to discover the next failure after a known blocker, not to redefine strict success.
 
+Some workarounds define a `start_phase`, so continuations can resume at the affected build or runtime phase instead of rerunning unrelated earlier phases. When a resumed phase depends on an earlier phase that was not rerun, the runner records that dependency as `assumed_passed` in `phases.jsonl` and in the manifest's `assumed_passed_phases`.
+
 ## Loop Until Done
 
 The intended workflow is a failure-harvest loop:
@@ -68,7 +70,7 @@ Runs write to:
 
 Important files:
 
-- `manifest.json`: run identity, selected phases, status, workaround context.
+- `manifest.json`: run identity, selected phases, phase scope, status, workaround context.
 - `phases.jsonl`: ordered phase outcomes, failed commands, log paths, and classifier hints.
 - `commands/<phase>/<command>.*`: stdout, stderr, and command metadata.
 - `collectors.jsonl`: collector outcomes and evidence paths.
@@ -107,6 +109,8 @@ Create the issue after reviewing the body:
 ```bash
 ./scripts/issue-discovery issue create .scm-local/issue-discovery/runs/<run-id> <fingerprint>
 ```
+
+The create command only files candidates marked `ready_to_file` unless `--force` is supplied. Real issue creation checks the body against the configured redaction rules and searches existing GitHub issues for the candidate fingerprint before calling `gh issue create`. If a duplicate exists, it prints the existing URL and exits without creating a new issue.
 
 The create command uses `gh issue create` from the repository root selected by the wrapper or `--repo-root`, so it requires the GitHub CLI to be installed and authenticated for that repository.
 
