@@ -90,3 +90,51 @@ def test_verify_heartbeat_signature_wrong_key(eth_account, encode_defunct):
     ts = int(time.time())
     sig = _make_sig(eth_account, encode_defunct, OTHER_PRIVATE_KEY, f"heartbeat:agent-1:{ts}")
     assert verify_heartbeat_signature("agent-1", ts, sig, OWNER_ADDRESS) is False
+
+
+# --- pluggable-identity Phase 2: scheme dispatch ---
+
+def test_verify_order_signature_accepts_identity_object(eth_account, encode_defunct):
+    """Calling with an Identity(scheme='eip191', identifier=...) works the
+    same as passing a raw address — the back-compat path coerces strings
+    to ``Identity(scheme='eip191', identifier=...)``."""
+    from src.api.utils import Identity, verify_order_signature
+
+    ts = int(time.time())
+    sig = _make_sig(eth_account, encode_defunct, OWNER_PRIVATE_KEY, f"create_order:agent-1:{ts}")
+    identity = Identity(scheme="eip191", identifier=OWNER_ADDRESS)
+    assert verify_order_signature("create_order", "agent-1", ts, sig, identity) is True
+
+
+def test_verify_heartbeat_signature_accepts_identity_object(eth_account, encode_defunct):
+    from src.api.utils import Identity, verify_heartbeat_signature
+
+    ts = int(time.time())
+    sig = _make_sig(eth_account, encode_defunct, OWNER_PRIVATE_KEY, f"heartbeat:agent-1:{ts}")
+    identity = Identity(scheme="eip191", identifier=OWNER_ADDRESS)
+    assert verify_heartbeat_signature("agent-1", ts, sig, identity) is True
+
+
+def test_verify_with_unknown_scheme_returns_false(eth_account, encode_defunct):
+    """Unknown scheme dispatched to the registry returns False (not an exception)."""
+    from src.api.utils import Identity, verify_order_signature
+
+    ts = int(time.time())
+    sig = _make_sig(eth_account, encode_defunct, OWNER_PRIVATE_KEY, f"create_order:agent-1:{ts}")
+    identity = Identity(scheme="not-a-real-scheme", identifier=OWNER_ADDRESS)
+    assert verify_order_signature("create_order", "agent-1", ts, sig, identity) is False
+
+
+def test_identity_lowercases_eip191_identifier():
+    """The inline registry Identity matches service.schemas.Identity normalization."""
+    from src.api.utils import Identity
+
+    ident = Identity(scheme="eip191", identifier="0xABCDEF0000000000000000000000000000000001")
+    assert ident.identifier == "0xabcdef0000000000000000000000000000000001"
+
+
+def test_identity_preserves_non_eip191_case():
+    from src.api.utils import Identity
+
+    ident = Identity(scheme="did-key", identifier="did:key:zMixedCASE")
+    assert ident.identifier == "did:key:zMixedCASE"

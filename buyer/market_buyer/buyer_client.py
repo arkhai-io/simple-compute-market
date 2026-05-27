@@ -163,19 +163,30 @@ def _post(
     *,
     signature: str,
     timestamp: int,
+    identity_scheme: str = "eip191",
+    identity_identifier: str | None = None,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    """Signed POST with JSON body. Raises RuntimeError on non-2xx."""
+    """Signed POST with JSON body. Raises RuntimeError on non-2xx.
+
+    Emits ``X-Identity-Scheme`` + ``X-Identity`` so storefronts that have
+    adopted the pluggable-identity dispatch (Phase 2) can route by scheme.
+    Storefronts that haven't yet ignore the headers — back-compat is preserved.
+    """
     data = json.dumps(body).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-Signature": signature,
+        "X-Timestamp": str(timestamp),
+        "X-Identity-Scheme": identity_scheme,
+    }
+    if identity_identifier:
+        headers["X-Identity"] = identity_identifier
     req = urllib.request.Request(
         url,
         data=data,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "X-Signature": signature,
-            "X-Timestamp": str(timestamp),
-        },
+        headers=headers,
         method="POST",
     )
     try:
@@ -345,6 +356,7 @@ def negotiate_with_seller(
         reply = _post(
             f"{seller_url}/api/v1/negotiate/new", new_body,
             signature=sig, timestamp=ts,
+            identity_identifier=buyer_address,
         )
         if on_round:
             on_round(0, new_body, reply)
@@ -439,6 +451,7 @@ def negotiate_with_seller(
         reply = _post(
             f"{seller_url}/api/v1/negotiate/{neg_id}", body,
             signature=sig, timestamp=ts,
+            identity_identifier=buyer_address,
         )
         if on_round:
             on_round(round_idx, body, reply)

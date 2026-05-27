@@ -92,17 +92,66 @@ def _sign_eip191(private_key: str, message: str) -> str:
     return signed.signature.hex()
 
 
-def _build_auth_headers(private_key: str, operation: str, resource_id: str) -> dict[str, str]:
-    """Build ``X-Signature`` / ``X-Timestamp`` headers for a signed request.
+def _address_from_private_key(private_key: str) -> str:
+    """Derive the EIP-191 wallet address (lowercase) for a private key."""
+    from eth_account import Account
+    return Account.from_key(private_key).address.lower()
 
-    The signed message is ``"<operation>:<resource_id>:<timestamp>"``.
+
+def _signed_request_headers(
+    private_key: str,
+    message: str,
+    *,
+    identity_scheme: str = "eip191",
+    identity_identifier: str | None = None,
+) -> dict[str, str]:
+    """Return the four signed-request headers for an arbitrary ``message``.
+
+    Differs from :func:`_build_auth_headers` only in that the caller has
+    already composed the full canonical message (used by per-endpoint
+    constructions that include the timestamp inline). Always emits the
+    ``X-Identity-Scheme`` / ``X-Identity`` pair.
+    """
+    ts = str(int(time.time()))
+    full_message = f"{message}:{ts}"
+    sig = _sign_eip191(private_key, full_message)
+    identifier = identity_identifier or _address_from_private_key(private_key)
+    return {
+        "X-Timestamp": ts,
+        "X-Signature": sig,
+        "X-Identity-Scheme": identity_scheme,
+        "X-Identity": identifier,
+    }
+
+
+def _build_auth_headers(
+    private_key: str,
+    operation: str,
+    resource_id: str,
+    *,
+    identity_scheme: str = "eip191",
+    identity_identifier: str | None = None,
+) -> dict[str, str]:
+    """Build signed-request headers for the storefront.
+
+    Headers emitted:
+      ``X-Timestamp`` / ``X-Signature`` — EIP-191 signature of
+      ``"<operation>:<resource_id>:<timestamp>"``.
+      ``X-Identity-Scheme`` / ``X-Identity`` — the scheme-tagged identity
+      that the signature attests; defaults to ``("eip191", <address derived
+      from private_key>)``. Servers that predate the pluggable-identity
+      headers ignore them; servers that don't dispatch through their
+      identity-scheme registry.
     """
     timestamp = str(int(time.time()))
     message = f"{operation}:{resource_id}:{timestamp}"
     signature = _sign_eip191(private_key, message)
+    identifier = identity_identifier or _address_from_private_key(private_key)
     return {
         "X-Timestamp": timestamp,
         "X-Signature": signature,
+        "X-Identity-Scheme": identity_scheme,
+        "X-Identity": identifier,
     }
 
 
@@ -695,8 +744,11 @@ class StorefrontClient(_StorefrontClientBase):
         listing has no typed payment token; the seller validates against
         its acceptance set.
         """
-        ts = str(int(time.time()))
-        sig = _sign_eip191(self._private_key, f"negotiate_new:{listing_id}:{ts}")
+        headers = _signed_request_headers(
+            self._private_key,
+            f"negotiate_new:{listing_id}",
+            identity_identifier=buyer_address,
+        )
         exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
         body = {
             "listing_id": listing_id,
@@ -718,8 +770,7 @@ class StorefrontClient(_StorefrontClientBase):
             "buyer_agent_url": buyer_agent_url,
         }
         return await self._post(
-            "/api/v1/negotiate/new", body,
-            extra_headers={"X-Signature": sig, "X-Timestamp": ts},
+            "/api/v1/negotiate/new", body, extra_headers=headers,
         )
 
     async def negotiate_continue(
@@ -737,16 +788,18 @@ class StorefrontClient(_StorefrontClientBase):
         omitted for ``accept`` / ``exit``. ``fields["amount"]`` carries the
         buyer's absolute new offer in base units.
         """
-        ts = str(int(time.time()))
-        sig = _sign_eip191(self._private_key, f"negotiate_continue:{neg_id}:{ts}")
+        headers = _signed_request_headers(
+            self._private_key,
+            f"negotiate_continue:{neg_id}",
+            identity_identifier=buyer_address,
+        )
         body: dict = {"action": action, "buyer_address": buyer_address}
         if proposal is not None:
             body["proposal"] = proposal
         if reason is not None:
             body["reason"] = reason
         return await self._post(
-            f"/api/v1/negotiate/{neg_id}", body,
-            extra_headers={"X-Signature": sig, "X-Timestamp": ts},
+            f"/api/v1/negotiate/{neg_id}", body, extra_headers=headers,
         )
 
     async def settle(
@@ -765,8 +818,11 @@ class StorefrontClient(_StorefrontClientBase):
         for compatibility with the e2e fixture; non-anvil consumers must
         pass their own value.
         """
-        ts = str(int(time.time()))
-        sig = _sign_eip191(self._private_key, f"settle_escrow:{escrow_uid}:{ts}")
+        headers = _signed_request_headers(
+            self._private_key,
+            f"settle_escrow:{escrow_uid}",
+            identity_identifier=buyer_address,
+        )
         body: dict = {
             "negotiation_id": negotiation_id,
             "buyer_address": buyer_address,
@@ -776,8 +832,7 @@ class StorefrontClient(_StorefrontClientBase):
             body["ssh_public_key"] = ssh_public_key
         return SettleResponse.from_dict(
             await self._post(
-                f"/api/v1/settle/{escrow_uid}", body,
-                extra_headers={"X-Signature": sig, "X-Timestamp": ts},
+                f"/api/v1/settle/{escrow_uid}", body, extra_headers=headers,
             )
         )
 
@@ -788,13 +843,16 @@ class StorefrontClient(_StorefrontClientBase):
         buyer_address: str,
     ) -> SettleStatusResponse:
         """GET /api/v1/settle/{escrow_uid}/status — adds EIP-191 auth headers automatically."""
-        ts = str(int(time.time()))
-        sig = _sign_eip191(self._private_key, f"settle_status:{escrow_uid}:{ts}")
+        headers = _signed_request_headers(
+            self._private_key,
+            f"settle_status:{escrow_uid}",
+            identity_identifier=buyer_address,
+        )
         url = self._url(f"/api/v1/settle/{escrow_uid}/status")
         resp = await self._client.get(
             f"/api/v1/settle/{escrow_uid}/status",
             params={"buyer_address": buyer_address},
-            headers={"X-Signature": sig, "X-Timestamp": ts},
+            headers=headers,
             timeout=self._timeout,
         )
         self._raise_for_status("GET", url, resp.status_code, resp.text)
@@ -1454,8 +1512,11 @@ class SyncStorefrontClient(_StorefrontClientBase):
         args. ``initial_amount`` is the absolute opening amount in base
         units of the payment token.
         """
-        ts = str(int(time.time()))
-        sig = _sign_eip191(self._private_key, f"negotiate_new:{listing_id}:{ts}")
+        headers = _signed_request_headers(
+            self._private_key,
+            f"negotiate_new:{listing_id}",
+            identity_identifier=buyer_address,
+        )
         exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
         body = {
             "listing_id": listing_id,
@@ -1477,8 +1538,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
             "buyer_agent_url": buyer_agent_url,
         }
         return self._post(
-            "/api/v1/negotiate/new", body,
-            extra_headers={"X-Signature": sig, "X-Timestamp": ts},
+            "/api/v1/negotiate/new", body, extra_headers=headers,
         )
 
     def negotiate_continue(
@@ -1496,16 +1556,18 @@ class SyncStorefrontClient(_StorefrontClientBase):
         omitted for ``accept`` / ``exit``. ``fields["amount"]`` carries the
         buyer's absolute new offer in base units.
         """
-        ts = str(int(time.time()))
-        sig = _sign_eip191(self._private_key, f"negotiate_continue:{neg_id}:{ts}")
+        headers = _signed_request_headers(
+            self._private_key,
+            f"negotiate_continue:{neg_id}",
+            identity_identifier=buyer_address,
+        )
         body: dict = {"action": action, "buyer_address": buyer_address}
         if proposal is not None:
             body["proposal"] = proposal
         if reason is not None:
             body["reason"] = reason
         return self._post(
-            f"/api/v1/negotiate/{neg_id}", body,
-            extra_headers={"X-Signature": sig, "X-Timestamp": ts},
+            f"/api/v1/negotiate/{neg_id}", body, extra_headers=headers,
         )
 
     def settle(
@@ -1524,8 +1586,11 @@ class SyncStorefrontClient(_StorefrontClientBase):
         for compatibility with the e2e fixture; non-anvil consumers must
         pass their own value.
         """
-        ts = str(int(time.time()))
-        sig = _sign_eip191(self._private_key, f"settle_escrow:{escrow_uid}:{ts}")
+        headers = _signed_request_headers(
+            self._private_key,
+            f"settle_escrow:{escrow_uid}",
+            identity_identifier=buyer_address,
+        )
         body: dict = {
             "negotiation_id": negotiation_id,
             "buyer_address": buyer_address,
@@ -1535,8 +1600,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
             body["ssh_public_key"] = ssh_public_key
         return SettleResponse.from_dict(
             self._post(
-                f"/api/v1/settle/{escrow_uid}", body,
-                extra_headers={"X-Signature": sig, "X-Timestamp": ts},
+                f"/api/v1/settle/{escrow_uid}", body, extra_headers=headers,
             )
         )
 
@@ -1547,13 +1611,16 @@ class SyncStorefrontClient(_StorefrontClientBase):
         buyer_address: str,
     ) -> SettleStatusResponse:
         """GET /api/v1/settle/{escrow_uid}/status — adds EIP-191 auth headers automatically."""
-        ts = str(int(time.time()))
-        sig = _sign_eip191(self._private_key, f"settle_status:{escrow_uid}:{ts}")
+        headers = _signed_request_headers(
+            self._private_key,
+            f"settle_status:{escrow_uid}",
+            identity_identifier=buyer_address,
+        )
         url = self._url(f"/api/v1/settle/{escrow_uid}/status")
         resp = self._client.get(
             f"/api/v1/settle/{escrow_uid}/status",
             params={"buyer_address": buyer_address},
-            headers={"X-Signature": sig, "X-Timestamp": ts},
+            headers=headers,
             timeout=self._timeout,
         )
         self._raise_for_status("GET", url, resp.status_code, resp.text)

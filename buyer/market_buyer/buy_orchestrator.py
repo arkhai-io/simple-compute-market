@@ -371,7 +371,10 @@ def submit_settlement(
     for attempt in range(1, max_attempts + 1):
         sig, ts = _sign(f"settle_escrow:{escrow_uid}", buyer_private_key)
         try:
-            return _signed_json(url, body, sig, ts, method="POST", timeout=timeout)
+            return _signed_json(
+                url, body, sig, ts, method="POST", timeout=timeout,
+                identity_identifier=buyer_address,
+            )
         except RuntimeError as exc:
             last_exc = exc
             if not _looks_like_propagation_lag(exc) or attempt == max_attempts:
@@ -395,8 +398,11 @@ def poll_settlement_status(
         seller_url.rstrip("/")
         + f"/api/v1/settle/{escrow_uid}/status?buyer_address={buyer_address}"
     )
-    return _signed_json(url, body=None, signature=sig, timestamp=ts,
-                        method="GET", timeout=timeout)
+    return _signed_json(
+        url, body=None, signature=sig, timestamp=ts,
+        method="GET", timeout=timeout,
+        identity_identifier=buyer_address,
+    )
 
 
 def _signed_json(
@@ -407,12 +413,17 @@ def _signed_json(
     *,
     method: str,
     timeout: float,
+    identity_scheme: str = "eip191",
+    identity_identifier: str | None = None,
 ) -> dict[str, Any]:
     headers = {
         "Accept": "application/json",
         "X-Signature": signature,
         "X-Timestamp": str(timestamp),
+        "X-Identity-Scheme": identity_scheme,
     }
+    if identity_identifier:
+        headers["X-Identity"] = identity_identifier
     data = None
     if body is not None:
         headers["Content-Type"] = "application/json"

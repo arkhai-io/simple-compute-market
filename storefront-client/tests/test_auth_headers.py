@@ -76,3 +76,34 @@ def test_client_signs_when_private_key_present():
         assert "X-Timestamp" in headers
     finally:
         client.close()
+
+
+def test_build_auth_headers_emits_identity_scheme_and_identifier():
+    """Pluggable-identity Phase 2: the four headers are emitted together."""
+    headers = _build_auth_headers(PRIVATE_KEY, "create_listing", "http://localhost:8000")
+    assert headers["X-Identity-Scheme"] == "eip191"
+    assert headers["X-Identity"] == OWNER_ADDRESS.lower()
+
+
+def test_build_auth_headers_respects_explicit_identifier():
+    """Caller-supplied identifier wins over private_key-derived address."""
+    headers = _build_auth_headers(
+        PRIVATE_KEY,
+        "create_listing",
+        "http://localhost:8000",
+        identity_identifier="0xabcd000000000000000000000000000000000001",
+    )
+    assert headers["X-Identity"] == "0xabcd000000000000000000000000000000000001"
+    assert headers["X-Identity-Scheme"] == "eip191"
+
+
+def test_build_auth_headers_respects_explicit_scheme():
+    headers = _build_auth_headers(
+        PRIVATE_KEY,
+        "create_listing",
+        "http://localhost:8000",
+        identity_scheme="some-other-scheme",
+        identity_identifier="opaque-id",
+    )
+    assert headers["X-Identity-Scheme"] == "some-other-scheme"
+    assert headers["X-Identity"] == "opaque-id"
