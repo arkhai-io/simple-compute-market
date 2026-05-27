@@ -92,6 +92,10 @@ The e2e run surfaced three real bugs that have since been fixed (commit `df59fef
 ## Commits on branch
 
 ```
+ae3e1c6 service/schemas: RateValue + AcceptedEscrow.literal_fields/rates siblings
+5033148 service: parse [escrow_templates.<name>] config tables
+489090c storefront: registry_auth_check probes every (chain, agent_id), surfaces per-chain status
+d2134d2 docs: refresh multi-chain handoff — e2e verified, cross-link escrow templates
 9613100 docs: design proposal for generic escrow templates (literal + rates split)
 df59fef e2e: migrate live compose configs + storefront-client to multi-chain shape
 181a99e docs: rewrite multi-chain refactor handoff to reflect completed state
@@ -108,5 +112,5 @@ b203972 storefront tests: migrate unit fixtures to chains dict shape
 
 ## Known follow-ups (not blockers)
 
-- `registry_auth_check` (in `storefront/services/system_service.py`) probes only the first chain with a resolved agent ID and returns on the first hit. To be truly multi-chain it should probe every (chain, agent_id) tuple and surface per-chain status. Pure status-endpoint polish — no correctness impact, but a misconfigured second chain's identity wouldn't show up as `owner_mismatch` until something tried to use it.
-- Cross-chain logical-token-address divergence (USDC at one address on Sepolia, another on Base) is **subsumed by the generic-escrow templates design** in [`design-generic-escrow-templates.md`](./design-generic-escrow-templates.md). That design's `[escrow_templates.<name>]` blocks carry a literal token address per template, so the CSV's single-`token`-column limitation goes away as part of that work — not as a standalone fix here.
+- ~~`registry_auth_check`~~ — **done** in `489090c`. Probes every configured chain concurrently; per-chain status surfaces in `identities[<chain>].auth_status` and `auth_per_chain`. Aggregate stays back-compat (`"ok"` or `"<chain>:<status>"`). New `agent_not_resolved` pending state covers the startup-task-in-flight window.
+- Cross-chain logical-token-address divergence (USDC at one address on Sepolia, another on Base) is **subsumed by the generic-escrow templates design** in [`design-generic-escrow-templates.md`](./design-generic-escrow-templates.md). That design's `[escrow_templates.<name>]` blocks carry a literal token address per template, so the CSV's single-`token`-column limitation goes away as part of that work — not as a standalone fix here. Phase 1 (config parsing) and Phase 2a (RateValue + sibling fields on AcceptedEscrow) are landed; remaining staging is captured in [`design-generic-escrow-templates-handoff.md`](./design-generic-escrow-templates-handoff.md).
