@@ -33,9 +33,13 @@ def test_settings_toml_provides_baseline_defaults():
     assert s.registry.discovery_timeout == 5.0
     assert s.provisioning.service_url == "http://localhost:8085"
     assert s.provisioning.timeout == 3600
-    # Negotiation default is "bisection" (not ""/"rl") — prevents silent RL
+    # Default chain ends in "bisection" (not "rl") — prevents silent RL
     # failures when torch is unavailable.
-    assert s.negotiation.policy_mode == "bisection"
+    assert s.negotiation.chain == [
+        "has_matching_inventory_guard",
+        "escrow_shape_guard",
+        "bisection",
+    ]
     assert s.auto_register is True
     assert s.pricing.publish_priceless is False
 
@@ -171,7 +175,11 @@ rpc_url = "http://localhost:8545"
     assert cfg.port == 8001
     assert cfg.chains.anvil.rpc_url == "http://localhost:8545"
     # Untouched key still has its settings.toml default.
-    assert cfg.negotiation.policy_mode == "bisection"
+    assert cfg.negotiation.chain == [
+        "has_matching_inventory_guard",
+        "escrow_shape_guard",
+        "bisection",
+    ]
 
 
 def test_secrets_overlay_wins_over_storefront_toml(tmp_path):

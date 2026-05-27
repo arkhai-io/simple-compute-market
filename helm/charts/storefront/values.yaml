@@ -72,7 +72,14 @@ agents:
         provisioning:
           mode: "mock"
         negotiation:
-          policyMode: "bisection"
+          # Ordered middleware chain. Terminal middleware is "bisection" (no
+          # ML deps) or "rl" (torch + checkpoint). The legacy `policyMode`
+          # key still works (rendered as `policy_mode = "<value>"`) and the
+          # storefront synthesizes the default chain from it.
+          chain:
+            - "has_matching_inventory_guard"
+            - "escrow_shape_guard"
+            - "bisection"
         # Runtime credentials the agent reads. Empty = absent in TOML.
         integrations:
           geminiApiKey: ""

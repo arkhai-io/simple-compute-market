@@ -69,10 +69,10 @@ Negotiation flow: the buyer's `market buy`/`market negotiate`
 discovers seller orders from `registry-service`, then issues
 synchronous signed POSTs against the seller's storefront
 (`/negotiate`, `/listings/...`, `/settle/{escrow_uid}`). The seller's
-storefront evaluates each request through the policy engine, decides
-counter/accept/exit, and returns the next round inline. There are no
-push messages and no symmetric agent-to-agent protocol — the buyer
-drives every round.
+storefront runs the request through a per-round middleware chain
+(configured in `[negotiation] chain`), decides counter/accept/exit, and
+returns the next round inline. There are no push messages and no
+symmetric agent-to-agent protocol — the buyer drives every round.
 
 ---
 
@@ -243,22 +243,19 @@ storefront/src/market_storefront/
 │   ├── buyer_auth.py       # Depends() factories for EIP-191 buyer signature verification
 │   └── seller_auth.py      # Depends() factory for EIP-191 seller signature verification
 ├── models/
-│   ├── domain_models.py      # Domain types: ComputeResource, Listing, DomainEvent, etc.
+│   ├── domain_models.py      # Domain types: ComputeResource, Listing, ProvisionTerms, …
 │   ├── listing_models.py     # HTTP shapes: ListingFilterParams, CreateListingRequest, …
 │   ├── negotiation_models.py # HTTP shapes: NegotiateNewRequest, ForceAcceptRequest, …
 │   ├── settle_models.py      # HTTP shapes: SettleRequest, SettleStatusResponse
-│   ├── alert_models.py       # HTTP shapes: ResourceAlertResponse
-│   └── system_models.py      # HTTP shapes: PolicyEvaluateRequest, HealthResponse, …
+│   └── system_models.py      # HTTP shapes: HealthResponse, SystemStatusResponse, …
 ├── services/
 │   ├── listing_service.py         # ListingService: create/close/refund/claim/reclaim/…
-│   ├── policy_service.py          # PolicyService: policy negotiation + infra
 │   ├── alkahest_service.py        # build_client(): AlkahestClient factory
 │   ├── negotiation_service.py     # NegotiationService: advance/force-accept/list/get
 │   └── system_service.py          # SystemService: health/seed/evaluate + registry checks
 ├── groups/                 # CLI groups: config, escrow, network
 ├── cli_publish.py, cli_portfolio.py, cli_logs.py, cli_common.py
 ├── negotiation_watchdog.py, agent_heartbeat.py
-├── policy/seeding.py
 ├── utils/
 │   ├── config.py, sqlite_client.py, action_executor.py
 │   ├── sync_negotiation.py, settlement_jobs.py, serializer.py
@@ -292,13 +289,15 @@ storefront/src/market_storefront/
 │  │         │                            │                        │ │
 │  │         └──────────┬─────────────────┘                        │ │
 │  │                    ▼                                           │ │
-│  │         _load_storefront_strategy()                           │ │
+│  │         _load_storefront_chain()                              │ │
 │  │              │                                                │ │
-│  │    ┌─────────┴──────────┐                                     │ │
-│  │    │  NegotiationStrategy (market_policy)                     │ │
-│  │    │  • BisectionStrategy  ← default; no ML deps              │ │
-│  │    │  • TorchArkhaiStrategy ← opt-in; requires torch          │ │
-│  │    └─────────┬──────────┘                                     │ │
+│  │    ┌─────────┴──────────────────────────┐                    │ │
+│  │    │  run_negotiation_chain(history,ctx)│                    │ │
+│  │    │   ◦ has_matching_inventory_guard   │                    │ │
+│  │    │   ◦ escrow_shape_guard             │                    │ │
+│  │    │   ◦ max_rounds_guard               │                    │ │
+│  │    │   ◦ bisection (or rl) ← terminal   │                    │ │
+│  │    └─────────┬──────────────────────────┘                    │ │
 │  │              ▼                                                 │ │
 │  │    NegotiationDecision {action, price, reason}                │ │
 │  │              │                                                │ │
@@ -402,15 +401,14 @@ A negotiation produces `list[EscrowTerms]` so multi-escrow designs (payment
 a wrapper type. Today every list is length-1 (single buyer-made ERC20
 escrow); the rest is forward shape.
 
-`CreateListingRequest` requires `accepted_escrows: list[dict]`. Service
-signatures (`PolicyService.evaluate_create_listing_policy`,
-`execute_create_listing`, `evaluate_listing_create_policy_from_raw`) take
-`accepted_escrows`; `ListingCreatedEvent` carries it as a field; the
-`oc.action.make_offer_from_order_create` domain callable emits
-`parameters["accepted_escrows"]`; `action_executor`'s MAKE_OFFER handler
-threads it directly to `create_order`. `_extract_initial_price_from_order`
-reads the primary rate via `primary_rate_value(accepted_escrows[0])`;
-its hidden-reserve fallback (empty `rates`) is
+`CreateListingRequest` requires `accepted_escrows: list[dict]`.
+`ListingService.create_listing` validates the body, writes the listing
+row via `sqlite_client.upsert_listing`, then (unless `paused=True`)
+publishes to the configured registries. Close is the symmetric
+procedural path: SQLite update → registry unpublish. No policy step
+gates either operation. `_extract_initial_price_from_order` reads the
+primary rate via `primary_rate_value(accepted_escrows[0])`; its
+hidden-reserve fallback (empty `rates`) is
 `[seller.pricing].default_min_price`.
 
 **Escrow templates (CSV → `accepted_escrows`):** sellers populate
@@ -427,93 +425,110 @@ fallback for rows without a templates cell.
 
 ---
 
-**Negotiation strategy selection — critical runtime behaviour:**
+**Procedural request path + two pluggable policy hooks:**
 
-`sync_negotiation.py` does **not** use the `@policy_callable` domain policy chain for deciding what to do in a negotiation round. It uses the `market_policy.negotiation_strategy` module directly via `_load_storefront_strategy()`. The two systems are parallel and independent:
+The storefront is a request/response service over its inventory and
+negotiation state. Listing create/close, lease start/end, and resource
+state transitions are direct procedural calls — `ListingService` mutates
+SQLite and (un)publishes to the registry; no policy layer gates them.
+The two places where policy plugs in are:
 
-- The `@policy_callable` chain (in `domain/compute/agent/app/policy/store.py`) handles listing-level decisions: whether to accept an order, what price floor to set, whether to pause. It also gates the pre-thread negotiation request through guard callables (`negotiate.guard.has_matching_inventory`, `negotiate.guard.escrow_fields_strict_match`). It does **not** drive round-by-round negotiation decisions — those bypass it via `_load_storefront_strategy()`.
-- The `NegotiationStrategy` (`market_policy.negotiation_strategy`) handles round-by-round decisions during an active negotiation: accept, counter at midpoint, or exit. This is what actually fires at each `/negotiate/new` and `/negotiations/{id}/advance` call.
+- **Buyer-side aggregation** (buyer-only) — `aggregate(negotiate, listings)`
+  in `buyer/market_buyer/aggregation.py` owns the iteration shape across
+  listing candidates. Built-ins: `best_price`, `cheapest_first`,
+  `registry_order`. Custom strategies plug in via entry-point or file
+  discovery.
+- **Seller-side per-round negotiation chain** (seller-only) — a list of
+  middlewares with signature `(history, context) -> (Maybe<Response>, Context)`.
+  Guards short-circuit with `reject`/`exit` when their preconditions
+  fail; the terminal middleware (`bisection` or `rl`) always returns
+  `counter`/`accept`/`exit`. Configured per-storefront in
+  `[negotiation] chain = [...]` in `storefront.toml`.
 
-`_load_storefront_strategy()` resolves the strategy as follows:
-1. Read `CONFIG.negotiation_policy_mode` (from `seller.negotiation.policy_mode` in TOML; default `"bisection"`)
-2. If `"rl"`: register `TorchArkhaiStrategy` (requires torch + pufferlib + model file); if torch is absent, `TorchArkhaiStrategy.decide()` returns `exit(reason="torch_unavailable")` every round — silent failure
-3. Call `load_strategy(name)` from the in-process strategy registry
-4. Return the strategy instance
+Both hooks live in `market-policy` (package: `policy/`, import:
+`market_policy`); the buyer and seller import from the same wheel. The
+data model is symmetric — `NegotiationRound`, `NegotiationContext`,
+`NegotiationDecision` are shared. Each side instantiates its own chain.
 
-**Negotiation direction:** determined by `determine_strategy_from_resources()` in `utils/validation.py`. Listings carry only an `offer_resource`; the payment side lives in `accepted_escrows` (see the section above). Seller offering `ComputeResource` → direction `"maximize"` (the seller wants the highest price the buyer will pay). The buyer's CLI runs in `"minimize"` direction from the opposite side of the same protocol.
+**Built-in negotiation middlewares:**
 
-**BisectionStrategy convergence (maximize direction):**
-- Accept if `their_price >= our_price * (1 - CONVERGENCE_RATIO)` (default ratio ≈ 0.01, so accept within 1%)
-- Counter at `(our_price + their_price) // 2` if `their_price >= our_price / 1.5`
-- Exit with `reason="price_unreasonable"` otherwise
+- `has_matching_inventory_guard` — round 0 only; the seller's portfolio
+  must contain a compute resource matching the listing's `offer_resource`
+  attributes. Rejects with `no_matching_inventory` if not.
+- `escrow_shape_guard` — every key on the matched
+  `accepted_escrows[i].literal_fields` must equal the buyer's value in
+  `escrow_proposal.literal_fields`. Rejects with `escrow_field_mismatch`
+  otherwise.
+- `max_rounds_guard` — exits with `max_rounds_reached` once
+  `len(history) >= [negotiation].max_rounds` (default 5).
+- `bisection_middleware` — terminal. Bisects between `our_price` (the
+  listing's primary rate) and `their_price` (the peer's latest offer);
+  accepts within ~1% convergence, counters at midpoint when feasible,
+  exits with `price_unreasonable` when `their_price < our_price / 1.5`
+  (maximize) or symmetrically (minimize).
+- `rl_middleware` — terminal (optional). Lazy-imports torch + the
+  pufferlib checkpoint at
+  `domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt`
+  (or `_buyer.pt`). Exits with `torch_unavailable` if torch isn't
+  installed.
 
-`our_price` is extracted via `_extract_initial_price_from_order()` in `action_executor.py`, which reads `primary_rate_value(accepted_escrows[0])`. This is the seller's price floor — the buyer's opening offer must be at or above this value for the seller to counter rather than exit immediately.
+**Chain runner:** `run_negotiation_chain(chain, history, context)` in
+`policy/.../negotiation_middleware.py`. Loops middlewares in order;
+returns the first `Some<Response>`; raises if the chain exhausts (the
+terminal middleware must always return `Some`).
 
-**`checks.negotiation_strategy` in system status:** `GET /api/v1/system/status` includes a `negotiation_strategy` check that instantiates the configured strategy and runs a synthetic maximize probe. If the strategy would exit on the probe (e.g. `"TorchArkhaiStrategy (exit_on_probe: torch_unavailable)"`), the check surfaces this before any negotiation is attempted. The smoke test (`test_negotiation_strategy_viable`) and e2e stage 00d both assert on this field.
+**Negotiation direction:** determined by
+`determine_strategy_from_resources()` in `utils/validation.py`. Listings
+carry an `offer_resource`; the payment side lives in `accepted_escrows`.
+Seller offering `ComputeResource` → direction `"maximize"` (highest
+price the buyer will pay). The buyer's CLI runs in `"minimize"` from the
+other side.
 
-**`checks` degraded-status evaluation:** Each check value is evaluated by `_check_is_healthy(key, value)` in `system_service.py` rather than against a fixed set of `"ok"` literals. This is because `negotiation_strategy` returns a human-readable strategy name (e.g. `"bisection"`) on success rather than the literal `"ok"`. The `_check_is_healthy` function treats the `negotiation_strategy` key specially: healthy unless the value contains `"exit_on_probe"` or starts with `"unknown:"` / `"error:"`. All other check keys use the literal set `{"ok", "unconfigured", "agent_not_found", "indexing"}`. When adding a new check to `get_status()` whose success value is not `"ok"`, either: (a) return `"ok"` on success and put the diagnostic name in a separate top-level fact field, or (b) add a key-specific rule to `_check_is_healthy`.
+**Chain loader:** `_load_storefront_chain()` in `sync_negotiation.py`
+reads `[negotiation] chain` from `storefront.toml` and resolves the
+names via `load_negotiation_chain()`. Back-compat: if `chain` is absent
+and the legacy `policy_mode` is set, synthesize
+`["has_matching_inventory_guard", "escrow_shape_guard", policy_mode]`.
+Custom middlewares are picked up by file discovery via
+`[negotiation] extra_policy_paths = [...]`.
 
-Storefront-side runtime (server, resource poller, watchdog, action
-executor) lives in `storefront/src/market_storefront/`. Policy engine
-infrastructure (policy store, manager, registry, evaluator, composite,
-negotiation thread, action builders) is the standalone `market-policy`
-package.
+**`our_price` source:** the terminal middleware reads it via
+`_extract_initial_price_from_order()` in `action_executor.py`, which
+calls `primary_rate_value(accepted_escrows[0])`. This is the seller's
+price floor — the buyer's opening offer must be at or above this value
+for the seller to counter rather than exit immediately.
 
-**Policy system:** lives in `market-policy` (package: `policy/`,
-import: `market_policy`). Policies are named callables registered
-with `@policy_callable("name")` and stored in a `PolicyStore`. When a
-negotiation request hits the storefront, the evaluator runs the
-registered chain until one returns an action
-(`accept` / `reject` / `counter` / `exit`). The seller seeds its
-default policies at server startup via
-`market_storefront.policy.seeding.ComputePolicySeeder`. The buyer
-side imports the same engine at CLI invocation time but does not run a
-server.
+**`checks.negotiation_strategy` in system status:** `GET /api/v1/system/status`
+includes a `negotiation_strategy` check that instantiates the configured
+chain and runs a synthetic maximize probe. If the terminal middleware
+would exit on the probe (e.g. `"rl (exit_on_probe: torch_unavailable)"`),
+the check surfaces this before any negotiation is attempted. The smoke
+test (`test_negotiation_strategy_viable`) and e2e stage 00d both assert
+on this field.
 
-**Critical policy wiring detail:** `PolicyStore.__init__` creates an **empty** `self._registry = {}`. The `@policy_callable` decorators populate the module-level `CALLABLE_REGISTRY` dict in `market_policy.registry`. These two are only connected by an explicit call to `policy_store.register_callables(CALLABLE_REGISTRY)`. `PolicyManager.initialize()` does this wiring at startup. Any code that creates a fresh `PolicyStore` instance (controllers, tests, seed endpoints) **must** call `register_callables` before evaluating policies, or `evaluate_policy` will always return `None` despite callables being registered in `CALLABLE_REGISTRY`.
+**`checks` degraded-status evaluation:** Each check value is evaluated
+by `_check_is_healthy(key, value)` in `system_service.py` rather than
+against a fixed set of `"ok"` literals. This is because
+`negotiation_strategy` returns a human-readable name (e.g. `"bisection"`)
+on success rather than the literal `"ok"`. The `_check_is_healthy`
+function treats the `negotiation_strategy` key specially: healthy unless
+the value contains `"exit_on_probe"` or starts with `"unknown:"` /
+`"error:"`. All other check keys use the literal set `{"ok",
+"unconfigured", "agent_not_found", "indexing"}`. When adding a new check
+to `get_status()` whose success value is not `"ok"`, either: (a) return
+`"ok"` on success and put the diagnostic name in a separate top-level
+fact field, or (b) add a key-specific rule to `_check_is_healthy`.
 
-**Orchestration over Event-Driven for Request-Path Operations:** The storefront request path uses a **synchronous orchestrator pattern**, not an event-driven pipeline.
-
-The policy dispatch layer takes domain events as its input format —
-`PolicyStore.evaluate_policy` receives a `DecisionContext` whose `event`
-field is a typed `DomainEvent` subclass (e.g. `ListingCreatedEvent`). The
-service layer constructs these events privately around each public method
-call.
-
-**What "orchestration" means here:** Each public service method is a named sequence of private steps:
-
-```python
-async def create_listing(self, request: CreateListingRequest, policy_svc) -> CreateListingResponse:
-    offer, demand = self._parse_offer_demand(request)          # step 1: validate inputs
-    action = await policy_svc.evaluate_create_listing_policy(  # step 2: consult policy
-        offer, demand, request.max_duration_seconds, request.paused
-    )
-    if action != "make_offer":
-        return CreateListingResponse(status="no_action")
-    listing_id = await policy_svc.execute_create_listing(      # step 3: execute
-        offer, demand, request.max_duration_seconds, request.paused
-    )
-    return CreateListingResponse(status="created", listing_id=listing_id)
-```
-
-Each step is independently callable from an admin endpoint for diagnosis — see the `evaluate-create` and `evaluate-close` admin endpoints.
-
-**Why not pure event-driven:** Synchronous control flow gives the e2e suite explicit interruption points between each orchestrator step — the dry-run + pause/advance pattern at the [Testing](#testing-strategy) section relies on them. An event-bus implementation would hide those transitions inside the runtime, making introspection and progress-gating much harder. The buyer CLI also expects `listing_id` synchronously in the create-listing response, so a queue front end would have no caller.
-
-**Optional queue adapter:** If a deployment ever needed an async queue front end (say, to fan out high-volume listing creates without changing the orchestrator), it would be a two-line wrapper per public method:
-
-```python
-def create_listing(request: CreateListingRequest) -> CreateListingResponse:
-    event_id = self._write_to_queue(request)           # write first event
-    result = await self._listen_for_result(event_id)   # await completion
-    return result
-```
-
-This isn't on the roadmap and isn't tested. It's noted here so the orchestrator's `DomainEvent`-typed internal inputs aren't mistaken for a transitional design pointing toward a future event-bus migration.
-
-`PolicyService` exposes only named domain-language methods. Domain event construction is fully private. Callers (`ListingService`, `AlertsController`) never construct domain events themselves. The word "event" does not appear in any public method name. Event construction (`_build_listing_created_event`, `_build_listing_closed_event`) is private.
-
-**`domain/` package — not installed, on sys.path:** `domain/compute/agent/app/policy/store.py` contains the actual `@policy_callable` decorated functions the storefront uses. The `domain/` tree is not a pip-installable package — it is copied into the Docker image at `/app/domain/` and requires `/app` to be on `sys.path`. The Dockerfile sets `ENV PYTHONPATH="/app"` to ensure this. The `POST /admin/policy/seed` endpoint also does a defensive `sys.path` check as a fallback. `domain.compute.agent.app.policy.arkhai_common` always fails to import (requires `gymnasium`) — this is expected and non-fatal; the module we actually need is `store.py`, which has no ML dependencies.
+**`domain/` tree — not installed, on sys.path:** holds the RL training
++ inference code that's outside the procedural runtime — specifically
+`domain/compute/agent/app/policy/torch_arkhai_strategy.py` (loads the
+pufferlib checkpoint at inference time, called by `rl_middleware`) and
+`domain/compute/training/` (the standalone train + eval CLIs). The tree
+is not a pip-installable package — it's copied into the Docker image at
+`/app/domain/` and requires `/app` on `sys.path` (Dockerfile sets
+`ENV PYTHONPATH="/app"`). `arkhai_common` requires `gymnasium`;
+importing it without the ML extra installed fails — that's expected and
+the `rl_middleware` exit-on-probe path surfaces it cleanly.
 
 **Local state — SQLite:** the storefront maintains a SQLite database
 (`seller.db_path`) containing policy configuration, order history,
@@ -582,9 +597,6 @@ GET  /health                            Kubernetes liveness/readiness probe (DB 
 GET  /api/v1/system/health              Versioned alias
 GET  /api/v1/system/status              Diagnostic snapshot: DB health + registry connectivity check + global pause state
 GET  /api/v1/system/events              Stage event log — historical JSON query or live SSE tail (admin key required)
-POST /admin/policy/seed                 Discover @policy_callable decorators + seed default DB rows (admin key)
-GET  /api/v1/system/policy              Callable registry + seeded policies with components_resolvable flag
-POST /api/v1/system/policy/evaluate     Dry-run a synthetic order_create event through the policy engine (no writes)
 ```
 
 **`/health` vs `/api/v1/system/status`:** `/health` performs only a fast SQLite ping — no outbound HTTP calls, safe as a Kubernetes liveness probe. `/api/v1/system/status` additionally probes `CONFIG.indexer_url/health` with a 2-second timeout and reports the result as `checks.registry` (`"ok"` | `"unreachable"` | `"timeout"` | `"unconfigured"` | `"http_<N>"`). A `checks.registry != "ok"` result means `resume_listing` will silently return `registry_status="error"` — this is the first thing to check when stage 04 or 05 of the e2e test fails.
@@ -641,9 +653,9 @@ Buyer                    Storefront (/negotiate/new)         SQLite
   │                              │── load listing ───────────────►│
   │                              │◄─ listing row ────────────────│
   │                              │                              │
-  │                              │  _load_storefront_strategy() │
+  │                              │  _load_storefront_chain()    │
   │                              │  determine_direction()        │
-  │                              │  strategy.decide(round_input) │
+  │                              │  run_negotiation_chain(...)   │
   │                              │  → NegotiationDecision        │
   │                              │                              │
   │                              │── INSERT negotiation_thread ──►│
@@ -804,13 +816,12 @@ escrow via `alkahest_py` directly from the CLI process before POSTing
 is the same loop bound to a single known seller; both share
 `buy_orchestrator`.
 
-The negotiation policy used by the buyer is the same `market-policy`
-engine the seller runs — both sides import a `BisectionStrategy` (or,
-behind the `[rl]` extra, the trained Arkhai pufferlib checkpoint)
-through `market_policy.negotiation_strategy`. Round-by-round events
-land in a per-run JSONL log under
-`$XDG_STATE_HOME/arkhai/buy-runs/<run_id>.jsonl` rather than a
-database.
+The negotiation chain the buyer runs is built from the same
+`market-policy` middlewares the seller uses — both sides instantiate
+the chain via `load_negotiation_chain([...])`, with `bisection` as the
+default terminal (or `rl` behind the optional torch extra). Round-by-
+round events land in a per-run JSONL log under
+`$XDG_STATE_HOME/arkhai/buy-runs/<run_id>.jsonl` rather than a database.
 
 **Key source layout:**
 ```
@@ -828,27 +839,32 @@ buyer/market_buyer/
 `market settle --from <run_id>` is the post-agreement half of the flow: it
 reads the agreed terms from the run-log JSONL, creates the on-chain escrow
 under the buyer's wallet via `make_create_escrow_fn`, then POSTs
-`/api/v1/settle/{uid}` and polls for fulfillment. The buyer's
-negotiation strategy is selected via `[negotiation].policy_mode` in
-`buyer.toml`, mirroring the seller's `[seller.negotiation].policy_mode` in
-`storefront.toml` — default `bisection`; `rl` requires torch + a checkpoint.
+`/api/v1/settle/{uid}` and polls for fulfillment. The buyer picks its
+terminal middleware via `[negotiation].policy_mode` in `buyer.toml`
+(`bisection` default; `rl` requires torch + a checkpoint). The seller
+configures the full ordered chain via `[negotiation].chain` in
+`storefront.toml`.
 
 ---
 
 ### `policy` (`market-policy`)
 
-Domain-agnostic strategy engine + training tool. Two surfaces:
+Shared negotiation machinery + the RL training/eval tool. Two surfaces:
 
-- **Library**: `market_policy.{store, manager, registry, evaluator,
-  composite, negotiation_thread, negotiation_strategy,
-  action_builders, identity}` — imported by both runtimes.
-- **CLI**: `market-policy train / eval / export` — invoked by
-  policy authors to produce strategy artifacts (RL checkpoints) that
-  buyers and sellers load at runtime through
-  `market_policy.negotiation_strategy.load_strategy()`.
+- **Library**: `market_policy.{negotiation_middleware,
+  negotiation_thread, identity, ports}` — imported by both buyer and
+  seller. The middleware shape (`NegotiationContext`,
+  `NegotiationDecision`, `register_negotiation_middleware`,
+  `load_negotiation_chain`, `run_negotiation_chain`) is the public
+  surface; built-in middlewares (`bisection_middleware`,
+  `has_matching_inventory_guard`, `escrow_shape_guard`,
+  `max_rounds_guard`, `buyer_escrow_shape_guard`) ship registered.
+- **CLI**: `market-policy train / eval / export` — invoked by policy
+  authors to produce RL checkpoints that the `rl` terminal middleware
+  loads at inference time.
 
-The CLI lives here (not in either runtime) because policy authoring
-is a tooling concern separate from the buyer or seller process.
+The CLI lives here (not in either runtime) because policy authoring is
+a tooling concern separate from the buyer or seller process.
 
 ---
 
@@ -1817,18 +1833,6 @@ This section records design decisions reached through implementation experience.
 
 ---
 
-### Negotiation Strategy Plug-in Surface (Not the Policy Store)
-
-**Context:** During the buyer/storefront split the original plan was to convert the seller's inline `decide_response` function in `sync_negotiation.py` into a registered `@policy_callable` and route `/negotiate/new` and `/negotiate/{neg_id}` through `policy_store.evaluate_policy(...)`. That would have unified per-round negotiation with the rest of the engine-driven actions (resource imbalance, order create/close).
-
-**What shipped instead:** a separate plug-in surface in `market-policy` — `market_policy.negotiation_strategy` exposing `NegotiationStrategy`, `NegotiationRoundInput`, `NegotiationDecision`, plus a `_REGISTRY` and `load_strategy(name, config=...)` factory. Both buyer (`buyer/market_buyer/buyer_client.py`, `groups/negotiate.py`) and storefront (`controllers/negotiate_controller.py` → `start_sync_negotiation` / `continue_sync_negotiation` → `load_strategy`) call this surface directly. The `policy_store` evaluation pipeline is reserved for non-negotiation triggers.
-
-**Why the divergence:** per-round negotiation is a pure function of the current round's inputs — no event-pipeline context, no DecisionContext/InvocationContext, no audit-log side effects required. Forcing it through `evaluate_policy` would have meant building a synthetic `NegotiationRound` event type, a fake `DecisionContext`, and re-deriving the round inputs from DB state on every call. A direct `Strategy.decide(round_input) → Decision` surface is significantly simpler and matches what both buyer (no SQLite) and storefront actually need.
-
-**Discovery:** strategies are discoverable two ways: (1) built-in registrations in `market_policy.negotiation_strategy` (e.g. the bisection strategy), (2) file-based discovery in `sync_negotiation._discover_file_policies` scanning `$XDG_CONFIG_HOME/arkhai/policies/<name>/policy.py` plus `[negotiation] extra_policy_paths` from settings, each exposing a `factory(cfg) -> NegotiationStrategy`. The file path is the local-tuning override UX — drop a folder, restart the storefront, the strategy is picked up.
-
----
-
 ### `market-infra` vs `market-service` Package Boundary
 
 **Context:** The split plan proposed a single `market-infra` package absorbing chain/alkahest/registry-indexer clients, `config_loader.py`, `role.py`, and shared schemas — anything a participant needs to "talk to the shared infra."
@@ -1858,27 +1862,29 @@ stage Nb:  advance   — call the real endpoint (often with paused=True to contr
 **Concrete example:**
 
 ```python
-def stage_1a_evaluate_create():
-    # dry-run: what would policy do?
-    result = admin_client.policy_evaluate(offer=..., demand=...)
-    assert result["action"] == "make_offer"
+def stage_05a_evaluate_negotiate():
+    # dry-run: would the negotiation chain produce a counter for this opener?
+    result = admin_client.evaluate_negotiate(listing_id, proposal=...)
+    assert result.would_negotiate is True
+    assert result.decision in ("counter", "accept")
 
-def stage_1b_create_listing():
-    # advance: create in paused state (not published to registry yet)
-    resp = admin_client.create_listing(offer=..., demand=..., paused=True)
-    assert resp.listing_id is not None
-    # audit: confirm listing appears in stage_event stream
-    event = wait_for_stage_event(stage="discovery", event="listing_created")
-    assert event["listing_id"] == resp.listing_id
+def stage_05b_negotiate_new():
+    # advance: actually start the negotiation
+    resp = await client.negotiate_new(listing_id=..., initial_price=..., ...)
+    assert resp.action in ("counter", "accept")
+    # audit: confirm the round_decided event appears in stage_event stream
+    event = wait_for_stage_event(stage="negotiation", event="round_decided")
+    assert event["negotiation_id"] == resp.negotiation_id
 ```
 
 **Admin "what would you do?" endpoints** (dry-run, no side effects):
-- `POST /api/v1/admin/listings/evaluate-create` → `AdminEvaluateCreateResponse`
-- `POST /api/v1/admin/listings/{listing_id}/evaluate-close` → `AdminEvaluateCloseResponse`
-- `POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate` → `EvaluateNegotiateResponse` (runs the configured negotiation strategy against a synthetic buyer offer; returns `would_negotiate=False` if the strategy would exit immediately)
-- `POST /api/v1/system/policy/evaluate` → `PolicyEvaluateResponse`
+- `POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate` → `EvaluateNegotiateResponse` — runs the configured negotiation chain against a synthetic buyer offer; returns `would_negotiate=False` if the terminal middleware would exit immediately.
+- `POST /api/v1/admin/settle/{escrow_uid}/evaluate-settle` → dry-run settlement readiness check.
 
-These call the policy consultation step only — `PolicyService.evaluate_*_listing_policy()` — without executing any action. They exist specifically to enable the stage-Na validation pattern.
+Listing create/close are now procedural (no policy step to dry-run), so
+their `evaluate-create` / `evaluate-close` admin endpoints were dropped
+in the procedural-policy refactor. The e2e stage-Na pattern survives
+via the remaining dry-run endpoints + the `stage_events` audit stream.
 
 **The event stream as the observable:** `GET /api/v1/system/events` (`SyncStorefrontClient.wait_for_stage_event()`) provides a cursor-based poll over the `stage_events` SQLite audit log. This is the mechanism for validating "what did you do?" without polling the resource directly or using `asyncio.sleep`. See `wait_for_stage_event` in `integration-tests/tests/e2e/roles/scenarios/conftest.py`.
 
@@ -2025,8 +2031,7 @@ autouse `reap_buyer_settle_subprocess` teardown is a no-op when
 |---|---|---|
 | 00a–00h | Readiness | storefront/registry/provisioning health, negotiation-strategy probe, provisioning mock-mode wiring, alkahest config, storefront↔provisioning link |
 | 00f | Resource seed | `POST /api/v1/admin/portfolio/resources/import` upserts the inline e2e compute CSV |
-| 01a / 01b | Policy dry-run + seed | `POST /api/v1/system/policy/evaluate`; `POST /admin/policy/seed` |
-| 02a / 02b | Create listing | dry-run `evaluate-create` then `POST /api/v1/listings/create paused=True` |
+| 02a / 02b | Create listing | `POST /api/v1/listings/create paused=True` (procedural — no dry-run step) |
 | 03a / 03c / 03b | Publish & index | `POST /api/v1/listings/validate-publish` → `wait-for-agent` long-poll → resume publishes to registry |
 | 04a | Primary registry visibility | listing visible on registry |
 | 05a / 05b | Negotiate | `evaluate-negotiate` → `POST /negotiate/new`; assert `round_decided` event with decision=counter |
@@ -2090,7 +2095,7 @@ asserts provisioning registered an active/pending lease for the escrow via
 resource release are intentionally outside the full-deal happy path; they
 belong in separate smoke or e2e tests for operator interventions.
 
-**Pre-negotiation inventory guard:** `/api/v1/negotiate/new` enforces immediate-deal inventory availability through `PolicyService.consult_pre_negotiation_guards()`, not by hard-coding inventory lookup inside the controller. The default `negotiate_request.default.v1` composite contains `negotiate.guard.has_matching_inventory`; if no available resource matches the listing offer, the guard returns `REJECT_OFFER` with `reason="no_matching_inventory"`, which the controller maps to HTTP 409. In-process integration tests that assert this behavior must wire `container.resolved_policy_service` with a real `PolicyService`; otherwise `start_sync_negotiation(..., policy_service=None)` deliberately skips policy-owned guards and only validates infrastructure invariants such as pause state and listing status.
+**Pre-negotiation inventory guard:** `/api/v1/negotiate/new` enforces immediate-deal inventory availability via the `has_matching_inventory_guard` middleware in the configured negotiation chain (round 0 only — `len(history) == 0`). If no available resource matches the listing's `offer_resource`, the middleware short-circuits with `action="reject", reason="no_matching_inventory"`, which the controller maps to HTTP 409. The default chain in `storefront.toml` puts this middleware first, so the check happens before any rate negotiation.
 
 **`ensure_storefront_resumed` teardown:** An `autouse=True` module-scoped fixture in `conftest.py` that unconditionally calls `admin_resume()` if `get_system_status().paused` is True after the module finishes. This targets the **global** `_GLOBALLY_PAUSED` flag (`POST /admin/pause|resume`), not the per-listing `paused=True` flag the synthetic scenario flips at 02b/03b. Neither full-deal scenario currently calls global `admin_pause`, but the fixture stays in place so a future test or a manually-paused live environment cannot strand the next run in 503.
 
@@ -2411,7 +2416,6 @@ cd registry-service && make reinit && make test-integration
 - `settle()` — `POST /api/v1/settle/{uid}` with EIP-191 auth.
 - `get_settle_status()` — `GET /api/v1/settle/{uid}/status` with EIP-191
   auth.
-- `evaluate_create_listing()` — `POST /api/v1/admin/listings/evaluate-create`.
 - `evaluate_negotiate()` — `POST /api/v1/admin/listings/{id}/evaluate-negotiate`.
 
 The wheel ships `EvaluateNegotiateResponse`, `SettleResponse`, and

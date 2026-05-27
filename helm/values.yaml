@@ -123,7 +123,10 @@ storefront:
           provisioning:
             mode: "mock"
           negotiation:
-            policyMode: "bisection"
+            chain:
+              - "has_matching_inventory_guard"
+              - "escrow_shape_guard"
+              - "bisection"
           integrations:
             geminiApiKey: ""
         chain:

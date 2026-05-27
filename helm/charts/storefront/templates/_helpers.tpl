@@ -214,7 +214,11 @@ poll_interval = {{ $prov.pollInterval | int }}
 {{- end }}
 
 [negotiation]
-policy_mode = {{ $neg.policyMode | default "" | quote }}
+{{- if $neg.chain }}
+chain = [{{ range $i, $mw := $neg.chain }}{{ if $i }}, {{ end }}{{ $mw | quote }}{{ end }}]
+{{- else if $neg.policyMode }}
+policy_mode = {{ $neg.policyMode | quote }}
+{{- end }}
 {{- end }}
 
 {{/*

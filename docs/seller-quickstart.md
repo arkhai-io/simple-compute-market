@@ -76,7 +76,13 @@ service_url = "http://seller-provisioning:8081"
 mode        = "http"                     # "mock" for a dry run
 
 [negotiation]
-policy_mode = "bisection"
+# Ordered middleware chain run per round. Each entry is a registered
+# `NegotiationMiddleware` name. Guards short-circuit (`reject`/`exit`)
+# when their preconditions fail; the terminal middleware (`bisection`
+# here; `rl` for the trained pufferlib checkpoint — requires torch)
+# always returns a counter/accept/exit. See "Custom middleware" below
+# to register your own.
+chain = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 
 [pricing]
 # Human / whole-token units, per hour. The publish CLI scales by the
@@ -219,6 +225,38 @@ touching libvirt. To create real VMs:
    ```
 
    `SUCCESS / ping: pong` means the next buy will actually create a VM.
+
+## Custom middleware
+
+A middleware is a function:
+
+```python
+from market_policy import (
+    NegotiationContext, NegotiationDecision, NegotiationStep,
+    register_negotiation_middleware,
+)
+
+@register_negotiation_middleware("my_guard")
+def my_guard(history, context) -> NegotiationStep:
+    # Return (None, context) to defer to the next middleware,
+    # or (NegotiationDecision(action="reject"|"exit", reason=...), context)
+    # to short-circuit the chain.
+    if not context.listing.get("offer_resource"):
+        return (
+            NegotiationDecision(action="reject", reason="no_offer"),
+            context,
+        )
+    return None, context
+```
+
+Drop a `.py` file containing `@register_negotiation_middleware(...)`
+decorated functions into `[negotiation] extra_policy_paths = [...]`
+(an explicit list of file/dir paths in `storefront.toml`). The
+storefront discovers and registers them at startup, then names listed
+in `[negotiation] chain` resolve against the in-process registry.
+
+The terminal middleware (always last in the chain) must return
+`NegotiationDecision` on every call; guards may return `None`.
 
 ## Common pitfalls
 

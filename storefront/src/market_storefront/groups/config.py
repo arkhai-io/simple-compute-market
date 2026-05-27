@@ -213,7 +213,9 @@ _INIT_USER_TEMPLATE = """\
 # frp_dashboard_password = ""
 
 [negotiation]
-# policy_mode = "bisection"                    # "bisection" (default; no ML deps) | "rl" (requires torch)
+# chain = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
+#                                              # ordered middleware chain; terminal middleware
+#                                              # is `bisection` (default; no ML deps) or `rl` (torch + checkpoint)
 # seller_model_path = "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt"
 # buyer_model_path  = "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt"
 
