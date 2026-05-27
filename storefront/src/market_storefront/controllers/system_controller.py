@@ -55,13 +55,15 @@ class SystemController:
         response_model=RegistryAgentReadyResponse,
         summary="Long-poll until this agent is indexed in the registry (admin)",
         description=(
-            "Blocks server-side until ``registry_auth_check()`` returns a "
-            "definitive result — i.e. the registry has indexed this agent and "
-            "the storefront can confirm ownership, or a terminal error occurred. "
-            "Returns immediately on any result other than ``agent_not_found`` "
-            "(which is the transient state while the registry's EventSync is "
-            "still catching up). Times out after *timeout* seconds (max 120). "
-            "Intended for the e2e test suite's stage 03c gate."
+            "Blocks server-side until every configured chain's "
+            "``registry_auth_check`` reaches a definitive state — i.e. the "
+            "registry has indexed this agent on each chain and the storefront "
+            "can confirm ownership, or a terminal error occurred on at least "
+            "one chain. Returns immediately when no chain remains in a "
+            "transient state (``agent_not_found``, ``agent_not_resolved``, "
+            "``timeout``, ``unreachable``). Times out after *timeout* seconds "
+            "(max 120). The response carries the aggregate verdict and a "
+            "per-chain dict for multi-chain operators."
         ),
         dependencies=[Depends(require_admin_key)],
     )

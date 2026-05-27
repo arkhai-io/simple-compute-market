@@ -19,6 +19,45 @@ from market_storefront.utils.config import CHAINS, settings, AGENT_ID
 logger = logging.getLogger(__name__)
 
 
+# Per-chain registry-auth states that mean "still in flight" — the wait
+# loop retries past these. Definitive states (``ok``, ``owner_mismatch``,
+# ``owner_unknown``, ``wallet_unconfigured``, ``unconfigured``, ``http_*``,
+# ``error: ...``) end the wait.
+_REGISTRY_AUTH_PENDING: frozenset[str] = frozenset({
+    "agent_not_found",
+    "agent_not_resolved",
+    "timeout",
+    "unreachable",
+})
+
+
+def _aggregate_registry_auth(per_chain: dict[str, str]) -> str:
+    """Collapse per-chain auth states into a single status string.
+
+    ``"ok"`` iff every chain reports ``"ok"``. Empty dict (no chains
+    configured) → ``"unconfigured"`` to preserve the pre-multi-chain
+    surface. Otherwise returns ``"<chain>:<status>"`` for the first
+    non-ok chain in dict iteration order — operators get a deterministic,
+    actionable hint pointing at the chain that needs attention.
+    """
+    if not per_chain:
+        return "unconfigured"
+    for name, status in per_chain.items():
+        if status != "ok":
+            return f"{name}:{status}"
+    return "ok"
+
+
+def _per_chain_has_pending(per_chain: dict[str, str]) -> bool:
+    """True iff any chain is in a transient (retry-worthy) state.
+
+    Empty dict (no chains configured) is treated as definitive — there is
+    nothing to wait on, so the caller exits immediately with whatever
+    aggregate string the empty dict produces (``"unconfigured"``).
+    """
+    return any(s in _REGISTRY_AUTH_PENDING for s in per_chain.values())
+
+
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
@@ -63,9 +102,11 @@ class SystemService:
         except Exception as exc:
             checks["database"] = f"error: {exc}"
 
+        per_chain_auth: dict[str, str] = {}
         if include_registry:
             checks["registry"] = await self.registry_check()
-            checks["registry_auth"] = await self.registry_auth_check()
+            per_chain_auth = await self._registry_auth_per_chain()
+            checks["registry_auth"] = _aggregate_registry_auth(per_chain_auth)
             checks["negotiation_strategy"] = self.negotiation_strategy_check()
 
         # agent_not_found is a transient post-registration state (registry indexing lag)
@@ -85,10 +126,19 @@ class SystemService:
             so it gets its own rule. The ``alkahest`` check returns the
             comma-joined list of configured chain names (e.g.
             ``"base_sepolia,ethereum_sepolia"``) when at least one chain is
-            up — also handled with its own rule.
+            up — also handled with its own rule. ``registry_auth`` may carry
+            a ``"<chain>:<status>"`` aggregate from the multi-chain probe;
+            we strip the chain prefix before checking literal-ness so
+            transient states (``agent_not_found``, ``agent_not_resolved``)
+            still report as healthy regardless of which chain raised them.
             """
-            _ok_literals = {"ok", "unconfigured", "agent_not_found", "indexing"}
-            if value in _ok_literals:
+            _ok_literals = {
+                "ok", "unconfigured", "agent_not_found", "agent_not_resolved", "indexing",
+            }
+            literal = value
+            if key == "registry_auth" and ":" in value:
+                literal = value.split(":", 1)[1]
+            if literal in _ok_literals:
                 return True
             if key == "negotiation_strategy":
                 return "exit_on_probe" not in value and not value.startswith(
@@ -104,8 +154,8 @@ class SystemService:
 
         if include_registry:
             # Populate top-level diagnostic fields — not checks, just facts.
-            # Per-chain: emit one (chain_name -> canonical_id) entry per chain
-            # where the agent has resolved an ID. The single-chain shape
+            # Per-chain: emit one (chain_name -> canonical_id + auth_status)
+            # entry per configured chain. The single-chain shape
             # (top-level ``agent_id`` / ``chain_id``) is replaced because
             # there is no single canonical truth in a multi-chain world.
             try:
@@ -114,11 +164,13 @@ class SystemService:
                 identities: dict[str, dict[str, Any]] = {}
                 for name, chain in CHAINS.items():
                     aid = _AGENT_IDS.get(name)
+                    auth_status = per_chain_auth.get(name, "unconfigured")
                     if aid is None or not chain.identity_registry_address:
                         identities[name] = {
                             "chain_id": chain.chain_id,
                             "agent_id": None,
                             "canonical_id": None,
+                            "auth_status": auth_status,
                         }
                         continue
                     identities[name] = {
@@ -129,6 +181,7 @@ class SystemService:
                             identity_registry=chain.identity_registry_address,
                             agent_id=aid,
                         ),
+                        "auth_status": auth_status,
                     }
                 result["identities"] = identities
             except Exception:
@@ -185,42 +238,49 @@ class SystemService:
         return results[-1]
 
     async def registry_auth_check(self) -> str:
-        """Verify this agent's wallet owns its on-chain agent ID(s).
+        """Aggregate registry-auth verdict across every configured chain.
 
-        Probes every configured registry concurrently. In a multi-chain
-        setup the storefront has one canonical ID per chain; this check
-        picks the **first** configured chain that has a resolved ID and
-        probes that. The Phase-3 simplification reflects that a chain
-        whose ID hasn't resolved yet would just report ``unconfigured``
-        until the startup task finishes.
+        Returns ``"ok"`` iff every configured chain has a resolved agent
+        ID and at least one registry confirms the owner matches our
+        wallet for that chain. Otherwise returns ``"<chain>:<status>"``
+        for the first non-ok chain (deterministic by TOML order). When
+        no chains are configured at all, returns ``"unconfigured"`` for
+        symmetry with the pre-multi-chain shape.
 
-        Returns 'ok' if at least one registry confirms the agent's
-        owner matches our wallet. ``agent_not_found`` only when *every*
-        registry reports 404 (none have indexed us yet). Other
-        definitive non-ok results win over agent_not_found.
+        ``wait_for_registry_agent`` consumes the same per-chain dict
+        directly via :meth:`_registry_auth_per_chain` so it can wait for
+        every chain rather than parsing this aggregate.
         """
-        urls = [u.rstrip("/") for u in (settings.registry.urls or []) if u]
-        if not urls:
-            return "unconfigured"
-        auth = settings.registry.auth or {}
+        per_chain = await self._registry_auth_per_chain()
+        return _aggregate_registry_auth(per_chain)
+
+    async def _registry_auth_per_chain(self) -> dict[str, str]:
+        """Probe registry-auth for every configured chain, concurrently.
+
+        For each chain in ``CHAINS``:
+
+        - If the chain has no resolved agent ID yet (startup task still
+          running) → ``"agent_not_resolved"`` (pending state).
+        - If the chain has no ``identity_registry_address`` → ``"unconfigured"``.
+        - Otherwise probe every configured registry URL concurrently and
+          pick the best result for that chain: ``"ok"`` wins; then
+          definitive non-ok beats ``"agent_not_found"``; otherwise
+          ``"agent_not_found"``.
+
+        Wallet missing → ``"wallet_unconfigured"`` for every chain. No
+        configured chains → empty dict (callers aggregate to
+        ``"unconfigured"``).
+        """
+        if not CHAINS:
+            return {}
         from market_storefront.agent import _AGENT_IDS
         from service.clients.erc8004.blockchain import build_erc8004_canonical_id
-        canonical: str | None = None
-        for name, chain in CHAINS.items():
-            aid = _AGENT_IDS.get(name)
-            if aid is None or not chain.identity_registry_address:
-                continue
-            canonical = build_erc8004_canonical_id(
-                chain_id=chain.chain_id,
-                identity_registry=chain.identity_registry_address,
-                agent_id=aid,
-            )
-            break
-        if canonical is None:
-            return "unconfigured"
+
+        urls = [u.rstrip("/") for u in (settings.registry.urls or []) if u]
+        auth = settings.registry.auth or {}
         wallet = (settings.wallet.address or "").lower()
 
-        async def _probe(url: str) -> str:
+        async def _probe_one(url: str, canonical: str) -> str:
             headers = {}
             token = auth.get(url) or auth.get(url + "/")
             if token:
@@ -248,53 +308,78 @@ class SystemService:
             except Exception as exc:
                 return f"error: {exc}"
 
-        import asyncio
-        results = await asyncio.gather(*[_probe(u) for u in urls])
-        if "ok" in results:
-            return "ok"
-        # Prefer a definitive non-ok result over agent_not_found, since
-        # the latter is the transient "registry hasn't EventSynced yet"
-        # state that wait_for_registry_agent retries past.
-        for r in results:
-            if r not in ("agent_not_found",):
-                return r
-        return "agent_not_found"
+        async def _check_chain(name: str) -> tuple[str, str]:
+            chain = CHAINS[name]
+            aid = _AGENT_IDS.get(name)
+            if aid is None:
+                return name, "agent_not_resolved"
+            if not chain.identity_registry_address:
+                return name, "unconfigured"
+            if not urls:
+                return name, "unconfigured"
+            canonical = build_erc8004_canonical_id(
+                chain_id=chain.chain_id,
+                identity_registry=chain.identity_registry_address,
+                agent_id=aid,
+            )
+            results = await asyncio.gather(*[_probe_one(u, canonical) for u in urls])
+            if "ok" in results:
+                return name, "ok"
+            for r in results:
+                if r != "agent_not_found":
+                    return name, r
+            return name, "agent_not_found"
+
+        pairs = await asyncio.gather(*[_check_chain(n) for n in CHAINS.keys()])
+        return dict(pairs)
 
     async def wait_for_registry_agent(self, timeout: float) -> dict:
-        """Block until registry_auth_check() returns a definitive result.
+        """Block until every configured chain has a definitive auth result.
 
-        Polls registry_auth_check() every second until the result is anything
-        other than 'agent_not_found' (the transient state while the registry's
-        EventSync is catching up after a fresh on-chain registration), or until
-        *timeout* seconds elapse.
+        Polls every second until no chain remains in a pending state
+        (``agent_not_found``, ``agent_not_resolved``, ``timeout``, or
+        ``unreachable`` — all transient: the registry's EventSync still
+        catching up, or the per-chain identity startup task still
+        registering), or until *timeout* seconds elapse.
 
         Returns a dict with keys:
-          ready       — True if a definitive result was reached before timeout
-          registry_auth — the raw registry_auth_check() value
-          elapsed_ms  — approximate wall-clock wait time in milliseconds
+          ready             — True if every chain reached a definitive state
+                              before timeout
+          registry_auth     — the aggregate string (``"ok"`` iff every chain is
+                              ok, else ``"<chain>:<status>"`` for the first
+                              non-ok chain)
+          auth_per_chain    — the full per-chain dict (chain_name → status)
+          elapsed_ms        — approximate wall-clock wait time in ms
 
         'ready=True' does not imply 'registry_auth="ok"' — callers must check
-        registry_auth independently.  Definitive non-ok values include
-        'owner_mismatch', 'unconfigured', 'unreachable', and error strings.
+        registry_auth or auth_per_chain to distinguish ``"ok"`` from
+        ``"owner_mismatch"``, etc.
 
         Intended consumers:
-          - GET /api/v1/system/wait-for-registry-agent (thin controller wrapper)
+          - GET /api/v1/system/wait-for-registry-agent
           - Storefront startup sequence (agent.py) — wait before starting the
             heartbeat loop so the first heartbeat is not guaranteed to 404.
+
+        Drives off :meth:`_registry_auth_per_chain` directly so the wait
+        sees per-chain state without needing to round-trip through the
+        aggregate string. Tests that want a synthetic transient state can
+        patch ``_registry_auth_per_chain``.
         """
-        _pending = {"agent_not_found", "timeout", "unreachable"}
         poll_interval = 1.0
         start = time.monotonic()
         deadline = start + timeout
         registry_auth = "unknown"
+        per_chain: dict[str, str] = {}
 
         while True:
-            registry_auth = await self.registry_auth_check()
+            per_chain = await self._registry_auth_per_chain()
+            registry_auth = _aggregate_registry_auth(per_chain)
             elapsed_ms = int((time.monotonic() - start) * 1000)
-            if registry_auth not in _pending:
+            if not _per_chain_has_pending(per_chain):
                 return {
                     "ready": True,
                     "registry_auth": registry_auth,
+                    "auth_per_chain": per_chain,
                     "elapsed_ms": elapsed_ms,
                 }
             remaining = deadline - time.monotonic()
@@ -306,6 +391,7 @@ class SystemService:
         return {
             "ready": False,
             "registry_auth": registry_auth,
+            "auth_per_chain": per_chain,
             "elapsed_ms": elapsed_ms,
         }
 

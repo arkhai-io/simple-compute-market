@@ -4,12 +4,12 @@ Covers the GET /api/v1/system/wait-for-registry-agent endpoint end-to-end
 through the canonical ``StorefrontClient`` (async) via ``httpx.ASGITransport``.
 
 The two cases that exercise the service's branching logic are:
-  1. ``registry_auth_check`` returns a definitive result immediately
-     → ``ready=True``, ``registry_auth`` carries the value.
-  2. ``registry_auth_check`` always returns the transient ``"agent_not_found"``
-     → request times out → ``ready=False``.
+  1. ``_registry_auth_per_chain`` returns a definitive dict immediately
+     → ``ready=True``, ``registry_auth`` carries the aggregate.
+  2. ``_registry_auth_per_chain`` always returns the transient
+     ``{"<chain>": "agent_not_found"}`` → request times out → ``ready=False``.
 
-``SystemService.registry_auth_check`` is patched at the class level so the
+``SystemService._registry_auth_per_chain`` is patched at the class level so the
 controller's ``self._svc`` instance sees the mock without requiring the test
 to reach the real registry service over the network.
 """
@@ -76,14 +76,17 @@ async def client(db) -> AsyncIterator[StorefrontClient]:
 
 class TestWaitForRegistryAgent:
     async def test_ready_when_auth_check_returns_ok(self, client):
-        """Returns ready=True immediately when registry_auth_check is 'ok'."""
+        """Returns ready=True immediately when every chain reports 'ok'."""
         with patch.object(
-            SystemService, "registry_auth_check", new=AsyncMock(return_value="ok")
+            SystemService,
+            "_registry_auth_per_chain",
+            new=AsyncMock(return_value={"anvil": "ok"}),
         ):
             result = await client.wait_for_registry_agent_ready(timeout=5.0)
 
         assert result.ready is True
         assert result.registry_auth == "ok"
+        assert result.auth_per_chain == {"anvil": "ok"}
         assert result.elapsed_ms >= 0
 
     async def test_ready_when_auth_check_returns_definitive_non_ok(self, client):
@@ -91,30 +94,32 @@ class TestWaitForRegistryAgent:
 
         'owner_mismatch' is definitive — the agent is indexed but ownership
         verification failed. The controller returns ready=True so callers can
-        inspect registry_auth and surface the specific problem.
+        inspect registry_auth and surface the specific problem. The aggregate
+        is chain-prefixed so operators know which chain misconfigured.
         """
         with patch.object(
             SystemService,
-            "registry_auth_check",
-            new=AsyncMock(return_value="owner_mismatch"),
+            "_registry_auth_per_chain",
+            new=AsyncMock(return_value={"anvil": "owner_mismatch"}),
         ):
             result = await client.wait_for_registry_agent_ready(timeout=5.0)
 
         assert result.ready is True
-        assert result.registry_auth == "owner_mismatch"
+        assert result.registry_auth == "anvil:owner_mismatch"
+        assert result.auth_per_chain == {"anvil": "owner_mismatch"}
 
     async def test_not_ready_on_timeout(self, client):
         """Returns ready=False when agent_not_found persists past timeout."""
         with patch.object(
             SystemService,
-            "registry_auth_check",
-            new=AsyncMock(return_value="agent_not_found"),
+            "_registry_auth_per_chain",
+            new=AsyncMock(return_value={"anvil": "agent_not_found"}),
         ):
             # Use a short timeout so the test completes quickly.
             result = await client.wait_for_registry_agent_ready(timeout=1.0)
 
         assert result.ready is False
-        assert result.registry_auth == "agent_not_found"
+        assert result.registry_auth == "anvil:agent_not_found"
         # Elapsed should be at least the timeout (in ms), with some tolerance.
         assert result.elapsed_ms >= 900
 
