@@ -110,7 +110,7 @@ Create the issue after reviewing the body:
 ./scripts/issue-discovery issue create .scm-local/issue-discovery/runs/<run-id> <fingerprint>
 ```
 
-The create command only files candidates marked `ready_to_file` unless `--force` is supplied. Real issue creation checks the body against the configured redaction rules and searches existing GitHub issues for the candidate fingerprint before calling `gh issue create`. If a duplicate exists, it prints the existing URL and exits without creating a new issue.
+The create command only files candidates marked `ready_to_file` unless `--force` is supplied. Real issue creation checks the body against the configured redaction rules and searches open GitHub issue titles for the candidate fingerprint before calling `gh issue create`. If a duplicate exists, it prints the existing URL and exits without creating a new issue.
 
 The create command uses `gh issue create` from the repository root selected by the wrapper or `--repo-root`, so it requires the GitHub CLI to be installed and authenticated for that repository.
 

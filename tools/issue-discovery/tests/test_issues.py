@@ -348,6 +348,8 @@ def test_issue_create_runs_gh_from_repo_root(tmp_path: Path, monkeypatch) -> Non
 
     assert code == 0
     assert calls[0]["command"][:3] == ["gh", "issue", "list"]
+    assert calls[0]["command"][calls[0]["command"].index("--state") + 1] == "open"
+    assert calls[0]["command"][calls[0]["command"].index("--search") + 1] == "fingerprint in:title"
     assert calls[1]["command"][:3] == ["gh", "issue", "create"]
     assert calls[1]["cwd"] == repo_root
 
