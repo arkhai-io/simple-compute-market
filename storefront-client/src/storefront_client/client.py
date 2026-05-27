@@ -829,18 +829,20 @@ class StorefrontClient(_StorefrontClientBase):
         agreed_price: float,
         agreed_duration_seconds: int,
         listing_id: str,
+        chain_name: str = "anvil",
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/verify — dry-run escrow chain read (admin key).
 
-        Reads the escrow from chain and confirms it matches the supplied terms.
-        Returns dict with valid=True/False and reason on failure.
-        No DB writes. Used by e2e stage 7b.
+        Reads the escrow from chain on ``chain_name`` and confirms it
+        matches the supplied terms. Returns dict with valid=True/False
+        and reason on failure. No DB writes. Used by e2e stage 7b.
         """
         body = {
             "seller_wallet": seller_wallet,
             "agreed_price": agreed_price,
             "agreed_duration_seconds": agreed_duration_seconds,
             "listing_id": listing_id,
+            "chain_name": chain_name,
         }
         return await self._post(
             f"/api/v1/admin/settle/{escrow_uid}/verify", body,
@@ -1578,18 +1580,20 @@ class SyncStorefrontClient(_StorefrontClientBase):
         agreed_price: float,
         agreed_duration_seconds: int,
         listing_id: str,
+        chain_name: str = "anvil",
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/verify — dry-run escrow chain read (admin key).
 
-        Reads the escrow from chain and confirms it matches the supplied terms.
-        Returns dict with valid=True/False and reason on failure.
-        No DB writes. Used by e2e stage 7b.
+        Reads the escrow from chain on ``chain_name`` and confirms it
+        matches the supplied terms. Returns dict with valid=True/False
+        and reason on failure. No DB writes. Used by e2e stage 7b.
         """
         body = {
             "seller_wallet": seller_wallet,
             "agreed_price": agreed_price,
             "agreed_duration_seconds": agreed_duration_seconds,
             "listing_id": listing_id,
+            "chain_name": chain_name,
         }
         return self._post(
             f"/api/v1/admin/settle/{escrow_uid}/verify", body,

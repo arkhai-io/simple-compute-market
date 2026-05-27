@@ -266,7 +266,7 @@ async def admin_client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient
     from market_storefront.services.listing_service import ListingService
 
     listing_svc = ListingService(
-        sqlite_client=db, alkahest_client=None
+        sqlite_client=db, alkahest_clients=None
     )
 
     _container.resolved_sqlite_client = db
@@ -295,7 +295,7 @@ async def admin_no_key_client(db) -> AsyncIterator[StorefrontClient]:
     from market_storefront.services.listing_service import ListingService
 
     listing_svc = ListingService(
-        sqlite_client=db, alkahest_client=None
+        sqlite_client=db, alkahest_clients=None
     )
 
     _container.resolved_sqlite_client = db
@@ -478,7 +478,7 @@ async def seller_auth_full_client(db):
     from market_storefront.services.listing_service import ListingService
     from tests._settings_overrides import settings_overrides
 
-    listing_svc = ListingService(sqlite_client=db, alkahest_client=None)
+    listing_svc = ListingService(sqlite_client=db, alkahest_clients=None)
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = listing_svc
