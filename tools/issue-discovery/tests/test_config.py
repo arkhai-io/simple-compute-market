@@ -45,12 +45,15 @@ def test_local_phase_file_loads_expected_core_phases() -> None:
     paths = ToolPaths(repo_root())
     phase_file = load_phase_file(paths.config_dir / "phases" / "local.yaml")
     ids = [phase.id for phase in phase_file.phases]
+    by_id = {phase.id: phase for phase in phase_file.phases}
 
     assert phase_file.schema_version == 1
     assert ids[0] == "source_identity"
     assert "compose_start_strict" in ids
     assert "full_integration_sweep" in ids
     assert ids[-1] == "teardown"
+    assert "node_version" in [command.id for command in by_id["host_identity"].commands]
+    assert "command -v node" in by_id["prerequisite_check"].commands[0].run
 
 
 def test_phase_ids_are_unique() -> None:

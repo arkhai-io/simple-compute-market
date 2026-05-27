@@ -60,6 +60,7 @@ install_base_packages() {
     gnupg \
     jq \
     make \
+    nodejs \
     python3 \
     sudo \
     tar \
@@ -125,6 +126,7 @@ check_tools() {
   require_command make
   require_command curl
   require_command jq
+  require_command node
   require_command python3
   require_command uv
   require_command docker
@@ -163,6 +165,7 @@ log_tool_versions() {
   log_version_command make make --version
   log_version_command curl curl --version
   log_version_command jq jq --version
+  log_version_command node node --version
   log_version_command python3 python3 --version
   log_version_command uv uv --version
   log_version_command docker docker --version

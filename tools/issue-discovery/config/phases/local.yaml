@@ -27,6 +27,8 @@ phases:
         run: docker compose version
       - id: uv_version
         run: uv --version
+      - id: node_version
+        run: node --version
       - id: python_version
         run: python3 --version
 
@@ -36,7 +38,7 @@ phases:
     blocking: true
     commands:
       - id: required_commands
-        run: command -v docker && command -v make && command -v uv && command -v jq && command -v curl && command -v git && command -v python3
+        run: command -v docker && command -v make && command -v uv && command -v jq && command -v curl && command -v git && command -v node && command -v python3
       - id: docker_daemon
         run: docker info
 

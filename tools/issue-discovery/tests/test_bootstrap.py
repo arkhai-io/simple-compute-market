@@ -27,7 +27,7 @@ def make_fake_path(tmp_path: Path) -> Path:
         target = shutil.which(tool)
         assert target is not None, tool
         os.symlink(target, bin_dir / tool)
-    for tool in ("curl", "git", "jq", "make", "python3", "uv"):
+    for tool in ("curl", "git", "jq", "make", "node", "python3", "uv"):
         make_executable(bin_dir / tool, "#!/usr/bin/env bash\nexit 0\n")
     make_executable(
         bin_dir / "docker",
@@ -108,4 +108,12 @@ def test_bootstrap_emits_tool_versions() -> None:
     assert "log_tool_versions()" in script
     assert "git --version" in script
     assert "docker compose version" in script
+    assert "node --version" in script
     assert "uv --version" in script
+
+
+def test_bootstrap_installs_node_for_alkahest_tests() -> None:
+    script = bootstrap_script().read_text(encoding="utf-8")
+
+    assert "nodejs" in script
+    assert "require_command node" in script
