@@ -151,9 +151,13 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
         "registry": [
             {"items": [
                 {"listing_id": "list-a", "seller": "http://seller-a:8001",
-                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 50}]},
+                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                       "literal_fields": {"token": "0x" + "ab" * 20},
+                                       "rates": [{"field": "amount", "per": "hour", "value": "50"}]}]},
                 {"listing_id": "list-b", "seller": "http://seller-b:8001",
-                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 70}]},
+                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                       "literal_fields": {"token": "0x" + "ab" * 20},
+                                       "rates": [{"field": "amount", "per": "hour", "value": "70"}]}]},
             ]},
         ],
         "seller-a": [
@@ -207,10 +211,14 @@ def test_cheapest_first_preserves_first_agreed_semantics():
             {"items": [
                 # Higher advertised price first in the registry response.
                 {"listing_id": "expensive", "seller": "http://seller-b:8001",
-                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 70}]},
+                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                       "literal_fields": {"token": "0x" + "ab" * 20},
+                                       "rates": [{"field": "amount", "per": "hour", "value": "70"}]}]},
                 # Cheaper advertised — should be tried first under cheapest_first.
                 {"listing_id": "cheap", "seller": "http://seller-a:8001",
-                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 50}]},
+                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                       "literal_fields": {"token": "0x" + "ab" * 20},
+                                       "rates": [{"field": "amount", "per": "hour", "value": "50"}]}]},
             ]},
         ],
         "seller-a": [

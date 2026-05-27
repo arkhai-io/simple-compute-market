@@ -250,10 +250,7 @@ def _scale_template_entries(
     The CSV importer stores ``accepted_escrows`` entries with rate values
     as the raw human strings from the slot assignments (``"0.5"`` for
     half a USDC). At publish time we look up token decimals against the
-    entry's chain and scale to a uint256-safe decimal-digit string —
-    the same shape the legacy ``min_price`` path emits. Also populates
-    the legacy ``fields`` / ``price_per_hour`` siblings so pre-helpers
-    readers still see the price.
+    entry's chain and scale to a uint256-safe decimal-digit string.
 
     Raises ``ValueError`` (per entry) with a row-actionable message when
     the entry references an unknown chain or a token whose metadata
@@ -325,12 +322,9 @@ def _scale_template_entries(
                 "value": str(int(base_units)),
             })
 
-        primary_value = new_rates[0]["value"] if new_rates else None
         scaled.append({
             "chain_name": chain_name,
             "escrow_address": str(entry.get("escrow_address") or "").lower(),
-            "fields": dict(literal_fields),
-            "price_per_hour": primary_value,
             "literal_fields": literal_fields,
             "rates": new_rates,
         })
@@ -356,14 +350,14 @@ def _publish_round(
     Pricing is per-row: ``resources.min_price`` / ``resources.token`` win
     over the [seller.pricing] defaults. Tristate publish behaviour:
 
-      * Row ``min_price > 0``  → publish with ``price_per_hour = min_price``
+      * Row ``min_price > 0``  → publish with a single amount/hour rate
         (public price).
-      * Row ``min_price = "0"`` → publish with ``price_per_hour = 0``
+      * Row ``min_price = "0"`` → publish with the rate value ``"0"``
         (free / public-test offering; explicit per-row, defaults don't
         override).
       * Row ``min_price`` unset and no default → controlled by
         ``publish_priceless``:
-          - True  → publish with ``price_per_hour = None`` (hidden reserve;
+          - True  → publish with ``rates = []`` (hidden reserve;
             buyer proposes; seller's strategy uses
             ``[seller.pricing].default_min_price`` as the negotiation floor).
           - False → skip the row, surfaced in ``failed``.
@@ -533,14 +527,12 @@ def _publish_round(
             accepted_escrows.append({
                 "chain_name": chain.name,
                 "escrow_address": escrow_address.lower(),
-                "fields": {"token": token_address},
-                "price_per_hour": advertised_amount,
                 "literal_fields": {"token": token_address},
                 "rates": [{
                     "field": "amount",
                     "per": "hour",
                     "value": advertised_amount,
-                }],
+                }] if advertised_amount is not None else [],
             })
         if not accepted_escrows:
             failed.append((

@@ -275,7 +275,8 @@ def register(app: typer.Typer) -> None:
                     msg += f" with token {token_contract}"
                 typer.secho(msg + ".", err=True, fg=typer.colors.RED)
                 raise typer.Exit(2)
-            entry_token = (picked_entry.get("fields") or {}).get("token")
+            from service.schemas import accepted_token_address
+            entry_token = accepted_token_address(picked_entry)
             if isinstance(entry_token, str) and entry_token.startswith("0x"):
                 # Surface the picked token back to the run-log + the
                 # downstream price-scaling step.
@@ -403,11 +404,13 @@ def register(app: typer.Typer) -> None:
                 duration_seconds=int(duration_seconds),
                 ssh_public_key="",  # negotiate-only flow; settle is a separate command
             )
-            _entry_fields = picked_entry.get("fields") or {}
+            from service.schemas import accepted_token_address
+            _entry_token = accepted_token_address(picked_entry)
             escrow_proposal = EscrowProposal(
                 chain_name=picked_entry.get("chain_name"),
                 escrow_address=picked_entry["escrow_address"],
-                fields={"token": _entry_fields.get("token")},
+                fields={"token": _entry_token},
+                literal_fields={"token": _entry_token},
                 expiration_unix=int(_time.time()) + 3600,
             )
 

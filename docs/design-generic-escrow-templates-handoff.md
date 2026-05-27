@@ -101,6 +101,19 @@ sessions.
   sibling on equal footing with the legacy `fields["arbiter"]`. The
   legacy no-proposal path is unchanged. 9 new tests in
   `storefront/tests/unit/test_escrow_verification.py::TestVerifyProposalDispatch`.
+- Phase 7: AcceptedEscrow drops the legacy `fields` and `price_per_hour`
+  siblings. `literal_fields: dict` and `rates: list[RateValue]` are now
+  non-optional (default `{}` / `[]`). The legacy-shape fallbacks in
+  `primary_rate_value` and `accepted_token_address` go away — readers
+  are exclusively on the new shape. Production emitters
+  (`cli_publish._scale_template_entries`, `cli_publish._publish_round`'s
+  CHAINS-broadcast fallback, `sqlite_client.synthesize_accepted_escrows_from_demand`)
+  stop populating the legacy keys. The seller-side `escrow_shape_guard`
+  middleware in `market-policy` now compares against `literal_fields`
+  on both sides. Buyer/storefront proposal readers drop the
+  `fields["arbiter"]` legacy fallback (Phase 5/6 emitters always populate
+  `literal_fields`). Bulk test rewrites across storefront unit +
+  integration, buyer, service, registry-service, and e2e fixtures.
 
 ## Why staged as siblings, not a rename
 
@@ -119,12 +132,9 @@ is on the helpers.
 
 ## What's left (staging plan)
 
-### Phase 7 — Drop legacy fields
-
-Once every reader is on helpers AND every emitter populates the new
-shape, delete `fields` and `price_per_hour` from `AcceptedEscrow`,
-make `literal_fields` non-optional, and rename `rates: list | None`
-to `rates: list`. Update tests in bulk. Single commit, clean diff.
+All seven phases shipped. The generic-escrow template wire format is
+now the canonical shape end-to-end. Deferred items remain in
+"Open questions" below.
 
 ## Negotiation invariant (don't break)
 
@@ -213,7 +223,6 @@ integration-tests/tests/e2e/roles/       Phase 3/4 (CSV fixtures)
 - ~~Phase 4~~ — cli_publish reads materialized templates from the row.
 - ~~Phase 5~~ — buyer dispatch + ERC20-only NotImplementedError gate.
 - ~~Phase 6~~ — seller verify + ERC20-only NotImplementedError gate.
-- Phase 7: 1 session (drop legacy fields + bulk test rewrites).
+- ~~Phase 7~~ — drop legacy fields + bulk test rewrites.
 
-So ~1 session left to fully land. Each is committable independently
-and keeps the branch green.
+All landed. Branch is clean.

@@ -92,7 +92,7 @@ def _extract_token_contract_from_listing(listing: dict[str, Any]) -> str:
 
     Used as the fallback when the buyer didn't include an
     ``escrow_proposal`` on the negotiation thread. With a proposal in
-    hand the verifier reads ``proposal.fields["token"]`` directly.
+    hand the verifier reads ``proposal.literal_fields["token"]`` directly.
     """
     from service.schemas import accepted_token_address
 
@@ -270,15 +270,12 @@ async def verify_escrow_for_settlement(
         if not isinstance(proposal_token, str) or not proposal_token:
             raise EscrowVerificationError(
                 f"escrow proposal for {escrow_uid} omitted token "
-                f"(checked literal_fields['token'] and fields['token']); "
-                f"cannot verify against chain"
+                f"(literal_fields['token'] missing); cannot verify "
+                f"against chain"
             )
         effective_token = proposal_token
         proposal_literal = escrow_proposal.literal_fields or {}
-        proposal_arbiter = (
-            proposal_literal.get("arbiter")
-            or escrow_proposal.fields.get("arbiter")
-        )
+        proposal_arbiter = proposal_literal.get("arbiter")
         if isinstance(proposal_arbiter, str) and proposal_arbiter:
             arbiter_slot = address_to_slot(
                 escrow_proposal.chain_name, proposal_arbiter,

@@ -131,8 +131,8 @@ def _good_listing() -> dict:
         "accepted_escrows": [{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"token": TOKEN},
-            "price_per_hour": 100,
+            "literal_fields": {"token": TOKEN},
+            "rates": [{"field": "amount", "per": "hour", "value": "100"}],
         }],
         "offer_resource": {"gpu_model": "H200", "gpu_count": 1},
     }
@@ -204,8 +204,8 @@ class TestExtractTokenContractFromListing:
             "accepted_escrows": json.dumps([{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"token": TOKEN},
-                "price_per_hour": 1,
+                "literal_fields": {"token": TOKEN},
+                "rates": [{"field": "amount", "per": "hour", "value": "1"}],
             }]),
             "offer_resource": {"gpu_model": "H200"},
         }
@@ -216,7 +216,7 @@ class TestExtractTokenContractFromListing:
             "accepted_escrows": [{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {},
+                "literal_fields": {},
             }],
             "offer_resource": {"gpu_model": "H200"},
         }
@@ -612,7 +612,9 @@ class TestVerifyProposalDispatch:
         assert captured["token"] == TOKEN
 
     @pytest.mark.asyncio
-    async def test_literal_fields_wins_over_legacy_fields(self, patched_codec_lookup):
+    async def test_ignores_legacy_fields_token(self, patched_codec_lookup):
+        """``fields`` is the negotiation-amount carrier; verifier reads
+        the token from ``literal_fields`` exclusively."""
         seams, captured = _build_seams_capturing_token()
         await verify_escrow_for_settlement(
             escrow_uid="0xdead",
@@ -633,27 +635,7 @@ class TestVerifyProposalDispatch:
         assert captured["token"] == TOKEN
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_legacy_fields_when_literal_unset(self, patched_codec_lookup):
-        """A proposal persisted before the Phase 5 cutover only carries
-        ``fields`` — verifier must still find the token."""
-        seams, captured = _build_seams_capturing_token()
-        await verify_escrow_for_settlement(
-            escrow_uid="0xdead",
-            seller_wallet=SELLER,
-            agreed_price=1000,
-            agreed_duration_seconds=3600,
-            listing=_good_listing(),
-            alkahest_client=_DUMMY_CLIENT,
-            chain_name=CHAIN,
-            alkahest_address_config_path=CONFIG_PATH,
-            escrow_proposal=_erc20_proposal(fields={"token": TOKEN}),
-            now_unix=1_700_000_000,
-            **seams,
-        )
-        assert captured["token"] == TOKEN
-
-    @pytest.mark.asyncio
-    async def test_raises_when_proposal_has_no_token(self, patched_codec_lookup):
+    async def test_raises_when_proposal_has_no_literal_token(self, patched_codec_lookup):
         seams, _captured = _build_seams_capturing_token()
         with pytest.raises(EscrowVerificationError, match="omitted token"):
             await verify_escrow_for_settlement(
@@ -665,7 +647,9 @@ class TestVerifyProposalDispatch:
                 alkahest_client=_DUMMY_CLIENT,
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
-                escrow_proposal=_erc20_proposal(fields={}, literal_fields={}),
+                escrow_proposal=_erc20_proposal(
+                    fields={"token": _TOKEN_LEGACY}, literal_fields={},
+                ),
                 now_unix=1_700_000_000,
                 **seams,
             )

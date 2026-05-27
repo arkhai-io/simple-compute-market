@@ -61,19 +61,18 @@ def synthesize_accepted_escrows_from_demand(
         return None
 
     amount = normalized.get("amount")
-    # ``price_per_hour`` is uint256-domain (base units) — emit as a
-    # decimal-digit string on the stored/wire JSON to stay safe past
-    # JS's 2^53 and SQLite int64 ceilings. Python callers parse it back
-    # with ``int(...)``.
+    # Rate value is uint256-domain (base units) — emit as a decimal-digit
+    # string on the stored/wire JSON to stay safe past JS's 2^53 and SQLite
+    # int64 ceilings. Python callers parse it back with ``int(...)``.
     if isinstance(amount, bool):
-        price_per_hour: str | None = None
+        rate_value: str | None = None
     elif isinstance(amount, int):
-        price_per_hour = str(amount)
+        rate_value = str(amount)
     elif isinstance(amount, str):
         s = amount.strip()
-        price_per_hour = s if s.isdigit() else None
+        rate_value = s if s.isdigit() else None
     else:
-        price_per_hour = None
+        rate_value = None
 
     from service.clients.alkahest import get_erc20_escrow_obligation_nontierable
 
@@ -92,14 +91,12 @@ def synthesize_accepted_escrows_from_demand(
         entries.append({
             "chain_name": name,
             "escrow_address": escrow_address.lower(),
-            "fields": {"token": contract_address},
-            "price_per_hour": price_per_hour,
             "literal_fields": {"token": contract_address},
             "rates": [{
                 "field": "amount",
                 "per": "hour",
-                "value": price_per_hour,
-            }] if price_per_hour is not None else [],
+                "value": rate_value,
+            }] if rate_value is not None else [],
         })
     return entries or None
 
@@ -434,7 +431,7 @@ class SQLiteClient:
             # ``escrows`` table joined via the winning ``negotiation_id``;
             # the buyer/match association lives on ``negotiation_threads``.
             # accepted_escrows is a JSON array of {chain_name, escrow_address,
-            # fields, price_per_hour} — the canonical pricing+escrow
+            # literal_fields, rates} — the canonical pricing+escrow
             # advertisement. The legacy ``demand_resource`` and per-deal
             # ``escrow_uid``/``buyer``/``matched_offer_id``/
             # ``seller_attestation``/``buyer_attestation`` columns are
@@ -804,7 +801,7 @@ class SQLiteClient:
         """Return the ``accepted_escrows`` column as a Python list.
 
         The column is a JSON-serialised list of AcceptedEscrow entries
-        (``{chain_name, escrow_address, fields, price_per_hour}``).
+        (``{chain_name, escrow_address, literal_fields, rates}``).
         Returns ``None`` when the column is NULL — callers that need to
         synthesise an entry from the legacy ``demand_resource`` field
         do so themselves.

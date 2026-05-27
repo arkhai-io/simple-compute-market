@@ -130,7 +130,7 @@ class TestListingRequestConstructor:
         req = ListingRequest(
             listing_id=uuid.uuid4().hex,
             offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "CA"},
-            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "0x" + "22" * 20}, "price_per_hour": 10_000}],
+            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": "0x" + "22" * 20}, "rates": [{"field": "amount", "per": "hour", "value": "10000"}]}],
             max_duration_seconds=3600,
         )
         assert req.max_duration_seconds == 3600
@@ -222,7 +222,7 @@ class TestPublishListingWireFormat:
         req = ListingRequest(
             listing_id=uuid.uuid4().hex,
             offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "CA"},
-            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "0x" + "22" * 20}, "price_per_hour": 10_000}],
+            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": "0x" + "22" * 20}, "rates": [{"field": "amount", "per": "hour", "value": "10000"}]}],
             max_duration_seconds=3600,
         )
         await client.publish_listing(AGENT_CANONICAL_ID, req, private_key=AGENT_PRIVATE_KEY)
@@ -260,8 +260,8 @@ class TestPublishListingWireFormat:
         entries = [{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"token": "0x" + "22" * 20},
-            "price_per_hour": 8_000,
+            "literal_fields": {"token": "0x" + "22" * 20},
+            "rates": [{"field": "amount", "per": "hour", "value": "8000"}],
         }]
         req = ListingRequest(listing_id=uuid.uuid4().hex, offer={}, accepted_escrows=entries)
         await client.publish_listing(AGENT_CANONICAL_ID, req, private_key=AGENT_PRIVATE_KEY)

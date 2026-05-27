@@ -7,7 +7,7 @@ the endpoint translates into an HTTP status + body.
 
 Strict address-only contract: ``payload["token"]`` is a 0x address;
 ``payload["amount"]`` is an integer in base units. Refunds read pricing
-from ``accepted_escrows[0].fields.token`` + ``price_per_hour``.
+from ``accepted_escrows[0].literal_fields.token`` + ``rates``.
 """
 
 from __future__ import annotations
@@ -42,13 +42,18 @@ def _fake_resolver(registry: dict[str, dict]):
 def _accepted_escrow(
     *,
     token: str = _MOCK_TOKEN["contract_address"],
-    price_per_hour: float | None = 1_000_000_000_000_000_000,
+    price_per_hour: int | None = 1_000_000_000_000_000_000,
 ) -> dict:
+    rates = (
+        []
+        if price_per_hour is None
+        else [{"field": "amount", "per": "hour", "value": str(int(price_per_hour))}]
+    )
     return {
         "chain_name": "anvil",
         "escrow_address": "0x" + "11" * 20,
-        "fields": {"token": token},
-        "price_per_hour": price_per_hour,
+        "literal_fields": {"token": token},
+        "rates": rates,
     }
 
 

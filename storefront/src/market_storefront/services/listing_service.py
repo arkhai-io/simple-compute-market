@@ -197,7 +197,7 @@ class ListingService:
         if not request.accepted_escrows:
             raise ValueError(
                 "accepted_escrows must be a non-empty list "
-                "of {chain_name, escrow_address, fields, price_per_hour} entries."
+                "of {chain_name, escrow_address, literal_fields, rates} entries."
             )
         return offer_resource, list(request.accepted_escrows)
 

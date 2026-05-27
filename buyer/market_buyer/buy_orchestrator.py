@@ -290,10 +290,12 @@ def fetch_listing_dict_multi(
 def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
     """Pull the seller's per-hour floor out of a registry listing dict.
 
-    Reads ``accepted_escrows[0].price_per_hour`` — the per-hour token rate
-    advertised on the seller's first accepted escrow tuple. Returns ``None``
-    if absent or unparseable (hidden-reserve listings).
+    Reads the primary rate on ``accepted_escrows[0]`` — the per-hour
+    token rate advertised on the seller's first accepted escrow tuple.
+    Returns ``None`` for hidden-reserve listings (empty ``rates``).
     """
+    from service.schemas import primary_rate_value
+
     accepted = listing.get("accepted_escrows") or []
     if isinstance(accepted, str):
         try:
@@ -305,11 +307,8 @@ def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
     first = accepted[0]
     if not isinstance(first, dict):
         return None
-    amount = first.get("price_per_hour")
-    try:
-        return float(amount) if amount is not None else None
-    except (ValueError, TypeError):
-        return None
+    amount = primary_rate_value(first)
+    return float(amount) if amount is not None else None
 
 
 # ---------------------------------------------------------------------------

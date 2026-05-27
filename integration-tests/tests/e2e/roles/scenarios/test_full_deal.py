@@ -128,14 +128,15 @@ DEMAND_RESOURCE = {
 # Listing-side accepted_escrows advertisement. The escrow_address here is a
 # stub — the buyer sends the placeholder zero address on its EscrowProposal
 # (see negotiate_new's defaults), which skips the (chain, address) strict
-# match in _match_accepted_escrow; field-level equality on fields["token"]
-# is what gates the proposal. The real escrow_address used on-chain is what
-# the buyer's CLI resolves through alkahest at settle time.
+# match in _match_accepted_escrow; field-level equality on
+# literal_fields["token"] is what gates the proposal. The real
+# escrow_address used on-chain is what the buyer's CLI resolves through
+# alkahest at settle time.
 ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
     "escrow_address": "0x" + "11" * 20,
-    "fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
-    "price_per_hour": DEMAND_RESOURCE["amount"],
+    "literal_fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
+    "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_RESOURCE["amount"])}],
 }]
 DURATION_HOURS = 1
 BUYER_INITIAL_PRICE = 7_000    # below seller floor (10_000) — forces counter at round 0

@@ -81,15 +81,12 @@ def test_synthesize_from_token_demand(stub_alkahest_address):
     assert len(result) == 1
     entry = result[0]
     assert entry["escrow_address"] == _ESCROW_ADDR.lower()
-    assert entry["fields"] == {"token": _TOKEN_ADDR}
-    # uint256-safe: price_per_hour is a decimal-digit string on the wire,
+    assert entry["literal_fields"] == {"token": _TOKEN_ADDR}
+    # uint256-safe: rate value is a decimal-digit string on the wire,
     # even when the caller passed a Python int.
-    assert entry["price_per_hour"] == "1000000"
+    assert entry["rates"] == [{"field": "amount", "per": "hour", "value": "1000000"}]
     # chain_name comes from CONFIG; just assert presence + type.
     assert isinstance(entry["chain_name"], str) and entry["chain_name"]
-    # Sibling shape (escrow templates wire format) ships alongside legacy.
-    assert entry["literal_fields"] == {"token": _TOKEN_ADDR}
-    assert entry["rates"] == [{"field": "amount", "per": "hour", "value": "1000000"}]
 
 
 def test_synthesize_from_token_demand_uint256_amount(stub_alkahest_address):
@@ -102,7 +99,7 @@ def test_synthesize_from_token_demand_uint256_amount(stub_alkahest_address):
     }
     result = synthesize_accepted_escrows_from_demand(demand)
     assert result is not None
-    assert result[0]["price_per_hour"] == str(big)
+    assert result[0]["rates"][0]["value"] == str(big)
 
 
 def test_synthesize_accepts_string_amount(stub_alkahest_address):
@@ -114,22 +111,18 @@ def test_synthesize_accepts_string_amount(stub_alkahest_address):
     }
     result = synthesize_accepted_escrows_from_demand(demand)
     assert result is not None
-    assert result[0]["price_per_hour"] == "1500"
+    assert result[0]["rates"][0]["value"] == "1500"
 
 
 def test_synthesize_from_token_demand_hidden_reserve(stub_alkahest_address):
     """``amount=None`` (hidden reserve) → entry still synthesized but
-    ``price_per_hour`` stays None."""
+    ``rates`` stays empty."""
     demand = {
         "token": {"symbol": "USDC", "contract_address": _TOKEN_ADDR, "decimals": 6},
         "amount": None,
     }
     result = synthesize_accepted_escrows_from_demand(demand)
     assert result is not None
-    assert result[0]["price_per_hour"] is None
-    assert result[0]["fields"] == {"token": _TOKEN_ADDR}
-    # Hidden reserve produces no rates (no numeric value to advertise),
-    # but literal_fields are still emitted so readers see a consistent shape.
     assert result[0]["literal_fields"] == {"token": _TOKEN_ADDR}
     assert result[0]["rates"] == []
 
@@ -143,7 +136,7 @@ def test_synthesize_accepts_json_string(stub_alkahest_address):
     })
     result = synthesize_accepted_escrows_from_demand(demand_str)
     assert result is not None
-    assert result[0]["fields"]["token"] == _TOKEN_ADDR
+    assert result[0]["literal_fields"]["token"] == _TOKEN_ADDR
 
 
 def test_synthesize_returns_none_for_compute_demand(stub_alkahest_address):
@@ -188,8 +181,8 @@ def test_upsert_listing_stores_explicit_accepted_escrows(tmp_db_path):
     explicit = [{
         "chain_name": "base_sepolia",
         "escrow_address": "0x" + "11" * 20,
-        "fields": {"token": "0x" + "22" * 20},
-        "price_per_hour": 999,
+        "literal_fields": {"token": "0x" + "22" * 20},
+        "rates": [{"field": "amount", "per": "hour", "value": "999"}],
     }]
     asyncio.run(db.upsert_listing(
         listing_id="lst2", status="open",
@@ -268,7 +261,7 @@ def test_backfill_runs_on_schema_init_and_drops_legacy_column(
     assert row is not None
     accepted = row["accepted_escrows"]
     assert isinstance(accepted, list) and accepted
-    assert accepted[0]["fields"]["token"] == _TOKEN_ADDR
+    assert accepted[0]["literal_fields"]["token"] == _TOKEN_ADDR
 
     # And the legacy column is gone.
     import sqlite3 as _sql

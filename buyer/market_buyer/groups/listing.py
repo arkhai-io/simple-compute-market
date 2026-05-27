@@ -91,11 +91,12 @@ def _format_accepted_escrows(entries: list) -> str:
         if not isinstance(entry, dict):
             lines.append(f"[{i}] {entry}")
             continue
+        from service.schemas import primary_rate_value, accepted_token_address
+
         chain = entry.get("chain_name") or "-"
         addr = _short_contract_address(str(entry.get("escrow_address") or "-"))
-        price = entry.get("price_per_hour")
-        fields = entry.get("fields") or {}
-        token = fields.get("token") if isinstance(fields, dict) else None
+        price = primary_rate_value(entry)
+        token = accepted_token_address(entry)
         parts = [f"chain={chain}", f"escrow={addr}"]
         if token:
             parts.append(f"token={_short_contract_address(str(token))}")

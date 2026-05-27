@@ -292,8 +292,8 @@ def compute_rate_total(rate: RateValue, duration_seconds: int) -> int:
     """Multiply a rate by the negotiated duration.
 
     Returns the final on-chain field value for ``rate.field``. Uses
-    integer division so sub-unit fractions truncate, matching the prior
-    ``price_per_hour × duration / 3600`` semantics.
+    integer division so sub-unit fractions truncate (i.e. for ERC20:
+    ``rate × duration_seconds // 3600``).
     """
     divisor = PER_UNIT_SECONDS.get(rate.per)
     if divisor is None:
@@ -304,12 +304,10 @@ def compute_rate_total(rate: RateValue, duration_seconds: int) -> int:
 # ---------------------------------------------------------------------------
 # AcceptedEscrow / EscrowProposal accessors
 # ---------------------------------------------------------------------------
-# Generic-escrow templates introduce ``literal_fields`` + ``rates`` in
-# place of the legacy ``fields`` + ``price_per_hour`` pair. Most consumers
-# treat an accepted_escrows entry as a JSON dict (after a round-trip
-# through SQLite or the wire); these accessors operate on either a
-# Pydantic model OR a dict, so the only change at the call site is the
-# accessor name.
+# Most consumers treat an accepted_escrows entry as a JSON dict (after a
+# round-trip through SQLite or the wire); these accessors operate on
+# either a Pydantic model OR a dict so the only change at the call site
+# is the accessor name.
 
 
 def primary_rate_value(accepted_or_proposal: Any) -> int | None:
@@ -324,31 +322,21 @@ def primary_rate_value(accepted_or_proposal: Any) -> int | None:
     listings, attestation one-shots). Callers translate ``None`` into
     either a hidden-reserve fallback (negotiation strategies) or a
     "no scaling" path (settlement of pure-literal escrows).
-
-    Falls back to the legacy ``price_per_hour`` field for entries
-    written before the templates wire-shape cutover. Phase 7 drops the
-    fallback when no legacy data remains in SQLite or on the wire.
     """
     rates = _rates_of(accepted_or_proposal)
-    if rates:
-        first = rates[0]
-        if isinstance(first, dict):
-            v = first.get("value")
-            if isinstance(v, str) and v.strip().isdigit():
-                return int(v.strip())
-            if isinstance(v, int) and not isinstance(v, bool):
-                return v
-        else:
-            v = getattr(first, "value", None)
-            if isinstance(v, int) and not isinstance(v, bool):
-                return v
-    legacy = _legacy_price_per_hour(accepted_or_proposal)
-    if legacy is None:
+    if not rates:
         return None
-    if isinstance(legacy, int) and not isinstance(legacy, bool):
-        return legacy
-    if isinstance(legacy, str) and legacy.strip().isdigit():
-        return int(legacy.strip())
+    first = rates[0]
+    if isinstance(first, dict):
+        v = first.get("value")
+        if isinstance(v, str) and v.strip().isdigit():
+            return int(v.strip())
+        if isinstance(v, int) and not isinstance(v, bool):
+            return v
+        return None
+    v = getattr(first, "value", None)
+    if isinstance(v, int) and not isinstance(v, bool):
+        return v
     return None
 
 
@@ -359,31 +347,10 @@ def accepted_token_address(accepted_or_proposal: Any) -> str | None:
     ERC-1155 escrows pin their payment-token. Returns ``None`` for
     escrow kinds (NativeToken, TokenBundle, attestation) that don't
     have a single ``token`` literal.
-
-    Falls back to the legacy ``fields["token"]`` shape for entries
-    written before the templates wire-shape cutover. Phase 7 drops the
-    fallback when no legacy data remains.
     """
     literals = _literal_fields_of(accepted_or_proposal)
     val = literals.get("token") if isinstance(literals, dict) else None
-    if isinstance(val, str) and val:
-        return val
-    legacy_fields = _legacy_fields(accepted_or_proposal)
-    legacy = legacy_fields.get("token") if isinstance(legacy_fields, dict) else None
-    return legacy if isinstance(legacy, str) and legacy else None
-
-
-def _legacy_price_per_hour(entry: Any) -> Any:
-    if isinstance(entry, dict):
-        return entry.get("price_per_hour")
-    return getattr(entry, "price_per_hour", None)
-
-
-def _legacy_fields(entry: Any) -> dict[str, Any]:
-    if isinstance(entry, dict):
-        out = entry.get("fields")
-        return out if isinstance(out, dict) else {}
-    return dict(getattr(entry, "fields", {}) or {})
+    return val if isinstance(val, str) and val else None
 
 
 def _rates_of(entry: Any) -> list[Any]:
@@ -403,35 +370,30 @@ def _literal_fields_of(entry: Any) -> dict[str, Any]:
 class AcceptedEscrow(BaseModel):
     """One escrow shape the seller will accept for this listing.
 
-    Each entry pins the (chain, escrow contract) tuple plus a partial
-    EscrowData advertisement. The buyer's proposal must reference one
-    of the listing's accepted entries by (chain_name, escrow_address)
-    and supply the buyer-committable EscrowData keys in ``fields``.
+    Each entry pins the (chain, escrow contract) tuple plus the
+    obligation literals + rates the seller has fixed. The buyer's
+    proposal references one of these entries by
+    ``(chain_name, escrow_address)`` and inherits its ``literal_fields``.
 
-    ``fields`` is shape-only: keys present advertise a seller-preferred
-    value; keys absent are open. Whether a set field is a hard constraint
-    or a negotiable default is the seller's negotiation policy's concern,
-    not protocol infrastructure.
+    ``literal_fields`` is shape-only: keys present advertise a seller-
+    preferred value; keys absent are open. Never includes a rate-bearing
+    field directly — those live in ``rates`` so duration scaling stays
+    explicit.
 
-    ``amount`` is intentionally never present in ``fields`` — the
-    on-chain ObligationData.amount is a per-deal total derived at
-    settlement from ``price_per_hour * duration_seconds / 3600``. The
-    advertised per-hour rate lives in the sibling ``price_per_hour``
-    field so ``fields`` stays a pure Partial<ObligationData>.
-
-    Forward-looking shape (per docs/design-generic-escrow-templates.md):
-    ``literal_fields`` + ``rates`` are first-class siblings that
-    generalize beyond single-rate ERC20. ``fields`` and ``price_per_hour``
-    remain the canonical readers until the generic-escrow migration
-    completes; emitters MAY populate ``literal_fields`` + ``rates`` in
-    addition for forward compat.
+    ``rates`` carries every rate-bearing field on the obligation. For
+    ERC20 escrows that's a single ``{"field": "amount", "per": "hour",
+    "value": …}`` entry; multi-rate templates (TokenBundle) carry one
+    per rate-bearing field. Empty list = hidden reserve (seller did not
+    publish a rate; negotiation establishes one via the strategy's
+    ``default_min_price``). Readers use the ``primary_rate_value`` /
+    ``accepted_token_address`` helpers in this module.
     """
 
     chain_name: str = Field(
         description=(
             "Alkahest chain identifier (e.g. ``base_sepolia``, ``anvil``). "
             "Combined with ``escrow_address`` to look up the SDK codec via "
-            "``service.clients.alkahest.address_to_slot``."
+            "``service.clients.alkahest.get_escrow_codec_for``."
         ),
     )
     escrow_address: str = Field(
@@ -440,55 +402,25 @@ class AcceptedEscrow(BaseModel):
             "The (chain, address) pair determines the EscrowData ABI."
         ),
     )
-    fields: dict[str, Any] = Field(
+    literal_fields: dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "Partial EscrowData advertised by the seller. Keys present = "
-            "seller-preferred values; keys absent = open. Never includes "
-            "``amount`` (derived at settlement from ``price_per_hour`` × "
-            "duration / 3600)."
+            "Literal obligation-data keys the seller has fixed (e.g. "
+            "``token``, ``arbiter``). Keys present = seller-preferred "
+            "value; keys absent = open. Never includes a rate-bearing "
+            "field — those live in ``rates``."
         ),
     )
-    price_per_hour: int | None = Field(
-        default=None,
+    rates: list[RateValue] = Field(
+        default_factory=list,
         description=(
-            "Advertised per-hour rate in the escrow's payment token, in "
-            "base units (token-amount × 10^decimals). uint256-domain — on "
-            "the wire as a decimal-digit string, Python int internally. "
-            "Total settlement amount is ``price_per_hour × duration_seconds "
-            "// 3600`` (integer division; sub-hour fractions truncate). "
-            "``None`` = hidden reserve (seller did not publish a rate; "
-            "negotiation must establish one via the strategy's "
-            "``default_min_price``)."
+            "Rate-bearing obligation fields. Each entry pins one field "
+            "(``amount`` for ERC20, ``erc20Amounts[i]`` / ``nativeAmount`` "
+            "for TokenBundle, …) plus its ``per`` unit and the rate "
+            "``value`` in base units. Empty list = hidden reserve. "
+            "Readers use ``primary_rate_value`` for the headline rate."
         ),
     )
-    literal_fields: dict[str, Any] | None = Field(
-        default=None,
-        description=(
-            "Forward-looking sibling of ``fields`` for the generic-escrow "
-            "migration. When set, mirrors ``fields`` (literal obligation "
-            "data keys the seller has fixed). Readers should prefer the "
-            "canonical accessors in this module (``primary_rate_value``, "
-            "``accepted_token_address``) which handle either shape."
-        ),
-    )
-    rates: list[RateValue] | None = Field(
-        default=None,
-        description=(
-            "Forward-looking sibling of ``price_per_hour`` for the "
-            "generic-escrow migration. When set, lists every rate-bearing "
-            "field on the obligation. Readers should prefer ``primary_rate_value``."
-        ),
-    )
-
-    @field_validator("price_per_hour", mode="before")
-    @classmethod
-    def _parse_price_per_hour(cls, v: Any) -> int | None:
-        return _parse_uint256_str(v, "price_per_hour")
-
-    @field_serializer("price_per_hour")
-    def _serialize_price_per_hour(self, v: int | None) -> str | None:
-        return _serialize_uint256_str(v)
 
 
 class EscrowProposal(BaseModel):

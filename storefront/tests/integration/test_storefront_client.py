@@ -33,8 +33,8 @@ _COMPUTE_OFFER = {
 _ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
     "escrow_address": "0x" + "11" * 20,
-    "fields": {"token": "0x0000000000000000000000000000000000000001"},
-    "price_per_hour": 10,
+    "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
+    "rates": [{"field": "amount", "per": "hour", "value": "10"}],
 }]
 
 

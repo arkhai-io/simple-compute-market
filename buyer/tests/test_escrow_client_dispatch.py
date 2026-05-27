@@ -1,8 +1,7 @@
 """Buyer-side dispatch tests for ``make_buyer_payment_escrow_terms_fn``.
 
-Phase 5 of the generic-escrow templates rollout: the builder reads the
-proposal's token from ``literal_fields`` (with legacy ``fields``
-fallback), and refuses to build for non-ERC20 escrow contracts with
+The builder reads the proposal's token from ``literal_fields`` and
+refuses to build for non-ERC20 escrow contracts with
 ``NotImplementedError``.
 """
 
@@ -120,8 +119,9 @@ def test_reads_token_from_literal_fields(patched_alkahest):
     assert terms[0].obligation_data["amount"] == 1_000
 
 
-def test_literal_fields_wins_over_legacy_fields(patched_alkahest):
-    """When both are set, literal_fields is authoritative."""
+def test_ignores_legacy_fields_token(patched_alkahest):
+    """``fields`` is the negotiation-amount carrier; the builder reads
+    the token from ``literal_fields`` exclusively."""
     build = make_buyer_payment_escrow_terms_fn(
         chain_name=_CHAIN, addr_config_path=None,
     )
@@ -134,22 +134,11 @@ def test_literal_fields_wins_over_legacy_fields(patched_alkahest):
     assert patched_alkahest["build_call"]["token"] == _TOKEN
 
 
-def test_falls_back_to_legacy_fields_when_literal_fields_unset(patched_alkahest):
-    """A proposal built before the cutover only carries ``fields``."""
+def test_raises_when_literal_fields_token_missing(patched_alkahest):
     build = make_buyer_payment_escrow_terms_fn(
         chain_name=_CHAIN, addr_config_path=None,
     )
-    proposal = _make_proposal(fields={"token": _TOKEN_LEGACY})
-    build(proposal, _SELLER, 750, 7200)
-
-    assert patched_alkahest["build_call"]["token"] == _TOKEN_LEGACY
-
-
-def test_raises_when_no_token_anywhere(patched_alkahest):
-    build = make_buyer_payment_escrow_terms_fn(
-        chain_name=_CHAIN, addr_config_path=None,
-    )
-    proposal = _make_proposal(fields={}, literal_fields={})
+    proposal = _make_proposal(fields={"token": _TOKEN_LEGACY}, literal_fields={})
     with pytest.raises(ValueError, match="token missing"):
         build(proposal, _SELLER, 100, 3600)
 

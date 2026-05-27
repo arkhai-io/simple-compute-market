@@ -58,8 +58,8 @@ def derive_refund_params(
       ``payload["token"]`` — optional 0x address overriding the escrow's
         token. Symbol strings are rejected.
       ``payload["amount"]`` — optional integer in base units; omitted ⇒
-        derive from the listing's accepted_escrows[0].price_per_hour
-        × agreed_duration_seconds (also base units).
+        derive from the listing's accepted_escrows[0] primary rate
+        × agreed_duration_seconds / 3600 (also base units).
 
     `resolve_token(address)` returns a dict with contract_address,
     decimals, symbol. Injected so unit tests don't need TokenRegistry.
@@ -106,10 +106,10 @@ def derive_refund_params(
             )
         token_meta = resolve_token(token_override)
     else:
+        from service.schemas import accepted_token_address
         token_addr_from_escrow = None
         if first_escrow is not None:
-            fields = first_escrow.get("fields") or {}
-            candidate = fields.get("token")
+            candidate = accepted_token_address(first_escrow)
             if isinstance(candidate, str) and candidate:
                 token_addr_from_escrow = candidate
         if token_addr_from_escrow:

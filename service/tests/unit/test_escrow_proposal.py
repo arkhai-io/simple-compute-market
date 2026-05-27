@@ -63,27 +63,27 @@ def test_proposal_carries_no_amount():
 
 def test_accepted_escrow_default_empty_fields():
     a = AcceptedEscrow(chain_name="anvil", escrow_address=_ESCROW)
-    assert a.fields == {}
-    assert a.price_per_hour is None
+    assert a.literal_fields == {}
+    assert a.rates == []
 
 
 def test_accepted_escrow_with_advertisement():
     a = AcceptedEscrow(
         chain_name="anvil",
         escrow_address=_ESCROW,
-        fields={"arbiter": _ARBITER, "token": _TOKEN},
-        price_per_hour=1_000_000,
+        literal_fields={"arbiter": _ARBITER, "token": _TOKEN},
+        rates=[{"field": "amount", "per": "hour", "value": "1000000"}],
     )
-    assert a.fields["token"] == _TOKEN
-    assert a.price_per_hour == 1_000_000
+    assert a.literal_fields["token"] == _TOKEN
+    assert a.rates[0].value == 1_000_000
 
 
 def test_accepted_escrow_roundtrip():
     original = AcceptedEscrow(
         chain_name="base_sepolia",
         escrow_address=_ESCROW,
-        fields={"arbiter": _ARBITER, "token": _TOKEN},
-        price_per_hour=1_500_000,
+        literal_fields={"arbiter": _ARBITER, "token": _TOKEN},
+        rates=[{"field": "amount", "per": "hour", "value": "1500000"}],
     )
     restored = AcceptedEscrow.model_validate(original.model_dump())
     assert restored == original

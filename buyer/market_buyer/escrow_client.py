@@ -119,15 +119,12 @@ def make_buyer_payment_escrow_terms_fn(
         if not isinstance(token, str) or not token:
             raise ValueError(
                 "EscrowProposal token missing or non-string — checked "
-                "literal_fields['token'] and fields['token']; cannot "
-                "build buyer-side obligation_data"
+                "literal_fields['token']; cannot build buyer-side "
+                "obligation_data"
             )
         arbiter_kind = "recipient_arbiter"
         proposal_literal = proposal.literal_fields or {}
-        proposal_arbiter = (
-            proposal_literal.get("arbiter")
-            or proposal.fields.get("arbiter")
-        )
+        proposal_arbiter = proposal_literal.get("arbiter")
         if isinstance(proposal_arbiter, str) and proposal_arbiter:
             arbiter_slot = address_to_slot(
                 proposal.chain_name, proposal_arbiter,

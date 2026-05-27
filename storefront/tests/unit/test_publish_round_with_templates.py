@@ -158,11 +158,10 @@ def test_scale_template_entries_scales_by_decimals(chains):
     assert len(result) == 1
     entry = result[0]
     assert entry["rates"] == [{"field": "amount", "per": "hour", "value": "2000000"}]
-    # Legacy siblings populated so pre-helpers readers still see the price.
-    assert entry["price_per_hour"] == "2000000"
-    assert entry["fields"] == {"token": _USDC_BASE}
     assert entry["literal_fields"] == {"token": _USDC_BASE}
     assert entry["chain_name"] == "base-sepolia"
+    assert "fields" not in entry
+    assert "price_per_hour" not in entry
 
 
 def test_scale_template_entries_preserves_zero(chains):
@@ -174,7 +173,6 @@ def test_scale_template_entries_preserves_zero(chains):
     }]
     result = _scale_template_entries(entries, chains)
     assert result[0]["rates"][0]["value"] == "0"
-    assert result[0]["price_per_hour"] == "0"
 
 
 def test_scale_template_entries_unknown_chain_errors(chains):
@@ -279,7 +277,7 @@ def test_publish_round_uses_row_templates(tmp_path, monkeypatch):
     assert entry["chain_name"] == "base-sepolia"
     assert entry["escrow_address"] == "0xee" + "0" * 38
     assert entry["rates"][0]["value"] == "2000000"
-    assert entry["price_per_hour"] == "2000000"
+    assert entry["literal_fields"] == {"token": _USDC_BASE}
 
 
 def test_publish_round_template_multi_chain_emits_one_entry_per_chain(

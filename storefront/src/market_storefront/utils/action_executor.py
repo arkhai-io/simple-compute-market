@@ -410,7 +410,7 @@ def _extract_initial_price_from_order(order: Listing | dict) -> float:
 
     raise ValueError(
         f"Listing {order.listing_id} has hidden reserve "
-        "(accepted_escrows[0].price_per_hour=None) and "
+        "(accepted_escrows[0].rates is empty) and "
         "[seller.pricing].default_min_price is not configured. The seller "
         "has no floor to negotiate against; refusing the negotiation."
     )
@@ -537,16 +537,17 @@ def _token_resource_from_accepted_escrow(
 ) -> TokenResource | None:
     """Build a ``TokenResource`` from an ``accepted_escrows[i]`` entry.
 
-    Looks up ERC20 metadata by the entry's ``fields.token`` address in
-    the chain-resolved cache, falling back to address-only metadata when
-    the cache doesn't yet know it. Returns ``None`` when the entry lacks
-    a token. The token amount is the entry's ``price_per_hour`` (per-hour
-    rate in base units); ``None`` becomes 0.
+    Looks up ERC20 metadata by the entry's ``literal_fields.token``
+    address in the chain-resolved cache, falling back to address-only
+    metadata when the cache doesn't yet know it. Returns ``None`` when
+    the entry lacks a token. The token amount is the entry's primary
+    rate value (per-hour rate in base units); ``None`` becomes 0.
     """
+    from service.schemas import accepted_token_address
+
     if not isinstance(accepted_escrow, dict):
         return None
-    fields = accepted_escrow.get("fields") or {}
-    token = fields.get("token")
+    token = accepted_token_address(accepted_escrow)
     if not isinstance(token, str) or not token:
         return None
     try:

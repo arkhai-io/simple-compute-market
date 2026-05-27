@@ -1,11 +1,11 @@
 """Pick an ``accepted_escrows`` entry from a listing.
 
 The seller advertises one or more escrow shapes it accepts on a given
-listing — each entry carries ``(chain_name, escrow_address, fields)``
-plus a per-hour price. The buyer's job is to pick one of those entries
-to negotiate against. Token, escrow contract, and chain all come from
-the picked entry — the buyer never imposes its own escrow shape on the
-seller.
+listing — each entry carries ``(chain_name, escrow_address,
+literal_fields, rates)``. The buyer's job is to pick one of those
+entries to negotiate against. Token, escrow contract, and chain all
+come from the picked entry — the buyer never imposes its own escrow
+shape on the seller.
 
 Selection rules (see ``select_escrow_entry``):
   * Filter entries by the buyer's configured ``chain_name`` (the buyer
@@ -34,10 +34,9 @@ logger = logging.getLogger(__name__)
 
 
 def _entry_token(entry: dict[str, Any]) -> Optional[str]:
-    fields = entry.get("fields") or {}
-    if not isinstance(fields, dict):
-        return None
-    v = fields.get("token")
+    from service.schemas import accepted_token_address
+
+    v = accepted_token_address(entry)
     return v.lower() if isinstance(v, str) and v.startswith("0x") else None
 
 
@@ -151,13 +150,16 @@ def select_escrow_entry(
     table.add_column("Escrow contract", overflow="fold")
     table.add_column("Token", overflow="fold")
     table.add_column("Price/hr", justify="right")
+    from service.schemas import primary_rate_value
+
     for i, e in enumerate(candidates, start=1):
         token = _entry_token(e) or "-"
+        rate = primary_rate_value(e)
         table.add_row(
             str(i),
             str(e.get("escrow_address", "-")),
             token,
-            str(e.get("price_per_hour", "-")),
+            "-" if rate is None else str(rate),
         )
     console.print(table)
     try:

@@ -378,10 +378,10 @@ def _seller_reference_amount(
 ) -> int:
     """Compute the seller's absolute reference amount in base units.
 
-    Reads ``accepted_escrows[0].price_per_hour`` (the per-hour broadcast
-    rate from the listing) and scales it by the buyer-requested duration:
-    ``per_hour * duration_seconds / 3600``. Falls back to 1 hour when no
-    duration was provided.
+    Reads the primary rate from ``accepted_escrows[0]`` (the per-hour
+    broadcast rate from the listing) and scales it by the buyer-requested
+    duration: ``rate * duration_seconds / 3600``. Falls back to 1 hour
+    when no duration was provided.
 
     Per-hour rates only live on the listing as a broadcast; once
     negotiation begins, both sides reason in absolute base units, so

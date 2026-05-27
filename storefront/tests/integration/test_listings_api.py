@@ -59,8 +59,8 @@ async def _seed_listing(db: SQLiteClient, listing_id: str, status: str = "open")
         accepted_escrows=[{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"token": "0x0000000000000000000000000000000000000001"},
-            "price_per_hour": 9000,
+            "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
+            "rates": [{"field": "amount", "per": "hour", "value": "9000"}],
         }],
         fulfillment_resource=None,
         max_duration_seconds=7200,
@@ -327,8 +327,8 @@ _OFFER = {
 _ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
     "escrow_address": "0x" + "11" * 20,
-    "fields": {"token": "0x0000000000000000000000000000000000000001"},
-    "price_per_hour": 5000,
+    "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
+    "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
 }]
 
 

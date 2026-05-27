@@ -149,7 +149,7 @@ def refund_cmd(
     amount: Optional[str] = typer.Option(
         None, "--amount", "-n",
         help="Refund amount in base units (decimal-digit string; uint256-safe). "
-             "Defaults to the listing's accepted_escrows[0].price_per_hour × "
+             "Defaults to the listing's accepted_escrows[0] primary rate × "
              "agreed_duration_seconds // 3600.",
     ),
     token: Optional[str] = typer.Option(

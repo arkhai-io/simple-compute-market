@@ -60,8 +60,8 @@ def _listing_with_one_escrow(**field_overrides) -> dict:
             {
                 "chain_name": "anvil",
                 "escrow_address": _ADDR,
-                "fields": fields,
-                "price_per_hour": 1000,
+                "literal_fields": fields,
+                "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
             }
         ],
     }
@@ -74,7 +74,7 @@ class TestPassesWhenAllFieldsMatch:
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": _ADDR,
-                "fields": {"token": _TOKEN},
+                "literal_fields": {"token": _TOKEN},
             },
         )
         decision, _ctx_out = escrow_shape_guard(history, ctx)
@@ -91,7 +91,7 @@ class TestPassesWhenAllFieldsMatch:
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": mixed_addr,
-                "fields": {"token": mixed_token},
+                "literal_fields": {"token": mixed_token},
             },
         )
         decision, _ = escrow_shape_guard(history, ctx)
@@ -108,7 +108,7 @@ class TestPassesWhenAllFieldsMatch:
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": _ADDR,
-                "fields": {"token": _TOKEN},
+                "literal_fields": {"token": _TOKEN},
             },
         )
         decision, _ = escrow_shape_guard(history, ctx)
@@ -122,7 +122,7 @@ class TestRejectsWhenFieldDiverges:
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": _ADDR,
-                "fields": {"token": _OTHER_TOKEN},
+                "literal_fields": {"token": _OTHER_TOKEN},
             },
         )
         decision, _ = escrow_shape_guard(history, ctx)
@@ -139,7 +139,7 @@ class TestRejectsWhenFieldDiverges:
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": _ADDR,
-                "fields": {"token": _TOKEN},  # no arbiter
+                "literal_fields": {"token": _TOKEN},  # no arbiter
             },
         )
         decision, _ = escrow_shape_guard(history, ctx)
@@ -171,7 +171,7 @@ class TestPassesThroughWithoutVetoing:
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": _ADDR,
-                "fields": {"token": _TOKEN},
+                "literal_fields": {"token": _TOKEN},
             },
         )
         decision, _ = escrow_shape_guard(history, ctx)
@@ -186,7 +186,7 @@ class TestPassesThroughWithoutVetoing:
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "0" * 40,
-                "fields": {"token": _TOKEN},
+                "literal_fields": {"token": _TOKEN},
             },
         )
         decision, _ = escrow_shape_guard(history, ctx)
@@ -202,7 +202,7 @@ class TestPassesThroughWithoutVetoing:
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "99" * 20,
-                "fields": {"token": _TOKEN},
+                "literal_fields": {"token": _TOKEN},
             },
         )
         decision, _ = escrow_shape_guard(history, ctx)
