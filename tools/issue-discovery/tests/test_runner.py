@@ -88,6 +88,9 @@ phases:
         ("still_runs", "passed"),
         ("teardown", "passed"),
     ]
+    candidates = read_jsonl(run_dir / "issue-candidates" / "candidates.jsonl")
+    assert candidates[0]["fingerprint"] == "diagnostic-failure-fail"
+    assert candidates[0]["phase"] == "diagnostic_failure"
 
 
 def test_runner_skips_after_blocking_failure_but_runs_teardown(tmp_path: Path) -> None:
@@ -139,3 +142,41 @@ phases:
         ("teardown", "passed"),
     ]
     assert records[1]["reason"] == "blocked"
+    body = (run_dir / "issue-candidates" / "fail-fast-fail.md").read_text(encoding="utf-8")
+    assert "Run `./scripts/issue-discovery test`." in body
+
+
+def test_issue_list_and_show_read_generated_candidates(tmp_path: Path, capsys) -> None:
+    phase_file = tmp_path / "phases.yaml"
+    phase_file.write_text(
+        """
+schema_version: 1
+name: test
+phases:
+  - id: fail_fast
+    name: Fail fast
+    category: test
+    blocking: true
+    commands:
+      - id: fail
+        run: exit 2
+""".lstrip(),
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / "run"
+    runner = DiscoveryRunner(repo_root=repo_root(), output_dir=run_dir)
+    runner._run_phase_file(
+        mode="test",
+        phase_path=phase_file,
+        selected_phase_ids=None,
+        workaround=None,
+    )
+    capsys.readouterr()
+
+    assert runner.issue_list(run_dir) == 0
+    listed = capsys.readouterr().out
+    assert "fail-fast-fail" in listed
+
+    assert runner.issue_show(run_dir, "fail-fast-fail") == 0
+    shown = capsys.readouterr().out
+    assert "# Fail fast failed" in shown

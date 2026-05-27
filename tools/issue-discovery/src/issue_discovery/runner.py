@@ -8,6 +8,7 @@ from issue_discovery.artifacts import ArtifactStore, utc_now_iso
 from issue_discovery.collectors import CollectorRunner, load_collectors
 from issue_discovery.commands import CommandResult, run_shell_command
 from issue_discovery.config import ToolPaths, load_yaml
+from issue_discovery.issues import IssuePacketGenerator, IssueRepository
 from issue_discovery.phases import CommandSpec, PhaseFile, PhaseSpec, load_phase_file
 from issue_discovery.redaction import Redactor
 from issue_discovery.workarounds import WorkaroundSpec, load_workarounds
@@ -77,17 +78,24 @@ class DiscoveryRunner:
         )
 
     def issue_list(self, run_dir: Path) -> int:
-        self._print_pending(f"issue list {run_dir}")
+        repository = IssueRepository(run_dir.resolve())
+        for candidate in repository.list():
+            labels = ",".join(candidate.get("labels", []))
+            print(
+                f"{candidate['fingerprint']}\t{candidate['classification']}\t"
+                f"{candidate['phase']}\t{labels}\t{candidate['title']}"
+            )
         return 0
 
     def issue_show(self, run_dir: Path, fingerprint: str) -> int:
-        self._print_pending(f"issue show {run_dir} {fingerprint}")
+        repository = IssueRepository(run_dir.resolve())
+        body_path = repository.body_path(fingerprint)
+        print(body_path.read_text(encoding="utf-8"), end="")
         return 0
 
     def issue_create(self, run_dir: Path, fingerprint: str, dry_run: bool) -> int:
-        suffix = " --dry-run" if dry_run else ""
-        self._print_pending(f"issue create {run_dir} {fingerprint}{suffix}")
-        return 0
+        repository = IssueRepository(run_dir.resolve())
+        return repository.create(fingerprint, dry_run=dry_run)
 
     def _run_phase_file(
         self,
@@ -150,6 +158,8 @@ class DiscoveryRunner:
             }
         )
         store.write_json("manifest.json", redactor.redact_mapping(manifest))
+        candidates = IssuePacketGenerator(store.run_dir).generate()
+        print(f"issue candidates: {len(candidates)}")
         print(f"status: {status}")
         return 1 if state.failed else 0
 

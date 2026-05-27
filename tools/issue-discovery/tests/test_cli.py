@@ -41,13 +41,24 @@ def test_continue_requires_workaround() -> None:
 
 
 def test_issue_create_has_independent_dry_run(tmp_path: Path, capsys) -> None:
+    run_dir = tmp_path / "run"
+    issue_dir = run_dir / "issue-candidates"
+    issue_dir.mkdir(parents=True)
+    (issue_dir / "candidate.md").write_text("# Candidate\n", encoding="utf-8")
+    (issue_dir / "candidates.jsonl").write_text(
+        '{"fingerprint":"fingerprint","title":"Candidate","labels":["bug"],'
+        '"classification":"test","phase":"phase","body_file":"issue-candidates/candidate.md",'
+        '"evidence":[]}\n',
+        encoding="utf-8",
+    )
+
     code = main(
         [
             "--repo-root",
             str(tmp_path),
             "issue",
             "create",
-            str(tmp_path / "run"),
+            str(run_dir),
             "fingerprint",
             "--dry-run",
         ]
@@ -55,5 +66,5 @@ def test_issue_create_has_independent_dry_run(tmp_path: Path, capsys) -> None:
 
     captured = capsys.readouterr()
     assert code == 0
-    assert "issue create" in captured.out
-    assert "--dry-run" in captured.out
+    assert "gh issue create" in captured.out
+    assert "--body-file" in captured.out
