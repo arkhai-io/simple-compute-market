@@ -205,16 +205,18 @@ class DiscoveryRunner:
 
         print(f"phase: {phase.id}")
         command_results: list[CommandResult] = []
-        failed_command: CommandResult | None = None
+        failed_commands: list[CommandResult] = []
         started_at = utc_now_iso()
         for command in phase.commands:
             result = self._run_command(store, redactor, phase.id, command, env)
             command_results.append(result)
             if not result.ok:
-                failed_command = result
-                break
+                failed_commands.append(result)
+                if phase.blocking:
+                    break
 
-        status = "failed" if failed_command else "passed"
+        first_failed_command = failed_commands[0] if failed_commands else None
+        status = "failed" if failed_commands else "passed"
         state.phase_status[phase.id] = status
         if status == "failed":
             state.failed_phases.append(phase.id)
@@ -233,7 +235,8 @@ class DiscoveryRunner:
             "started_at": started_at,
             "completed_at": utc_now_iso(),
             "commands": [result.to_json(store.run_dir) for result in command_results],
-            "failed_command": failed_command.id if failed_command else None,
+            "failed_command": first_failed_command.id if first_failed_command else None,
+            "failed_commands": [result.id for result in failed_commands],
             "classifiers": phase.classifiers if status == "failed" else (),
         }
         store.append_jsonl("phases.jsonl", redactor.redact_mapping(record))

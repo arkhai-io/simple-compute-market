@@ -49,8 +49,12 @@ phases:
     category: test
     blocking: false
     commands:
-      - id: fail
+      - id: fail_one
         run: exit 3
+      - id: fail_two
+        run: exit 4
+      - id: after_failures
+        run: echo continued within phase
   - id: still_runs
     name: Still runs
     category: test
@@ -88,8 +92,16 @@ phases:
         ("still_runs", "passed"),
         ("teardown", "passed"),
     ]
+    diagnostic = records[1]
+    assert [item["id"] for item in diagnostic["commands"]] == [
+        "fail_one",
+        "fail_two",
+        "after_failures",
+    ]
+    assert diagnostic["failed_command"] == "fail_one"
+    assert diagnostic["failed_commands"] == ["fail_one", "fail_two"]
     candidates = read_jsonl(run_dir / "issue-candidates" / "candidates.jsonl")
-    assert candidates[0]["fingerprint"] == "diagnostic-failure-fail"
+    assert candidates[0]["fingerprint"] == "diagnostic-failure-fail-one"
     assert candidates[0]["phase"] == "diagnostic_failure"
 
 
@@ -107,6 +119,8 @@ phases:
     commands:
       - id: fail
         run: exit 2
+      - id: should_not_run
+        run: echo should not run
   - id: should_skip
     name: Should skip
     category: test
@@ -142,6 +156,7 @@ phases:
         ("teardown", "passed"),
     ]
     assert records[1]["reason"] == "blocked"
+    assert [item["id"] for item in records[0]["commands"]] == ["fail"]
     body = (run_dir / "issue-candidates" / "fail-fast-fail.md").read_text(encoding="utf-8")
     assert "Run `./scripts/issue-discovery test`." in body
 
