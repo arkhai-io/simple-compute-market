@@ -8,12 +8,46 @@ CPUS="${SCM_MULTIPASS_CPUS:-4}"
 MEMORY="${SCM_MULTIPASS_MEMORY:-8G}"
 DISK="${SCM_MULTIPASS_DISK:-40G}"
 KEEP_VM="${KEEP_VM:-0}"
-VALIDATION_COMMAND="${SCM_VALIDATION_COMMAND:-./scripts/issue-discovery strict}"
-ARTIFACT_DEST="${SCM_MULTIPASS_ARTIFACT_DEST:-$ROOT_DIR/.scm-local/clean-room/$NAME}"
+SEQUENCE="${SCM_CLEAN_ROOM_SEQUENCE:-local-vm}"
+ARTIFACT_DEST="${SCM_MULTIPASS_ARTIFACT_DEST:-$ROOT_DIR/.scm-local/clean-room-runs/$NAME}"
+DRY_RUN=0
 
 log() {
   printf '[multipass-clean-room] %s\n' "$*"
 }
+
+usage() {
+  cat <<'USAGE'
+usage: scripts/clean-room/multipass-run.sh [--dry-run]
+
+Environment:
+  SCM_MULTIPASS_NAME           VM name. Defaults to scm-issue-discovery-<utc timestamp>.
+  SCM_MULTIPASS_IMAGE          Multipass image. Defaults to 22.04.
+  SCM_MULTIPASS_CPUS           VM CPU count. Defaults to 4.
+  SCM_MULTIPASS_MEMORY         VM memory. Defaults to 8G.
+  SCM_MULTIPASS_DISK           VM disk. Defaults to 40G.
+  SCM_CLEAN_ROOM_SEQUENCE      issue-discovery clean-room sequence. Defaults to local-vm.
+  SCM_MULTIPASS_ARTIFACT_DEST  Host artifact destination.
+  KEEP_VM                      Keep the VM instead of deleting it.
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dry-run)
+      DRY_RUN=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
 
 cleanup() {
   if [ "$KEEP_VM" = "1" ]; then
@@ -52,15 +86,34 @@ create_bundle() {
 
 fetch_artifacts() {
   mkdir -p "$ARTIFACT_DEST"
-  if multipass exec "$NAME" -- test -d /home/ubuntu/simple-compute-market/.scm-local/issue-discovery/runs; then
+  if multipass exec "$NAME" -- test -d /home/ubuntu/simple-compute-market/.scm-local; then
     log "fetching artifacts to $ARTIFACT_DEST"
     multipass transfer --recursive \
-      "$NAME:/home/ubuntu/simple-compute-market/.scm-local/issue-discovery/runs" \
+      "$NAME:/home/ubuntu/simple-compute-market/.scm-local" \
       "$ARTIFACT_DEST/" || true
   else
-    log "no issue-discovery artifacts found in VM"
+    log "no clean-room artifacts found in VM"
   fi
 }
+
+dry_run() {
+  log "dry run only; multipass will not be invoked"
+  log "would launch VM $NAME ($IMAGE, cpus=$CPUS, memory=$MEMORY, disk=$DISK)"
+  log "would transfer current git branch as a bundle"
+  log "would run bootstrap with SCM_CLEAN_ROOM_SEQUENCE=$SEQUENCE"
+  log "would fetch artifacts to $ARTIFACT_DEST"
+  if [ "$KEEP_VM" = "1" ]; then
+    log "would keep VM $NAME"
+  else
+    log "would delete VM $NAME"
+  fi
+  "$ROOT_DIR/scripts/issue-discovery" clean-room plan "$SEQUENCE"
+}
+
+if [ "$DRY_RUN" = "1" ]; then
+  dry_run
+  exit 0
+fi
 
 command -v multipass >/dev/null 2>&1 || {
   echo "multipass is required" >&2
@@ -68,7 +121,6 @@ command -v multipass >/dev/null 2>&1 || {
 }
 
 require_git_repo
-trap cleanup EXIT
 
 bundle="$(mktemp -t scm-issue-discovery.XXXXXX.bundle)"
 trap 'rm -f "$bundle"; cleanup' EXIT
@@ -95,7 +147,7 @@ multipass exec "$NAME" -- bash -lc '
 log "running bootstrap and validation"
 set +e
 multipass exec "$NAME" -- sudo env \
-  "SCM_VALIDATION_COMMAND=$VALIDATION_COMMAND" \
+  "SCM_CLEAN_ROOM_SEQUENCE=$SEQUENCE" \
   /home/ubuntu/simple-compute-market/scripts/bootstrap-clean-host-ubuntu.sh run
 rc=$?
 set -e
