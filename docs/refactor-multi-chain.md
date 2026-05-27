@@ -83,10 +83,18 @@ All passing:
 - `buyer`: 104 tests
 - `storefront-client`: 7 tests
 - `make test-render` (helm umbrella structural checks)
+- `make build` (wheels + docker images) clean
+- `make test-module MODULE=e2e_deal`: 28/28 pass against a freshly-rebuilt docker-compose stack (anvil + 2 registries + bob + alice + provisioning in mock mode)
+- `make test-module MODULE=e2e_deal_buyer_cli`: 26/26 pass driving the real `market` CLI subprocess through negotiation → escrow → settle → provisioning → lease expiry → release
+
+The e2e run surfaced three real bugs that have since been fixed (commit `df59fef`): `storefront.{bob,alice}.toml` still on legacy `[chain]`, storefront-client `settle()` not sending `chain_name`, buyer negotiate not recording chain in the run-log.
 
 ## Commits on branch
 
 ```
+9613100 docs: design proposal for generic escrow templates (literal + rates split)
+df59fef e2e: migrate live compose configs + storefront-client to multi-chain shape
+181a99e docs: rewrite multi-chain refactor handoff to reflect completed state
 cee5684 storefront-client + integration fixtures: chain_name in verify_settle
 c65acf7 config templates + fixtures: migrate to [chains.<name>] shape
 aa5500c buyer: multi-chain config + interactive chain selection per listing
@@ -100,6 +108,5 @@ b203972 storefront tests: migrate unit fixtures to chains dict shape
 
 ## Known follow-ups (not blockers)
 
-- `registry_auth_check` probes only the first registered chain. The full multi-chain check would loop over `_AGENT_IDS` and require all of them to be reachable on their respective registries — but that's a polish on a status endpoint, not a correctness issue.
-- e2e module hasn't been live-tested end-to-end on this branch; the fixture migration is in but a real e2e run (docker-compose stack up, buyer CLI subprocess driving a deal) would exercise the full path.
-- Token resolution in `cli_publish` falls through chains until one succeeds; resource-row `token` column is still single-valued. If operators publish on chains where the same logical token (USDC) has different addresses, they'll need per-chain token columns in the CSV — out of scope for this refactor.
+- `registry_auth_check` (in `storefront/services/system_service.py`) probes only the first chain with a resolved agent ID and returns on the first hit. To be truly multi-chain it should probe every (chain, agent_id) tuple and surface per-chain status. Pure status-endpoint polish — no correctness impact, but a misconfigured second chain's identity wouldn't show up as `owner_mismatch` until something tried to use it.
+- Cross-chain logical-token-address divergence (USDC at one address on Sepolia, another on Base) is **subsumed by the generic-escrow templates design** in [`design-generic-escrow-templates.md`](./design-generic-escrow-templates.md). That design's `[escrow_templates.<name>]` blocks carry a literal token address per template, so the CSV's single-`token`-column limitation goes away as part of that work — not as a standalone fix here.
