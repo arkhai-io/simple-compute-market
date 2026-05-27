@@ -125,6 +125,27 @@ def test_issue_generator_uses_matching_classifier_for_known_root_cause(tmp_path:
     assert [candidate.fingerprint for candidate in candidates] == ["storefront-volume-ownership"]
 
 
+def test_issue_generator_matches_docker_redis_port_conflict_text(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_run(
+        run_dir,
+        stderr_text=(
+            "Error response from daemon: driver failed programming external connectivity "
+            "on endpoint simple-compute-market-redis-1: Error starting userland proxy: "
+            "listen tcp4 0.0.0.0:6379: bind: address already in use"
+        ),
+        classifiers=[
+            "redis_host_port_conflict",
+            "storefront_volume_ownership",
+        ],
+    )
+
+    candidates = IssuePacketGenerator(run_dir).generate()
+
+    assert [candidate.fingerprint for candidate in candidates] == ["redis-host-port-conflict"]
+
+
 def test_issue_create_runs_gh_from_repo_root(tmp_path: Path, monkeypatch) -> None:
     run_dir = tmp_path / "run"
     repo_root = tmp_path / "repo"

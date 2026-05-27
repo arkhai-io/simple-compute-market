@@ -27,7 +27,9 @@ _CLASSIFIER_PATTERNS = {
     "redis-host-port-conflict": (
         "port is already allocated",
         "bind for 0.0.0.0:6379",
+        "0.0.0.0:6379: bind: address already in use",
         "listen tcp 0.0.0.0:6379",
+        "listen tcp4 0.0.0.0:6379",
     ),
     "storefront-volume-ownership": (
         "unable to open database file",
