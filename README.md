@@ -36,10 +36,10 @@ A typical buy, once `buyer.toml` is in place:
 
 ```bash
 market listing list --gpu-model H200
-market buy --gpu-model H200 --duration 3600 --max-price 5
+market buy --gpu-model H200 --duration-hours 1
 ```
 
-The buyer CLI handles negotiation rounds, creates the on-chain escrow, polls for provisioning, and exits when the VM is ready with SSH credentials in the run log.
+The CLI handles negotiation rounds, creates the on-chain escrow, polls for provisioning, and prints the connection + tenant credentials when the VM is ready.
 
 ## Reference
 
