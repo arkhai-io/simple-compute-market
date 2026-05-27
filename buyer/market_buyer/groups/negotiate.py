@@ -348,6 +348,7 @@ def register(app: typer.Typer) -> None:
             token_contract=token_contract,
             token_decimals=token_decimals,
             resumed_from=from_run,
+            chain_name=(chain_cfg.name if chain_cfg is not None else None),
         )
 
         header = Table.grid(padding=(0, 2))

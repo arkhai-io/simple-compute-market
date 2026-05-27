@@ -756,13 +756,21 @@ class StorefrontClient(_StorefrontClientBase):
         negotiation_id: str,
         buyer_address: str,
         ssh_public_key: str = "",
+        chain_name: str = "anvil",
     ) -> SettleResponse:
-        """POST /api/v1/settle/{escrow_uid} — adds EIP-191 auth headers automatically."""
+        """POST /api/v1/settle/{escrow_uid} — adds EIP-191 auth headers automatically.
+
+        ``chain_name`` tells the seller which configured ``[chains.<name>]``
+        entry to dispatch the on-chain verify against. Defaults to ``"anvil"``
+        for compatibility with the e2e fixture; non-anvil consumers must
+        pass their own value.
+        """
         ts = str(int(time.time()))
         sig = _sign_eip191(self._private_key, f"settle_escrow:{escrow_uid}:{ts}")
         body: dict = {
             "negotiation_id": negotiation_id,
             "buyer_address": buyer_address,
+            "chain_name": chain_name,
         }
         if ssh_public_key:
             body["ssh_public_key"] = ssh_public_key
@@ -1507,13 +1515,21 @@ class SyncStorefrontClient(_StorefrontClientBase):
         negotiation_id: str,
         buyer_address: str,
         ssh_public_key: str = "",
+        chain_name: str = "anvil",
     ) -> SettleResponse:
-        """POST /api/v1/settle/{escrow_uid} — adds EIP-191 auth headers automatically."""
+        """POST /api/v1/settle/{escrow_uid} — adds EIP-191 auth headers automatically.
+
+        ``chain_name`` tells the seller which configured ``[chains.<name>]``
+        entry to dispatch the on-chain verify against. Defaults to ``"anvil"``
+        for compatibility with the e2e fixture; non-anvil consumers must
+        pass their own value.
+        """
         ts = str(int(time.time()))
         sig = _sign_eip191(self._private_key, f"settle_escrow:{escrow_uid}:{ts}")
         body: dict = {
             "negotiation_id": negotiation_id,
             "buyer_address": buyer_address,
+            "chain_name": chain_name,
         }
         if ssh_public_key:
             body["ssh_public_key"] = ssh_public_key

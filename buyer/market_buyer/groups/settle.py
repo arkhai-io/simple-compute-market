@@ -32,11 +32,15 @@ from ..run_log import read_run
 
 
 def _chain_name_from_run_log(run_id: str) -> Optional[str]:
-    """Look up the chain the escrow was created on, from the run-log.
+    """Look up the chain the deal targets, from the run-log.
 
-    Buyer's escrow_created event records the chain it picked at deal time;
-    settling on a different chain would fail. Returns None when the
-    run-log doesn't have an escrow_created event yet.
+    Source priority:
+      1. ``escrow_created`` event (recorded at escrow creation time).
+      2. ``run_started`` event (recorded when ``market negotiate`` picked
+         the chain from the listing's accepted_escrows).
+
+    Settling on a different chain would fail, so we trust whichever
+    event the buyer wrote first.
     """
     for ev in read_run(run_id):
         if ev.get("event") == "escrow_created":
@@ -45,6 +49,10 @@ def _chain_name_from_run_log(run_id: str) -> Optional[str]:
                 return cn
             terms = ev.get("terms") or {}
             cn = terms.get("chain_name")
+            if isinstance(cn, str) and cn:
+                return cn
+        if ev.get("event") == "run_started":
+            cn = ev.get("chain_name")
             if isinstance(cn, str) and cn:
                 return cn
     return None

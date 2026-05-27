@@ -27,11 +27,11 @@ address     = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
 private_key = "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a"
 ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess alice@example.com"
 
-[chain]
-name    = "anvil"
+[chains.anvil]
 rpc_url = "ws://anvil:8545"
 chain_id = 31337
 alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
+identity_registry_address = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
 
 [registry]
 # Single-registry topology — Alice only publishes to the public
@@ -41,7 +41,6 @@ alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_a
 # in registry-A. No [registry.auth] subsection because we don't talk
 # to registry-b at all.
 urls                      = ["http://registry:8080"]
-identity_registry_address = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
 
 [provisioning]
 # Shares Bob's provisioning service for now. The multi-registry test
