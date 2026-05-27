@@ -1,7 +1,20 @@
+# ZeroTier setup
 
-# Creating Your Own ZeroTier Network Using CLI Tools
+## Why ZeroTier?
 
-Here's how to create and manage your own ZeroTier network using only command-line tools:
+A storefront needs a routable URL — the one it registers on-chain so buyers and indexers can reach `/negotiate`, `/settle`, etc. The standard ways to get one are a public IP plus DNS and port-forwarding, a cloud-hosted reverse proxy (Cloudflare Tunnel, ngrok, FRP — see [`seller-frp-setup.md`](./seller-frp-setup.md)), or a private overlay where every participant has a virtual IP and can route to every other without anyone being publicly reachable.
+
+ZeroTier is the third option, wired in as a built-in. If `[seller] zerotier_network` is set in `storefront.toml`, the storefront joins the configured network at startup, reads its assigned ZT IP via `zerotier-cli`, and substitutes it into `base_url` (which accepts a `{ZEROTIER_IP}` template). The advertised URL points at that IP; buyers join the same overlay with `market network join <network-id>` to reach it. To the rest of the protocol it's an ordinary HTTP URL.
+
+Use it when:
+
+- The storefront runs on a residential / CGNAT / home-network host where port forwarding is awkward.
+- You want the service visible only to authorized members — the ZT controller authorizes each node before it can join, so there's no public listener.
+- You're running a private or invite-only marketplace and want the whole participant set on a private overlay.
+
+The trade-off is that every participant on the overlay has to install ZeroTier and join the network. For an open public marketplace, public DNS or a reverse proxy is usually simpler.
+
+This runbook is for the **controller operator** — the party creating the network and authorizing members (typically the marketplace operator, or a seller hosting their own private registry alongside their storefront). Participants joining an existing network don't need this doc.
 
 ## Prerequisites
 
