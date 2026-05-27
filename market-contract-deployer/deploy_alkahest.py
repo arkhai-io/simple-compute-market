@@ -87,15 +87,18 @@ def wait_for_anvil(retries: int = 30, delay: float = 1.0) -> None:
 def main() -> int:
     wait_for_anvil()
 
-    # Safety: deployer nonce must be 0 on a fresh Anvil
+    # Skip when the deployer has already submitted transactions — the
+    # contracts are baked into the test-env Anvil state file, so a
+    # non-zero nonce means we're booting against pre-deployed state
+    # and there's nothing to do.
     nonce_hex = rpc("eth_getTransactionCount", [DEPLOYER, "latest"])
     nonce = int(nonce_hex, 16)
     if nonce != 0:
         print(
-            f"ERROR: Deployer {DEPLOYER} has nonce {nonce}, expected 0."
-            " Fresh Anvil required."
+            f"Deployer {DEPLOYER} has nonce {nonce} — contracts already "
+            "deployed (pre-baked state). Skipping replay."
         )
-        return 1
+        return 0
 
     data = json.loads(TRANSACTIONS_FILE.read_text())
     transactions = data["transactions"]

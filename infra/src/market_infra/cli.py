@@ -97,12 +97,6 @@ def chain_deploy_contracts(
         ..., "--rpc-url", "-r",
         help="RPC URL to deploy against (sets ANVIL_RPC_URL / RPC_URL).",
     ),
-    erc8004: bool = typer.Option(
-        True, "--erc8004/--no-erc8004",
-        help="Deploy the ERC-8004 IdentityRegistry / ReputationRegistry / "
-             "ValidationRegistry vanity contracts (default on). Disable when "
-             "the chain already has canonical ERC-8004 deployments.",
-    ),
     alkahest: bool = typer.Option(
         True, "--alkahest/--no-alkahest",
         help="Deploy the Alkahest contract suite by replaying "
@@ -127,19 +121,14 @@ def chain_deploy_contracts(
 ) -> None:
     """Deploy the contract suites for the marketplace to the given RPC.
 
-    Three independently togglable suites:
-      ERC-8004   — IdentityRegistry, ReputationRegistry, ValidationRegistry.
+    Two suites:
       Alkahest   — Escrow / arbiter / obligation contracts.
       EAS        — Ethereum Attestation Service (currently bundled with
                    alkahest; standalone toggling is TODO upstream).
-
-    Replaces the buyer's prior broken `market dev deploy-registry`.
-    Defaults reproduce the all-suites Anvil flow that
-    `market-contract-deployer/deploy-local.sh` runs in the test-env image.
     """
-    if not (erc8004 or alkahest or eas):
+    if not (alkahest or eas):
         typer.secho(
-            "Nothing to deploy: all three suites disabled.",
+            "Nothing to deploy: both suites disabled.",
             err=True, fg=typer.colors.YELLOW,
         )
         raise typer.Exit(0)
@@ -163,28 +152,6 @@ def chain_deploy_contracts(
             f"Deploy Alkahest + EAS contracts (replay) to {rpc_url}",
             ["python3", "deploy_alkahest.py"],
             REPO_ROOT / "market-contract-deployer",
-            deployer_env,
-        )
-
-    if erc8004:
-        # The hardhat scripts use the localhost / anvil custom-chain mapping
-        # in hardhat.config.ts which reads RPC_URL.
-        _run(
-            f"Deploy CREATE2 factory to {rpc_url}",
-            ["npx", "hardhat", "run", "scripts/deploy-create2-factory.ts"],
-            REPO_ROOT / "erc-8004-contracts",
-            deployer_env,
-        )
-        _run(
-            f"Deploy ERC-8004 vanity contracts to {rpc_url}",
-            ["npx", "hardhat", "run", "scripts/deploy-vanity.ts", "--network", "anvil"],
-            REPO_ROOT / "erc-8004-contracts",
-            deployer_env,
-        )
-        _run(
-            "Upgrade ERC-8004 proxies to full implementations",
-            ["npx", "hardhat", "run", "scripts/upgrade-local.ts", "--network", "anvil"],
-            REPO_ROOT / "erc-8004-contracts",
             deployer_env,
         )
 

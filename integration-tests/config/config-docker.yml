@@ -9,11 +9,7 @@ rpc:
   chain_id: 31337
 
 registry:
-  identity_address:   "0x8004A818BFB912233c491871b3d84c89A494BD9e"
-  reputation_address: "0x8004B663056A597Dffe9eCcC1965A193B7388713"
-  validation_address: "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
-  owner_address:      "0x547289319C3e6aedB179C0b8e8aF0B5ACd062603"
-  api_url:            "http://registry:8080"
+  api_url: "http://registry:8080"
 
 buyer:
   private_key:       "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"

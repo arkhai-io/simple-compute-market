@@ -11,9 +11,9 @@ Run once from repo root and commit the transactions file:
     cd storefront && uv run python scripts/generate_alkahest_transactions.py
 
 The transactions file is saved to:
-    erc-8004-contracts/alkahest-transactions.json
+    market-contract-deployer/alkahest-transactions.json
 
-docker-compose contracts-deploy then replays these before deploying ERC-8004.
+docker-compose contracts-deploy replays these on stack startup.
 Regenerate only when the alkahest_py wheel version changes.
 """
 
@@ -30,7 +30,7 @@ ALICE_FUNDING = 1_000_000_000  # 1B MOCK tokens
 BOB_FUNDING = 1_000_000_000
 
 DEFAULT_OUTPUT = (
-    pathlib.Path(__file__).parents[3] / "erc-8004-contracts" / "alkahest-transactions.json"
+    pathlib.Path(__file__).parents[3] / "market-contract-deployer" / "alkahest-transactions.json"
 )
 
 
@@ -114,7 +114,7 @@ def main() -> int:
     print(f"Transactions saved: {out_path}")
 
     print("\nNext steps:")
-    print("  1. Commit erc-8004-contracts/alkahest-transactions.json")
+    print("  1. Commit market-contract-deployer/alkahest-transactions.json")
     print("  2. docker-compose contracts-deploy replays them before deploying ERC-8004")
     return 0
 

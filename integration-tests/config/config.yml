@@ -16,10 +16,6 @@ rpc:
 
 registry: # injected from environment profile file
   api_url:
-  identity_address:
-  reputation_address:
-  validation_address:
-  owner_address:
 
 buyer:
   # The buyer is a pure HTTP client (market_buyer CLI / library) — only
