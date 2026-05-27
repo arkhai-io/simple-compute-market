@@ -66,6 +66,17 @@ sessions.
   template's rate-slot count at parse time. 17 unit tests in
   `tests/unit/test_accepted_escrows_csv_dsl.py` + 3 end-to-end tests
   in `test_resource_csv_importer.py`.
+- Phase 4: `_publish_round` branches on the row's materialized
+  `accepted_escrows` column. When present, `_scale_template_entries()`
+  resolves the entry's chain in `CHAINS`, calls `resolve_token` against
+  `literal_fields["token"]`, and scales each `rates[i].value` from raw
+  human (slot value as written in CSV) to base units, populating the
+  legacy `fields`/`price_per_hour` siblings alongside. The legacy
+  CHAINS-broadcast path stays as the fallback for rows without
+  templates — backward compat during phases 5/6. Rows with templates
+  ignore the row's `min_price`/`token` columns entirely (templates are
+  the source of truth). 13 unit tests in
+  `tests/unit/test_publish_round_with_templates.py`.
 
 ## Why staged as siblings, not a rename
 
@@ -83,18 +94,6 @@ in the staging plan drops the legacy fields cleanly once every reader
 is on the helpers.
 
 ## What's left (staging plan)
-
-### Phase 4 — `cli_publish` switches to template iteration
-
-Once templates are parsed and CSV rows reference them, `_publish_round`
-stops calling `get_erc20_escrow_obligation_nontierable` directly and
-materializes one `accepted_escrows` entry per (template referenced by
-row) × (slot values from CSV).
-
-This is the commit that justifies the templates' existence. After
-this, ERC20 still flows end-to-end; other obligation kinds become
-addable via TOML alone (provided buyer/seller dispatch supports
-them — see phase 5/6).
 
 ### Phase 5 — Buyer dispatch
 
@@ -208,10 +207,10 @@ integration-tests/tests/e2e/roles/       Phase 3/4 (CSV fixtures)
 
 - ~~Phase 2b~~ — landed `6c8bb5b`.
 - ~~Phase 2c~~ — landed `f4b0770` (helper fallback prep in `df79caa`).
-- ~~Phase 3~~ — CSV importer + storage. Landing in this session.
-- Phase 4: 1 session (cli_publish iterates parsed entries instead of building from min_price/token).
+- ~~Phase 3~~ — CSV importer + storage.
+- ~~Phase 4~~ — cli_publish reads materialized templates from the row.
 - Phase 5 + 6: 1 session (buyer/seller dispatch + verify; ERC20-only path).
 - Phase 7: 1 session (drop legacy fields + bulk test rewrites).
 
-So ~3 sessions left to fully land. Each is committable independently
+So ~2 sessions left to fully land. Each is committable independently
 and keeps the branch green.

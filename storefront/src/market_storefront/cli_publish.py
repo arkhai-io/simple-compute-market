@@ -70,15 +70,22 @@ def _import_csv(csv_path: str, db: Optional[str]) -> None:
 def _available_resources(db_path: str) -> list[dict]:
     """Read all `state='available'` compute resources from the agent DB.
 
-    Returns row dicts including per-resource pricing (min_price, token).
-    NULL pricing means "no per-row override; fall back to config defaults."
+    Returns row dicts including per-resource pricing (min_price, token)
+    and any template-materialized ``accepted_escrows`` entries that the
+    CSV importer wrote at import time. NULL pricing means "no per-row
+    override; fall back to config defaults"; a non-empty
+    ``accepted_escrows`` short-circuits the legacy pricing path entirely
+    at publish time.
     """
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
     try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(resources)").fetchall()}
+        has_accepted = "accepted_escrows" in cols
+        select_extra = ", accepted_escrows" if has_accepted else ""
         rows = conn.execute(
-            """SELECT resource_id, resource_subtype, unit, value, state, attributes,
-                      min_price, token
+            f"""SELECT resource_id, resource_subtype, unit, value, state, attributes,
+                      min_price, token{select_extra}
                FROM resources
                WHERE resource_type = 'compute.gpu' AND state = 'available'
                ORDER BY resource_id""",
@@ -92,6 +99,16 @@ def _available_resources(db_path: str) -> list[dict]:
             attrs = json.loads(row["attributes"] or "{}")
         except json.JSONDecodeError:
             attrs = {}
+        accepted_escrows: list[dict] | None = None
+        if has_accepted:
+            raw = row["accepted_escrows"]
+            if isinstance(raw, str) and raw.strip():
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        accepted_escrows = parsed
+                except json.JSONDecodeError:
+                    accepted_escrows = None
         out.append({
             "resource_id": row["resource_id"],
             "gpu_model": attrs.get("gpu_model"),
@@ -100,6 +117,7 @@ def _available_resources(db_path: str) -> list[dict]:
             "region": attrs.get("region"),
             "min_price": row["min_price"],
             "token": row["token"],
+            "accepted_escrows": accepted_escrows,
         })
     return out
 
@@ -223,6 +241,102 @@ def _resolve_pricing(
     return min_price, token_address
 
 
+def _scale_template_entries(
+    entries: list[dict[str, Any]],
+    chains: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Scale template-materialized rate values to base units, in place.
+
+    The CSV importer stores ``accepted_escrows`` entries with rate values
+    as the raw human strings from the slot assignments (``"0.5"`` for
+    half a USDC). At publish time we look up token decimals against the
+    entry's chain and scale to a uint256-safe decimal-digit string —
+    the same shape the legacy ``min_price`` path emits. Also populates
+    the legacy ``fields`` / ``price_per_hour`` siblings so pre-helpers
+    readers still see the price.
+
+    Raises ``ValueError`` (per entry) with a row-actionable message when
+    the entry references an unknown chain or a token whose metadata
+    can't be resolved on that chain.
+    """
+    from service.clients.token import resolve_token, TokenResolutionError
+
+    scaled: list[dict[str, Any]] = []
+    for raw_entry in entries:
+        entry = dict(raw_entry)
+        chain_name = entry.get("chain_name")
+        if not chain_name or chain_name not in chains:
+            raise ValueError(
+                f"accepted_escrows entry references unknown chain "
+                f"{chain_name!r}; configured: {sorted(chains)}"
+            )
+        chain = chains[chain_name]
+        literal_fields = dict(entry.get("literal_fields") or {})
+        token_address = literal_fields.get("token")
+        if not isinstance(token_address, str) or not token_address:
+            raise ValueError(
+                f"accepted_escrows entry on chain {chain_name!r} is "
+                f"missing literal_fields.token; cannot scale rates"
+            )
+        try:
+            token_meta = resolve_token(
+                token_address,
+                rpc_url=chain.rpc_url,
+                chain_id=chain.chain_id,
+            )
+        except TokenResolutionError as exc:
+            raise ValueError(
+                f"accepted_escrows: token {token_address} unresolvable on "
+                f"chain {chain_name!r}: {exc}"
+            ) from exc
+        literal_fields["token"] = token_meta.contract_address.lower()
+        decimals = token_meta.decimals
+
+        new_rates: list[dict[str, Any]] = []
+        for rate in entry.get("rates") or []:
+            raw_value = rate.get("value")
+            if raw_value is None or raw_value == "":
+                raise ValueError(
+                    f"accepted_escrows entry on chain {chain_name!r} "
+                    f"has a rate with no value (field={rate.get('field')!r})"
+                )
+            try:
+                human = Decimal(str(raw_value))
+            except (InvalidOperation, ValueError, TypeError) as exc:
+                raise ValueError(
+                    f"accepted_escrows rate value {raw_value!r} on chain "
+                    f"{chain_name!r} is not numeric"
+                ) from exc
+            base_units = human * (Decimal(10) ** decimals)
+            if base_units != base_units.to_integral_value():
+                raise ValueError(
+                    f"accepted_escrows rate value {raw_value!r} on chain "
+                    f"{chain_name!r} has more decimals than the token's "
+                    f"{decimals}"
+                )
+            if base_units < 0:
+                raise ValueError(
+                    f"accepted_escrows rate value {raw_value!r} on chain "
+                    f"{chain_name!r} is negative"
+                )
+            new_rates.append({
+                "field": rate.get("field"),
+                "per": rate.get("per"),
+                "value": str(int(base_units)),
+            })
+
+        primary_value = new_rates[0]["value"] if new_rates else None
+        scaled.append({
+            "chain_name": chain_name,
+            "escrow_address": str(entry.get("escrow_address") or "").lower(),
+            "fields": dict(literal_fields),
+            "price_per_hour": primary_value,
+            "literal_fields": literal_fields,
+            "rates": new_rates,
+        })
+    return scaled
+
+
 def _publish_round(
     *,
     db_path: str,
@@ -268,6 +382,49 @@ def _publish_round(
         if res["resource_id"] in skip_ids:
             skipped.append(res)
             continue
+
+        # Template-materialized path: the CSV importer wrote a fully
+        # resolved ``accepted_escrows`` list onto the row. We only need
+        # to scale rate values to base units (token decimals lookup) and
+        # publish — no CHAINS broadcast, no min_price/token reading,
+        # no get_erc20_escrow_obligation_nontierable.
+        template_entries = res.get("accepted_escrows")
+        if template_entries:
+            from .utils.config import CHAINS
+            if not CHAINS:
+                failed.append((res, "no [chains.<name>] tables configured"))
+                continue
+            try:
+                accepted_escrows = _scale_template_entries(template_entries, CHAINS)
+            except ValueError as exc:
+                failed.append((res, str(exc)))
+                continue
+            max_duration_seconds = (
+                res.get("max_duration_seconds") or default_max_duration_seconds
+            )
+            offer = {
+                "resource_id": res["resource_id"],
+                "gpu_model": res["gpu_model"],
+                "gpu_count": res["gpu_count"],
+                "sla": res["sla"],
+                "region": res["region"],
+            }
+            try:
+                resp = _publish_offer(
+                    base_url, offer, accepted_escrows, max_duration_seconds,
+                    wallet_address, private_key,
+                )
+                published.append({
+                    "resource": res,
+                    "response": resp,
+                    "accepted_escrows": accepted_escrows,
+                })
+            except typer.Exit:
+                failed.append((res, "HTTP error (see above)"))
+            except Exception as exc:
+                failed.append((res, str(exc)))
+            continue
+
         min_price, token_address = _resolve_pricing(
             res,
             default_min_price=default_min_price,
