@@ -26,7 +26,7 @@ dependencies = [
     "arkhai-registry-client>=0.6.0",
     "market-service>=0.1.0",
 	"market-storefront>=0.1.0",
-    "provisioning-service>=0.3.0",
+    "provisioning-service>=0.4.0",
 ]
 
 [tool.uv]

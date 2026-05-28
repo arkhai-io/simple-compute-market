@@ -198,7 +198,7 @@ requires-dist = [
     { name = "market-service", specifier = ">=0.1.0" },
     { name = "market-storefront", specifier = ">=0.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8" },
-    { name = "provisioning-service", specifier = ">=0.3.0" },
+    { name = "provisioning-service", specifier = ">=0.4.0" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
     { name = "pytest-html", specifier = ">=4.0" },
@@ -220,7 +220,7 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_registry_client-0.10.0-py3-none-any.whl" },
+    { path = "../.dist/arkhai_registry_client-0.10.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -232,7 +232,7 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_storefront_client-0.15.0-py3-none-any.whl" },
+    { path = "../.dist/arkhai_storefront_client-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -1302,7 +1302,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "market_policy-0.1.0-py3-none-any.whl" },
+    { path = "../.dist/market_policy-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -1316,7 +1316,7 @@ dependencies = [
     { name = "web3" },
 ]
 wheels = [
-    { path = "market_service-0.1.0-py3-none-any.whl" },
+    { path = "../.dist/market_service-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -1345,7 +1345,7 @@ dependencies = [
     { name = "websockets" },
 ]
 wheels = [
-    { path = "market_storefront-0.1.0-py3-none-any.whl" },
+    { path = "../.dist/market_storefront-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -1751,7 +1751,7 @@ wheels = [
 
 [[package]]
 name = "provisioning-service"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "aiohttp" },
@@ -1772,7 +1772,7 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 wheels = [
-    { path = "provisioning_service-0.3.0-py3-none-any.whl" },
+    { path = "../.dist/provisioning_service-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

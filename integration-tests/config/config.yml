@@ -44,4 +44,3 @@ tests:
 
 provisioning:
   api_url: ""          # injected from environment profile file or ARKHAI_PROVISIONING__API_URL
-  enable_auth: false   # set to true if the deployed service has auth enabled

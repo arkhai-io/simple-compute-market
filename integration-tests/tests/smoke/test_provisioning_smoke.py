@@ -5,8 +5,8 @@ Scope (per Architecture.md — Smoke Tests jurisdiction):
   - The service is reachable and healthy
   - The host registry API responds correctly
   - Ansible readiness endpoint returns structured diagnostics
-  - Auth enforcement is tested only when enable_auth=true in the
-    provisioning config profile
+  - Auth enforcement is tested only when the shared admin key is configured
+    (the storefront presents it as X-Admin-Key)
 
 These tests are stateless and idempotent. They do not submit Ansible jobs
 or modify persistent state (other than a transient test-host registration
@@ -19,7 +19,8 @@ Run against a deployed stack::
 Required config (via ACTIVE_PROFILES + mounted config file, or env var override):
   provisioning:
     api_url: "http://<host>:<port>"
-    enable_auth: false
+  seller:
+    admin_api_key: "<shared secret, matches the provisioning storefront_admin_key>"
 """
 
 from __future__ import annotations
@@ -57,8 +58,16 @@ def _api_url() -> str:
     return url.rstrip("/")
 
 
-def _enable_auth() -> bool:
-    return bool(_provisioning_settings().get("enable_auth", False))
+def _admin_key() -> str:
+    """The shared secret the storefront presents to provisioning as X-Admin-Key.
+
+    Configured under the seller section because it is the operator's single
+    ``admin_api_key`` — the same key the storefront's own /admin/* routes use.
+    """
+    try:
+        return str(dict(settings.get("seller", {})).get("admin_api_key", "") or "")
+    except Exception:
+        return ""
 
 
 def _client() -> httpx.Client:
@@ -187,16 +196,20 @@ class TestProvisioningSmoke:
         log.info("Host CRUD round-trip passed")
 
     def test_auth_enforcement_when_enabled(self):
-        """POST /api/v1/hosts/{host}/vms/ without X-Agent-ID → 401 when auth is on."""
-        if not _enable_auth():
-            pytest.skip("Auth is not enabled on this deployment — skipping 401 check")
+        """POST /api/v1/hosts/{host}/vms/ without X-Admin-Key → 401 when a key is set.
+
+        Stays within smoke-test scope: it never submits a real job. The gate
+        rejects the request before the body reaches the controller.
+        """
+        if not _admin_key():
+            pytest.skip("No admin key configured on this deployment — skipping 401 check")
         with _client() as client:
             resp = client.post(
                 "/api/v1/hosts/kvm1/vms/",
                 json={"vm_target": "smoke-test-vm"},
-                # Intentionally no X-Agent-ID header
+                # Intentionally no X-Admin-Key header
             )
         assert resp.status_code == 401, (
-            f"Expected 401 with auth enabled, got {resp.status_code}: {resp.text}"
+            f"Expected 401 without admin key, got {resp.status_code}: {resp.text}"
         )
-        log.info("Auth enforcement confirmed: 401 without X-Agent-ID")
+        log.info("Auth enforcement confirmed: 401 without X-Admin-Key")

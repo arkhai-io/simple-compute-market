@@ -176,49 +176,19 @@ def registry_client():
 
 
 @pytest.fixture(scope="module")
-def seller_agent_id(storefront_admin_client) -> str:
-    """Discover the seller's live canonical agent ID from /api/v1/system/status.
-
-    Reads the storefront's own agent_id rather than hardcoding it in the test
-    config. The hardcoded form (e.g. ``eip155:31337:0x8004A8...:2``) is only
-    deterministic on a strictly-fresh anvil where account #2 registers second
-    against IdentityRegistry — any prior registration shifts the on-chain ID
-    and breaks the auth header used by /admin/* and the provisioning service.
-
-    The storefront exposes its live agent_id at the top level of
-    /api/v1/system/status (added in 40b1b9b alongside chain_id and
-    resource_count diagnostics). Falls back to the configured ``SELLER.AGENT_ID``
-    if the status endpoint doesn't include one (e.g. seller hasn't completed
-    registration yet — should be a clear test failure rather than a silent
-    skip).
-    """
-    status = storefront_admin_client.get_system_status()
-    live = getattr(status, "agent_id", None)
-    if live:
-        return str(live)
-    fallback = str(settings.SELLER.AGENT_ID or "")
-    if not fallback:
-        pytest.skip(
-            "Storefront has no live agent_id and SELLER.AGENT_ID is not configured. "
-            "Either run `market-storefront register` against the storefront, "
-            "or set SELLER.AGENT_ID in config-<profile>.yml."
-        )
-    return fallback
-
-
-@pytest.fixture(scope="module")
-def provisioning_client(seller_agent_id):
+def provisioning_client():
     """Canonical SyncProvisioningClient.
 
-    Uses the seller's live agent ID for X-Agent-ID — provisioning jobs created
-    by the storefront carry the seller's agent_id, so reads need the same value
-    or get a 403.
+    Provisioning is an internal dependency of the storefront, gated by the
+    shared admin key (presented as X-Admin-Key). The seller's admin_api_key
+    is that shared secret, so reads use it directly.
     """
     from client.provisioning_client import SyncProvisioningClient
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
+    admin_key = str(settings.SELLER.ADMIN_API_KEY or "") or None
     client = SyncProvisioningClient(
         base_url=url,
-        agent_id=seller_agent_id or None,
+        admin_key=admin_key,
     )
     yield client
     client.close()
@@ -231,7 +201,8 @@ def provisioning_test_client():
     Only works when the provisioning service runs with ACTIVE_PROFILES=mock.
     """
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
-    with ProvisioningTestClient(base_url=url, timeout=20.0) as client:
+    admin_key = str(settings.SELLER.ADMIN_API_KEY or "") or None
+    with ProvisioningTestClient(base_url=url, timeout=20.0, admin_key=admin_key) as client:
         yield client
 
 
@@ -260,11 +231,17 @@ def _ensure_provisioning_host_registered():
     base = url.rstrip("/")
     host_name = "kvm1"
 
+    # Provisioning gates non-health routes on the shared admin key (X-Admin-Key);
+    # the seller's admin_api_key is that shared secret.
+    admin_key = str(settings.SELLER.ADMIN_API_KEY or "")
+    auth_headers = {"X-Admin-Key": admin_key} if admin_key else {}
+
     # Probe existence — provisioning's GET /hosts/{name} returns 404 when absent.
     try:
-        with urllib.request.urlopen(
-            f"{base}/api/v1/hosts/{host_name}", timeout=5,
-        ) as resp:
+        probe = urllib.request.Request(
+            f"{base}/api/v1/hosts/{host_name}", headers=auth_headers,
+        )
+        with urllib.request.urlopen(probe, timeout=5) as resp:
             if resp.status == 200:
                 log.info("[conftest] Provisioning host %r already registered", host_name)
                 return
@@ -289,7 +266,7 @@ def _ensure_provisioning_host_registered():
     req = urllib.request.Request(
         f"{base}/api/v1/hosts/",
         data=_json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **auth_headers},
         method="POST",
     )
     try:
