@@ -245,27 +245,37 @@ async def verify_escrow_for_settlement(
             address_to_slot,
             get_escrow_codec_for,
         )
-        try:
-            _codec = get_escrow_codec_for(
-                escrow_proposal.chain_name,
-                escrow_proposal.escrow_address,
-                config_path=alkahest_address_config_path,
-            )
-        except ValueError as exc:
-            raise EscrowVerificationError(
-                f"Cannot resolve escrow codec for proposal "
-                f"(chain={escrow_proposal.chain_name!r}, "
-                f"address={escrow_proposal.escrow_address!r}): {exc}"
-            ) from exc
-        if _codec.kind != "erc20_escrow_obligation_nontierable":
-            raise NotImplementedError(
-                f"Seller verify not implemented for escrow kind "
-                f"{_codec.kind!r} at address "
-                f"{escrow_proposal.escrow_address!r} "
-                f"(chain {escrow_proposal.chain_name!r}); "
-                f"ERC20 non-tierable only."
-            )
-        effective_escrow_kind = _codec.kind
+        _addr = (escrow_proposal.escrow_address or "").lower()
+        # The buyer may leave the escrow contract unpinned — a zero-address
+        # placeholder — so negotiation gates on field equality rather than a
+        # specific (chain, address). An unpinned proposal escrows against the
+        # chain's default kind, so resolve the codec from ``escrow_kind``
+        # rather than the placeholder address (which matches no codec).
+        _unpinned = (not _addr) or set(_addr.removeprefix("0x")) <= {"0"}
+        if _unpinned:
+            effective_escrow_kind = escrow_kind
+        else:
+            try:
+                _codec = get_escrow_codec_for(
+                    escrow_proposal.chain_name,
+                    escrow_proposal.escrow_address,
+                    config_path=alkahest_address_config_path,
+                )
+            except ValueError as exc:
+                raise EscrowVerificationError(
+                    f"Cannot resolve escrow codec for proposal "
+                    f"(chain={escrow_proposal.chain_name!r}, "
+                    f"address={escrow_proposal.escrow_address!r}): {exc}"
+                ) from exc
+            if _codec.kind != "erc20_escrow_obligation_nontierable":
+                raise NotImplementedError(
+                    f"Seller verify not implemented for escrow kind "
+                    f"{_codec.kind!r} at address "
+                    f"{escrow_proposal.escrow_address!r} "
+                    f"(chain {escrow_proposal.chain_name!r}); "
+                    f"ERC20 non-tierable only."
+                )
+            effective_escrow_kind = _codec.kind
         proposal_token = accepted_token_address(escrow_proposal)
         if not isinstance(proposal_token, str) or not proposal_token:
             raise EscrowVerificationError(
