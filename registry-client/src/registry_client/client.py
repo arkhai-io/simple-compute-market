@@ -468,7 +468,7 @@ class RegistryClient(_RegistryClientBase):
 
     async def update_listing(self, listing_id: str, request: UpdateListingRequest) -> dict:
         """PUT /listings/{listing_id} → updated listing dict."""
-        return await self._request("PUT", f"/listings/{listing_id}", json=request.to_dict())
+        return await self._request("PUT", f"/listings/{listing_id}", json=request.to_dict(listing_id))
 
     async def delete_listing(self, listing_id: str, private_key: str) -> None:
         """DELETE /listings/{listing_id} with EIP-191 auth query params."""
@@ -729,7 +729,7 @@ class SyncRegistryClient(_RegistryClientBase):
 
     def update_listing(self, listing_id: str, request: UpdateListingRequest) -> dict:
         """PUT /listings/{listing_id} → updated listing dict."""
-        return self._request("PUT", f"/listings/{listing_id}", json=request.to_dict())
+        return self._request("PUT", f"/listings/{listing_id}", json=request.to_dict(listing_id))
 
     def delete_listing(self, listing_id: str, private_key: str) -> None:
         """DELETE /listings/{listing_id} with EIP-191 auth query params."""

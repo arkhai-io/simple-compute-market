@@ -440,6 +440,11 @@ def _payload_to_dict(payload: Any) -> dict | None:
                 return dump()
             except Exception:
                 pass
+    # UpdateListingRequest.to_dict() requires the listing_id it signs over;
+    # for audit we keep the update fields, not the signed envelope.
+    updates = getattr(payload, "updates", None)
+    if isinstance(updates, dict):
+        return dict(updates)
     to_dict = getattr(payload, "to_dict", None)
     if callable(to_dict):
         try:

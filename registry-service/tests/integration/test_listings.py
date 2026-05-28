@@ -229,12 +229,10 @@ class TestUpdateOrderAuth:
         self, registry_client, authenticated_open_order,
     ):
         order_id = authenticated_open_order.listing_id
-        # listing_id goes in `updates` so the client signs over the real
-        # resource_id (update_listing:<listing_id>:<ts>).
         put = await registry_client.update_listing(
             order_id,
             UpdateListingRequest(
-                updates={"listing_id": order_id, "status": "accepted"},
+                updates={"status": "accepted"},
                 private_key=MAKER_PRIVATE_KEY,
             ),
         )
@@ -249,7 +247,7 @@ class TestUpdateOrderAuth:
             await registry_client.update_listing(
                 order_id,
                 UpdateListingRequest(
-                    updates={"listing_id": order_id, "status": "accepted"},
+                    updates={"status": "accepted"},
                     private_key=TAKER_PRIVATE_KEY,
                 ),
             )

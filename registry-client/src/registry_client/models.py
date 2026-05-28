@@ -321,20 +321,21 @@ class UpdateListingRequest:
     """Request body for PUT /listings/{listing_id}.
 
     Constructs the signed body that the registry route expects.
-    Auth fields (signature, timestamp, signer_agent_id) are embedded
-    when ``private_key`` is supplied.
+    Auth fields (signature, timestamp) are embedded when ``private_key``
+    is supplied. The signature covers the ``listing_id`` being updated
+    (passed to :meth:`to_dict`), matching the registry's owner-scoped
+    verification.
     """
 
     updates: dict[str, Any]
     private_key: str | None = None
     agent_id: str | None = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self, listing_id: str) -> dict:
         from registry_client.auth import build_auth_headers
         body = dict(self.updates)
         if self.private_key:
-            auth = build_auth_headers(self.private_key, "update_listing",
-                                      self.updates.get("listing_id", ""))
+            auth = build_auth_headers(self.private_key, "update_listing", listing_id)
             body["signature"] = auth["X-Signature"]
             body["timestamp"] = int(auth["X-Timestamp"])
         if self.agent_id:
