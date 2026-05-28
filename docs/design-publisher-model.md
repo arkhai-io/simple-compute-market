@@ -72,17 +72,24 @@ refactor.
 | `GET /agents/{wallet}/listings` | `GET /listings?publisher=<identifier>` |
 | `PUT /listings/{id}`, `DELETE /listings/{id}` | unchanged; signature verified against the listing's publisher identity |
 | `GET /listings`, `GET /listings/{id}` | unchanged; response carries `storefront_url` (joined from the publisher) |
-| `GET /agents`, `GET /agents/{id}`, `GET /agents/search` | removed |
+| `GET /agents/{id}` | `GET /publishers/{publisher_id}` — the publisher entity: `storefront_url`, `identities` (the `(scheme, identifier)` list), `created_at` |
+| `GET /agents` | `GET /publishers` — list publishers; optional `?identifier=` / `?scheme=` filter to resolve a publisher by a signing identity |
+| `GET /agents/search` | removed — agent-card search has nothing to query under the publisher model |
 | `POST /agents/{id}/heartbeat` | removed |
+
+A publisher is addressed in the path by its surrogate `publisher_id` (the
+value listings carry); the `?identifier=` filter on the list endpoint is
+the lookup-by-signing-identity path.
 
 Signature messages are unchanged: `create_listing:<identifier>:<ts>`,
 `update_listing:<listing_id>:<ts>`, `delete_listing:<listing_id>:<ts>`.
 
 ## Removed
 
-- Registry: the agent routes above; the `AgentMetadataEntry` and
-  `HealthCheck` tables; the agent health-check background service;
-  `/api/v1/system/sync` EventSync reporting and
+- Registry: `GET /agents/search` and `POST /agents/{id}/heartbeat` (the
+  list and single-agent GETs become the publisher endpoints above); the
+  `AgentMetadataEntry` and `HealthCheck` tables; the agent health-check
+  background service; `/api/v1/system/sync` EventSync reporting and
   `/api/v1/system/sync/wait-for-agent`; the legacy ERC-8004 columns
   (`agent_id`, `chain_id`, `identity_registry`, `onchain_agent_id`,
   `registry_address`, `token_uri`, agent metadata, health status,
@@ -91,9 +98,10 @@ Signature messages are unchanged: `create_listing:<identifier>:<ts>`,
   `wait_for_registry_agent` / `registry_auth_check` /
   `_registry_auth_per_chain`, the `registry_auth` field in
   `/system/status`, the stale `register` CLI doc text.
-- registry-client: `list_agents`, `get_agent`, `search_agents`,
-  `heartbeat`, `wait_for_agent_indexed`, and the `AgentSummary` /
-  `AgentListResponse` models.
+- registry-client: `search_agents`, `heartbeat`, `wait_for_agent_indexed`.
+  `list_agents` / `get_agent` become `list_publishers` / `get_publisher`,
+  and `AgentSummary` / `AgentListResponse` become `Publisher` /
+  `PublisherListResponse`.
 - storefront-client: `wait_for_registry_agent_ready` (async + sync) and
   `RegistryAgentReadyResponse`.
 - e2e: the "agent indexed" stages (`SellerAgentIndexed` in the full deal;
@@ -147,7 +155,7 @@ green at the last phase, once the wire change has landed across packages.
 ```
 registry-service/src/db/models.py             publishers + identities + listings; drop Agent/AgentMetadataEntry/HealthCheck
 registry-service/alembic/versions/014_*.py     the transform migration
-registry-service/src/api/agent_routes.py       removed (or folded into listing/publisher routes)
+registry-service/src/api/publisher_routes.py    GET /publishers, GET /publishers/{id} (was agent_routes.py)
 registry-service/src/api/listing_routes.py     publish/query repointed to the publisher model
 registry-service/src/api/utils.py              ensure_publisher_for_identity (was ensure_agent_for_eip191)
 registry-service/src/api/system_routes.py      drop /sync EventSync + /sync/wait-for-agent
