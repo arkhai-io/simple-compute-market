@@ -66,7 +66,8 @@ rpc_url  = "https://base-sepolia.infura.io/v3/<YOUR_KEY>"
 urls = ["http://<INDEXER_HOST>:8080"]
 
 [registry.auth]
-# Required when the indexer runs with REGISTRY_REQUIRE_API_KEY=true.
+# Required when the indexer gates writes (REGISTRY_REQUIRE_WRITE_API_KEY=true);
+# the key must be write-scoped.
 # Keys must exactly match the URLs in [registry] urls (scheme, host,
 # port, trailing slash).
 "http://<INDEXER_HOST>:8080" = "<your-token>"

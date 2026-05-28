@@ -4,8 +4,8 @@ gate it protects.
 Mints + revokes happen via httpx against the FastAPI app over the
 ASGITransport, just like every other integration test in this
 suite. Uses ``monkeypatch`` to flip ``settings.admin_api_key`` and
-``settings.require_api_key`` per test so the gate's on-vs-off
-branches are both exercised.
+the ``settings.require_read_api_key`` / ``require_write_api_key``
+toggles per test so each gate's on-vs-off branches are exercised.
 """
 from __future__ import annotations
 
@@ -82,6 +82,7 @@ class TestApiKeyLifecycle:
         body = resp.json()
         assert body["name"] == "alice"
         assert body["key"] and isinstance(body["key"], str)
+        assert body["scope"] == "read"  # least-privilege default
         assert "id" in body and "created_at" in body
 
         # Subsequent GET must NOT return the raw key — only metadata.
@@ -128,55 +129,70 @@ class TestApiKeyLifecycle:
 # Bearer-token gate on non-admin routes
 # ---------------------------------------------------------------------------
 
+# A write endpoint whose only pre-route logic is the write gate, then an
+# agent lookup that 404s for an unregistered id. So: 401 (no key) / 403
+# (read key) come from the gate; 404 means the gate let the request
+# through to the route. Avoids needing a signed payload to probe the gate.
+_WRITE_PROBE = "/agents/0x000000000000000000000000000000000000dEaD/heartbeat"
 
-class TestRequireApiKeyGate:
+
+class _GateBase:
     @pytest.fixture(autouse=True)
     def _admin(self, monkeypatch):
         monkeypatch.setattr(settings, "admin_api_key", "admin-token")
 
-    async def _mint(self, raw_client, name="user"):
+    async def _mint(self, raw_client, name="user", scope="read"):
         resp = await raw_client.post(
             "/admin/api-keys",
             headers={"Authorization": "Bearer admin-token"},
-            json={"name": name},
+            json={"name": name, "scope": scope},
         )
         return resp.json()["key"], resp.json()["id"]
 
-    async def test_listings_open_to_all_when_gate_disabled(
-        self, raw_client, monkeypatch,
-    ):
-        """Default behaviour for a public registry — no auth needed."""
-        monkeypatch.setattr(settings, "require_api_key", False)
-        resp = await raw_client.get("/listings")
-        assert resp.status_code == 200
 
-    async def test_listings_401_without_key_when_gate_enabled(
-        self, raw_client, monkeypatch,
-    ):
-        monkeypatch.setattr(settings, "require_api_key", True)
+class TestGatesDisabled(_GateBase):
+    async def test_reads_and_writes_open_when_both_off(self, raw_client, monkeypatch):
+        """Default public registry — neither direction needs a key."""
+        monkeypatch.setattr(settings, "require_read_api_key", False)
+        monkeypatch.setattr(settings, "require_write_api_key", False)
+        assert (await raw_client.get("/listings")).status_code == 200
+        # Write gate off → request reaches the route (404 for unknown agent).
+        assert (await raw_client.post(_WRITE_PROBE)).status_code == 404
+
+
+class TestReadGate(_GateBase):
+    @pytest.fixture(autouse=True)
+    def _gate(self, monkeypatch):
+        monkeypatch.setattr(settings, "require_read_api_key", True)
+        monkeypatch.setattr(settings, "require_write_api_key", False)
+
+    async def test_401_without_key(self, raw_client):
         resp = await raw_client.get("/listings")
         assert resp.status_code == 401
         assert "API key" in resp.json()["detail"]
 
-    async def test_listings_200_with_valid_key(self, raw_client, monkeypatch):
-        monkeypatch.setattr(settings, "require_api_key", True)
-        raw, _ = await self._mint(raw_client)
+    async def test_200_with_read_key(self, raw_client):
+        raw, _ = await self._mint(raw_client, scope="read")
         resp = await raw_client.get(
             "/listings", headers={"Authorization": f"Bearer {raw}"},
         )
         assert resp.status_code == 200
 
-    async def test_listings_401_after_revocation(self, raw_client, monkeypatch):
-        monkeypatch.setattr(settings, "require_api_key", True)
-        raw, key_id = await self._mint(raw_client)
+    async def test_200_with_write_key(self, raw_client):
+        """A write key implies read access."""
+        raw, _ = await self._mint(raw_client, scope="write")
+        resp = await raw_client.get(
+            "/listings", headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 200
 
-        # First request works.
+    async def test_401_after_revocation(self, raw_client):
+        raw, key_id = await self._mint(raw_client, scope="read")
         ok = await raw_client.get(
             "/listings", headers={"Authorization": f"Bearer {raw}"},
         )
         assert ok.status_code == 200
 
-        # Revoke; same key must now 401.
         await raw_client.delete(
             f"/admin/api-keys/{key_id}",
             headers={"Authorization": "Bearer admin-token"},
@@ -186,9 +202,49 @@ class TestRequireApiKeyGate:
         )
         assert gone.status_code == 401
 
-    async def test_health_unaffected_by_gate(self, raw_client, monkeypatch):
-        """/health stays open even with require_api_key=True so
-        liveness probes don't need credentials."""
-        monkeypatch.setattr(settings, "require_api_key", True)
+    async def test_writes_open_when_only_read_gated(self, raw_client):
+        """Read-gated but write-open: a write needs no key, reaches the route."""
+        assert (await raw_client.post(_WRITE_PROBE)).status_code == 404
+
+
+class TestWriteGate(_GateBase):
+    @pytest.fixture(autouse=True)
+    def _gate(self, monkeypatch):
+        # Open-market posture: public discovery, gated publishing.
+        monkeypatch.setattr(settings, "require_read_api_key", False)
+        monkeypatch.setattr(settings, "require_write_api_key", True)
+
+    async def test_reads_open_when_only_write_gated(self, raw_client):
+        assert (await raw_client.get("/listings")).status_code == 200
+
+    async def test_write_401_without_key(self, raw_client):
+        resp = await raw_client.post(_WRITE_PROBE)
+        assert resp.status_code == 401
+        assert "API key" in resp.json()["detail"]
+
+    async def test_write_403_with_read_key(self, raw_client):
+        raw, _ = await self._mint(raw_client, scope="read")
+        resp = await raw_client.post(
+            _WRITE_PROBE, headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 403
+        assert "write-scoped" in resp.json()["detail"]
+
+    async def test_write_passes_gate_with_write_key(self, raw_client):
+        """Write key clears the gate; 404 is the route rejecting an
+        unknown agent, not the gate rejecting the key."""
+        raw, _ = await self._mint(raw_client, scope="write")
+        resp = await raw_client.post(
+            _WRITE_PROBE, headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 404
+
+
+class TestHealthAlwaysOpen(_GateBase):
+    async def test_health_unaffected_by_gates(self, raw_client, monkeypatch):
+        """/health stays open even with both gates on so liveness
+        probes don't need credentials."""
+        monkeypatch.setattr(settings, "require_read_api_key", True)
+        monkeypatch.setattr(settings, "require_write_api_key", True)
         resp = await raw_client.get("/health")
         assert resp.status_code == 200

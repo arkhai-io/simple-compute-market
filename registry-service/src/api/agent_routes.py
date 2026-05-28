@@ -13,6 +13,7 @@ from sqlalchemy import desc
 from src.db.database import get_db
 from src.db.models import Agent, AgentMetadataEntry
 from src.types import HeartbeatRequest
+from src.api.api_key_auth import require_read_access, require_write_access
 from src.api.utils import (
     verify_heartbeat_signature,
     find_agent_by_id,
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/agents/search")
+@router.get("/agents/search", dependencies=[Depends(require_read_access)])
 async def search_agents(
     q: str = Query(..., description="Search query"),
     endpoint_type: Optional[str] = Query(None, description="Filter by endpoint type"),
@@ -71,7 +72,7 @@ async def search_agents(
     return {"items": items}
 
 
-@router.get("/agents/{agent_id}")
+@router.get("/agents/{agent_id}", dependencies=[Depends(require_read_access)])
 async def get_agent(
     agent_id: str = Path(..., description="Agent ID (canonical eip155:... format or integer PK)"),
     db: Session = Depends(get_db),
@@ -111,7 +112,7 @@ async def get_agent(
     }
 
 
-@router.get("/agents")
+@router.get("/agents", dependencies=[Depends(require_read_access)])
 async def list_agents(
     q: Optional[str] = Query(None, description="Search query"),
     endpoint_type: Optional[str] = Query(None, description="Filter by endpoint type (MCP, A2A, etc.)"),
@@ -190,7 +191,7 @@ async def list_agents(
     }
 
 
-@router.post("/agents/{agent_id}/heartbeat")
+@router.post("/agents/{agent_id}/heartbeat", dependencies=[Depends(require_write_access)])
 async def heartbeat(
     agent_id: str = Path(..., description="Agent ID (canonical ID or integer PK)"),
     request: HeartbeatRequest = Body(default=HeartbeatRequest()),

@@ -139,7 +139,7 @@ class Listing(Base):
 
 
 class ApiKey(Base):
-    """Bearer-token credential for read/write access to a private registry.
+    """Bearer-token credential for accessing a private registry.
 
     Operators mint a key via ``POST /admin/api-keys`` (gated by the
     ``REGISTRY_ADMIN_API_KEY`` env var). The raw secret is shown to
@@ -148,10 +148,15 @@ class ApiKey(Base):
     sets ``revoked_at`` rather than deleting the row, preserving the
     audit trail.
 
-    Auth gating is opt-in: when ``settings.require_api_key`` is False
-    (the default for backward compat) the table is unused and every
-    request is allowed through. When True, the auth dependency on
-    every non-admin / non-health route requires
+    ``scope`` is ``read`` or ``write``; a write key implies read. Read
+    routes (discovery, lookups) accept any active key; write routes
+    (publish / update / delete listings, heartbeat) require a write key.
+    New keys default to ``read`` (least privilege).
+
+    Auth gating is opt-in per direction: when
+    ``settings.require_read_api_key`` / ``require_write_api_key`` are
+    False (the default) that direction is open and the table goes
+    unconsulted for it. When set, the matching route dependency requires
     ``Authorization: Bearer <raw-key>`` and verifies via hash lookup.
     """
     __tablename__ = "api_keys"
@@ -159,6 +164,7 @@ class ApiKey(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)  # human label e.g. "alice-buyer"
     key_hash = Column(String, nullable=False, unique=True)  # sha256(raw_key)
+    scope = Column(String, nullable=False, server_default="read")  # "read" | "write"
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
 

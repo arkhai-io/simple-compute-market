@@ -35,14 +35,23 @@ class Settings(BaseSettings):
     endpoint_check_timeout: int = 10
     heartbeat_ttl_secs: int = 60
     
-    # API key authentication (opt-in; off by default for back-compat).
-    # When ``require_api_key=True`` every non-admin / non-health route
-    # rejects requests without ``Authorization: Bearer <key>`` matching
-    # an active row in the api_keys table. Operators mint and revoke
-    # keys via ``POST /admin/api-keys`` etc., gated by the
+    # API key authentication, gated independently for read and write
+    # access (both opt-in; off by default). Read routes (discovery,
+    # lookups, system diagnostics) require any active key when
+    # ``require_read_api_key`` is set; write routes (publish / update /
+    # delete listings, heartbeat) require a *write*-scoped key when
+    # ``require_write_api_key`` is set. The two toggles compose:
+    #   both off  → fully public registry
+    #   write on  → open discovery, gated publishing (vetted sellers)
+    #   both on   → private registry (buyers hold read keys, sellers write)
+    # Keys carry a scope; a write key implies read. Operators mint and
+    # revoke keys via ``POST /admin/api-keys`` etc., gated by the
     # ``admin_api_key`` env var (separate from the api_keys table).
-    require_api_key: bool = Field(
-        default=False, validation_alias="REGISTRY_REQUIRE_API_KEY",
+    require_read_api_key: bool = Field(
+        default=False, validation_alias="REGISTRY_REQUIRE_READ_API_KEY",
+    )
+    require_write_api_key: bool = Field(
+        default=False, validation_alias="REGISTRY_REQUIRE_WRITE_API_KEY",
     )
     admin_api_key: str | None = Field(
         default=None, validation_alias="REGISTRY_ADMIN_API_KEY",

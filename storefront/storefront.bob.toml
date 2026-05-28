@@ -31,8 +31,8 @@ alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_a
 [registry]
 # Two registry instances: ``registry`` is the public one,
 # ``registry-b`` simulates a private/secondary registry that gates
-# access via Authorization: Bearer (REGISTRY_REQUIRE_API_KEY=true on
-# its container). The seller fans publishes/heartbeats out to both;
+# read + write access via Authorization: Bearer (both gates on in its
+# container). The seller fans publishes/heartbeats out to both;
 # buyers discover the union. Drop registry-b from urls + auth to
 # fall back to single-public-registry behaviour.
 urls                      = ["http://registry:8080", "http://registry-b:8080"]

@@ -16,6 +16,7 @@ from sqlalchemy import desc
 
 from src.db.database import get_db
 from src.db.models import Agent, Listing, OrderStatusEnum
+from src.api.api_key_auth import require_read_access, require_write_access
 from src.api.filter_eval import FilterParamError, build_criteria, evaluate_all
 from src.api.filter_spec import compute_etag, get_loaded_spec
 from src.api.utils import (
@@ -50,7 +51,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/agents/{agent_id}/listings", status_code=201)
+@router.post(
+    "/agents/{agent_id}/listings",
+    status_code=201,
+    dependencies=[Depends(require_write_access)],
+)
 async def publish_listing(
     agent_id: str = Path(..., description="EIP-191 wallet address (0x...)"),
     body: dict = Body(..., description="Marketplace listing data"),
@@ -158,7 +163,7 @@ async def publish_listing(
     }
 
 
-@router.get("/agents/{agent_id}/listings")
+@router.get("/agents/{agent_id}/listings", dependencies=[Depends(require_read_access)])
 async def get_agent_listings(
     agent_id: str = Path(..., description="EIP-191 wallet address (0x...) or legacy canonical ID"),
     status: Optional[str] = Query(None, description="Filter by listing status"),
@@ -188,7 +193,7 @@ async def get_agent_listings(
 _RESERVED_QUERY_PARAMS = {"status", "limit", "offset"}
 
 
-@router.get("/listings")
+@router.get("/listings", dependencies=[Depends(require_read_access)])
 async def query_listings(
     request: Request,
     status: Optional[str] = Query("open", description="Filter by listing status"),
@@ -245,13 +250,19 @@ async def query_listings(
     }
 
 
-@router.put("/listings/{listing_id}")
+@router.put("/listings/{listing_id}", dependencies=[Depends(require_write_access)])
 async def update_listing(
     listing_id: str = Path(..., description="Listing ID"),
     body: dict = Body(..., description="Listing updates"),
     db: Session = Depends(get_db),
 ):
-    """Update a listing (e.g., mark as accepted). Also updates the corresponding symmetric listing."""
+    """Update a listing's lifecycle status (e.g. mark accepted/closed).
+
+    Owner-scoped: when the seller agent has an owner, the signature must
+    come from that owner wallet — the same gate as delete. Listings are
+    fungible and buyers attach to negotiation threads rather than to a
+    listing, so there is no buyer-side update path.
+    """
     listing = db.query(Listing).filter(Listing.listing_id == listing_id).first()
 
     if not listing:
@@ -259,26 +270,16 @@ async def update_listing(
 
     signature = body.pop("signature", None)
     timestamp = body.pop("timestamp", None)
-    signer_agent_id = body.pop("signer_agent_id", None)
 
     seller_agent = find_agent_by_id(db, listing.agent_id)
     if seller_agent and seller_agent.owner:
-        if not signature or timestamp is None or not signer_agent_id:
+        if not signature or timestamp is None:
             raise HTTPException(
                 status_code=401,
-                detail="signature, timestamp, and signer_agent_id required for authenticated listings"
+                detail="Signature and timestamp required for authenticated listings",
             )
         _check_timestamp(timestamp)
-
-        signer_agent = find_agent_by_id(db, signer_agent_id)
-        if not signer_agent or not signer_agent.owner:
-            raise HTTPException(status_code=403, detail="Signer agent not registered or has no owner")
-
-        is_seller = (signer_agent.agent_id == listing.agent_id)
-        if not is_seller and listing.buyer is not None:
-            raise HTTPException(status_code=403, detail="Only the listing seller can update after a buyer is assigned")
-
-        if not verify_order_signature("update_listing", listing_id, timestamp, signature, signer_agent.owner):
+        if not verify_order_signature("update_listing", listing_id, timestamp, signature, seller_agent.owner):
             raise HTTPException(status_code=401, detail="Invalid signature")
 
     if "status" in body:
@@ -304,7 +305,7 @@ async def update_listing(
     }
 
 
-@router.get("/listings/{listing_id}")
+@router.get("/listings/{listing_id}", dependencies=[Depends(require_read_access)])
 async def get_listing(
     listing_id: str = Path(..., description="Listing ID"),
     db: Session = Depends(get_db),
@@ -320,7 +321,11 @@ async def get_listing(
     }
 
 
-@router.delete("/listings/{listing_id}", status_code=204)
+@router.delete(
+    "/listings/{listing_id}",
+    status_code=204,
+    dependencies=[Depends(require_write_access)],
+)
 async def delete_listing(
     listing_id: str = Path(..., description="Listing ID"),
     signature: Optional[str] = Query(None, description="EIP-191 signature"),

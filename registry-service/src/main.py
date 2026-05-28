@@ -44,10 +44,16 @@ async def lifespan(app: FastAPI):
         from src.db.models import ApiKey
         with SessionLocal() as session:
             if session.query(ApiKey).count() == 0:
-                seed = ApiKey(name="bootstrap", key_hash=_hash_key(settings.bootstrap_api_key))
+                # Write scope: the bootstrap key is the operator's own
+                # full-access credential (write implies read).
+                seed = ApiKey(
+                    name="bootstrap",
+                    key_hash=_hash_key(settings.bootstrap_api_key),
+                    scope="write",
+                )
                 session.add(seed)
                 session.commit()
-                logger.info("[BOOTSTRAP] seeded api_keys with the env-provided key")
+                logger.info("[BOOTSTRAP] seeded api_keys with the env-provided write key")
             else:
                 logger.info("[BOOTSTRAP] api_keys table not empty; bootstrap key ignored")
 

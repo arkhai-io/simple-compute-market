@@ -16,8 +16,9 @@ publication — signature recovery is the trust anchor.
   signed publication.
 - Scheme-tagged identity storage: `(scheme, identifier)` is the canonical
   agent key. `eip191` (wallet address) is the only built-in scheme.
-- Optional API-key auth (`REGISTRY_REQUIRE_API_KEY=true`) for private
-  registries.
+- Optional API-key auth, gated independently for read and write
+  (`REGISTRY_REQUIRE_READ_API_KEY`, `REGISTRY_REQUIRE_WRITE_API_KEY`);
+  keys carry a read/write scope.
 
 ## Quick start (local docker-compose)
 
@@ -42,11 +43,15 @@ DATABASE_URL=sqlite:///./indexer.db uv run uvicorn src.main:app --port 8080
 
 ## API key auth
 
-When `REGISTRY_REQUIRE_API_KEY=true`, every non-admin / non-health route
-requires `Authorization: Bearer <key>` matching an active row in the
-`api_keys` table. Operators mint keys via `POST /admin/api-keys` (gated
-by `REGISTRY_ADMIN_API_KEY`); a single bootstrap key can be seeded via
-`REGISTRY_BOOTSTRAP_API_KEY` on first start.
+Read access (discovery, lookups) and write access (publish/update/delete
+listings, heartbeat) gate independently via `REGISTRY_REQUIRE_READ_API_KEY`
+and `REGISTRY_REQUIRE_WRITE_API_KEY`. When a gate is on, the matching
+routes require `Authorization: Bearer <key>` against an active row in
+`api_keys`; write routes additionally require the key's scope to be
+`write` (a write key also satisfies reads). Operators mint keys via
+`POST /admin/api-keys` (gated by `REGISTRY_ADMIN_API_KEY`), passing
+`scope: read|write`; a single write-scoped bootstrap key can be seeded
+via `REGISTRY_BOOTSTRAP_API_KEY` on first start.
 
 ## Database
 

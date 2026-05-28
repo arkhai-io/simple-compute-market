@@ -2217,7 +2217,7 @@ registry-service/tests/
     │                            # shared agent/order fixtures; Hardhat key constants
     ├── test_agents.py           # GET /agents, GET /agents/{id}, GET /agents/search,
     │                            # POST /agents/{id}/heartbeat
-    ├── test_api_keys.py         # REQUIRE_API_KEY mode auth flow
+    ├── test_api_keys.py         # read/write API-key gates + key scopes
     ├── test_filter_spec.py      # GET /filter-spec full HTTP path + ETag header
     ├── test_listings.py         # GET /listings, GET /listings/{id}, POST /agents/{id}/listings,
     │                            # GET /agents/{id}/listings, DELETE /listings/{id}, full lifecycle

@@ -10,8 +10,8 @@ through negotiation start, and they only become non-trivial with two
 
 The docker-compose stack runs:
   * ``registry``    on host port 8080 — public, no auth
-  * ``registry-b``  on host port 8082 — REGISTRY_REQUIRE_API_KEY=true,
-                    seeded with bearer ``test-buyer-token``
+  * ``registry-b``  on host port 8082 — read + write gated, seeded with
+                    a write-scoped bearer ``test-buyer-token``
   * ``bob-storefront``   (Bob)   on host port 8001 — Anvil acct #2,
                          [registry] urls = [registry, registry-b]
   * ``alice-storefront`` (Alice) on host port 8002 — Anvil acct #4,

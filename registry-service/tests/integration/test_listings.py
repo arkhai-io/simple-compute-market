@@ -218,3 +218,50 @@ class TestOrderLifecycle:
         with pytest.raises(RegistryClientError) as exc_info:
             await registry_client.get_listing(order_id)
         assert exc_info.value.status_code == 404
+
+
+class TestUpdateOrderAuth:
+    """update_listing is owner-scoped: the signature must come from the
+    listing seller's owner wallet, mirroring delete. A non-owner cannot
+    mutate someone else's listing."""
+
+    async def test_owner_signed_update_accepted(
+        self, registry_client, authenticated_open_order,
+    ):
+        order_id = authenticated_open_order.listing_id
+        # listing_id goes in `updates` so the client signs over the real
+        # resource_id (update_listing:<listing_id>:<ts>).
+        put = await registry_client.update_listing(
+            order_id,
+            UpdateListingRequest(
+                updates={"listing_id": order_id, "status": "accepted"},
+                private_key=MAKER_PRIVATE_KEY,
+            ),
+        )
+        assert put["status"] == "accepted"
+
+    async def test_non_owner_signature_rejected(
+        self, registry_client, authenticated_open_order,
+    ):
+        """A valid signature from a non-owner wallet is still rejected."""
+        order_id = authenticated_open_order.listing_id
+        with pytest.raises(RegistryClientError) as exc_info:
+            await registry_client.update_listing(
+                order_id,
+                UpdateListingRequest(
+                    updates={"listing_id": order_id, "status": "accepted"},
+                    private_key=TAKER_PRIVATE_KEY,
+                ),
+            )
+        assert exc_info.value.status_code == 401
+
+    async def test_unauthenticated_update_rejected(
+        self, registry_client, authenticated_open_order,
+    ):
+        order_id = authenticated_open_order.listing_id
+        with pytest.raises(RegistryClientError) as exc_info:
+            await registry_client.update_listing(
+                order_id,
+                UpdateListingRequest(updates={"status": "accepted"}),
+            )
+        assert exc_info.value.status_code == 401
