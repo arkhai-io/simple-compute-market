@@ -1,11 +1,11 @@
 # External layer: the EVM chain and deployed contracts.
 #
 # In production, this layer is NOT run by anyone in this repo — it's the
-# real chain (Ethereum, Base, etc.) with Alkahest + ERC-8004 contracts
-# already deployed by someone else.
+# real chain (Ethereum, Base, etc.) with the Alkahest contracts already
+# deployed by someone else.
 #
 # For local development and testing, we provide a test chain (Anvil) with
-# all required contracts deployed. Real users can ignore this file.
+# the Alkahest contracts deployed. Real users can ignore this file.
 #
 # Usage:
 #   docker compose -f compose/external.yml up       # start chain + deploy contracts
@@ -20,7 +20,7 @@ services:
     environment:
       - ANVIL_IP_ADDR=0.0.0.0
 
-  # One-shot: deploys Alkahest + ERC-8004 contracts, writes addresses to
+  # One-shot: deploys the Alkahest contracts, writes addresses to
   # shared-env/.env, then exits. This runs once per fresh chain.
   contracts-deploy:
     image: arkhai:contract-deployer

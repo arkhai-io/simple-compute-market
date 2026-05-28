@@ -1,6 +1,6 @@
-# Registry stack — a private ERC-8004 indexer.
+# Registry stack — a private listings indexer.
 #
-# Sellers and buyers publish/query agent identity and listings here.
+# Sellers publish listings here; buyers query them.
 # Designed to run alongside compose/seller.yml on the same docker network,
 # so the storefront can reach the indexer via the service name
 # (`http://registry:8080`) and external clients can reach it at port 8080
