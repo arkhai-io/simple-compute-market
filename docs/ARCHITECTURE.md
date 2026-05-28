@@ -991,12 +991,16 @@ running ──▶ cancelled (SIGTERM sent to ansible-playbook PID, stored in job
 | `logs` | Raw Ansible stdout+stderr, updated every ~2s while running; credentials redacted |
 | `process_id` | PID of the running `ansible-playbook` subprocess — useful for host-level inspection |
 | `retry_count / max_retries / next_retry_at` | Retry state |
-| `agent_id` | Identity of the seller who submitted the job (wallet address or legacy canonical) |
-| `buyer_agent_id` | Identity of the buyer (tenant) — controls credential visibility |
+| `agent_id` | Identity of the storefront that submitted the job (its wallet address) — informational provenance, not access control |
+| `buyer_agent_id` | Identity of the buyer (tenant) — informational provenance |
 
 **Credentials** are stored separately in the `credentials` table (joined to job by `job_id`), split by role:
-- `root` — granted to seller only; includes root password and SSH key path on host
-- `tenant` — granted to both seller and buyer; includes tenant password and SSH commands (internal + external via FRP)
+- `root` — root password and SSH key path on host
+- `tenant` — tenant password and SSH commands (internal + external via FRP)
+
+`GET /jobs/{job_id}/credentials` returns every role for the job; the
+provisioning service does not gate per-caller. The storefront is the sole
+caller and decides which credentials to surface to which tenant.
 
 ---
 
@@ -1138,12 +1142,14 @@ Useful for pre-flight capacity checking before a `create` job.
 #### Provisioning API Endpoints (`main.py` / `api/routes.py`, port `8081`)
 
 - `GET  /health` — checks API, database connectivity, and job processing loop liveness; returns `{"status": "ok"|"degraded", "checks": {...}}`
-- `POST /jobs` — submit a provisioning job; returns `{"job_id": "...", "status": "queued"}`; accepts `X-Agent-ID` header (required when auth is enabled)
-- `GET  /jobs` — list jobs with pagination (`offset`/`limit`), status filter, sort; authenticated agents see only their own jobs (seller or buyer role)
+- `POST /jobs` — submit a provisioning job; returns `{"job_id": "...", "status": "queued"}`
+- `GET  /jobs` — list jobs with pagination (`offset`/`limit`), status filter, sort
 - `GET  /jobs/{job_id}` — full job status including params, result, error, and retry metadata
-- `GET  /jobs/{job_id}/credentials` — returns credentials for the requesting agent; **requires `X-Agent-ID` header always** (regardless of `ENABLE_AUTH`); sellers get root+tenant, buyers get tenant only
+- `GET  /jobs/{job_id}/credentials` — returns every role's credentials for the job; the storefront (sole caller) decides which to surface to which tenant
 - `GET  /jobs/{job_id}/logs` — raw Ansible stdout+stderr for the job; credentials are redacted in storage but paths/keys may appear; logs update in near-real-time while job is running
 - `POST /jobs/{job_id}/cancel` — cancels a queued job, or sends `SIGTERM` to the Ansible PID if the job is running
+
+Every route except `/health` and the docs routes is gated by `StorefrontAuthMiddleware`: when `storefront_admin_key` is set, the caller must present it as `X-Admin-Key`. This is the operator's `admin_api_key` — the same shared secret the provisioning→storefront lease callback presents — so the storefront↔provisioning hop can cross an untrusted network. The storefront is the only caller; credentials are always mediated back through it, never served to tenants directly.
 
 #### Ansible Diagnostic Endpoints (unified API, port `8081`)
 
@@ -1230,7 +1236,7 @@ provisioning-service/src/
 ├── services/                   # For internal business logic
 ├── models/                     # Request and Response objects for controllers
 ├── middleware/
-│   ├── auth.py                 # AgentAuthMiddleware (X-Agent-ID enforcement; eip191 or eip155 form)
+│   ├── auth.py                 # StorefrontAuthMiddleware (shared X-Admin-Key gate)
 │   └── rate_limit.py           # AgentRateLimitMiddleware (sliding window per agent)
 ├── db/
 │   ├── models.py               # AnsibleJob + Credential SQLAlchemy models (table: ansible_jobs)
@@ -1996,7 +2002,7 @@ This section defines the testing conventions for the Arkhai Market Stack. It exi
 
 **External boundary definition:** Any I/O that crosses a process boundary. In this codebase that means:
 - Ansible subprocess invocations — mocked at `AnsibleService` (replace `start_playbook` / `wait_for_playbook` / `check_connectivity`)
-- The optional registry-lookup HTTP call in `AgentAuthMiddleware` (verifies the caller's X-Agent-ID against an external registry) — bypassed by disabling auth (`enable_auth=false` in test settings)
+- The `StorefrontAuthMiddleware` X-Admin-Key gate — open in tests because the test settings leave `storefront_admin_key` empty
 
 **Test setup pattern:** Use `httpx.AsyncClient` with `ASGITransport` against the real `app` instance, injected via the canonical `FooClient(transport=...)` constructor. Override container providers for `AnsibleService` before the test and restore them after. See `src/tests/integration/conftest.py` for the full fixture implementation.
 
@@ -2035,7 +2041,7 @@ await asyncio.wait_for(job_dispatched.wait(), timeout=5.0)
 
 **What they cover:** Stateless, idempotent verification that a deployed stack is wired correctly — services can reach each other, authentication headers are enforced, health endpoints return 200, expected routes exist. These run as Helm test hooks in Kubernetes.
 
-**What they do not cover:** Service semantics. By the time a smoke test runs, the semantics have already been validated by integration tests. A smoke test for the provisioning service should verify that `GET /health` returns 200 and that `POST /api/v1/hosts/kvm1/vms/` returns 401 without an `X-Agent-ID` header — it should not submit a real provisioning job and poll for completion.
+**What they do not cover:** Service semantics. By the time a smoke test runs, the semantics have already been validated by integration tests. A smoke test for the provisioning service should verify that `GET /health` returns 200 and that `POST /api/v1/hosts/kvm1/vms/` returns 401 without a valid `X-Admin-Key` header — it should not submit a real provisioning job and poll for completion.
 
 **Current location:** `helm/templates/tests/` as Kubernetes Job resources executed by `helm test`.
 

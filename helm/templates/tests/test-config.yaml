@@ -44,4 +44,3 @@ data:
 
     provisioning:
       api_url:     {{ printf "http://%s-provisioning:%d" .Release.Name (int .Values.provisioning.server.port) | quote }}
-      enable_auth: {{ .Values.provisioning.config.enable_auth }}
