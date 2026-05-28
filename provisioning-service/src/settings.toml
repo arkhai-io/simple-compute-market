@@ -24,7 +24,10 @@ log_level = "info"
 database_url = "sqlite:///provisioning.db"
 
 # Ansible
-ansible_cfg = ""  # Path to ansible.cfg; set via active profile (e.g. config-docker.yml)
+# Path to ansible.cfg, exported as ANSIBLE_CONFIG at startup (see main.py).
+# Defaults to the baked /opt path like the other ansible paths below; mock
+# mode overrides it back to "".
+ansible_cfg = "/opt/compute-provisioning-iac/ansible/ansible.cfg"
 ansible_timeout_seconds = 1800
 default_vm_host = "kvm1"
 

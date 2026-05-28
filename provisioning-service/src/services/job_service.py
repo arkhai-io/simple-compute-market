@@ -413,6 +413,12 @@ class AnsibleJobService:
         except Exception as exc:
             logger.exception("Unexpected error processing job %s: %s", job_id, exc)
             try:
+                # The error may have come from a failed flush/commit (e.g. an
+                # IntegrityError while storing credentials), which leaves the
+                # session in an aborted transaction. Roll back first so the
+                # recovery query/update below can run instead of silently
+                # re-raising and leaving the job stuck in `running`.
+                db.rollback()
                 job = (
                     db.query(AnsibleJob)
                     .filter(AnsibleJob.id == job_id)
@@ -426,7 +432,10 @@ class AnsibleJobService:
                         error=f"Internal error: {exc}",
                     )
             except Exception:
-                pass
+                logger.exception(
+                    "Failed to mark job %s as failed after an unexpected error",
+                    job_id,
+                )
         finally:
             # Clean up the DB-rendered temp inventory file if one was created.
             if rendered_inv_path is not None:

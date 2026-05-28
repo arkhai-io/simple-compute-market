@@ -1,8 +1,10 @@
 # ---------------------------------------------------------------------------
 # Profile: seller
 # Activated when the provisioning service runs as part of `compose/seller.yml`
-# (compose sets ACTIVE_PROFILES=seller). Layers on top of `docker` defaults
-# already baked into the image.
+# (compose sets ACTIVE_PROFILES=seller). Base defaults — including the
+# ansible paths and ansible_cfg/ANSIBLE_CONFIG — come from settings.toml,
+# which is baked into the image; this profile only overrides the values
+# that differ for the seller compose stack.
 #
 # storefront_admin_key is intentionally omitted here — config.py resolves
 # it from the storefront TOML mounted at /etc/arkhai/storefront.toml so a
