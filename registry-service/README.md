@@ -23,7 +23,7 @@ publication — signature recovery is the trust anchor.
 ## Quick start (local docker-compose)
 
 ```bash
-# From repo root — brings up anvil, contracts-deploy, registry, both
+# From repo root — brings up anvil (contracts pre-baked), registry, both
 # storefronts and provisioning.
 docker compose up -d
 

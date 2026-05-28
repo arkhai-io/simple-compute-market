@@ -114,12 +114,11 @@ OFFER_RESOURCE = {
 DEMAND_RESOURCE = {
     "token": {
         "symbol": "MOCK",
-        # MockERC20 deployed by alkahest at fixed deterministic address —
-        # see market-contract-deployer/alkahest-transactions.json `_mock_erc20`.
-        # Stage 07 escrows real tokens against this contract so that
-        # storefront's pre-settlement on-chain verifier (commit 03e47bf)
-        # actually finds the EAS attestation. Account #1 (test buyer)
-        # is pre-funded by the alkahest deploy script.
+        # MockERC20 deployed by alkahest at a fixed deterministic address.
+        # The buyer (account #1) is pre-funded with it in the baked chain
+        # state (see test-env/generate_state.py). Stage 07 escrows real
+        # tokens against this contract so the storefront's pre-settlement
+        # on-chain verifier (commit 03e47bf) finds the EAS attestation.
         "contract_address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
         "decimals": 0,   # listing-display only; raw amounts are what land on-chain
     },

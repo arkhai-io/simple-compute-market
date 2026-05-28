@@ -4,9 +4,8 @@
 # public registry only, while Bob fans out to both. DO NOT use these
 # keys on any public network.
 #
-# Account #4 (not #3): the contracts-deploy script reserves account
-# #3 (0x90F7...b906) as a sentinel agent that's pre-seeded into
-# IdentityRegistry. Reusing it for Alice would collide — her
+# Account #4 (not #3): account #3 (0x90F7...b906) is reserved as a
+# sentinel agent. Reusing it for Alice would collide — her
 # perform_registration() returns numeric_agent_id=0 ("no changes")
 # and she ends up sharing the sentinel agent's identity. So we pick
 # the next unclaimed Anvil account.

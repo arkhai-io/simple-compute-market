@@ -2,7 +2,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-runtime-images build-seller dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra dist-clean init init-prerequisites init-submodules init-dependencies init-zero-tier init-buyer init-storefront init-registry-service push-runtime-artifacts push-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: build build-dev build-seller dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-registry-service push-runtime-artifacts push-images push-helm push-wheels push-cli clobber-wheels
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -17,7 +17,7 @@ DIST_DIR := ${CURDIR}/.dist
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra
+dist: dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service
 
 dist-storefront-client: ## Build arkhai-storefront-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -55,12 +55,6 @@ dist-service: ## Build market-service wheel into .dist/
 	@ls $(DIST_DIR)/market_service-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: market-service produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-infra: ## Build market-infra wheel into .dist/
-	-mkdir -p $(DIST_DIR)
-	cd infra && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/market_infra-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: market-infra produced a platform-specific wheel — must build inside Docker" && exit 1)
-
 dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 	helm package helm/ --destination $(DIST_DIR)
 
@@ -79,19 +73,18 @@ test-storefront:
 	cd storefront && make reinit && make test
 
 #Basic flow: build (optional), init (downloads if not built), run
-#Build should construct all deployment and runtime arifacts locally.
-# build-test-env must run after build-market-contract-deployer (uses the image).
-# build-runtime-images parallelizes the three independent service images.
-build: build-buyer build-market-contract-deployer build-test-env build-runtime-images build-test-image
-
-build-runtime-images: init-prerequisites dist
+# `build` produces the production artifacts: the three runtime images
+# (registry, storefront, provisioning) and the buyer CLI binary. `build-dev`
+# adds the test chain + integration-test image needed for the local e2e stack.
+build: init-prerequisites dist build-buyer
 	$(MAKE) -j3 build-registry build-storefront build-provisioning
+
+build-dev: build build-test-env build-test-image
 
 # Seller-only build: the two runtime images a seller actually needs
 # (`arkhai:storefront`, `arkhai:provisioning`) and just the wheels they
-# consume via --find-links. Skips `dist-infra` (operator-side CLI; not
-# consumed by either image) and `build-registry` (sellers point at someone
-# else's registry).
+# consume via --find-links. Skips `build-registry` (sellers point at
+# someone else's registry).
 build-seller: init-prerequisites dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service ## Build only what a seller needs: storefront + provisioning images.
 	$(MAKE) -j2 build-storefront build-provisioning
 
@@ -103,22 +96,15 @@ build-seller: init-prerequisites dist-storefront-client dist-storefront dist-pol
 build-seller-for-host: ## build-seller with appuser UID/GID matching the current user
 	$(MAKE) build-seller APPUSER_UID=$(shell id -u) APPUSER_GID=$(shell id -g)
 
-build-buyer: init-prerequisites init-dependencies
+build-buyer: init-prerequisites init-buyer
 	cd buyer && make build
 
-build-market-contract-deployer:
-	cd market-contract-deployer && make build
-
-#The anvil rpc url is hard coded inside of deploy_alkhahest.py. Don't change the network name or anvil container name.
-#Yes it's weird running containers to build a container but the --init <genesis.json> way of initializing anvil looks tedious
+# Regenerate the baked Anvil state + Alkahest address book by running
+# EnvTestManager once and snapshotting its chain (see test-env/generate_state.py).
+# Runs through the storefront venv, which pins alkahest_py; the relative
+# --find-links keeps storefront/uv.lock paths portable.
 build-anvil-state:
-	-docker network create anvil
-	-mkdir shared-env
-	docker run -d --rm --network anvil --name anvil -p 8545:8545 -e ANVIL_IP_ADDR=0.0.0.0 -v ./test-env/state:/state --user root --entrypoint anvil ghcr.io/foundry-rs/foundry:${FOUNDRY_VERSION} --dump-state /state/state.json
-	docker run --rm --network anvil --name contracts-deploy -e ENV_FILE=/app/shared-env/.env -v ./shared-env:/app/shared-env/ arkhai:contract-deployer
-	echo "Todo: add a step here to verify contract deployment"
-	docker stop anvil
-	-docker network rm anvil
+	cd storefront && uv run --find-links ../.dist python ../test-env/generate_state.py
 
 build-test-env: build-anvil-state
 	cd test-env && make build
@@ -148,11 +134,10 @@ init-prerequisites:
 init-submodules:
 	GIT_TRACE=1 GIT_CURL_TRACE=1 git submodule update --init
 
-init-dependencies: init-zero-tier init-buyer
-
-#requires sudo
+# ZeroTier overlay install (sudo). Standalone — run by whoever sets up the
+# overlay network; not pulled into `build` so a default build needs no sudo.
 init-zero-tier:
-	cd infra && make install
+	cd scripts/zerotier && make install
 
 init-buyer:
 	cd buyer && make init
@@ -242,7 +227,7 @@ PROVISIONING_VERSION      := $(shell sed -n 's/^version = "\(.*\)"/\1/p' provisi
 #
 # Prerequisites:
 #   make dist              — wheels must exist in .dist/
-#   make build-runtime-images  — Docker images must be built locally
+#   make build             — Docker images must be built locally
 #   make build-buyer       — buyer/dist/market binary must exist
 #
 # Targets can be run individually or all at once via push-runtime-artifacts.

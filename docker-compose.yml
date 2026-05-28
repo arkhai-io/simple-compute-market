@@ -1,5 +1,7 @@
 services:
-  # 1. Local test chain (Anvil)
+  # 1. Local test chain (Anvil). The arkhai:test-env image boots anvil with
+  #    the Alkahest contracts + mock tokens pre-baked into its state snapshot
+  #    (test-env/state/state.json), so no separate deploy step is needed.
   anvil:
     image: arkhai:test-env
     container_name: anvil
@@ -7,28 +9,19 @@ services:
       - "8545:8545"
     environment:
       - ANVIL_IP_ADDR=0.0.0.0
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -X POST http://localhost:8545 -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' | grep -q result || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
-  # 2. One-shot contract deployer — writes alkahest contract addresses to
-  #    shared-env/.env, then exits. Agents depend on this completing before
-  #    they start (registry no longer reads on-chain addresses).
-  contracts-deploy:
-    image: arkhai:contract-deployer
-    depends_on:
-      anvil:
-        condition: service_started
-    environment:
-      - ENV_FILE=/app/shared-env/.env
-      - RPC_URL=http://anvil:8545
-    volumes:
-      - ./shared-env:/app/shared-env
-    command: sh -c ./deploy-local.sh
-
-  # 3. Registry/Indexer service
+  # 2. Registry/Indexer service
   registry:
     image: arkhai:registry
     depends_on:
-      contracts-deploy:
-        condition: service_completed_successfully
+      anvil:
+        condition: service_healthy
     ports:
       - "8080:8080"
     env_file:
@@ -49,7 +42,7 @@ services:
       retries: 3
       start_period: 10s
 
-  # 3b. Second Registry/Indexer — a "private" registry alongside the
+  # 2b. Second Registry/Indexer — a "private" registry alongside the
   # public one, exercising the multi-registry code paths permanently
   # in CI. Same image, same chain, independent SQLite. Both EventSync
   # the same anvil so the seller's on-chain agent registration is
@@ -58,8 +51,8 @@ services:
   registry-b:
     image: arkhai:registry
     depends_on:
-      contracts-deploy:
-        condition: service_completed_successfully
+      anvil:
+        condition: service_healthy
     ports:
       - "8082:8080"
     env_file:
@@ -92,7 +85,7 @@ services:
       retries: 3
       start_period: 10s
 
-  # 4. Bob's storefront — the primary test seller.
+  # 3. Bob's storefront — the primary test seller.
   # Buyers are pure HTTP clients (the `market` CLI / market_buyer
   # library) — no buyer container in this stack. To exercise a buy
   # against this seller, run `market buy ...` from the host (or a
@@ -143,7 +136,7 @@ services:
         limits:
           memory: 512m
 
-  # 5b. Alice's storefront — exercises heterogeneous registry
+  # 3b. Alice's storefront — exercises heterogeneous registry
   # topology in the multi-registry e2e scenario. Alice's config.toml
   # lists only the public registry, so her listings appear only
   # there, while Bob's fan out to both. This is the only thing that
@@ -182,7 +175,7 @@ services:
         limits:
           memory: 512m
 
-  # 6. Redis (job queue for provisioning service)
+  # 4. Redis (job queue for provisioning service)
   redis:
     image: redis:7-alpine
     ports:
@@ -193,7 +186,7 @@ services:
       timeout: 3s
       retries: 3
 
-  # 7. Provisioning service.
+  # 5. Provisioning service.
   # Configuration is bundled in the image (provisioning-service/src/settings.toml,
   # plus dynaconf profile loading via ACTIVE_PROFILES). Compose-time
   # overrides go in `environment:` below.

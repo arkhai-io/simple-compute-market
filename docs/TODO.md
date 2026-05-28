@@ -24,27 +24,13 @@ Pending architectural work and known operational issues for the Arkhai market st
 
 ---
 
-### Chain-Agnostic Contract Deployment
-
-**Status:** Planned. CLI surface exists; the underlying deployer scripts still ignore it.
-
-**Problem:** The `market-infra chain deploy-contracts` CLI accepts `--rpc-url`, `--deployer-key`, and `--alkahest/--eas` flags and exports `RPC_URL` / `ANVIL_RPC_URL` into the deployer subprocess environment. But `market-contract-deployer/deploy_alkahest.py:22` still has `RPC_URL = "http://anvil:8545"` as a module-level constant and uses Anvil account #0 (`0xf39Fd6…`) as the deployer. The script does not read the env vars the CLI plumbs through, so passing `--rpc-url` to `market-infra` has no effect on the actual deployment.
-
-**Planned fix:**
-- Make `deploy_alkahest.py` actually read `RPC_URL` / `ANVIL_RPC_URL` and a deployer key from env (with sensible Anvil defaults preserved for the local-dev path).
-- The `--no-eas --alkahest` separation in `market-infra chain deploy-contracts` is upstream-blocked: the alkahest deploy fixture currently always bundles EAS. Until alkahest accepts an externally-deployed EAS address, the flags are coupled and the CLI warns when toggled apart.
-
-This closes the bootstrapping path for a market operator standing up the stack against a real chain — the wiring is mostly in place, only `deploy_alkahest.py` needs to honour what the CLI already exposes.
-
----
-
 ### Native Launch CLI for Provisioning Service
 
-**Status:** Planned. Registry has a wrapper (`market-infra registry start` → `make serve`); provisioning doesn't.
+**Status:** Planned. The registry is launched directly via `registry-service` (`make serve`); provisioning has no native launch path.
 
 **Problem:** The provisioning service is launched today only via raw `uvicorn` in its Dockerfile (`provisioning-service/Dockerfile:105`). There is no native, `pip install …` + run path — running it without docker-compose requires manually invoking uvicorn against the right module and managing the worker process separately. This blocks the "provider runs a provisioning service" half of the four-parties topology: a provider should be able to install and run the service on their own machine without inheriting the dev stack's container assumptions.
 
-**Planned fix:** add a `provisioning-service` console script that wraps both the API uvicorn process and the worker process (likely as two subcommands: `provisioning-service serve` and `provisioning-service worker`). Compose / Helm configs then invoke the console script instead of `uvicorn …` directly. Mirrors how `registry-service` is now reachable via `market-infra registry start`.
+**Planned fix:** add a `provisioning-service` console script that wraps both the API uvicorn process and the worker process (likely as two subcommands: `provisioning-service serve` and `provisioning-service worker`). Compose / Helm configs then invoke the console script instead of `uvicorn …` directly.
 
 The `provisioning-service` wheel stays its own distributable — it's operated by providers, who already install `market-storefront` from a separate wheel, and the existing Helm chart structure already treats it as a separate workload.
 

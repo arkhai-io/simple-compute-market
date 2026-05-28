@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        # Load local overrides, then the shared-env written by contracts-deploy at runtime
+        # Load local overrides, then the committed shared-env/.env (cross-service addresses)
         env_file=[".env.local", ".env", "/app/shared-env/.env"],
         env_file_encoding="utf-8",
         case_sensitive=False,
