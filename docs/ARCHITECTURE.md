@@ -152,7 +152,7 @@ In production this component is absent — the agent and registry configs point 
 
 **Role:** Listings registry — discovery surface for the marketplace.
 
-FastAPI service that stores published listings and serves them through a filter-spec-driven `GET /listings` query API. Sellers publish via signed `POST /agents/{wallet}/listings`; buyers fetch via the discovery query. Agent rows are created lazily on first signed publication — the signature is the trust anchor, so no chain-walk is needed.
+FastAPI service that stores published listings and serves them through a filter-spec-driven `GET /listings` query API. Sellers publish via signed `POST /listings` (the publishing identity + signature ride in the body); buyers fetch via the discovery query. A listing is owned by a **publisher** — a principal identified by one or more signing `(scheme, identifier)` identities (today a single `eip191` wallet). Publisher + identity rows are created lazily on first signed publication — the signature is the trust anchor, so no chain-walk is needed. Listings carry `storefront_url` (where a buyer negotiates), joined from the owning publisher.
 
 **Ports:** `8080` (default)
 
@@ -161,12 +161,12 @@ FastAPI service that stores published listings and serves them through a filter-
 - Prod: PostgreSQL
 
 **Key APIs:**
-- `GET /agents` — discover registered agents
-- `GET /agents/{agentId}` — agent detail + health status
-- `POST /agents/{agentId}/heartbeat` — agents POST signed heartbeats to stay "healthy"
-- `POST /agents/{agentId}/listings` — publish/update an order
-- `GET /listings` — global order book query; query params are **spec-driven** (resolved against `filter-spec.yaml` — see below), not a hardcoded signature
-- `PUT /listings/{listing_id}` — update order status (e.g., mark accepted/closed)
+- `POST /listings` — publish/update a listing (signed body: publishing identity + signature). Lazily creates the publisher.
+- `GET /listings` — global order book query; query params are **spec-driven** (resolved against `filter-spec.yaml` — see below), not a hardcoded signature. `?publisher=<identifier>` narrows to one publisher.
+- `GET /listings/{listing_id}` — single listing
+- `PUT /listings/{listing_id}` / `DELETE /listings/{listing_id}` — update/remove; signature verified against the listing's publisher identity (owner-scoped)
+- `GET /publishers` — list publishers; `?identifier=` resolves a publisher by a signing identity
+- `GET /publishers/{publisher_id}` — the publisher entity: `storefront_url`, `identities`, `created_at`
 - `POST /api/v1/listings/validate-publish` — JSON Schema dry-run check of a publish candidate against `filter-spec.yaml`'s `listing_shape` (Draft 2020-12); used by the buyer/seller pre-publish path
 - `GET /api/v1/filter-spec` — current filter spec; ETag-tagged for client caching
 
@@ -217,19 +217,19 @@ Loaded once at import via `lru_cache`; path overridable via
 the image, mount the new YAML over the baked one and restart the registry;
 buyers detect the change via the ETag on the next `/filter-spec` fetch.
 
-**Agent identity format:** scheme-tagged `(scheme, identifier)` pairs.
+**Publisher identity format:** scheme-tagged `(scheme, identifier)` pairs.
 The default and only built-in scheme is `eip191`, whose identifier is
-the lowercase 0x hex wallet address. Listings are published under
-`/agents/{wallet}/listings` and the registry creates agent rows lazily
-on first signed publication. Custom schemes register via
-`service.identity.register_identity_scheme(verifier)`.
+the lowercase 0x hex wallet address. A publisher may hold more than one
+identity (the seam for cross-chain/cross-scheme linking); today it holds
+one. Listings are published via signed `POST /listings` and the registry
+creates the publisher + identity rows lazily on first publication. Custom
+schemes register via `service.identity.register_identity_scheme(verifier)`.
 
 **Source layout:**
 ```
 registry-service/src/
-├── api/             # FastAPI routes (agent_routes, listing_routes, system_routes)
-├── db/              # SQLAlchemy models + Alembic migrations
-├── services/        # health_check.py
+├── api/             # FastAPI routes (publisher_routes, listing_routes, system_routes)
+├── db/              # SQLAlchemy models (publishers, identities, listings, api_keys) + Alembic migrations
 ├── types/
 └── main.py
 ```
@@ -256,24 +256,19 @@ the configured alkahest contract addresses on each chain, starts the
 negotiation watchdog, and preflights the provisioning service.
 
 Identity is the wallet address (`settings.wallet.address`) — no
-per-chain on-chain registration step.
-
-The `market-storefront register` console verb delegates to the same
-`perform_registration()` helper used at startup. Operators can run it
-manually to inspect or update registration.
+on-chain registration step and nothing to register ahead of time. The
+storefront becomes known to a registry the first time it publishes a
+listing (the registry creates its publisher row lazily).
 
 **Key source layout:**
 ```
 storefront/src/market_storefront/
 ├── cli.py                  # `market-storefront` console-script entry
-├── commands/
-│   └── register.py         # In-process registration helper
 ├── server.py               # FastAPI app, lifespan, run_serve()
 ├── container.py            # Resolved service singletons (populated in lifespan)
-├── agent.py                # Startup/background-task helpers:
-│                           #   _startup_tasks, _ensure_agent_identity, _start_heartbeat,
-│                           #   _preflight_provisioning, _probe_chain_addresses,
-│                           #   _maybe_join_zerotier_network
+├── agent.py                # Startup-task helpers:
+│                           #   _startup_tasks, _preflight_provisioning,
+│                           #   _probe_chain_addresses, _maybe_join_zerotier_network
 ├── controllers/
 │   ├── listings_controller.py     # GET/POST /api/v1/listings/* + /listings/create|close|refund|…
 │   ├── negotiations_controller.py # GET/POST /api/v1/listings/*/negotiations/*
@@ -300,7 +295,7 @@ storefront/src/market_storefront/
 │   └── system_service.py          # SystemService: health/seed/evaluate + registry checks
 ├── groups/                 # CLI groups: config, escrow, network
 ├── cli_publish.py, cli_portfolio.py, cli_logs.py, cli_common.py
-├── negotiation_watchdog.py, agent_heartbeat.py
+├── negotiation_watchdog.py
 ├── utils/
 │   ├── config.py, sqlite_client.py, action_executor.py
 │   ├── sync_negotiation.py, settlement_jobs.py, serializer.py
@@ -351,9 +346,9 @@ storefront/src/market_storefront/
 │  └───────────────────────────────────────────────────────────────┘ │
 │                                                                     │
 │  Background tasks                                                   │
-│  ┌─────────────────────┐  ┌───────────────┐                        │
-│  │ negotiation_watchdog│  │agent_heartbeat│                        │
-│  └─────────────────────┘  └───────────────┘                        │
+│  ┌─────────────────────┐                                           │
+│  │ negotiation_watchdog│                                           │
+│  └─────────────────────┘                                           │
 │                                                                     │
 │  Resource lifecycle owned by provisioning service LeaseWatchdog,    │
 │  which calls PATCH /api/v1/admin/portfolio/resources/{id} on expiry │
@@ -2083,7 +2078,7 @@ autouse `reap_buyer_settle_subprocess` teardown is a no-op when
 | 00a–00h | Readiness | storefront/registry/provisioning health, negotiation-strategy probe, provisioning mock-mode wiring, alkahest config, storefront↔provisioning link |
 | 00f | Resource seed | `POST /api/v1/admin/portfolio/resources/import` upserts the inline e2e compute CSV |
 | 02a / 02b | Create listing | `POST /api/v1/listings/create paused=True` (procedural — no dry-run step) |
-| 03a / 03c / 03b | Publish & index | `POST /api/v1/listings/validate-publish` → `wait-for-agent` long-poll → resume publishes to registry |
+| 03a / 03b | Publish | `POST /api/v1/listings/validate-publish` → resume publishes to registry (the publisher is created lazily on this first signed publish) |
 | 04a | Primary registry visibility | listing visible on registry |
 | 05a / 05b | Negotiate | `evaluate-negotiate` → `POST /negotiate/new`; assert `round_decided` event with decision=counter |
 | 06b | Force-accept + terminal | guard no prior exit/accept; `POST .../force-accept` → accept; thread terminal=success |
@@ -2131,9 +2126,9 @@ selection.
 
 **`/api/v1/negotiate/new` signing and escrow terms:** `StorefrontClient.negotiate_new()` and `SyncStorefrontClient.negotiate_new()` add EIP-191 `X-Signature` and `X-Timestamp` headers automatically. They accept `listing_id`, `buyer_address`, `initial_price`, `duration_seconds`, `buyer_agent_url`, `ssh_public_key`, `token`, and `escrow_expiration_unix`, then build the structured `provision_terms` and `escrow_terms_proposal` body required by the server. The buyer proposal's `literal_fields["token"]` must match one of the listing's `accepted_escrows[i].literal_fields.token` advertisements; omitting it makes the helper send the zero address, which is only valid for listings without a typed payment token. If an e2e test raises `TypeError: SyncStorefrontClient.negotiate_new() got an unexpected keyword argument 'token'`, the runtime is importing a stale `arkhai-storefront-client` install. Rebuild the wheel and reinstall consumers with `make reinit` so `uv.lock` is re-resolved against the current `.dist/` wheel.
 
-**Current full-deal details:** stage 03c uses the storefront's
-`GET /api/v1/system/wait-for-registry-agent` long-poll, not a direct
-registry wait. The full-deal happy path assumes one primary registry; private
+**Current full-deal details:** publishing is lazy — the publisher row is
+created on the first signed publish (stage 03b), so there is no
+index-before-publish wait. The full-deal happy path assumes one primary registry; private
 registry auth and multi-registry fan-out/fan-in belong in separate
 topology-specific e2e tests. Stage 07 creates the real buyer escrow and arms
 the mock provisioning gate. The test imports its own inline compute resource
@@ -2152,14 +2147,12 @@ belong in separate smoke or e2e tests for operator interventions.
 
 **`wait_for_stage_event` helper:** In `conftest.py`. Wraps `SyncStorefrontClient.wait_for_stage_event()` with pytest-friendly timeout error. Used at stage 08b to await the `resource_reserved` event (provisioning job queued) without a sleep loop. The underlying client method polls `GET /api/v1/system/events` with a cursor and 500ms interval. For stages where the observable is a background job reaching terminal state rather than a discrete pipeline event, prefer a server-side long-poll (see `wait_for_settlement` below).
 
-**`wait_for_registry_agent_ready` (storefront client):** `SyncStorefrontClient.wait_for_registry_agent_ready(timeout=90.0)` calls `GET /api/v1/system/wait-for-registry-agent` — a single server-side long-poll on the storefront. The storefront calls `registry_auth_check()` (which fetches `GET /agents/{canonical}` from the registry using the storefront's live runtime agent ID) every 1 s until the result is definitive (anything other than `"agent_not_found"`), or the timeout elapses. Returns `RegistryAgentReadyResponse(ready, registry_auth, elapsed_ms)`. Used at stage 03c. **Advantage over querying the registry directly:** no agent ID config is needed — the storefront uses its own live runtime ID (set by `_ensure_agent_identity` at startup), so the wait is correct regardless of what numeric ID was assigned on-chain.
-
 **`wait_for_settlement` (storefront client):** `SyncStorefrontClient.wait_for_settlement(escrow_uid, timeout=60.0)` calls `GET /api/v1/admin/settle/{uid}/wait` — a server-side long-poll on the admin settle controller. The storefront polls `load_settlement_job` every 1 s until the job status is `"ready"` or `"failed"`, or the timeout elapses (server-enforced max 120 s). Returns `SettleWaitResponse(ready, status, provisioning_job_id, elapsed_ms)`. Used at stage 09b. Returns immediately if the job is already in a terminal state when called. Callers must check `result.ready` (timeout flag) and `result.status` (the actual job state). The admin-only auth boundary is intentional: this endpoint surfaces internal settlement job state that the buyer does not need; the buyer's observable is the existing `GET /settle/{uid}/status` point-in-time read.
 
-**Pattern: server-side long-poll for background work.** Any time a test needs to gate on a background task completing a unit of work, add an admin/system endpoint that blocks server-side until the condition is met, then call it once from the test. This is preferable to client-side polling loops for two reasons: the wait is observable (the endpoint logs elapsed time), and it avoids the mismatch between client timeout and server-side poll interval that caused the stage 09b flakiness. The `wait-for-registry-agent` and `wait-for-settlement` endpoints are the canonical examples of this pattern.
+**Pattern: server-side long-poll for background work.** Any time a test needs to gate on a background task completing a unit of work, add an admin/system endpoint that blocks server-side until the condition is met, then call it once from the test. This is preferable to client-side polling loops for two reasons: the wait is observable (the endpoint logs elapsed time), and it avoids the mismatch between client timeout and server-side poll interval that caused the stage 09b flakiness. The `wait-for-settlement` endpoint is the canonical example of this pattern.
 
 **`GET /api/v1/system/status` top-level fields:** In addition to `checks`, the full diagnostic status endpoint exposes three top-level fact fields (admin key required):
-- `agent_id` — the storefront's canonical `eip155:…` agent ID (from live runtime state; `None` if not yet registered)
+- `agent_id` — the storefront's identity: its lowercase `eip191` wallet address. This is the `X-Agent-ID` it presents to the provisioning service, so consumers read it here to address jobs the storefront owns. `None` if no wallet is configured.
 - `chain_id` — the EVM chain ID (from `CONFIG.chain_id` or RPC fallback; `None` if both fail)
 - `resource_count` — number of rows in the local `resources` table. `0` immediately signals that the CSV importer wrote to a different SQLite path than the server reads — the root cause of `no_matching_inventory` 409s. Exposed by `SyncStorefrontClient.get_system_status().resource_count`.
 
@@ -2207,32 +2200,30 @@ provisioning-service/src/tests/
 registry-service/tests/
 ├── conftest.py                  # db_session fixture (in-memory SQLite), sign_order_auth helper
 ├── unit/
-│   ├── test_agent_id_lookup.py  # find_agent_by_id — canonical ID parsing, case folding
 │   ├── test_order_auth_utils.py # EIP-191 signature verification helpers (exhaustive)
 │   ├── test_filter_eval.py      # build_criteria + evaluate_all — spec-driven listing
 │   │                            # filter semantics
 │   └── test_filter_spec.py      # YAML loader, FilterDecl validation, ETag stability + sensitivity
 └── integration/
     ├── conftest.py              # RegistryClient wired to in-process app via httpx ASGITransport;
-    │                            # shared agent/order fixtures; Hardhat key constants
-    ├── test_agents.py           # GET /agents, GET /agents/{id}, GET /agents/search,
-    │                            # POST /agents/{id}/heartbeat
+    │                            # publisher/identity/listing fixtures; Hardhat key constants
+    ├── test_publishers.py       # GET /publishers (list + resolve-by-identifier), GET /publishers/{id}
+    ├── test_eip191_publish.py   # signed POST /listings lazily creates publisher + identity
     ├── test_api_keys.py         # read/write API-key gates + key scopes
     ├── test_filter_spec.py      # GET /filter-spec full HTTP path + ETag header
-    ├── test_listings.py         # GET /listings, GET /listings/{id}, POST /agents/{id}/listings,
-    │                            # GET /agents/{id}/listings, DELETE /listings/{id}, full lifecycle
+    ├── test_listings.py         # POST /listings, GET /listings{,/{id}}, ?publisher= filter,
+    │                            # PUT/DELETE owner-scoped auth, full lifecycle
     ├── test_listings_filtering.py # spec-driven query params (gpu_model, ram_gb_min lower-bound
     │                            # alias, token array projection, If-Match 412, unknown filter 400)
     ├── test_validate_publish.py # JSON Schema dry-run cases (happy + each rejection class)
-    └── test_system.py           # GET /health (including 503 on DB failure),
-                                 # GET /api/v1/system/config, /sync, /stats
+    └── test_system.py           # GET /health (including 503 on DB failure), GET /api/v1/system/stats
 ```
 
 **Client contract enforcement in registry-service integration tests:**
 
 All integration tests import `RegistryClient` from the `arkhai-registry-client` wheel and exercise the API exclusively through it.  The transport is `httpx.ASGITransport(app=app)` — real HTTP through the full FastAPI stack, no network socket.  If the API renames a field or changes a response shape, the client's `from_dict` parser will either raise or silently drop the field, and the assertion will fail immediately.  The `get_db` dependency is overridden per-test to yield the fixture's isolated in-memory SQLite session.
 
-The two legitimate raw-call exceptions (rejection-path tests and `db_session` state setup) apply here exactly as documented in the provisioning-service section above. `RegistryClient` and `SyncRegistryClient` expose typed methods covering `/api/v1/system/config`, `/api/v1/system/sync`, `/api/v1/system/stats`, `PUT /listings/{id}`, and `validate_publish_listing()` (`POST /api/v1/listings/validate-publish`) with `ValidatePublishRequest`/`ValidatePublishResponse` models. `ListingRequest` and `ValidatePublishRequest` carry a `seller` field (`""` default) to satisfy the filter-spec's required-publish-candidate constraint; the storefront populates it from `BASE_URL_OVERRIDE`/seller URL.
+The two legitimate raw-call exceptions (rejection-path tests and `db_session` state setup) apply here exactly as documented in the provisioning-service section above. `RegistryClient` and `SyncRegistryClient` expose typed methods covering `/api/v1/system/stats`, `GET /publishers{,/{id}}`, `POST /listings`, `PUT`/`DELETE /listings/{id}`, and `validate_publish_listing()` (`POST /api/v1/listings/validate-publish`) with `ValidatePublishRequest`/`ValidatePublishResponse` models. `ListingRequest` and `ValidatePublishRequest` carry a `storefront_url` field (`""` default) to satisfy the filter-spec's required-publish-candidate constraint; the storefront populates it from `BASE_URL_OVERRIDE`/its storefront URL.
 
 **service package (`market-service`)**:
 ```
