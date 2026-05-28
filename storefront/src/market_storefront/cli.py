@@ -5,7 +5,6 @@ operations live in market-buyer (`market` console script). The two
 ship as separate wheels; install both if you both buy and sell.
 
 Subcommands:
-    register     Register agent on-chain (one-shot, before `serve`).
     serve        Run the storefront HTTP server in-process.
     publish      Post listings from the agent DB. Mirror of
                  `market buy` on the buyer side.

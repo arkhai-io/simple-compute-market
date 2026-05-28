@@ -204,11 +204,7 @@ class AdminSettleController:
         timeout: float = Query(default=60.0, gt=0, le=120,
                                description="Maximum seconds to wait (server-enforced, max 120)"),
     ) -> SettleWaitResponse:
-        """Server-side long-poll: block until settlement is terminal or timeout elapses.
-
-        Mirrors the registry-agent wait pattern from
-        GET /api/v1/system/wait-for-registry-agent.
-        """
+        """Server-side long-poll: block until settlement is terminal or timeout elapses."""
         _terminal = {"ready", "failed"}
         start = time.monotonic()
         deadline = start + timeout

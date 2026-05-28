@@ -153,7 +153,6 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
             update_request = UpdateListingRequest(
                 updates={"status": "closed"},
                 private_key=settings.wallet.private_key,
-                agent_id=_canonical_agent_id(),
             )
             payloads = {url: update_request for url in target_urls}
             results = await registry_client.update_listing_per_registry(
@@ -405,7 +404,6 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
     accepted_escrows = order_dict.get("accepted_escrows") or []
 
     try:
-        agent_id_for_registry = _canonical_agent_id() or AGENT_ID
         async with _make_registry_client() as registry_client:
             order_request = ListingRequest(
                 listing_id=order_id,
@@ -416,7 +414,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
             )
             payloads = {url: order_request for url in registry_client.urls}
             results = await registry_client.publish_listing_per_registry(
-                agent_id_for_registry, payloads, private_key=settings.wallet.private_key,
+                payloads, private_key=settings.wallet.private_key,
             )
         await _record_publications(order_id, results)
         any_ok = any(r["success"] for r in results)

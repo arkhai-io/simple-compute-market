@@ -57,32 +57,6 @@ class StageEventResponse(BaseModel):
     count: int
 
 
-class RegistryAgentReadyResponse(BaseModel):
-    """Response from GET /api/v1/system/wait-for-registry-agent.
-
-    ``ready=True`` means every configured chain reached a definitive
-    non-pending state — either ``"ok"`` (agent indexed on that chain
-    and owner verified) or a terminal error (``"owner_mismatch"``,
-    ``"unconfigured"``, etc.) on at least one chain. ``ready=False``
-    means the request timed out while at least one chain was still
-    in a transient state (``agent_not_found`` indexing-lag,
-    ``agent_not_resolved`` startup-task-in-flight, etc.).
-
-    ``registry_auth`` is the aggregate string — ``"ok"`` iff every chain
-    is ok; else ``"<chain>:<status>"`` for the first non-ok chain.
-    ``auth_per_chain`` carries the full per-chain dict for operators
-    inspecting a multi-chain setup; it's empty when no chains are
-    configured.
-
-    ``elapsed_ms`` is the approximate server-side wait time.
-    """
-
-    ready: bool
-    registry_auth: str
-    auth_per_chain: dict[str, str] = Field(default_factory=dict)
-    elapsed_ms: int
-
-
 class ResourcePatchRequest(BaseModel):
     """Request body for PATCH /api/v1/admin/portfolio/resources/{resource_id}.
 

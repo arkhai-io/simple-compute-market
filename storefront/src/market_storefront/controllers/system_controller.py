@@ -14,7 +14,6 @@ import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
 from market_storefront.models.system_models import (
     HealthResponse,
-    RegistryAgentReadyResponse,
     StageEventResponse,
 )
 from market_storefront.server import is_globally_paused
@@ -49,29 +48,6 @@ class SystemController:
         body = await self._svc.get_health(include_registry=True)
         body["paused"] = is_globally_paused()
         return HealthResponse(**body)
-
-    @router.get(
-        "/api/v1/system/wait-for-registry-agent",
-        response_model=RegistryAgentReadyResponse,
-        summary="Long-poll until this agent is indexed in the registry (admin)",
-        description=(
-            "Blocks server-side until every configured chain's "
-            "``registry_auth_check`` reaches a definitive state — i.e. the "
-            "registry has indexed this agent on each chain and the storefront "
-            "can confirm ownership, or a terminal error occurred on at least "
-            "one chain. Returns immediately when no chain remains in a "
-            "transient state (``agent_not_found``, ``agent_not_resolved``, "
-            "``timeout``, ``unreachable``). Times out after *timeout* seconds "
-            "(max 120). The response carries the aggregate verdict and a "
-            "per-chain dict for multi-chain operators."
-        ),
-        dependencies=[Depends(require_admin_key)],
-    )
-    async def wait_for_registry_agent(
-        self,
-        timeout: Annotated[float, Query(gt=0, le=120)] = 90.0,
-    ) -> RegistryAgentReadyResponse:
-        return RegistryAgentReadyResponse(**(await self._svc.wait_for_registry_agent(timeout)))
 
     @router.get(
         "/api/v1/system/events",

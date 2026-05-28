@@ -581,36 +581,6 @@ class SettleResponse:
 
 
 @dataclass
-class RegistryAgentReadyResponse:
-    """Response from GET /api/v1/system/wait-for-registry-agent.
-
-    ``registry_auth`` is the aggregate verdict: ``"ok"`` iff every
-    configured chain is verified, else ``"<chain>:<status>"`` for the
-    first non-ok chain. ``auth_per_chain`` carries the full per-chain
-    dict for operators inspecting a multi-chain setup.
-    """
-
-    ready: bool = False
-    registry_auth: str = ""
-    elapsed_ms: int = 0
-    auth_per_chain: dict[str, str] = field(default_factory=dict)
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "RegistryAgentReadyResponse":
-        known = {"ready", "registry_auth", "elapsed_ms", "auth_per_chain"}
-        raw_per_chain = d.get("auth_per_chain") or {}
-        per_chain = {str(k): str(v) for k, v in raw_per_chain.items()} if isinstance(raw_per_chain, dict) else {}
-        return cls(
-            ready=bool(d.get("ready", False)),
-            registry_auth=str(d.get("registry_auth", "")),
-            elapsed_ms=int(d.get("elapsed_ms", 0)),
-            auth_per_chain=per_chain,
-            extra={k: v for k, v in d.items() if k not in known},
-        )
-
-
-@dataclass
 class SettleStatusResponse:
     """Response from GET /api/v1/settle/{escrow_uid}/status."""
 
