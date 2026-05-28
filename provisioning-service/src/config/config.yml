@@ -12,6 +12,6 @@
 #   golden_root_ssh_filename, golden_root_ssh_password, golden_image_name
 #   golden_gcs_bucket, golden_gcs_project
 #   frp_server_addr, frp_domain, frp_dashboard_password
-#   enable_auth, registry_url, registry_cache_ttl_seconds, registry_cache_max_size
+#   storefront_url, storefront_admin_key
 #   enable_rate_limiting, rate_limit_requests_per_minute, log_level
 # ---------------------------------------------------------------------------

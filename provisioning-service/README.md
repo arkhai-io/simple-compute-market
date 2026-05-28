@@ -87,5 +87,5 @@ docker run --rm --env-file .env.local -p 8081:8081 \
 | `PROVISIONING_REPO_ROOT` | *(auto-detected)* | Override project root path |
 | `PLAYBOOK_PATH` | *(auto-resolved)* | Override playbook path |
 | `INVENTORY_PATH` | *(auto-resolved)* | Override inventory path |
-| `ENABLE_AUTH` | `false` | Enable agent authentication |
+| `PROVISIONING_STOREFRONT_ADMIN_KEY` | *(empty)* | Shared secret with the storefront; gates every non-health request as `X-Admin-Key`. Empty = auth disabled (dev). |
 | `ENABLE_RATE_LIMITING` | `false` | Enable per-agent rate limiting |

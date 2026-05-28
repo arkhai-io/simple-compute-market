@@ -24,7 +24,6 @@ import signal
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from config import Settings
@@ -80,7 +79,6 @@ class AnsibleJobService:
     async def submit(
         self,
         params: AnsibleJobParams,
-        agent_id: str | None,
         job_queue,
     ) -> JobSubmitResponse:
         """Persist a new job and place it on the in-process queue."""
@@ -98,8 +96,6 @@ class AnsibleJobService:
                 id=job_id,
                 status=JobStatus.queued.value,
                 params=raw_params,
-                agent_id=agent_id,
-                buyer_agent_id=params.buyer_agent_id,
                 escrow_uid=params.escrow_uid,
                 retry_count=0,
                 max_retries=max_retries,
@@ -113,7 +109,6 @@ class AnsibleJobService:
 
     def list_jobs(
         self,
-        agent_id: str | None,
         offset: int = 0,
         limit: int = 20,
         status_filter: str | None = None,
@@ -126,13 +121,6 @@ class AnsibleJobService:
         }
         with self._session_factory() as db:
             query = db.query(AnsibleJob)
-            if agent_id:
-                query = query.filter(
-                    or_(
-                        AnsibleJob.agent_id == agent_id,
-                        AnsibleJob.buyer_agent_id == agent_id,
-                    )
-                )
             if status_filter:
                 query = query.filter(AnsibleJob.status == status_filter)
             if escrow_uid:
@@ -147,8 +135,8 @@ class AnsibleJobService:
                 limit=limit,
             )
 
-    def get_job(self, job_id: str, agent_id: str | None) -> JobStatusResponse:
-        """Return full job status. Raises LookupError for 404, PermissionError for 403."""
+    def get_job(self, job_id: str) -> JobStatusResponse:
+        """Return full job status. Raises LookupError for 404."""
         with self._session_factory() as db:
             job = (
                 db.query(AnsibleJob)
@@ -157,19 +145,14 @@ class AnsibleJobService:
             )
             if not job:
                 raise LookupError(f"Job {job_id} not found")
-
-            # agent_id=None means "skip auth" — test endpoints under /test/*
-            # call this from a server-side admin context (mock profile only).
-            if job.agent_id and agent_id is not None:
-                is_seller = job.agent_id == agent_id
-                is_buyer = job.buyer_agent_id and job.buyer_agent_id == agent_id
-                if not is_seller and not is_buyer:
-                    raise PermissionError(f"Job {job_id} belongs to another agent")
-
             return self._to_status_response(job)
 
-    def get_credentials(self, job_id: str, agent_id: str) -> CredentialListResponse:
-        """Return credentials for the requesting agent. Raises on auth failures."""
+    def get_credentials(self, job_id: str) -> CredentialListResponse:
+        """Return all credentials for a job. Raises LookupError for 404.
+
+        The provisioning service trusts its caller (the storefront); the
+        storefront decides which credentials to surface to which tenant.
+        """
         with self._session_factory() as db:
             job = (
                 db.query(AnsibleJob)
@@ -178,20 +161,10 @@ class AnsibleJobService:
             )
             if not job:
                 raise LookupError(f"Job {job_id} not found")
-
-            is_seller = job.agent_id and job.agent_id == agent_id
-            is_buyer = job.buyer_agent_id and job.buyer_agent_id == agent_id
-            if not is_seller and not is_buyer:
-                raise PermissionError(
-                    "Access denied: you are not the seller or buyer of this job"
-                )
 
             creds = (
                 db.query(Credential)
-                .filter(
-                    Credential.job_id == job_id,
-                    Credential.granted_to == agent_id,
-                )
+                .filter(Credential.job_id == job_id)
                 .all()
             )
             return CredentialListResponse(
@@ -208,7 +181,7 @@ class AnsibleJobService:
                 ],
             )
 
-    def get_logs(self, job_id: str, agent_id: str | None) -> JobLogsResponse:
+    def get_logs(self, job_id: str) -> JobLogsResponse:
         """Return raw Ansible logs for a job."""
         with self._session_factory() as db:
             job = (
@@ -219,15 +192,9 @@ class AnsibleJobService:
             if not job:
                 raise LookupError(f"Job {job_id} not found")
 
-            if job.agent_id and agent_id:
-                is_seller = job.agent_id == agent_id
-                is_buyer = job.buyer_agent_id and job.buyer_agent_id == agent_id
-                if not is_seller and not is_buyer:
-                    raise PermissionError(f"Job {job_id} belongs to another agent")
-
             return JobLogsResponse(job_id=job.id, status=job.status, logs=job.logs)
 
-    def cancel_job(self, job_id: str, agent_id: str | None) -> dict:
+    def cancel_job(self, job_id: str) -> dict:
         """Cancel a queued or running job. Sends SIGTERM if Ansible is running."""
         with self._session_factory() as db:
             job = (
@@ -237,9 +204,6 @@ class AnsibleJobService:
             )
             if not job:
                 raise LookupError(f"Job {job_id} not found")
-
-            if agent_id and job.agent_id and job.agent_id != agent_id:
-                raise PermissionError("Cannot cancel another agent's job")
 
             if job.status not in (JobStatus.queued.value, JobStatus.running.value):
                 return {
@@ -544,7 +508,6 @@ class AnsibleJobService:
             gcs_bucket_url=params.get("gcs_bucket_url"),
             gcs_image_path=params.get("gcs_image_path"),
             vm_expiry_at=params.get("vm_expiry_at"),
-            buyer_agent_id=params.get("buyer_agent_id"),
             max_retries=params.get("max_retries"),
         )
 
@@ -574,13 +537,12 @@ class AnsibleJobService:
 
         sanitized = copy.deepcopy(result_payload)
 
-        def _store_role(role_name: str, role_data: dict, granted_to: str) -> None:
-            if not role_data or not granted_to:
+        def _store_role(role_name: str, role_data: dict) -> None:
+            if not role_data:
                 return
             cred = Credential(
                 job_id=job.id,
                 role=role_name,
-                granted_to=granted_to,
                 password=role_data.get("password"),
                 ssh_commands=role_data.get("ssh_commands"),
                 ssh_key_path_host=role_data.get("ssh_key_path_host"),
@@ -588,17 +550,8 @@ class AnsibleJobService:
             )
             db.add(cred)
 
-        tenant_data = auth.get("tenant", {})
-        root_data = auth.get("root", {})
-
-        if job.agent_id:
-            if root_data:
-                _store_role(CredentialRole.root.value, root_data, job.agent_id)
-            if tenant_data:
-                _store_role(CredentialRole.tenant.value, tenant_data, job.agent_id)
-
-        if job.buyer_agent_id and tenant_data:
-            _store_role(CredentialRole.tenant.value, tenant_data, job.buyer_agent_id)
+        _store_role(CredentialRole.root.value, auth.get("root", {}))
+        _store_role(CredentialRole.tenant.value, auth.get("tenant", {}))
 
         sanitized.pop("authentication", None)
         if isinstance(sanitized.get("ansible_result"), dict):
@@ -701,7 +654,5 @@ class AnsibleJobService:
             retry_count=job.retry_count,
             max_retries=job.max_retries,
             next_retry_at=job.next_retry_at,
-            agent_id=job.agent_id,
-            buyer_agent_id=job.buyer_agent_id,
             escrow_uid=job.escrow_uid,
         )
