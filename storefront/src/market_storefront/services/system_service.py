@@ -104,9 +104,13 @@ class SystemService:
 
         if include_registry:
             # Top-level diagnostic facts. Identity is the wallet (eip191),
-            # not a per-chain ERC-8004 NFT; emit one entry per configured
-            # chain carrying the wallet identifier.
+            # not a per-chain ERC-8004 NFT — a single chain-agnostic value.
+            # ``agent_id`` is the identity the storefront presents to the
+            # provisioning service (X-Agent-ID); consumers read it here to
+            # address jobs the storefront owns. ``identities`` keeps the
+            # per-chain breakdown for multi-chain operators.
             wallet = (settings.wallet.address or "").lower() or None
+            result["agent_id"] = wallet
             identities: dict[str, dict[str, Any]] = {}
             for name, chain in CHAINS.items():
                 identities[name] = {
