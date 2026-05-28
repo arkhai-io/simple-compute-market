@@ -700,11 +700,12 @@ class StorefrontClient(_StorefrontClientBase):
         shape. ``initial_amount`` is the absolute opening amount in base
         units of the payment token (already multiplied out from any
         per-hour rate). ``chain_name`` + ``escrow_address`` pick the
-        listing's accepted_escrows entry to propose against; ``token``
-        populates ``fields["token"]``. Empty values produce zero-address
-        / placeholder strings — legal in environments where the seller's
-        listing has no typed payment token; the seller validates against
-        its acceptance set.
+        listing's accepted_escrows entry to propose against. ``fields``
+        carries the negotiated ``amount`` (the per-round value); ``token``
+        is a literal escrow value and goes in ``literal_fields["token"]``,
+        where the seller's settlement verifier reads it. Empty values
+        produce zero-address / placeholder strings — legal where the
+        seller's listing has no typed payment token.
         """
         headers = _signed_request_headers(
             self._private_key,
@@ -723,10 +724,8 @@ class StorefrontClient(_StorefrontClientBase):
             "proposal": {
                 "chain_name": chain_name or "anvil",
                 "escrow_address": escrow_address or ("0x" + "0" * 40),
-                "fields": {
-                    "amount": int(initial_amount),
-                    "token": token or ("0x" + "0" * 40),
-                },
+                "fields": {"amount": int(initial_amount)},
+                "literal_fields": {"token": token or ("0x" + "0" * 40)},
                 "expiration_unix": exp_unix,
             },
             "buyer_agent_url": buyer_agent_url,
@@ -1455,10 +1454,8 @@ class SyncStorefrontClient(_StorefrontClientBase):
             "proposal": {
                 "chain_name": chain_name or "anvil",
                 "escrow_address": escrow_address or ("0x" + "0" * 40),
-                "fields": {
-                    "amount": int(initial_amount),
-                    "token": token or ("0x" + "0" * 40),
-                },
+                "fields": {"amount": int(initial_amount)},
+                "literal_fields": {"token": token or ("0x" + "0" * 40)},
                 "expiration_unix": exp_unix,
             },
             "buyer_agent_url": buyer_agent_url,
