@@ -363,10 +363,15 @@ class AgreementContext:
     Today only ``seller_wallet`` is read (by RecipientArbiterCodec).
     Future codecs that bind more of the agreement into the demand
     (TrustedOracle, AttestationProperty, etc.) read the other fields.
+
+    ``agreed_amount`` is the absolute payment total in base units of
+    the escrow's payment token (post-negotiation; per-hour rates only
+    appear as listing broadcasts). ``duration_seconds`` is the lease
+    window the seller commits to.
     """
 
     seller_wallet: str
-    agreed_price: float
+    agreed_amount: int
     duration_seconds: int
 
 
@@ -457,7 +462,7 @@ def known_arbiter_kinds() -> list[str]:
 def build_payment_obligation_data(
     *,
     seller_wallet: str,
-    agreed_price: float,
+    agreed_amount: int,
     duration_seconds: int,
     token_contract_address: str,
     chain_name: str,
@@ -470,41 +475,37 @@ def build_payment_obligation_data(
     call this helper with the negotiated inputs and the chain config, so
     they produce identical expected obligation_data. Any divergence
     between sides means a misconfiguration somewhere — wrong token,
-    wrong chain config, wrong amount formula, wrong arbiter kind — and
-    the seller's verifier flags it before any provisioning side-effect.
+    wrong chain config, wrong amount, wrong arbiter kind — and the
+    seller's verifier flags it before any provisioning side-effect.
 
     Returns the literal ``ERC20EscrowObligation.ObligationData`` struct:
 
         {arbiter: <kind-specific address for chain_name>,
          demand:  "0x" + <kind-specific demand bytes>,
          token:   token_contract_address,
-         amount:  int(agreed_price * duration_seconds / 3600)}
+         amount:  agreed_amount}
 
-    ``agreed_price`` is a float in base units per hour; multiplying by
-    duration and dividing by 3600 in float, then rounding to int once,
-    keeps sub-hour leases precise (integer ``agreed_price // 3600`` would
-    truncate to zero for small rates and short durations).
+    ``agreed_amount`` is the absolute payment total in base units of
+    ``token_contract_address`` — already multiplied out from any per-hour
+    rate during negotiation. The middleware chain owns price math; this
+    helper just wires obligation bytes.
 
     The arbiter address and demand bytes are produced by the registered
-    ``ArbiterCodec`` matching ``arbiter_kind``. The amount formula is
-    today's hard-coded policy (per-hour rate × duration / 3600); step 6
-    moves it into a per-escrow-kind helper as the escrow contract
-    dispatch becomes polymorphic.
+    ``ArbiterCodec`` matching ``arbiter_kind``.
     """
     codec = get_arbiter_codec(arbiter_kind)
     agreement = AgreementContext(
         seller_wallet=seller_wallet,
-        agreed_price=agreed_price,
+        agreed_amount=int(agreed_amount),
         duration_seconds=duration_seconds,
     )
     arbiter_address = codec.resolve_address(chain_name, config_path=addr_config_path)
     demand_bytes = codec.encode_demand(agreement)
-    amount_raw = int(float(agreed_price) * max(duration_seconds, 1) / 3600)
     return {
         "arbiter": arbiter_address,
         "demand": "0x" + demand_bytes.hex(),
         "token": token_contract_address,
-        "amount": amount_raw,
+        "amount": int(agreed_amount),
     }
 
 

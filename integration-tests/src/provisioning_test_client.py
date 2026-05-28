@@ -13,7 +13,7 @@ Usage::
     # Add a rule that pauses before returning
     client.add_mock_rule(
         rule_id="pause-create",
-        match={"vm_action": "create", "vm_host": "ww1"},
+        match={"vm_action": "create", "vm_host": "kvm1"},
         pause_before_result=True,
     )
 
@@ -52,12 +52,19 @@ class ProvisioningTestClient:
         Default HTTP timeout in seconds.  ``wait_for_job`` and ``drain``
         use a longer per-call timeout matching the server-side ``timeout``
         query parameter.
+    admin_key:
+        Shared secret presented as ``X-Admin-Key``. The ``/test/*`` and
+        watchdog routes sit behind the same gate as the rest of the API, so
+        when the deployment configures a key this must match it.
     """
 
-    def __init__(self, base_url: str, *, timeout: float = 15.0) -> None:
+    def __init__(
+        self, base_url: str, *, timeout: float = 15.0, admin_key: str | None = None
+    ) -> None:
         self._base = base_url.rstrip("/")
         self._timeout = timeout
-        self._client = httpx.Client(base_url=self._base, timeout=timeout)
+        headers = {"X-Admin-Key": admin_key} if admin_key else {}
+        self._client = httpx.Client(base_url=self._base, timeout=timeout, headers=headers)
 
     def close(self) -> None:
         self._client.close()

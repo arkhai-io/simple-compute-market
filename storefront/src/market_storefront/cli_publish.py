@@ -45,39 +45,47 @@ from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
 def _import_csv(csv_path: str, db: Optional[str]) -> None:
     """Invoke the existing import_resources_csv.py script directly.
 
-    Uses ``storefront/.venv/bin/python`` rather than ``uv run`` — the
-    latter fails cleanly from outside the storefront project, and the
-    storefront venv is a stable dependency of the provider-side
-    deployment anyway.
+    Uses ``sys.executable`` (the python running this CLI) and locates
+    the script relative to this package — works in both dev checkouts
+    (``storefront/scripts/...``) and the container runtime
+    (``/app/scripts/...``).
     """
-    script = REPO_ROOT / "storefront" / "scripts" / "import_resources_csv.py"
-    python = REPO_ROOT / "storefront" / ".venv" / "bin" / "python"
-    if not python.exists():
+    import sys
+    package_root = Path(__file__).resolve().parents[2]
+    script = package_root / "scripts" / "import_resources_csv.py"
+    if not script.exists():
         raise typer.BadParameter(
-            f"Storefront venv not found at {python}. "
-            "Run `cd storefront && uv sync` first."
+            f"import_resources_csv.py not found at {script}. "
+            "This shouldn't happen with a normal install — file a bug."
         )
     cmd = [
-        str(python), str(script),
+        sys.executable, str(script),
         "--csv", str(Path(csv_path).resolve()),
     ]
     if db:
         cmd.extend(["--db-path", str(Path(db).resolve())])
-    subprocess.run(cmd, cwd=str(REPO_ROOT), check=True)
+    subprocess.run(cmd, cwd=str(package_root), check=True)
 
 
 def _available_resources(db_path: str) -> list[dict]:
     """Read all `state='available'` compute resources from the agent DB.
 
-    Returns row dicts including per-resource pricing (min_price, token).
-    NULL pricing means "no per-row override; fall back to config defaults."
+    Returns row dicts including per-resource pricing (min_price, token)
+    and any template-materialized ``accepted_escrows`` entries that the
+    CSV importer wrote at import time. NULL pricing means "no per-row
+    override; fall back to config defaults"; a non-empty
+    ``accepted_escrows`` short-circuits the legacy pricing path entirely
+    at publish time.
     """
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
     try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(resources)").fetchall()}
+        has_accepted = "accepted_escrows" in cols
+        select_extra = ", accepted_escrows" if has_accepted else ""
         rows = conn.execute(
-            """SELECT resource_id, resource_subtype, unit, value, state, attributes,
-                      min_price, token
+            f"""SELECT resource_id, resource_subtype, unit, value, state, attributes,
+                      min_price, token{select_extra}
                FROM resources
                WHERE resource_type = 'compute.gpu' AND state = 'available'
                ORDER BY resource_id""",
@@ -91,6 +99,16 @@ def _available_resources(db_path: str) -> list[dict]:
             attrs = json.loads(row["attributes"] or "{}")
         except json.JSONDecodeError:
             attrs = {}
+        accepted_escrows: list[dict] | None = None
+        if has_accepted:
+            raw = row["accepted_escrows"]
+            if isinstance(raw, str) and raw.strip():
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        accepted_escrows = parsed
+                except json.JSONDecodeError:
+                    accepted_escrows = None
         out.append({
             "resource_id": row["resource_id"],
             "gpu_model": attrs.get("gpu_model"),
@@ -99,6 +117,7 @@ def _available_resources(db_path: str) -> list[dict]:
             "region": attrs.get("region"),
             "min_price": row["min_price"],
             "token": row["token"],
+            "accepted_escrows": accepted_escrows,
         })
     return out
 
@@ -222,6 +241,96 @@ def _resolve_pricing(
     return min_price, token_address
 
 
+def _scale_template_entries(
+    entries: list[dict[str, Any]],
+    chains: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Scale template-materialized rate values to base units, in place.
+
+    The CSV importer stores ``accepted_escrows`` entries with rate values
+    as the raw human strings from the slot assignments (``"0.5"`` for
+    half a USDC). At publish time we look up token decimals against the
+    entry's chain and scale to a uint256-safe decimal-digit string.
+
+    Raises ``ValueError`` (per entry) with a row-actionable message when
+    the entry references an unknown chain or a token whose metadata
+    can't be resolved on that chain.
+    """
+    from service.clients.token import resolve_token, TokenResolutionError
+
+    scaled: list[dict[str, Any]] = []
+    for raw_entry in entries:
+        entry = dict(raw_entry)
+        chain_name = entry.get("chain_name")
+        if not chain_name or chain_name not in chains:
+            raise ValueError(
+                f"accepted_escrows entry references unknown chain "
+                f"{chain_name!r}; configured: {sorted(chains)}"
+            )
+        chain = chains[chain_name]
+        literal_fields = dict(entry.get("literal_fields") or {})
+        token_address = literal_fields.get("token")
+        if not isinstance(token_address, str) or not token_address:
+            raise ValueError(
+                f"accepted_escrows entry on chain {chain_name!r} is "
+                f"missing literal_fields.token; cannot scale rates"
+            )
+        try:
+            token_meta = resolve_token(
+                token_address,
+                rpc_url=chain.rpc_url,
+                chain_id=chain.chain_id,
+            )
+        except TokenResolutionError as exc:
+            raise ValueError(
+                f"accepted_escrows: token {token_address} unresolvable on "
+                f"chain {chain_name!r}: {exc}"
+            ) from exc
+        literal_fields["token"] = token_meta.contract_address.lower()
+        decimals = token_meta.decimals
+
+        new_rates: list[dict[str, Any]] = []
+        for rate in entry.get("rates") or []:
+            raw_value = rate.get("value")
+            if raw_value is None or raw_value == "":
+                raise ValueError(
+                    f"accepted_escrows entry on chain {chain_name!r} "
+                    f"has a rate with no value (field={rate.get('field')!r})"
+                )
+            try:
+                human = Decimal(str(raw_value))
+            except (InvalidOperation, ValueError, TypeError) as exc:
+                raise ValueError(
+                    f"accepted_escrows rate value {raw_value!r} on chain "
+                    f"{chain_name!r} is not numeric"
+                ) from exc
+            base_units = human * (Decimal(10) ** decimals)
+            if base_units != base_units.to_integral_value():
+                raise ValueError(
+                    f"accepted_escrows rate value {raw_value!r} on chain "
+                    f"{chain_name!r} has more decimals than the token's "
+                    f"{decimals}"
+                )
+            if base_units < 0:
+                raise ValueError(
+                    f"accepted_escrows rate value {raw_value!r} on chain "
+                    f"{chain_name!r} is negative"
+                )
+            new_rates.append({
+                "field": rate.get("field"),
+                "per": rate.get("per"),
+                "value": str(int(base_units)),
+            })
+
+        scaled.append({
+            "chain_name": chain_name,
+            "escrow_address": str(entry.get("escrow_address") or "").lower(),
+            "literal_fields": literal_fields,
+            "rates": new_rates,
+        })
+    return scaled
+
+
 def _publish_round(
     *,
     db_path: str,
@@ -241,14 +350,14 @@ def _publish_round(
     Pricing is per-row: ``resources.min_price`` / ``resources.token`` win
     over the [seller.pricing] defaults. Tristate publish behaviour:
 
-      * Row ``min_price > 0``  → publish with ``price_per_hour = min_price``
+      * Row ``min_price > 0``  → publish with a single amount/hour rate
         (public price).
-      * Row ``min_price = "0"`` → publish with ``price_per_hour = 0``
+      * Row ``min_price = "0"`` → publish with the rate value ``"0"``
         (free / public-test offering; explicit per-row, defaults don't
         override).
       * Row ``min_price`` unset and no default → controlled by
         ``publish_priceless``:
-          - True  → publish with ``price_per_hour = None`` (hidden reserve;
+          - True  → publish with ``rates = []`` (hidden reserve;
             buyer proposes; seller's strategy uses
             ``[seller.pricing].default_min_price`` as the negotiation floor).
           - False → skip the row, surfaced in ``failed``.
@@ -267,6 +376,49 @@ def _publish_round(
         if res["resource_id"] in skip_ids:
             skipped.append(res)
             continue
+
+        # Template-materialized path: the CSV importer wrote a fully
+        # resolved ``accepted_escrows`` list onto the row. We only need
+        # to scale rate values to base units (token decimals lookup) and
+        # publish — no CHAINS broadcast, no min_price/token reading,
+        # no get_erc20_escrow_obligation_nontierable.
+        template_entries = res.get("accepted_escrows")
+        if template_entries:
+            from .utils.config import CHAINS
+            if not CHAINS:
+                failed.append((res, "no [chains.<name>] tables configured"))
+                continue
+            try:
+                accepted_escrows = _scale_template_entries(template_entries, CHAINS)
+            except ValueError as exc:
+                failed.append((res, str(exc)))
+                continue
+            max_duration_seconds = (
+                res.get("max_duration_seconds") or default_max_duration_seconds
+            )
+            offer = {
+                "resource_id": res["resource_id"],
+                "gpu_model": res["gpu_model"],
+                "gpu_count": res["gpu_count"],
+                "sla": res["sla"],
+                "region": res["region"],
+            }
+            try:
+                resp = _publish_offer(
+                    base_url, offer, accepted_escrows, max_duration_seconds,
+                    wallet_address, private_key,
+                )
+                published.append({
+                    "resource": res,
+                    "response": resp,
+                    "accepted_escrows": accepted_escrows,
+                })
+            except typer.Exit:
+                failed.append((res, "HTTP error (see above)"))
+            except Exception as exc:
+                failed.append((res, str(exc)))
+            continue
+
         min_price, token_address = _resolve_pricing(
             res,
             default_min_price=default_min_price,
@@ -287,12 +439,27 @@ def _publish_round(
             ))
             continue
         from service.clients.token import resolve_token, TokenResolutionError
-        try:
-            token_meta = resolve_token(
-                token_address, rpc_url=rpc_url, chain_id=chain_id,
-            )
-        except TokenResolutionError as exc:
-            failed.append((res, f"chain resolve failed for {token_address}: {exc}"))
+        from .utils.config import CHAINS
+        if not CHAINS:
+            failed.append((res, "no [chains.<name>] tables configured"))
+            continue
+        token_meta = None
+        token_resolve_errors: list[str] = []
+        for chain in CHAINS.values():
+            try:
+                token_meta = resolve_token(
+                    token_address, rpc_url=chain.rpc_url, chain_id=chain.chain_id,
+                )
+                break
+            except TokenResolutionError as exc:
+                token_resolve_errors.append(f"{chain.name}: {exc}")
+                continue
+        if token_meta is None:
+            failed.append((
+                res,
+                f"chain resolve failed for {token_address}: "
+                + "; ".join(token_resolve_errors),
+            ))
             continue
         token_address = token_meta.contract_address.lower()
         token_decimals = token_meta.decimals
@@ -346,25 +513,34 @@ def _publish_round(
             "region": res["region"],
         }
         from service.clients.alkahest import get_erc20_escrow_obligation_nontierable
-        from .utils.config import settings
-        try:
-            escrow_address = get_erc20_escrow_obligation_nontierable(
-                settings.chain.name,
-                config_path=settings.chain.alkahest_address_config_path,
-            )
-        except Exception as exc:
+        accepted_escrows: list[dict] = []
+        per_chain_errors: list[str] = []
+        for chain in CHAINS.values():
+            try:
+                escrow_address = get_erc20_escrow_obligation_nontierable(
+                    chain.name,
+                    config_path=chain.alkahest_address_config_path,
+                )
+            except Exception as exc:
+                per_chain_errors.append(f"{chain.name}: {exc}")
+                continue
+            accepted_escrows.append({
+                "chain_name": chain.name,
+                "escrow_address": escrow_address.lower(),
+                "literal_fields": {"token": token_address},
+                "rates": [{
+                    "field": "amount",
+                    "per": "hour",
+                    "value": advertised_amount,
+                }] if advertised_amount is not None else [],
+            })
+        if not accepted_escrows:
             failed.append((
                 res,
-                f"alkahest config could not resolve ERC20 escrow address on "
-                f"chain {settings.chain.name!r}: {exc}",
+                "alkahest config could not resolve ERC20 escrow address on any "
+                f"configured chain: {'; '.join(per_chain_errors)}",
             ))
             continue
-        accepted_escrows = [{
-            "chain_name": settings.chain.name,
-            "escrow_address": escrow_address.lower(),
-            "fields": {"token": token_address},
-            "price_per_hour": advertised_amount,
-        }]
         try:
             resp = _publish_offer(
                 base_url, offer, accepted_escrows, max_duration_seconds,
@@ -472,12 +648,13 @@ def _print_publish_table(console: Console, published: list[dict], failed: list[t
     summary.add_column("Price/hr × Token")
     summary.add_column("Listing ID", overflow="fold")
     summary.add_column("Status")
+    from service.schemas import accepted_token_address, primary_rate_value
     for entry in published:
         res = entry["resource"]
         resp = entry["response"]
         first_escrow = (entry["accepted_escrows"] or [{}])[0]
-        price = first_escrow.get("price_per_hour")
-        token = (first_escrow.get("fields") or {}).get("token", "-")
+        price = primary_rate_value(first_escrow)
+        token = accepted_token_address(first_escrow) or "-"
         summary.add_row(
             res["resource_id"],
             f"{res['gpu_model']} x{res['gpu_count']}",
@@ -526,33 +703,33 @@ def register(app: typer.Typer) -> None:
             30.0, "--poll-interval",
             help="Seconds between scans in --watch mode.",
         ),
-        agent_url: Optional[str] = typer.Option(
+        storefront_url: Optional[str] = typer.Option(
             None, "--storefront-url", "-a",
-            help="Seller agent base URL (default: seller.base_url from config.toml).",
+            help="Storefront base URL (default: base_url from storefront.toml).",
         ),
         db: Optional[str] = typer.Option(
             None, "--db",
-            help="Explicit seller agent SQLite DB path "
-                 "(default: seller.db_path from config.toml).",
+            help="Explicit storefront SQLite DB path "
+                 "(default: db_path from storefront.toml).",
         ),
     ) -> None:
-        """Publish sell orders for every priced compute resource on the seller's node.
+        """Publish sell orders for every priced compute resource on the storefront.
 
         Pricing is per-resource: each row's `min_price` / `token` columns
-        win over the [seller.pricing] defaults. Resources without either
-        a row-level price or a default are skipped (reported as failed).
+        win over the [pricing] defaults. Resources without either a
+        row-level price or a default are skipped (reported as failed).
         """
         console = Console()
         from .utils.config import settings
 
-        base_url = resolve_storefront_url(agent_url, default_port=8001)
+        base_url = resolve_storefront_url(storefront_url, default_port=8001)
         private_key = settings.wallet.private_key
         wallet_address = settings.wallet.address or ""
         db_path = _resolve_db_path(db)
         if not db_path:
             typer.secho(
-                "Could not resolve seller agent DB. Pass --db or set "
-                "seller.db_path in config.toml.",
+                "Could not resolve storefront DB. Pass --db or set "
+                "db_path in storefront.toml.",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(1)
@@ -565,17 +742,22 @@ def register(app: typer.Typer) -> None:
             else settings.pricing.default_max_duration_seconds
         )
 
-        from .utils.config import chain_id as _resolve_chain_id
-        rpc_url = settings.chain.rpc_url
-        if not rpc_url:
+        from .utils.config import CHAINS
+        if not CHAINS:
             typer.secho(
-                "chain.rpc_url is not configured — required to resolve "
-                "ERC-20 token decimals on chain. Set chain.rpc_url in "
-                "config.toml.",
+                "No [chains.<name>] tables configured — required to resolve "
+                "ERC-20 token metadata on chain. Add at least one chain "
+                "entry to storefront.toml.",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(1)
-        chain_id = _resolve_chain_id()
+        # The publish loop iterates CHAINS internally; rpc_url / chain_id
+        # are kept on the watch-loop signature for back-compat but use the
+        # first configured chain as a generic resolution target. Per-chain
+        # token resolution happens inside _publish_round.
+        first_chain = next(iter(CHAINS.values()))
+        rpc_url = first_chain.rpc_url
+        chain_id = first_chain.chain_id
 
         # Mode: abort-all is mutually exclusive with the publish flags.
         if abort_all:

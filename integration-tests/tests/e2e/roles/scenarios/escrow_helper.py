@@ -9,8 +9,8 @@ buyer's wallet, the same way
 production — but inlined here because integration-tests doesn't
 depend on the buyer wheel.
 
-Token distribution is deploy-time (the alkahest deploy script funds
-account #1 with MockERC20). Escrow creation is runtime: in production
+Token distribution is baked into the chain state (account #1 holds
+MockERC20 — see test-env/generate_state.py). Escrow creation is runtime: in production
 the buyer signs and sends this transaction themselves, so the test
 does the same — with the buyer's private key, against the just-
 finalized negotiation terms.
@@ -94,7 +94,7 @@ def create_buyer_escrow(
     *,
     buyer_private_key: str,
     seller_wallet_address: str,
-    agreed_price: float,
+    agreed_amount: int,
     duration_seconds: int,
     token_contract_address: str,
     rpc_url: str = "ws://localhost:8545",
@@ -104,9 +104,10 @@ def create_buyer_escrow(
     """Create an ERC20EscrowObligation under RecipientArbiter for the
     seller, returning the EAS attestation uid (0x-prefixed 32 bytes).
 
-    The amount escrowed is the same ``agreed_price * duration / 3600``
-    formula the storefront's verifier uses on the read side, so
-    verification passes by construction.
+    ``agreed_amount`` is the absolute payment in base units of
+    ``token_contract_address`` — already multiplied out from any
+    per-hour rate during negotiation. The middleware chain owns price
+    math; this helper just escrows the agreed total.
 
     ``rpc_url`` must use the ``ws://`` or ``wss://`` scheme for alkahest-py.
     ``http://`` / ``https://`` URLs are coerced automatically with a warning;
@@ -126,8 +127,7 @@ def create_buyer_escrow(
     )
     demand_bytes = encode_recipient_demand(seller_wallet_address)
 
-    amount_raw = int(float(agreed_price) * max(duration_seconds, 1) / 3600)
-    price_data = {"address": token_contract_address, "value": amount_raw}
+    price_data = {"address": token_contract_address, "value": int(agreed_amount)}
     arbiter_data = {"arbiter": arbiter_address, "demand": demand_bytes}
     expiration = int(time.time()) + int(expiration_seconds)
 

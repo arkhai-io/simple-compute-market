@@ -32,6 +32,7 @@ from market_buyer.buy_orchestrator import (
     BuyConstraints,
     BuyResult,
     run_buy,
+    submit_settlement,
 )
 
 
@@ -76,6 +77,11 @@ def _escrow_proposal() -> EscrowProposal:
     )
 
 
+def _build_escrow_proposal():
+    """Test-fixture factory: returns the same proposal regardless of match."""
+    return lambda _match: _escrow_proposal()
+
+
 # Seller-echoed accept-time terms: must be included in /negotiate/new mock
 # replies so _settle_one can read outcome.accepted_escrow_proposal
 # and dispatch escrow construction off it.
@@ -94,7 +100,7 @@ _ACCEPTED_ECHO = {
 }
 
 
-def _stub_escrow_terms(seller_wallet, agreed_price, duration_seconds):
+def _stub_escrow_terms(seller_wallet, agreed_amount, duration_seconds):
     """An ERC20-shaped EscrowTerms for tests that don't care about codec details."""
     return EscrowTerms(
         maker="buyer",
@@ -103,14 +109,14 @@ def _stub_escrow_terms(seller_wallet, agreed_price, duration_seconds):
             "arbiter": _RECIPIENT_ARBITER,
             "demand": "0x" + "00" * 31 + seller_wallet[2:].rjust(2, "0"),
             "token": _TOKEN,
-            "amount": int(float(agreed_price) * max(duration_seconds, 1) / 3600),
+            "amount": int(float(agreed_amount) * max(duration_seconds, 1) / 3600),
         },
         expiration_unix=1_800_000_000,
     )
 
 
-def _build_escrow_terms_ok(proposal, seller_wallet, agreed_price, duration_seconds):
-    return [_stub_escrow_terms(seller_wallet, agreed_price, duration_seconds)]
+def _build_escrow_terms_ok(proposal, seller_wallet, agreed_amount, duration_seconds):
+    return [_stub_escrow_terms(seller_wallet, agreed_amount, duration_seconds)]
 
 
 @dataclass
@@ -159,7 +165,7 @@ def test_no_matches_returns_no_matches_status():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xnever"],
         )
@@ -181,7 +187,7 @@ def test_matches_can_be_preseeded_skipping_registry_query():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xnever"],
             matches=[{"listing_id": "seller-1", "seller": _SELLER_URL}],
@@ -202,7 +208,7 @@ def test_happy_path_drives_to_ready():
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL,
                       "max_duration_seconds": 7200}]},
         # 2. /negotiate/new — seller accepts immediately
-        {"negotiation_id": "neg-1", "action": "accept", "price": 50, **_ACCEPTED_ECHO},
+        {"negotiation_id": "neg-1", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO},
         # 3. GET /.well-known/agent-wallet.json on seller
         {"agent_wallet_address": _SELLER_WALLET},
         # 4. POST /settle/{uid}
@@ -217,9 +223,9 @@ def test_happy_path_drives_to_ready():
     build_calls: list[tuple[EscrowProposal, str, int, int]] = []
     create_calls: list[list[EscrowTerms]] = []
 
-    def _build_escrow_terms(proposal, seller_wallet, agreed_price, duration_seconds):
-        build_calls.append((proposal, seller_wallet, agreed_price, duration_seconds))
-        return [_stub_escrow_terms(seller_wallet, agreed_price, duration_seconds)]
+    def _build_escrow_terms(proposal, seller_wallet, agreed_amount, duration_seconds):
+        build_calls.append((proposal, seller_wallet, agreed_amount, duration_seconds))
+        return [_stub_escrow_terms(seller_wallet, agreed_amount, duration_seconds)]
 
     def _create_escrow(escrows):
         create_calls.append(escrows)
@@ -235,7 +241,7 @@ def test_happy_path_drives_to_ready():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms,
             create_escrow=_create_escrow,
             on_event=lambda name, body: events.append((name, body)),
@@ -247,7 +253,7 @@ def test_happy_path_drives_to_ready():
     assert result.fulfillment_uid == "0xattest"
     assert result.connection_details == "ssh alice@vm1"
     assert result.tenant_credentials == {"password": "hunter2"}
-    assert result.agreed_price == 50
+    assert result.agreed_amount == 50
     assert result.negotiation_id == "neg-1"
 
     # build_escrow_terms received the proposal echoed by the seller +
@@ -303,7 +309,7 @@ def test_first_match_exits_second_agrees():
         {"negotiation_id": "neg-1", "action": "exit",
          "reason": "price_unreasonable"},
         # /negotiate/new on seller2 — accepts
-        {"negotiation_id": "neg-2", "action": "accept", "price": 50, **_ACCEPTED_ECHO},
+        {"negotiation_id": "neg-2", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO},
         # Seller2 wallet
         {"agent_wallet_address": _SELLER_WALLET},
         # POST /settle/{uid}
@@ -319,7 +325,7 @@ def test_first_match_exits_second_agrees():
             config=config,
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -339,7 +345,7 @@ def test_first_match_exits_second_agrees():
 def test_escrow_hook_failure_returns_exited_with_reason():
     responses = [
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
-        {"negotiation_id": "neg-1", "action": "accept", "price": 50, **_ACCEPTED_ECHO},
+        {"negotiation_id": "neg-1", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO},
         {"agent_wallet_address": _SELLER_WALLET},
     ]
 
@@ -354,7 +360,7 @@ def test_escrow_hook_failure_returns_exited_with_reason():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=_broken_escrow,
             sleep=lambda _: None,
@@ -371,7 +377,7 @@ def test_escrow_hook_failure_returns_exited_with_reason():
 def test_provisioning_failed_returns_failed_status():
     responses = [
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
-        {"negotiation_id": "neg-1", "action": "accept", "price": 50, **_ACCEPTED_ECHO},
+        {"negotiation_id": "neg-1", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO},
         {"agent_wallet_address": _SELLER_WALLET},
         {"escrow_uid": "0xescrow", "status": "provisioning"},
         {"status": "failed", "reason": "no available VM"},
@@ -384,7 +390,7 @@ def test_provisioning_failed_returns_failed_status():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -399,158 +405,6 @@ def test_provisioning_failed_returns_failed_status():
 # ---------------------------------------------------------------------------
 
 
-_OTHER_TOKEN = "0x" + "33" * 20
-
-
-def _counter_echo_with(**overrides) -> dict:
-    """Build an ACCEPTED echo block whose escrow proposal can be tweaked.
-
-    Defaults to the same shape as ``_ACCEPTED_ECHO`` but with fields
-    overridable via kwargs (e.g. swap token).
-    """
-    proposal = {
-        "chain_name": "anvil",
-        "escrow_address": _ESCROW_ADDR,
-        "fields": {"token": _TOKEN},
-        "expiration_unix": 1_800_000_000,
-    }
-    proposal.update(overrides)
-    return {
-        "accepted_provision_terms": _ACCEPTED_ECHO["accepted_provision_terms"],
-        "accepted_escrow_proposal": proposal,
-    }
-
-
-def test_strict_echo_default_rejects_token_swap_before_settle():
-    """Seller agrees on price but counters with a different payment token;
-    the default counter policy short-circuits to exited before any
-    escrow / settle call is made.
-    """
-    responses = [
-        # Registry
-        {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
-        # /negotiate/new — seller accepts price but swaps token
-        {
-            "negotiation_id": "neg-1",
-            "action": "accept",
-            "price": 50,
-            **_counter_echo_with(fields={"token": _OTHER_TOKEN}),
-        },
-        # No more responses — if the test reaches settle, urlopen raises.
-    ]
-
-    events: list[tuple[str, dict]] = []
-
-    with patch(
-        "market_buyer.buy_orchestrator.urllib.request.urlopen",
-        side_effect=_urlopen_sequence(responses),
-    ):
-        result = run_buy(
-            config=_config(),
-            constraints=_constraints(),
-            provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
-            build_escrow_terms=_build_escrow_terms_ok,
-            create_escrow=lambda escrows: ["0xnever"],
-            on_event=lambda name, body: events.append((name, body)),
-            sleep=lambda _: None,
-        )
-
-    assert result.status == "exited"
-    assert result.reason is not None
-    assert result.reason.startswith("no_match_agreed_to_terms")
-
-    # The negotiation attempt recorded the rejection on its outcome.
-    assert len(result.attempts) == 1
-    attempt = result.attempts[0]
-    assert attempt["outcome"]["status"] == "exited"
-    assert "counter_rejected" in (attempt["outcome"].get("reason") or "")
-    assert "token" in (attempt["outcome"].get("reason") or "")
-
-    # And a counter_rejected event fired with the offending field info.
-    rejected = [body for name, body in events if name == "counter_rejected"]
-    assert len(rejected) == 1
-    assert rejected[0]["reason"] is not None
-    assert "token" in rejected[0]["reason"]
-
-
-def test_always_accept_lets_seller_swap_token():
-    """always_accept opts out of the strict echo check; settlement proceeds."""
-    config = BuyConfig(
-        registry_urls=[_REGISTRY],
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        counter_policy="always_accept",
-    )
-    responses = [
-        {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
-        {
-            "negotiation_id": "neg-1",
-            "action": "accept",
-            "price": 50,
-            **_counter_echo_with(fields={"token": _OTHER_TOKEN}),
-        },
-        {"agent_wallet_address": _SELLER_WALLET},
-        {"escrow_uid": "0xescrow", "status": "provisioning"},
-        {"status": "ready", "fulfillment_uid": "0xattest"},
-    ]
-
-    build_calls = []
-
-    def _build(proposal, seller_wallet, agreed_price, duration_seconds):
-        build_calls.append(proposal)
-        return [_stub_escrow_terms(seller_wallet, agreed_price, duration_seconds)]
-
-    with patch(
-        "market_buyer.buy_orchestrator.urllib.request.urlopen",
-        side_effect=_urlopen_sequence(responses),
-    ):
-        result = run_buy(
-            config=config,
-            constraints=_constraints(),
-            provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
-            build_escrow_terms=_build,
-            create_escrow=lambda escrows: ["0xescrow"],
-            sleep=lambda _: None,
-        )
-
-    assert result.status == "ready"
-    # build_escrow_terms ran with the seller's counter (the swapped token).
-    assert len(build_calls) == 1
-    assert build_calls[0].fields["token"] == _OTHER_TOKEN
-
-
-def test_strict_echo_default_rejects_missing_seller_echo():
-    """Seller doesn't echo accepted_escrow_proposal at all → reject upstream
-    of settle, with a 'seller_did_not_echo' reason.
-    """
-    responses = [
-        {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
-        # Seller "accepts" but doesn't include accepted_escrow_proposal.
-        {"negotiation_id": "neg-1", "action": "accept", "price": 50,
-         "accepted_provision_terms": _ACCEPTED_ECHO["accepted_provision_terms"]},
-    ]
-    with patch(
-        "market_buyer.buy_orchestrator.urllib.request.urlopen",
-        side_effect=_urlopen_sequence(responses),
-    ):
-        result = run_buy(
-            config=_config(),
-            constraints=_constraints(),
-            provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
-            build_escrow_terms=_build_escrow_terms_ok,
-            create_escrow=lambda escrows: ["0xnever"],
-            sleep=lambda _: None,
-        )
-    assert result.status == "exited"
-    assert result.attempts and result.attempts[0]["outcome"]["status"] == "exited"
-    reason = result.attempts[0]["outcome"].get("reason") or ""
-    assert "counter_rejected" in reason
-    assert "seller_did_not_echo" in reason
-
-
 # ---------------------------------------------------------------------------
 # Settlement polling timeout
 # ---------------------------------------------------------------------------
@@ -560,7 +414,7 @@ def test_settlement_timeout_returns_timeout_status():
     """Seller stays provisioning past the timeout → status=timeout."""
     responses = [
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
-        {"negotiation_id": "neg-1", "action": "accept", "price": 50, **_ACCEPTED_ECHO},
+        {"negotiation_id": "neg-1", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO},
         {"agent_wallet_address": _SELLER_WALLET},
         {"escrow_uid": "0xescrow", "status": "provisioning"},
     ] + [{"status": "provisioning"}] * 50  # never terminal
@@ -573,7 +427,7 @@ def test_settlement_timeout_returns_timeout_status():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xescrow"],
             settlement_poll_interval=0.01,
@@ -594,7 +448,7 @@ def test_to_dict_omits_none_fields():
         status="ready",
         negotiation_id="neg-1",
         seller_url=_SELLER_URL,
-        agreed_price=50,
+        agreed_amount=50,
         escrow_uid="0xescrow",
         fulfillment_uid="0xattest",
         connection_details="ssh alice@vm",
@@ -602,7 +456,7 @@ def test_to_dict_omits_none_fields():
     )
     d = r.to_dict()
     assert d["status"] == "ready"
-    assert d["agreed_price"] == 50
+    assert d["agreed_amount"] == 50
     assert "reason" not in d
     assert "tenant_credentials" not in d
 
@@ -610,3 +464,78 @@ def test_to_dict_omits_none_fields():
 def test_to_dict_skips_empty_attempts_list():
     r = BuyResult(status="no_matches")
     assert r.to_dict() == {"status": "no_matches", "rounds": 0}
+
+
+def _settle_kwargs():
+    return dict(
+        seller_url=_SELLER_URL,
+        escrow_uid="0x" + "ff" * 32,
+        negotiation_id="neg-1",
+        ssh_public_key="ssh-rsa AAAA...",
+        buyer_address=_BUYER_ADDR,
+        buyer_private_key=_BUYER_PK,
+        chain_name="anvil",
+    )
+
+
+def test_submit_settlement_retries_on_propagation_lag(monkeypatch):
+    """A 400 with the seller's chain-read-failed detail should retry."""
+    calls = {"n": 0}
+
+    def fake_signed_json(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError(
+                "POST .../settle/0xff... -> HTTP 400: "
+                "{\"detail\":\"Failed to read escrow 0xff... from chain: "
+                "ABI decoding failed: buffer overrun while deserializing\"}"
+            )
+        return {"escrow_uid": "0x" + "ff" * 32, "status": "provisioning"}
+
+    sleeps: list[float] = []
+    monkeypatch.setattr("market_buyer.buy_orchestrator._signed_json", fake_signed_json)
+    out = submit_settlement(**_settle_kwargs(), sleep=sleeps.append, retry_backoff=0.0)
+
+    assert out["status"] == "provisioning"
+    assert calls["n"] == 3
+    assert sleeps == [0.0, 0.0]
+
+
+def test_submit_settlement_does_not_retry_other_400s(monkeypatch):
+    """A 400 that's not the propagation-lag pattern bubbles up immediately."""
+    calls = {"n": 0}
+
+    def fake_signed_json(*args, **kwargs):
+        calls["n"] += 1
+        raise RuntimeError(
+            "POST .../settle/0xff... -> HTTP 400: "
+            "{\"detail\":\"agreed_amount mismatch: 1000000 vs 2000000\"}"
+        )
+
+    monkeypatch.setattr("market_buyer.buy_orchestrator._signed_json", fake_signed_json)
+    with pytest.raises(RuntimeError, match="agreed_amount mismatch"):
+        submit_settlement(**_settle_kwargs(), sleep=lambda _s: None)
+    assert calls["n"] == 1
+
+
+def test_submit_settlement_gives_up_after_max_attempts(monkeypatch):
+    """Persistent propagation-lag errors eventually raise."""
+    calls = {"n": 0}
+
+    def fake_signed_json(*args, **kwargs):
+        calls["n"] += 1
+        raise RuntimeError(
+            "POST .../settle/0xff... -> HTTP 400: "
+            "{\"detail\":\"Failed to read escrow 0xff... from chain: "
+            "ABI decoding failed: buffer overrun while deserializing\"}"
+        )
+
+    monkeypatch.setattr("market_buyer.buy_orchestrator._signed_json", fake_signed_json)
+    with pytest.raises(RuntimeError, match="buffer overrun"):
+        submit_settlement(
+            **_settle_kwargs(),
+            sleep=lambda _s: None,
+            max_attempts=4,
+            retry_backoff=0.0,
+        )
+    assert calls["n"] == 4

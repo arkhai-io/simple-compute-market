@@ -64,115 +64,59 @@ class HealthResponse:
 
 
 # ---------------------------------------------------------------------------
-# Agents
+# Publishers
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class Capability:
-    id: str
-    name: str
-    description: str | None = None
-    tags: list[str] = field(default_factory=list)
-    input_modes: list[str] = field(default_factory=lambda: ["text/plain"])
-    output_modes: list[str] = field(default_factory=lambda: ["text/plain"])
-    examples: list[str] = field(default_factory=list)
+class PublisherIdentity:
+    """A publisher's signing identity — a ``(scheme, identifier)`` pair."""
+
+    scheme: str
+    identifier: str
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Capability":
-        return cls(
-            id=d["id"],
-            name=d["name"],
-            description=d.get("description"),
-            tags=d.get("tags", []),
-            input_modes=d.get("inputModes", ["text/plain"]),
-            output_modes=d.get("outputModes", ["text/plain"]),
-            examples=d.get("examples", []),
-        )
+    def from_dict(cls, d: dict) -> "PublisherIdentity":
+        return cls(scheme=d.get("scheme", ""), identifier=d.get("identifier", ""))
 
 
 @dataclass
-class Endpoint:
-    name: str
-    endpoint: str
-    version: str | None = None
-    mcp_tools: list[str] | None = None
-    mcp_prompts: list[str] | None = None
-    mcp_resources: list[str] | None = None
-    a2a_skills: list[str] | None = None
+class Publisher:
+    """A listing-owning principal, returned by GET /publishers/{id}."""
 
-    @classmethod
-    def from_dict(cls, d: dict) -> "Endpoint":
-        return cls(
-            name=d["name"],
-            endpoint=d["endpoint"],
-            version=d.get("version"),
-            mcp_tools=d.get("mcpTools"),
-            mcp_prompts=d.get("mcpPrompts"),
-            mcp_resources=d.get("mcpResources"),
-            a2a_skills=d.get("a2aSkills"),
-        )
-
-
-@dataclass
-class AgentSummary:
-    """
-    Lightweight agent representation returned by GET /agents.
-    The API currently returns ``{}`` schema, so we capture all known fields
-    defensively and stash extras.
-    """
-
-    id: str | int | None = None
-    agent_id: str | None = None           # canonical eip155:… form
-    name: str | None = None
-    description: str | None = None
-    owner: str | None = None
-    chain_id: int | None = None
-    visibility: str | None = None
-    labels: dict[str, str] = field(default_factory=dict)
+    publisher_id: int | None = None
+    storefront_url: str | None = None
+    identities: list[PublisherIdentity] = field(default_factory=list)
+    created_at: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "AgentSummary":
-        known = {"id", "agentId", "name", "description", "owner", "chainId",
-                 "visibility", "labels"}
+    def from_dict(cls, d: dict) -> "Publisher":
+        known = {"publisher_id", "storefront_url", "identities", "created_at"}
         return cls(
-            id=d.get("id"),
-            agent_id=d.get("agentId"),
-            name=d.get("name"),
-            description=d.get("description"),
-            owner=d.get("owner"),
-            chain_id=d.get("chainId"),
-            visibility=d.get("visibility"),
-            labels=d.get("labels", {}),
+            publisher_id=d.get("publisher_id"),
+            storefront_url=d.get("storefront_url"),
+            identities=[PublisherIdentity.from_dict(i) for i in d.get("identities", [])],
+            created_at=d.get("created_at"),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
 
 @dataclass
-class AgentListResponse:
-    """Wrapper around the list returned by GET /agents."""
+class PublisherListResponse:
+    """Wrapper around the list returned by GET /publishers."""
 
-    agents: list[AgentSummary]
-    total: int | None = None
-    limit: int | None = None
-    offset: int | None = None
+    publishers: list[Publisher]
+    count: int | None = None
 
     @classmethod
-    def from_raw(cls, raw: list | dict) -> "AgentListResponse":
-        """
-        The API may return a plain list or a paginated envelope dict.
-        Handle both shapes.
-        """
+    def from_raw(cls, raw: list | dict) -> "PublisherListResponse":
         if isinstance(raw, list):
-            return cls(agents=[AgentSummary.from_dict(a) for a in raw])
-        # Paginated envelope — registry uses "items"; also handle "agents" / "data"
-        items = raw.get("items") or raw.get("agents") or raw.get("data") or []
+            return cls(publishers=[Publisher.from_dict(p) for p in raw])
+        items = raw.get("items") or raw.get("publishers") or raw.get("data") or []
         return cls(
-            agents=[AgentSummary.from_dict(a) for a in items],
-            total=raw.get("total"),
-            limit=raw.get("limit"),
-            offset=raw.get("offset"),
+            publishers=[Publisher.from_dict(p) for p in items],
+            count=raw.get("count"),
         )
 
 
@@ -221,13 +165,18 @@ class TokenResource:
 
 @dataclass
 class ListingRequest:
-    """Request body for POST /agents/{agent_id}/listings."""
+    """Listing fields for POST /listings.
+
+    ``storefront_url`` is the publisher's storefront URL (recorded on the
+    publisher). The signing identity and signature are added by the client
+    at publish time, not here.
+    """
 
     offer: dict[str, Any]
     accepted_escrows: list[dict[str, Any]]
     max_duration_seconds: int | None = None
     listing_id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex)
-    seller: str = ""
+    storefront_url: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -235,21 +184,23 @@ class ListingRequest:
             "offer_resource": self.offer,
             "accepted_escrows": self.accepted_escrows,
             "max_duration_seconds": self.max_duration_seconds,
-            "seller": self.seller,
+            "storefront_url": self.storefront_url,
         }
 
 
 @dataclass
 class ListingSummary:
-    """
-    Single listing record as returned by GET /listings or
-    GET /agents/{id}/listings. Schema is ``{}`` in the spec; we capture
-    common fields defensively.
+    """Single listing record as returned by GET /listings or
+    GET /listings/{id}. Captures common fields defensively.
+
+    ``storefront_url`` is the publisher's storefront URL — where a buyer
+    negotiates.
     """
 
     id: str | int | None = None
     status: str | None = None
-    maker_agent_id: str | None = None
+    publisher_id: int | None = None
+    storefront_url: str | None = None
     offer: dict[str, Any] = field(default_factory=dict)
     accepted_escrows: list[dict[str, Any]] = field(default_factory=list)
     max_duration_seconds: int | None = None
@@ -259,27 +210,19 @@ class ListingSummary:
     @classmethod
     def from_dict(cls, d: dict) -> "ListingSummary":
         known = {
-            "listing_id", "agent_id", "seller", "buyer",
+            "listing_id", "publisher_id", "storefront_url",
             "offer_resource", "accepted_escrows", "max_duration_seconds",
             "created_at", "updated_at", "status",
-            # camelCase alternatives
-            "id", "makerAgentId", "offer", "maxDurationSeconds", "createdAt",
-            "maker_agent_id",
+            "id", "offer", "maxDurationSeconds", "createdAt",
         }
-        # Registry uses "listing_id" as the primary key; fall back to "id"
         listing_id = d.get("listing_id") or d.get("id")
-        maker = (
-            d.get("agent_id")
-            or d.get("makerAgentId")
-            or d.get("maker_agent_id")
-            or d.get("seller")
-        )
         offer = d.get("offer") or d.get("offer_resource") or {}
         accepted_escrows = d.get("accepted_escrows") or []
         return cls(
             id=listing_id,
             status=d.get("status"),
-            maker_agent_id=maker,
+            publisher_id=d.get("publisher_id"),
+            storefront_url=d.get("storefront_url"),
             offer=offer,
             accepted_escrows=accepted_escrows,
             max_duration_seconds=d.get("max_duration_seconds") or d.get("maxDurationSeconds"),
@@ -312,7 +255,7 @@ class ListingListResponse:
 
 
 # ---------------------------------------------------------------------------
-# Listing update + heartbeat (request)
+# Listing update (request)
 # ---------------------------------------------------------------------------
 
 
@@ -320,123 +263,36 @@ class ListingListResponse:
 class UpdateListingRequest:
     """Request body for PUT /listings/{listing_id}.
 
-    Constructs the signed body that the registry route expects.
-    Auth fields (signature, timestamp, signer_agent_id) are embedded
-    when ``private_key`` is supplied.
+    Constructs the signed body that the registry route expects. Auth fields
+    (signature, timestamp) are embedded when ``private_key`` is supplied. The
+    signature covers the ``listing_id`` (passed to :meth:`to_dict`), matching
+    the registry's owner-scoped verification against the listing's publisher
+    identity.
     """
 
     updates: dict[str, Any]
     private_key: str | None = None
-    agent_id: str | None = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self, listing_id: str) -> dict:
         from registry_client.auth import build_auth_headers
         body = dict(self.updates)
         if self.private_key:
-            auth = build_auth_headers(self.private_key, "update_listing",
-                                      self.updates.get("listing_id", ""))
+            auth = build_auth_headers(self.private_key, "update_listing", listing_id)
             body["signature"] = auth["X-Signature"]
             body["timestamp"] = int(auth["X-Timestamp"])
-        if self.agent_id:
-            body["signer_agent_id"] = self.agent_id
         return body
 
 
-@dataclass
-class HeartbeatRequest:
-    signature: str | None = None
-    timestamp: int | None = None
-
-    def to_dict(self) -> dict:
-        return {k: v for k, v in {"signature": self.signature, "timestamp": self.timestamp}.items()
-                if v is not None}
-
-
 # ---------------------------------------------------------------------------
-# System diagnostics  (GET /api/v1/system/config|sync|stats)
+# System diagnostics  (GET /api/v1/system/stats)
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class AgentIndexedResponse:
-    """Response from GET /api/v1/system/sync/wait-for-agent."""
-
-    indexed: bool
-    agent_id: str
-    elapsed_ms: int = 0
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "AgentIndexedResponse":
-        known = {"indexed", "agent_id", "elapsed_ms"}
-        return cls(
-            indexed=bool(d.get("indexed", False)),
-            agent_id=str(d.get("agent_id", "")),
-            elapsed_ms=int(d.get("elapsed_ms", 0)),
-            extra={k: v for k, v in d.items() if k not in known},
-        )
-
-
-@dataclass
-class SystemConfigResponse:
-    """Response from GET /api/v1/system/config."""
-
-    chain_id: int = 0
-    rpc_url: str = ""
-    identity_registry_address: str = ""
-    reputation_registry_address: str = ""
-    validation_registry_address: str = ""
-    enable_health_checks: bool = False
-    heartbeat_ttl_secs: int = 0
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "SystemConfigResponse":
-        known = {
-            "chain_id", "rpc_url", "identity_registry_address",
-            "reputation_registry_address", "validation_registry_address",
-            "enable_health_checks", "heartbeat_ttl_secs",
-        }
-        return cls(
-            chain_id=int(d.get("chain_id", 0)),
-            rpc_url=d.get("rpc_url", ""),
-            identity_registry_address=d.get("identity_registry_address", ""),
-            reputation_registry_address=d.get("reputation_registry_address", ""),
-            validation_registry_address=d.get("validation_registry_address", ""),
-            enable_health_checks=bool(d.get("enable_health_checks", False)),
-            heartbeat_ttl_secs=int(d.get("heartbeat_ttl_secs", 0)),
-            extra={k: v for k, v in d.items() if k not in known},
-        )
-
-
-@dataclass
-class SystemSyncResponse:
-    """Response from GET /api/v1/system/sync."""
-
-    event_sync_running: bool = False
-    event_sync_last_block: int = 0
-    health_check_running: bool = False
-    health_check_enabled: bool = False
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "SystemSyncResponse":
-        es = d.get("event_sync", {})
-        hc = d.get("health_check", {})
-        return cls(
-            event_sync_running=bool(es.get("running", False)),
-            event_sync_last_block=int(es.get("last_synced_block", 0)),
-            health_check_running=bool(hc.get("running", False)),
-            health_check_enabled=bool(hc.get("enabled", False)),
-            extra={k: v for k, v in d.items() if k not in ("event_sync", "health_check")},
-        )
 
 
 @dataclass
 class SystemStatsResponse:
     """Response from GET /api/v1/system/stats."""
 
-    agent_count: int = 0
+    publisher_count: int = 0
     order_count: int = 0
     orders_by_status: dict[str, int] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
@@ -445,9 +301,9 @@ class SystemStatsResponse:
     def from_dict(cls, d: dict) -> "SystemStatsResponse":
         obs_raw = d.get("orders_by_status", {})
         obs = {k: int(v) for k, v in obs_raw.items()} if isinstance(obs_raw, dict) else {}
-        known = {"agent_count", "order_count", "orders_by_status"}
+        known = {"publisher_count", "order_count", "orders_by_status"}
         return cls(
-            agent_count=int(d.get("agent_count", 0)),
+            publisher_count=int(d.get("publisher_count", 0)),
             order_count=int(d.get("order_count", 0)),
             orders_by_status=obs,
             extra={k: v for k, v in d.items() if k not in known},
@@ -462,12 +318,12 @@ class ValidatePublishRequest:
     offer_resource: dict
     accepted_escrows: list[dict]
     max_duration_seconds: int | None = None
-    seller: str = ""
+    storefront_url: str = ""
 
     def to_dict(self) -> dict:
         d: dict = {
             "listing_id": self.listing_id,
-            "seller": self.seller,
+            "storefront_url": self.storefront_url,
             "offer_resource": self.offer_resource,
             "accepted_escrows": self.accepted_escrows,
         }

@@ -91,11 +91,12 @@ def _format_accepted_escrows(entries: list) -> str:
         if not isinstance(entry, dict):
             lines.append(f"[{i}] {entry}")
             continue
+        from service.schemas import primary_rate_value, accepted_token_address
+
         chain = entry.get("chain_name") or "-"
         addr = _short_contract_address(str(entry.get("escrow_address") or "-"))
-        price = entry.get("price_per_hour")
-        fields = entry.get("fields") or {}
-        token = fields.get("token") if isinstance(fields, dict) else None
+        price = primary_rate_value(entry)
+        token = accepted_token_address(entry)
         parts = [f"chain={chain}", f"escrow={addr}"]
         if token:
             parts.append(f"token={_short_contract_address(str(token))}")
@@ -257,9 +258,8 @@ def listing_list(
     console = Console()
     table = Table(title="Open Listings", box=box.SIMPLE_HEAVY, expand=True)
     table.add_column("Listing ID", style="bold", overflow="fold")
-    table.add_column("Agent ID")
-    table.add_column("Seller")
-    table.add_column("Buyer")
+    table.add_column("Publisher")
+    table.add_column("Storefront URL")
     table.add_column("Offer")
     table.add_column("Accepted escrows")
     table.add_column("Created", justify="right")
@@ -269,9 +269,8 @@ def listing_list(
         accepted_display = _format_accepted_escrows(row.get("accepted_escrows", []))
         table.add_row(
             str(row.get("listing_id", "-")),
-            _shorten(str(row.get("agent_id", "-")), 32),
-            _shorten(str(row.get("seller", "-")), 40),
-            _shorten(str(row.get("buyer", "-")), 40),
+            str(row.get("publisher_id", "-")),
+            _shorten(str(row.get("storefront_url", "-")), 40),
             offer_display if "\n" in offer_display else _shorten(offer_display, 120),
             accepted_display if "\n" in accepted_display else _shorten(accepted_display, 120),
             _short_ts(row.get("created_at")),
@@ -332,10 +331,9 @@ def listing_show(
     table.add_column(style="bold", no_wrap=True)
     table.add_column()
     table.add_row("Listing ID", str(found.get("listing_id", "-")))
-    table.add_row("Agent ID", str(found.get("agent_id", "-")))
+    table.add_row("Publisher", str(found.get("publisher_id", "-")))
     table.add_row("Status", str(found.get("status", "-")))
-    table.add_row("Seller", str(found.get("seller", "-")))
-    table.add_row("Buyer", str(found.get("buyer", "-")))
+    table.add_row("Storefront URL", str(found.get("storefront_url", "-")))
     max_secs = found.get("max_duration_seconds")
     table.add_row(
         "Max duration (s)",

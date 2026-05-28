@@ -17,82 +17,6 @@ from typing import Any
 
 
 # ---------------------------------------------------------------------------
-# ERC-8004 registration file  (GET /.well-known/erc-8004-registration.json)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class RegistrationRecord:
-    """Single on-chain registration entry inside the ERC-8004 file."""
-
-    agent_id: int | None = None       # 0 means not yet registered
-    agent_registry: str | None = None  # "eip155:<chainId>:<address>"
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "RegistrationRecord":
-        return cls(
-            agent_id=d.get("agentId"),
-            agent_registry=d.get("agentRegistry"),
-        )
-
-    @property
-    def registry_address(self) -> str | None:
-        """Extract the bare 0x address from 'eip155:<chainId>:<address>'."""
-        raw = self.agent_registry or ""
-        parts = raw.split(":")
-        return parts[-1] if len(parts) == 3 else None
-
-
-@dataclass
-class StorefrontEndpoint:
-    name: str
-    endpoint: str
-    version: str | None = None
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "StorefrontEndpoint":
-        known = {"name", "endpoint", "version"}
-        return cls(
-            name=d["name"],
-            endpoint=d["endpoint"],
-            version=d.get("version"),
-            extra={k: v for k, v in d.items() if k not in known},
-        )
-
-
-@dataclass
-class ERC8004RegistrationFile:
-    """Response from GET /.well-known/erc-8004-registration.json"""
-
-    type: str | None = None
-    name: str | None = None
-    description: str | None = None
-    endpoints: list[StorefrontEndpoint] = field(default_factory=list)
-    registrations: list[RegistrationRecord] = field(default_factory=list)
-    updated_at: int | None = None
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "ERC8004RegistrationFile":
-        known = {"type", "name", "description", "endpoints", "registrations", "updatedAt"}
-        return cls(
-            type=d.get("type"),
-            name=d.get("name"),
-            description=d.get("description"),
-            endpoints=[StorefrontEndpoint.from_dict(e) for e in d.get("endpoints", [])],
-            registrations=[RegistrationRecord.from_dict(r) for r in d.get("registrations", [])],
-            updated_at=d.get("updatedAt"),
-            extra={k: v for k, v in d.items() if k not in known},
-        )
-
-    @property
-    def is_registered(self) -> bool:
-        """True iff at least one registration record has a non-zero agentId."""
-        return any(r.agent_id is not None for r in self.registrations)
-
-
-# ---------------------------------------------------------------------------
 # Listing create response  (POST /listings/create)
 # ---------------------------------------------------------------------------
 
@@ -429,7 +353,7 @@ class NegotiationSummary:
     buyer_address: str = ""
     status: str = ""
     terminal_state: str | None = None
-    agreed_price: float | None = None
+    agreed_amount: int | None = None
     agreed_duration_seconds: int | None = None
     requested_duration_seconds: int | None = None
     created_at: str = ""
@@ -439,7 +363,7 @@ class NegotiationSummary:
     def from_dict(cls, d: dict) -> "NegotiationSummary":
         known = {
             "negotiation_id", "our_listing_id", "buyer_address", "status",
-            "terminal_state", "agreed_price", "agreed_duration_seconds",
+            "terminal_state", "agreed_amount", "agreed_duration_seconds",
             "requested_duration_seconds", "created_at",
         }
         return cls(
@@ -448,7 +372,7 @@ class NegotiationSummary:
             buyer_address=d.get("buyer_address", ""),
             status=d.get("status", ""),
             terminal_state=d.get("terminal_state"),
-            agreed_price=d.get("agreed_price"),
+            agreed_amount=int(d["agreed_amount"]) if d.get("agreed_amount") is not None else None,
             agreed_duration_seconds=d.get("agreed_duration_seconds"),
             requested_duration_seconds=d.get("requested_duration_seconds"),
             created_at=d.get("created_at", ""),
@@ -489,7 +413,7 @@ class NegotiationDetail:
     their_agent_id: str = ""
     status: str = ""
     terminal_state: str | None = None
-    agreed_price: float | None = None
+    agreed_amount: int | None = None
     agreed_duration_seconds: int | None = None
     requested_duration_seconds: int | None = None
     round_count: int = 0
@@ -502,7 +426,7 @@ class NegotiationDetail:
     def from_dict(cls, d: dict) -> "NegotiationDetail":
         known = {
             "negotiation_id", "our_listing_id", "their_agent_id", "status",
-            "terminal_state", "agreed_price", "agreed_duration_seconds",
+            "terminal_state", "agreed_amount", "agreed_duration_seconds",
             "requested_duration_seconds", "round_count", "messages", "stage_events",
             "escrows",
         }
@@ -512,7 +436,7 @@ class NegotiationDetail:
             their_agent_id=d.get("their_agent_id", ""),
             status=d.get("status", ""),
             terminal_state=d.get("terminal_state"),
-            agreed_price=d.get("agreed_price"),
+            agreed_amount=int(d["agreed_amount"]) if d.get("agreed_amount") is not None else None,
             agreed_duration_seconds=d.get("agreed_duration_seconds"),
             requested_duration_seconds=d.get("requested_duration_seconds"),
             round_count=d.get("round_count", 0),
@@ -525,24 +449,32 @@ class NegotiationDetail:
 
 @dataclass
 class NegotiationActionResponse:
-    """Response from POST .../advance or .../force-accept."""
+    """Response from POST .../advance or .../force-accept.
+
+    ``proposal`` is the full EscrowProposal-shaped dict returned by the
+    seller's counter / accept decisions (with ``fields["amount"]``
+    carrying the absolute amount in base units). ``amount`` is the
+    convenience scalar returned by force-accept.
+    """
 
     neg_id: str = ""
     listing_id: str = ""
     action: str = ""
-    price: float | None = None
+    proposal: dict[str, Any] | None = None
+    amount: int | None = None
     reason: str | None = None
     source: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "NegotiationActionResponse":
-        known = {"neg_id", "listing_id", "action", "price", "reason", "source"}
+        known = {"neg_id", "listing_id", "action", "proposal", "amount", "reason", "source"}
         return cls(
             neg_id=d.get("neg_id", ""),
             listing_id=d.get("listing_id", ""),
             action=d.get("action", ""),
-            price=d.get("price"),
+            proposal=d.get("proposal"),
+            amount=int(d["amount"]) if d.get("amount") is not None else None,
             reason=d.get("reason"),
             source=d.get("source"),
             extra={k: v for k, v in d.items() if k not in known},
@@ -595,12 +527,13 @@ class EvaluateNegotiateResponse:
     """Response from POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate."""
 
     listing_id: str = ""
-    our_reference_price: float = 0
-    their_proposed_price: float = 0
+    our_reference_amount: int = 0
+    their_proposed_amount: int = 0
     direction: str = ""
     strategy: str = ""
     decision: str = ""
-    decision_price: float | None = None
+    decision_amount: int | None = None
+    decision_proposal: dict[str, Any] | None = None
     decision_reason: str | None = None
     would_negotiate: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
@@ -608,18 +541,19 @@ class EvaluateNegotiateResponse:
     @classmethod
     def from_dict(cls, d: dict) -> "EvaluateNegotiateResponse":
         known = {
-            "listing_id", "our_reference_price", "their_proposed_price",
-            "direction", "strategy", "decision", "decision_price",
-            "decision_reason", "would_negotiate",
+            "listing_id", "our_reference_amount", "their_proposed_amount",
+            "direction", "strategy", "decision", "decision_amount",
+            "decision_proposal", "decision_reason", "would_negotiate",
         }
         return cls(
             listing_id=d.get("listing_id", ""),
-            our_reference_price=float(d.get("our_reference_price", 0)),
-            their_proposed_price=float(d.get("their_proposed_price", 0)),
+            our_reference_amount=int(d.get("our_reference_amount", 0)),
+            their_proposed_amount=int(d.get("their_proposed_amount", 0)),
             direction=d.get("direction", ""),
             strategy=d.get("strategy", ""),
             decision=d.get("decision", ""),
-            decision_price=d.get("decision_price"),
+            decision_amount=int(d["decision_amount"]) if d.get("decision_amount") is not None else None,
+            decision_proposal=d.get("decision_proposal"),
             decision_reason=d.get("decision_reason"),
             would_negotiate=bool(d.get("would_negotiate", False)),
             extra={k: v for k, v in d.items() if k not in known},
@@ -642,26 +576,6 @@ class SettleResponse:
             status=d.get("status", ""),
             escrow_uid=d.get("escrow_uid", ""),
             negotiation_id=d.get("negotiation_id", ""),
-            extra={k: v for k, v in d.items() if k not in known},
-        )
-
-
-@dataclass
-class RegistryAgentReadyResponse:
-    """Response from GET /api/v1/system/wait-for-registry-agent."""
-
-    ready: bool = False
-    registry_auth: str = ""
-    elapsed_ms: int = 0
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "RegistryAgentReadyResponse":
-        known = {"ready", "registry_auth", "elapsed_ms"}
-        return cls(
-            ready=bool(d.get("ready", False)),
-            registry_auth=str(d.get("registry_auth", "")),
-            elapsed_ms=int(d.get("elapsed_ms", 0)),
             extra={k: v for k, v in d.items() if k not in known},
         )
 

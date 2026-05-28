@@ -5,7 +5,6 @@ operations live in market-buyer (`market` console script). The two
 ship as separate wheels; install both if you both buy and sell.
 
 Subcommands:
-    register     Register agent on-chain (one-shot, before `serve`).
     serve        Run the storefront HTTP server in-process.
     publish      Post listings from the agent DB. Mirror of
                  `market buy` on the buyer side.
@@ -67,84 +66,12 @@ def main(
         "--config",
         callback=_config_path_callback,
         is_eager=True,
-        help="Path to an explicit config.toml. Defaults to "
-             "$XDG_CONFIG_HOME/arkhai/config.toml.",
+        help="Path to an explicit storefront.toml. Defaults to "
+             "$XDG_CONFIG_HOME/arkhai/storefront.toml.",
     ),
 ) -> None:
     """market-storefront — provider-side admin CLI."""
     pass
-
-
-# ---------------------------------------------------------------------------
-# register — one-shot on-chain registration
-# ---------------------------------------------------------------------------
-
-
-@app.command("register")
-def register_cmd(
-    chain_id: int = typer.Option(
-        None, "--chain-id",
-        help="Numeric chain ID for canonical-id construction. "
-             "When omitted, queried from chain.rpc_url via eth_chainId; "
-             "falls back to 1337 (local Anvil) if no RPC is configured.",
-    ),
-) -> None:
-    """Register the storefront on-chain via ERC-8004.
-
-    Inputs come from config.toml (TOML-only — no env vars or .env
-    files). Run this before `market-storefront serve` on a fresh
-    deployment; idempotent on subsequent runs.
-    """
-    from .commands.register import run_register
-    from .utils.config import settings
-
-    resolved_chain_id = chain_id
-    if resolved_chain_id is None:
-        resolved_chain_id = _query_chain_id(settings.chain.rpc_url) or 1337
-        typer.echo(f"Using chain_id={resolved_chain_id} (auto-detected).")
-
-    raise typer.Exit(asyncio.run(run_register(chain_id=resolved_chain_id)))
-
-
-def _query_chain_id(rpc_url: str | None) -> int | None:
-    """Query eth_chainId against the configured RPC.
-
-    Returns None on any failure (network, malformed reply, no rpc_url).
-    The caller falls back to a default — `register` accepts a wrong
-    chain_id more gracefully than a stuck startup, so we prefer "fall
-    through with default" over "crash".
-
-    Translates ``ws://`` / ``wss://`` URLs to ``http://`` / ``https://``
-    for this one-shot RPC call: urllib doesn't speak websocket, but the
-    eth_chainId method is identical over either transport. The seller's
-    runtime keeps using the configured ws:// URL for event subscriptions.
-    """
-    if not rpc_url or not rpc_url.strip():
-        return None
-    http_url = rpc_url.strip()
-    if http_url.startswith("ws://"):
-        http_url = "http://" + http_url[len("ws://"):]
-    elif http_url.startswith("wss://"):
-        http_url = "https://" + http_url[len("wss://"):]
-    try:
-        import json as _json
-        from urllib.request import Request, urlopen
-        req = Request(
-            http_url,
-            data=_json.dumps({
-                "jsonrpc": "2.0", "id": 1, "method": "eth_chainId", "params": [],
-            }).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-        )
-        with urlopen(req, timeout=5) as resp:
-            body = _json.loads(resp.read())
-        return int(body.get("result", "0x0"), 16) or None
-    except Exception as exc:
-        typer.secho(
-            f"[register] eth_chainId lookup against {rpc_url!r} failed: {exc}",
-            err=True, fg=typer.colors.YELLOW,
-        )
-        return None
 
 
 # ---------------------------------------------------------------------------

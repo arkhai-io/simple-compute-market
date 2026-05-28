@@ -1,0 +1,91 @@
+#!/bin/bash
+
+# Input variables
+REQUIRED_COUNT="{{ required_gpu_count }}"
+VM_NAME="{{ vm_name }}"
+
+# Parse JSON arrays
+AVAILABLE_POOL='{{ available_gpus_json }}'
+FAILED_LIST='{{ failed_gpus_json }}'
+ATTEMPTED_LIST='{{ attempted_combinations_json }}'
+
+{% raw %}
+# Get available GPUs (excluding failed ones)
+AVAILABLE_GPUS=$(echo "$AVAILABLE_POOL" | jq -r '.[]' | while read gpu; do
+  if ! echo "$FAILED_LIST" | jq -e --arg gpu "$gpu" 'index($gpu)' > /dev/null 2>&1; then
+    echo "$gpu"
+  fi
+done)
+
+# Convert to array
+mapfile -t AVAILABLE_GPUS_ARRAY <<< "$AVAILABLE_GPUS"
+AVAILABLE_COUNT=${#AVAILABLE_GPUS_ARRAY[@]}
+
+# Check if we have enough available GPUs
+if [ $AVAILABLE_COUNT -lt $REQUIRED_COUNT ]; then
+  echo "INSUFFICIENT_GPUS"
+  exit 0
+fi
+
+# Count VMs using each GPU
+declare -A GPU_VM_COUNT
+for gpu_pci in "${AVAILABLE_GPUS_ARRAY[@]}"; do
+  [ -z "$gpu_pci" ] && continue
+  COUNT=0
+  for vm in $(virsh list --all --name); do
+    if [ ! -z "$vm" ] && [ "$vm" != "$VM_NAME" ]; then
+      VM_GPUS=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s\n", $1, $2, $3, $4}' | sed 's/ /0/g')
+      if echo "$VM_GPUS" | grep -q "^${gpu_pci}$"; then
+        COUNT=$((COUNT + 1))
+      fi
+    fi
+  done
+  GPU_VM_COUNT[$gpu_pci]=$COUNT
+done
+
+# Sort GPUs by usage count (ascending)
+SORTED_GPUS=()
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  SORTED_GPUS+=("$(echo "$line" | cut -d: -f2-)")
+done < <(
+  for gpu in "${AVAILABLE_GPUS_ARRAY[@]}"; do
+    [ -z "$gpu" ] && continue
+    echo "${GPU_VM_COUNT[$gpu]:-0}:$gpu"
+  done | sort -t: -k1 -n
+)
+
+# Select least-used GPUs
+SELECTED_GPUS=()
+for gpu in "${SORTED_GPUS[@]}"; do
+  if [ ${#SELECTED_GPUS[@]} -lt $REQUIRED_COUNT ]; then
+    SELECTED_GPUS+=("$gpu")
+  fi
+done
+
+# Check if this combination was already attempted
+SELECTED_STR=$(IFS=,; echo "${SELECTED_GPUS[*]}")
+IS_ATTEMPTED=0
+
+while IFS= read -r attempted; do
+  [ -z "$attempted" ] && continue
+  ATTEMPTED_STR=$(echo "$attempted" | jq -r 'join(",")')
+  if [ "$SELECTED_STR" = "$ATTEMPTED_STR" ]; then
+    IS_ATTEMPTED=1
+    break
+  fi
+done < <(echo "$ATTEMPTED_LIST" | jq -c '.[]')
+
+# If already attempted, try a different permutation
+if [ $IS_ATTEMPTED -eq 1 ]; then
+  # Rotate the selection
+  TEMP="${SELECTED_GPUS[0]}"
+  for ((i=0; i<${#SELECTED_GPUS[@]}-1; i++)); do
+    SELECTED_GPUS[$i]="${SELECTED_GPUS[$((i+1))]}"
+  done
+  SELECTED_GPUS[$((${#SELECTED_GPUS[@]}-1))]="$TEMP"
+fi
+
+# Output selected GPUs as JSON array
+printf '%s\n' "${SELECTED_GPUS[@]}" | jq -R . | jq -s .
+{% endraw %}

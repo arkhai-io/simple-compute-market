@@ -27,8 +27,7 @@ from models.vm_request_model import CreateVmRequest
 from services.async_job_queue import AsyncJobQueue
 
 
-AGENT_ID = "eip155:1337:0xdeadbeef:1"
-HOST = "ww1"
+HOST = "kvm1"
 VM_NAME = "agent-vm-01"
 
 
@@ -58,7 +57,6 @@ class TestHttpValidation:
             resp = await http.post(
                 f"/api/v1/hosts/{HOST}/vms/",
                 json={"vm_ram": 2048},
-                headers={"X-Agent-ID": AGENT_ID},
             )
         assert resp.status_code == 422
 
@@ -71,7 +69,6 @@ class TestHttpValidation:
             resp = await http.post(
                 f"/api/v1/hosts/{HOST}/vms/",
                 json={"vm_target": VM_NAME, "frp_server_addr": "1.2.3.4"},
-                headers={"X-Agent-ID": AGENT_ID},
             )
         assert resp.status_code == 422
 
@@ -140,6 +137,23 @@ class TestCreateVmViaClient:
         call_kwargs = fake_ansible.start_playbook.call_args
         assert call_kwargs.kwargs.get("limit") == HOST or HOST in str(call_kwargs)
 
+    async def test_credentials_stored_and_returned_after_success(self, client_and_queue):
+        """A successful create stores every role's credentials, retrievable by job_id.
+
+        The storefront (sole caller) fetches all roles and decides what to
+        surface — provisioning does not gate per-caller.
+        """
+        client, job_queue = client_and_queue
+        dispatched = _make_event_seam(job_queue)
+
+        submit = await client.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
+        await asyncio.wait_for(dispatched.wait(), timeout=5.0)
+        await client.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
+
+        creds = await client.get_job_credentials(submit.job_id)
+        roles = {c.role for c in creds.credentials}
+        assert roles == {"root", "tenant"}
+
     async def test_create_vm_full_request_body_accepted(self, client_and_queue):
         """Verify a fully-populated CreateVmRequest is accepted by the API."""
         client, job_queue = client_and_queue
@@ -151,7 +165,6 @@ class TestCreateVmViaClient:
             vm_vcpus=4,
             vm_disk_size="20G",
             image_setup_type="scratch",
-            buyer_agent_id="eip155:1337:0xbuyer:2",
         ))
 
         assert submit.status == "queued"

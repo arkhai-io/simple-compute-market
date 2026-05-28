@@ -58,7 +58,7 @@ async def _seed_order(db: SQLiteClient, order_id: str) -> None:
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
         offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
-        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "0x0000000000000000000000000000000000000001"}, "price_per_hour": 9000}],
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": "0x0000000000000000000000000000000000000001"}, "rates": [{"field": "amount", "per": "hour", "value": "9000"}]}],
         fulfillment_resource=None,
         max_duration_seconds=7200,
         seller="http://seller:8001",
@@ -316,20 +316,20 @@ class TestGetNegotiation:
 class TestForceAccept:
     async def test_requires_admin_key(self, client_no_key):
         with pytest.raises(StorefrontClientError) as exc_info:
-            await client_no_key.force_accept_negotiation("ord-fa", "neg-fa", price=8500)
+            await client_no_key.force_accept_negotiation("ord-fa", "neg-fa", amount=8500)
         assert "403" in str(exc_info.value)
 
     async def test_force_accept_commits_terminal_success(self, client):
         c, db = client
         await _seed_order(db, "ord-fa2")
         await _seed_thread(db, "neg-fa2", "ord-fa2")
-        result = await c.force_accept_negotiation("ord-fa2", "neg-fa2", price=8500)
+        result = await c.force_accept_negotiation("ord-fa2", "neg-fa2", amount=8500)
         assert result.action == "accept"
-        assert result.price == 8500
+        assert result.amount == 8500
         assert result.source == "admin_force_accept"
         detail = await c.get_negotiation("ord-fa2", "neg-fa2")
         assert detail.terminal_state == "success"
-        assert detail.agreed_price == 8500
+        assert detail.agreed_amount == 8500
 
     async def test_force_accept_missing_price_raises(self, client):
         c, db = client
@@ -349,13 +349,13 @@ class TestForceAccept:
         await _seed_thread(db, "neg-fa4", "ord-fa4",
                            terminal_state="success", agreed_price=9000)
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.force_accept_negotiation("ord-fa4", "neg-fa4", price=8000)
+            await c.force_accept_negotiation("ord-fa4", "neg-fa4", amount=8000)
         assert "409" in str(exc_info.value)
 
     async def test_force_accept_404_unknown_neg_raises(self, client):
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.force_accept_negotiation("ord-fa5", "ghost", price=8000)
+            await c.force_accept_negotiation("ord-fa5", "ghost", amount=8000)
         assert "404" in str(exc_info.value)
 
 

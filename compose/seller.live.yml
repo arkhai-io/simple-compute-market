@@ -1,0 +1,24 @@
+# Overlay for live KVM provisioning. Layered on top of compose/seller.yml:
+#
+#   docker compose -f compose/seller.yml -f compose/seller.live.yml up -d
+#
+# Adds the SSH-key bind-mount on seller-provisioning. The pubkey must be
+# authorized on the KVM host(s) you list under [kvm_hosts] in the ansible
+# inventory baked into the image.
+#
+# Also exposes `host.docker.internal` as a route to the docker host, so
+# ansible inventories can use it as `ansible_host` when the storefront
+# box is itself the KVM host (single-machine deployments). For multi-host
+# setups the inventory uses real IPs/DNS and host.docker.internal is
+# unused.
+#
+# Environment override:
+#   SELLER_SSH_PRIVKEY       — path to KVM-host SSH privkey (default: ../keys/id_ed25519,
+#                              i.e. ./keys/id_ed25519 relative to the project root)
+
+services:
+  seller-provisioning:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${SELLER_SSH_PRIVKEY:-../keys/id_ed25519}:/home/appuser/.ssh/id_ed25519:ro

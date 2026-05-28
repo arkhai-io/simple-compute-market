@@ -71,12 +71,12 @@ class TestParseIni:
     def test_parses_single_host(self):
         ini = (
             "[kvm_hosts]\n"
-            "ww1  ansible_host=10.0.0.1  ansible_user=ubuntu  "
+            "kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu  "
             "ansible_ssh_private_key_file=/home/user/.ssh/id_ed25519\n"
         )
         result = _parse_ini(ini)
         assert len(result) == 1
-        assert result[0]["name"] == "ww1"
+        assert result[0]["name"] == "kvm1"
         assert result[0]["kvm_host"] == "10.0.0.1"
         assert result[0]["ssh_user"] == "ubuntu"
         assert result[0]["ansible_ssh_private_key_file"] == "/home/user/.ssh/id_ed25519"
@@ -84,26 +84,26 @@ class TestParseIni:
     def test_parses_multiple_hosts(self):
         ini = (
             "[kvm_hosts]\n"
-            "ww1  ansible_host=10.0.0.1  ansible_user=ubuntu\n"
+            "kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu\n"
             "ww2  ansible_host=10.0.0.2  ansible_user=root\n"
         )
         result = _parse_ini(ini)
         assert len(result) == 2
         names = {r["name"] for r in result}
-        assert names == {"ww1", "ww2"}
+        assert names == {"kvm1", "ww2"}
 
     def test_skips_group_headers_and_comments(self):
         ini = (
             "# this is a comment\n"
             "[kvm_hosts]\n"
-            "ww1  ansible_host=10.0.0.1  ansible_user=ubuntu\n"
+            "kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu\n"
             "[other_group]\n"
             "other  ansible_host=9.9.9.9  ansible_user=nobody\n"
         )
         result = _parse_ini(ini)
-        # Both ww1 and other should be parsed (group membership is not filtered)
+        # Both kvm1 and other should be parsed (group membership is not filtered)
         names = {r["name"] for r in result}
-        assert "ww1" in names
+        assert "kvm1" in names
 
     def test_skips_entry_missing_ansible_host(self):
         ini = "bad_entry  ansible_user=ubuntu\n"
@@ -127,7 +127,7 @@ class TestParseIni:
 class TestSeedFromIni:
     _INI = (
         "[kvm_hosts]\n"
-        "ww1  ansible_host=10.0.0.1  ansible_user=ubuntu  "
+        "kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu  "
         "ansible_ssh_private_key_file=/home/user/.ssh/id_ed25519\n"
         "ww2  ansible_host=10.0.0.2  ansible_user=root  "
         "ansible_ssh_private_key_file=/home/user/.ssh/id_ed25519\n"
@@ -137,13 +137,13 @@ class TestSeedFromIni:
         hosts = svc.seed_from_ini(self._INI, ssh_key_type="path")
         assert len(hosts) == 2
         names = {h.name for h in hosts}
-        assert names == {"ww1", "ww2"}
+        assert names == {"kvm1", "ww2"}
 
     def test_stores_key_path_verbatim(self, svc):
         hosts = svc.seed_from_ini(self._INI, ssh_key_type="path")
-        ww1 = next(h for h in hosts if h.name == "ww1")
-        assert ww1.ssh_key_value == "/home/user/.ssh/id_ed25519"
-        assert ww1.ssh_key_type == "path"
+        kvm1 = next(h for h in hosts if h.name == "kvm1")
+        assert kvm1.ssh_key_value == "/home/user/.ssh/id_ed25519"
+        assert kvm1.ssh_key_type == "path"
 
     def test_idempotent_on_repeat_call(self, svc):
         svc.seed_from_ini(self._INI, ssh_key_type="path")
@@ -158,13 +158,13 @@ class TestSeedFromIni:
         svc.seed_from_ini(self._INI, ssh_key_type="path")
         updated_ini = (
             "[kvm_hosts]\n"
-            "ww1  ansible_host=10.9.9.9  ansible_user=newuser  "
+            "kvm1  ansible_host=10.9.9.9  ansible_user=newuser  "
             "ansible_ssh_private_key_file=/home/user/.ssh/id_ed25519\n"
         )
         svc.seed_from_ini(updated_ini, ssh_key_type="path")
-        ww1 = svc.get_host("ww1")
-        assert ww1.kvm_host == "10.9.9.9"
-        assert ww1.ssh_user == "newuser"
+        kvm1 = svc.get_host("kvm1")
+        assert kvm1.kvm_host == "10.9.9.9"
+        assert kvm1.ssh_user == "newuser"
 
     def test_absent_hosts_not_touched(self, svc):
         """Append-only: hosts not in the new INI are left as-is."""
@@ -175,9 +175,9 @@ class TestSeedFromIni:
             "ansible_ssh_private_key_file=/home/user/.ssh/id_ed25519\n"
         )
         svc.seed_from_ini(ini_ww2_only, ssh_key_type="path")
-        ww1 = svc.get_host("ww1")
-        assert ww1 is not None
-        assert ww1.enabled is True
+        kvm1 = svc.get_host("kvm1")
+        assert kvm1 is not None
+        assert kvm1.enabled is True
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +235,7 @@ class TestRegisterHostEmbeddedKey:
 class TestRenderInventoryIni:
     def test_emits_kvm_hosts_group_header(self, svc):
         hosts = [
-            Host(name="ww1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            Host(name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
                  ssh_key_type="path", ssh_key_value="/key", gpu_count=0, enabled=True),
         ]
         ini = svc.render_inventory_ini(hosts)
@@ -243,7 +243,7 @@ class TestRenderInventoryIni:
 
     def test_path_host_writes_key_path_directly(self, svc):
         hosts = [
-            Host(name="ww1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            Host(name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
                  ssh_key_type="path", ssh_key_value="/home/appuser/.ssh/id_ed25519",
                  gpu_count=0, enabled=True),
         ]
@@ -252,16 +252,16 @@ class TestRenderInventoryIni:
 
     def test_embedded_host_uses_sentinel(self, svc):
         hosts = [
-            Host(name="ww1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            Host(name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
                  ssh_key_type="embedded", ssh_key_value="ENCRYPTED",
                  gpu_count=0, enabled=True),
         ]
         ini = svc.render_inventory_ini(hosts)
-        assert "__embedded_key_ww1__" in ini
+        assert "__embedded_key_kvm1__" in ini
 
     def test_correct_variable_names(self, svc):
         hosts = [
-            Host(name="ww1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            Host(name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
                  ssh_key_type="path", ssh_key_value="/key", gpu_count=0, enabled=True),
         ]
         ini = svc.render_inventory_ini(hosts)
@@ -270,13 +270,13 @@ class TestRenderInventoryIni:
 
     def test_multiple_hosts_all_present(self, svc):
         hosts = [
-            Host(name="ww1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            Host(name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
                  ssh_key_type="path", ssh_key_value="/key", gpu_count=0, enabled=True),
             Host(name="ww2", kvm_host="10.0.0.2", ssh_user="root",
                  ssh_key_type="path", ssh_key_value="/key", gpu_count=1, enabled=True),
         ]
         ini = svc.render_inventory_ini(hosts)
-        assert "ww1" in ini
+        assert "kvm1" in ini
         assert "ww2" in ini
 
 
@@ -288,26 +288,26 @@ class TestRenderInventoryIni:
 class TestListHosts:
     def test_enabled_only_excludes_disabled(self, svc):
         body = HostCreate(
-            name="ww1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/key",
         )
         svc.register_host(body)
-        svc.disable_host("ww1")
+        svc.disable_host("kvm1")
 
         enabled = svc.list_hosts(enabled_only=True)
         assert all(h.enabled for h in enabled)
-        assert not any(h.name == "ww1" for h in enabled)
+        assert not any(h.name == "kvm1" for h in enabled)
 
     def test_enabled_only_false_includes_disabled(self, svc):
         body = HostCreate(
-            name="ww1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/key",
         )
         svc.register_host(body)
-        svc.disable_host("ww1")
+        svc.disable_host("kvm1")
 
         all_hosts = svc.list_hosts(enabled_only=False)
-        assert any(h.name == "ww1" for h in all_hosts)
+        assert any(h.name == "kvm1" for h in all_hosts)
 
     def test_search_filter(self, svc):
         for name, ip in [("alpha", "10.0.0.1"), ("beta", "10.0.0.2"), ("gamma", "10.0.0.3")]:

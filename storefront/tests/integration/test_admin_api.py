@@ -62,7 +62,6 @@ def reset_pause_state():
 async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
     _container.resolved_sqlite_client = db
     _container.resolved_system_service = SystemService(sqlite_client=db)
-    _container.resolved_policy_service = None  # not needed for most admin tests
 
     app = FastAPI()
     app.include_router(system_router)
@@ -77,14 +76,12 @@ async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
 
     _container.resolved_sqlite_client = None
     _container.resolved_system_service = None
-    _container.resolved_policy_service = None
 
 
 @pytest_asyncio.fixture
 async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
     _container.resolved_sqlite_client = db
     _container.resolved_system_service = SystemService(sqlite_client=db)
-    _container.resolved_policy_service = None
 
     app = FastAPI()
     app.include_router(system_router)
@@ -97,7 +94,6 @@ async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
 
     _container.resolved_sqlite_client = None
     _container.resolved_system_service = None
-    _container.resolved_policy_service = None
 
 
 # ---------------------------------------------------------------------------
@@ -123,13 +119,6 @@ class TestHealthEndpoint:
         registry_check = result.checks.get("registry")
         assert registry_check is not None
         assert isinstance(registry_check, str) and registry_check
-
-    async def test_system_status_includes_registry_auth_check(self, client):
-        c, _ = client
-        result = await c.get_system_status()
-        auth_check = result.checks.get("registry_auth")
-        assert auth_check is not None
-        assert isinstance(auth_check, str) and auth_check
 
     async def test_system_status_includes_negotiation_strategy_check(self, client):
         c, _ = client
@@ -194,110 +183,6 @@ class TestAdminResume:
 # Policy seed, status, and evaluate
 # ---------------------------------------------------------------------------
 
-class TestPolicySeed:
-    async def test_seed_returns_structured_response(self, client):
-        c, _ = client
-        result = await c.policy_seed()
-        assert "callable_registry_count" in result
-        assert "callables" in result
-        assert "seeded_policies" in result
-        assert "import_errors" in result
-        assert isinstance(result["callables"], list)
-        assert isinstance(result["import_errors"], list)
-
-    async def test_seed_requires_admin_key(self, client_no_key):
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await client_no_key.policy_seed()
-        assert "403" in str(exc_info.value)
-
-    async def test_seed_seeds_order_create_policy(self, client):
-        c, _ = client
-        result = await c.policy_seed()
-        seeded = result.get("seeded_policies", [])
-        assert any("order_create" in p for p in seeded)
-
-    async def test_seed_idempotent(self, client):
-        c, _ = client
-        r1 = await c.policy_seed()
-        r2 = await c.policy_seed()
-        assert r1["seeded_policies"] == r2["seeded_policies"]
-
-
-class TestPolicyStatus:
-    async def test_policy_status_returns_structured_response(self, client):
-        c, _ = client
-        await c.policy_seed()
-        result = await c.policy_status()
-        assert "callable_count" in result
-        assert "callable_registry" in result
-        assert "seeded_policies" in result
-        assert isinstance(result["seeded_policies"], list)
-
-    async def test_policy_status_lists_seeded_policies(self, client):
-        c, _ = client
-        await c.policy_seed()
-        result = await c.policy_status()
-        names = [p["policy_name"] for p in result["seeded_policies"]]
-        assert any("order_create" in n for n in names)
-
-    async def test_policy_status_includes_resolvable_flag(self, client):
-        c, _ = client
-        await c.policy_seed()
-        result = await c.policy_status()
-        for policy in result["seeded_policies"]:
-            assert "components_resolvable" in policy
-
-
-class TestPolicyEvaluate:
-    """Tests for POST /api/v1/system/policy/evaluate.
-
-    Full policy evaluation requires a real PolicyService which needs the full
-    domain package. The validation tests (bad event_type, missing offer) can
-    run with policy_svc=None because they fail before reaching the service.
-    The evaluation tests that need PolicyService are tested in
-    unit/services/test_policy_service.py.
-    """
-
-    async def test_evaluate_rejects_bad_event_type(self, client):
-        """Empty offer/accepted_escrows rejected with 400 by the controller."""
-        c, _ = client
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await c.policy_evaluate(
-                offer={}, accepted_escrows=[],
-                max_duration_seconds=None,
-                policy_components=["oc.action.make_offer_from_order_create"],
-            )
-        # policy_evaluate hardcodes event_type="order_create" in the client,
-        # so we test the missing offer/accepted_escrows validation instead.
-        assert "400" in str(exc_info.value) or "422" in str(exc_info.value)
-
-    async def test_evaluate_rejects_missing_offer(self, client):
-        """Empty offer dict is rejected with 400 by the controller."""
-        c, _ = client
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await c.policy_evaluate(
-                offer={}, accepted_escrows=[{
-                    "chain_name": "anvil",
-                    "escrow_address": "0x" + "11" * 20,
-                    "fields": {"token": "0x0000000000000000000000000000000000000001"},
-                    "price_per_hour": 1000,
-                }],
-                policy_components=["oc.action.make_offer_from_order_create"],
-            )
-        assert any(code in str(exc_info.value) for code in ("400", "422"))
-
-    async def test_evaluate_rejects_missing_accepted_escrows(self, client):
-        """Empty accepted_escrows list is rejected with 400 by the controller."""
-        c, _ = client
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await c.policy_evaluate(
-                offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"},
-                accepted_escrows=[],
-                policy_components=["oc.action.make_offer_from_order_create"],
-            )
-        assert any(code in str(exc_info.value) for code in ("400", "422"))
-
-
 class TestAdminImportResources:
     """Tests for POST /api/v1/admin/portfolio/resources/import."""
 
@@ -307,7 +192,7 @@ class TestAdminImportResources:
         "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
         'compute-import-001,compute.gpu,rtx5080,count,1,available,'
         '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-        'RTX 5080,90.0,"California, US",ww1\n'
+        'RTX 5080,90.0,"California, US",kvm1\n'
     )
 
     async def test_requires_admin_key(self, client_no_key):
@@ -357,9 +242,9 @@ class TestAdminImportResources:
             "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
             'compute-good-001,compute.gpu,rtx5080,count,1,available,'
             '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-            'RTX 5080,90.0,"California, US",ww1\n'
+            'RTX 5080,90.0,"California, US",kvm1\n'
             # Row with missing resource_id will fail.
-            ',compute.gpu,rtx5080,count,1,available,150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",ww1\n'
+            ',compute.gpu,rtx5080,count,1,available,150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm1\n'
         ).encode()
         result = await c.admin_import_resources(mixed_csv)
         assert result.total_rows == 2

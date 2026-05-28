@@ -10,6 +10,13 @@ class SettleRequest(BaseModel):
     negotiation_id: str
     ssh_public_key: str
     buyer_address: str
+    chain_name: str = Field(
+        description=(
+            "Chain name from the accepted escrow proposal — the storefront "
+            "uses it to pick the matching AlkahestClient out of its "
+            "per-chain dispatch table."
+        ),
+    )
 
 
 class SettleResponse(BaseModel):
@@ -41,9 +48,22 @@ class VerifyEscrowRequest(BaseModel):
     test getRecordFromChain in isolation before committing to settle.
     """
     seller_wallet: str = Field(description="Expected seller wallet address (recipient on-chain)")
-    agreed_price: float = Field(description="Expected agreed price in base token units per hour")
+    agreed_price: float = Field(
+        description=(
+            "Expected absolute payment amount in base units of the payment "
+            "token (the field name is retained from before the per-hour → "
+            "absolute refactor; semantically it now holds the amount, not "
+            "a rate)."
+        ),
+    )
     agreed_duration_seconds: int = Field(description="Expected lease duration in seconds")
     listing_id: str = Field(description="Listing ID — used to extract token contract from DB")
+    chain_name: str = Field(
+        description=(
+            "Chain name to dispatch the on-chain read on. The storefront "
+            "verifies the escrow against its [chains.<name>] entry."
+        ),
+    )
 
 
 class VerifyEscrowResponse(BaseModel):

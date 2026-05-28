@@ -1,0 +1,370 @@
+---
+# This file handles recursive GPU retry logic for multi-GPU virt-install
+# It maintains lists of available and failed GPUs, retrying combinations until success
+
+- name: Initialize multi-GPU retry variables (first call only)
+  set_fact:
+    multi_gpu_retry_count: "{{ multi_gpu_retry_count | default(0) | int }}"
+    attempted_gpu_combinations: "{{ attempted_gpu_combinations | default([]) }}"
+    failed_gpus: "{{ failed_gpus | default([]) }}"
+    available_gpu_pool: "{{ available_gpu_pool | default([]) }}"
+    current_gpu_selection: "{{ current_gpu_selection | default([]) }}"
+    max_multi_gpu_retries: "{{ max_multi_gpu_retries | default(50) | int }}"
+    virt_install_multi_success: false
+  when: multi_gpu_retry_count is not defined or multi_gpu_retry_count | int == 0
+
+- name: Get all available GPUs from lockfile (first call only)
+  shell: |
+    if [ ! -f /etc/libvirt/gpu-capabilities/gpu-lockfile.json ]; then
+      echo "[]"
+      exit 0
+    fi
+    
+    jq -r '.gpu_modes.passthrough.available_devices[]' /etc/libvirt/gpu-capabilities/gpu-lockfile.json 2>/dev/null | jq -R . | jq -s .
+  args:
+    executable: /bin/bash
+  register: all_available_gpus_raw
+  delegate_to: "{{ target_host }}"
+  when: available_gpu_pool | length == 0
+
+- name: Parse available GPU pool
+  set_fact:
+    available_gpu_pool: "{{ all_available_gpus_raw.stdout | from_json }}"
+  when: 
+    - all_available_gpus_raw is defined
+    - all_available_gpus_raw.stdout is defined
+    - available_gpu_pool | length == 0
+
+- name: Display all available GPU Pool
+  debug:
+    msg:
+      - "=== Available GPU Pool ==="
+      - "Total GPUs Available: {{ available_gpu_pool | length }}"
+      - "GPUs: {{ available_gpu_pool | join(', ') }}"
+  when:
+    - available_gpu_pool is defined
+    - available_gpu_pool | length > 0 
+    - multi_gpu_retry_count | int == 0
+
+- name: Calculate required GPU count
+  set_fact:
+    required_gpu_count: "{{ vm_gpu_devices | length if (vm_gpu_devices is defined and vm_gpu_devices | length > 0) else 1 }}"
+
+- name: Check if enough GPUs available
+  fail:
+    msg: |
+      Insufficient GPUs available on the server.
+      Required: {{ required_gpu_count }}
+      Available: {{ available_gpu_pool | length }}
+      
+      Available GPUs: {{ available_gpu_pool | join(', ') }}
+  when: (available_gpu_pool | length) < (required_gpu_count | int)
+
+- name: Display multi-GPU retry status
+  debug:
+    msg:
+      - "=== Multi-GPU Retry Attempt {{ multi_gpu_retry_count }}/{{ max_multi_gpu_retries }} ==="
+      - "Required GPUs: {{ required_gpu_count }}"
+      - "Available GPU Pool: {{ available_gpu_pool | join(', ') }}"
+      - "Failed GPUs: {{ failed_gpus | join(', ') if failed_gpus | length > 0 else 'None' }}"
+      - "Previous Attempts: {{ attempted_gpu_combinations | length }}"
+
+- name: Prepare GPU selection script variables
+  set_fact:
+    available_gpus_json: "{{ available_gpu_pool | to_json }}"
+    failed_gpus_json: "{{ failed_gpus | to_json }}"
+    attempted_combinations_json: "{{ attempted_gpu_combinations | to_json }}"
+
+- name: Debug JSON inputs
+  debug:
+    msg:
+      - "Available GPUs JSON: {{ available_gpus_json }}"
+      - "Failed GPUs JSON: {{ failed_gpus_json }}"
+      - "Attempted Combinations JSON: {{ attempted_combinations_json }}"
+
+- name: Create temporary directory for GPU selection script
+  tempfile:
+    state: directory
+    suffix: _gpu_selection
+  register: temp_script_dir
+  delegate_to: "{{ target_host }}"
+
+- name: Template GPU selection script
+  template:
+    src: "{{ role_path }}/templates/select_gpu_combination.sh.j2"
+    dest: "{{ temp_script_dir.path }}/select_gpu_combination.sh"
+    mode: '0755'
+  delegate_to: "{{ target_host }}"
+
+- name: Select next GPU combination
+  shell: "{{ temp_script_dir.path }}/select_gpu_combination.sh"
+  args:
+    executable: /bin/bash
+  register: selected_gpus_raw
+  delegate_to: "{{ target_host }}"
+
+- name: Debug selected GPU combination output
+  debug:
+    msg:
+      - "Raw output: {{ selected_gpus_raw.stdout }}"
+      - "Parsed output: {{ selected_gpus_raw.stdout | from_json }}"
+  when: selected_gpus_raw is defined
+
+- name: Clean up GPU selection script
+  file:
+    path: "{{ temp_script_dir.path }}"
+    state: absent
+  delegate_to: "{{ target_host }}"
+  when: temp_script_dir.path is defined
+
+- name: Parse selected GPU combination
+  set_fact:
+    current_gpu_selection: "{{ selected_gpus_raw.stdout | from_json }}"
+  when:
+    - selected_gpus_raw is defined
+    - selected_gpus_raw.stdout is defined
+    - selected_gpus_raw.stdout != "INSUFFICIENT_GPUS"
+
+- name: Check if GPU selection is valid
+  fail:
+    msg: |
+      No more GPU combinations available to try.
+      Failed GPUs: {{ failed_gpus | join(', ') }}
+      Available GPUs: {{ available_gpu_pool | join(', ') }}
+      Attempted combinations: {{ attempted_gpu_combinations | length }}
+  when:
+    - selected_gpus_raw.stdout is defined
+    - selected_gpus_raw.stdout == "INSUFFICIENT_GPUS"
+
+- name: Build GPU device list with audio devices
+  shell: |
+    GPU_DEVICES='{{ current_gpu_selection | to_json }}'
+    
+    echo "$GPU_DEVICES" | jq -r '.[]' | while read gpu_pci; do
+      # Extract GPU components
+      GPU_DOMAIN=$(echo "$gpu_pci" | cut -d':' -f1)
+      GPU_BUS=$(echo "$gpu_pci" | cut -d':' -f2)
+      GPU_SLOT=$(echo "$gpu_pci" | cut -d':' -f3 | cut -d'.' -f1)
+      
+      # Find audio device
+      AUDIO_DEVICE=$(lspci -D | grep "^${GPU_DOMAIN}:${GPU_BUS}:${GPU_SLOT}\.1" | grep -i "audio" | awk '{print $1}' | head -1)
+      
+      # Find ROM file if exists
+      ROM_FILE=""
+      if [ -d "/etc/libvirt/gpu-roms" ]; then
+        ROM_FILE=$(ls /etc/libvirt/gpu-roms/*${GPU_BUS}_${GPU_SLOT}*.rom 2>/dev/null | head -1)
+      fi
+      
+      # Output as JSON
+      jq -n \
+        --arg pci "$gpu_pci" \
+        --arg audio "${AUDIO_DEVICE:-NO_AUDIO_DEVICE}" \
+        --arg romfile "${ROM_FILE:-}" \
+        '{pci: $pci, audio: $audio, romfile: $romfile}'
+    done | jq -s .
+  args:
+    executable: /bin/bash
+  register: gpu_devices_with_audio
+  delegate_to: "{{ target_host }}"
+
+- name: Set GPU devices for virt-install
+  set_fact:
+    vm_gpu_devices: "{{ gpu_devices_with_audio.stdout | from_json }}"
+
+- name: Add current combination to attempted list
+  set_fact:
+    attempted_gpu_combinations: "{{ attempted_gpu_combinations + [current_gpu_selection] }}"
+
+- name: Try virt-install with selected GPU combination
+  block:
+    - name: Build hostdev arguments for selected GPUs
+      set_fact:
+        gpu_hostdev_args:  >-
+          {% set args = [] %}
+          {% if vm_gpu_devices is defined and vm_gpu_devices | length > 0 %}
+          {%   for gpu in vm_gpu_devices %}
+          {%     set gpu_arg = '--hostdev ' + gpu.pci %}
+          {%     if gpu.romfile is defined and gpu.romfile != '' %}
+          {%       set gpu_arg = gpu_arg + ',romfile=' + gpu.romfile %}
+          {%     endif %}
+          {%     set _ = args.append(gpu_arg) %}
+          {%     if gpu.audio is defined and gpu.audio != '' and gpu.audio != 'NO_AUDIO_DEVICE' %}
+          {%       set _ = args.append('--hostdev ' + gpu.audio) %}
+          {%     endif %}
+          {%   endfor %}
+          {% elif vm_gpu_device is defined and vm_gpu_device != '' %}
+          {%   set gpu_arg = '--hostdev ' + vm_gpu_device %}
+          {%   if vm_gpu_rom_file is defined and vm_gpu_rom_file != '' %}
+          {%     set gpu_arg = gpu_arg + ',romfile=' + vm_gpu_rom_file %}
+          {%   endif %}
+          {%   set _ = args.append(gpu_arg) %}
+          {%   if gpu_audio_device is defined and gpu_audio_device.stdout is defined and gpu_audio_device.stdout != 'NO_AUDIO_DEVICE' %}
+          {%     set _ = args.append('--hostdev ' + gpu_audio_device.stdout) %}
+          {%   endif %}
+          {% endif %}
+          {{ args | join(' ') }}
+    - name: Display current GPU attempt
+      debug:
+        msg:
+          - "=== Attempting GPU Combination ==="
+          - "GPUs: {{ current_gpu_selection | join(', ') }}"
+          - "Hostdev args: {{ gpu_hostdev_args }}"
+
+    - name: Execute virt-install with selected GPUs (scratch/base image)
+      shell: |
+        virt-install \
+          --name {{ vm_name }} \
+          --ram {{ vm_ram }} \
+          --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \
+          {% if vm_image_type == 'scratch' %}--disk path=/var/lib/libvirt/images/{{ vm_name }}-init.iso,device=cdrom \
+          {% endif %}--vcpus {{ vm_vcpus }} \
+          --cpu host-passthrough,cache.mode=passthrough \
+          --machine q35 \
+          --boot uefi \
+          --features smm=on \
+          --tpm none \
+          --os-variant {{ vm_os_variant }} \
+          --network network=default,model=virtio \
+          --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 \
+          {{ gpu_hostdev_args }} \
+          --graphics none \
+          --console pty,target_type=serial \
+          --import \
+          --noautoconsole
+      register: vm_create_result
+      when: vm_image_type is defined and vm_image_type in ['scratch', 'base']
+      delegate_to: "{{ target_host }}"
+
+    - name: Execute virt-install with selected GPUs (golden image)
+      shell: |
+        virt-install \
+          --name {{ vm_name }} \
+          --ram {{ vm_ram }} \
+          --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \
+          --vcpus {{ vm_vcpus }} \
+          --cpu host-passthrough,cache.mode=passthrough \
+          --machine q35 \
+          --boot uefi \
+          --features smm=on \
+          --tpm none \
+          --os-variant {{ vm_os_variant }} \
+          --network network=default,model=virtio \
+          --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 \
+          {{ gpu_hostdev_args }} \
+          --graphics none \
+          --console pty,target_type=serial \
+          --import \
+          --noautoconsole
+      register: vm_create_result
+      when: vm_image_type is defined and vm_image_type == 'golden'
+      delegate_to: "{{ target_host }}"
+
+    - name: Mark virt-install as successful
+      set_fact:
+        virt_install_multi_success: true
+
+    - name: Display VM creation success
+      debug:
+        msg:
+          - "=== VM Created Successfully ==="
+          - "VM Name: {{ vm_name }}"
+          - "GPUs Attached: {{ current_gpu_selection | join(', ') }}"
+          - "Retry attempts: {{ multi_gpu_retry_count }}"
+
+  rescue:
+    - name: Check if error is GPU-related
+      set_fact:
+        is_gpu_error: "{{ (vm_create_result.stderr | default('') is search('hostdev|PCI|GPU|vfio|IOMMU|in use')) or (vm_create_result.msg | default('') is search('hostdev|PCI|GPU|vfio|IOMMU|in use')) }}"
+
+    - name: Display error information
+      debug:
+        msg:
+          - "=== GPU Combination Failed ==="
+          - "Failed GPUs: {{ current_gpu_selection | join(', ') }}"
+          - "Error: {{ vm_create_result.stderr | default(vm_create_result.msg | default('Unknown error')) }}"
+          - "Is GPU error: {{ is_gpu_error }}"
+
+    - name: Identify which GPU(s) failed
+      shell: |
+        ERROR_MSG='{{ vm_create_result.stderr | default(vm_create_result.msg | default("")) }}'
+        GPU_LIST='{{ current_gpu_selection | to_json }}'
+        
+        # Check if error mentions specific PCI addresses
+        FAILED_GPUS=()
+        
+        echo "$GPU_LIST" | jq -r '.[]' | while read gpu_pci; do
+          # Normalize PCI address for matching
+          GPU_NORMALIZED=$(echo "$gpu_pci" | sed 's/[:\.]/_/g')
+          
+          # Check if this GPU is mentioned in error
+          if echo "$ERROR_MSG" | grep -qi "$gpu_pci\|$GPU_NORMALIZED"; then
+            echo "$gpu_pci"
+          fi
+        done | jq -R . | jq -s .
+      args:
+        executable: /bin/bash
+      register: identified_failed_gpus
+      when: is_gpu_error | bool
+      delegate_to: "{{ target_host }}"
+
+    - name: Update failed GPU list
+      set_fact:
+        failed_gpus: "{{ (failed_gpus + (identified_failed_gpus.stdout | from_json)) | unique }}"
+      when:
+        - is_gpu_error | bool
+        - identified_failed_gpus is defined
+        - identified_failed_gpus.stdout is defined
+        - (identified_failed_gpus.stdout | from_json) | length > 0
+
+    - name: Add all GPUs from combination to failed list if specific GPU not identified
+      set_fact:
+        failed_gpus: "{{ (failed_gpus + current_gpu_selection) | unique }}"
+      when:
+        - is_gpu_error | bool
+        - identified_failed_gpus is not defined or (identified_failed_gpus.stdout | from_json) | length == 0
+
+    - name: Increment retry count
+      set_fact:
+        multi_gpu_retry_count: "{{ multi_gpu_retry_count | int + 1 }}"
+
+    - name: Check if we should continue retrying
+      set_fact:
+        should_retry: "{{ (multi_gpu_retry_count | int) < (max_multi_gpu_retries | int) and (is_gpu_error | bool) and ((available_gpu_pool | length) - (failed_gpus | length)) >= (required_gpu_count | int) }}"
+
+    - name: Display retry decision
+      debug:
+        msg:
+          - "Should retry: {{ should_retry }}"
+          - "Retry count: {{ multi_gpu_retry_count }}/{{ max_multi_gpu_retries }}"
+          - "Available GPUs remaining: {{ (available_gpu_pool | length) - (failed_gpus | length) }}"
+          - "Required GPUs: {{ required_gpu_count }}"
+
+    - name: Recursively retry with next GPU combination
+      include_tasks: gpu-virt-install-multi-retry.yml
+      when: should_retry | bool
+
+    - name: Fail if no more GPU combinations available or max retries reached
+      fail:
+        msg: |
+          Failed to create VM with {{ required_gpu_count }} GPU(s) after {{ multi_gpu_retry_count }} attempts.
+          
+          Available GPUs: {{ available_gpu_pool | join(', ') }}
+          Failed GPUs: {{ failed_gpus | join(', ') }}
+          Remaining functional GPUs: {{ (available_gpu_pool | length) - (failed_gpus | length) }}
+          
+          Attempted combinations: {{ attempted_gpu_combinations | length }}
+          {% for combo in attempted_gpu_combinations %}
+          - {{ combo | join(', ') }}
+          {% endfor %}
+          
+          Last error: {{ vm_create_result.stderr | default(vm_create_result.msg | default('Unknown error')) }}
+          
+          Please check:
+          1. GPU hardware status
+          2. VFIO-PCI driver binding for all GPUs
+          3. IOMMU configuration
+          4. PCI device availability
+          5. Existing VM GPU allocations
+      when:
+        - not (virt_install_multi_success | default(false) | bool)
+        - not (should_retry | bool)

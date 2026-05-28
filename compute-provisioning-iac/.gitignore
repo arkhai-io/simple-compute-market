@@ -1,0 +1,11 @@
+# Terraform
+terraform/*/*.tfvars
+terraform/*/*.tfstate
+terraform/*/*.tfstate.backup
+terraform/*/.terraform*
+terraform/*/*.plan
+
+# Ansible
+ansible/build-vars*.yaml
+ansible/inventory/management-vars.yaml
+credentials/

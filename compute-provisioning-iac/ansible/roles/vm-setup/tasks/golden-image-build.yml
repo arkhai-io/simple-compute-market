@@ -1,0 +1,625 @@
+---
+# Golden Image Building Tasks
+
+- name: Apply default GCS and folder structuring variables
+  set_fact:
+    gcs_bucket_url: "{{ gcs_bucket_url | default(gcp_variables.gcs_bucket_url | default('')) }}"
+    gcs_project_id: "{{ gcs_project_id | default(gcp_variables.gcs_project_id | default('')) }}"
+    gcs_service_account_content: "{{ gcs_service_account_content | default(gcp_variables.gcs_service_account_content | default('')) }}"
+  when: vm_image_type == "golden"
+  tags:
+    - gcloud_vars
+    - build_configure
+
+- name: Create service account key file
+  copy:
+    dest: "/tmp/gcs_service_account_key.json"
+    content: "{{ gcs_service_account_content }}"
+    mode: '0644'
+  when: vm_image_type == "golden"
+  tags:
+    - gcloud_init
+    - build_configure
+
+- name: Authenticate gcloud with service account
+  shell: gcloud auth activate-service-account --key-file=/tmp/gcs_service_account_key.json
+  register: gcloud_auth_result
+  changed_when: false
+  failed_when: gcloud_auth_result.rc != 0
+  when: vm_image_type == "golden"
+  tags:
+    - gcloud_init
+    - build_configure
+
+- name: Set GCP project
+  shell: gcloud config set project {{ gcs_project_id }}
+  register: gcloud_set_project_result
+  changed_when: false
+  failed_when: gcloud_set_project_result.rc != 0
+  when: vm_image_type == "golden"
+  tags:
+    - gcloud_init
+    - build_configure
+
+- name: Turn off automatic parallel uploads configuration for gcloud
+  shell: gcloud config set storage/parallel_composite_upload_enabled False
+  register: gcloud_parallel_upload_result
+  changed_when: false
+  failed_when: gcloud_parallel_upload_result.rc != 0
+  when: vm_image_type == "golden"
+  tags:
+    - gcloud_init
+    - build_configure
+
+- name: Verify GCS Bucket exists
+  shell: gcloud storage ls {{ gcs_bucket_url }}
+  register: gcs_bucket_check
+  failed_when: gcs_bucket_check.rc != 0
+  changed_when: false
+  when: vm_image_type == "golden"
+  tags:
+    - gcloud_init
+    - build_configure
+
+- name: Read group_vars/all.yaml for default VM and Packer settings
+  include_vars:
+    file: "{{ lookup('env', 'PWD') }}/group_vars/all.yml"
+  when: vm_image_type == "golden"
+  tags:
+    - packer_vars
+    - build_configure
+
+- name: Apply default Packer variables for Golden Image Creation
+  set_fact:
+    # Set VM parameters
+    vm_memory: "{{ ram | default(default_vm_settings.ram | default(2048)) }}"
+    vm_cpu: "{{ vcpus | default(default_vm_settings.vcpus | default(2)) }}"
+    disk_size: "{{ disk_size | default(default_vm_settings.disk_size | default('20G')) }}"
+    # Set Packer build parameters
+    iso_url: "{{ iso_url | default(packer_variables.iso_url | default('https://cloud-images.ubuntu.com/noble/20251126/noble-server-cloudimg-amd64.img')) }}"
+    iso_checksum: "{{ iso_checksum | default(packer_variables.iso_checksum | default('sha256:8bf11afd901fdec5aad647a8a284243a2a0b80a81ac732ae618ab36afa09f2b4')) }}"
+    accelerator: "{{ accelerator | default(packer_variables.accelerator | default('kvm'))   }}"
+    build_format: "{{ build_format | default(packer_variables.build_format | default('qcow2')) }}"
+    build_name: "{{ build_name | default(packer_variables.build_name | default('ubuntu_noble_golden')) }}"
+    build_version: "{{ build_version | default(packer_variables.build_version | default('v1.0.0')) }}"
+    packer_work_dir: "{{ packer_work_dir | default(packer_variables.packer_work_dir | default('/tmp/packer_workspace')) }}"
+    output_dir: "{{ output_dir | default(packer_variables.output_dir | default('artifacts')) }}"
+    generate_new_templates: "{{ generate_new_templates | default(packer_variables.generate_new_templates | default('true')) }}"
+  when: vm_image_type == "golden"
+  tags:
+    - packer_vars
+    - build_configure
+
+- name: Set up random suffix for instance_name
+  set_fact:
+    base_instance_name_suffix: "{{ ansible_date_time.epoch | hash('md5') | truncate(4, True, '') }}"
+  when: vm_image_type == "golden" and base_instance_name is undefined
+  tags:
+    - packer_vars
+    - build_configure
+
+# Store final base_instance_name in output JSON
+- name: Generate instance name if base_instance_name is not provided
+  set_fact:
+    base_instance_name: "{{ base_instance_name if base_instance_name is defined else 'hostenv_' + base_instance_name_suffix }}"
+  when: vm_image_type == "golden"
+  tags:
+    - packer_vars
+    - build_configure
+
+- name: Debug root pasword, private key, and public key parameters
+  debug:
+    msg:
+      - "=== Golden Image Root Credentials Debug ==="
+      - "Root Password is defined: {{ root_password is defined }}"
+      - "Root Filename is defined: {{ root_filename is defined }}"
+  when: vm_image_type == "golden"
+  tags:
+    - packer_root_ssh
+    - build_configure
+# Add when root_password or root_filename is not defined
+- name: Generate suffix for SSH
+  set_fact:
+    ssh_suffix: "{{ ansible_date_time.epoch | hash('md5') | truncate(6, True, '') }}"
+  tags:
+    - packer_root_ssh
+    - build_configure
+  when: vm_image_type == "golden" and root_filename is not defined
+
+- name: Define root variables
+  set_fact:
+    ssh_fname: "{{ root_filename if root_filename is defined else 'root_ssh_' + ssh_suffix + '_ed25519' }}"
+    ssh_pword: "{{ root_password if root_password is defined else lookup('password', '/dev/null chars=ascii_letters,digits length=40') }}"
+  when: vm_image_type == "golden"
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+- name: Debug home env
+  debug: 
+    msg:
+      - "{{ ansible_env.HOME  }}"
+  when: vm_image_type == "golden"
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+- name: Set up host environment root SSH folder
+  file:
+    path: "{{ ansible_env.HOME }}/.ssh"
+    state: directory
+    mode: '0700'
+  when: vm_image_type == "golden" and root_filename is not defined
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+# Store generated SSH key and pubkey in output JSON
+- name: Generate root Ed25519 SSH key
+  openssh_keypair:
+    path: "{{ ansible_env.HOME }}/.ssh/{{ ssh_fname }}"
+    type: ed25519
+    size: 256
+    state: present
+    force: yes
+  when: vm_image_type == "golden" and root_filename is not defined
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+- name: Read SSH private key
+  slurp:
+    src: "{{ ansible_env.HOME }}/.ssh/{{ ssh_fname }}"
+  register: ssh_privkey_content
+  when: vm_image_type == "golden"
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+- name: Read SSH public key
+  slurp:
+    src: "{{ ansible_env.HOME }}/.ssh/{{ ssh_fname }}.pub"
+  register: ssh_pubkey_content
+  when: vm_image_type == "golden"
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+- name: Set SSH key variables
+  set_fact:
+    ssh_privkey_path: "{{ ansible_env.HOME }}/.ssh/{{ ssh_fname }}"
+    ssh_privkey: "{{ ssh_privkey_content.content | b64decode | trim }}"
+    ssh_pubkey: "{{ ssh_pubkey_content.content | b64decode | trim }}"
+  when: vm_image_type == "golden"
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+- name: Generate password hash for root user
+  shell: mkpasswd --method=SHA-512 --rounds=4096 "{{ ssh_pword }}"
+  register: password_hash_result
+  when: vm_image_type == "golden"
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+- name: Set hashed password variable
+  set_fact:
+    hashed_rpword: "{{ password_hash_result.stdout }}"
+  when: vm_image_type == "golden"
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+- name: Remove packer folder, if generate_new_templates is true
+  block:
+    - name: Check if packer folder exists
+      stat:
+          path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+      register: packer_remove_work_dir_stat
+      when: vm_image_type == "golden" and generate_new_templates is true
+      tags:
+        - packer_workspace_setup
+        - build_configure
+    - name: Remove packer folder if generate_new_templates is true
+      file:
+        path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+        state: absent
+      when: vm_image_type == "golden" and packer_remove_work_dir_stat.stat.exists
+      tags:
+        - packer_workspace_setup
+        - build_configure
+
+
+- name: Check if packer directory exists
+  stat:
+    path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+  register: packer_work_dir_stat
+  when: vm_image_type == "golden"
+  tags:
+    - packer_workspace_setup
+    - build_configure
+
+- name: Set up packer directory
+  file:
+    path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+    state: directory
+    mode: '0755'
+  when: vm_image_type == "golden" and not packer_work_dir_stat.stat.exists
+  tags:
+    - packer_workspace_setup
+    - build_configure
+
+- name: Check if packer workspace is created
+  debug:
+    msg: "Packer role path is {{ role_path }}"
+  when: vm_image_type == "golden" and not packer_work_dir_stat.stat.exists
+  tags:
+    - packer_workspace_setup
+    - build_configure
+
+- name: Copy packer files (excluding artifacts, user-data, meta-data)
+  synchronize:
+    src: "{{ role_path }}/files/{{ build_name }}/"
+    dest: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+    delete: yes
+    rsync_opts:
+      - "--exclude=config/user-data"
+      - "--exclude=config/meta-data"
+  when: vm_image_type == "golden" and not packer_work_dir_stat.stat.exists
+  tags:
+    - packer_workspace_setup
+    - build_configure
+
+- name: Allow permission to run for prepare-image.sh
+  file:
+    path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/scripts/prepare-image.sh"
+    mode: a+x
+  when: vm_image_type == "golden" and not packer_work_dir_stat.stat.exists
+  tags:
+    - packer_workspace_setup
+    - build_configure
+
+- name: Generate user-data from template
+  template:
+    src: "{{ role_path}}/templates/user-data.j2"
+    dest: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/config/user-data"
+    mode: '0644'
+  when: vm_image_type == "golden" and generate_new_templates is true
+  tags:
+    - packer_workspace_setup
+    - build_configure
+    
+- name: Generate meta-data from template
+  template:
+    src: "{{ role_path}}/templates/meta-data.j2"
+    dest: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/config/meta-data"
+    mode: '0644'
+  when: vm_image_type == "golden" and generate_new_templates is true
+  tags:
+    - packer_workspace_setup
+    - build_configure
+    
+- name: Create values.pkrvars.hcl file
+  template:
+    src: "{{ role_path}}/templates/values.pkrvars.hcl.j2"
+    dest: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/values.pkrvars.hcl"
+    mode: '0644'
+  when: vm_image_type == "golden" and generate_new_templates is true
+  tags:
+    - packer_workspace_setup
+    - build_configure
+
+- name: Remove artifacts folder, if exists, to ensure clean build
+  block:
+    - name: Check if artifacts folder exists
+      stat:
+        path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/artifacts"
+      register: packer_artifacts_dir_stat
+      when: vm_image_type == "golden"
+      tags:
+        - packer_workspace_setup
+        - build_configure
+    - name: Remove artifacts folder if exists
+      file:
+        path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/artifacts"
+        state: absent
+      when: vm_image_type == "golden" and packer_artifacts_dir_stat.stat.exists
+      tags:
+        - packer_workspace_setup
+        - build_configure
+
+- name: Initialize Packer
+  command: packer init .
+  args:
+    chdir: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+  register: packer_init_result
+  when: vm_image_type == "golden"
+  tags:
+    - packer_init
+    - build_configure
+  
+- name: Display Packer init output
+  debug:
+    var: packer_init_result.stdout_lines
+  when: vm_image_type == "golden"
+  tags:
+    - packer_init
+    - build_configure
+    
+- name: Validate Packer configuration
+  command: packer validate -var-file=values.pkrvars.hcl .
+  args:
+    chdir: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+  register: packer_validate_result
+  when: vm_image_type == "golden"
+  tags:
+    - packer_validate
+    - build_configure
+  
+- name: Display Packer validation output
+  debug:
+    var: packer_validate_result.stdout_lines
+  when: vm_image_type == "golden"
+  tags:
+    - packer_validate
+    - build_configure
+
+- name: Remove existing cidata.iso if generating new templates
+  file:
+    path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/cidata.iso"
+    state: absent
+  when: vm_image_type == "golden" and generate_new_templates is true
+  tags:
+    - packer_build
+    - build
+
+- name: Check if cidata.iso exists
+  stat:
+    path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/cidata.iso"
+  register: file_stat_cidata
+  when: vm_image_type == "golden"
+  tags:
+    - packer_build
+    - build
+
+- name: Create genisoimage cidata.iso for cloud-init if not exist
+  command: >
+    genisoimage -output {{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/cidata.iso
+    -input-charset utf-8 -V cidata -J -r
+    {{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/config/user-data
+    {{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/config/meta-data
+  args:
+    chdir: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+  when:
+    - vm_image_type == "golden"
+    - (generate_new_templates is true) or (not file_stat_cidata.stat.exists)
+  register: genisoimage_result
+  tags:
+    - packer_build
+    - build
+    
+- name: Build VM image with Packer
+  command: packer build -var-file=values.pkrvars.hcl .
+  args:
+    chdir: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+  register: packer_build_result
+  when: vm_image_type == "golden"
+  async: 3600  # 1 hour timeout
+  poll: 30     # Check every 30 seconds
+  tags:
+    - packer_build
+    - build
+  
+- name: Display Packer build output
+  debug:
+    var: packer_build_result.stdout_lines
+  when: vm_image_type == "golden"
+  tags:
+    - verify_packer_build
+    - build
+    
+- name: Find generated qcow2 files
+  find:
+    paths: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/artifacts"
+    patterns:
+      - "*.qcow2"
+      - "*.sha256sum"
+  register: artifact_files
+  when: vm_image_type == "golden"
+  tags:
+    - artifacts_init
+    - build_upload
+
+- name: Get current date for image versioning
+  set_fact:
+    current_date: "{{ ansible_date_time.date | replace('-', '') }}"
+  when: vm_image_type == "golden"
+  tags:
+    - artifacts_init
+    - build_upload
+
+- name: Set GCS Folder Paths
+  set_fact:
+    gcs_date_path: "{{ build_name }}/{{ current_date }}"
+    gcs_current_path: "{{ build_name }}/current"
+  when: vm_image_type == "golden"
+  tags:
+    - artifacts_init
+    - build_upload
+
+- name: Clear first existing artifacts in GCS current folder, if exists
+  block:
+    - name: List files in current folder
+      shell: gcloud storage ls {{ gcs_bucket_url }}/{{ gcs_current_path }}/
+      register: gcs_current_files
+      failed_when: false
+      when: vm_image_type == "golden"
+      tags:
+        - artifacts_current_prep
+        - build_upload
+    - name: Clear current_folder if any files exist
+      when: vm_image_type == "golden" and gcs_current_files.rc == 0
+      shell: gcloud storage rm {{ gcs_bucket_url }}/{{ gcs_current_path }}/**
+      register: gcs_clear_current
+      tags:
+        - artifacts_current_prep
+        - build_upload
+    - name: Display clear result
+      debug:
+        msg: "{{ 'Current folder cleared: ' + (gcs_clear_current.stdout | default('No output')) if gcs_current_files.rc == 0 else 'Current folder did not exist' }}"
+      when: vm_image_type == "golden"
+      tags:
+        - artifacts_current_prep
+        - build_upload
+
+- name: Clear also existing artifacts in GCS date folder, if exists
+  block:
+    - name: List files in date folder
+      shell: gcloud storage ls {{ gcs_bucket_url }}/{{ gcs_date_path }}/
+      register: gcs_date_files
+      failed_when: false
+      when: vm_image_type == "golden"
+      tags:
+        - artifacts_date_prep
+        - build_upload
+    - name: Clear current_folder if any files exist
+      when: vm_image_type == "golden" and gcs_date_files.rc == 0
+      shell: gcloud storage rm {{ gcs_bucket_url }}/{{ gcs_date_path }}/**
+      register: gcs_clear_date
+      tags:
+        - artifacts_date_prep
+        - build_upload
+    - name: Display clear result
+      debug:
+        msg: "{{ 'Date folder cleared: ' + (gcs_clear_date.stdout | default('No output')) if gcs_date_files.rc == 0 else 'Date folder did not exist' }}"
+      when: vm_image_type == "golden"
+      tags:
+        - artifacts_date_prep
+        - build_upload
+
+- name: Upload artifacts to GCS date bucket
+  shell: gcloud storage cp {{ item.path }} {{ gcs_bucket_url }}/{{ gcs_date_path }}/{{ item.path | basename | trim }}
+  loop: "{{ artifact_files.files }}"
+  register: gcs_upload_date_results
+  failed_when: gcs_upload_date_results.rc != 0
+  when: vm_image_type == "golden"
+  tags:
+    - artifacts_upload
+    - build_upload
+  
+- name: Upload artifacts to GCS current bucket
+  shell: gcloud storage cp {{ item.path }} {{ gcs_bucket_url }}/{{ gcs_current_path }}/{{ item.path | basename | trim}}
+  loop: "{{ artifact_files.files }}"
+  register: gcs_upload_current_results
+  failed_when: gcs_upload_current_results.rc != 0
+  when: vm_image_type == "golden"
+  tags:
+    - artifacts_upload
+    - build_upload
+
+- name: Copy qcow2 artifact to qemu image folder using shell
+  shell: cp "{{ item.path }}" "/var/lib/libvirt/images/{{ item.path | basename | trim }}"
+  loop: "{{ artifact_files.files }}"
+  when: vm_image_type == "golden" and item.path is search('\.qcow2$')
+  tags:
+    - artifacts_deploy
+    - build_upload
+
+- name: Set ownership and permissions for qcow2 file
+  file:
+    path: "/var/lib/libvirt/images/{{ item.path | basename | trim }}"
+    owner: libvirt-qemu
+    group: kvm
+    mode: '0644'
+  loop: "{{ artifact_files.files }}"
+  when: vm_image_type == "golden" and item.path is search('\.qcow2$')
+  tags:
+    - artifacts_deploy
+    - build_upload
+
+- name: Verify uploads completed successfully
+  shell:
+    gcloud storage ls {{ gcs_bucket_url }}/{{ gcs_current_path }} && gcloud storage ls {{ gcs_bucket_url }}/{{ gcs_date_path }}
+  when:
+    - vm_image_type == "golden"
+    - gcs_upload_date_results is defined
+    - gcs_upload_date_results.results is defined
+    - gcs_upload_current_results is defined
+    - gcs_upload_current_results.results is defined
+  register: verify_artifacts
+  tags:
+    - artifacts_cleanup
+    - build_upload
+
+- name: Remove local artifacts after successful upload
+  file:
+    path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/artifacts"
+    state: absent
+  when:
+    - vm_image_type == "golden"
+    - verify_artifacts is defined
+    - verify_artifacts is succeeded
+  tags:
+    - artifacts_cleanup
+    - build_upload
+
+- name: Display GCP Artifacts uploaded
+  debug:
+    var: verify_artifacts.stdout_lines
+  when:
+    - vm_image_type == "golden"
+    - verify_artifacts is defined
+    - verify_artifacts is succeeded
+  tags:
+    - artifacts_cleanup
+    - build_upload
+
+# Create YAML data output for Host Environment details
+- name: Create golden image root credentials YAML file
+  copy:
+    content: |
+      # Golden Image Root Credentials
+      # Generated: {{ ansible_date_time.iso8601 }}
+      # Image: {{ build_name }}-{{ build_version }}
+      
+      golden_image_name: "{{ build_name }}-{{ build_version }}"
+      gcs_bucket_url: "{{ gcs_bucket_url }}"
+      gcs_image_path: "{{ gcs_current_path }}"
+      root_ssh_filename: "{{ ssh_fname }}"
+      root_ssh_password: "{{ ssh_pword }}"
+      root_ssh_private_key: |
+        {{ ssh_privkey | indent(8) }}
+      root_ssh_public_key: |
+        {{ ssh_pubkey | indent(8) }}
+    dest: "{{ inventory_dir }}/management-vars.yaml"
+    mode: '0600'
+  delegate_to: localhost
+  become: no
+  register: credentials_file_result
+  when: vm_image_type == "golden" and packer_build_result.rc == 0
+  tags:
+    - artifacts_cleanup
+    - build_completion
+
+- name: Display golden image build notes
+  debug:
+    msg: |-
+      === Golden Image Creation Complete ===
+      1. Packer build completed with return code: {{ packer_build_result.rc }}
+      2. Artifacts have been uploaded to GCS bucket: {{ gcs_bucket_url }}
+         - Date-stamped folder: {{ gcs_date_path }}
+         - Current folder: {{ gcs_current_path }}
+      3. Artifacts have been copied to /var/lib/libvirt/images/ under the name: {{ build_name }}-{{ build_version }}.qcow2
+      4. Local artifacts have been cleaned up
+      5. management-vars.yaml file created at: {{ credentials_file_result.dest }}
+         - Contains root SSH credentials for the golden image
+
+      You can now use the created golden image in your VM deployments.
+  failed_when:
+    - credentials_file_result is not defined and not credentials_file_result.changed 
+    - packer_build_result is not defined or packer_build_result.rc != 0
+    - verify_artifacts is not defined or not verify_artifacts is succeeded
+  tags:
+    - artifacts_cleanup
+    - build_completion

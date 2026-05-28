@@ -17,12 +17,12 @@ ansible_cfg: "/opt/compute-provisioning-iac/ansible/ansible.cfg"
 # Storefront callback target for the lease watchdog.
 #
 # The watchdog PATCHes this URL when a lease expires to mark the storefront
-# resource back to available. Defaults to the storefront container name on
-# the shared docker network (set by storefront/Makefile deploy-seller-agent).
+# resource back to available. Defaults to the storefront service name on the
+# shared docker network (matches docker-compose.yml's bob-storefront).
 #
 # Override at runtime:
 #   PROVISIONING_STOREFRONT_URL=http://<host>:<port>
 #   PROVISIONING_STOREFRONT_ADMIN_KEY=<key>
 # ---------------------------------------------------------------------------
-storefront_url: "http://market-agent-sell:8001"
+storefront_url: "http://bob-storefront:8001"
 storefront_admin_key: "test-api-key"

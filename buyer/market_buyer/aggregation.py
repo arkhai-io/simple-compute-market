@@ -22,7 +22,7 @@ knows the comparison rule, so the orchestrator stays dumb.
 Built-in flavors:
 
 - ``best_price`` (default) — negotiate with *all* candidates in parallel,
-  pick the lowest agreed_price. The canonical "comparison shopping"
+  pick the lowest agreed_amount. The canonical "comparison shopping"
   example. Default because the sequential alternatives give up the
   comparison's headline benefit (cross-seller price discovery) in
   exchange for slightly less per-buy work; with ``max_matches_to_try``
@@ -60,7 +60,7 @@ Three places ``load_aggregation_policy`` looks, in order:
 1. In-process ``_REGISTRY`` (built-ins + anything decorated with
    ``@register_aggregation_policy``).
 2. File-based: ``$XDG_CONFIG_HOME/arkhai/aggregation_policies/<name>/policy.py``
-   plus any folder added via ``[buyer.aggregation] extra_policy_paths``.
+   plus any folder added via ``[aggregation] extra_policy_paths``.
    Each subdir's name becomes the policy name. The file exports
    ``factory(cfg) -> AggregationPolicy``; ``cfg`` is the buyer's full
    TOML config so policies can read per-policy knobs without us baking
@@ -139,14 +139,14 @@ def _load_buyer_config() -> dict[str, Any]:
 def _resolve_extra_policy_paths(cfg: dict[str, Any]) -> list[str]:
     """Pull extra aggregation-policy directories out of TOML.
 
-    Accepts ``[buyer.aggregation] extra_policy_paths = [".../a", ...]``
+    Accepts ``[aggregation] extra_policy_paths = [".../a", ...]``
     (list) or a single string. Empty / unset → empty list.
     """
     try:
         from service.config_loader import get_dotted
     except Exception:
         return []
-    raw = get_dotted(cfg, "buyer.aggregation.extra_policy_paths")
+    raw = get_dotted(cfg, "aggregation.extra_policy_paths")
     if raw is None:
         return []
     if isinstance(raw, str):
@@ -320,12 +320,15 @@ async def gather_outcomes(
 
 
 def _extract_advertised_price(match: dict[str, Any]) -> float | None:
-    """Pull the per-hour advertised price from a match's first accepted escrow.
+    """Pull the per-hour advertised rate from a match's first accepted escrow.
 
-    Mirrors what the seller advertises: ``accepted_escrows[0].price_per_hour``
-    (or 0 for free / None for hidden reserve). Returns ``None`` if no usable
-    rate is published — callers fall back to their own ``initial_price``.
+    Mirrors what the seller advertises: ``accepted_escrows[0]`` primary
+    rate (0 for free; ``None`` for hidden reserve, i.e. empty ``rates``).
+    Returns ``None`` if no usable rate is published — callers fall back
+    to their own ``initial_price``.
     """
+    from service.schemas import primary_rate_value
+
     accepted = match.get("accepted_escrows") or []
     if isinstance(accepted, str):
         try:
@@ -337,14 +340,10 @@ def _extract_advertised_price(match: dict[str, Any]) -> float | None:
     first = accepted[0]
     if not isinstance(first, dict):
         return None
-    amount = first.get("price_per_hour")
-    try:
-        parsed = float(amount) if amount is not None else None
-    except (ValueError, TypeError):
+    amount = primary_rate_value(first)
+    if amount is None or amount <= 0:
         return None
-    if parsed is None or parsed <= 0:
-        return None
-    return parsed
+    return float(amount)
 
 
 async def _sequential_first_agreed(
@@ -354,7 +353,7 @@ async def _sequential_first_agreed(
     """Walk candidates in order; first ``status=="agreed"`` wins."""
     for c in candidates:
         outcome = await negotiate(c)
-        if outcome.status == "agreed" and outcome.agreed_price is not None:
+        if outcome.status == "agreed" and outcome.agreed_amount is not None:
             return (c, outcome)
     return None
 
@@ -426,7 +425,7 @@ async def _priceless_last(
 def _resolve_best_price_timeout() -> float | None:
     """Optional wall-clock budget for ``best_price`` (seconds).
 
-    Read from ``[buyer.aggregation] best_price_timeout`` in TOML. Unset,
+    Read from ``[aggregation] best_price_timeout`` in TOML. Unset,
     non-numeric, or non-positive → no timeout (the policy waits for
     every candidate). A positive value caps the comparison at the
     given number of seconds; any candidate still negotiating when the
@@ -437,7 +436,7 @@ def _resolve_best_price_timeout() -> float | None:
         from service.config_loader import get_dotted
     except Exception:
         return None
-    raw = get_dotted(cfg, "buyer.aggregation.best_price_timeout")
+    raw = get_dotted(cfg, "aggregation.best_price_timeout")
     if raw is None:
         return None
     try:
@@ -450,18 +449,18 @@ def _resolve_best_price_timeout() -> float | None:
 def _pick_min_agreed(
     results: list[tuple[dict[str, Any], NegotiationOutcome | BaseException]],
 ) -> tuple[dict[str, Any], NegotiationOutcome] | None:
-    """Pick the candidate with the lowest agreed_price from a result set."""
+    """Pick the candidate with the lowest agreed_amount from a result set."""
     agreed: list[tuple[dict[str, Any], NegotiationOutcome]] = []
     for c, r in results:
         if (
             isinstance(r, NegotiationOutcome)
             and r.status == "agreed"
-            and r.agreed_price is not None
+            and r.agreed_amount is not None
         ):
             agreed.append((c, r))
     if not agreed:
         return None
-    return min(agreed, key=lambda p: p[1].agreed_price or 0)
+    return min(agreed, key=lambda p: p[1].agreed_amount or 0)
 
 
 @register_aggregation_policy("best_price")
@@ -473,7 +472,7 @@ async def _best_price(
 
     The canonical "comparison shopping" example. Bound the candidate
     list upstream (``max_matches_to_try``) to control fan-out;
-    optionally cap wall time with ``[buyer.aggregation] best_price_timeout``
+    optionally cap wall time with ``[aggregation] best_price_timeout``
     so one slow seller can't hold up the whole buy.
 
     Without a timeout, costs N negotiations of wall time at most. With
@@ -558,7 +557,7 @@ async def _fastest_agreed(
                 if (
                     isinstance(outcome, NegotiationOutcome)
                     and outcome.status == "agreed"
-                    and outcome.agreed_price is not None
+                    and outcome.agreed_amount is not None
                 ):
                     return (c, outcome)
         return None

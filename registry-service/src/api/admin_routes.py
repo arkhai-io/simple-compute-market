@@ -11,7 +11,7 @@ value if the operator loses it. Lost key → revoke + mint a fresh one.
 """
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -32,11 +32,16 @@ router = APIRouter(
 
 class CreateApiKeyRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=128, description="Human-readable label")
+    scope: Literal["read", "write"] = Field(
+        "read",
+        description="'read' (discovery/lookups) or 'write' (publish/update/delete + heartbeat). Write implies read. Defaults to read (least privilege).",
+    )
 
 
 class CreateApiKeyResponse(BaseModel):
     id: int
     name: str
+    scope: str
     key: str = Field(..., description="Raw bearer token — store this now; the registry retains only its hash")
     created_at: str
 
@@ -44,6 +49,7 @@ class CreateApiKeyResponse(BaseModel):
 class ApiKeyListItem(BaseModel):
     id: int
     name: str
+    scope: str
     created_at: str
     revoked_at: Optional[str] = None
 
@@ -55,9 +61,9 @@ def create_api_key(
     """Mint a new key. The response includes the raw token; the
     operator must capture it now — the registry never returns it
     again."""
-    raw, row = mint_api_key(db, name=body.name.strip())
+    raw, row = mint_api_key(db, name=body.name.strip(), scope=body.scope)
     return CreateApiKeyResponse(
-        id=row.id, name=row.name, key=raw,
+        id=row.id, name=row.name, scope=row.scope, key=raw,
         created_at=row.created_at.isoformat(),
     )
 
@@ -69,7 +75,7 @@ def list_api_keys(db: Session = Depends(get_db)) -> List[ApiKeyListItem]:
     rows = db.query(ApiKey).order_by(ApiKey.created_at.desc()).all()
     return [
         ApiKeyListItem(
-            id=r.id, name=r.name,
+            id=r.id, name=r.name, scope=r.scope,
             created_at=r.created_at.isoformat(),
             revoked_at=r.revoked_at.isoformat() if r.revoked_at else None,
         )

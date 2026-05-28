@@ -38,6 +38,29 @@ def client(tmp_path):
     return SQLiteClient(db_path=str(tmp_path / "agent.db"))
 
 
+@pytest.fixture(autouse=True)
+def _anvil_chain(monkeypatch):
+    """Inject a synthetic [chains.anvil] entry so start_settlement_job's
+    ``CHAINS.get(chain_name)`` lookup resolves in tests that don't write a
+    full storefront.toml."""
+    from service.config_loader import ChainConfig
+    from market_storefront.utils import config as agent_config
+
+    monkeypatch.setattr(
+        agent_config,
+        "CHAINS",
+        {
+            "anvil": ChainConfig(
+                name="anvil",
+                rpc_url="http://localhost:8545",
+                chain_id=31337,
+                alkahest_address_config_path=None,
+            ),
+        },
+        raising=False,
+    )
+
+
 @pytest.mark.asyncio
 async def test_insert_escrow_happy_path(client):
     ok = await client.insert_escrow(
@@ -184,6 +207,7 @@ async def test_start_refuses_unknown_negotiation(client):
             ssh_public_key="ssh-rsa ...",
             sqlite_client=client,
             alkahest_client=MagicMock(),
+            chain_name='anvil',
         )
 
 
@@ -198,6 +222,7 @@ async def test_start_refuses_non_terminal_thread(client):
             ssh_public_key="ssh-rsa ...",
             sqlite_client=client,
             alkahest_client=MagicMock(),
+            chain_name='anvil',
         )
 
 
@@ -212,6 +237,7 @@ async def test_start_refuses_terminal_without_agreed_price(client):
             ssh_public_key="ssh-rsa ...",
             sqlite_client=client,
             alkahest_client=MagicMock(),
+            chain_name='anvil',
         )
 
 
@@ -226,6 +252,7 @@ async def test_start_refuses_when_seller_order_gone(client):
             ssh_public_key="ssh-rsa ...",
             sqlite_client=client,
             alkahest_client=MagicMock(),
+            chain_name='anvil',
         )
 
 
@@ -249,6 +276,7 @@ async def test_start_happy_path_inserts_row_and_kicks_off_task(client):
             ssh_public_key="ssh-rsa ...",
             sqlite_client=client,
             alkahest_client=MagicMock(),
+            chain_name='anvil',
         )
 
     assert result["status"] == "provisioning"
@@ -288,6 +316,7 @@ async def test_start_aborts_when_escrow_verification_rejects(client):
                 ssh_public_key="ssh-rsa ...",
                 sqlite_client=client,
                 alkahest_client=MagicMock(),
+            chain_name='anvil',
             )
 
     # No DB row, no background task.
@@ -311,6 +340,7 @@ async def test_start_is_idempotent_by_escrow_uid(client):
             escrow_uid="0xescrow", negotiation_id="neg-1",
             ssh_public_key="ssh-rsa ...",
             sqlite_client=client, alkahest_client=MagicMock(),
+            chain_name='anvil',
         )
         # Flip the existing job to 'ready' to prove the second call reads, not overwrites.
         await client.update_escrow(
@@ -321,6 +351,7 @@ async def test_start_is_idempotent_by_escrow_uid(client):
             escrow_uid="0xescrow", negotiation_id="neg-1",
             ssh_public_key="ssh-rsa ...",
             sqlite_client=client, alkahest_client=MagicMock(),
+            chain_name='anvil',
         )
 
     assert first["status"] == "provisioning"

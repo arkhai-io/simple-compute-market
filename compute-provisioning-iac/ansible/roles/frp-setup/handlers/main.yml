@@ -1,0 +1,19 @@
+---
+- name: reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: yes
+
+- name: restart frps
+  ansible.builtin.systemd:
+    name: frps
+    state: restarted
+
+- name: restart nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: restarted
+
+- name: restart fail2ban
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: restarted

@@ -1,0 +1,53 @@
+server {
+    listen {{ app_nginx_port | default(8080) }};
+{% if frp_subdomain_host is defined and app_nginx_site_name is defined %}
+    server_name {{ app_nginx_site_name }}.{{ frp_subdomain_host }};
+{% else %}
+    server_name {{ app_nginx_server_name | default('_') }};
+{% endif %}
+
+    # Increase buffer sizes for large headers/cookies
+    client_header_buffer_size 16k;
+    large_client_header_buffers 4 32k;
+
+    # Logging
+    access_log /var/log/nginx/{{ app_nginx_site_name | default('docker-app') }}-access.log;
+    error_log /var/log/nginx/{{ app_nginx_site_name | default('docker-app') }}-error.log;
+
+    # Allow ACME challenge for SSL certificates
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+        allow all;
+    }
+
+    # Proxy settings - connects to Docker container on localhost
+    location {{ app_nginx_path | default('/') }} {
+        proxy_pass http://127.0.0.1:{{ app_container_internal_port if docker_network_mode | default('bridge') == 'host' else app_container_port }};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        
+        # Increase proxy buffer sizes
+        proxy_buffer_size 16k;
+        proxy_buffers 4 32k;
+        proxy_busy_buffers_size 64k;
+        
+        # Real IP forwarding
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # Health check endpoint (optional)
+    location /health {
+        proxy_pass http://localhost:{{ app_container_internal_port if docker_network_mode | default('bridge') == 'host' else app_container_port }}/health;
+        access_log off;
+    }
+}

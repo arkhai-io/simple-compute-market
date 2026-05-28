@@ -91,18 +91,9 @@ def reclaim_cmd(
              "(see `market logs runs`).",
     ),
     chain_name: Optional[str] = typer.Option(
-        None, "--chain-name",
-        help="Chain name for alkahest address resolution "
-             "(default: chain.name from config.toml).",
-    ),
-    rpc_url: Optional[str] = typer.Option(
-        None, "--rpc-url",
-        help="Chain RPC URL (default: chain.rpc_url).",
-    ),
-    addr_config: Optional[str] = typer.Option(
-        None, "--alkahest-addr-config",
-        help="Path to alkahest address config JSON "
-             "(default: chain.alkahest_address_config_path).",
+        None, "--chain",
+        help="Which [chains.<name>] entry to reclaim on. Required when "
+             "more than one chain is configured.",
     ),
     private_key: Optional[str] = typer.Option(
         None, "--buyer-priv-key",
@@ -134,39 +125,32 @@ def reclaim_cmd(
             raise typer.Exit(3)
 
     pk = resolve_config_value(override=private_key, toml_path="wallet.private_key")
-    rpc = resolve_config_value(override=rpc_url, toml_path="chain.rpc_url")
-    chain = resolve_config_value(
-        override=chain_name, toml_path="chain.name", default="ethereum_sepolia",
-    )
-    addr = resolve_config_value(
-        override=addr_config, toml_path="chain.alkahest_address_config_path",
-    )
-
-    missing = [k for k, v in {
-        "wallet.private_key (or --buyer-priv-key)": pk,
-        "chain.rpc_url (or --rpc-url)": rpc,
-    }.items() if not v]
-    if missing:
+    if not pk:
         typer.secho(
-            f"Missing required config: {', '.join(missing)}",
+            "Missing wallet.private_key (or --buyer-priv-key).",
             err=True, fg=typer.colors.RED,
         )
         raise typer.Exit(2)
+
+    from ..common import select_chain_for_listing
+    chain_cfg = select_chain_for_listing(
+        listing=None, override=chain_name, yes=False,
+    )
 
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")
     header.add_column()
     header.add_row("Escrow UID", escrow_uid)
-    header.add_row("Chain", chain)
-    header.add_row("RPC", rpc)
+    header.add_row("Chain", chain_cfg.name)
+    header.add_row("RPC", chain_cfg.rpc_url)
     console.print(Panel(header, title="market escrow reclaim", border_style="cyan"))
 
     try:
         receipt = asyncio.run(_do_reclaim(
             private_key=pk,
-            rpc_url=rpc,
-            chain_name=chain,
-            addr_config_path=addr or None,
+            rpc_url=chain_cfg.rpc_url,
+            chain_name=chain_cfg.name,
+            addr_config_path=chain_cfg.alkahest_address_config_path,
             escrow_uid=escrow_uid,
         ))
     except Exception as exc:
@@ -210,21 +194,16 @@ def create_cmd(
         None, "--token-contract",
         help="ERC-20 contract address. Default: resolve 'MOCK' via the token registry.",
     ),
-    token_decimals: int = typer.Option(
-        18, "--token-decimals",
-        help="ERC-20 token decimals.",
+    token_decimals: Optional[int] = typer.Option(
+        None, "--token-decimals",
+        help="ERC-20 token decimals override. When omitted, reads "
+             "the value recorded in the run-log; if that's also "
+             "missing, falls back to a chain decimals() lookup.",
     ),
     chain_name_flag: Optional[str] = typer.Option(
-        None, "--chain-name",
-        help="Chain name for alkahest address resolution (default: chain.name).",
-    ),
-    rpc_url: Optional[str] = typer.Option(
-        None, "--rpc-url",
-        help="Chain RPC URL (default: chain.rpc_url).",
-    ),
-    addr_config: Optional[str] = typer.Option(
-        None, "--alkahest-addr-config",
-        help="Path to alkahest address config JSON (default: chain.alkahest_address_config_path).",
+        None, "--chain",
+        help="Which [chains.<name>] entry to create the escrow on. Required "
+             "when more than one chain is configured.",
     ),
     private_key: Optional[str] = typer.Option(
         None, "--buyer-priv-key",
@@ -248,6 +227,7 @@ def create_cmd(
     from ._deal import load_deal_context, open_run_log, resolve_chain_settings
     from ..buy_orchestrator import AgreedTerms, _resolve_seller_wallet
     from ..escrow_client import make_create_escrow_fn
+    from ..common import select_chain_for_listing
 
     deal = load_deal_context(run_id)
     if deal.escrow_uid:
@@ -259,16 +239,21 @@ def create_cmd(
         return
 
     effective_token = token_contract or deal.token_contract
-    effective_token_decimals = (
-        token_decimals if token_decimals != 18 else (deal.token_decimals or 18)
+    # Precedence: explicit override > run-log recording > chain lookup
+    # (delegated to resolve_chain_settings when this is None).
+    effective_token_decimals: Optional[int] = (
+        int(token_decimals)
+        if token_decimals is not None
+        else (int(deal.token_decimals) if deal.token_decimals is not None else None)
+    )
+    chain_cfg = select_chain_for_listing(
+        listing=None, override=chain_name_flag, yes=False,
     )
     chain = resolve_chain_settings(
         buyer_address=buyer_address,
         buyer_private_key=private_key,
         ssh_public_key=None,
-        rpc_url=rpc_url,
-        chain_name=chain_name_flag,
-        alkahest_addr_config=addr_config,
+        chain=chain_cfg,
         token_contract=effective_token,
         token_decimals=effective_token_decimals,
         require_ssh=False,
@@ -302,7 +287,7 @@ def create_cmd(
         seller_wallet_address=seller_wallet,
         negotiation_id=deal.negotiation_id,
         listing_id=deal.listing_id,
-        agreed_price=deal.agreed_price,
+        agreed_amount=deal.agreed_amount,
         duration_seconds=effective_duration_seconds,
     )
     log.event("escrow_create_start", terms=terms.__dict__)
@@ -313,7 +298,7 @@ def create_cmd(
     header.add_row("Run ID", run_id)
     header.add_row("Seller", deal.seller_url)
     header.add_row("Seller wallet", seller_wallet)
-    header.add_row("Agreed price", str(deal.agreed_price))
+    header.add_row("Agreed price", str(deal.agreed_amount))
     header.add_row("Duration (seconds)", str(effective_duration_seconds))
     header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
     console.print(Panel(header, title="market escrow create", border_style="cyan"))
@@ -358,18 +343,10 @@ def show_cmd(
         help="Buyer run-id to look up the escrow_uid from "
              "(see `market logs runs`).",
     ),
-    rpc_url: Optional[str] = typer.Option(
-        None, "--rpc-url",
-        help="Chain RPC URL (default: chain.rpc_url).",
-    ),
     chain_name_flag: Optional[str] = typer.Option(
-        None, "--chain-name",
-        help="Chain name for alkahest address resolution (default: chain.name).",
-    ),
-    addr_config: Optional[str] = typer.Option(
-        None, "--alkahest-addr-config",
-        help="Path to alkahest address config JSON "
-             "(default: chain.alkahest_address_config_path).",
+        None, "--chain",
+        help="Which [chains.<name>] entry to read the escrow from. "
+             "Required when more than one chain is configured.",
     ),
 ) -> None:
     """Read an escrow attestation from chain state.
@@ -397,25 +374,16 @@ def show_cmd(
             )
             raise typer.Exit(3)
 
-    rpc = resolve_config_value(override=rpc_url, toml_path="chain.rpc_url")
-    chain = resolve_config_value(
-        override=chain_name_flag, toml_path="chain.name", default="ethereum_sepolia",
-    )
-    addr_cfg = resolve_config_value(
-        override=addr_config, toml_path="chain.alkahest_address_config_path",
+    from ..common import select_chain_for_listing
+    chain_cfg = select_chain_for_listing(
+        listing=None, override=chain_name_flag, yes=False,
     )
     private_key = resolve_config_value(
-        override=None, toml_path="buyer.private_key",
+        override=None, toml_path="wallet.private_key",
     )
-    if not rpc:
-        typer.secho(
-            "Missing chain.rpc_url (or --rpc-url).",
-            err=True, fg=typer.colors.RED,
-        )
-        raise typer.Exit(2)
     if not private_key:
         typer.secho(
-            "Missing buyer.private_key in config.toml — alkahest_py "
+            "Missing wallet.private_key in buyer.toml — alkahest_py "
             "requires a wallet key even for read-only inspection.",
             err=True, fg=typer.colors.RED,
         )
@@ -430,10 +398,10 @@ def show_cmd(
     from alkahest_py import AlkahestClient
 
     try:
-        prewarm_alkahest_address_config_cache(addr_cfg or None)
+        prewarm_alkahest_address_config_cache(chain_cfg.alkahest_address_config_path)
         address_config = resolve_alkahest_address_config(
-            get_alkahest_network(chain),
-            config_path=addr_cfg or None,
+            get_alkahest_network(chain_cfg.name),
+            config_path=chain_cfg.alkahest_address_config_path,
         )
     except Exception as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
@@ -441,7 +409,7 @@ def show_cmd(
 
     client = AlkahestClient(
         private_key=private_key,
-        rpc_url=rpc,
+        rpc_url=chain_cfg.rpc_url,
         address_config=address_config,
     )
 

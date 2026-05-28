@@ -3,14 +3,18 @@ set -euo pipefail
 
 # ── Market CLI cURL Installer ────────────────────────────────
 #
-# Usage:
-#   curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash
+# Usage (latest):
+#   curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh | bash
 #
-# This script downloads the latest Market CLI tarball,
-# extracts it, and runs the bundled install.sh.
+# Usage (specific version):
+#   curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh | \
+#     bash -s -- --version market-cli-v1.0.0
+#
+# Downloads the Market CLI tarball from the corresponding GitHub
+# Release, extracts it, and runs the bundled install.sh.
 # ─────────────────────────────────────────────────────────────
 
-CF_URL="https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli"
+GITHUB_RELEASES_BASE="https://github.com/arkhai-io/simple-compute-market/releases"
 TARBALL_NAME="market-cli.tar.gz"
 CLI_VERSION=""
 
@@ -52,6 +56,18 @@ download() {
     fi
 }
 
+# Compose the release base URL for a given version label.
+# Empty / "latest" → /releases/latest/download
+# Otherwise        → /releases/download/<tag>
+release_url_for() {
+    local version="$1"
+    if [ -z "$version" ] || [ "$version" = "latest" ]; then
+        echo "${GITHUB_RELEASES_BASE}/latest/download"
+    else
+        echo "${GITHUB_RELEASES_BASE}/download/${version}"
+    fi
+}
+
 # ── Main ─────────────────────────────────────────────────────
 
 parse_args() {
@@ -82,26 +98,23 @@ main() {
 
     check_curl_or_wget
 
-    # Create temp directory for download and extraction
     TMPDIR_INSTALL="$(mktemp -d)"
 
-    local version_param="latest"
-    if [ -n "$CLI_VERSION" ]; then
-        version_param="$CLI_VERSION"
-    fi
+    local base_url
+    base_url="$(release_url_for "$CLI_VERSION")"
 
-    local tarball_url="${CF_URL}?version=${version_param}"
+    local tarball_url="${base_url}/${TARBALL_NAME}"
     local tarball_path="${TMPDIR_INSTALL}/${TARBALL_NAME}"
 
-    info "Downloading Market CLI (${version_param})..."
+    info "Downloading Market CLI (${version_label})..."
     if ! download "$tarball_url" "$tarball_path"; then
         error "Failed to download tarball from ${tarball_url}"
         error "Check that the URL is accessible and try again."
         exit 1
     fi
 
-    local checksum_url="${CF_URL}?version=${version_param}&file=checksum"
-    local checksum_path="${TMPDIR_INSTALL}/checksum.sha256"
+    local checksum_url="${base_url}/${TARBALL_NAME}.sha256"
+    local checksum_path="${TMPDIR_INSTALL}/${TARBALL_NAME}.sha256"
     if download "$checksum_url" "$checksum_path"; then
         local expected_hash
         expected_hash="$(awk '{print $1}' "$checksum_path")"
@@ -111,7 +124,7 @@ main() {
         elif command -v shasum &>/dev/null; then
             actual_hash="$(shasum -a 256 "$tarball_path" | awk '{print $1}')"
         else
-            warn "No sha256 tool found — skipping verification"
+            warn "No sha256 tool found -- skipping verification"
             actual_hash="$expected_hash"
         fi
         if [ "$expected_hash" != "$actual_hash" ]; then
@@ -121,12 +134,11 @@ main() {
             exit 1
         fi
     else
-        warn "Checksum file not available — skipping verification"
+        warn "Checksum file not available -- skipping verification"
     fi
 
     tar xzf "$tarball_path" -C "$TMPDIR_INSTALL" --no-same-owner --no-same-permissions
 
-    # Find the extracted directory
     local extracted
     extracted="$(find "$TMPDIR_INSTALL" -mindepth 1 -maxdepth 1 -type d | head -1)"
 
@@ -135,7 +147,6 @@ main() {
         exit 1
     fi
 
-    # Run the bundled installer
     cd "$extracted"
     bash install.sh "$@"
 }

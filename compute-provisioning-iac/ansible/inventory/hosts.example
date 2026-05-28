@@ -1,0 +1,31 @@
+# =============================================================================
+# Ansible inventory — example template
+# =============================================================================
+# Copy to `hosts` and fill in your real values:
+#   cp ansible/inventory/hosts.example ansible/inventory/hosts
+#
+# The real `hosts` file is gitignored so operator-specific IPs, usernames,
+# and per-host overrides don't get committed.
+#
+# `[kvm_hosts]` is the group the storefront's `attribute.vm_host` column
+# in `resources.csv` resolves against. The other groups are only used if
+# you also operate FRP proxies or remote provisioning workers; for a
+# single-box seller you can leave them empty.
+# =============================================================================
+
+[frp_servers]
+# proxy-prod ansible_host=<IP> ansible_user=<user> ansible_ssh_private_key_file=~/.ssh/id_ed25519
+
+[provisioning_servers]
+# provisioning-prod ansible_host=<IP> ansible_user=<user> ansible_ssh_private_key_file=~/.ssh/id_ed25519
+
+[kvm_hosts]
+# Alias used in resources.csv (attribute.vm_host) — pick something short.
+# host1 ansible_host=<IP> ansible_user=<user> gpus=<count> ansible_ssh_private_key_file=~/.ssh/id_ed25519
+#
+# Optional per-host args:
+#   ansible_port=<port>     — if SSH isn't on 22
+#   gpus=<count>            — used by the provisioning service's capacity checks
+
+[kvms]
+# Reserved for future use. Leave empty.

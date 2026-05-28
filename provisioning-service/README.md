@@ -83,9 +83,9 @@ docker run --rm --env-file .env.local -p 8081:8081 \
 | `DATABASE_URL` | `postgresql+psycopg2://...` | Database connection string |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection for job queue |
 | `ANSIBLE_TIMEOUT_SECONDS` | `1800` | Max seconds per Ansible run |
-| `DEFAULT_VM_HOST` | `ww1` | Default KVM host target |
+| `DEFAULT_VM_HOST` | `kvm1` | Default KVM host target |
 | `PROVISIONING_REPO_ROOT` | *(auto-detected)* | Override project root path |
 | `PLAYBOOK_PATH` | *(auto-resolved)* | Override playbook path |
 | `INVENTORY_PATH` | *(auto-resolved)* | Override inventory path |
-| `ENABLE_AUTH` | `false` | Enable agent authentication |
+| `PROVISIONING_STOREFRONT_ADMIN_KEY` | *(empty)* | Shared secret with the storefront; gates every non-health request as `X-Admin-Key`. Empty = auth disabled (dev). |
 | `ENABLE_RATE_LIMITING` | `false` | Enable per-agent rate limiting |

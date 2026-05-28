@@ -1,0 +1,31 @@
+---
+# VM Management - Destroy Tasks
+
+- name: Force stop VM
+  shell: virsh destroy {{ vm_name }}
+  register: destroy_result
+  delegate_to: "{{ target_host }}"
+
+- name: Get current timestamp for destroy action
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: destroy_timestamp
+  delegate_to: localhost
+
+- name: Create JSON data structure for VM destroy
+  set_fact:
+    vm_destroy_data:
+      action: "destroy"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ destroy_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "{{ 'success' if (destroy_result is defined and destroy_result.rc == 0) else 'failed' }}"
+      operation_initiated: "{{ 'yes' if destroy_result is defined else 'no' }}"
+      shutdown_method: "force"
+      result_message: "{{ destroy_result.stdout if destroy_result is defined else 'No output' }}"
+      error: "{{ destroy_result.stderr | default('') if destroy_result is defined and destroy_result.rc != 0 else '' }}"
+      note: "VM was forcefully stopped and may lose unsaved data"
+
+- name: Display destroy result
+  debug:
+    msg: "VM {{ vm_name }} {{ 'destroyed successfully' if destroy_result.rc == 0 else 'failed to destroy' }}"
+  when: destroy_result is defined

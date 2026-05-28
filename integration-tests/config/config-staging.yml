@@ -2,13 +2,8 @@ rpc:
   url: "https://staging-rpc.example.com" # Add url for node or provider such as Alchemy
   chain_id: 11155111   # Sepolia
 
-# Update for Sepolia addresses
 registry:
-  identity_address:   "0x0000000000000000000000000000000000000000"
-  reputation_address: "0x0000000000000000000000000000000000000000"
-  validation_address: "0x0000000000000000000000000000000000000000"
-  owner_address:      "0x0000000000000000000000000000000000000000"
-  api_url:            "http://registry:8080"
+  api_url: "http://registry:8080"
 
 # Update for each client and then create file as Kubernetes secret
 buyer:

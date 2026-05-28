@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from market_storefront.utils.sqlite_client import SQLiteClient
+from service.config_loader import EscrowTemplate, RateSlot
 
 
 def _write_csv(path: Path, content: str) -> None:
@@ -141,3 +142,94 @@ async def test_upsert_resources_from_csv_generates_resource_id_when_missing(tmp_
         r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
         generated_id,
     )
+
+
+@pytest.mark.asyncio
+async def test_csv_accepted_escrows_column_round_trips_through_sqlite(tmp_path: Path):
+    """``accepted_escrows`` CSV cells parse against the templates catalog at
+    import time and store the materialized entries JSON-encoded; the
+    resource list deserializes them back to plain lists ready for the
+    publish loop."""
+    db_path = str(tmp_path / "agent.db")
+    csv_path = tmp_path / "resources_templates.csv"
+    sqlite_client = SQLiteClient(db_path=db_path)
+
+    usdc_template = EscrowTemplate(
+        name="usdc",
+        chain="anvil",
+        escrow_address="0x" + "ab" * 20,
+        literal_fields={"token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"},
+        rate_slots={"amount": RateSlot(field="amount", per="hour")},
+    )
+
+    _write_csv(
+        csv_path,
+        "\n".join([
+            "resource_id,resource_type,state,accepted_escrows,attribute.topic",
+            "info-1,information.note,available,usdc=200,market-overview",
+        ]),
+    )
+
+    report = await sqlite_client.upsert_resources_from_csv(
+        csv_path=str(csv_path),
+        templates={"usdc": usdc_template},
+    )
+    resources = await sqlite_client.list_resources()
+
+    assert report["imported_count"] == 1
+    assert len(resources) == 1
+    accepted = resources[0]["accepted_escrows"]
+    assert accepted == [
+        {
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "ab" * 20,
+            "literal_fields": {"token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"},
+            "rates": [{"field": "amount", "per": "hour", "value": "200"}],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_csv_accepted_escrows_column_without_templates_errors(tmp_path: Path):
+    """When the CSV references templates but the storefront passes no
+    templates catalog, the import surfaces a row-level error rather than
+    silently dropping the column."""
+    db_path = str(tmp_path / "agent.db")
+    csv_path = tmp_path / "resources_no_templates.csv"
+    sqlite_client = SQLiteClient(db_path=db_path)
+
+    _write_csv(
+        csv_path,
+        "\n".join([
+            "resource_id,resource_type,state,accepted_escrows,attribute.topic",
+            "info-1,information.note,available,usdc=200,market-overview",
+        ]),
+    )
+
+    report = await sqlite_client.upsert_resources_from_csv(csv_path=str(csv_path))
+    assert report["imported_count"] == 0
+    assert report["failed_count"] == 1
+    assert "no escrow_templates configured" in report["rows"][0]["errors"][0]
+
+
+@pytest.mark.asyncio
+async def test_csv_accepted_escrows_empty_cell_stores_null(tmp_path: Path):
+    """An empty ``accepted_escrows`` cell is fine — the resource still
+    imports, the column round-trips as ``None``."""
+    db_path = str(tmp_path / "agent.db")
+    csv_path = tmp_path / "resources_empty_ae.csv"
+    sqlite_client = SQLiteClient(db_path=db_path)
+
+    _write_csv(
+        csv_path,
+        "\n".join([
+            "resource_id,resource_type,state,accepted_escrows,attribute.topic",
+            "info-1,information.note,available,,market-overview",
+        ]),
+    )
+
+    report = await sqlite_client.upsert_resources_from_csv(csv_path=str(csv_path))
+    resources = await sqlite_client.list_resources()
+
+    assert report["imported_count"] == 1
+    assert resources[0]["accepted_escrows"] is None

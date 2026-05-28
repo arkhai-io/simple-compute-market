@@ -34,8 +34,9 @@ def _normalize_to_dict(value: Any) -> dict[str, Any] | None:
 def synthesize_accepted_escrows_from_demand(
     demand_resource: Any,
 ) -> list[dict[str, Any]] | None:
-    """Build a single-entry ``accepted_escrows`` list from a legacy
-    ``demand_resource`` payload (``{token: {contract_address, ...}, amount}``).
+    """Build an ``accepted_escrows`` list from a legacy ``demand_resource``
+    payload (``{token: {contract_address, ...}, amount}``), one entry per
+    configured chain.
 
     Used by:
       * the one-shot schema-init backfill (pre-cutover rows still carrying
@@ -43,10 +44,12 @@ def synthesize_accepted_escrows_from_demand(
       * action_executor's MAKE_OFFER entry point (policy layer still emits
         ``demand``; storefront converts at the boundary before persisting).
 
-    Returns ``None`` when the demand can't be mapped (no token, missing
-    contract_address, or alkahest config can't resolve the erc20 escrow
-    obligation address for the configured chain).
+    Returns ``None`` when the demand can't be mapped to any chain (no
+    token, missing contract_address, or every chain's alkahest config
+    fails to resolve the erc20 escrow obligation address).
     """
+    from market_storefront.utils.config import CHAINS
+
     normalized = _normalize_to_dict(demand_resource)
     if not normalized:
         return None
@@ -56,40 +59,46 @@ def synthesize_accepted_escrows_from_demand(
     contract_address = token.get("contract_address")
     if not isinstance(contract_address, str) or not contract_address:
         return None
-    try:
-        from service.clients.alkahest import (
-            get_erc20_escrow_obligation_nontierable,
-        )
-        escrow_address = get_erc20_escrow_obligation_nontierable(
-            settings.chain.name,
-            config_path=settings.chain.alkahest_address_config_path,
-        )
-    except Exception as exc:
-        logger.debug(
-            "Skipping accepted_escrows synthesis for chain %r: %s",
-            settings.chain.name, exc,
-        )
-        return None
+
     amount = normalized.get("amount")
-    # ``price_per_hour`` is uint256-domain (base units) — emit as a
-    # decimal-digit string on the stored/wire JSON to stay safe past
-    # JS's 2^53 and SQLite int64 ceilings. Python callers parse it back
-    # with ``int(...)``.
+    # Rate value is uint256-domain (base units) — emit as a decimal-digit
+    # string on the stored/wire JSON to stay safe past JS's 2^53 and SQLite
+    # int64 ceilings. Python callers parse it back with ``int(...)``.
     if isinstance(amount, bool):
-        price_per_hour: str | None = None
+        rate_value: str | None = None
     elif isinstance(amount, int):
-        price_per_hour = str(amount)
+        rate_value = str(amount)
     elif isinstance(amount, str):
         s = amount.strip()
-        price_per_hour = s if s.isdigit() else None
+        rate_value = s if s.isdigit() else None
     else:
-        price_per_hour = None
-    return [{
-        "chain_name": settings.chain.name,
-        "escrow_address": escrow_address.lower(),
-        "fields": {"token": contract_address},
-        "price_per_hour": price_per_hour,
-    }]
+        rate_value = None
+
+    from service.clients.alkahest import get_erc20_escrow_obligation_nontierable
+
+    entries: list[dict[str, Any]] = []
+    for name, cc in CHAINS.items():
+        try:
+            escrow_address = get_erc20_escrow_obligation_nontierable(
+                name,
+                config_path=cc.alkahest_address_config_path,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Skipping accepted_escrows synthesis for chain %r: %s", name, exc,
+            )
+            continue
+        entries.append({
+            "chain_name": name,
+            "escrow_address": escrow_address.lower(),
+            "literal_fields": {"token": contract_address},
+            "rates": [{
+                "field": "amount",
+                "per": "hour",
+                "value": rate_value,
+            }] if rate_value is not None else [],
+        })
+    return entries or None
 
 
 def _publication_row_to_dict(row: tuple) -> dict[str, Any]:
@@ -223,57 +232,29 @@ class SQLiteClient:
                     except sqlite3.OperationalError:
                         pass
 
-            # Policies table (callable-only)
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS policies (
-                  agent_id TEXT NOT NULL,
-                  name TEXT NOT NULL,
-                  trigger_type TEXT NOT NULL,
-                  callable_ref TEXT,
-                  PRIMARY KEY(agent_id, name)
-                )
-                """
-            )
-            # Policy composites (ordered components per policy)
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS policy_composites (
-                  agent_id TEXT NOT NULL,
-                  policy_name TEXT NOT NULL,
-                  position INTEGER NOT NULL,
-                  component_name TEXT NOT NULL,
-                  PRIMARY KEY(agent_id, policy_name, position),
-                  FOREIGN KEY(agent_id, policy_name) REFERENCES policies(agent_id, name)
-                )
-                """
-            )
-            # Decisions table
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS decisions (
-                  decision_id TEXT PRIMARY KEY,
-                  event_id TEXT NOT NULL,
-                  event_type TEXT NOT NULL,
-                  agent_id TEXT NOT NULL,
-                  policy_used TEXT,
-                  action_type TEXT NOT NULL,
-                  timestamp TEXT NOT NULL,
-                  context_json TEXT
-                )
-                """
-            )
-            # Decision outcomes table
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS decision_outcomes (
-                  decision_id TEXT PRIMARY KEY,
-                  outcome_json TEXT,
-                  timestamp TEXT NOT NULL,
-                  FOREIGN KEY(decision_id) REFERENCES decisions(decision_id)
-                )
-                """
-            )
+            # Drop legacy policy / decision tables (procedural-policy refactor).
+            # Idempotent: noop once the tables are gone.
+            for legacy_table in (
+                "decision_outcomes",
+                "decisions",
+                "policy_composites",
+                "policies",
+            ):
+                try:
+                    cur.execute(f"DROP TABLE IF EXISTS {legacy_table}")
+                except sqlite3.OperationalError:
+                    pass
+            for legacy_idx in (
+                "idx_decisions_event_id",
+                "idx_decisions_event_type",
+                "idx_decisions_timestamp",
+                "idx_decisions_agent_id",
+            ):
+                try:
+                    cur.execute(f"DROP INDEX IF EXISTS {legacy_idx}")
+                except sqlite3.OperationalError:
+                    pass
+
             # Negotiation threads table. ``buyer`` / ``matched_offer_id``
             # capture the buyer↔seller pairing — they were previously stored
             # on the listings row (one buyer per listing), but multi-escrow
@@ -450,7 +431,7 @@ class SQLiteClient:
             # ``escrows`` table joined via the winning ``negotiation_id``;
             # the buyer/match association lives on ``negotiation_threads``.
             # accepted_escrows is a JSON array of {chain_name, escrow_address,
-            # fields, price_per_hour} — the canonical pricing+escrow
+            # literal_fields, rates} — the canonical pricing+escrow
             # advertisement. The legacy ``demand_resource`` and per-deal
             # ``escrow_uid``/``buyer``/``matched_offer_id``/
             # ``seller_attestation``/``buyer_attestation`` columns are
@@ -535,6 +516,7 @@ class SQLiteClient:
                   min_price TEXT,
                   token TEXT,
                   max_duration_seconds INTEGER,
+                  accepted_escrows TEXT,
                   created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
                   updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
                 )
@@ -547,6 +529,7 @@ class SQLiteClient:
                 "ALTER TABLE resources ADD COLUMN min_price TEXT",
                 "ALTER TABLE resources ADD COLUMN token TEXT",
                 "ALTER TABLE resources ADD COLUMN max_duration_seconds INTEGER",
+                "ALTER TABLE resources ADD COLUMN accepted_escrows TEXT",
             ):
                 try:
                     cur.execute(col_ddl)
@@ -653,19 +636,6 @@ class SQLiteClient:
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_credentials_listing_granted ON credentials(listing_id, granted_to)"
-            )
-            # Create indexes
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_decisions_event_id ON decisions(event_id)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_decisions_event_type ON decisions(event_type)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_decisions_agent_id ON decisions(agent_id)"
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_negotiation_messages_negotiation_id ON negotiation_messages(negotiation_id)"
@@ -831,7 +801,7 @@ class SQLiteClient:
         """Return the ``accepted_escrows`` column as a Python list.
 
         The column is a JSON-serialised list of AcceptedEscrow entries
-        (``{chain_name, escrow_address, fields, price_per_hour}``).
+        (``{chain_name, escrow_address, literal_fields, rates}``).
         Returns ``None`` when the column is NULL — callers that need to
         synthesise an entry from the legacy ``demand_resource`` field
         do so themselves.
@@ -1063,6 +1033,7 @@ class SQLiteClient:
         min_price: str | None = None,
         token: str | None = None,
         max_duration_seconds: int | None = None,
+        accepted_escrows: list[dict[str, Any]] | None = None,
     ) -> None:
         """Create or update a generic resource snapshot row.
 
@@ -1096,9 +1067,9 @@ class SQLiteClient:
                     """
                     INSERT INTO resources(
                       resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                      min_price, token, max_duration_seconds, created_at, updated_at
+                      min_price, token, max_duration_seconds, accepted_escrows, created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(resource_id) DO UPDATE SET
                       resource_type=excluded.resource_type,
                       resource_subtype=excluded.resource_subtype,
@@ -1109,6 +1080,7 @@ class SQLiteClient:
                       min_price=excluded.min_price,
                       token=excluded.token,
                       max_duration_seconds=excluded.max_duration_seconds,
+                      accepted_escrows=excluded.accepted_escrows,
                       updated_at=excluded.updated_at
                     """,
                     (
@@ -1122,6 +1094,7 @@ class SQLiteClient:
                         min_price,
                         token,
                         max_duration_seconds,
+                        json.dumps(accepted_escrows) if accepted_escrows is not None else None,
                         now_iso,
                         now_iso,
                     ),
@@ -1158,7 +1131,7 @@ class SQLiteClient:
                 cur.execute(
                     f"""
                     SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                           min_price, token, max_duration_seconds, created_at, updated_at
+                           min_price, token, max_duration_seconds, accepted_escrows, created_at, updated_at
                     FROM resources
                     {where_clause}
                     ORDER BY updated_at DESC
@@ -1178,6 +1151,7 @@ class SQLiteClient:
                     row_min_price,
                     row_token,
                     row_max_duration_seconds,
+                    row_accepted_escrows,
                     row_created_at,
                     row_updated_at,
                 ) in rows:
@@ -1189,6 +1163,14 @@ class SQLiteClient:
                                 attrs = parsed
                         except Exception:
                             attrs = {}
+                    accepted: list[dict[str, Any]] | None = None
+                    if isinstance(row_accepted_escrows, str) and row_accepted_escrows.strip():
+                        try:
+                            parsed_ae = json.loads(row_accepted_escrows)
+                            if isinstance(parsed_ae, list):
+                                accepted = parsed_ae
+                        except Exception:
+                            accepted = None
                     result.append(
                         {
                             "resource_id": row_resource_id,
@@ -1201,6 +1183,7 @@ class SQLiteClient:
                             "min_price": row_min_price,
                             "token": row_token,
                             "max_duration_seconds": row_max_duration_seconds,
+                            "accepted_escrows": accepted,
                             "created_at": row_created_at,
                             "updated_at": row_updated_at,
                         }
@@ -1298,12 +1281,14 @@ class SQLiteClient:
         *,
         csv_path: str,
         dry_run: bool = False,
+        templates: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Import resources from CSV file and upsert rows into the resources table."""
         report = await upsert_resources_from_csv(
             csv_path=csv_path,
             sqlite_client=self,
             dry_run=dry_run,
+            templates=templates,
         )
         return report.to_dict()
 
@@ -1313,6 +1298,7 @@ class SQLiteClient:
         csv_content: str,
         source_label: str = "<inline>",
         dry_run: bool = False,
+        templates: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Import resources from a CSV string and upsert rows into the resources table.
 
@@ -1325,6 +1311,7 @@ class SQLiteClient:
             source_label=source_label,
             sqlite_client=self,
             dry_run=dry_run,
+            templates=templates,
         )
         return report.to_dict()
 
@@ -2081,251 +2068,6 @@ class SQLiteClient:
         return await asyncio.to_thread(_load)
 
 
-    async def save_policy(
-        self,
-        *,
-        agent_id: str,
-        name: str,
-        trigger_type: str,
-        callable_ref: str | None,
-    ) -> None:
-        def _save() -> None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    INSERT INTO policies(agent_id, name, trigger_type, callable_ref)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(agent_id, name) DO UPDATE SET
-                        trigger_type=excluded.trigger_type,
-                        callable_ref=excluded.callable_ref
-                    """,
-                    (agent_id, name, trigger_type, callable_ref),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-        await asyncio.to_thread(_save)
-
-    async def load_policies_by_trigger(self, *, agent_id: str, trigger_type: str) -> list[dict[str, Any]]:
-        def _load() -> list[dict[str, Any]]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    "SELECT name, callable_ref FROM policies WHERE agent_id=? AND trigger_type=?",
-                    (agent_id, trigger_type),
-                )
-                rows = cur.fetchall()
-                result: list[dict[str, Any]] = []
-                for (name, callable_ref) in rows:
-                    result.append(
-                        {
-                            "name": name,
-                            "callable_ref": callable_ref,
-                        }
-                    )
-                return result
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_load)
-
-    async def save_policy_composite(self, *, agent_id: str, policy_name: str, components: list[str]) -> None:
-        """Persist ordered component names for a composite policy."""
-        def _save() -> None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                # Clear existing components to avoid duplicates
-                cur.execute(
-                    "DELETE FROM policy_composites WHERE agent_id=? AND policy_name=?",
-                    (agent_id, policy_name),
-                )
-                # Insert ordered components
-                for idx, comp in enumerate(components):
-                    cur.execute(
-                        """
-                        INSERT INTO policy_composites(agent_id, policy_name, position, component_name)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (agent_id, policy_name, idx, comp),
-                    )
-                conn.commit()
-            finally:
-                conn.close()
-
-        await asyncio.to_thread(_save)
-
-    async def load_policy_composite(self, *, agent_id: str, policy_name: str) -> list[str]:
-        def _load() -> list[str]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT component_name from policy_composites
-                    WHERE agent_id=? AND policy_name=?
-                    ORDER BY position ASC
-                    """,
-                    (agent_id, policy_name),
-                )
-                return [row[0] for row in cur.fetchall()]
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_load)
-
-    async def list_seeded_policies(self) -> list[dict]:
-        """Return all seeded policies joined with their ordered components.
-
-        Used by the system controller's policy diagnostic and dry-run endpoints.
-        Each row has: policy_name, trigger_type, callable_ref, components (list[str]).
-
-        Note: policy_composites rows are keyed by callable_ref (the indirection
-        pointer stored in the policies.callable_ref column), NOT by policies.name.
-        """
-        def _list() -> list[dict]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT p.name, p.trigger_type, p.callable_ref,
-                           GROUP_CONCAT(pc.component_name, '||') as components_concat
-                    FROM policies p
-                    LEFT JOIN policy_composites pc
-                           ON pc.agent_id = p.agent_id
-                           AND pc.policy_name = p.callable_ref
-                    GROUP BY p.agent_id, p.name, p.trigger_type, p.callable_ref
-                    ORDER BY p.name
-                    """
-                )
-                rows = []
-                for name, trigger_type, callable_ref, components_concat in cur.fetchall():
-                    components = (
-                        components_concat.split("||") if components_concat else []
-                    )
-                    rows.append({
-                        "policy_name": name,
-                        "trigger_type": trigger_type,
-                        "callable_ref": callable_ref,
-                        "components": components,
-                    })
-                return rows
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_list)
-
-    async def save_decision(
-        self,
-        *,
-        decision_id: str,
-        event_id: str,
-        event_type: str,
-        agent_id: str,
-        policy_used: str,
-        action_type: str,
-        timestamp: str,
-        context_json: str | None,
-    ) -> None:
-        """Save a decision record."""
-        def _save() -> None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    INSERT INTO decisions(decision_id, event_id, event_type, agent_id, policy_used, action_type, timestamp, context_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (decision_id, event_id, event_type, agent_id, policy_used, action_type, timestamp, context_json),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        
-        await asyncio.to_thread(_save)
-    
-    async def save_decision_outcome(
-        self,
-        *,
-        decision_id: str,
-        outcome_json: str | None,
-        timestamp: str,
-    ) -> None:
-        """Save a decision outcome record."""
-        def _save() -> None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    INSERT OR REPLACE INTO decision_outcomes(decision_id, outcome_json, timestamp)
-                    VALUES (?, ?, ?)
-                    """,
-                    (decision_id, outcome_json, timestamp),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        
-        await asyncio.to_thread(_save)
-    
-    async def load_recent_decisions(
-        self,
-        *,
-        agent_id: str,
-        limit: int = 10,
-        event_type: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Load recent decisions for context building (without heavy context_json payloads)."""
-        def _load() -> list[dict[str, Any]]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                if event_type:
-                    cur.execute(
-                        """
-                        SELECT decision_id, event_id, event_type, policy_used, action_type, timestamp
-                        FROM decisions
-                        WHERE agent_id = ? AND event_type = ?
-                        ORDER BY timestamp DESC
-                        LIMIT ?
-                        """,
-                        (agent_id, event_type, limit),
-                    )
-                else:
-                    cur.execute(
-                        """
-                        SELECT decision_id, event_id, event_type, policy_used, action_type, timestamp
-                        FROM decisions
-                        WHERE agent_id = ?
-                        ORDER BY timestamp DESC
-                        LIMIT ?
-                        """,
-                        (agent_id, limit),
-                    )
-                rows = cur.fetchall()
-                result = []
-                for row in rows:
-                    result.append({
-                        "decision_id": row[0],
-                        "event_id": row[1],
-                        "event_type": row[2],
-                        "policy_used": row[3],
-                        "action_type": row[4],
-                        "timestamp": row[5],
-                    })
-                return result
-            finally:
-                conn.close()
-        
-        return await asyncio.to_thread(_load)
-    
     async def save_negotiation_message(
         self,
         *,
@@ -2495,8 +2237,12 @@ class SQLiteClient:
         run (or be retried) as a separate step by reading these columns,
         without replaying the round-by-round message history.
 
-        ``agreed_duration_seconds`` echoes the buyer's negotiation-init ask;
-        total payment = agreed_price (per-hour) × agreed_duration_seconds / 3600.
+        ``agreed_price`` is the absolute payment amount in base units of
+        the payment token (the column name is retained from before the
+        per-hour → absolute refactor; semantically it now holds the
+        amount, not a per-hour rate). ``agreed_duration_seconds`` echoes
+        the buyer's negotiation-init ask and is used by settlement-time
+        arbiter codecs that bind the seller's delivery window.
         """
         def _save() -> None:
             now = datetime.now().isoformat()
@@ -3511,7 +3257,9 @@ class SQLiteClient:
                     "negotiation_id", "our_listing_id", "buyer_address",
                     "status", "terminal_state",
                     "requested_duration_seconds",
-                    "agreed_price", "agreed_duration_seconds",
+                    # Column stays ``agreed_price``; wire field is
+                    # ``agreed_amount`` (absolute amount in base units).
+                    "agreed_amount", "agreed_duration_seconds",
                     "agreed_at", "created_at", "updated_at",
                 ]
                 return [dict(zip(keys, row)) for row in cur.fetchall()]
@@ -3557,7 +3305,10 @@ class SQLiteClient:
                     "negotiation_id", "our_listing_id", "their_listing_id",
                     "our_agent_id", "their_agent_id", "status", "terminal_state",
                     "requested_duration_seconds",
-                    "agreed_price", "agreed_duration_seconds", "agreed_at",
+                    # Column is named ``agreed_price`` (kept from before the
+                    # per-hour → absolute refactor); the wire field is
+                    # ``agreed_amount`` since it holds an absolute amount.
+                    "agreed_amount", "agreed_duration_seconds", "agreed_at",
                     "created_at", "updated_at",
                 ]
                 thread = dict(zip(thread_keys, thread_row))

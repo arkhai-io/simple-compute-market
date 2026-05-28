@@ -35,7 +35,7 @@ global:
     port: 8081
   # ---------------------------------------------------------------------------
   # Admin API key — gates all /admin/* endpoints on the storefront.
-  # Rendered into each agent's config.toml as [seller].admin_api_key.
+  # Rendered into each agent's storefront.toml as `admin_api_key` (top-level).
   # Also injected into the per-agent secret profile consumed by test pods
   # so the e2e suite can authenticate to admin-gated endpoints.
   # In production, override with a strong random value.
@@ -123,7 +123,10 @@ storefront:
           provisioning:
             mode: "mock"
           negotiation:
-            policyMode: "bisection"
+            policies:
+              - "has_matching_inventory_guard"
+              - "escrow_shape_guard"
+              - "bisection"
           integrations:
             geminiApiKey: ""
         chain:
@@ -166,10 +169,7 @@ provisioning:
     log_level: "info"
     database_url: "sqlite:////app/data/provisioning.db"
     ansible_timeout_seconds: 1800
-    default_vm_host: "ww1"
-    enable_auth: false
-    registry_cache_ttl_seconds: 300
-    registry_cache_max_size: 256
+    default_vm_host: "kvm1"
     lease_watchdog_enabled: true
     lease_watchdog_poll_interval_seconds: 60
     lease_watchdog_grace_period_seconds: 300

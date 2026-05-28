@@ -1,0 +1,155 @@
+---
+# VM Management - Capacity Tasks
+# Returns available CPU, RAM, and GPU resources not allocated to VMs
+
+- name: Get total host CPU information
+  shell: |
+    # Get total physical CPU cores
+    TOTAL_CPUS=$(nproc)
+    echo "$TOTAL_CPUS"
+  register: host_total_cpus
+  delegate_to: "{{ target_host }}"
+
+- name: Get total host RAM in MB
+  shell: |
+    # Get total RAM in MB
+    TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    TOTAL_RAM_MB=$((TOTAL_RAM_KB / 1024))
+    echo "$TOTAL_RAM_MB"
+  register: host_total_ram
+  delegate_to: "{{ target_host }}"
+
+- name: Get total GPU count
+  shell: |
+    # Count NVIDIA and AMD GPUs using lspci (only .0 functions to match allocation logic)
+    GPU_COUNT=$(lspci -nn | grep -iE 'vga|3d|display' | grep -E '\[10de:|\[1002:' | grep '\.0 ' | wc -l)
+    echo "$GPU_COUNT"
+  register: host_total_gpus
+  delegate_to: "{{ target_host }}"
+
+- name: Get GPU details (model and brand)
+  shell: |
+    # Get NVIDIA and AMD GPU details using lspci
+    lspci -nn | grep -iE 'vga|3d|display' | grep -E '\[10de:|\[1002:' | while read -r line; do
+      # Determine brand
+      if echo "$line" | grep -q '\[10de:'; then
+        BRAND="NVIDIA"
+      elif echo "$line" | grep -q '\[1002:'; then
+        BRAND="AMD"
+      else
+        BRAND="Unknown"
+      fi
+      # Extract model name (use device description)
+      MODEL=$(echo "$line" | awk -F': ' '{print $2}' | sed 's/ \[.*//')
+      echo "$MODEL ($BRAND)"
+    done
+  register: gpu_details
+  delegate_to: "{{ target_host }}"
+
+- name: Get allocated resources from running VMs
+  shell: >-
+    GPU_ADDRESSES=$(lspci -nn | grep -iE 'vga|3d|display' | grep -E '\[10de:|\[1002:' | grep '\.0 ' | awk '{print $1}');
+    ALL_VMS=$(virsh list --all --name);
+    TOTAL_VCPUS=0;
+    TOTAL_RAM_KB=0;
+    ALLOCATED_GPU_LIST="";
+    if [ -n "$ALL_VMS" ]; then
+      for VM in $ALL_VMS; do
+        if [ -n "$VM" ]; then
+          VM_STATE=$(virsh domstate "$VM" 2>/dev/null || echo "");
+          if [ -z "$VM_STATE" ]; then
+            continue;
+          fi;
+          IS_RUNNING=$(echo "$VM_STATE" | grep -c running || echo 0);
+          if [ "$IS_RUNNING" -eq 1 ]; then
+            VCPUS=$(virsh dominfo "$VM" 2>/dev/null | grep "^CPU(s):" | awk '{print $2}');
+            if [ -n "$VCPUS" ]; then
+              TOTAL_VCPUS=$((TOTAL_VCPUS + VCPUS));
+            fi;
+            RAM_KB=$(virsh dominfo "$VM" 2>/dev/null | grep "^Max memory:" | awk '{print $3}');
+            if [ -n "$RAM_KB" ]; then
+              TOTAL_RAM_KB=$((TOTAL_RAM_KB + RAM_KB));
+            fi;
+          fi;
+          VM_XML=$(virsh dumpxml "$VM" 2>/dev/null || echo "");
+          if [ -z "$VM_XML" ]; then
+            continue;
+          fi;
+          for addr in $GPU_ADDRESSES; do
+            BUS=$(echo "$addr" | cut -d: -f1);
+            SLOT=$(echo "$addr" | cut -d: -f2 | cut -d. -f1);
+            if echo "$VM_XML" | grep -q "<hostdev" && echo "$VM_XML" | grep -q "bus='0x$BUS' slot='0x$SLOT'"; then
+              if ! echo "$ALLOCATED_GPU_LIST" | grep -qw "$addr"; then
+                ALLOCATED_GPU_LIST="$ALLOCATED_GPU_LIST $addr";
+              fi;
+            fi;
+          done;
+        fi;
+      done;
+    fi;
+    TOTAL_GPUS=$(echo "$ALLOCATED_GPU_LIST" | wc -w);
+    TOTAL_RAM_MB=$((TOTAL_RAM_KB / 1024));
+    echo "ALLOCATED_VCPUS=$TOTAL_VCPUS";
+    echo "ALLOCATED_RAM_MB=$TOTAL_RAM_MB";
+    echo "ALLOCATED_GPUS=$TOTAL_GPUS"
+  args:
+    executable: /bin/bash
+  register: allocated_resources
+  delegate_to: "{{ target_host }}"
+
+- name: Parse allocated resources
+  set_fact:
+    allocated_vcpus: "{{ allocated_resources.stdout | regex_search('ALLOCATED_VCPUS=(\\d+)', '\\1') | first | int }}"
+    allocated_ram_mb: "{{ allocated_resources.stdout | regex_search('ALLOCATED_RAM_MB=(\\d+)', '\\1') | first | int }}"
+    allocated_gpus: "{{ allocated_resources.stdout | regex_search('ALLOCATED_GPUS=(\\d+)', '\\1') | first | int }}"
+
+- name: Calculate available resources
+  set_fact:
+    available_vcpus: "{{ host_total_cpus.stdout | int - allocated_vcpus | int }}"
+    available_ram_mb: "{{ host_total_ram.stdout | int - allocated_ram_mb | int }}"
+    available_gpus: "{{ host_total_gpus.stdout | int - allocated_gpus | int }}"
+
+- name: Get current timestamp for capacity action
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: capacity_timestamp
+  delegate_to: localhost
+
+- name: Create JSON data structure for check
+  set_fact:
+    capacity_data:
+      action: "check"
+      timestamp: "{{ capacity_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "success"
+      total:
+        vcpus: "{{ host_total_cpus.stdout | int }}"
+        ram_mb: "{{ host_total_ram.stdout | int }}"
+        gpus: "{{ host_total_gpus.stdout | int }}"
+      allocated:
+        vcpus: "{{ allocated_vcpus | int }}"
+        ram_mb: "{{ allocated_ram_mb | int }}"
+        gpus: "{{ allocated_gpus | int }}"
+      available:
+        vcpus: "{{ available_vcpus | int }}"
+        ram_mb: "{{ available_ram_mb | int }}"
+        gpus: "{{ available_gpus | int }}"
+      gpu_details: "{{ gpu_details.stdout_lines }}"
+      utilization:
+        vcpu_percent: "{{ ((allocated_vcpus | float / (host_total_cpus.stdout | int | float)) * 100) | round(2) if (host_total_cpus.stdout | int) > 0 else 0 }}"
+        ram_percent: "{{ ((allocated_ram_mb | float / (host_total_ram.stdout | int | float)) * 100) | round(2) if (host_total_ram.stdout | int) > 0 else 0 }}"
+        gpu_percent: "{{ ((allocated_gpus | float / (host_total_gpus.stdout | int | float)) * 100) | round(2) if (host_total_gpus.stdout | int) > 0 else 0 }}"
+
+- name: Set check_data for JSON output
+  set_fact:
+    check_data: "{{ capacity_data }}"
+
+- name: Display capacity summary
+  debug:
+    msg:
+      - "=== Host Capacity Summary for {{ target_host }} ==="
+      - "Total: {{ host_total_cpus.stdout }} vCPUs, {{ host_total_ram.stdout }} MB RAM, {{ host_total_gpus.stdout }} GPUs"
+      - "Allocated: {{ allocated_vcpus }} vCPUs, {{ allocated_ram_mb }} MB RAM, {{ allocated_gpus }} GPUs"
+      - "Available: {{ available_vcpus }} vCPUs, {{ available_ram_mb }} MB RAM, {{ available_gpus }} GPUs"
+      - "GPU Details:"
+      - "{{ gpu_details.stdout_lines }}"
+      - "Utilization: {{ capacity_data.utilization.vcpu_percent }}% CPU, {{ capacity_data.utilization.ram_percent }}% RAM, {{ capacity_data.utilization.gpu_percent }}% GPU"

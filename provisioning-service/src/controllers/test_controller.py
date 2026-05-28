@@ -23,10 +23,10 @@ Rule schema (POST /test/mock-rules body)
 ::
 
     {
-        "rule_id": "my-ww1-create",     // optional; auto-assigned if absent
+        "rule_id": "my-kvm1-create",     // optional; auto-assigned if absent
         "match": {                       // subset of AnsibleJobParams fields
             "vm_action": "create",
-            "vm_host": "ww1"
+            "vm_host": "kvm1"
         },
         "pause_before_result": true,     // block at wait_for_playbook until resumed
         "result_stdout": "...",          // Ansible stdout to inject (optional)
@@ -166,7 +166,7 @@ def job_summary(
     job_service: AnsibleJobService = Depends(_get_job_service),
 ) -> dict:
     """Return counts of jobs by status — non-blocking diagnostic snapshot."""
-    result = job_service.list_jobs(agent_id=None, limit=1000)
+    result = job_service.list_jobs(limit=1000)
     counts: dict[str, int] = {}
     for job in result.jobs:
         counts[job.status] = counts.get(job.status, 0) + 1
@@ -199,7 +199,7 @@ async def drain_jobs(
     """
     deadline = asyncio.get_event_loop().time() + timeout
     while True:
-        result = job_service.list_jobs(agent_id=None, limit=1000)
+        result = job_service.list_jobs(limit=1000)
         active = [j for j in result.jobs if j.status not in TERMINAL_STATUSES]
         if not active:
             summary = {}
@@ -231,7 +231,7 @@ async def wait_for_job(
     deadline = asyncio.get_event_loop().time() + timeout
     while True:
         try:
-            job = job_service.get_job(job_id, agent_id=None)
+            job = job_service.get_job(job_id)
         except LookupError:
             raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
         if job.status in TERMINAL_STATUSES:

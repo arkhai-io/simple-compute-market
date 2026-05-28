@@ -17,7 +17,6 @@ Usage (async)::
 
     client = StorefrontClient("http://seller-storefront:8001", private_key="0x...")
     async with client:
-        reg = await client.get_registration()
         resp = await client.create_listing(
             agent_wallet_address="0xSellerWallet",
             offer={...},
@@ -30,7 +29,7 @@ Usage (sync, e.g. smoke tests)::
     from storefront_client import SyncStorefrontClient
 
     client = SyncStorefrontClient("http://seller-storefront:8001", private_key="0x...")
-    reg = client.get_registration()
+    health = client.get_health()
     client.close()
 """
 
@@ -48,7 +47,6 @@ from storefront_client.models import (
     StorefrontListingCloseResponse,
     StorefrontListingCreateResponse,
     StorefrontListingRefundResponse,
-    ERC8004RegistrationFile,
     HealthResponse,
     ListingListResponse,
     ListingSummary,
@@ -58,7 +56,6 @@ from storefront_client.models import (
     NegotiationActionResponse,
     AdminPauseResponse,
     ReleaseReservationsResponse,
-    RegistryAgentReadyResponse,
     SettleResponse,
     SettleStatusResponse,
     SettleWaitResponse,
@@ -92,17 +89,66 @@ def _sign_eip191(private_key: str, message: str) -> str:
     return signed.signature.hex()
 
 
-def _build_auth_headers(private_key: str, operation: str, resource_id: str) -> dict[str, str]:
-    """Build ``X-Signature`` / ``X-Timestamp`` headers for a signed request.
+def _address_from_private_key(private_key: str) -> str:
+    """Derive the EIP-191 wallet address (lowercase) for a private key."""
+    from eth_account import Account
+    return Account.from_key(private_key).address.lower()
 
-    The signed message is ``"<operation>:<resource_id>:<timestamp>"``.
+
+def _signed_request_headers(
+    private_key: str,
+    message: str,
+    *,
+    identity_scheme: str = "eip191",
+    identity_identifier: str | None = None,
+) -> dict[str, str]:
+    """Return the four signed-request headers for an arbitrary ``message``.
+
+    Differs from :func:`_build_auth_headers` only in that the caller has
+    already composed the full canonical message (used by per-endpoint
+    constructions that include the timestamp inline). Always emits the
+    ``X-Identity-Scheme`` / ``X-Identity`` pair.
+    """
+    ts = str(int(time.time()))
+    full_message = f"{message}:{ts}"
+    sig = _sign_eip191(private_key, full_message)
+    identifier = identity_identifier or _address_from_private_key(private_key)
+    return {
+        "X-Timestamp": ts,
+        "X-Signature": sig,
+        "X-Identity-Scheme": identity_scheme,
+        "X-Identity": identifier,
+    }
+
+
+def _build_auth_headers(
+    private_key: str,
+    operation: str,
+    resource_id: str,
+    *,
+    identity_scheme: str = "eip191",
+    identity_identifier: str | None = None,
+) -> dict[str, str]:
+    """Build signed-request headers for the storefront.
+
+    Headers emitted:
+      ``X-Timestamp`` / ``X-Signature`` — EIP-191 signature of
+      ``"<operation>:<resource_id>:<timestamp>"``.
+      ``X-Identity-Scheme`` / ``X-Identity`` — the scheme-tagged identity
+      that the signature attests; defaults to ``("eip191", <address derived
+      from private_key>)``. Servers that predate the pluggable-identity
+      headers ignore them; servers that don't dispatch through their
+      identity-scheme registry.
     """
     timestamp = str(int(time.time()))
     message = f"{operation}:{resource_id}:{timestamp}"
     signature = _sign_eip191(private_key, message)
+    identifier = identity_identifier or _address_from_private_key(private_key)
     return {
         "X-Timestamp": timestamp,
         "X-Signature": signature,
+        "X-Identity-Scheme": identity_scheme,
+        "X-Identity": identifier,
     }
 
 
@@ -243,35 +289,6 @@ class StorefrontClient(_StorefrontClientBase):
         if resp.status_code not in (200, 503):
             self._raise_for_status("GET", url, resp.status_code, resp.text)
         return HealthResponse.from_dict(resp.json())
-
-    async def wait_for_registry_agent_ready(
-        self,
-        *,
-        timeout: float = 90.0,
-    ) -> RegistryAgentReadyResponse:
-        """GET /api/v1/system/wait-for-registry-agent — long-poll (admin).
-
-        Single server-side long-poll: the storefront blocks internally until
-        ``registry_auth_check()`` returns a definitive result (anything other
-        than ``"agent_not_found"``), or until *timeout* seconds elapse.
-
-        Returns ``RegistryAgentReadyResponse``.  Callers must check
-        ``result.ready`` and ``result.registry_auth``:
-        - ``ready=True, registry_auth="ok"`` — agent indexed and owner verified
-        - ``ready=True, registry_auth=<other>`` — definitive but non-ok
-        - ``ready=False`` — timed out while still ``"agent_not_found"``
-
-        Raises ``StorefrontClientError`` on non-2xx responses.
-        """
-        url = self._url("/api/v1/system/wait-for-registry-agent")
-        resp = await self._client.get(
-            "/api/v1/system/wait-for-registry-agent",
-            params={"timeout": timeout},
-            headers=self._admin_headers(),
-            timeout=timeout + 10.0,
-        )
-        self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return RegistryAgentReadyResponse.from_dict(resp.json())
 
     async def get_events(
         self,
@@ -429,13 +446,13 @@ class StorefrontClient(_StorefrontClientBase):
         neg_id: str,
         *,
         action: str,
-        price: float | None = None,
+        proposal: dict[str, Any] | None = None,
         reason: str | None = None,
     ) -> "NegotiationActionResponse":
         """POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/advance  (admin key)"""
         body: dict[str, Any] = {"action": action}
-        if price is not None:
-            body["price"] = price
+        if proposal is not None:
+            body["proposal"] = proposal
         if reason is not None:
             body["reason"] = reason
         return NegotiationActionResponse.from_dict(
@@ -451,13 +468,13 @@ class StorefrontClient(_StorefrontClientBase):
         listing_id: str,
         neg_id: str,
         *,
-        price: float,
+        amount: int,
     ) -> "NegotiationActionResponse":
         """POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept  (admin key)"""
         return NegotiationActionResponse.from_dict(
             await self._post(
                 f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept",
-                {"price": price},
+                {"amount": int(amount)},
                 extra_headers=self._admin_headers(),
             )
         )
@@ -499,10 +516,6 @@ class StorefrontClient(_StorefrontClientBase):
         )
         self._raise_for_status("POST", url, resp.status_code, resp.text)
         return ImportResourcesResponse.from_dict(resp.json())
-
-    async def policy_seed(self) -> dict:
-        """POST /admin/policy/seed — discover callables + seed default policies (admin key)."""
-        return await self._post("/api/v1/admin/policy/seed", {}, extra_headers=self._admin_headers())
 
     async def get_resource(self, resource_id: str) -> dict:
         """GET /api/v1/admin/portfolio/resources/{resource_id}  (admin key required).
@@ -546,76 +559,26 @@ class StorefrontClient(_StorefrontClientBase):
         self._raise_for_status("PATCH", url, resp.status_code, resp.text)
         return resp.json()
 
-    async def policy_status(self) -> dict:
-        """GET /api/v1/system/policy — callable registry + seeded policy diagnostic."""
-        return await self._get("/api/v1/system/policy")
-
-    async def policy_evaluate(
-        self,
-        *,
-        offer: dict,
-        accepted_escrows: list[dict[str, Any]],
-        max_duration_seconds: int | None = None,
-        policy_components: list[str],
-    ) -> dict:
-        """POST /api/v1/system/policy/evaluate — dry-run an order_create event.
-
-        Pure data operation — no DB lookup.  Supply the callable names to
-        evaluate against (e.g. read from GET /api/v1/system/policy after seeding).
-        """
-        return await self._post(
-            "/api/v1/system/policy/evaluate",
-            {
-                "event_type": "order_create",
-                "offer": offer,
-                "accepted_escrows": accepted_escrows,
-                "max_duration_seconds": max_duration_seconds,
-                "policy_components": policy_components,
-            },
-        )
-
-    async def evaluate_create_listing(
-        self,
-        *,
-        offer: dict[str, Any],
-        accepted_escrows: list[dict[str, Any]],
-        max_duration_seconds: int | None = None,
-        paused: bool = False,
-    ) -> dict:
-        """POST /api/v1/admin/listings/evaluate-create — dry-run, no DB writes (admin key)."""
-        body = {
-            "offer": offer,
-            "accepted_escrows": accepted_escrows,
-            "max_duration_seconds": max_duration_seconds,
-            "paused": paused,
-        }
-        return await self._post(
-            "/api/v1/admin/listings/evaluate-create", body,
-            extra_headers=self._admin_headers(),
-        )
-
-    async def evaluate_close_listing(self, listing_id: str) -> dict:
-        """POST /api/v1/admin/listings/{listing_id}/evaluate-close — dry-run, no DB writes (admin key)."""
-        return await self._post(
-            f"/api/v1/admin/listings/{listing_id}/evaluate-close", {},
-            extra_headers=self._admin_headers(),
-        )
-
     async def evaluate_negotiate(
         self,
         listing_id: str,
         *,
-        their_proposed_price: float,
+        proposal: dict[str, Any],
+        requested_duration_seconds: int | None = None,
         buyer_address: str = "",
     ) -> EvaluateNegotiateResponse:
         """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate — dry-run (admin key).
 
-        Runs the configured negotiation strategy against a synthetic buyer offer
-        without creating a negotiation thread or writing to the database.
-        Returns EvaluateNegotiateResponse.would_negotiate=False when the strategy
-        would exit immediately (e.g. price_unreasonable or torch_unavailable).
+        Runs the configured negotiation strategy against a synthetic buyer
+        proposal without creating a negotiation thread or writing to the
+        database. ``proposal`` is the full EscrowProposal-shaped dict (with
+        ``fields["amount"]`` carrying the absolute opening amount in base
+        units). Returns ``EvaluateNegotiateResponse.would_negotiate=False``
+        when the strategy would exit immediately.
         """
-        body = {"their_proposed_price": their_proposed_price, "buyer_address": buyer_address}
+        body: dict[str, Any] = {"proposal": proposal, "buyer_address": buyer_address}
+        if requested_duration_seconds is not None:
+            body["requested_duration_seconds"] = int(requested_duration_seconds)
         return EvaluateNegotiateResponse.from_dict(
             await self._post(
                 f"/api/v1/admin/listings/{listing_id}/evaluate-negotiate", body,
@@ -624,12 +587,6 @@ class StorefrontClient(_StorefrontClientBase):
         )
 
 
-
-    async def get_registration(self) -> ERC8004RegistrationFile:
-        """GET /.well-known/erc-8004-registration.json"""
-        return ERC8004RegistrationFile.from_dict(
-            await self._get("/.well-known/erc-8004-registration.json")
-        )
 
     async def create_listing(
         self,
@@ -716,26 +673,6 @@ class StorefrontClient(_StorefrontClientBase):
         )
 
 
-    async def send_resource_alert(
-        self,
-        *,
-        event_type: str = "resource_imbalance",
-        resource: dict[str, Any],
-        value: float,
-        label: str,
-        threshold: str,
-    ) -> dict[str, Any]:
-        """POST /alerts/resource"""
-        body = {
-            "event_type": event_type,
-            "resource": resource,
-            "value": value,
-            "label": label,
-            "threshold": threshold,
-        }
-        return await self._post("/api/v1/alerts/resource", body)
-
-
     # ------------------------------------------------------------------
     # Buyer protocol — negotiate / settle
     # EIP-191 signed X-Signature + X-Timestamp headers are added automatically.
@@ -746,7 +683,7 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         listing_id: str,
         buyer_address: str,
-        initial_price: float,
+        initial_amount: int,
         duration_seconds: int,
         buyer_agent_url: str = "",
         ssh_public_key: str = "",
@@ -757,39 +694,44 @@ class StorefrontClient(_StorefrontClientBase):
     ) -> dict:
         """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically.
 
-        ``provision_terms`` and ``escrow_proposal`` are required by the
-        wire protocol; this helper builds canonical defaults from the
-        scalar args so smoke / integration tests can keep their current
-        call shape. ``chain_name`` + ``escrow_address`` pick the
-        listing's accepted_escrows entry to propose against;
-        ``token`` populates ``fields["token"]``. Empty
-        values produce zero-address / placeholder strings — legal in
-        environments where the seller's listing has no typed payment
-        token; the seller validates against its acceptance set.
+        ``provision_terms`` and ``proposal`` are required by the wire
+        protocol; this helper builds canonical defaults from the scalar
+        args so smoke / integration tests can keep their current call
+        shape. ``initial_amount`` is the absolute opening amount in base
+        units of the payment token (already multiplied out from any
+        per-hour rate). ``chain_name`` + ``escrow_address`` pick the
+        listing's accepted_escrows entry to propose against. ``fields``
+        carries the negotiated ``amount`` (the per-round value); ``token``
+        is a literal escrow value and goes in ``literal_fields["token"]``,
+        where the seller's settlement verifier reads it. Empty values
+        produce zero-address / placeholder strings — legal where the
+        seller's listing has no typed payment token.
         """
-        ts = str(int(time.time()))
-        sig = _sign_eip191(self._private_key, f"negotiate_new:{listing_id}:{ts}")
+        headers = _signed_request_headers(
+            self._private_key,
+            f"negotiate_new:{listing_id}",
+            identity_identifier=buyer_address,
+        )
         exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
         body = {
             "listing_id": listing_id,
             "buyer_address": buyer_address,
-            "initial_price": initial_price,
             "provision_terms": {
                 "duration_seconds": duration_seconds,
                 "ssh_public_key": ssh_public_key,
                 "compute_resource": None,
             },
-            "escrow_proposal": {
+            "proposal": {
                 "chain_name": chain_name or "anvil",
                 "escrow_address": escrow_address or ("0x" + "0" * 40),
-                "fields": {"token": token or ("0x" + "0" * 40)},
+                "fields": {"amount": int(initial_amount)},
+                "literal_fields": {"token": token or ("0x" + "0" * 40)},
                 "expiration_unix": exp_unix,
             },
             "buyer_agent_url": buyer_agent_url,
         }
         return await self._post(
-            "/api/v1/negotiate/new", body,
-            extra_headers={"X-Signature": sig, "X-Timestamp": ts},
+            "/api/v1/negotiate/new", body, extra_headers=headers,
         )
 
     async def negotiate_continue(
@@ -798,16 +740,28 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         action: str,
         buyer_address: str,
-        price: float | None = None,
+        proposal: dict[str, Any] | None = None,
         reason: str | None = None,
     ) -> dict:
-        """POST /api/v1/negotiate/{neg_id}"""
+        """POST /api/v1/negotiate/{neg_id}.
+
+        ``proposal`` is the full EscrowProposal-shaped dict for ``counter``;
+        omitted for ``accept`` / ``exit``. ``fields["amount"]`` carries the
+        buyer's absolute new offer in base units.
+        """
+        headers = _signed_request_headers(
+            self._private_key,
+            f"negotiate_continue:{neg_id}",
+            identity_identifier=buyer_address,
+        )
         body: dict = {"action": action, "buyer_address": buyer_address}
-        if price is not None:
-            body["price"] = price
+        if proposal is not None:
+            body["proposal"] = proposal
         if reason is not None:
             body["reason"] = reason
-        return await self._post(f"/api/v1/negotiate/{neg_id}", body)
+        return await self._post(
+            f"/api/v1/negotiate/{neg_id}", body, extra_headers=headers,
+        )
 
     async def settle(
         self,
@@ -816,20 +770,30 @@ class StorefrontClient(_StorefrontClientBase):
         negotiation_id: str,
         buyer_address: str,
         ssh_public_key: str = "",
+        chain_name: str = "anvil",
     ) -> SettleResponse:
-        """POST /api/v1/settle/{escrow_uid} — adds EIP-191 auth headers automatically."""
-        ts = str(int(time.time()))
-        sig = _sign_eip191(self._private_key, f"settle_escrow:{escrow_uid}:{ts}")
+        """POST /api/v1/settle/{escrow_uid} — adds EIP-191 auth headers automatically.
+
+        ``chain_name`` tells the seller which configured ``[chains.<name>]``
+        entry to dispatch the on-chain verify against. Defaults to ``"anvil"``
+        for compatibility with the e2e fixture; non-anvil consumers must
+        pass their own value.
+        """
+        headers = _signed_request_headers(
+            self._private_key,
+            f"settle_escrow:{escrow_uid}",
+            identity_identifier=buyer_address,
+        )
         body: dict = {
             "negotiation_id": negotiation_id,
             "buyer_address": buyer_address,
+            "chain_name": chain_name,
         }
         if ssh_public_key:
             body["ssh_public_key"] = ssh_public_key
         return SettleResponse.from_dict(
             await self._post(
-                f"/api/v1/settle/{escrow_uid}", body,
-                extra_headers={"X-Signature": sig, "X-Timestamp": ts},
+                f"/api/v1/settle/{escrow_uid}", body, extra_headers=headers,
             )
         )
 
@@ -840,13 +804,16 @@ class StorefrontClient(_StorefrontClientBase):
         buyer_address: str,
     ) -> SettleStatusResponse:
         """GET /api/v1/settle/{escrow_uid}/status — adds EIP-191 auth headers automatically."""
-        ts = str(int(time.time()))
-        sig = _sign_eip191(self._private_key, f"settle_status:{escrow_uid}:{ts}")
+        headers = _signed_request_headers(
+            self._private_key,
+            f"settle_status:{escrow_uid}",
+            identity_identifier=buyer_address,
+        )
         url = self._url(f"/api/v1/settle/{escrow_uid}/status")
         resp = await self._client.get(
             f"/api/v1/settle/{escrow_uid}/status",
             params={"buyer_address": buyer_address},
-            headers={"X-Signature": sig, "X-Timestamp": ts},
+            headers=headers,
             timeout=self._timeout,
         )
         self._raise_for_status("GET", url, resp.status_code, resp.text)
@@ -889,18 +856,20 @@ class StorefrontClient(_StorefrontClientBase):
         agreed_price: float,
         agreed_duration_seconds: int,
         listing_id: str,
+        chain_name: str = "anvil",
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/verify — dry-run escrow chain read (admin key).
 
-        Reads the escrow from chain and confirms it matches the supplied terms.
-        Returns dict with valid=True/False and reason on failure.
-        No DB writes. Used by e2e stage 7b.
+        Reads the escrow from chain on ``chain_name`` and confirms it
+        matches the supplied terms. Returns dict with valid=True/False
+        and reason on failure. No DB writes. Used by e2e stage 7b.
         """
         body = {
             "seller_wallet": seller_wallet,
             "agreed_price": agreed_price,
             "agreed_duration_seconds": agreed_duration_seconds,
             "listing_id": listing_id,
+            "chain_name": chain_name,
         }
         return await self._post(
             f"/api/v1/admin/settle/{escrow_uid}/verify", body,
@@ -1024,36 +993,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
         if resp.status_code not in (200, 503):
             self._raise_for_status("GET", url, resp.status_code, resp.text)
         return HealthResponse.from_dict(resp.json())
-
-    def wait_for_registry_agent_ready(
-        self,
-        *,
-        timeout: float = 90.0,
-    ) -> RegistryAgentReadyResponse:
-        """GET /api/v1/system/wait-for-registry-agent — long-poll (admin).
-
-        Single server-side long-poll: the storefront blocks internally until
-        ``registry_auth_check()`` returns a definitive result (anything other
-        than ``"agent_not_found"``), or until *timeout* seconds elapse.
-
-        Returns ``RegistryAgentReadyResponse``.  Callers must check
-        ``result.ready`` and ``result.registry_auth``:
-        - ``ready=True, registry_auth="ok"`` — agent indexed and owner verified
-        - ``ready=True, registry_auth=<other>`` — definitive but non-ok (e.g.
-          ``"owner_mismatch"``, ``"unconfigured"``)
-        - ``ready=False`` — timed out while still ``"agent_not_found"``
-
-        Raises ``StorefrontClientError`` on non-2xx responses.
-        """
-        url = self._url("/api/v1/system/wait-for-registry-agent")
-        resp = self._client.get(
-            "/api/v1/system/wait-for-registry-agent",
-            params={"timeout": timeout},
-            headers=self._admin_headers(),
-            timeout=timeout + 10.0,  # client timeout slightly longer than server cap
-        )
-        self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return RegistryAgentReadyResponse.from_dict(resp.json())
 
     def get_events(
         self,
@@ -1203,13 +1142,13 @@ class SyncStorefrontClient(_StorefrontClientBase):
         neg_id: str,
         *,
         action: str,
-        price: float | None = None,
+        proposal: dict[str, Any] | None = None,
         reason: str | None = None,
     ) -> NegotiationActionResponse:
         """POST .../advance  (admin key required)"""
         body: dict[str, Any] = {"action": action}
-        if price is not None:
-            body["price"] = price
+        if proposal is not None:
+            body["proposal"] = proposal
         if reason is not None:
             body["reason"] = reason
         return NegotiationActionResponse.from_dict(
@@ -1225,13 +1164,13 @@ class SyncStorefrontClient(_StorefrontClientBase):
         listing_id: str,
         neg_id: str,
         *,
-        price: float,
+        amount: int,
     ) -> NegotiationActionResponse:
         """POST .../force-accept  (admin key required)"""
         return NegotiationActionResponse.from_dict(
             self._post(
                 f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept",
-                {"price": price},
+                {"amount": int(amount)},
                 extra_headers=self._admin_headers(),
             )
         )
@@ -1359,80 +1298,26 @@ class SyncStorefrontClient(_StorefrontClientBase):
             extra_headers=self._admin_headers(),
         )
 
-    def policy_seed(self) -> dict:
-        """POST /admin/policy/seed — discover callables + seed default policies (admin key)."""
-        return self._post("/api/v1/admin/policy/seed", {}, extra_headers=self._admin_headers())
-
-    def policy_status(self) -> dict:
-        """GET /api/v1/system/policy — callable registry + seeded policy diagnostic."""
-        return self._get("/api/v1/system/policy")
-
-    def policy_evaluate(
-        self,
-        *,
-        offer: dict,
-        accepted_escrows: list[dict[str, Any]],
-        max_duration_seconds: int | None = None,
-        policy_components: list[str],
-    ) -> dict:
-        """POST /api/v1/system/policy/evaluate — dry-run an order_create event.
-
-        Pure data operation — no DB lookup.  Supply the callable names to
-        evaluate against (e.g. read from GET /api/v1/system/policy after seeding).
-        """
-        return self._post(
-            "/api/v1/system/policy/evaluate",
-            {
-                "event_type": "order_create",
-                "offer": offer,
-                "accepted_escrows": accepted_escrows,
-                "max_duration_seconds": max_duration_seconds,
-                "policy_components": policy_components,
-            },
-        )
-
-    def evaluate_create_listing(
-        self,
-        *,
-        offer: dict[str, Any],
-        accepted_escrows: list[dict[str, Any]],
-        max_duration_seconds: int | None = None,
-        paused: bool = False,
-    ) -> dict:
-        """POST /api/v1/admin/listings/evaluate-create — dry-run, no DB writes (admin key)."""
-        body = {
-            "offer": offer,
-            "accepted_escrows": accepted_escrows,
-            "max_duration_seconds": max_duration_seconds,
-            "paused": paused,
-        }
-        return self._post(
-            "/api/v1/admin/listings/evaluate-create", body,
-            extra_headers=self._admin_headers(),
-        )
-
-    def evaluate_close_listing(self, listing_id: str) -> dict:
-        """POST /api/v1/admin/listings/{listing_id}/evaluate-close — dry-run, no DB writes (admin key)."""
-        return self._post(
-            f"/api/v1/admin/listings/{listing_id}/evaluate-close", {},
-            extra_headers=self._admin_headers(),
-        )
-
     def evaluate_negotiate(
         self,
         listing_id: str,
         *,
-        their_proposed_price: float,
+        proposal: dict[str, Any],
+        requested_duration_seconds: int | None = None,
         buyer_address: str = "",
     ) -> EvaluateNegotiateResponse:
         """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate — dry-run (admin key).
 
-        Runs the configured negotiation strategy against a synthetic buyer offer
-        without creating a negotiation thread or writing to the database.
-        Returns EvaluateNegotiateResponse.would_negotiate=False when the strategy
-        would exit immediately (e.g. price_unreasonable or torch_unavailable).
+        Runs the configured negotiation strategy against a synthetic buyer
+        proposal without creating a negotiation thread or writing to the
+        database. ``proposal`` is the full EscrowProposal-shaped dict (with
+        ``fields["amount"]`` carrying the absolute opening amount in base
+        units). Returns ``EvaluateNegotiateResponse.would_negotiate=False``
+        when the strategy would exit immediately.
         """
-        body = {"their_proposed_price": their_proposed_price, "buyer_address": buyer_address}
+        body: dict[str, Any] = {"proposal": proposal, "buyer_address": buyer_address}
+        if requested_duration_seconds is not None:
+            body["requested_duration_seconds"] = int(requested_duration_seconds)
         return EvaluateNegotiateResponse.from_dict(
             self._post(
                 f"/api/v1/admin/listings/{listing_id}/evaluate-negotiate", body,
@@ -1441,12 +1326,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
         )
 
 
-
-    def get_registration(self) -> ERC8004RegistrationFile:
-        """GET /.well-known/erc-8004-registration.json"""
-        return ERC8004RegistrationFile.from_dict(
-            self._get("/.well-known/erc-8004-registration.json")
-        )
 
     def create_listing(
         self,
@@ -1532,25 +1411,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
             self._post("/listings/claim", body, extra_headers=headers)
         )
 
-    def send_resource_alert(
-        self,
-        *,
-        event_type: str = "resource_imbalance",
-        resource: dict[str, Any],
-        value: float,
-        label: str,
-        threshold: str,
-    ) -> dict[str, Any]:
-        """POST /alerts/resource"""
-        body = {
-            "event_type": event_type,
-            "resource": resource,
-            "value": value,
-            "label": label,
-            "threshold": threshold,
-        }
-        return self._post("/api/v1/alerts/resource", body)
-
     # ------------------------------------------------------------------
     # Buyer protocol — negotiate / settle
     # EIP-191 signed X-Signature + X-Timestamp headers are added automatically.
@@ -1561,7 +1421,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         listing_id: str,
         buyer_address: str,
-        initial_price: float,
+        initial_amount: int,
         duration_seconds: int,
         buyer_agent_url: str = "",
         ssh_public_key: str = "",
@@ -1572,33 +1432,36 @@ class SyncStorefrontClient(_StorefrontClientBase):
     ) -> dict:
         """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically.
 
-        ``provision_terms`` and ``escrow_proposal`` are required by the
-        wire protocol; this helper builds canonical defaults from the
-        scalar args. See the async variant for the field semantics.
+        ``provision_terms`` and ``proposal`` are required by the wire
+        protocol; this helper builds canonical defaults from the scalar
+        args. ``initial_amount`` is the absolute opening amount in base
+        units of the payment token.
         """
-        ts = str(int(time.time()))
-        sig = _sign_eip191(self._private_key, f"negotiate_new:{listing_id}:{ts}")
+        headers = _signed_request_headers(
+            self._private_key,
+            f"negotiate_new:{listing_id}",
+            identity_identifier=buyer_address,
+        )
         exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
         body = {
             "listing_id": listing_id,
             "buyer_address": buyer_address,
-            "initial_price": initial_price,
             "provision_terms": {
                 "duration_seconds": duration_seconds,
                 "ssh_public_key": ssh_public_key,
                 "compute_resource": None,
             },
-            "escrow_proposal": {
+            "proposal": {
                 "chain_name": chain_name or "anvil",
                 "escrow_address": escrow_address or ("0x" + "0" * 40),
-                "fields": {"token": token or ("0x" + "0" * 40)},
+                "fields": {"amount": int(initial_amount)},
+                "literal_fields": {"token": token or ("0x" + "0" * 40)},
                 "expiration_unix": exp_unix,
             },
             "buyer_agent_url": buyer_agent_url,
         }
         return self._post(
-            "/api/v1/negotiate/new", body,
-            extra_headers={"X-Signature": sig, "X-Timestamp": ts},
+            "/api/v1/negotiate/new", body, extra_headers=headers,
         )
 
     def negotiate_continue(
@@ -1607,16 +1470,28 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         action: str,
         buyer_address: str,
-        price: float | None = None,
+        proposal: dict[str, Any] | None = None,
         reason: str | None = None,
     ) -> dict:
-        """POST /api/v1/negotiate/{neg_id}"""
+        """POST /api/v1/negotiate/{neg_id}.
+
+        ``proposal`` is the full EscrowProposal-shaped dict for ``counter``;
+        omitted for ``accept`` / ``exit``. ``fields["amount"]`` carries the
+        buyer's absolute new offer in base units.
+        """
+        headers = _signed_request_headers(
+            self._private_key,
+            f"negotiate_continue:{neg_id}",
+            identity_identifier=buyer_address,
+        )
         body: dict = {"action": action, "buyer_address": buyer_address}
-        if price is not None:
-            body["price"] = price
+        if proposal is not None:
+            body["proposal"] = proposal
         if reason is not None:
             body["reason"] = reason
-        return self._post(f"/api/v1/negotiate/{neg_id}", body)
+        return self._post(
+            f"/api/v1/negotiate/{neg_id}", body, extra_headers=headers,
+        )
 
     def settle(
         self,
@@ -1625,20 +1500,30 @@ class SyncStorefrontClient(_StorefrontClientBase):
         negotiation_id: str,
         buyer_address: str,
         ssh_public_key: str = "",
+        chain_name: str = "anvil",
     ) -> SettleResponse:
-        """POST /api/v1/settle/{escrow_uid} — adds EIP-191 auth headers automatically."""
-        ts = str(int(time.time()))
-        sig = _sign_eip191(self._private_key, f"settle_escrow:{escrow_uid}:{ts}")
+        """POST /api/v1/settle/{escrow_uid} — adds EIP-191 auth headers automatically.
+
+        ``chain_name`` tells the seller which configured ``[chains.<name>]``
+        entry to dispatch the on-chain verify against. Defaults to ``"anvil"``
+        for compatibility with the e2e fixture; non-anvil consumers must
+        pass their own value.
+        """
+        headers = _signed_request_headers(
+            self._private_key,
+            f"settle_escrow:{escrow_uid}",
+            identity_identifier=buyer_address,
+        )
         body: dict = {
             "negotiation_id": negotiation_id,
             "buyer_address": buyer_address,
+            "chain_name": chain_name,
         }
         if ssh_public_key:
             body["ssh_public_key"] = ssh_public_key
         return SettleResponse.from_dict(
             self._post(
-                f"/api/v1/settle/{escrow_uid}", body,
-                extra_headers={"X-Signature": sig, "X-Timestamp": ts},
+                f"/api/v1/settle/{escrow_uid}", body, extra_headers=headers,
             )
         )
 
@@ -1649,13 +1534,16 @@ class SyncStorefrontClient(_StorefrontClientBase):
         buyer_address: str,
     ) -> SettleStatusResponse:
         """GET /api/v1/settle/{escrow_uid}/status — adds EIP-191 auth headers automatically."""
-        ts = str(int(time.time()))
-        sig = _sign_eip191(self._private_key, f"settle_status:{escrow_uid}:{ts}")
+        headers = _signed_request_headers(
+            self._private_key,
+            f"settle_status:{escrow_uid}",
+            identity_identifier=buyer_address,
+        )
         url = self._url(f"/api/v1/settle/{escrow_uid}/status")
         resp = self._client.get(
             f"/api/v1/settle/{escrow_uid}/status",
             params={"buyer_address": buyer_address},
-            headers={"X-Signature": sig, "X-Timestamp": ts},
+            headers=headers,
             timeout=self._timeout,
         )
         self._raise_for_status("GET", url, resp.status_code, resp.text)
@@ -1698,18 +1586,20 @@ class SyncStorefrontClient(_StorefrontClientBase):
         agreed_price: float,
         agreed_duration_seconds: int,
         listing_id: str,
+        chain_name: str = "anvil",
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/verify — dry-run escrow chain read (admin key).
 
-        Reads the escrow from chain and confirms it matches the supplied terms.
-        Returns dict with valid=True/False and reason on failure.
-        No DB writes. Used by e2e stage 7b.
+        Reads the escrow from chain on ``chain_name`` and confirms it
+        matches the supplied terms. Returns dict with valid=True/False
+        and reason on failure. No DB writes. Used by e2e stage 7b.
         """
         body = {
             "seller_wallet": seller_wallet,
             "agreed_price": agreed_price,
             "agreed_duration_seconds": agreed_duration_seconds,
             "listing_id": listing_id,
+            "chain_name": chain_name,
         }
         return self._post(
             f"/api/v1/admin/settle/{escrow_uid}/verify", body,

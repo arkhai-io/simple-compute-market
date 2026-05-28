@@ -1,0 +1,34 @@
+# Registry stack — dev rig variant.
+#
+# Brings up only the registry/indexer service against the shared dev
+# network (joined with compose/external.yml's Anvil + contract deployer).
+# Contract addresses come from shared-env/.env, which the deployer in
+# compose/external.yml populates on first boot.
+#
+# For an operator-facing standalone deployment (named volume, bearer
+# auth, env file the operator edits), see compose/registry.yml + the
+# docs/indexer-quickstart.md walkthrough.
+#
+# Usage:
+#   docker compose -f compose/external.yml -f compose/registry.dev.yml up
+
+services:
+  registry:
+    image: arkhai:registry
+    ports:
+      - "8080:8080"
+    env_file:
+      - ../registry-service/.env.docker-compose
+    volumes:
+      - ../shared-env:/app/shared-env
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

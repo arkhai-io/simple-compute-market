@@ -12,10 +12,9 @@ This module exposes ``MultiRegistryClient`` with the same async
 context-manager surface and method signatures as
 ``registry_client.RegistryClient``:
 
-  * **Reads** (``list_listings``, ``get_listing``,
-    ``wait_for_agent_indexed``) fan in across every configured
-    registry concurrently. Per-registry failures are swallowed with a
-    warning so one dead registry doesn't gate the whole discovery
+  * **Reads** (``list_listings``, ``get_listing``) fan in across every
+    configured registry concurrently. Per-registry failures are swallowed
+    with a warning so one dead registry doesn't gate the whole discovery
     pass.
 
   * **Writes** (``publish_listing``, ``update_listing``,
@@ -40,7 +39,6 @@ from registry_client import (
     UpdateListingRequest,
 )
 from registry_client.models import (
-    AgentIndexedResponse,
     ListingListResponse,
     ListingSummary,
 )
@@ -86,6 +84,9 @@ class MultiRegistryClient:
         self._timeout = timeout
         # Per-URL bearer tokens. URLs without an entry get no
         # Authorization header on their underlying RegistryClient.
+        # Look up via the URL-normalizing helper so trailing-slash and
+        # case mismatches between [registry] urls and [registry.auth]
+        # keys don't silently drop the token.
         self._auth: dict[str, str] = dict(auth or {})
 
     @property
@@ -93,8 +94,9 @@ class MultiRegistryClient:
         return list(self._urls)
 
     async def __aenter__(self) -> "MultiRegistryClient":
+        from service.registry_url import lookup_registry_auth
         for url in self._urls:
-            client = RegistryClient(url, api_key=self._auth.get(url))
+            client = RegistryClient(url, api_key=lookup_registry_auth(self._auth, url))
             await client.__aenter__()
             self._clients.append(client)
         return self
@@ -195,69 +197,19 @@ class MultiRegistryClient:
             "all registries failed without a response",
         )
 
-    async def wait_for_agent_indexed(
-        self, agent_id: str, *, timeout: float = 60.0,
-    ) -> AgentIndexedResponse:
-        """Long-poll every registry concurrently; return on the first
-        ``indexed=True``. If no registry confirms within the timeout,
-        return the first non-error response (so the caller still sees
-        an ``indexed=False`` payload to act on)."""
-        if not self._clients:
-            raise RegistryClientError(
-                "GET", "/api/v1/system/sync/wait-for-agent", 404,
-                "no registries configured",
-            )
-        tasks = [
-            asyncio.create_task(
-                self._bound(c.wait_for_agent_indexed(agent_id, timeout=timeout))
-            )
-            for c in self._clients
-        ]
-        first_seen: AgentIndexedResponse | None = None
-        last_error: BaseException | None = None
-        try:
-            for completed in asyncio.as_completed(tasks):
-                try:
-                    result = await completed
-                except BaseException as exc:
-                    last_error = exc
-                    logger.warning(
-                        "[MULTI_REGISTRY] wait_for_agent_indexed errored: %s",
-                        exc,
-                    )
-                    continue
-                if getattr(result, "indexed", False):
-                    return result
-                if first_seen is None:
-                    first_seen = result
-        finally:
-            for t in tasks:
-                if not t.done():
-                    t.cancel()
-        if first_seen is not None:
-            return first_seen
-        if last_error is not None:
-            raise last_error
-        raise RegistryClientError(
-            "GET", "/api/v1/system/sync/wait-for-agent", 500,
-            "all registries failed without a response",
-        )
-
     # ------------------------------------------------------------------
     # Writes — fan-out, best-effort
     # ------------------------------------------------------------------
 
     async def publish_listing(
-        self, agent_id: str, listing: ListingRequest, private_key: str,
+        self, listing: ListingRequest, private_key: str,
     ) -> dict:
         """Fan out the same ``listing`` payload to every configured
         registry. Back-compat wrapper around
         :meth:`publish_listing_per_registry`. Returns the first
         registry's successful response."""
         payloads = {url: listing for url in self._urls}
-        results = await self.publish_listing_per_registry(
-            agent_id, payloads, private_key,
-        )
+        results = await self.publish_listing_per_registry(payloads, private_key)
         return _first_ok_response(results, op="publish_listing")
 
     async def update_listing(
@@ -282,7 +234,6 @@ class MultiRegistryClient:
 
     async def publish_listing_per_registry(
         self,
-        agent_id: str,
         payloads: dict[str, ListingRequest],
         private_key: str,
     ) -> list[PublishResult]:
@@ -298,9 +249,7 @@ class MultiRegistryClient:
         return await self._fanout_per_registry(
             "publish_listing",
             payloads,
-            lambda client, payload: client.publish_listing(
-                agent_id, payload, private_key,
-            ),
+            lambda client, payload: client.publish_listing(payload, private_key),
         )
 
     async def update_listing_per_registry(
@@ -436,6 +385,11 @@ def _payload_to_dict(payload: Any) -> dict | None:
                 return dump()
             except Exception:
                 pass
+    # UpdateListingRequest.to_dict() requires the listing_id it signs over;
+    # for audit we keep the update fields, not the signed envelope.
+    updates = getattr(payload, "updates", None)
+    if isinstance(updates, dict):
+        return dict(updates)
     to_dict = getattr(payload, "to_dict", None)
     if callable(to_dict):
         try:

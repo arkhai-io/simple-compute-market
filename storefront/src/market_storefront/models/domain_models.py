@@ -6,11 +6,6 @@ import uuid
 
 from service.schemas import (
     AcceptedEscrow,
-    ActionType,
-    Decision as CoreDecision,
-    DecisionContext as CoreDecisionContext,
-    DomainAction as CoreDomainAction,
-    DomainEvent as CoreDomainEvent,
     Resource as CoreResource,
     TokenResource as CoreTokenResource,
 )
@@ -22,28 +17,17 @@ from service.clients.token import ERC20TokenMetadata
 # =============================================================================
 #
 # service.schemas (external wheel — canonical base types)
-# ├── CoreResource                  Base resource model
-# │   └── ComputeDomainResource     Parse/coerce helper; extends CoreResource
-# │       ├── ComputeResource       A compute slice (GPU, CPU, RAM, region, ...)
-# │       └── TokenResource         ERC-20 token payment (= CoreTokenResource alias)
-# ├── CoreDomainEvent               Base event model
-# │   ├── DomainEvent               (alias for CoreDomainEvent)
-# │   ├── ListingCreatedEvent       order_create pipeline trigger
-# │   ├── ListingClosedEvent        order_close pipeline trigger
-# │   └── ResourceImbalanceEvent    alert pipeline trigger
-# └── (other core types re-aliased below)
-#     ├── Action                    = CoreDomainAction
-#     ├── DecisionContext           = CoreDecisionContext
-#     └── Decision                  = CoreDecision
+# └── CoreResource                  Base resource model
+#     └── ComputeDomainResource     Parse/coerce helper; extends CoreResource
+#         ├── ComputeResource       A compute slice (GPU, CPU, RAM, region, ...)
+#         └── TokenResource         ERC-20 token payment (= CoreTokenResource alias)
 #
 # Marketplace-layer types (defined here)
 # ├── Listing                       A published marketplace listing
 # │   ├── offer_resource: ComputeResource | TokenResource
 # │   └── accepted_escrows: list[AcceptedEscrow] | None
 # ├── Host                          Physical host metadata (capacity, hardware)
-# ├── ComputeResourcePortfolio      Collection of ComputeResource slices
-# └── ResourceAlertRequest          HTTP input for POST /alerts/resource
-#         └── .to_resource_imbalance_event() → ResourceImbalanceEvent
+# └── ComputeResourcePortfolio      Collection of ComputeResource slices
 #
 # Enumerations
 # ├── GPUModel          Advisory string-enum of common NVIDIA models.
@@ -52,8 +36,7 @@ from service.clients.token import ERC20TokenMetadata
 # ├── Region            Advisory string-enum. Field types are plain `str`;
 # │                       region vocabularies are indexer-local.
 # ├── GpuInterconnect   nvlink | nvswitch | pcie_only | infiniband
-# ├── VirtualizationType bare_metal | vm | container
-# └── EventType         order_create | order_close | resource_imbalance | ...
+# └── VirtualizationType bare_metal | vm | container
 # =============================================================================
 
 
@@ -116,7 +99,7 @@ class Host(BaseModel):
     ``tag.*`` namespace (e.g. ``attributes["tag.datacenter_tier"]``).
     """
 
-    name: str = Field(description="Host alias (matches provisioning-service host alias, e.g. 'ww1').")
+    name: str = Field(description="Host alias (matches provisioning-service host alias, e.g. 'kvm1').")
     cpu_type: str | None = Field(default=None, description="Host CPU model string, e.g. 'AMD EPYC 9654'")
     host_cpu_cores: int | None = Field(default=None, description="Total physical CPU cores on host")
     host_ram_gb: int | None = Field(default=None, description="Host total RAM in GB")
@@ -458,9 +441,9 @@ class Listing(BaseModel):
         default=None,
         description=(
             "Optional ceiling on lease duration in seconds. None = unlimited. "
-            "accepted_escrows[i].price_per_hour is the advertised per-hour "
-            "rate; total payment is computed at agreement time as "
-            "price_per_hour * agreed_duration_seconds / 3600."
+            "accepted_escrows[i].rates carries the advertised per-hour rate "
+            "for ERC20 escrows; total payment is computed at agreement time "
+            "as primary_rate * agreed_duration_seconds / 3600."
         ),
     )
     oracle_address: str | None = Field(
@@ -481,275 +464,3 @@ class Listing(BaseModel):
         return data
 
 
-# =============================
-# Event models for A2A workflow
-# =============================
-
-
-class EventType(str, Enum):
-    """Events that can be handled by the Agent"""
-
-    ORDER_CREATE = "order_create"
-    ORDER_CLOSE = "order_close"
-    RESOURCE_IMBALANCE = "resource_imbalance"
-    # Pre-thread guard hook: fires from /negotiate/new before any state
-    # mutation. The seeded policy composite runs guards (e.g. inventory
-    # match) and emits REJECT_OFFER with a reason on veto, mapped to
-    # HTTP 409 (OfferUnfulfillableError) by the negotiate flow. Operators
-    # who want to support non-immediate deals (futures, off-chain matched)
-    # swap the composite's components for an empty list or an alternative
-    # guard set.
-    NEGOTIATION_REQUESTED = "negotiation_requested"
-DomainEvent = CoreDomainEvent
-
-
-class ListingCreatedEvent(DomainEvent):
-    """Event triggered when a local client requests order creation."""
-
-    event_type: EventType = Field(default=EventType.ORDER_CREATE)
-    offer: Union[ComputeResource, TokenResource] = Field(
-        description="Offered resource (compute or token)"
-    )
-    accepted_escrows: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description=(
-            "Escrow shapes the seller will accept for this listing — each "
-            "entry pins (chain_name, escrow_address) plus a partial "
-            "ObligationData advertisement via the fields map, with the "
-            "per-hour rate in price_per_hour."
-        ),
-    )
-    max_duration_seconds: int | None = Field(
-        default=None,
-        description=(
-            "Optional max lease duration in seconds (None = unlimited). "
-            "Buyer asks for an actual duration at negotiation init."
-        ),
-    )
-
-    @model_validator(mode="before")
-    @classmethod
-    def parse_resources(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        if "offer" in data:
-            data["offer"] = ComputeDomainResource.parse_from_dict(data["offer"])
-        return data
-
-
-class ListingClosedEvent(DomainEvent):
-    """Event triggered when a local client requests listing closure."""
-
-    event_type: EventType = Field(default=EventType.ORDER_CLOSE)
-    listing_id: str = Field(description="Listing ID to close")
-
-
-class NegotiationRequestedEvent(DomainEvent):
-    """Event triggered when a buyer asks to start a negotiation thread.
-
-    Fires from ``sync_negotiation.start_negotiation_for_remote_request``
-    before any thread state is written. The seeded guard composite runs
-    against this event; if any guard returns ``REJECT_OFFER``, the flow
-    short-circuits with HTTP 409 and the reason in the action's
-    ``parameters["reason"]``.
-
-    Carries the listing dict (so guards can read ``offer_resource``,
-    ``accepted_escrows``, ``status``, etc.) plus the buyer's proposed
-    price, duration, and escrow proposal so escrow- and price-aware
-    guards can run against the request before any thread state is
-    written.
-    """
-
-    event_type: EventType = Field(default=EventType.NEGOTIATION_REQUESTED)
-    listing_id: str = Field(description="Listing the buyer wants to negotiate against")
-    listing: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Full listing row from sqlite (offer_resource, accepted_escrows, status, ...)",
-    )
-    proposed_price: float | None = Field(
-        default=None,
-        description="Buyer's initial price proposal (None if not provided)",
-    )
-    requested_duration_seconds: int | None = Field(
-        default=None,
-        description="Buyer's requested lease duration in seconds (None if not provided)",
-    )
-    escrow_proposal: dict[str, Any] | None = Field(
-        default=None,
-        description=(
-            "Buyer's EscrowProposal as a dict (chain_name, escrow_address, "
-            "fields, expiration_unix). None for legacy clients."
-        ),
-    )
-
-
-class ResourceAlertRequest(BaseModel):
-    """Request model for resource imbalance alerts from monitoring systems.
-    
-    Validates incoming alert structure and provides conversion to ResourceImbalanceEvent.
-    All fields are required - strict validation with no defaults.
-    """
-    
-    event_type: Literal["resource_imbalance"] = Field(
-        description="Type of event (must be resource_imbalance)"
-    )
-    resource: dict[str, Any] = Field(
-        description="Resource details with required fields: gpu_model, gpu_count, sla, region"
-    )
-    value: float = Field(
-        ge=0.0,
-        le=1.0,
-        description="Utilization value (0.0-1.0) that maps to severity"
-    )
-    label: str = Field(description="Alert label (e.g., 'LOW UTILIZATION')")
-    threshold: str = Field(description="Threshold string (e.g., '<=0.30')")
-    
-    @field_validator("resource")
-    @classmethod
-    def validate_resource(cls, v: dict[str, Any]) -> dict[str, Any]:
-        """Validate resource dict has all required fields."""
-        required_fields = ["gpu_model", "gpu_count", "sla", "region"]
-        missing = [field for field in required_fields if field not in v]
-        if missing:
-            raise ValueError(f"Resource dict missing required fields: {missing}")
-        return v
-    
-    def to_resource_imbalance_event(
-        self,
-        event_id: str | None = None,
-        source: str | None = None,
-    ) -> "ResourceImbalanceEvent":
-        """Convert alert to ResourceImbalanceEvent.
-        
-        Maps value -> severity, extracts resource fields, stores label/threshold in data.
-        """
-        # Extract resource fields (gpu_model/region are open strings; the
-        # indexer's filter-spec.yaml gates which values are actually
-        # publishable on the marketplace).
-        gpu_model = str(self.resource["gpu_model"])
-        gpu_count = int(self.resource["gpu_count"])
-        sla = float(self.resource["sla"])
-        region = str(self.resource["region"])
-        
-        # Create ComputeResource
-        compute_resource = ComputeResource(
-            gpu_model=gpu_model,
-            gpu_count=gpu_count,
-            sla=sla,
-            region=region,
-        )
-        
-        # Map value to severity
-        severity = self.value
-        
-        # Determine imbalance_type from label/value (policy can override)
-        # Default to 'surplus' for low utilization, 'deficit' for high
-        imbalance_type = "surplus" if "LOW" in self.label.upper() else "deficit"
-        
-        # Create event with label and threshold in data for policy access
-        return ResourceImbalanceEvent(
-            event_id=event_id or f"alert_{uuid.uuid4()}",
-            source=source or "resource-monitor",
-            resource=compute_resource,
-            imbalance_type=imbalance_type,
-            severity=severity,
-            data={
-                "gpu_model": gpu_model,
-                "gpu_count": gpu_count,
-                "region": region,
-                "sla": sla,
-                "imbalance_type": imbalance_type,
-                "severity": severity,
-                "label": self.label,
-                "threshold": self.threshold,
-                "value": self.value,
-            },
-        )
-
-
-class ResourceImbalanceEvent(DomainEvent):
-    """Event triggered when resource imbalance is detected"""
-
-    event_type: EventType = Field(default=EventType.RESOURCE_IMBALANCE)
-    resource: ComputeResource = Field(description="The imbalanced resource")
-    imbalance_type: str = Field(description="Type of imbalance: surplus or deficit")
-    severity: float = Field(description="Severity of imbalance (0.0-1.0)")
-
-    @model_validator(mode="before")
-    @classmethod
-    def parse_resource(cls, data: Any) -> Any:
-        """Parse resource from dict to ComputeResource if needed.
-        
-        Also extracts imbalance_type and severity from nested data dict if present.
-        """
-        if not isinstance(data, dict):
-            return data
-        
-        # Handle nested data structure - extract fields from data dict
-        if "data" in data and isinstance(data["data"], dict):
-            nested_data = data["data"]
-            
-            # Extract resource from nested data
-            if "resource" in nested_data:
-                resource_dict = nested_data["resource"]
-                if isinstance(resource_dict, dict):
-                    # Validate required fields
-                    required_fields = ["gpu_model", "gpu_count", "sla", "region"]
-                    missing = [f for f in required_fields if f not in resource_dict]
-                    if missing:
-                        raise ValueError(f"Resource missing required fields: {missing}")
-                    # Convert to ComputeResource
-                    data["resource"] = ComputeResource.model_validate(resource_dict)
-            
-            # Extract imbalance_type and severity from nested data if not at top level
-            if "imbalance_type" in nested_data and "imbalance_type" not in data:
-                data["imbalance_type"] = nested_data["imbalance_type"]
-            if "severity" in nested_data and "severity" not in data:
-                data["severity"] = nested_data["severity"]
-        
-        # If resource is at top level as dict, convert it
-        elif "resource" in data and isinstance(data["resource"], dict):
-            resource_dict = data["resource"]
-            required_fields = ["gpu_model", "gpu_count", "sla", "region"]
-            missing = [f for f in required_fields if f not in resource_dict]
-            if missing:
-                raise ValueError(f"Resource missing required fields: {missing}")
-            data["resource"] = ComputeResource.model_validate(resource_dict)
-        
-        return data
-
-    @classmethod
-    def create(
-        cls,
-        event_id: str,
-        source: str,
-        resource: ComputeResource,
-        imbalance_type: str,
-        severity: float,
-    ) -> "ResourceImbalanceEvent":
-        """Create a resource imbalance event"""
-        return cls(
-            event_id=event_id,
-            source=source,
-            resource=resource,
-            imbalance_type=imbalance_type,
-            severity=severity,
-            data={
-                "gpu_model": resource.gpu_model,
-                "gpu_count": resource.gpu_count,
-                "region": resource.region,
-                "imbalance_type": imbalance_type,
-                "severity": severity,
-            },
-        )
-
-
-# =============================
-# Decision and Action domain models for reactive agents
-# =============================
-# ActionType moved to service.schemas (imported at module top).
-
-
-Action = CoreDomainAction
-DecisionContext = CoreDecisionContext
-Decision = CoreDecision

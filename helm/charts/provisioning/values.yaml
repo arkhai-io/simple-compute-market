@@ -57,7 +57,7 @@ sshKey:
 #   table on every pod startup (idempotent via seed_from_ini).
 #   Example:
 #     [kvm_hosts]
-#     ww1  ansible_host=10.0.0.1  ansible_user=ubuntu  ansible_ssh_private_key_file=/home/appuser/.ssh/id_ed25519
+#     kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu  ansible_ssh_private_key_file=/home/appuser/.ssh/id_ed25519
 #
 # createSecret: true  — chart creates a Secret from the values below.
 # createSecret: false — chart expects a pre-existing Secret named secretName
@@ -104,7 +104,7 @@ config:
 
   # Ansible runtime
   ansible_timeout_seconds: 1800
-  default_vm_host: "ww1"
+  default_vm_host: "kvm1"
 
   # Golden image credentials (leave empty unless using golden mode)
   golden_root_ssh_filename: ""
@@ -117,12 +117,6 @@ config:
   frp_server_addr: ""
   frp_domain: ""
   frp_dashboard_password: ""
-
-  # Authentication
-  enable_auth: false
-  registry_url: ""
-  registry_cache_ttl_seconds: 300
-  registry_cache_max_size: 256
 
   # Lease watchdog
   lease_watchdog_enabled: true

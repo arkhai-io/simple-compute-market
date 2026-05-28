@@ -1,0 +1,414 @@
+---
+# Docker Application Deployment with Nginx Reverse Proxy
+# This role deploys any Docker container and exposes it through Nginx
+# Nginx acts as a reverse proxy - it is NOT the application being deployed
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  when: ansible_os_family == "Debian"
+
+- name: Install dependencies for Docker
+  ansible.builtin.package:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Add Docker GPG key
+  ansible.builtin.apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Add Docker repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Install Docker
+  ansible.builtin.package:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+
+- name: Ensure Docker service is started and enabled
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Set default nginx port if not provided
+  ansible.builtin.set_fact:
+    app_nginx_port: "{{ app_nginx_port | default(8080) }}"
+
+- name: Set Docker image full name (GCP Artifact Registry)
+  ansible.builtin.set_fact:
+    docker_image_full: "{{ gcp_registry_region }}-docker.pkg.dev/{{ gcp_project_id }}/{{ gcp_repository }}/{{ docker_image_name }}:{{ docker_image_tag | default('latest') }}"
+  when: 
+    - docker_registry_type is defined
+    - docker_registry_type == 'gcp'
+
+- name: Set Docker image full name (Docker Hub)
+  ansible.builtin.set_fact:
+    docker_image_full: "{{ dockerhub_username }}/{{ docker_image_name }}:{{ docker_image_tag | default('latest') }}"
+  when: 
+    - docker_registry_type is defined
+    - docker_registry_type == 'dockerhub'
+    - dockerhub_username is defined
+
+- name: Set Docker image full name (generic registry or default)
+  ansible.builtin.set_fact:
+    docker_image_full: "{{ docker_image_name }}:{{ docker_image_tag | default('latest') }}"
+  when: docker_registry_type is not defined or (docker_registry_type != 'gcp' and docker_registry_type != 'dockerhub')
+
+- name: Install gcloud SDK for GCP authentication
+  ansible.builtin.shell: |
+    if ! command -v gcloud &> /dev/null; then
+      echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+      curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
+      apt-get update && apt-get install -y google-cloud-sdk
+    fi
+  args:
+    creates: /usr/bin/gcloud
+  when: 
+    - ansible_os_family == "Debian"
+    - docker_registry_type is defined
+    - docker_registry_type == 'gcp'
+
+- name: Copy GCP service account key from local machine to VM
+  ansible.builtin.copy:
+    src: "{{ gcp_service_account_key }}"
+    dest: /tmp/gcp-sa-key.json
+    mode: '0600'
+  when:
+    - docker_registry_type is defined
+    - docker_registry_type == 'gcp'
+    - gcp_service_account_key is defined
+  no_log: true
+
+- name: Activate GCP service account in gcloud
+  ansible.builtin.shell: gcloud auth activate-service-account --key-file=/tmp/gcp-sa-key.json
+  when:
+    - docker_registry_type is defined
+    - docker_registry_type == 'gcp'
+    - gcp_service_account_key is defined
+  no_log: true
+  changed_when: false
+
+- name: Configure Docker credential helper for GCP
+  ansible.builtin.shell: gcloud auth configure-docker {{ gcp_registry_region }}-docker.pkg.dev --quiet
+  when:
+    - docker_registry_type is defined
+    - docker_registry_type == 'gcp'
+    - gcp_registry_region is defined
+  changed_when: false
+
+- name: Authenticate Docker with generic registry
+  community.docker.docker_login:
+    registry_url: "{{ docker_registry_url }}"
+    username: "{{ docker_registry_username }}"
+    password: "{{ docker_registry_password }}"
+  when:
+    - docker_registry_type is defined
+    - docker_registry_type == 'generic'
+    - docker_registry_url is defined
+    - docker_registry_username is defined
+    - docker_registry_password is defined
+  no_log: true
+
+- name: Authenticate with Docker Hub
+  community.docker.docker_login:
+    username: "{{ dockerhub_username }}"
+    password: "{{ dockerhub_password }}"
+  when:
+    - docker_registry_type is not defined or docker_registry_type == 'dockerhub'
+    - dockerhub_username is defined
+    - dockerhub_password is defined
+  no_log: true
+
+- name: Pull Docker image
+  community.docker.docker_image:
+    name: "{{ docker_image_full }}"
+    source: pull
+    state: present
+  register: docker_pull
+
+- name: Remove GCP service account key from VM
+  ansible.builtin.file:
+    path: /tmp/gcp-sa-key.json
+    state: absent
+  when:
+    - docker_registry_type is defined
+    - docker_registry_type == 'gcp'
+    - gcp_service_account_key is defined
+
+- name: Logout Docker from GCP Artifact Registry
+  ansible.builtin.shell: docker logout https://{{ gcp_registry_region }}-docker.pkg.dev
+  when:
+    - docker_registry_type is defined
+    - docker_registry_type == 'gcp'
+    - gcp_registry_region is defined
+  changed_when: false
+
+- name: Stop existing container if running
+  community.docker.docker_container:
+    name: "{{ app_container_name }}"
+    state: absent
+  ignore_errors: yes
+
+- name: Run Docker container (bridge networking)
+  community.docker.docker_container:
+    name: "{{ app_container_name }}"
+    image: "{{ docker_image_full }}"
+    state: started
+    restart_policy: always
+    ports:
+      - "{{ app_container_port }}:{{ app_container_internal_port | default(app_container_port) }}"
+    networks:
+      - name: bridge
+    env: "{{ app_container_env | default({}) }}"
+    volumes: "{{ app_container_volumes | default([]) }}"
+  register: container_start_bridge
+  when: docker_network_mode | default('bridge') != 'host'
+
+- name: Run Docker container (host networking)
+  community.docker.docker_container:
+    name: "{{ app_container_name }}"
+    image: "{{ docker_image_full }}"
+    state: started
+    restart_policy: always
+    network_mode: host
+    env: "{{ app_container_env | default({}) }}"
+    volumes: "{{ app_container_volumes | default([]) }}"
+  register: container_start_host
+  when: docker_network_mode | default('bridge') == 'host'
+
+- name: Inspect container to get current state
+  community.docker.docker_container_info:
+    name: "{{ app_container_name }}"
+  register: container_info
+
+- name: Wait for container to start
+  ansible.builtin.pause:
+    seconds: 5
+
+- name: Install nginx if not present
+  ansible.builtin.package:
+    name: 
+      - nginx
+      - certbot
+      - python3-certbot-nginx
+    state: present
+
+- name: Deploy nginx reverse proxy configuration
+  ansible.builtin.template:
+    src: nginx-app.conf.j2
+    dest: "/etc/nginx/sites-available/{{ app_nginx_site_name | default('docker-app') }}"
+    mode: '0644'
+  notify: restart nginx
+
+- name: Enable nginx reverse proxy site
+  ansible.builtin.file:
+    src: "/etc/nginx/sites-available/{{ app_nginx_site_name | default('docker-app') }}"
+    dest: "/etc/nginx/sites-enabled/{{ app_nginx_site_name | default('docker-app') }}"
+    state: link
+  notify: restart nginx
+
+- name: Test nginx configuration
+  ansible.builtin.command: nginx -t
+  register: nginx_test
+  changed_when: false
+
+- name: Ensure nginx is running
+  ansible.builtin.systemd:
+    name: nginx
+    state: started
+    enabled: yes
+
+- name: Configure UFW - Allow HTTP for Certbot (if FRP subdomain configured)
+  community.general.ufw:
+    rule: allow
+    port: '80'
+    proto: tcp
+  when: 
+    - frp_subdomain_host is defined 
+    - app_nginx_site_name is defined
+    - enable_ssl | default(false)
+
+- name: Configure UFW - Allow HTTPS (if FRP subdomain configured)
+  community.general.ufw:
+    rule: allow
+    port: '443'
+    proto: tcp
+  when: 
+    - frp_subdomain_host is defined 
+    - app_nginx_site_name is defined
+    - enable_ssl | default(false)
+
+- name: Check if DNS is properly configured for app subdomain
+  ansible.builtin.shell: |
+    dig +short {{ app_nginx_site_name }}.{{ frp_subdomain_host }} | grep -q "{{ ansible_host }}"
+  register: dns_check
+  changed_when: false
+  failed_when: false
+  when: 
+    - frp_subdomain_host is defined 
+    - app_nginx_site_name is defined
+    - enable_ssl | default(false)
+
+- name: Display DNS check result
+  ansible.builtin.debug:
+    msg:
+      - "DNS Check Result:"
+      - "{{ 'DNS is properly configured' if dns_check.rc == 0 else 'DNS is NOT configured or does not point to this server' }}"
+      - "Expected: {{ app_nginx_site_name }}.{{ frp_subdomain_host }} -> {{ ansible_host }}"
+      - "{{ 'SSL certificate will be obtained' if dns_check.rc == 0 else 'SSL certificate step will be skipped - configure DNS first' }}"
+  when: 
+    - frp_subdomain_host is defined 
+    - app_nginx_site_name is defined
+    - enable_ssl | default(false)
+  
+  # Add this task before the Certbot task in main.yml
+- name: Create ACME challenge directory
+  ansible.builtin.file:
+    path: /var/www/html/.well-known/acme-challenge
+    state: directory
+    mode: '0755'
+  when: enable_ssl | default(false)
+
+- name: Test ACME challenge accessibility
+  ansible.builtin.copy:
+    content: "test"
+    dest: /var/www/html/.well-known/acme-challenge/test
+  when: enable_ssl | default(false)
+
+- name: Reload nginx before Certbot
+  ansible.builtin.systemd:
+    name: nginx
+    state: reloaded
+  when: enable_ssl | default(false)
+
+- name: Obtain SSL certificate with Certbot
+  ansible.builtin.command: >
+    certbot --nginx -d {{ app_nginx_site_name }}.{{ frp_subdomain_host }}
+    --non-interactive --agree-tos --email {{ certbot_email | default('admin@' + frp_subdomain_host) }}
+    --redirect
+  register: certbot_result
+  changed_when: "'Successfully received certificate' in certbot_result.stdout"
+  when: 
+    - frp_subdomain_host is defined
+    - app_nginx_site_name is defined
+    - enable_ssl | default(false)
+    - dns_check.rc == 0
+
+- name: Fail if SSL is enabled but certificate was not issued
+  ansible.builtin.fail:
+    msg: >-
+      SSL is enabled but the certificate was not issued for
+      {{ app_nginx_site_name }}.{{ frp_subdomain_host }}.
+      {% if dns_check.rc != 0 %}
+      DNS check failed (domain does not resolve to this server).
+      {% else %}
+      Certbot exited with code {{ certbot_result.rc }}:
+      {{ certbot_result.stderr | default('') }}
+      {% endif %}
+  when:
+    - enable_ssl | default(false)
+    - frp_subdomain_host is defined
+    - app_nginx_site_name is defined
+    - (dns_check.rc != 0) or (certbot_result is defined and certbot_result.rc is defined and certbot_result.rc != 0)
+
+- name: Display Certbot result
+  ansible.builtin.debug:
+    msg: "{{ certbot_result.stdout_lines if certbot_result.stdout_lines is defined else ['Certbot skipped - DNS not configured or SSL not enabled'] }}"
+  when: 
+    - frp_subdomain_host is defined 
+    - app_nginx_site_name is defined
+    - enable_ssl | default(false)
+
+- name: Set nginx URL for stats (with FRP subdomain, HTTP)
+  ansible.builtin.set_fact:
+    nginx_url: "http://{{ app_nginx_site_name }}.{{ frp_subdomain_host }}:{{ app_nginx_port }}{{ app_nginx_path | default('/') }}"
+    nginx_subdomain: "{{ app_nginx_site_name }}.{{ frp_subdomain_host }}"
+  when: 
+    - frp_subdomain_host is defined 
+    - app_nginx_site_name is defined
+    - not (enable_ssl | default(false))
+
+- name: Set nginx URL for stats (without FRP subdomain)
+  ansible.builtin.set_fact:
+    nginx_url: "http://{{ ansible_host }}:{{ app_nginx_port }}{{ app_nginx_path | default('/') }}"
+    nginx_server_name: "{{ app_nginx_server_name | default('_') }}"
+  when: frp_subdomain_host is not defined or app_nginx_site_name is not defined
+
+
+- name: Set HTTPS URL for stats (with SSL enabled and successful)
+  ansible.builtin.set_fact:
+    nginx_url: "https://{{ app_nginx_site_name }}.{{ frp_subdomain_host }}{{ app_nginx_path | default('/') }}"
+    nginx_subdomain: "{{ app_nginx_site_name }}.{{ frp_subdomain_host }}"
+    ssl_enabled: true
+  when: 
+    - frp_subdomain_host is defined
+    - app_nginx_site_name is defined
+    - enable_ssl | default(false)
+    - certbot_result is defined
+    - certbot_result.rc is defined
+    - certbot_result.rc == 0
+
+- name: Return deployment data as structured JSON
+  ansible.builtin.set_stats:
+    data:
+      docker_deployment:
+        timestamp: "{{ ansible_date_time.iso8601 }}"
+        server: "{{ ansible_host }}"
+        container:
+          name: "{{ app_container_name }}"
+          image: "{{ docker_image_full }}"
+          port: "{{ app_container_port }}"
+          internal_port: "{{ app_container_internal_port | default(app_container_port) }}"
+          status: "{{ container_info.container.State.Status }}"
+          id: "{{ container_info.container.Id }}"
+          env: "{{ app_container_env | default({}) }}"
+          volumes: "{{ app_container_volumes | default([]) }}"
+        nginx:
+          site_name: "{{ app_nginx_site_name | default('docker-app') }}"
+          path: "{{ app_nginx_path | default('/') }}"
+          port: "{{ app_nginx_port }}"
+          url: "{{ nginx_url }}"
+          subdomain: "{{ nginx_subdomain | default('') }}"
+          server_name: "{{ nginx_server_name | default('') }}"
+          ssl_enabled: "{{ ssl_enabled | default(false) }}"
+        registry:
+          type: "{{ docker_registry_type | default('dockerhub') }}"
+          image_name: "{{ docker_image_name }}"
+          image_tag: "{{ docker_image_tag | default('latest') }}"
+    per_host: yes
+
+- name: Set display message URL
+  ansible.builtin.set_fact:
+    display_url_label: "{{ 'Nginx Subdomain' if (frp_subdomain_host is defined and app_nginx_site_name is defined) else 'Nginx Proxy' }}"
+
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "================================================"
+      - "Docker Application Deployment Complete"
+      - "================================================"
+      - "Container Name: {{ app_container_name }}"
+      - "Image: {{ docker_image_full }}"
+      - "Container Port: {{ app_container_port }}"
+      - "Nginx Site Name: {{ app_nginx_site_name | default('docker-app') }}"
+      - "Nginx Port: {{ app_nginx_port }}"
+      - "{{ display_url_label }}: {{ nginx_url }}"
+      - "Container Status: {{ container_info.container.State.Status }}"
+      - "================================================"

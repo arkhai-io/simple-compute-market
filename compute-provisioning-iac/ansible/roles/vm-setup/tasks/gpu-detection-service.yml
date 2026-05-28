@@ -1,0 +1,346 @@
+---
+# GPU Detection, Verifying and Logging
+
+- name: Create GPU detection script
+  copy:
+    dest: /usr/local/bin/gpu-detect
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      
+      LOCKFILE="/etc/libvirt/gpu-capabilities/gpu-lockfile.json"
+      CONFIG_FILE="/etc/libvirt/gpu-capabilities/gpu-config.json"
+      TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+      HOSTNAME=$(hostname)
+      
+      echo "[$(date)] GPU Detection Service starting..."
+      
+      mkdir -p /etc/libvirt/gpu-capabilities
+      echo "[$(date)] Created capabilities directory"
+      
+      # Detect GPU presence
+      echo "[$(date)] Starting GPU detection..."
+      NVIDIA_COUNT=$(lspci | grep -iE "VGA|3D controller" | grep -i "NVIDIA" | wc -l | xargs || echo "0")
+      AMD_COUNT=$(lspci | grep -iE "VGA|3D controller" | grep -i "AMD" | wc -l | xargs || echo "0")
+      echo "[$(date)] Found $NVIDIA_COUNT NVIDIA GPU(s), $AMD_COUNT AMD GPU(s)"
+      
+      NVIDIA_DETECTED=false
+      AMD_DETECTED=false
+      VFIO_DRIVER_IN_USE=false
+      
+      if [[ ${NVIDIA_COUNT} -gt 0 ]] 2>/dev/null; then
+        NVIDIA_DETECTED=true
+        echo "[$(date)] NVIDIA GPU detected"
+      fi
+      
+      if [[ ${AMD_COUNT} -gt 0 ]] 2>/dev/null; then
+        AMD_DETECTED=true
+        echo "[$(date)] AMD GPU detected"
+      fi
+      
+      # Check kernel driver in use for all GPUs
+      echo "[$(date)] Checking kernel drivers..."
+      if [ "$NVIDIA_DETECTED" = true ] || [ "$AMD_DETECTED" = true ]; then
+        GPU_ADDRESSES=$(lspci | grep -iE "VGA|3D controller" | grep -iE "NVIDIA|AMD" | awk '{print $1}' || true)
+        for addr in $GPU_ADDRESSES; do
+          if [ -z "$addr" ]; then
+            echo "[$(date)] WARNING: Empty GPU address found, skipping"
+            continue
+          fi
+          DRIVER=$(lspci -k -s "$addr" 2>/dev/null | grep "Kernel driver in use" | awk '{print $5}' || echo "")
+          echo "[$(date)] GPU $addr using driver: ${DRIVER:-none}"
+          if [ "$DRIVER" = "vfio-pci" ]; then
+            VFIO_DRIVER_IN_USE=true
+            echo "[$(date)] vfio-pci driver detected on $addr"
+          fi
+        done
+      fi
+      echo "[$(date)] Kernel driver check complete. VFIO in use: $VFIO_DRIVER_IN_USE"
+      
+      # Check NVIDIA MIG capability (only if nvidia driver is in use)
+      echo "[$(date)] Checking NVIDIA MIG capability..."
+      MIG_SUPPORTED=false
+      MIG_ENABLED=false
+      if [ "$NVIDIA_DETECTED" = true ] && [ "$VFIO_DRIVER_IN_USE" = false ]; then
+        if command -v nvidia-smi >/dev/null 2>&1; then
+          echo "[$(date)] nvidia-smi found, querying MIG status..."
+          MIG_MODES=$(nvidia-smi --query-gpu=mig.mode.current --format=csv,noheader 2>/dev/null | tr -d '[:space:]' || echo "N/A")
+          echo "[$(date)] MIG modes: $MIG_MODES"
+          if [[ "$MIG_MODES" != "N/A" && "$MIG_MODES" != "NotSupported" && -n "$MIG_MODES" ]]; then
+            MIG_SUPPORTED=true
+            if echo "$MIG_MODES" | grep -qi "Enabled"; then
+              MIG_ENABLED=true
+              echo "[$(date)] MIG is ENABLED"
+            else
+              echo "[$(date)] MIG is supported but DISABLED"
+            fi
+          else
+            echo "[$(date)] MIG not supported (response: $MIG_MODES)"
+          fi
+        else
+          echo "[$(date)] nvidia-smi not found, skipping MIG check"
+        fi
+      else
+        echo "[$(date)] Skipping MIG check (NVIDIA: $NVIDIA_DETECTED, VFIO: $VFIO_DRIVER_IN_USE)"
+      fi
+      
+      # Check SR-IOV capability (only if nvidia/amdgpu driver is in use)
+      echo "[$(date)] Checking SR-IOV capability..."
+      SRIOV_SUPPORTED=false
+      if [ "$VFIO_DRIVER_IN_USE" = false ] && { [ "$NVIDIA_DETECTED" = true ] || [ "$AMD_DETECTED" = true ]; }; then
+        GPU_ADDRESSES=$(lspci | grep -iE "VGA|3D controller" | grep -iE "NVIDIA|AMD" | awk '{print $1}' || true)
+        for addr in $GPU_ADDRESSES; do
+          if [ -z "$addr" ]; then
+            echo "[$(date)] WARNING: Empty GPU address in SR-IOV check, skipping"
+            continue
+          fi
+          echo "[$(date)] Checking SR-IOV for GPU $addr..."
+          TOTAL_VFS=$(lspci -s "$addr" -vvv 2>/dev/null | grep "Total VFs:" | awk '{print $NF}' || echo "")
+          if [[ -n "$TOTAL_VFS" ]] && [[ "$TOTAL_VFS" -gt 0 ]] 2>/dev/null; then
+            SRIOV_SUPPORTED=true
+            echo "[$(date)] SR-IOV supported on GPU $addr (Total VFs: $TOTAL_VFS)"
+            break
+          else
+            echo "[$(date)] SR-IOV not supported on GPU $addr"
+          fi
+        done
+      else
+        echo "[$(date)] Skipping SR-IOV check (VFIO: $VFIO_DRIVER_IN_USE)"
+      fi
+      
+      # Get GPU PCI addresses (only those bound to vfio-pci)
+      echo "[$(date)] Collecting GPU PCI addresses (vfio-pci only)..."
+      AVAILABLE_GPU_ADDRESSES=""
+      if [ "$NVIDIA_DETECTED" = true ] || [ "$AMD_DETECTED" = true ]; then
+        ALL_GPU_ADDRS=$(lspci -D | grep -iE "VGA|3D controller" | grep -iE "NVIDIA|AMD" | awk '{print $1}')
+        for addr in $ALL_GPU_ADDRS; do
+          if [ -z "$addr" ]; then
+            continue
+          fi
+          GPU_DRIVER=$(lspci -k -s "$addr" 2>/dev/null | grep "Kernel driver in use" | awk '{print $5}' || echo "")
+          if [ "$GPU_DRIVER" = "vfio-pci" ]; then
+            echo "[$(date)] Found vfio-pci GPU: $addr"
+            if [ -z "$AVAILABLE_GPU_ADDRESSES" ]; then
+              AVAILABLE_GPU_ADDRESSES="$addr"
+            else
+              AVAILABLE_GPU_ADDRESSES="$AVAILABLE_GPU_ADDRESSES"$'\n'"$addr"
+            fi
+          else
+            echo "[$(date)] Skipping GPU $addr (driver: ${GPU_DRIVER:-none}, not vfio-pci)"
+          fi
+        done
+      fi
+      GPU_PCI_ADDRESSES=$(echo "$AVAILABLE_GPU_ADDRESSES" | jq -R -s -c 'split("\n") | map(select(length > 0))' || echo '[]')
+      echo "[$(date)] Available GPU PCI addresses (vfio-pci bound): $GPU_PCI_ADDRESSES"
+      
+      # Determine supported modes
+      echo "[$(date)] Determining supported GPU modes..."
+      NO_GPU_SUPPORTED=true
+      PASSTHROUGH_SUPPORTED=false
+      PARTITIONED_SUPPORTED=false
+      
+      # Passthrough is supported if GPU exists (regardless of driver)
+      if [ "$NVIDIA_DETECTED" = true ] || [ "$AMD_DETECTED" = true ]; then
+        PASSTHROUGH_SUPPORTED=true
+        echo "[$(date)] GPU passthrough: SUPPORTED"
+      fi
+      
+      # Partitioning only supported if not using vfio-pci and MIG/SR-IOV available
+      if [ "$VFIO_DRIVER_IN_USE" = false ]; then
+        if [ "$MIG_SUPPORTED" = true ] || [ "$SRIOV_SUPPORTED" = true ]; then
+          PARTITIONED_SUPPORTED=true
+          echo "[$(date)] GPU partitioning: SUPPORTED"
+        else
+          echo "[$(date)] GPU partitioning: NOT SUPPORTED (no MIG/SR-IOV)"
+        fi
+      else
+        echo "[$(date)] GPU partitioning: NOT AVAILABLE (vfio-pci driver in use for passthrough)"
+      fi
+      
+      # Generate config JSON
+      echo "[$(date)] Writing config file: $CONFIG_FILE"
+      cat > "$CONFIG_FILE" << EOF
+      {
+        "nvidia_detected": $NVIDIA_DETECTED,
+        "amd_detected": $AMD_DETECTED,
+        "nvidia_mig_supported": $MIG_SUPPORTED,
+        "nvidia_mig_enabled": $MIG_ENABLED,
+        "sriov_supported": $SRIOV_SUPPORTED,
+        "vm_gpu_modes": {
+          "no_gpu": $NO_GPU_SUPPORTED,
+          "passthrough_only": $PASSTHROUGH_SUPPORTED,
+          "partitioned_gpu": $PARTITIONED_SUPPORTED
+        },
+        "detection_timestamp": "$TIMESTAMP",
+        "hostname": "$HOSTNAME"
+      }
+      EOF
+      echo "[$(date)] Config file written successfully"
+      
+      # Generate lockfile JSON
+      echo "[$(date)] Writing lockfile: $LOCKFILE"
+      cat > "$LOCKFILE" << EOF
+      {
+        "lockfile_version": "1.0",
+        "generated_timestamp": "$TIMESTAMP",
+        "hostname": "$HOSTNAME",
+        "gpu_modes": {
+          "no_gpu": {
+            "supported": $NO_GPU_SUPPORTED,
+            "virt_install_flags": [],
+            "description": "Standard VM without attached GPU"
+          },
+          "passthrough": {
+            "supported": $PASSTHROUGH_SUPPORTED,
+            "virt_install_flags": [
+              "--hostdev",
+              "<PCI_ADDRESS>"
+            ],
+            "available_devices": $GPU_PCI_ADDRESSES,
+            "description": "Full GPU passthrough to single VM",
+            "requirements": [
+              "GPU must not be in use by host",
+              "IOMMU must be enabled",
+              "vfio-pci driver must be loaded"
+            ]
+          },
+          "partitioned": {
+            "supported": $PARTITIONED_SUPPORTED,
+            "nvidia_mig": {
+              "supported": $MIG_SUPPORTED,
+              "enabled": $MIG_ENABLED,
+              "virt_install_flags": [
+                "--hostdev",
+                "<MIG_INSTANCE_PCI_ADDRESS>"
+              ],
+              "setup_required": [
+                "Enable MIG mode: nvidia-smi -i <GPU_ID> -mig 1",
+                "Create MIG instances: nvidia-smi mig -cgi <profile_id>",
+                "Get instance PCI address: nvidia-smi mig -lgi"
+              ]
+            },
+            "sriov": {
+              "supported": $SRIOV_SUPPORTED,
+              "virt_install_flags": [
+                "--hostdev",
+                "<VF_PCI_ADDRESS>"
+              ],
+              "setup_required": [
+                "Enable SR-IOV: echo <NUM_VFS> > /sys/bus/pci/devices/<PCI_ADDRESS>/sriov_numvfs",
+                "Bind VF to vfio-pci driver",
+                "List VFs: lspci | grep 'Virtual Function'"
+              ]
+            },
+            "description": "GPU partitioning allows multiple VMs to share GPU resources"
+          }
+        },
+        "detection_details": {
+          "nvidia_detected": $NVIDIA_DETECTED,
+          "amd_detected": $AMD_DETECTED,
+          "nvidia_mig_supported": $MIG_SUPPORTED,
+          "nvidia_mig_enabled": $MIG_ENABLED,
+          "sriov_supported": $SRIOV_SUPPORTED
+        },
+        "usage_instructions": {
+          "check_support": "jq '.gpu_modes.<mode>.supported' /etc/libvirt/gpu-capabilities/gpu-lockfile.json",
+          "get_flags": "jq -r '.gpu_modes.<mode>.virt_install_flags[]' /etc/libvirt/gpu-capabilities/gpu-lockfile.json",
+          "list_devices": "jq -r '.gpu_modes.passthrough.available_devices[]' /etc/libvirt/gpu-capabilities/gpu-lockfile.json"
+        }
+      }
+      EOF
+      echo "[$(date)] Lockfile written successfully"
+      
+      echo "[$(date)] GPU detection complete. Files updated:"
+      echo "  - $CONFIG_FILE"
+      echo "  - $LOCKFILE"
+      echo "[$(date)] GPU Detection Service finished successfully"
+  tags:
+    - gpu_detection
+    - build_completion
+    - enable_gpu_detection_on_boot
+
+- name: Create GPU detection systemd service
+  copy:
+    dest: /etc/systemd/system/gpu-detect.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=GPU Detection Service
+      After=network-online.target
+      Wants=network-online.target
+      DefaultDependencies=no
+      
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/gpu-detect
+      RemainAfterExit=yes
+      StandardOutput=journal
+      StandardError=journal
+      
+      [Install]
+      WantedBy=sysinit.target
+  tags:
+    - gpu_detection
+    - build_completion
+    - enable_gpu_detection_on_boot
+
+- name: Create libvirtd.service drop-in directory
+  file:
+    path: /etc/systemd/system/libvirtd.service.d
+    state: directory
+    mode: '0755'
+  tags:
+    - gpu_detection
+    - build_completion
+    - enable_gpu_detection_on_boot
+
+- name: Configure libvirtd to wait for GPU detection
+  copy:
+    dest: /etc/systemd/system/libvirtd.service.d/gpu-detect.conf
+    mode: '0644'
+    content: |
+      [Unit]
+      After=gpu-detect.service
+      Wants=gpu-detect.service
+  tags:
+    - gpu_detection
+    - build_completion
+    - enable_gpu_detection_on_boot
+
+- name: Enable and start GPU detection service
+  systemd:
+    name: gpu-detect
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  tags:
+    - gpu_detection
+    - build_completion
+    - enable_gpu_detection_on_boot
+
+- name: Display GPU detection summary
+  debug:
+    msg:
+      - "=== GPU Detection Summary ==="
+      - "NVIDIA GPU Detected: {{ 'YES' if gpu_capabilities.nvidia_detected else 'NO' }}"
+      - "AMD GPU Detected: {{ 'YES' if gpu_capabilities.amd_detected else 'NO' }}"
+      - "NVIDIA MIG Supported: {{ 'YES' if gpu_capabilities.nvidia_mig_supported else 'NO' }}"
+      - "NVIDIA MIG Enabled: {{ 'YES' if gpu_capabilities.nvidia_mig_enabled else 'NO' }}"
+      - "SR-IOV Supported: {{ 'YES' if gpu_capabilities.sriov_supported else 'NO' }}"
+      - ""
+      - "VM GPU Modes Available:"
+      - "  (1) No GPU VM: {{ 'SUPPORTED' if gpu_capabilities.vm_gpu_modes.no_gpu else 'NOT SUPPORTED' }}"
+      - "  (2) Passthrough-only GPU VM: {{ 'SUPPORTED' if gpu_capabilities.vm_gpu_modes.passthrough_only else 'NOT SUPPORTED' }}"
+      - "  (3) Partitioned GPU VM: {{ 'SUPPORTED' if gpu_capabilities.vm_gpu_modes.partitioned_gpu else 'NOT SUPPORTED' }}"
+      - ""
+      - "Configuration saved to:"
+      - "  - /etc/libvirt/gpu-capabilities/gpu-config.json (detailed info)"
+      - "  - /etc/libvirt/gpu-capabilities/gpu-lockfile.json (VM provisioning lockfile)"
+      - ""
+      - "Use lockfile in Ansible: include_vars /etc/libvirt/gpu-capabilities/gpu-lockfile.json"
+  when: gpu_capabilities is defined
+  tags:
+    - gpu_detection
+    - build_completion
+

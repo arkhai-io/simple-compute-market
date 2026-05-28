@@ -35,22 +35,48 @@ def sign_eip191(private_key: str, message: str) -> str:
     return signed.signature.hex()
 
 
-def build_auth_headers(private_key: str, operation: str, resource_id: str) -> dict[str, str]:
+def address_from_private_key(private_key: str) -> str:
+    """Derive the EIP-191 wallet address (lowercase) for a private key."""
+    from eth_account import Account
+
+    return Account.from_key(private_key).address.lower()
+
+
+def build_auth_headers(
+    private_key: str,
+    operation: str,
+    resource_id: str,
+    *,
+    identity_scheme: str = "eip191",
+    identity_identifier: str | None = None,
+) -> dict[str, str]:
     """Build the auth headers expected by the Registry service.
 
     Header layout::
 
-        X-Timestamp : unix timestamp (seconds, as a string)
-        X-Signature : EIP-191 signature of  "<operation>:<resource_id>:<timestamp>"
-        Content-Type: application/json
+        X-Timestamp       : unix timestamp (seconds, as a string)
+        X-Signature       : EIP-191 signature of  "<operation>:<resource_id>:<timestamp>"
+        X-Identity-Scheme : identity-scheme name (default "eip191")
+        X-Identity        : scheme identifier (default: address derived from private_key)
+        Content-Type      : application/json
+
+    The ``X-Identity-Scheme`` / ``X-Identity`` headers were added in the
+    pluggable-identity refactor (Phase 2). Servers that predate them
+    ignore them; servers that dispatch by scheme use them to route to
+    the right verifier. ``identity_identifier`` defaults to the address
+    derived from ``private_key`` so the common case requires no change
+    at the call site.
     """
     timestamp = str(int(time.time()))
     message = f"{operation}:{resource_id}:{timestamp}"
     signature = sign_eip191(private_key, message)
+    identifier = identity_identifier or address_from_private_key(private_key)
     return {
         "Content-Type": "application/json",
         "X-Timestamp": timestamp,
         "X-Signature": signature,
+        "X-Identity-Scheme": identity_scheme,
+        "X-Identity": identifier,
     }
 
 

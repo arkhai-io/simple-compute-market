@@ -7,7 +7,6 @@ on:
   workflow_dispatch:
 
 env:
-  GCS_BUCKET: ww-migration-arkhai-installer-files
   TARBALL_NAME: market-cli.tar.gz
 
 jobs:
@@ -15,7 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
 
     steps:
       - name: Checkout code
@@ -32,7 +30,7 @@ jobs:
             echo "CLI_VERSION=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
           fi
 
-      - name: Build tarball for cURL installer
+      - name: Build tarball
         run: |
           tar czf "/tmp/$TARBALL_NAME" \
             --transform 's,^\./,market-cli/,' \
@@ -61,58 +59,12 @@ jobs:
           mv "/tmp/$TARBALL_NAME" .
           ls -lh "$TARBALL_NAME"
 
-      - name: Generate checksums
+      - name: Generate checksum
         run: |
           sha256sum "$TARBALL_NAME" > "${TARBALL_NAME}.sha256"
 
-      - name: Generate aggregate checksum manifest
-        run: |
-          mkdir -p checksums
-          cp "${TARBALL_NAME}.sha256" "checksums/${CLI_VERSION}.sha256"
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCS_STG_WRITER_KEY }}
-
-      - name: Upload latest tarball to GCS
-        uses: google-github-actions/upload-cloud-storage@v2
-        with:
-          path: ${{ env.TARBALL_NAME }}
-          destination: ${{ env.GCS_BUCKET }}/releases/latest
-
-      - name: Upload latest checksum to GCS
-        uses: google-github-actions/upload-cloud-storage@v2
-        with:
-          path: ${{ env.TARBALL_NAME }}.sha256
-          destination: ${{ env.GCS_BUCKET }}/releases/latest
-
-      - name: Upload versioned tarball to GCS
-        uses: google-github-actions/upload-cloud-storage@v2
-        with:
-          path: ${{ env.TARBALL_NAME }}
-          destination: ${{ env.GCS_BUCKET }}/releases/${{ env.CLI_VERSION }}
-
-      - name: Upload versioned checksum to GCS
-        uses: google-github-actions/upload-cloud-storage@v2
-        with:
-          path: ${{ env.TARBALL_NAME }}.sha256
-          destination: ${{ env.GCS_BUCKET }}/releases/${{ env.CLI_VERSION }}
-
-      - name: Upload aggregate checksum manifest to GCS
-        uses: google-github-actions/upload-cloud-storage@v2
-        with:
-          path: checksums/${{ env.CLI_VERSION }}.sha256
-          destination: ${{ env.GCS_BUCKET }}/checksums
-
-      - name: Prepare installer script
+      - name: Prepare installer script (curl entry point)
         run: cp scripts/install-remote.sh install.sh
-
-      - name: Upload installer script to GCS
-        uses: google-github-actions/upload-cloud-storage@v2
-        with:
-          path: install.sh
-          destination: ${{ env.GCS_BUCKET }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -126,19 +78,28 @@ jobs:
             ## Install
 
             ```bash
-            curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash
+            curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh | bash
             ```
 
-      - name: Generate build summary
+            Pin a specific version:
+
+            ```bash
+            curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh | \
+              bash -s -- --version ${{ env.CLI_VERSION }}
+            ```
+
+      - name: Build summary
+        env:
+          REF_NAME: ${{ github.ref_name }}
         run: |
           TARBALL_SIZE=$(wc -c < "$TARBALL_NAME" | tr -d ' ')
           TARBALL_SIZE_KB=$(( TARBALL_SIZE / 1024 ))
-          echo "### Market CLI Release" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Tag:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Tarball size:** ${TARBALL_SIZE_KB} KB" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Install (cURL):**" >> $GITHUB_STEP_SUMMARY
-          echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "### Market CLI Release" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Tag:** \`${REF_NAME}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Tarball size:** ${TARBALL_SIZE_KB} KB" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Install (cURL):**" >> "$GITHUB_STEP_SUMMARY"
+          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
+          echo "curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh | bash" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

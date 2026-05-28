@@ -1,5 +1,9 @@
 .vscode/
 
+# Local rehearsal params (private keys, RPC URLs, etc.)
+.rehearsal-params.local.md
+.rehearsal-params.local.*
+
 ### Python ###
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -60,6 +64,7 @@ cover/
 
 # Django stuff:
 *.log
+*.log.[0-9]*
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -196,7 +201,6 @@ node_modules
 # Puffer artifacts — ignore any resources/ dir or symlink at any depth
 **/resources
 pr-message-puffer.md
-*/uv.lock
 test-env/state/state.json
 shared-env/*
 helm/Chart.lock

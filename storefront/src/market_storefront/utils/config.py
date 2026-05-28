@@ -18,11 +18,10 @@ Module-level constants are computed once at import:
 * ``AGENT_NAME`` — ``settings.agent_name``, falling back to ``AGENT_ID``.
 * ``BASE_URL_OVERRIDE`` — ``settings.base_url`` with ZeroTier placeholder
   resolution applied.
-
-Free function:
-
-* ``chain_id()`` — returns ``settings.chain.chain_id`` when non-zero, otherwise
-  issues a live ``eth_chainId`` RPC call against ``settings.chain.rpc_url``.
+* ``CHAINS`` — ``dict[str, ChainConfig]`` built from the ``[chains.<name>]``
+  TOML tables. Storefront call sites that need on-chain dispatch look up
+  ``CHAINS[chain_name]`` where ``chain_name`` comes from the incoming
+  proposal / escrow context.
 """
 
 from __future__ import annotations
@@ -33,12 +32,14 @@ from pathlib import Path
 from typing import Any
 
 from dynaconf import Dynaconf
-from service.config_loader import storefront_config_files  # type: ignore[import-not-found]
-from service.clients.erc8004.blockchain import (  # type: ignore[import-not-found]
-    rpc_url_for_http_provider,
+from service.config_loader import (  # type: ignore[import-not-found]
+    ChainConfig,
+    EscrowTemplate,
+    chains_from_config,
+    derive_wallet_address,
+    escrow_templates_from_config,
+    storefront_config_files,
 )
-from web3 import Web3
-from web3.providers import HTTPProvider
 
 from .zerotier import BaseUrlResolutionError, resolve_base_url_best_effort
 
@@ -51,7 +52,7 @@ _DEFAULTS_FILE = Path(__file__).resolve().parent.parent / "settings.toml"
 
 def _build_settings() -> Dynaconf:
     overlays = [str(p) for p in storefront_config_files() if Path(p).exists()]
-    return Dynaconf(
+    s = Dynaconf(
         settings_file=[str(_DEFAULTS_FILE)],
         includes=overlays,
         envvar_prefix="STOREFRONT",
@@ -61,8 +62,102 @@ def _build_settings() -> Dynaconf:
         merge_enabled=True,
     )
 
+    # Derive wallet.address from wallet.private_key when only the key is
+    # set. The address is a deterministic function of the key, so there's
+    # no reason to require both in config. When both are set and disagree
+    # the configured address wins (user might be intentionally signing
+    # for a delegated address), but we log a warning so the mismatch
+    # doesn't hide later confusion.
+    pk = str(s.get("wallet.private_key", "") or "")
+    addr_cfg = str(s.get("wallet.address", "") or "")
+    if pk:
+        derived_addr = derive_wallet_address(pk)
+        if derived_addr:
+            if not addr_cfg:
+                s.set("wallet.address", derived_addr)
+            elif addr_cfg.lower() != derived_addr.lower():
+                logger.warning(
+                    "[CONFIG] wallet.address (%s) does not match the address "
+                    "derived from wallet.private_key (%s); using the configured "
+                    "address.",
+                    addr_cfg, derived_addr,
+                )
+    return s
+
+
+def _coerce_chains_table(raw: Any) -> dict[str, dict[str, Any]]:
+    """Materialise dynaconf's ``settings.chains`` into a plain dict-of-dicts.
+
+    Dynaconf hands the nested table back as a ``DynaBox`` (or similar
+    mapping wrapper); :func:`chains_from_config` requires real dicts to
+    walk its ``isinstance(..., dict)`` checks. The dance below is just
+    to break that wrapper open.
+    """
+    if raw is None:
+        return {}
+    if not hasattr(raw, "items"):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for name, sub in raw.items():
+        if not isinstance(name, str):
+            continue
+        if hasattr(sub, "items"):
+            out[name] = {k: v for k, v in sub.items()}
+        elif isinstance(sub, dict):
+            out[name] = sub
+    return out
+
+
+def _build_chains(s: Dynaconf) -> dict[str, ChainConfig]:
+    """Build the typed CHAINS dict from the merged dynaconf settings."""
+    raw = s.get("chains")
+    return chains_from_config({"chains": _coerce_chains_table(raw)})
+
+
+def _coerce_templates_table(raw: Any) -> dict[str, dict[str, Any]]:
+    """Materialise dynaconf's ``settings.escrow_templates`` into a plain dict.
+
+    Mirror of :func:`_coerce_chains_table`. The values can include nested
+    ``literal`` / ``rates`` sub-tables, so recurse one level deep — that's
+    enough for the current schema (no four-level nesting).
+    """
+    if raw is None or not hasattr(raw, "items"):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for name, sub in raw.items():
+        if not isinstance(name, str) or not hasattr(sub, "items"):
+            continue
+        coerced: dict[str, Any] = {}
+        for k, v in sub.items():
+            if hasattr(v, "items") and not isinstance(v, dict):
+                coerced[k] = {sk: sv for sk, sv in v.items()}
+            else:
+                coerced[k] = v
+        out[name] = coerced
+    return out
+
+
+def _build_escrow_templates(
+    s: Dynaconf, chains: dict[str, ChainConfig]
+) -> dict[str, EscrowTemplate]:
+    """Build the typed ESCROW_TEMPLATES dict from merged dynaconf settings."""
+    raw = s.get("escrow_templates")
+    return escrow_templates_from_config(
+        {"escrow_templates": _coerce_templates_table(raw)},
+        chains=chains,
+    )
+
 
 settings: Dynaconf = _build_settings()
+CHAINS: dict[str, ChainConfig] = _build_chains(settings)
+ESCROW_TEMPLATES: dict[str, EscrowTemplate] = _build_escrow_templates(settings, CHAINS)
+
+if not CHAINS:
+    logger.warning(
+        "[CONFIG] no [chains.<name>] tables configured — the storefront will "
+        "fail when it needs to dispatch any on-chain call. Add at least one "
+        "chain entry to storefront.toml."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -116,46 +211,3 @@ def _resolve_base_url() -> str:
 AGENT_ID: str = get_agent_id()
 AGENT_NAME: str = str(settings.get("agent_name") or AGENT_ID)
 BASE_URL_OVERRIDE: str = _resolve_base_url()
-
-
-# ---------------------------------------------------------------------------
-# chain_id — live composite, not cached (RPC may need re-evaluation in tests).
-# ---------------------------------------------------------------------------
-
-
-def chain_id() -> int:
-    """Return the effective EVM chain ID.
-
-    Resolution order:
-      1. ``settings.chain.chain_id`` — pinned in ``[chain].chain_id``. This is
-         the fast path and the expected state for all deployments.
-      2. Live ``eth_chainId`` RPC call against ``settings.chain.rpc_url`` —
-         fallback when ``chain.chain_id`` is 0 (unset).
-
-    Raises ``RuntimeError`` when ``chain.chain_id`` is 0 and the RPC call fails,
-    so callers surface the misconfiguration loudly rather than silently using
-    a wrong value.
-    """
-    explicit = int(settings.get("chain.chain_id", 0) or 0)
-    if explicit:
-        return explicit
-    rpc_url = settings.get("chain.rpc_url")
-    if not rpc_url:
-        raise RuntimeError(
-            "chain.chain_id is not set in storefront.toml and chain.rpc_url is "
-            "absent — cannot determine chain ID. Add chain_id = <N> under "
-            "[chain] in storefront.toml."
-        )
-    try:
-        w3 = Web3(
-            HTTPProvider(
-                rpc_url_for_http_provider(rpc_url),
-                request_kwargs={"timeout": 5},
-            )
-        )
-        return w3.eth.chain_id
-    except Exception as exc:
-        raise RuntimeError(
-            f"chain.chain_id is not set in storefront.toml and the RPC fallback "
-            f"failed ({exc}). Add chain_id = <N> under [chain] in storefront.toml."
-        ) from exc

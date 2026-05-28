@@ -42,20 +42,7 @@ api_url           = ""
 base_url_override = ""
 private_key       = ""
 wallet_address    = ""
-agent_id          = ""        # ERC-8004 canonical ID; used as X-Agent-ID for provisioning auth
-admin_api_key     = ""        # X-Admin-Key for /admin/* and admin-only resource endpoints
-
-# ---------------------------------------------------------------------------
-# Agent / registry endpoints (e2e tests)
-# ---------------------------------------------------------------------------
-[default.agents]
-registry_url = ""
-buyer_url = ""
-seller_url = ""
-buyer_db = ""
-seller_db = ""
-buyer_env = ""
-seller_env = ""
+admin_api_key     = ""        # X-Admin-Key for /admin/* and the provisioning service
 
 # ---------------------------------------------------------------------------
 # Test behaviour
@@ -75,4 +62,3 @@ e2e_poll_interval_s = 3
 # ---------------------------------------------------------------------------
 [default.provisioning]
 api_url = ""
-enable_auth = false

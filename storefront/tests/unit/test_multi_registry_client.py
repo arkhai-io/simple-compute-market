@@ -2,8 +2,7 @@
 
 Each underlying RegistryClient is replaced with a fake — these tests
 verify the fan-in / fan-out semantics on top of those fakes (dedupe,
-error swallowing, race for first hit, FIRST_COMPLETED on
-wait_for_agent_indexed) without booting any HTTP transport.
+error swallowing, race for first hit) without booting any HTTP transport.
 """
 from __future__ import annotations
 
@@ -15,7 +14,6 @@ import pytest
 
 from registry_client import RegistryClientError
 from registry_client.models import (
-    AgentIndexedResponse,
     ListingListResponse,
     ListingSummary,
 )
@@ -25,7 +23,7 @@ from registry_client.models import (
 # every constructed wrapper gets fakes back from its __aenter__.
 def _summary(listing_id: str, **overrides: Any) -> ListingSummary:
     base = dict(
-        id=listing_id, status="open", maker_agent_id="http://seller:8001",
+        id=listing_id, status="open", publisher_id=1, storefront_url="http://seller:8001",
         offer={}, accepted_escrows=[], max_duration_seconds=3600, created_at=None,
     )
     base.update(overrides)
@@ -65,15 +63,7 @@ class _FakeRegistry:
             raise action
         return action
 
-    async def wait_for_agent_indexed(self, agent_id, *, timeout=60.0):
-        action = self.responses.get(self.url, {}).get("wait_for_agent_indexed")
-        if callable(action):
-            return await action()
-        if isinstance(action, BaseException):
-            raise action
-        return action
-
-    async def publish_listing(self, agent_id, listing, private_key):
+    async def publish_listing(self, listing, private_key):
         action = self.responses.get(self.url, {}).get("publish_listing")
         if isinstance(action, BaseException):
             raise action
@@ -126,8 +116,8 @@ class TestListListings:
         """Same listing_id appearing in two registries is one row in
         the merged output — first registry seen wins."""
         from market_storefront.utils.multi_registry_client import MultiRegistryClient
-        first = _summary("dup", maker_agent_id="http://r1-seller")
-        second = _summary("dup", maker_agent_id="http://r2-seller")
+        first = _summary("dup", storefront_url="http://r1-seller")
+        second = _summary("dup", storefront_url="http://r2-seller")
         _FakeRegistry.responses = {
             "http://r1": {"list_listings": ListingListResponse(listings=[first])},
             "http://r2": {"list_listings": ListingListResponse(listings=[second])},
@@ -135,7 +125,7 @@ class TestListListings:
         async with MultiRegistryClient(["http://r1", "http://r2"]) as rc:
             result = await rc.list_listings()
         assert len(result.listings) == 1
-        assert result.listings[0].maker_agent_id == "http://r1-seller"
+        assert result.listings[0].storefront_url == "http://r1-seller"
 
     @pytest.mark.asyncio
     async def test_swallows_per_registry_failure(self):
@@ -193,38 +183,6 @@ class TestGetListing:
             with pytest.raises(RegistryClientError) as exc_info:
                 await rc.get_listing("x")
         assert exc_info.value.status_code == 404
-
-
-class TestWaitForAgentIndexed:
-    @pytest.mark.asyncio
-    async def test_returns_first_indexed_true(self):
-        from market_storefront.utils.multi_registry_client import MultiRegistryClient
-
-        async def slow_indexed():
-            await asyncio.sleep(0.05)
-            return AgentIndexedResponse(indexed=True, agent_id="a", elapsed_ms=50)
-
-        async def fast_not_indexed():
-            return AgentIndexedResponse(indexed=False, agent_id="a", elapsed_ms=1)
-
-        _FakeRegistry.responses = {
-            "http://r1": {"wait_for_agent_indexed": fast_not_indexed},
-            "http://r2": {"wait_for_agent_indexed": slow_indexed},
-        }
-        async with MultiRegistryClient(["http://r1", "http://r2"]) as rc:
-            result = await rc.wait_for_agent_indexed("a", timeout=1.0)
-        assert result.indexed is True
-
-    @pytest.mark.asyncio
-    async def test_returns_first_seen_when_no_registry_confirms(self):
-        from market_storefront.utils.multi_registry_client import MultiRegistryClient
-        _FakeRegistry.responses = {
-            "http://r1": {"wait_for_agent_indexed": AgentIndexedResponse(indexed=False, agent_id="a", elapsed_ms=10)},
-            "http://r2": {"wait_for_agent_indexed": AgentIndexedResponse(indexed=False, agent_id="a", elapsed_ms=10)},
-        }
-        async with MultiRegistryClient(["http://r1", "http://r2"]) as rc:
-            result = await rc.wait_for_agent_indexed("a", timeout=1.0)
-        assert result.indexed is False
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +279,6 @@ class TestPublishListing:
         async with MultiRegistryClient(["http://r1", "http://r2"]) as rc:
             from registry_client.models import ListingRequest
             result = await rc.publish_listing(
-                "agent-1",
                 ListingRequest(listing_id="x", offer={}, accepted_escrows=[], max_duration_seconds=None),
                 "0xkey",
             )
@@ -338,7 +295,6 @@ class TestPublishListing:
             from registry_client.models import ListingRequest
             with pytest.raises(RuntimeError, match="failed for all 2"):
                 await rc.publish_listing(
-                    "agent-1",
                     ListingRequest(listing_id="x", offer={}, accepted_escrows=[], max_duration_seconds=None),
                     "0xkey",
                 )
@@ -373,7 +329,7 @@ class TestPublishListingPerRegistry:
                 ),
             }
             results = await rc.publish_listing_per_registry(
-                "agent-1", payloads, "0xkey",
+                payloads, "0xkey",
             )
         assert [r["registry_url"] for r in results] == ["http://r1", "http://r2"]
         assert all(r["success"] for r in results)
@@ -405,7 +361,7 @@ class TestPublishListingPerRegistry:
                 for url in ("http://r1", "http://r2")
             }
             results = await rc.publish_listing_per_registry(
-                "agent-1", payloads, "0xkey",
+                payloads, "0xkey",
             )
         assert results[0]["success"] is False
         assert "r1 down" in (results[0]["error"] or "")
@@ -430,7 +386,7 @@ class TestPublishListingPerRegistry:
                 ),
             }
             results = await rc.publish_listing_per_registry(
-                "agent-1", payloads, "0xkey",
+                payloads, "0xkey",
             )
         stranger = [r for r in results if r["registry_url"] == "http://stranger"][0]
         assert stranger["success"] is False
@@ -450,11 +406,11 @@ class TestUpdateListingPerRegistry:
             payloads = {
                 "http://r1": UpdateListingRequest(
                     updates={"status": "closed"},
-                    private_key="0xkey", agent_id="agent-1",
+                    private_key="0xkey",
                 ),
                 "http://r2": UpdateListingRequest(
                     updates={"status": "closed"},
-                    private_key="0xkey", agent_id="agent-1",
+                    private_key="0xkey",
                 ),
             }
             results = await rc.update_listing_per_registry("x", payloads)
@@ -506,7 +462,6 @@ class TestBackcompatWrappersStillReturnFirstOk:
         }
         async with MultiRegistryClient(["http://r1", "http://r2"]) as rc:
             result = await rc.publish_listing(
-                "agent-1",
                 ListingRequest(listing_id="x", offer={}, accepted_escrows=[], max_duration_seconds=None),
                 "0xkey",
             )

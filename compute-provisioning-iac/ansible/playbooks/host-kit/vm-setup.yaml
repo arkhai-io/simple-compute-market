@@ -1,0 +1,8 @@
+---
+- name: Host Kit / KVM Host Setup
+  hosts: kvm_hosts
+  become: yes
+  roles:
+    - ../../roles/vm-setup
+  vars:
+    vm_image_type: "{{ image_setup_type | default('golden') }}" # options: golden, scratch

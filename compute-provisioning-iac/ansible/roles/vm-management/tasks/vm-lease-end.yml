@@ -1,0 +1,186 @@
+---
+# VM Management - Lease End Tasks
+
+- name: Create lease-end log directory on target host
+  file:
+    path: "/var/log/vm-lease-end/{{ vm_name }}"
+    state: directory
+    mode: '0755'
+  when: vm_action == "lease_end"
+  delegate_to: "{{ target_host }}"
+
+- name: Check if 'at' package is installed
+  shell: |
+    if ! command -v at >/dev/null 2>&1; then
+      echo "ERROR: 'at' command not found. Please install the 'at' package first."
+      echo "On Ubuntu/Debian: sudo apt install at"
+      echo "On RHEL/CentOS: sudo yum install at" 
+      echo "On Fedora: sudo dnf install at"
+      exit 1
+    fi
+    echo "'at' command is available"
+  when: vm_action == "lease_end"
+  register: at_check_result
+  delegate_to: "{{ target_host }}"
+
+- name: Schedule VM shutdown using at command with UTC timezone
+  shell: |
+    # Check if at service is running
+    if ! systemctl is-active --quiet atd; then
+      systemctl start atd
+      if ! systemctl is-active --quiet atd; then
+        echo "ERROR: Failed to start atd service"
+        exit 1
+      fi
+    fi
+    
+    # Check if cleanup script exists
+    if [ ! -f "/usr/local/bin/cleanup_vm_{{ vm_name }}.sh" ]; then
+      echo "ERROR: Cleanup script not found at /usr/local/bin/cleanup_vm_{{ vm_name }}.sh"
+      echo "This script should have been created during VM creation."
+      exit 1
+    fi
+    
+    # Convert input datetime and validate
+    LEASE_TIME="{{ vm_lease_end }}"
+    echo "Scheduling VM {{ vm_name }} destroy and cleanup at $LEASE_TIME UTC"
+    
+    if ! TZ=UTC date -d "$LEASE_TIME" >/dev/null 2>&1; then
+      echo "ERROR: Invalid datetime format '$LEASE_TIME'. Use 'YYYY-MM-DD HH:MM' format."
+      exit 1
+    fi
+    
+    # Validate year is reasonable (within next 50 years)
+    LEASE_YEAR=$(TZ=UTC date -d "$LEASE_TIME" +%Y)
+    CURRENT_YEAR=$(TZ=UTC date +%Y)
+    MAX_YEAR=$((CURRENT_YEAR + 50))
+    
+    if [ $LEASE_YEAR -gt $MAX_YEAR ]; then
+      echo "ERROR: Year $LEASE_YEAR is too far in future. Check for typos (did you mean ${LEASE_YEAR:0:4}?)."
+      exit 1
+    fi
+    
+    # Check if time is in future
+    CURRENT_UTC_EPOCH=$(TZ=UTC date +%s)
+    LEASE_UTC_EPOCH=$(TZ=UTC date -d "$LEASE_TIME" +%s)
+    
+    if [ $LEASE_UTC_EPOCH -le $CURRENT_UTC_EPOCH ]; then
+      echo "ERROR: Time '$LEASE_TIME UTC' is in the past. Current UTC: $(TZ=UTC date)"
+      exit 1
+    fi
+    
+    # Convert to format 'at' accepts and schedule
+    AT_DATE=$(TZ=UTC date -d "$LEASE_TIME" "+%H:%M %m/%d/%Y")
+    
+    # Create single log file path with timestamp
+    LEASE_LOG_DIR="/var/log/vm-lease-end/{{ vm_name }}"
+    LEASE_LOG_FILE="$LEASE_LOG_DIR/lease_end_$(date +%Y%m%d_%H%M%S).log"
+    
+    # Create command that destroys VM, runs cleanup script, and logs everything to single file
+    CLEANUP_CMD="{ echo \"[\$(date -u +\\\"%Y-%m-%dT%H:%M:%SZ\\\")] === Lease-End Execution Started ===\"; echo \"[\$(date -u +\\\"%Y-%m-%dT%H:%M:%SZ\\\")] Destroying VM {{ vm_name }}...\"; virsh destroy {{ vm_name }} 2>&1 && echo \"[\$(date -u +\\\"%Y-%m-%dT%H:%M:%SZ\\\")] VM {{ vm_name }} destroyed successfully\" || echo \"[\$(date -u +\\\"%Y-%m-%dT%H:%M:%SZ\\\")] VM {{ vm_name }} destroy failed or already stopped\"; echo \"\"; /usr/local/bin/cleanup_vm_{{ vm_name }}.sh \"$LEASE_LOG_FILE\" 2>&1; echo \"\"; echo \"[\$(date -u +\\\"%Y-%m-%dT%H:%M:%SZ\\\")] === Lease-End Execution Completed ===\"; } >> \"$LEASE_LOG_FILE\" 2>&1 #LEASE:{{ vm_name }}"
+    
+    # Create metadata file
+    cat > "$LEASE_LOG_DIR/scheduled_info.txt" << METADATA_EOF
+    VM Name: {{ vm_name }}
+    Scheduled Time (UTC): $LEASE_TIME
+    Scheduled At: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    Scheduled By: Ansible (vm-lease-end)
+    Log File: $LEASE_LOG_FILE
+    Cleanup Script: /usr/local/bin/cleanup_vm_{{ vm_name }}.sh
+    Actions:
+      - Force destroy VM (virsh destroy)
+      - Execute complete cleanup script
+      - Remove all network rules and configurations
+      - Clean up SSH keys and files
+      - Remove VM storage and definition
+    METADATA_EOF
+    
+    AT_OUTPUT=$(TZ=UTC echo "$CLEANUP_CMD" | TZ=UTC at "$AT_DATE" 2>&1)
+    AT_EXIT_CODE=$?
+    
+    # Try alternative format if first fails
+    if [ $AT_EXIT_CODE -ne 0 ]; then
+      AT_DATE=$(TZ=UTC date -d "$LEASE_TIME" "+%m/%d/%Y %H:%M")
+      AT_OUTPUT=$(TZ=UTC echo "$CLEANUP_CMD" | TZ=UTC at "$AT_DATE" 2>&1)
+      AT_EXIT_CODE=$?
+    fi
+    
+    if [ $AT_EXIT_CODE -ne 0 ]; then
+      echo "ERROR: Failed to schedule job - $AT_OUTPUT"
+      exit 1
+    fi
+    
+    # Verify job was scheduled
+    sleep 1
+    JOB_NUM=$(atq | tail -1 | awk '{print $1}')
+    if [ -z "$JOB_NUM" ]; then
+      echo "ERROR: No job scheduled"
+      exit 1
+    fi
+    
+    echo "SUCCESS: Job $JOB_NUM scheduled - destroy and cleanup at $LEASE_TIME UTC"
+    echo "Active jobs: $(atq | wc -l)"
+    echo "Log directory: $LEASE_LOG_DIR"
+    echo "Execution log will be written to: $LEASE_LOG_FILE"
+    echo "Metadata saved to: $LEASE_LOG_DIR/scheduled_info.txt"
+  when: vm_action == "lease_end"
+  register: lease_end_result
+  delegate_to: "{{ target_host }}"
+
+- name: Get current timestamp for lease_end
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: lease_end_timestamp
+  when: 
+    - vm_action == "lease_end"
+    - lease_end_result is defined
+  delegate_to: localhost
+
+- name: Create JSON data structure for lease_end action
+  set_fact:
+    vm_lease_end_data:
+      action: "lease_end"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ lease_end_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "{{ 'success' if (lease_end_result is defined and lease_end_result.rc == 0) else 'failed' }}"
+      scheduled_shutdown_utc: "{{ vm_lease_end }} UTC"
+      timezone_info: "Input time treated as UTC, scheduled accordingly"
+      log_directory: "/var/log/vm-lease-end/{{ vm_name }}"
+      log_file_pattern: "lease_end_*.log"
+      cleanup_actions:
+        - "Force destroy VM (virsh destroy)"
+        - "Remove FRP proxy configuration"
+        - "Clean up iptables port forwarding rules"
+        - "Clean up firewall rules (UFW/firewalld)"
+        - "Detach and return GPU to pool (if attached)"
+        - "Remove static DHCP lease"
+        - "Clean up SSH keys and cloud-init files"
+        - "Undefine VM and remove all storage"
+        - "Remove cleanup script"
+      at_command: "virsh destroy {{ vm_name }} && /usr/local/bin/cleanup_vm_{{ vm_name }}.sh"
+      scheduled_jobs: "{{ lease_end_result.stdout_lines | select('match', '.*[0-9]+.*') | list if lease_end_result is defined else [] }}"
+      error: "{{ lease_end_result.stderr | default('') if lease_end_result.rc != 0 else '' }}"
+      note: "VM will be forcefully destroyed and completely removed at the scheduled time. All execution logs will be saved in log directory."
+  when: 
+    - vm_action == "lease_end"
+    - lease_end_result is defined
+
+- name: Display lease_end scheduling result
+  debug:
+    msg:
+      - "VM {{ vm_name }} scheduled for destroy and complete cleanup at {{ vm_lease_end }} UTC"
+      - "Host: {{ target_host }}"
+      - "Status: {{ 'Success' if lease_end_result.rc == 0 else 'Failed' }}"
+      - "Actions: VM will be forcefully destroyed and all resources cleaned up (network rules, SSH keys, storage, etc.)"
+      - ""
+      - "Logging Information:"
+      - "  - Log directory: /var/log/vm-lease-end/{{ vm_name }}/"
+      - "  - All execution details logged to single file: lease_end_*.log"
+      - "  - Scheduled job metadata: /var/log/vm-lease-end/{{ vm_name }}/scheduled_info.txt"
+      - ""
+      - "To check execution status after lease expires:"
+      - "  ssh {{ target_host }} 'cat /var/log/vm-lease-end/{{ vm_name }}/lease_end_*.log'"
+  when: 
+    - vm_action == "lease_end"
+    - lease_end_result is defined
+    - lease_end_result.rc == 0

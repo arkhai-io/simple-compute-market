@@ -30,7 +30,11 @@ def _escrow_proposal() -> EscrowProposal:
     )
 
 
-def _stub_build_escrow_terms(proposal, seller_wallet, agreed_price, duration_seconds):
+def _build_escrow_proposal():
+    return lambda _match: _escrow_proposal()
+
+
+def _stub_build_escrow_terms(proposal, seller_wallet, agreed_amount, duration_seconds):
     return [EscrowTerms(
         maker="buyer",
         escrow_contract="0x" + "ee" * 20,
@@ -38,7 +42,7 @@ def _stub_build_escrow_terms(proposal, seller_wallet, agreed_price, duration_sec
             "arbiter": "0x" + "cd" * 20,
             "demand": "0x" + "00" * 32,
             "token": proposal.fields["token"],
-            "amount": int(float(agreed_price) * max(duration_seconds, 1) / 3600),
+            "amount": int(float(agreed_amount) * max(duration_seconds, 1) / 3600),
         },
         expiration_unix=proposal.expiration_unix,
     )]
@@ -54,20 +58,23 @@ def _fail_build_escrow_terms(*_a, **_kw):
 
 
 class TestExtractSellerMinPrice:
-    def test_list_with_price_per_hour(self):
-        listing = {"accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 1500}]}
+    def test_list_with_rate(self):
+        listing = {"accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                          "rates": [{"field": "amount", "per": "hour", "value": "1500"}]}]}
         assert extract_seller_min_price(listing) == 1500
 
     def test_string_json_list(self):
-        listing = {"accepted_escrows": json.dumps([{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 9000}])}
+        listing = {"accepted_escrows": json.dumps([{"chain_name": "anvil", "escrow_address": "0xE",
+                                                     "rates": [{"field": "amount", "per": "hour", "value": "9000"}]}])}
         assert extract_seller_min_price(listing) == 9000
 
-    def test_missing_price_returns_none(self):
+    def test_missing_rate_returns_none(self):
         listing = {"accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE"}]}
         assert extract_seller_min_price(listing) is None
 
-    def test_unparseable_price_returns_none(self):
-        listing = {"accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": "not-a-number"}]}
+    def test_unparseable_rate_returns_none(self):
+        listing = {"accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                          "rates": [{"field": "amount", "per": "hour", "value": "not-a-number"}]}]}
         assert extract_seller_min_price(listing) is None
 
     def test_empty_accepted_escrows_returns_none(self):
@@ -142,7 +149,7 @@ class TestRunBuyDerivePrices:
             seen_prices.append((kwargs["initial_price"], kwargs["max_price"]))
             from market_buyer.buyer_client import NegotiationOutcome
             return NegotiationOutcome(
-                status="exited", agreed_price=None, rounds=1, reason="exited",
+                status="exited", agreed_amount=None, rounds=1, reason="exited",
                 negotiation_id="neg-1", duration_seconds=3600,
             )
 
@@ -164,9 +171,11 @@ class TestRunBuyDerivePrices:
         )
         matches = [
             {"listing_id": "L1", "seller": "http://s1",
-             "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 100}]},
+             "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                    "rates": [{"field": "amount", "per": "hour", "value": "100"}]}]},
             {"listing_id": "L2", "seller": "http://s2",
-             "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 200}]},
+             "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                    "rates": [{"field": "amount", "per": "hour", "value": "200"}]}]},
         ]
 
         def derive(match):
@@ -175,7 +184,7 @@ class TestRunBuyDerivePrices:
 
         result = run_buy(
             config=config, constraints=constraints, provision=provision,
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_fail_build_escrow_terms,
             create_escrow=lambda escrows: pytest.fail("escrow shouldn't run on exited"),
             matches=matches, max_matches_to_try=2,
@@ -208,7 +217,7 @@ class TestRunBuyDerivePrices:
         matches = [{"listing_id": "L1", "seller": "http://s1"}]
         result = run_buy(
             config=config, constraints=constraints, provision=provision,
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_fail_build_escrow_terms,
             create_escrow=lambda escrows: pytest.fail("never"),
             matches=matches, max_matches_to_try=1,
@@ -233,7 +242,7 @@ def _agree_negotiate_factory(price: int = 100):
         provision_terms = kwargs.get("provision_terms")
         escrow_proposal = kwargs.get("escrow_proposal")
         return NegotiationOutcome(
-            status="agreed", agreed_price=price, rounds=2, reason=None,
+            status="agreed", agreed_amount=price, rounds=2, reason=None,
             negotiation_id="neg-id",
             duration_seconds=(
                 provision_terms.duration_seconds if provision_terms is not None else None
@@ -278,7 +287,7 @@ class TestConfirmSettlementGate:
             config=self._config(),
             constraints=self._constraints(),
             provision=self._provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_fail_build_escrow_terms,
             create_escrow=lambda escrows: pytest.fail("escrow MUST NOT run when declined"),
             matches=matches, max_matches_to_try=1,
@@ -288,7 +297,7 @@ class TestConfirmSettlementGate:
 
         assert result.status == "exited"
         assert result.reason == "user_declined"
-        assert result.agreed_price == 100
+        assert result.agreed_amount == 100
         # Settlement-decline event was emitted; escrow_create_start was NOT.
         stages = [s for s, _ in events]
         assert "settlement_declined" in stages
@@ -318,7 +327,7 @@ class TestConfirmSettlementGate:
             config=self._config(),
             constraints=self._constraints(),
             provision=self._provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_stub_build_escrow_terms,
             create_escrow=fake_create,
             matches=matches, max_matches_to_try=1,
@@ -351,7 +360,7 @@ class TestConfirmSettlementGate:
             config=self._config(),
             constraints=self._constraints(),
             provision=self._provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_stub_build_escrow_terms,
             create_escrow=fake_create,
             matches=matches, max_matches_to_try=1,
@@ -371,7 +380,7 @@ class TestConfirmSettlementGate:
             config=self._config(),
             constraints=self._constraints(),
             provision=self._provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_fail_build_escrow_terms,
             create_escrow=lambda escrows: pytest.fail("never"),
             matches=matches, max_matches_to_try=1,

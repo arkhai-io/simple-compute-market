@@ -138,25 +138,24 @@ else auto-generates from the agent fullname.
 {{- end }}
 
 {{/*
-Render the per-agent non-sensitive config.toml. The output is a single
-string the ConfigMap template embeds under `config.toml`.
+Render the per-agent non-sensitive storefront.toml. The output is a single
+string the ConfigMap template embeds under `storefront.toml`.
 
 Argument: dict with `root` (chart root) and `agent`.
 
 Pairs with `storefront.agentSecretsToml` — together they form the
 complete config the runtime loader (`service.config_loader`) merges
 at startup. Sensitive values (wallet.address, wallet.private_key,
-seller.admin_api_key, seller.resources_csv_inline,
-seller.integrations.gemini_api_key) live in the Secret-rendered
-overlay and are not duplicated here.
+admin_api_key, resources_csv_inline, integrations.gemini_api_key)
+live in the Secret-rendered overlay and are not duplicated here.
 
-Topology-derived values (base_url, registry.url, chain.rpc_url,
-seller.provisioning.service_url) are composed from the chart's view of
+Topology-derived values (base_url, registry.urls, chain.rpc_url,
+provisioning.service_url) are composed from the chart's view of
 the cluster — never authored as hardcoded strings in values.yaml.
 
 Anything that isn't here (image, replicas, probes, Service objects,
 resources, autoRegister) is k8s-only and never ends up in the agent's
-config.toml.
+storefront.toml.
 */}}
 {{- define "storefront.agentConfigToml" -}}
 {{- $root := .root -}}
@@ -178,25 +177,24 @@ log_file_path       = {{ $seller.logFilePath | quote }}
 {{- if $seller.resourcesCsvPath }}
 resources_csv_path  = {{ $seller.resourcesCsvPath | quote }}
 {{- end }}
-{{- if $agent.agentId }}
-onchain_agent_id    = {{ $agent.agentId | quote }}
-{{- end }}
 auto_register       = {{ $agent.autoRegister | default true }}
 
 [wallet]
 ssh_public_key = {{ $seller.sshPublicKey | default "" | quote }}
 
-[chain]
-name    = {{ $chain.name | default "ethereum_sepolia" | quote }}
+[chains.{{ $chain.name | default "ethereum_sepolia" }}]
 rpc_url = {{ default (include "rpc.wsUrl" $root) $chain.rpcUrl | quote }}
 chain_id = {{ $root.Values.global.rpc.chainId | int }}
+identity_registry_address = {{ $root.Values.global.registry.identity_address | quote }}
 {{- if $chain.alkahestAddressConfigPath }}
 alkahest_address_config_path = {{ $chain.alkahestAddressConfigPath | quote }}
+{{- end }}
+{{- if $agent.agentId }}
+onchain_agent_id = {{ $agent.agentId | int }}
 {{- end }}
 
 [registry]
 urls = [{{ default (include "registry.url" $root) $cfg.registryUrl | quote }}]
-identity_registry_address = {{ $root.Values.global.registry.identity_address | quote }}
 {{- if $agent.rootPath }}
 
 [gateway]
@@ -216,12 +214,16 @@ poll_interval = {{ $prov.pollInterval | int }}
 {{- end }}
 
 [negotiation]
-policy_mode = {{ $neg.policyMode | default "" | quote }}
+{{- if $neg.policies }}
+policies = [{{ range $i, $mw := $neg.policies }}{{ if $i }}, {{ end }}{{ $mw | quote }}{{ end }}]
+{{- else if $neg.policyMode }}
+policy_mode = {{ $neg.policyMode | quote }}
+{{- end }}
 {{- end }}
 
 {{/*
-Render the per-agent sensitive config.secrets.toml. The output is a
-single string the Secret template embeds under `config.secrets.toml`.
+Render the per-agent sensitive storefront.secrets.toml. The output is a
+single string the Secret template embeds under `storefront.secrets.toml`.
 
 Argument: dict with `root` (chart root) and `agent`.
 

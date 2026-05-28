@@ -18,7 +18,7 @@ VM operations scoped to a host live in ``VmController``
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi_utils.cbv import cbv
 
 import container as _container_module
@@ -248,7 +248,6 @@ class HostController:
         self,
         host: str,
         body: VmActionRequest = Depends(),
-        request: Request = None,
     ) -> JobSubmitResponse:
         """Submit a job to report total, allocated, and available resources on ``host``.
 
@@ -263,10 +262,9 @@ class HostController:
         """
         if self._host_service.get_host(host) is None:
             raise HTTPException(status_code=404, detail=f"Host '{host}' not found")
-        agent_id: str | None = getattr(request.state, "agent_id", None) if request else None
         params = build_simple_params("check", host, body)
         return await self._job_service.submit(
-            params, agent_id, _container_module.resolved_job_queue
+            params, _container_module.resolved_job_queue
         )
 
     # ------------------------------------------------------------------

@@ -23,24 +23,35 @@ def db():
 
 
 @pytest.fixture(autouse=True)
-def _stub_settings():
-    """Pre-populate the storefront settings used by AdminSettleService."""
-    from tests._settings_overrides import settings_overrides
+def _stub_chains(monkeypatch):
+    """Inject a synthetic [chains.anvil] entry so verify_escrow_dry_run's
+    CHAINS lookup resolves and the chain-aware code path can run.
+    """
+    from service.config_loader import ChainConfig
+    from market_storefront.utils import config as agent_config
 
-    with settings_overrides(
-        **{
-            "chain.rpc_url": "http://anvil:8545",
-            "chain.name": "anvil",
-            "chain.alkahest_address_config_path": "/fake/alkahest.json",
-        }
-    ):
-        yield
+    monkeypatch.setattr(
+        agent_config,
+        "CHAINS",
+        {
+            "anvil": ChainConfig(
+                name="anvil",
+                rpc_url="http://anvil:8545",
+                chain_id=31337,
+                alkahest_address_config_path="/fake/alkahest.json",
+            ),
+        },
+        raising=False,
+    )
 
 
 @pytest.fixture
 def svc(db):
     from market_storefront.services.admin_settle_service import AdminSettleService
-    return AdminSettleService(sqlite_client=db)
+    return AdminSettleService(
+        sqlite_client=db,
+        alkahest_clients={"anvil": MagicMock()},
+    )
 
 
 _LISTING_ID = "listing-abc"
@@ -69,6 +80,7 @@ class TestVerifyEscrowDryRun:
                 seller_wallet=_SELLER_WALLET,
                 agreed_price=5000,
                 agreed_duration_seconds=3600,
+                chain_name='anvil',
             )
 
     async def test_returns_valid_true_when_verification_passes(self, svc, db):
@@ -84,6 +96,7 @@ class TestVerifyEscrowDryRun:
                 seller_wallet=_SELLER_WALLET,
                 agreed_price=5000,
                 agreed_duration_seconds=3600,
+                chain_name='anvil',
             )
         mock_verify.assert_awaited_once()
         assert result["valid"] is True
@@ -104,6 +117,7 @@ class TestVerifyEscrowDryRun:
                 seller_wallet=_SELLER_WALLET,
                 agreed_price=5000,
                 agreed_duration_seconds=3600,
+                chain_name='anvil',
             )
         assert result["valid"] is False
         assert result["escrow_uid"] == _ESCROW_UID
@@ -122,6 +136,7 @@ class TestVerifyEscrowDryRun:
                 seller_wallet=_SELLER_WALLET,
                 agreed_price=7000,
                 agreed_duration_seconds=7200,
+                chain_name='anvil',
             )
         call_kwargs = mock_verify.call_args.kwargs
         assert call_kwargs["escrow_uid"] == _ESCROW_UID

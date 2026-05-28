@@ -1,0 +1,6 @@
+ansible.log
+inventory/hosts*
+# Allow the committed template through the hosts* glob above.
+!inventory/hosts.example
+playbooks/frp-server-credentials*
+credentials/*

@@ -43,8 +43,12 @@ async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
         accepted_escrows=[{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"token": _TOKEN},
-            "price_per_hour": demand_amount,
+            "literal_fields": {"token": _TOKEN},
+            "rates": (
+                []
+                if demand_amount is None
+                else [{"field": "amount", "per": "hour", "value": str(demand_amount)}]
+            ),
         }],
         fulfillment_resource=None,
         max_duration_seconds=7200,
@@ -66,7 +70,7 @@ async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
         attributes={
             "gpu_model": "H200",
             "region": "California, US",
-            "vm_host": "ww1",
+            "vm_host": "kvm1",
         },
     )
 
@@ -75,7 +79,6 @@ async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
 async def client(db):
     import market_policy.negotiation_thread as _nt_module
     from market_policy.identity import Identity
-    from market_storefront.services.policy_service import PolicyService
 
     _nt_module._thread_store = None
     _nt_module.get_thread_store(
@@ -91,11 +94,6 @@ async def client(db):
     config.chain_rpc_url = ""
 
     _container.resolved_sqlite_client = db
-    _container.resolved_policy_service = PolicyService(
-        sqlite_client=db,
-        alkahest_client=None,
-        agent_id="test-agent",
-    )
 
     app = FastAPI()
     app.include_router(negotiate_router)
@@ -110,7 +108,6 @@ async def client(db):
             yield c, db
 
     _container.resolved_sqlite_client = None
-    _container.resolved_policy_service = None
 
 
 class TestNegotiateNew:
@@ -123,7 +120,7 @@ class TestNegotiateNew:
             await c.negotiate_new(
                 listing_id="",  # empty string still passes model; real 422 from missing field
                 buyer_address=_BUYER,
-                initial_price=8000,
+                initial_amount=8000,
                 duration_seconds=3600,
             )
         # missing listing_id can't be tested via client (required param);
@@ -135,7 +132,7 @@ class TestNegotiateNew:
             await c.negotiate_new(
                 listing_id="ghost-listing",
                 buyer_address=_BUYER,
-                initial_price=8000,
+                initial_amount=8000,
                 duration_seconds=3600,
             )
         assert "404" in str(exc_info.value)
@@ -146,7 +143,7 @@ class TestNegotiateNew:
         result = await c.negotiate_new(
             listing_id="neg-listing-1",
             buyer_address=_BUYER,
-            initial_price=5000,
+            initial_amount=5000,
             duration_seconds=3600,
             token=_TOKEN,
         )
@@ -160,20 +157,8 @@ class TestNegotiateNew:
             await c.negotiate_new(
                 listing_id="some-listing",
                 buyer_address=_BUYER,
-                initial_price=8000,
+                initial_amount=8000,
                 duration_seconds=0,
-            )
-        assert any(code in str(exc_info.value) for code in ("422", "400"))
-
-    async def test_negative_price_returns_422(self, client):
-        """initial_price < 0 is rejected by Pydantic (ge=0)."""
-        c, _ = client
-        with pytest.raises((StorefrontClientError, Exception)) as exc_info:
-            await c.negotiate_new(
-                listing_id="some-listing",
-                buyer_address=_BUYER,
-                initial_price=-1,
-                duration_seconds=3600,
             )
         assert any(code in str(exc_info.value) for code in ("422", "400"))
 
@@ -190,7 +175,7 @@ class TestNegotiateNew:
             await c.negotiate_new(
                 listing_id="neg-listing-closed",
                 buyer_address=_BUYER,
-                initial_price=5000,
+                initial_amount=5000,
                 duration_seconds=3600,
             )
         msg = str(exc_info.value)
@@ -214,8 +199,8 @@ class TestNegotiateNew:
             accepted_escrows=[{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"token": _TOKEN},
-                "price_per_hour": 5000,
+                "literal_fields": {"token": _TOKEN},
+                "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
             }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
@@ -225,7 +210,7 @@ class TestNegotiateNew:
             await c.negotiate_new(
                 listing_id="neg-listing-empty",
                 buyer_address=_BUYER,
-                initial_price=5000,
+                initial_amount=5000,
                 duration_seconds=3600,
             )
         msg = str(exc_info.value)
@@ -249,8 +234,8 @@ class TestNegotiateNew:
             accepted_escrows=[{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"token": _TOKEN},
-                "price_per_hour": None,  # hidden reserve
+                "literal_fields": {"token": _TOKEN},
+                "rates": [],  # hidden reserve
             }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
@@ -265,14 +250,14 @@ class TestNegotiateNew:
             unit="vm",
             value=1,
             state="available",
-            attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "ww1"},
+            attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "kvm1"},
         )
         # default_min_price is None in the test config — falls through.
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.negotiate_new(
                 listing_id="neg-listing-priceless",
                 buyer_address=_BUYER,
-                initial_price=5000,
+                initial_amount=5000,
                 duration_seconds=3600,
                 token=_TOKEN,
             )
@@ -301,8 +286,8 @@ class TestNegotiateNew:
             accepted_escrows=[{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"token": _TOKEN},
-                "price_per_hour": 5000,
+                "literal_fields": {"token": _TOKEN},
+                "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
             }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
@@ -314,7 +299,7 @@ class TestNegotiateNew:
             await c.negotiate_new(
                 listing_id="neg-listing-rtx",
                 buyer_address=_BUYER,
-                initial_price=5000,
+                initial_amount=5000,
                 duration_seconds=3600,
             )
         assert "409" in str(exc_info.value)
@@ -351,7 +336,7 @@ class TestNegotiateContinue:
         result = await c.negotiate_new(
             listing_id="neg-listing-continue",
             buyer_address=_BUYER,
-            initial_price=5000,
+            initial_amount=5000,
             duration_seconds=3600,
             token=_TOKEN,
         )

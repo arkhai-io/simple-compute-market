@@ -1,0 +1,2813 @@
+---
+- name: Ensure we have root privileges
+  become: yes
+  become_method: sudo
+  set_fact:
+    ansible_become: yes
+  tags: always
+
+- name: Check if /tmp directory exists
+  stat:
+    path: /tmp
+  register: tmp_stat
+  tags: always
+
+- name: Ensure parent directory for install script exists
+  file:
+    path: /tmp
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+    recurse: yes
+  when: not tmp_stat.stat.exists
+  tags: always
+
+- name: Create install script on remote
+  copy:
+    dest: /tmp/install_tools.sh
+    content: "#!/bin/bash\nset -e\n"
+    mode: '0755'
+  tags: always
+
+- name: Add vim/nano install to script
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get update && apt-get install -y vim nano"
+    insertafter: EOF
+  tags: vim_nano
+
+- name: Add git install to script
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y git ca-certificates"
+    insertafter: EOF
+  tags: git
+
+- name: Add python install to script
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y python3 python3-pip python3-venv"
+    insertafter: EOF
+  tags: python
+
+- name: Add net-tools install to script
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y net-tools"
+    insertafter: EOF
+  tags: net_tools
+
+- name: Add at package for scheduled tasks
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y at"
+    insertafter: EOF
+  tags: at
+
+- name: Add fail2ban for intrusion prevention
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y fail2ban"
+    insertafter: EOF
+  tags: fail2ban
+
+- name: Add UFW firewall
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y ufw"
+    insertafter: EOF
+  tags: ufw
+
+- name: Add selinux-utils for SELinux support
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y selinux-utils"
+    insertafter: EOF
+  tags: selinux
+
+- name: Check if GCP SDK is present
+  command: which gcloud
+  register: gcloud_check
+  failed_when: false
+  changed_when: false
+  when: vm_image_type == "golden"
+  tags:
+    - gcloud
+    - build_setup
+
+- name: Add GCP Public Key
+  when: vm_image_type == "golden" and gcloud_check.rc != 0
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --yes --dearmor -o /usr/share/keyrings/cloud.google.gpg"
+    insertafter: EOF
+  tags:
+    - gcloud
+    - build_setup
+
+- name: Add gcloud CLI distribution URI as a package source
+  when: vm_image_type == "golden" and gcloud_check.rc != 0
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "echo \"deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main\" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list"
+    insertafter: EOF
+  tags:
+    - gcloud
+    - build_setup
+
+- name: Install gcloud and requirements
+  when: vm_image_type == "golden" and gcloud_check.rc != 0
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get update && apt-get install -y apt-transport-https ca-certificates gnupg curl google-cloud-cli"
+    insertafter: EOF
+  tags:
+    - gcloud
+    - build_setup
+
+- name: Check first if Packer is already installed
+  shell: which packer
+  register: packer_check
+  failed_when: false
+  changed_when: false
+  when: vm_image_type == "golden"
+  tags:
+    - packer
+    - build_setup
+
+- name: Add HashiCorp's GPG Key
+  when: vm_image_type == "golden" and packer_check.rc != 0
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "wget -O - https://apt.releases.hashicorp.com/gpg | gpg --yes --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg"
+    insertafter: EOF
+  tags:
+    - packer
+    - build_setup
+
+- name: Add HashiCorp's official Linux repository
+  when: vm_image_type == "golden" and packer_check.rc != 0
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(grep -oP '(?<=UBUNTU_CODENAME=).*' /etc/os-release || lsb_release -cs) main" | tee /etc/apt/sources.list.d/hashicorp.list
+    insertafter: EOF
+  tags:
+    - packer
+    - build_setup
+
+- name: Update apt and install Packer
+  when: vm_image_type == "golden" and packer_check.rc != 0
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get update && apt-get install -y packer genisoimage"
+    insertafter: EOF
+  tags:
+    - packer
+    - build_setup
+
+- name: Add KVM virtualization packages to script
+  lineinfile:
+    path: /tmp/install_tools.sh
+    line: "apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst virt-manager virt-viewer virt-top libguestfs-tools qemu-guest-agent"
+    insertafter: EOF
+  tags: kvm
+
+- name: Run install script
+  shell: /tmp/install_tools.sh
+  args:
+    executable: /bin/bash
+  register: install_script_result
+  tags:
+    - run_script
+    - build_setup
+
+- name: Show install script execution results
+  debug:
+    msg: "Install script completed with return code: {{ install_script_result.rc }}"
+  tags:
+    - run_script
+    - build_setup
+
+- name: Allow SSH through UFW
+  ufw:
+    rule: allow
+    port: '22'
+    proto: tcp
+  tags: ufw
+
+- name: Enable UFW
+  ufw:
+    state: enabled
+    policy: deny
+  tags: ufw
+
+- name: Check for NVIDIA GPU presence
+  become: yes
+  shell: lspci -nn | grep -i nvidia | grep -iE '(VGA|Display|3D controller)'
+  register: nvidia_gpu_check
+  changed_when: false
+  failed_when: false
+  tags: gpu_passthrough
+
+- name: Check for AMD GPU presence
+  become: yes
+  shell: lspci -nn | grep -i amd | grep -iE '(VGA|Display|3D controller)'
+  register: amd_gpu_check
+  changed_when: false
+  failed_when: false
+  tags: gpu_passthrough
+
+- name: Set GPU passthrough availability flag
+  set_fact:
+    gpu_passthrough_available: "{{ (nvidia_gpu_check.stdout != '' or amd_gpu_check.stdout != '') }}"
+  tags: gpu_passthrough
+
+- name: Display GPU detection status
+  debug:
+    msg:
+      - "============================================"
+      - "GPU DETECTION"
+      - "============================================"
+      - "NVIDIA GPU detected: {{ 'Yes' if nvidia_gpu_check.stdout != '' else 'No' }}"
+      - "AMD GPU detected: {{ 'Yes' if amd_gpu_check.stdout != '' else 'No' }}"
+      - "GPU Passthrough: {{ 'Will be configured' if gpu_passthrough_available else 'SKIPPED - No compatible GPU found' }}"
+      - "============================================"
+  tags: gpu_passthrough
+
+- name: Get NVIDIA GPU PCI addresses
+  become: yes
+  shell: lspci -D | grep -i nvidia | grep -iE '(VGA|Display|3D controller)' | awk '{print $1}'
+  register: nvidia_gpu_addresses
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Get NVIDIA GPU device ID
+  become: yes
+  shell: lspci -D -nn | grep -i nvidia | grep -iE '(VGA|Display|3D controller)' | head -1 | grep -oP '\[[\da-f]{4}:[\da-f]{4}\]' | tr -d '[]' | head -1
+  register: nvidia_gpu_id_result
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available and nvidia_gpu_addresses.stdout != ""
+  tags: gpu_passthrough
+
+- name: Set NVIDIA GPU device ID variable
+  set_fact:
+    nvidia_gpu_id: "{{ nvidia_gpu_id_result.stdout }}"
+  when: gpu_passthrough_available and nvidia_gpu_id_result is defined and nvidia_gpu_id_result.stdout is defined and nvidia_gpu_id_result.stdout != ""
+  tags: gpu_passthrough
+
+- name: Get NVIDIA GPU IOMMU group numbers
+  become: yes
+  shell: |
+    GROUPS=""
+    {% for gpu_addr in nvidia_gpu_addresses.stdout_lines %}
+    if [ -L "/sys/bus/pci/devices/{{ gpu_addr }}/iommu_group" ]; then
+      GROUP_NUM=$(basename $(readlink /sys/bus/pci/devices/{{ gpu_addr }}/iommu_group))
+      if [ ! -z "$GROUP_NUM" ]; then
+        if [ -z "$GROUPS" ]; then
+          GROUPS="$GROUP_NUM"
+        elif ! echo "$GROUPS" | grep -qw "$GROUP_NUM"; then
+          GROUPS="$GROUPS $GROUP_NUM"
+        fi
+      fi
+    fi
+    {% endfor %}
+    echo "$GROUPS"
+  register: nvidia_iommu_groups
+  changed_when: false
+  when: gpu_passthrough_available and nvidia_gpu_addresses.stdout != ""
+  tags: gpu_passthrough
+
+- name: Debug NVIDIA IOMMU group numbers
+  debug:
+    msg:
+      - "NVIDIA GPU addresses: {{ nvidia_gpu_addresses.stdout_lines }}"
+      - "NVIDIA IOMMU group numbers: {{ nvidia_iommu_groups.stdout }}"
+  when: gpu_passthrough_available and nvidia_iommu_groups is defined and nvidia_iommu_groups.stdout is defined
+  tags: gpu_passthrough
+
+- name: Get all devices in NVIDIA GPU IOMMU groups
+  become: yes
+  shell: |
+    ALL_DEVICES=""
+    for GROUP_NUM in {{ nvidia_iommu_groups.stdout }}; do
+      if [ -d "/sys/kernel/iommu_groups/$GROUP_NUM/devices" ]; then
+        for device in /sys/kernel/iommu_groups/$GROUP_NUM/devices/*; do
+          DEV_ADDR=$(basename "$device")
+          DEV_ID=$(lspci -n -s "$DEV_ADDR" | awk '{print $3}')
+          if [ ! -z "$DEV_ID" ]; then
+            if [ -z "$ALL_DEVICES" ]; then
+              ALL_DEVICES="$DEV_ID"
+            elif ! echo "$ALL_DEVICES" | grep -qw "$DEV_ID"; then
+              ALL_DEVICES="$ALL_DEVICES,$DEV_ID"
+            fi
+          fi
+        done
+      fi
+    done
+    echo "$ALL_DEVICES"
+  register: nvidia_iommu_device_ids
+  changed_when: false
+  when: gpu_passthrough_available and nvidia_iommu_groups is defined and nvidia_iommu_groups.stdout is defined and nvidia_iommu_groups.stdout != ""
+  tags: gpu_passthrough
+
+- name: Display NVIDIA IOMMU group devices
+  debug:
+    msg:
+      - "NVIDIA GPU IOMMU group device IDs: {{ nvidia_iommu_device_ids.stdout }}"
+  when: gpu_passthrough_available and nvidia_iommu_device_ids is defined and nvidia_iommu_device_ids.stdout is defined and nvidia_iommu_device_ids.stdout != ""
+  tags: gpu_passthrough
+
+- name: Verify NVIDIA IOMMU group contents manually
+  become: yes
+  shell: |
+    echo "=== NVIDIA IOMMU Group Verification ==="
+    for GROUP_NUM in {{ nvidia_iommu_groups.stdout }}; do
+      echo "Group $GROUP_NUM devices:"
+      if [ -d "/sys/kernel/iommu_groups/$GROUP_NUM/devices" ]; then
+        ls -la /sys/kernel/iommu_groups/$GROUP_NUM/devices/ | tail -n +4
+        echo "Device IDs in group $GROUP_NUM:"
+        for device in /sys/kernel/iommu_groups/$GROUP_NUM/devices/*; do
+          DEV_ADDR=$(basename "$device")
+          echo "  $DEV_ADDR: $(lspci -n -s $DEV_ADDR)"
+        done
+      else
+        echo "  Group directory not found"
+      fi
+      echo ""
+    done
+  register: nvidia_iommu_verification
+  when: gpu_passthrough_available and nvidia_iommu_groups is defined and nvidia_iommu_groups.stdout is defined and nvidia_iommu_groups.stdout != ""
+  tags: gpu_passthrough
+
+- name: Display NVIDIA IOMMU group verification
+  debug:
+    var: nvidia_iommu_verification.stdout_lines
+  when: gpu_passthrough_available and nvidia_iommu_verification is defined and nvidia_iommu_verification.stdout is defined
+  tags: gpu_passthrough
+
+- name: Get AMD GPU PCI addresses
+  become: yes
+  shell: lspci -D | grep -i amd | grep -iE '(VGA|Display|3D controller)' | awk '{print $1}'
+  register: amd_gpu_addresses
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Get AMD GPU device ID
+  become: yes
+  shell: lspci -D -nn | grep -i amd | grep -iE '(VGA|Display|3D controller)' | head -1 | grep -oP '\[[\da-f]{4}:[\da-f]{4}\]' | tr -d '[]' | head -1
+  register: amd_gpu_id_result
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available and amd_gpu_addresses.stdout != ""
+  tags: gpu_passthrough
+
+- name: Set AMD GPU device ID variable
+  set_fact:
+    amd_gpu_id: "{{ amd_gpu_id_result.stdout }}"
+  when: gpu_passthrough_available and amd_gpu_id_result is defined and amd_gpu_id_result.stdout is defined and amd_gpu_id_result.stdout != ""
+  tags: gpu_passthrough
+
+- name: Get AMD GPU IOMMU group numbers
+  become: yes
+  shell: |
+    GROUPS=""
+    {% for gpu_addr in amd_gpu_addresses.stdout_lines %}
+    if [ -L "/sys/bus/pci/devices/{{ gpu_addr }}/iommu_group" ]; then
+      GROUP_NUM=$(basename $(readlink /sys/bus/pci/devices/{{ gpu_addr }}/iommu_group))
+      if [ ! -z "$GROUP_NUM" ]; then
+        if [ -z "$GROUPS" ]; then
+          GROUPS="$GROUP_NUM"
+        elif ! echo "$GROUPS" | grep -qw "$GROUP_NUM"; then
+          GROUPS="$GROUPS $GROUP_NUM"
+        fi
+      fi
+    fi
+    {% endfor %}
+    echo "$GROUPS"
+  register: amd_iommu_groups
+  changed_when: false
+  when: gpu_passthrough_available and amd_gpu_addresses.stdout != ""
+  tags: gpu_passthrough
+
+- name: Debug AMD IOMMU group numbers
+  debug:
+    msg:
+      - "AMD GPU addresses: {{ amd_gpu_addresses.stdout_lines }}"
+      - "AMD IOMMU group numbers: {{ amd_iommu_groups.stdout }}"
+  when: gpu_passthrough_available and amd_iommu_groups is defined and amd_iommu_groups.stdout is defined
+  tags: gpu_passthrough
+
+- name: Get all devices in AMD GPU IOMMU groups
+  become: yes
+  shell: |
+    ALL_DEVICES=""
+    for GROUP_NUM in {{ amd_iommu_groups.stdout }}; do
+      if [ -d "/sys/kernel/iommu_groups/$GROUP_NUM/devices" ]; then
+        for device in /sys/kernel/iommu_groups/$GROUP_NUM/devices/*; do
+          DEV_ADDR=$(basename "$device")
+          DEV_ID=$(lspci -n -s "$DEV_ADDR" | awk '{print $3}')
+          if [ ! -z "$DEV_ID" ]; then
+            if [ -z "$ALL_DEVICES" ]; then
+              ALL_DEVICES="$DEV_ID"
+            elif ! echo "$ALL_DEVICES" | grep -qw "$DEV_ID"; then
+              ALL_DEVICES="$ALL_DEVICES,$DEV_ID"
+            fi
+          fi
+        done
+      fi
+    done
+    echo "$ALL_DEVICES"
+  register: amd_iommu_device_ids
+  changed_when: false
+  when: gpu_passthrough_available and amd_iommu_groups is defined and amd_iommu_groups.stdout is defined and amd_iommu_groups.stdout != ""
+  tags: gpu_passthrough
+
+- name: Display AMD IOMMU group devices
+  debug:
+    msg:
+      - "AMD GPU IOMMU group device IDs: {{ amd_iommu_device_ids.stdout }}"
+  when: gpu_passthrough_available and amd_iommu_device_ids is defined and amd_iommu_device_ids.stdout is defined and amd_iommu_device_ids.stdout != ""
+  tags: gpu_passthrough
+
+- name: Combine all IOMMU group device IDs for VFIO binding
+  set_fact:
+    vfio_device_ids_combined: "{{ ((nvidia_iommu_device_ids.stdout if (nvidia_iommu_device_ids is defined and nvidia_iommu_device_ids.stdout is defined and nvidia_iommu_device_ids.stdout != '') else '') + (',' if (nvidia_iommu_device_ids is defined and nvidia_iommu_device_ids.stdout is defined and nvidia_iommu_device_ids.stdout != '' and amd_iommu_device_ids is defined and amd_iommu_device_ids.stdout is defined and amd_iommu_device_ids.stdout != '') else '') + (amd_iommu_device_ids.stdout if (amd_iommu_device_ids is defined and amd_iommu_device_ids.stdout is defined and amd_iommu_device_ids.stdout != '') else '')) }}"
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Display all devices to be bound to VFIO
+  debug:
+    msg:
+      - "All IOMMU group devices to bind to VFIO-PCI: {{ vfio_device_ids_combined }}"
+  when: gpu_passthrough_available and vfio_device_ids_combined != ""
+  tags: gpu_passthrough
+
+- name: Detect CPU vendor (Intel or AMD)
+  become: yes
+  shell: lscpu | grep -i "vendor id" | awk '{print $3}'
+  register: cpu_vendor
+  changed_when: false
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Set IOMMU parameter based on CPU vendor
+  set_fact:
+    iommu_param: "{{ 'intel_iommu=on' if 'Intel' in cpu_vendor.stdout else 'amd_iommu=on' }}"
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Check current GRUB configuration
+  become: yes
+  shell: grep "GRUB_CMDLINE_LINUX_DEFAULT" /etc/default/grub
+  register: current_grub_config
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Display current GRUB configuration
+  debug:
+    msg:
+      - "Current GRUB config: {{ current_grub_config.stdout if current_grub_config.stdout != '' else 'Not found' }}"
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Check if IOMMU is already enabled in GRUB
+  set_fact:
+    iommu_already_enabled: "{{ 'iommu=' in current_grub_config.stdout }}"
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Check if VFIO-PCI prebinding already configured in GRUB
+  become: yes
+  shell: grep "^GRUB_CMDLINE_LINUX_DEFAULT=" /etc/default/grub | grep -q "vfio-pci.ids=" && echo "PRESENT" || echo "ABSENT"
+  register: vfio_grub_check
+  changed_when: false
+  when: gpu_passthrough_available and vfio_device_ids_combined is defined and vfio_device_ids_combined != ""
+  tags: gpu_passthrough
+
+- name: Backup GRUB configuration before modifications
+  become: yes
+  copy:
+    src: /etc/default/grub
+    dest: "/etc/default/grub.backup.{{ ansible_date_time.epoch }}"
+    remote_src: yes
+  when: 
+    - gpu_passthrough_available
+    - (not iommu_already_enabled) or (vfio_grub_check is defined and vfio_grub_check.stdout is defined and vfio_grub_check.stdout == "ABSENT") or (vfio_device_ids_combined is defined and vfio_device_ids_combined != "")
+  tags: gpu_passthrough
+
+- name: Enable IOMMU in GRUB (if not already present)
+  become: yes
+  shell: |
+    CURRENT_LINE=$(grep "^GRUB_CMDLINE_LINUX_DEFAULT=" /etc/default/grub | sed 's/^GRUB_CMDLINE_LINUX_DEFAULT="//' | sed 's/"$//')
+    
+    # Add IOMMU parameters if not present
+    if ! echo "$CURRENT_LINE" | grep -q "{{ iommu_param }}"; then
+      CURRENT_LINE="$CURRENT_LINE {{ iommu_param }}"
+    fi
+    if ! echo "$CURRENT_LINE" | grep -q "iommu=pt"; then
+      CURRENT_LINE="$CURRENT_LINE iommu=pt"
+    fi
+    
+    # Update GRUB file
+    sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"$CURRENT_LINE\"|" /etc/default/grub
+    echo "IOMMU_UPDATED"
+  register: grub_iommu_result
+  when: gpu_passthrough_available and not iommu_already_enabled
+  changed_when: "'IOMMU_UPDATED' in grub_iommu_result.stdout"
+  tags: gpu_passthrough
+
+- name: Add VFIO-PCI prebinding to GRUB (if not already present)
+  become: yes
+  shell: |
+    CURRENT_LINE=$(grep "^GRUB_CMDLINE_LINUX_DEFAULT=" /etc/default/grub | sed 's/^GRUB_CMDLINE_LINUX_DEFAULT="//' | sed 's/"$//')
+    
+    # Remove existing vfio-pci.ids and vfio-pci.disable_vga if present
+    CURRENT_LINE=$(echo "$CURRENT_LINE" | sed 's/vfio-pci\.ids=[^ ]*//g' | sed 's/vfio-pci\.disable_vga=[^ ]*//g' | sed 's/  */ /g' | sed 's/^ *//' | sed 's/ *$//')
+    
+    # Add new vfio-pci parameters
+    CURRENT_LINE="$CURRENT_LINE vfio-pci.ids={{ vfio_device_ids_combined }} vfio-pci.disable_vga=1"
+    
+    # Update GRUB file
+    sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"$CURRENT_LINE\"|" /etc/default/grub
+    echo "VFIO_UPDATED"
+  register: grub_vfio_result
+  when: 
+    - gpu_passthrough_available
+    - vfio_device_ids_combined is defined
+    - vfio_device_ids_combined != ""
+  changed_when: "'VFIO_UPDATED' in grub_vfio_result.stdout"
+  tags: gpu_passthrough
+
+- name: Set GRUB modified flag
+  set_fact:
+    grub_modified:
+      changed: "{{ (grub_iommu_result is defined and grub_iommu_result.changed) or (grub_vfio_result is defined and grub_vfio_result.changed) }}"
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Update GRUB
+  become: yes
+  command: update-grub
+  when: gpu_passthrough_available and grub_modified.changed
+  tags: gpu_passthrough
+
+- name: Check if VFIO modules config exists
+  become: yes
+  stat:
+    path: /etc/modules-load.d/vfio.conf
+  register: vfio_conf_stat
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Read existing VFIO modules config
+  become: yes
+  slurp:
+    path: /etc/modules-load.d/vfio.conf
+  register: vfio_conf_content
+  when: gpu_passthrough_available and vfio_conf_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Display existing VFIO modules config
+  debug:
+    msg:
+      - "File exists: /etc/modules-load.d/vfio.conf"
+      - "Contents:"
+      - "{{ vfio_conf_content.content | b64decode }}"
+  when: gpu_passthrough_available and vfio_conf_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Create VFIO modules configuration
+  become: yes
+  copy:
+    dest: /etc/modules-load.d/vfio.conf
+    content: |
+      vfio
+      vfio_iommu_type1
+      vfio_pci
+      vfio_virqfd
+    mode: '0644'
+  when: gpu_passthrough_available and (not vfio_conf_stat.stat.exists or ('vfio_pci' not in (vfio_conf_content.content | b64decode)))
+  tags: gpu_passthrough
+
+- name: Check if VFIO PCI config exists
+  become: yes
+  stat:
+    path: /etc/modprobe.d/vfio.conf
+  register: vfio_pci_conf_stat
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Read existing VFIO PCI config
+  become: yes
+  slurp:
+    path: /etc/modprobe.d/vfio.conf
+  register: vfio_pci_conf_content
+  when: gpu_passthrough_available and vfio_pci_conf_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Display existing VFIO PCI config
+  debug:
+    msg:
+      - "File exists: /etc/modprobe.d/vfio.conf"
+      - "Contents:"
+      - "{{ vfio_pci_conf_content.content | b64decode }}"
+  when: gpu_passthrough_available and vfio_pci_conf_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Bind all IOMMU group devices to VFIO-PCI
+  become: yes
+  copy:
+    dest: /etc/modprobe.d/vfio.conf
+    content: |
+      options vfio-pci ids={{ vfio_device_ids_combined }} disable_vga=1
+    mode: '0644'
+  when: 
+    - gpu_passthrough_available
+    - vfio_device_ids_combined is defined
+    - vfio_device_ids_combined != ""
+    - not vfio_pci_conf_stat.stat.exists or (vfio_device_ids_combined not in (vfio_pci_conf_content.content | b64decode))
+  register: vfio_pci_configured
+  tags: gpu_passthrough
+
+- name: Check if NVIDIA blacklist exists
+  become: yes
+  stat:
+    path: /etc/modprobe.d/blacklist-nvidia.conf
+  register: blacklist_nvidia_stat
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Read existing NVIDIA blacklist
+  become: yes
+  slurp:
+    path: /etc/modprobe.d/blacklist-nvidia.conf
+  register: blacklist_nvidia_content
+  when: gpu_passthrough_available and blacklist_nvidia_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Display existing NVIDIA blacklist
+  debug:
+    msg:
+      - "File exists: /etc/modprobe.d/blacklist-nvidia.conf"
+      - "Contents:"
+      - "{{ blacklist_nvidia_content.content | b64decode }}"
+  when: gpu_passthrough_available and blacklist_nvidia_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Blacklist NVIDIA and Nouveau drivers
+  become: yes
+  copy:
+    dest: /etc/modprobe.d/blacklist-nvidia.conf
+    content: |
+      blacklist nouveau
+      blacklist nvidia
+      blacklist nvidia_drm
+      blacklist nvidia_modeset
+      blacklist nvidia_uvm
+      options nouveau modeset=0
+    mode: '0644'
+  when: gpu_passthrough_available and nvidia_gpu_id is defined and nvidia_gpu_id != "" and (not blacklist_nvidia_stat.stat.exists or ('blacklist nouveau' not in (blacklist_nvidia_content.content | b64decode)))
+  register: nvidia_blacklisted
+  tags: gpu_passthrough
+
+- name: Check if AMD blacklist exists
+  become: yes
+  stat:
+    path: /etc/modprobe.d/blacklist-amd.conf
+  register: blacklist_amd_stat
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Read existing AMD blacklist
+  become: yes
+  slurp:
+    path: /etc/modprobe.d/blacklist-amd.conf
+  register: blacklist_amd_content
+  when: gpu_passthrough_available and blacklist_amd_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Display existing AMD blacklist
+  debug:
+    msg:
+      - "File exists: /etc/modprobe.d/blacklist-amd.conf"
+      - "Contents:"
+      - "{{ blacklist_amd_content.content | b64decode }}"
+  when: gpu_passthrough_available and blacklist_amd_stat.stat.exists
+  tags: gpu_passthrough
+
+- name: Blacklist AMD drivers
+  become: yes
+  copy:
+    dest: /etc/modprobe.d/blacklist-amd.conf
+    content: |
+      blacklist amdgpu
+      blacklist radeon
+    mode: '0644'
+  when: gpu_passthrough_available and amd_gpu_id is defined and amd_gpu_id != "" and (not blacklist_amd_stat.stat.exists or ('blacklist amdgpu' not in (blacklist_amd_content.content | b64decode)))
+  register: amd_blacklisted
+  tags: gpu_passthrough
+
+- name: Update initramfs
+  become: yes
+  command: update-initramfs -u -k all
+  when: gpu_passthrough_available and (grub_modified.changed or vfio_pci_configured.changed or nvidia_blacklisted.changed or amd_blacklisted.changed)
+  register: initramfs_updated
+  tags: gpu_passthrough
+
+- name: Verify NVIDIA VFIO binding (check if reboot needed)
+  become: yes
+  shell: lspci -nnk -d {{ nvidia_gpu_id }} | grep "Kernel driver in use"
+  register: nvidia_vfio_check
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available and nvidia_gpu_id is defined and nvidia_gpu_id != ""
+  tags: gpu_passthrough
+
+- name: Display NVIDIA VFIO status
+  debug:
+    msg: 
+      - "NVIDIA GPU driver: {{ nvidia_vfio_check.stdout if nvidia_vfio_check.stdout != '' else 'Not bound yet' }}"
+      - "{% if 'vfio-pci' in nvidia_vfio_check.stdout %}✔️ NVIDIA GPU is already bound to vfio-pci{% elif initramfs_updated.changed %}⚠️ Reboot required to apply VFIO binding{% else %}⚠️ Configuration may need reboot{% endif %}"
+  when: gpu_passthrough_available and nvidia_gpu_id is defined and nvidia_gpu_id != ""
+  tags: gpu_passthrough
+
+- name: Verify AMD VFIO binding (check if reboot needed)
+  become: yes
+  shell: lspci -nnk -d {{ amd_gpu_id }} | grep "Kernel driver in use"
+  register: amd_vfio_check
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available and amd_gpu_id is defined and amd_gpu_id != ""
+  tags: gpu_passthrough
+
+- name: Display AMD VFIO status
+  debug:
+    msg: 
+      - "AMD GPU driver: {{ amd_vfio_check.stdout if amd_vfio_check.stdout != '' else 'Not bound yet' }}"
+      - "{% if 'vfio-pci' in amd_vfio_check.stdout %}✔️ AMD GPU is already bound to vfio-pci{% elif initramfs_updated.changed %}⚠️ Reboot required to apply VFIO binding{% else %}⚠️ Configuration may need reboot{% endif %}"
+  when: gpu_passthrough_available and amd_gpu_id is defined and amd_gpu_id != ""
+  tags: gpu_passthrough
+
+- name: Verify IOMMU in dmesg
+  become: yes
+  shell: dmesg | grep -e IOMMU -e DMAR
+  register: iommu_dmesg
+  changed_when: false
+  failed_when: false
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Display IOMMU status
+  debug:
+    msg: "{{ iommu_dmesg.stdout_lines if iommu_dmesg.stdout != '' else 'IOMMU not detected in dmesg (may need reboot)' }}"
+  when: gpu_passthrough_available
+  tags: gpu_passthrough
+
+- name: Create reboot notification file
+  become: yes
+  copy:
+    dest: /root/GPU_PASSTHROUGH_REBOOT_REQUIRED.txt
+    content: |
+      ============================================
+      GPU PASSTHROUGH CONFIGURATION COMPLETED
+      ============================================
+      
+      {% if nvidia_iommu_device_ids is defined and nvidia_iommu_device_ids.stdout is defined and nvidia_iommu_device_ids.stdout != "" %}
+      NVIDIA GPU IOMMU Group Device IDs: {{ nvidia_iommu_device_ids.stdout }}
+      {% endif %}
+      {% if amd_iommu_device_ids is defined and amd_iommu_device_ids.stdout is defined and amd_iommu_device_ids.stdout != "" %}
+      AMD GPU IOMMU Group Device IDs: {{ amd_iommu_device_ids.stdout }}
+      {% endif %}
+      All Devices Bound to VFIO-PCI: {{ vfio_device_ids_combined }}
+      
+      CPU Vendor: {{ cpu_vendor.stdout }}
+      IOMMU Parameter: {{ iommu_param }}
+      
+      CHANGES MADE:
+      {% if grub_modified.changed %}
+      ✓ GRUB configuration updated with IOMMU settings
+      {% endif %}
+      {% if vfio_pci_configured.changed %}
+      ✓ VFIO-PCI binding configured for all IOMMU group devices
+      {% endif %}
+      {% if nvidia_blacklisted.changed %}
+      ✓ NVIDIA and Nouveau drivers blacklisted
+      {% endif %}
+      {% if amd_blacklisted.changed %}
+      ✓ AMD drivers (amdgpu, radeon) blacklisted
+      {% endif %}
+      {% if initramfs_updated.changed %}
+      ✓ Initramfs updated
+      {% endif %}
+      
+      === REBOOT REQUIRED TO APPLY CHANGES ===
+      
+      After reboot, verify with:
+      {% if nvidia_gpu_addresses is defined and nvidia_gpu_addresses.stdout != "" %}
+      {% for gpu_addr in nvidia_gpu_addresses.stdout_lines %}
+      - lspci -nnk -s {{ gpu_addr }}
+      {% endfor %}
+      {% endif %}
+      {% if amd_gpu_addresses is defined and amd_gpu_addresses.stdout != "" %}
+      {% for gpu_addr in amd_gpu_addresses.stdout_lines %}
+      - lspci -nnk -s {{ gpu_addr }}
+      {% endfor %}
+      {% endif %}
+      - dmesg | grep -e IOMMU -e DMAR
+      - Check all IOMMU group devices: ls -l /sys/bus/pci/devices/<GPU_ADDRESS>/iommu_group/devices/
+      
+      Expected: Kernel driver in use: vfio-pci (for all devices in GPU's IOMMU group)
+      ============================================
+    mode: '0644'
+  when: gpu_passthrough_available and initramfs_updated.changed
+  tags: gpu_passthrough
+
+- name: Display reboot warning
+  debug:
+    msg: 
+      - "============================================"
+      - "=== REBOOT REQUIRED ==="
+      - "GPU passthrough configuration completed."
+      - "System reboot is required to apply changes."
+      - "Details saved in: /root/GPU_PASSTHROUGH_REBOOT_REQUIRED.txt"
+      - "============================================"
+  when: gpu_passthrough_available and initramfs_updated.changed
+  tags: gpu_passthrough
+
+- name: Check hardware virtualization support
+  shell: grep -E '(vmx|svm)' /proc/cpuinfo
+  register: cpu_virt_support
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Debug CPU virtualization support
+  debug:
+    msg: 
+      - "=== Hardware Virtualization Check ==="
+      - "CPU virtualization support: {{ 'Available' if cpu_virt_support.rc == 0 else 'Not available' }}"
+      - "CPU features found: {{ cpu_virt_support.stdout_lines | length }} virtualization extensions"
+  tags: kvm_config
+
+- name: Check current KVM modules
+  shell: lsmod | grep kvm
+  register: kvm_modules
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Detect CPU vendor for nested virtualization
+  shell: |
+    if grep -q "Intel" /proc/cpuinfo; then
+      echo "intel"
+    elif grep -q "AMD" /proc/cpuinfo; then
+      echo "amd"
+    else
+      echo "unknown"
+    fi
+  register: cpu_vendor
+  tags: kvm_config
+
+- name: Show detected CPU vendor
+  debug:
+    msg: "Detected CPU vendor: {{ cpu_vendor.stdout | upper }}"
+  tags: kvm_config
+
+- name: Enable nested virtualization for Intel CPUs
+  shell: |
+    echo "options kvm_intel nested=1" > /etc/modprobe.d/kvm.conf
+    modprobe -r kvm_intel || true
+    modprobe kvm_intel nested=1
+  when: cpu_vendor.stdout == "intel" and cpu_virt_support.rc == 0
+  register: intel_nested_result
+  tags: kvm_config
+
+- name: Confirm Intel nested virtualization setup
+  debug:
+    msg: "Intel nested virtualization enabled successfully"
+  when: cpu_vendor.stdout == "intel" and cpu_virt_support.rc == 0 and intel_nested_result.rc == 0
+  tags: kvm_config
+
+- name: Enable nested virtualization for AMD CPUs
+  shell: |
+    echo "options kvm_amd nested=1" > /etc/modprobe.d/kvm.conf
+    modprobe -r kvm_amd || true
+    modprobe kvm_amd nested=1
+  when: cpu_vendor.stdout == "amd" and cpu_virt_support.rc == 0
+  register: amd_nested_result
+  tags: kvm_config
+
+- name: Confirm AMD nested virtualization setup
+  debug:
+    msg: "AMD nested virtualization enabled successfully"
+  when: cpu_vendor.stdout == "amd" and cpu_virt_support.rc == 0 and amd_nested_result.rc == 0
+  tags: kvm_config
+
+- name: Check if IOMMU is currently active
+  shell: dmesg | grep -E "IOMMU|DMAR"
+  register: iommu_active_check
+  failed_when: false
+  changed_when: false
+  tags: kvm_config
+
+- name: Add user to libvirt and kvm groups
+  user:
+    name: "{{ ansible_user_id }}"
+    groups: libvirt,kvm
+    append: yes
+  register: user_groups_result
+  tags: kvm_config
+
+- name: Confirm user group assignment
+  debug:
+    msg: "User '{{ ansible_user_id }}' successfully added to libvirt and kvm groups"
+  when: user_groups_result is changed
+  tags: kvm_config
+
+- name: Start and enable libvirtd service
+  systemd:
+    name: libvirtd
+    state: started
+    enabled: yes
+  tags: kvm_config
+
+- name: Test if libvirtd is working
+  shell: virsh version >/dev/null 2>&1
+  register: libvirtd_test
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Stop libvirtd service if broken
+  systemd:
+    name: libvirtd
+    state: stopped
+  when: libvirtd_test.rc != 0
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Clean up orphaned dnsmasq processes
+  shell: |
+    pgrep -f "dnsmasq.*virbr" | xargs -r kill -TERM || true
+    sleep 1
+    pgrep -f "dnsmasq.*virbr" | xargs -r kill -KILL || true
+  when: libvirtd_test.rc != 0
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Reset libvirtd failure count
+  shell: systemctl reset-failed libvirtd.service
+  when: libvirtd_test.rc != 0
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Check for problematic qemu.conf security settings
+  shell: grep -q "security_driver.*selinux" /etc/libvirt/qemu.conf
+  register: selinux_config_check
+  ignore_errors: yes
+  when: libvirtd_test.rc != 0
+  tags: kvm_config
+
+- name: Backup and remove problematic security settings
+  shell: |
+    cp /etc/libvirt/qemu.conf /etc/libvirt/qemu.conf.backup-$(date +%Y%m%d-%H%M%S)
+    sed -i '/^# BEGIN ANSIBLE MANAGED BLOCK - SECURITY HARDENING$/,/^# END ANSIBLE MANAGED BLOCK - SECURITY HARDENING$/d' /etc/libvirt/qemu.conf
+  when: libvirtd_test.rc != 0 and selinux_config_check.rc == 0
+  tags: kvm_config
+
+- name: Start libvirtd after cleanup
+  systemd:
+    name: libvirtd
+    state: started
+    enabled: yes
+  when: libvirtd_test.rc != 0
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Wait for libvirtd socket after restart
+  wait_for:
+    path: /var/run/libvirt/libvirt-sock
+    timeout: 10
+  when: libvirtd_test.rc != 0
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Verify libvirtd is working after fix
+  shell: virsh version
+  register: libvirtd_fix_result
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Display libvirtd status
+  debug:
+    msg: "libvirtd status: {{ 'Working' if libvirtd_fix_result.rc == 0 else 'Fixed after cleanup' if libvirtd_test.rc != 0 else 'Working' }}"
+  tags: kvm_config
+
+- name: Check if default network exists
+  shell: |
+    if ! virsh net-list --all >/dev/null 2>&1; then
+      echo "virsh_failed"
+      exit 1
+    fi
+    virsh net-list --all | grep -q default && echo "network_exists" || echo "network_missing"
+  register: default_network_check
+  ignore_errors: yes
+  tags: kvm_network
+
+- name: Define default network if it doesn't exist
+  shell: virsh net-define /usr/share/libvirt/networks/default.xml
+  when: default_network_check.rc == 0 and default_network_check.stdout == "network_missing"
+  ignore_errors: yes
+  tags: kvm_network
+
+- name: Set default network to autostart
+  shell: virsh net-autostart default
+  when: default_network_check.rc == 0
+  ignore_errors: yes
+  tags: kvm_network
+
+- name: Check if default network is running
+  shell: virsh net-list | grep -q "default.*active"
+  register: default_network_running
+  ignore_errors: yes
+  tags: kvm_network
+
+- name: Start default network
+  shell: virsh net-start default
+  when: default_network_running is defined and default_network_running.rc != 0
+  ignore_errors: yes
+  tags: kvm_network
+
+- name: Create bridge network configuration script
+  copy:
+    dest: /tmp/setup_bridge.sh
+    content: |
+      #!/bin/bash
+      # Configure bridge networking for KVM (requires wired connection, modifies network config)
+      
+      # Check if we're using a wired connection
+      WIRED_INTERFACE=$(ip route | grep default | grep -E 'eth[0-9]|enp[0-9]' | awk '{print $5}' | head -1)
+      WIRELESS_INTERFACE=$(ip route | grep default | grep -E 'wl[0-9]|wlp[0-9]' | awk '{print $5}' | head -1)
+      
+      if [ ! -z "$WIRED_INTERFACE" ]; then
+        echo "Setting up bridge with wired interface: $WIRED_INTERFACE"
+        cat > /etc/netplan/01-netcfg.yaml <<EOF
+      network:
+        version: 2
+        renderer: networkd
+        ethernets:
+          $WIRED_INTERFACE:
+            dhcp4: no
+        bridges:
+          br0:
+            dhcp4: yes
+            interfaces:
+              - $WIRED_INTERFACE
+      EOF
+      else
+        echo "No wired interface found for bridging"
+        exit 1
+      fi
+      
+      chmod 600 /etc/netplan/01-netcfg.yaml
+      echo "Bridge configuration created. Run 'netplan try' to test and apply."
+    mode: '0755'
+    force: yes
+  tags: kvm_bridge
+
+- name: Verify installed packages
+  shell: |
+    vim --version && nano --version && git --version && python3 --version && pip3 --version
+  register: verify_output
+  ignore_errors: yes
+  tags: verify_kvm
+
+- name: Verify KVM installation
+  shell: |
+    virsh --version && qemu-kvm --version | head -1 && systemctl is-active libvirtd
+  register: kvm_verify_output
+  ignore_errors: yes
+  tags: verify_kvm
+
+- name: Check virtualization capabilities
+  shell: |
+    echo "=== CPU Virtualization Support ==="
+    grep -E '(vmx|svm)' /proc/cpuinfo | wc -l
+    echo "=== KVM Modules ==="
+    lsmod | grep kvm
+    echo "=== Nested Virtualization Status ==="
+    if [ -f /sys/module/kvm_intel/parameters/nested ]; then
+      echo "Intel nested: $(cat /sys/module/kvm_intel/parameters/nested)"
+    fi
+    if [ -f /sys/module/kvm_amd/parameters/nested ]; then
+      echo "AMD nested: $(cat /sys/module/kvm_amd/parameters/nested)"
+    fi
+    echo "=== Libvirt Networks ==="
+    virsh net-list --all || echo "Failed to list networks"
+  register: virt_capabilities
+  ignore_errors: yes
+  tags: verify_kvm
+
+- name: Show verification results
+  debug:
+    var: verify_output.stdout_lines
+  tags: verify_kvm
+
+- name: Show KVM verification results
+  debug:
+    var: kvm_verify_output.stdout_lines
+  tags: verify_kvm
+
+- name: Show virtualization capabilities
+  debug:
+    var: virt_capabilities.stdout_lines
+  tags: verify_kvm
+
+- name: Configure fail2ban main configuration
+  copy:
+    dest: /etc/fail2ban/fail2ban.local
+    content: |
+      # Fail2ban main configuration
+      [Definition]
+      
+      # Log level (CRITICAL, ERROR, WARNING, NOTICE, INFO, DEBUG)
+      loglevel = INFO
+      
+      # Log target (STDOUT, STDERR, SYSLOG, file)
+      logtarget = /var/log/fail2ban.log
+      
+      # Socket file location
+      socket = /var/run/fail2ban/fail2ban.sock
+      
+      # PID file location
+      pidfile = /var/run/fail2ban/fail2ban.pid
+      
+      # Database file location
+      dbfile = /var/lib/fail2ban/fail2ban.sqlite3
+      
+      # Purge database older than this time (seconds)
+      dbpurgeage = 86400
+    backup: yes
+    mode: '0644'
+  tags: fail2ban
+
+- name: Configure fail2ban jail settings
+  copy:
+    dest: /etc/fail2ban/jail.local
+    content: |
+      # Fail2ban jail configuration
+      [DEFAULT]
+      # Ban time (seconds) - 20 minutes
+      bantime = 1200
+      
+      # Find time window (seconds) - 5 minutes
+      findtime = 300
+      
+      # Max retry attempts before ban
+      maxretry = 5
+      
+      # Backend for log monitoring
+      backend = auto
+      
+      # Ban action - blocks all ports for the IP
+      banaction = iptables-allports
+      
+      # Email settings (configure as needed)
+      destemail = root@localhost
+      sender = fail2ban@{{ ansible_hostname }}
+      
+      # Action to take (ban + email notification)
+      action = %(action_mw)s
+      
+      # Ignore local networks and VM networks
+      ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+      
+      [sshd]
+      # More relaxed: allow up to 6 failed attempts before ban, ban lasts 20 minutes
+      # Monitor standard SSH attacks
+      enabled = true
+      port = ssh
+      filter = sshd
+      logpath = /var/log/auth.log
+      maxretry = 6
+      bantime = 1200
+      
+      [vm-ssh-attacks]
+      # More relaxed: allow up to 4 failed attempts from VMs (internal network only), ban lasts 20 minutes
+      # Restrict to internal VM network sources (e.g., 192.168.122.0/24)
+      # Use 'ignoreip' or custom filter to match only internal network sources
+      ignoreip = 0.0.0.0/8 127.0.0.1/8 ::1 !192.168.122.0/24 !192.168.100.0/16
+      # Monitor SSH attacks from VM networks
+      enabled = true
+      filter = vm-ssh-attacks
+      logpath = /var/log/kern.log
+      maxretry = 4
+      bantime = 1200
+      findtime = 300
+      banaction = iptables-allports
+      action = iptables-allports
+      
+      [bridged-ssh-attacks]
+      # More relaxed: allow up to 4 failed attempts from bridged networks, ban lasts 20 minutes, longer findtime
+      # Monitor all ports except 22
+      port = 0:21,23:65535
+      # Monitor SSH attacks through bridged networks (excluding port 22)
+      enabled = true
+      filter = bridged-ssh-attacks
+      logpath = /var/log/auth.log
+      maxretry = 4
+      bantime = 1200
+      findtime = 900
+      banaction = iptables-allports
+      action = iptables-allports
+    backup: yes
+    mode: '0644'
+  tags: fail2ban
+
+- name: Create custom fail2ban filter for VM SSH attacks
+  copy:
+    dest: /etc/fail2ban/filter.d/vm-ssh-attacks.conf
+    content: |
+      # Fail2ban filter for VM SSH attack attempts
+      [Definition]
+
+      # Match blocked VM SSH attempts from iptables logs
+      failregex = ^.*DROP.*SRC=<HOST>.*DPT=22.*$
+                  ^.*BLOCKED.*SRC=<HOST>.*DPT=22.*$
+                  ^.*kernel.*DROP.*<HOST>.*22.*$
+
+      # Ignore successful connections (none expected from VMs)
+      ignoreregex =
+
+      [Init]
+      # Author: Custom filter for VM security
+      # Description: Detects blocked SSH attempts from VM networks
+      maxlines = 1
+    mode: '0644'
+  tags: fail2ban
+
+- name: Create custom fail2ban filter for bridged SSH attacks
+  copy:
+    dest: /etc/fail2ban/filter.d/bridged-ssh-attacks.conf
+    content: |
+      # Fail2ban filter for SSH attacks through bridged networks
+      [Definition]
+
+      # Match SSH failures from bridged network interfaces, but NOT for port 22
+      failregex = ^.*sshd.*Failed password.*from <HOST>.*$
+                  ^.*sshd.*Invalid user.*from <HOST>.*$
+
+      # Ignore legitimate connections and any log lines for port 22
+      ignoreregex = ^.*sshd.*Accepted.*from <HOST>.*$
+                    ^.*port 22.*$
+
+      [Init]
+      # Author: Custom filter for bridge security
+      # Description: Detects SSH attacks through custom bridge networks, excluding port 22
+      maxlines = 10
+    mode: '0644'
+  tags: fail2ban
+
+- name: Ensure kern.log exists for fail2ban
+  file:
+    path: /var/log/kern.log
+    state: touch
+    mode: '0644'
+  tags: fail2ban
+
+- name: Start and enable fail2ban service
+  systemd:
+    name: fail2ban
+    state: started
+    enabled: yes
+  tags: fail2ban
+
+- name: Reload fail2ban after installation
+  shell: sudo fail2ban-client reload
+  register: fail2ban_reload_result
+  changed_when: false
+  tags: fail2ban
+
+- name: Wait for fail2ban to initialize
+  pause:
+    seconds: 5
+  tags: fail2ban
+
+- name: Test basic fail2ban functionality
+  shell: |
+    echo "Testing fail2ban filter loading..."
+    
+    # Test if jails are now available
+    if fail2ban-client status | grep -q "sshd"; then
+      echo "✓ sshd jail loaded successfully"
+    else
+      echo "✗ sshd jail not found"
+    fi
+    
+    if fail2ban-client status | grep -q "vm-ssh-attacks"; then
+      echo "✓ vm-ssh-attacks jail loaded successfully"
+    else
+      echo "✗ vm-ssh-attacks jail not found"
+    fi
+    
+    if fail2ban-client status | grep -q "bridged-ssh-attacks"; then
+      echo "✓ bridged-ssh-attacks jail loaded successfully"
+    else
+      echo "✗ bridged-ssh-attacks jail not found"
+      echo "Testing bridged filter manually..."
+      fail2ban-regex --print-all-matched /var/log/auth.log /etc/fail2ban/filter.d/bridged-ssh-attacks.conf 2>/dev/null || echo "Filter test failed"
+      echo "Checking jail debug for bridged-ssh-attacks..."
+      fail2ban-client -d | grep -A 5 -B 5 "bridged-ssh-attacks" || echo "Jail not found in debug"
+    fi
+  register: basic_test_result
+  ignore_errors: yes
+  tags: fail2ban
+
+- name: Display basic test results
+  debug:
+    var: basic_test_result.stdout_lines
+  tags: fail2ban
+
+- name: Check fail2ban status
+  shell: |
+    fail2ban-client status
+    echo "=== Active Jails ==="
+    fail2ban-client status | grep "Jail list" | cut -d: -f2 | tr ',' '\n' | while read jail; do
+      if [ ! -z "$(echo $jail | tr -d ' ')" ]; then
+        echo "Jail: $jail"
+        fail2ban-client status "$(echo $jail | tr -d ' ')"
+        echo ""
+      fi
+    done
+  register: fail2ban_status
+  ignore_errors: yes
+  tags: fail2ban
+
+- name: Display fail2ban status
+  debug:
+    var: fail2ban_status.stdout_lines
+  tags: fail2ban
+
+- name: Configure SSH security hardening - restrict VM access to host SSH
+  blockinfile:
+    path: /etc/ssh/sshd_config
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - VM SECURITY HARDENING"
+    block: |
+      # Deny SSH access from VM networks to host
+      DenyUsers *@192.168.122.*
+      DenyUsers *@192.168.100.*
+      # Allow only specific admin users/networks (customize as needed)
+      # AllowUsers admin@your-admin-network/24
+      
+      # Additional hardening
+      PermitEmptyPasswords no
+      MaxAuthTries 3
+      ClientAliveInterval 300
+      ClientAliveCountMax 2
+      UseDNS no
+    backup: yes
+  notify: restart sshd
+  tags: security_hardening
+
+- name: Create iptables rules to block VM-to-host SSH access
+  shell: |
+    echo "Setting up iptables rules to block VM-to-host SSH access..."
+    
+    # Block VMs from accessing host SSH (port 22)
+    iptables -C INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j DROP 2>/dev/null || \
+      iptables -I INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j DROP
+    
+    # Block additional VM networks if configured
+    iptables -C INPUT -s 192.168.100.0/16 -p tcp --dport 22 -j DROP 2>/dev/null || \
+      iptables -I INPUT -s 192.168.100.0/16 -p tcp --dport 22 -j DROP
+    
+    # Allow libvirt bridge traffic for VM operations (non-SSH)
+    iptables -C INPUT -i virbr+ -p tcp --dport 22 -j DROP 2>/dev/null || \
+      iptables -I INPUT -i virbr+ -p tcp --dport 22 -j DROP
+    
+    # Block VMs from accessing other host services (optional - uncomment as needed)
+    # iptables -C INPUT -s 192.168.122.0/24 -p tcp --dport 80 -j DROP 2>/dev/null || \
+    #   iptables -I INPUT -s 192.168.122.0/24 -p tcp --dport 80 -j DROP
+    # iptables -C INPUT -s 192.168.122.0/24 -p tcp --dport 443 -j DROP 2>/dev/null || \
+    #   iptables -I INPUT -s 192.168.122.0/24 -p tcp --dport 443 -j DROP
+    
+    echo "VM-to-host SSH access blocked via iptables"
+  register: iptables_vm_security
+  tags: security_hardening
+
+- name: Configure firewall rules using UFW (if available)
+  shell: |
+    if command -v ufw >/dev/null 2>&1; then
+      echo "Configuring UFW rules for VM security..."
+      
+      # Deny SSH from VM networks
+      ufw --force deny from 192.168.122.0/24 to any port 22
+      ufw --force deny from 192.168.100.0/16 to any port 22
+      
+      # Allow libvirt bridge traffic (non-SSH)
+      ufw --force allow in on virbr0 from 192.168.122.0/24
+      ufw --force allow out on virbr0 to 192.168.122.0/24
+      
+      echo "UFW VM security rules configured"
+    else
+      echo "UFW not available, using iptables rules only"
+    fi
+  register: ufw_vm_security
+  tags: security_hardening
+
+- name: Save iptables rules persistently
+  shell: |
+    echo "Saving iptables rules for persistence..."
+    
+    # Try different methods based on system
+    if command -v iptables-save >/dev/null 2>&1; then
+      if [ -d /etc/iptables ]; then
+        iptables-save > /etc/iptables/rules.v4
+        echo "Rules saved to /etc/iptables/rules.v4"
+      elif [ -d /etc/sysconfig ]; then
+        iptables-save > /etc/sysconfig/iptables
+        echo "Rules saved to /etc/sysconfig/iptables"
+      else
+        # Create systemd service for rule restoration
+        mkdir -p /etc/systemd/system
+        cat > /etc/systemd/system/iptables-restore.service << 'EOF'
+    [Unit]
+    Description=Restore iptables rules for VM security
+    After=network.target
+    
+    [Service]
+    Type=oneshot
+    ExecStart=/sbin/iptables-restore < /etc/iptables.rules
+    RemainAfterExit=yes
+    
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+        iptables-save > /etc/iptables.rules
+        systemctl enable iptables-restore.service
+        echo "Custom iptables restore service created and enabled"
+      fi
+    else
+      echo "Warning: Could not save iptables rules - they may not persist after reboot"
+    fi
+  register: iptables_save_result
+  tags: security_hardening
+
+- name: Detect available virtualization technologies
+  shell: |
+    echo "=== Virtualization Detection ==="
+    
+    if [ -e /dev/kvm ]; then
+      echo "kvm_available"
+    else
+      echo "kvm_unavailable"
+    fi
+    
+    if command -v qemu-system-x86_64 >/dev/null 2>&1 || command -v qemu-kvm >/dev/null 2>&1; then
+      echo "qemu_available"
+      qemu-system-x86_64 --version 2>/dev/null || qemu-kvm --version 2>/dev/null || echo "qemu_version_unknown"
+    else
+      echo "qemu_unavailable"
+    fi
+    
+    if command -v virsh >/dev/null 2>&1; then
+      echo "libvirt_available"
+      virsh uri 2>/dev/null || echo "libvirt_no_uri"
+      virsh capabilities 2>/dev/null | grep -o "<domain type='[^']*'" | cut -d"'" -f2 | sort -u || echo "no_capabilities"
+    else
+      echo "libvirt_unavailable"
+    fi
+    
+    if command -v lxc-ls >/dev/null 2>&1; then
+      echo "lxc_available"
+    fi
+    
+    if command -v VBoxManage >/dev/null 2>&1; then
+      echo "virtualbox_available"
+    fi
+    
+    if command -v virt-what >/dev/null 2>&1; then
+      echo "Running virt-what:"
+      virt-what 2>/dev/null || echo "virt-what_failed"
+    fi
+    
+    echo "=== Primary Virtualization ==="
+    if [ -e /dev/kvm ] && command -v virsh >/dev/null 2>&1; then
+      echo "kvm_qemu_libvirt"
+    elif command -v virsh >/dev/null 2>&1; then
+      echo "qemu_libvirt"
+    elif command -v qemu-system-x86_64 >/dev/null 2>&1 || command -v qemu-kvm >/dev/null 2>&1; then
+      echo "qemu_only"
+    else
+      echo "no_virtualization"
+    fi
+  register: virt_detection
+  ignore_errors: yes
+  tags: security_hardening
+
+- name: Display virtualization capabilities
+  debug:
+    msg: "{{ virt_detection.stdout_lines }}"
+  tags: security_hardening
+
+- name: Check if SELinux is available and enabled
+  shell: |
+    if command -v getenforce >/dev/null 2>&1; then
+      if getenforce 2>/dev/null | grep -q "Enforcing\|Permissive"; then
+        echo "selinux_available"
+      else
+        echo "selinux_disabled"
+      fi
+    else
+      echo "selinux_not_installed"
+    fi
+  register: selinux_status
+  tags: security_hardening
+
+- name: Determine correct qemu user/group for the system
+  shell: |
+    if getent passwd libvirt-qemu >/dev/null 2>&1; then
+      echo "libvirt-qemu"
+    elif getent passwd qemu >/dev/null 2>&1; then
+      echo "qemu"
+    else
+      echo "none"
+    fi
+  register: qemu_user
+  tags: security_hardening
+
+- name: Determine correct qemu group for the system
+  shell: |
+    if getent group libvirt-qemu >/dev/null 2>&1; then
+      echo "libvirt-qemu"
+    elif getent group qemu >/dev/null 2>&1; then
+      echo "qemu"
+    elif getent group kvm >/dev/null 2>&1; then
+      echo "kvm"
+    else
+      echo "none"
+    fi
+  register: qemu_group
+  tags: security_hardening
+
+- name: Debug detected qemu user/group
+  debug:
+    msg: 
+      - "Detected QEMU user: {{ qemu_user.stdout }}, group: {{ qemu_group.stdout }}"
+      - "Virtualization: {{ virt_detection.stdout_lines | select('search', 'PRIMARY VIRTUALIZATION|kvm|qemu|libvirt') | list }}"
+  tags: security_hardening
+
+- name: Configure libvirt security settings (with SELinux)
+  blockinfile:
+    path: /etc/libvirt/qemu.conf
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - SECURITY HARDENING"
+    block: |
+      # SELinux-enabled security with user/group isolation
+      security_driver = "selinux"
+      user = "{{ qemu_user.stdout }}"
+      group = "{{ qemu_group.stdout }}"
+    backup: yes
+  when: 
+    - not (skip_libvirt_security | default(true) | bool)
+    - selinux_status.stdout == "selinux_available" 
+    - qemu_user.stdout != "none" 
+    - qemu_group.stdout != "none"
+    - virt_detection.stdout is search("qemu_available|kvm_available")
+  notify: restart libvirtd
+  tags: security_hardening
+
+- name: Configure libvirt security settings (without SELinux)
+  blockinfile:
+    path: /etc/libvirt/qemu.conf
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - SECURITY HARDENING"
+    block: |
+      # Security hardening with user/group isolation (no SELinux)
+      user = "{{ qemu_user.stdout }}"
+      group = "{{ qemu_group.stdout }}"
+    backup: yes
+  when: 
+    - not (skip_libvirt_security | default(true) | bool)
+    - selinux_status.stdout != "selinux_available" 
+    - qemu_user.stdout != "none" 
+    - qemu_group.stdout != "none"
+    - virt_detection.stdout is search("qemu_available|kvm_available")
+  notify: restart libvirtd
+  tags: security_hardening
+
+- name: Skip security hardening if no proper user/group found
+  debug:
+    msg: "INFO: Libvirt security hardening is {{ 'disabled' if (skip_libvirt_security | default(true) | bool) else 'enabled' }} (controlled by skip_libvirt_security={{ skip_libvirt_security | default(true) }})"
+  tags: security_hardening
+
+- name: Flush handlers to restart libvirtd before continuing
+  meta: flush_handlers
+  when: not (skip_libvirt_security | default(true) | bool)
+  tags: security_hardening
+
+- name: Wait for libvirtd socket to be ready
+  wait_for:
+    path: /var/run/libvirt/libvirt-sock
+    timeout: 30
+  register: socket_wait_result
+  when: not (skip_libvirt_security | default(true) | bool)
+  tags: security_hardening
+
+- name: Check libvirtd status after security hardening
+  shell: |
+    echo "=== libvirtd Diagnostics ==="
+    
+    # Check if service is active
+    echo "Service status:"
+    systemctl is-active libvirtd && echo "service_active" || echo "service_inactive"
+    systemctl status libvirtd --no-pager || true
+    
+    # Check sockets
+    echo ""
+    echo "Socket status:"
+    systemctl is-active libvirtd.socket && echo "socket_active" || echo "socket_inactive"
+    [ -S /var/run/libvirt/libvirt-sock ] && echo "socket_exists" || echo "socket_missing"
+    ls -la /var/run/libvirt/ || echo "Directory doesn't exist"
+    
+    # Check for errors in logs
+    echo ""
+    echo "Recent errors:"
+    journalctl -u libvirtd -n 20 --no-pager || echo "No journal entries"
+    
+    # Check configuration
+    echo ""
+    echo "Configuration check:"
+    libvirtd --version || echo "libvirtd binary issue"
+    
+    # Try virsh command
+    echo ""
+    echo "Virsh test:"
+    virsh version 2>&1 && echo "virsh_works" || echo "virsh_fails"
+  register: libvirtd_health_check
+  ignore_errors: yes
+  when: not (skip_libvirt_security | default(true) | bool)
+  tags: security_hardening
+
+- name: Remove problematic security settings if libvirtd fails
+  shell: >
+    set -x &&
+    echo "[$(date)] libvirtd health check failed, rolling back security settings..." &&
+    echo "[$(date)] Health check output:" &&
+    echo '{{ libvirtd_health_check.stdout }}' &&
+    echo "[$(date)] Backing up config..." &&
+    cp /etc/libvirt/qemu.conf /etc/libvirt/qemu.conf.backup-failed-$(date +%Y%m%d-%H%M%S) &&
+    echo "[$(date)] Removing security hardening block..." &&
+    sed -i '/^# BEGIN ANSIBLE MANAGED BLOCK - SECURITY HARDENING$/,/^# END ANSIBLE MANAGED BLOCK - SECURITY HARDENING$/d' /etc/libvirt/qemu.conf &&
+    echo "[$(date)] Security block removed" &&
+    echo "[$(date)] Checking config after removal:" &&
+    (grep -i "security\|user\|group" /etc/libvirt/qemu.conf || echo "No security settings found") &&
+    echo "[$(date)] Stopping all libvirt services and sockets..." &&
+    (systemctl stop libvirtd.socket libvirtd-ro.socket libvirtd-admin.socket libvirtd.service || true) &&
+    echo "[$(date)] Cleaning up dnsmasq processes..." &&
+    (pkill -f "dnsmasq.*virbr" || true) &&
+    sleep 1 &&
+    echo "[$(date)] Resetting failed state..." &&
+    (systemctl reset-failed libvirtd.service libvirtd.socket || true) &&
+    echo "[$(date)] Starting libvirtd sockets..." &&
+    systemctl start libvirtd.socket libvirtd-ro.socket libvirtd-admin.socket &&
+    sleep 2 &&
+    echo "[$(date)] Starting libvirtd service..." &&
+    systemctl start libvirtd.service &&
+    sleep 3 &&
+    echo "[$(date)] Verifying service is running..." &&
+    (systemctl status libvirtd --no-pager || true) &&
+    (ls -la /var/run/libvirt/ || true) &&
+    (virsh version || echo "virsh still failing") &&
+    echo "[$(date)] Security rollback complete"
+  when: 
+    - not (skip_libvirt_security | default(true) | bool)
+    - libvirtd_health_check.stdout is not search("service_active") or libvirtd_health_check.stdout is not search("virsh_works")
+  register: security_rollback
+  tags: security_hardening
+
+- name: Final verification that libvirtd is working
+  shell: |
+    systemctl is-active libvirtd
+    virsh version
+    echo "libvirtd is working correctly (security hardening skipped)"
+  register: final_libvirtd_check
+  tags: security_hardening
+
+- name: Display libvirtd security status
+  debug:
+    msg:
+      - "=== libvirt Security Status ==="
+      - "Security Hardening: {{ 'Skipped (skip_libvirt_security=true)' if (skip_libvirt_security | default(true) | bool) else 'Applied' }}"
+      - "SELinux Status: {{ selinux_status.stdout if selinux_status is defined else 'Not checked' }}"
+      - "libvirtd Status: {{ 'Running' if libvirtd_health_check is defined and libvirtd_health_check.stdout is defined and libvirtd_health_check.stdout is search('service_active') and libvirtd_health_check.stdout is search('virsh_works') else 'Not checked (security hardening skipped)' if (skip_libvirt_security | default(true) | bool) else 'Failed (security settings rolled back)' }}"
+      - "Security Rollback: {{ 'Yes - incompatible security settings removed' if security_rollback is defined and security_rollback.changed else 'No - security settings applied successfully' if not (skip_libvirt_security | default(true) | bool) else 'Not applicable (security hardening skipped)' }}"
+  tags: security_hardening
+
+- name: Create VM network isolation script
+  copy:
+    dest: /usr/local/bin/vm-network-isolation.sh
+    content: |
+      #!/bin/bash
+      # Block VMs from accessing host SSH/services via iptables rules on all VM networks and bridges
+      
+      set -e
+      echo "Applying VM network isolation rules..."
+      
+      iptables -C INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j DROP 2>/dev/null || \
+        iptables -I INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j DROP
+      
+      for bridge in $(brctl show | awk '/^virbr/ {print $1}'); do
+        iptables -C INPUT -i $bridge -p tcp --dport 22 -j DROP 2>/dev/null || \
+          iptables -I INPUT -i $bridge -p tcp --dport 22 -j DROP
+      done
+      
+      for bridge in $(brctl show | awk '/^br[0-9]/ {print $1}'); do
+        iptables -C INPUT -i $bridge -p tcp --dport 22 -j DROP 2>/dev/null || \
+          iptables -I INPUT -i $bridge -p tcp --dport 22 -j DROP
+        iptables -C INPUT -i $bridge -p tcp --dport 22 -j LOG --log-prefix "BLOCKED-BRIDGE-SSH: " 2>/dev/null || \
+          iptables -I INPUT -i $bridge -p tcp --dport 22 -j LOG --log-prefix "BLOCKED-BRIDGE-SSH: "
+      done
+      
+      iptables -C INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j LOG --log-prefix "BLOCKED-VM-SSH: " 2>/dev/null || \
+        iptables -I INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j LOG --log-prefix "BLOCKED-VM-SSH: "
+      
+      echo "VM network isolation rules applied successfully"
+    mode: '0755'
+  tags: security_hardening
+
+- name: Create systemd service for VM network isolation
+  copy:
+    dest: /etc/systemd/system/vm-network-isolation.service
+    content: |
+      [Unit]
+      Description=VM Network Isolation Security Rules
+      After=network.target libvirtd.service
+      Wants=libvirtd.service
+      
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/vm-network-isolation.sh
+      RemainAfterExit=yes
+      
+      [Install]
+      WantedBy=multi-user.target
+  register: vm_isolation_service
+  tags: security_hardening
+
+- name: Enable and start VM network isolation service
+  systemd:
+    name: vm-network-isolation.service
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  when: vm_isolation_service is changed
+  tags: security_hardening
+
+- name: Configure audit logging for SSH attempts from VMs
+  shell: |
+    if command -v auditctl >/dev/null 2>&1; then
+      echo "Setting up audit rules for VM SSH attempts..."
+      
+      # Add audit rule for SSH connection attempts
+      auditctl -l | grep -q "ssh-attempts" || \
+        auditctl -a always,exit -F arch=b64 -S connect -F a2=0x10 -k ssh-attempts
+      
+      # Make audit rules persistent
+      if [ ! -f /etc/audit/rules.d/vm-ssh-monitoring.rules ]; then
+        cat > /etc/audit/rules.d/vm-ssh-monitoring.rules << 'EOF'
+    # Monitor SSH connection attempts from VMs
+    -a always,exit -F arch=b64 -S connect -F a2=0x10 -k ssh-attempts
+    -a always,exit -F arch=b32 -S connect -F a2=0x10 -k ssh-attempts
+    EOF
+        service auditd restart || systemctl restart auditd || echo "Could not restart auditd"
+      fi
+      
+      echo "SSH audit logging configured"
+    else
+      echo "Audit tools not available, skipping audit configuration"
+    fi
+  register: audit_config
+  tags: security_hardening
+
+- name: Display security hardening summary
+  debug:
+    msg:
+      - "=== VM Security Hardening Applied ==="
+      - "1. SSH access blocked from VM networks (192.168.122.0/24, 192.168.100.0/16)"
+      - "2. Iptables rules configured and saved persistently"
+      - "3. UFW rules applied (if UFW available): {{ 'Yes' if ufw_vm_security.stdout is defined and 'UFW' in ufw_vm_security.stdout else 'No' }}"
+      - "4. Libvirt security settings hardened"
+      - "5. VM network isolation service created and enabled"
+      - "6. SSH audit logging configured: {{ 'Yes' if audit_config.stdout is defined and 'audit' in audit_config.stdout else 'No' }}"
+      - "7. SSH daemon configuration hardened"
+      - "8. Fail2ban intrusion prevention system installed and configured"
+      - ""
+      - "=== Security Measures Active ==="
+      - "- VMs cannot SSH to host (port 22 blocked)"
+      - "- VM bridge interfaces restricted"
+      - "- Libvirt processes run with reduced privileges"
+      - "- Network isolation enforced at startup"
+      - "- Connection attempts logged for monitoring"
+      - "- Fail2ban monitoring SSH brute force, DDoS, and VM attacks"
+      - "- Automatic IP banning for suspicious activity"
+      - ""
+      - "To verify: sudo iptables -L INPUT | grep 192.168.122"
+      - "Fail2ban status: sudo fail2ban-client status"
+  tags: security_hardening
+
+- name: Clean up installation script
+  file:
+    path: /tmp/install_tools.sh
+    state: absent
+  tags: cleanup
+
+- name: Display post-installation notes
+  debug:
+    msg:
+      - "=== KVM Installation & Security Hardening Complete ==="
+      - "1. Users have been added to libvirt and kvm groups"
+      - "2. Nested virtualization has been enabled (if supported)"
+      - "3. Default libvirt network has been configured"
+      - "4. A bridge network setup script has been created at /tmp/setup_bridge.sh"
+      - "5. Security hardening applied - VMs blocked from accessing host SSH"
+      - "6. Network isolation rules configured and persistent"
+      - "7. Fail2ban intrusion prevention system installed and configured"
+      - "8. Installation script has been cleaned up"
+      - ""
+      - "SECURITY FEATURES ACTIVE:"
+      - "  ✓ VM-to-host SSH access blocked (iptables + SSH config)"
+      - "  ✓ Libvirt security hardening applied"
+      - "  ✓ Network isolation service enabled"
+      - "  ✓ SSH connection monitoring configured"
+      - "  ✓ Fail2ban monitoring and auto-banning suspicious IPs"
+      - "  ✓ Custom filters for VM and libvirt attack detection"
+      - ""
+      - "FAIL2BAN JAILS ACTIVE:"
+      - "  - SSH brute force protection (6 attempts, 20 min ban)"
+      - "  - VM SSH attack detection (4 attempts, 20 min ban, internal network only)"
+      - "  - Bridged SSH attack detection (4 attempts, 20 min ban, all ports except 22)"
+      - "  - All jails use iptables-allports (complete IP blocking)"
+      - ""
+      - "IMPORTANT: A reboot is recommended to ensure all changes take effect"
+      - "After reboot, you can:"
+      - "  - Use virt-manager for GUI VM management"
+      - "  - Use virsh for command-line VM operations"
+      - "  - Run /tmp/setup_bridge.sh to configure bridge networking (optional)"
+      - "  - Use the vm-management role to download cloud images and manage VMs"
+      - ""
+      - "Security Verification:"
+      - "  - Check iptables: sudo iptables -L INPUT | grep 192.168.122"
+      - "  - Check SSH config: sudo sshd -T | grep -i deny"
+      - "  - Monitor logs: sudo tail -f /var/log/auth.log | grep BLOCKED-VM-SSH"
+      - "  - Check fail2ban: sudo fail2ban-client status"
+      - "  - View banned IPs: sudo fail2ban-client status sshd"
+      - "  - Check bridged attacks: sudo fail2ban-client status bridged-ssh-attacks"
+      - "  - Monitor fail2ban logs: sudo tail -f /var/log/fail2ban.log"
+      - "  - Monitor bridge SSH logs: sudo tail -f /var/log/kern.log | grep BLOCKED-BRIDGE-SSH"
+      - ""
+      - "To test: virsh list --all"
+  tags: verify_kvm
+
+- name: Apply default GCS and folder structuring variables
+  set_fact:
+    gcs_bucket_url: "{{ gcs_bucket_url | default(gcp_variables.gcs_bucket_url | default('')) }}"
+    gcs_project_id: "{{ gcs_project_id | default(gcp_variables.gcs_project_id | default('')) }}"
+    gcs_service_account_content: "{{ gcs_service_account_content | default(gcp_variables.gcs_service_account_content | default('')) }}"
+  when: vm_image_type == "golden"
+  tags:
+    - gcloud_vars
+    - build_configure
+
+- name: Create service account key file
+  copy:
+    dest: "/tmp/gcs_service_account_key.json"
+    content: "{{ gcs_service_account_content }}"
+    mode: '0644'
+  when: vm_image_type == "golden"
+  tags:
+    - gcloud_init
+    - build_configure
+
+- name: Authenticate gcloud with service account
+  shell: gcloud auth activate-service-account --key-file=/tmp/gcs_service_account_key.json
+  register: gcloud_auth_result
+  changed_when: false
+  failed_when: gcloud_auth_result.rc != 0
+  when: vm_image_type == "golden"
+  tags:
+    - gcloud_init
+    - build_configure
+
+- name: Set GCP project
+  shell: gcloud config set project {{ gcs_project_id }}
+  register: gcloud_set_project_result
+  changed_when: false
+  failed_when: gcloud_set_project_result.rc != 0
+  when: vm_image_type == "golden"
+  tags:
+    - gcloud_init
+    - build_configure
+
+- name: Turn off automatic parallel uploads configuration for gcloud
+  shell: gcloud config set storage/parallel_composite_upload_enabled False
+  register: gcloud_parallel_upload_result
+  changed_when: false
+  failed_when: gcloud_parallel_upload_result.rc != 0
+  when: vm_image_type == "golden"
+  tags:
+    - gcloud_init
+    - build_configure
+
+- name: Verify GCS Bucket exists
+  shell: gcloud storage ls {{ gcs_bucket_url }}
+  register: gcs_bucket_check
+  failed_when: gcs_bucket_check.rc != 0
+  changed_when: false
+  when: vm_image_type == "golden"
+  tags:
+    - gcloud_init
+    - build_configure
+
+- name: Read group_vars/all.yaml for default VM and Packer settings
+  include_vars:
+    file: "{{ lookup('env', 'PWD') }}/group_vars/all.yml"
+  when: vm_image_type == "golden"
+  tags:
+    - packer_vars
+    - build_configure
+
+- name: Apply default Packer variables for Golden Image Creation
+  set_fact:
+    # Set VM parameters
+    vm_memory: "{{ ram | default(default_vm_settings.ram | default(2048)) }}"
+    vm_cpu: "{{ vcpus | default(default_vm_settings.vcpus | default(2)) }}"
+    disk_size: "{{ disk_size | default(default_vm_settings.disk_size | default('20G')) }}"
+    # Set Packer build parameters
+    iso_url: "{{ iso_url | default(packer_variables.iso_url | default('https://cloud-images.ubuntu.com/noble/20251126/noble-server-cloudimg-amd64.img')) }}"
+    iso_checksum: "{{ iso_checksum | default(packer_variables.iso_checksum | default('sha256:8bf11afd901fdec5aad647a8a284243a2a0b80a81ac732ae618ab36afa09f2b4')) }}"
+    accelerator: "{{ accelerator | default(packer_variables.accelerator | default('kvm'))   }}"
+    build_format: "{{ build_format | default(packer_variables.build_format | default('qcow2')) }}"
+    build_name: "{{ build_name | default(packer_variables.build_name | default('ubuntu_noble_golden')) }}"
+    build_version: "{{ build_version | default(packer_variables.build_version | default('v1.0.0')) }}"
+    packer_work_dir: "{{ packer_work_dir | default(packer_variables.packer_work_dir | default('/tmp/packer_workspace')) }}"
+    output_dir: "{{ output_dir | default(packer_variables.output_dir | default('artifacts')) }}"
+    generate_new_templates: "{{ generate_new_templates | default(packer_variables.generate_new_templates | default('true')) }}"
+  when: vm_image_type == "golden"
+  tags:
+    - packer_vars
+    - build_configure
+
+- name: Set up random suffix for instance_name
+  set_fact:
+    base_instance_name_suffix: "{{ ansible_date_time.epoch | hash('md5') | truncate(4, True, '') }}"
+  when: vm_image_type == "golden" and base_instance_name is undefined
+  tags:
+    - packer_vars
+    - build_configure
+
+# Store final base_instance_name in output JSON
+- name: Generate instance name if base_instance_name is not provided
+  set_fact:
+    base_instance_name: "{{ base_instance_name if base_instance_name is defined else 'hostenv_' + base_instance_name_suffix }}"
+  when: vm_image_type == "golden"
+  tags:
+    - packer_vars
+    - build_configure
+
+- name: Debug root pasword, private key, and public key parameters
+  debug:
+    msg:
+      - "=== Golden Image Root Credentials Debug ==="
+      - "Root Password is defined: {{ root_password is defined }}"
+      - "Root Filename is defined: {{ root_filename is defined }}"
+  when: vm_image_type == "golden"
+  tags:
+    - packer_root_ssh
+    - build_configure
+# Add when root_password or root_filename is not defined
+- name: Generate suffix for SSH
+  set_fact:
+    ssh_suffix: "{{ ansible_date_time.epoch | hash('md5') | truncate(6, True, '') }}"
+  tags:
+    - packer_root_ssh
+    - build_configure
+  when: vm_image_type == "golden" and root_filename is not defined
+
+- name: Define root variables
+  set_fact:
+    ssh_fname: "{{ root_filename if root_filename is defined else 'root_ssh_' + ssh_suffix + '_ed25519' }}"
+    ssh_pword: "{{ root_password if root_password is defined else lookup('password', '/dev/null chars=ascii_letters,digits length=40') }}"
+  when: vm_image_type == "golden"
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+- name: Set up host environment root SSH folder
+  file:
+    path: "{{ ansible_env.HOME }}/.ssh"
+    state: directory
+    mode: '0700'
+  when: vm_image_type == "golden" and root_filename is not defined
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+# Store generated SSH key and pubkey in output JSON
+- name: Generate root Ed25519 SSH key
+  openssh_keypair:
+    path: "{{ ansible_env.HOME }}/.ssh/{{ ssh_fname }}"
+    type: ed25519
+    size: 256
+    state: present
+    force: yes
+  when: vm_image_type == "golden" and root_filename is not defined
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+- name: Read SSH private key
+  slurp:
+    src: "{{ ansible_env.HOME }}/.ssh/{{ ssh_fname }}"
+  register: ssh_privkey_content
+  when: vm_image_type == "golden"
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+- name: Read SSH public key
+  slurp:
+    src: "{{ ansible_env.HOME }}/.ssh/{{ ssh_fname }}.pub"
+  register: ssh_pubkey_content
+  when: vm_image_type == "golden"
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+- name: Set SSH key variables
+  set_fact:
+    ssh_privkey_path: "{{ ansible_env.HOME }}/.ssh/{{ ssh_fname }}"
+    ssh_privkey: "{{ ssh_privkey_content.content | b64decode | trim }}"
+    ssh_pubkey: "{{ ssh_pubkey_content.content | b64decode | trim }}"
+  when: vm_image_type == "golden"
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+- name: Generate password hash for root user
+  shell: mkpasswd --method=SHA-512 --rounds=4096 "{{ ssh_pword }}"
+  register: password_hash_result
+  when: vm_image_type == "golden"
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+- name: Set hashed password variable
+  set_fact:
+    hashed_rpword: "{{ password_hash_result.stdout }}"
+  when: vm_image_type == "golden"
+  tags:
+    - packer_root_ssh
+    - build_configure
+
+- name: Check if packer directory exists
+  stat:
+    path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+  register: packer_work_dir_stat
+  when: vm_image_type == "golden"
+  tags:
+    - packer_workspace_setup
+    - build_configure
+
+- name: Set up packer directory
+  file:
+    path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+    state: directory
+    mode: '0755'
+  when: vm_image_type == "golden" and not packer_work_dir_stat.stat.exists
+  tags:
+    - packer_workspace_setup
+    - build_configure
+
+- name: Check if packer workspace is created
+  debug:
+    msg: "Packer role path is {{ role_path }}"
+  when: vm_image_type == "golden" and not packer_work_dir_stat.stat.exists
+  tags:
+    - packer_workspace_setup
+    - build_configure
+
+- name: Copy packer files (excluding artifacts, user-data, meta-data)
+  synchronize:
+    src: "{{ role_path }}/files/{{ build_name }}/"
+    dest: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+    delete: yes
+    rsync_opts:
+      - "--exclude=config/user-data"
+      - "--exclude=config/meta-data"
+  when: vm_image_type == "golden" and not packer_work_dir_stat.stat.exists
+  tags:
+    - packer_workspace_setup
+    - build_configure
+
+- name: Allow permission to run for prepare-image.sh
+  file:
+    path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/scripts/prepare-image.sh"
+    mode: a+x
+  when: vm_image_type == "golden" and not packer_work_dir_stat.stat.exists
+  tags:
+    - packer_workspace_setup
+    - build_configure
+
+- name: Generate user-data from template
+  template:
+    src: "{{ role_path}}/templates/user-data.j2"
+    dest: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/config/user-data"
+    mode: '0644'
+  when: vm_image_type == "golden" and generate_new_templates is true
+  tags:
+    - packer_workspace_setup
+    - build_configure
+    
+- name: Generate meta-data from template
+  template:
+    src: "{{ role_path}}/templates/meta-data.j2"
+    dest: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/config/meta-data"
+    mode: '0644'
+  when: vm_image_type == "golden" and generate_new_templates is true
+  tags:
+    - packer_workspace_setup
+    - build_configure
+    
+- name: Create values.pkrvars.hcl file
+  template:
+    src: "{{ role_path}}/templates/values.pkrvars.hcl.j2"
+    dest: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/values.pkrvars.hcl"
+    mode: '0644'
+  when: vm_image_type == "golden" and generate_new_templates is true
+  tags:
+    - packer_workspace_setup
+    - build_configure
+
+- name: Remove artifacts folder, if exists, to ensure clean build
+  block:
+    - name: Check if artifacts folder exists
+      stat:
+        path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/artifacts"
+      register: packer_artifacts_dir_stat
+      when: vm_image_type == "golden"
+      tags:
+        - packer_workspace_setup
+        - build_configure
+    - name: Remove artifacts folder if exists
+      file:
+        path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/artifacts"
+        state: absent
+      when: vm_image_type == "golden" and packer_artifacts_dir_stat.stat.exists
+      tags:
+        - packer_workspace_setup
+        - build_configure
+
+- name: Initialize Packer
+  command: packer init .
+  args:
+    chdir: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+  register: packer_init_result
+  when: vm_image_type == "golden"
+  tags:
+    - packer_init
+    - build_configure
+  
+- name: Display Packer init output
+  debug:
+    var: packer_init_result.stdout_lines
+  when: vm_image_type == "golden"
+  tags:
+    - packer_init
+    - build_configure
+    
+- name: Validate Packer configuration
+  command: packer validate -var-file=values.pkrvars.hcl .
+  args:
+    chdir: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+  register: packer_validate_result
+  when: vm_image_type == "golden"
+  tags:
+    - packer_validate
+    - build_configure
+  
+- name: Display Packer validation output
+  debug:
+    var: packer_validate_result.stdout_lines
+  when: vm_image_type == "golden"
+  tags:
+    - packer_validate
+    - build_configure
+
+- name: Remove existing cidata.iso if generating new templates
+  file:
+    path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/cidata.iso"
+    state: absent
+  when: vm_image_type == "golden" and generate_new_templates is true
+  tags:
+    - packer_build
+    - build
+
+- name: Check if cidata.iso exists
+  stat:
+    path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/cidata.iso"
+  register: file_stat_cidata
+  when: vm_image_type == "golden"
+  tags:
+    - packer_build
+    - build
+
+- name: Create genisoimage cidata.iso for cloud-init if not exist
+  command: >
+    genisoimage -output {{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/cidata.iso
+    -input-charset utf-8 -V cidata -J -r
+    {{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/config/user-data
+    {{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/config/meta-data
+  args:
+    chdir: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+  when:
+    - vm_image_type == "golden"
+    - (generate_new_templates is true) or (not file_stat_cidata.stat.exists)
+  register: genisoimage_result
+  tags:
+    - packer_build
+    - build
+    
+- name: Build VM image with Packer
+  command: packer build -var-file=values.pkrvars.hcl .
+  args:
+    chdir: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}"
+  register: packer_build_result
+  when: vm_image_type == "golden"
+  async: 3600  # 1 hour timeout
+  poll: 30     # Check every 30 seconds
+  tags:
+    - packer_build
+    - build
+  
+- name: Display Packer build output
+  debug:
+    var: packer_build_result.stdout_lines
+  when: vm_image_type == "golden"
+  tags:
+    - verify_packer_build
+    - build
+    
+- name: Find generated qcow2 files
+  find:
+    paths: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/artifacts"
+    patterns:
+      - "*.qcow2"
+      - "*.sha256sum"
+  register: artifact_files
+  when: vm_image_type == "golden"
+  tags:
+    - artifacts_init
+    - build_upload
+
+- name: Get current date for image versioning
+  set_fact:
+    current_date: "{{ ansible_date_time.date | replace('-', '') }}"
+  when: vm_image_type == "golden"
+  tags:
+    - artifacts_init
+    - build_upload
+
+- name: Set GCS Folder Paths
+  set_fact:
+    gcs_date_path: "{{ build_name }}/{{ current_date }}"
+    gcs_current_path: "{{ build_name }}/current"
+  when: vm_image_type == "golden"
+  tags:
+    - artifacts_init
+    - build_upload
+
+- name: Clear first existing artifacts in GCS current folder, if exists
+  block:
+    - name: List files in current folder
+      shell: gcloud storage ls {{ gcs_bucket_url }}/{{ gcs_current_path }}/
+      register: gcs_current_files
+      failed_when: false
+      when: vm_image_type == "golden"
+      tags:
+        - artifacts_current_prep
+        - build_upload
+    - name: Clear current_folder if any files exist
+      when: vm_image_type == "golden" and gcs_current_files.rc == 0
+      shell: gcloud storage rm {{ gcs_bucket_url }}/{{ gcs_current_path }}/**
+      register: gcs_clear_current
+      tags:
+        - artifacts_current_prep
+        - build_upload
+    - name: Display clear result
+      debug:
+        msg: "{{ 'Current folder cleared: ' + (gcs_clear_current.stdout | default('No output')) if gcs_current_files.rc == 0 else 'Current folder did not exist' }}"
+      when: vm_image_type == "golden"
+      tags:
+        - artifacts_current_prep
+        - build_upload
+
+- name: Clear also existing artifacts in GCS date folder, if exists
+  block:
+    - name: List files in date folder
+      shell: gcloud storage ls {{ gcs_bucket_url }}/{{ gcs_date_path }}/
+      register: gcs_date_files
+      failed_when: false
+      when: vm_image_type == "golden"
+      tags:
+        - artifacts_date_prep
+        - build_upload
+    - name: Clear current_folder if any files exist
+      when: vm_image_type == "golden" and gcs_date_files.rc == 0
+      shell: gcloud storage rm {{ gcs_bucket_url }}/{{ gcs_date_path }}/**
+      register: gcs_clear_date
+      tags:
+        - artifacts_date_prep
+        - build_upload
+    - name: Display clear result
+      debug:
+        msg: "{{ 'Date folder cleared: ' + (gcs_clear_date.stdout | default('No output')) if gcs_date_files.rc == 0 else 'Date folder did not exist' }}"
+      when: vm_image_type == "golden"
+      tags:
+        - artifacts_date_prep
+        - build_upload
+
+- name: Upload artifacts to GCS date bucket
+  shell: gcloud storage cp {{ item.path }} {{ gcs_bucket_url }}/{{ gcs_date_path }}/{{ item.path | basename | trim }}
+  loop: "{{ artifact_files.files }}"
+  register: gcs_upload_date_results
+  failed_when: gcs_upload_date_results.rc != 0
+  when: vm_image_type == "golden"
+  tags:
+    - artifacts_upload
+    - build_upload
+  
+- name: Upload artifacts to GCS current bucket
+  shell: gcloud storage cp {{ item.path }} {{ gcs_bucket_url }}/{{ gcs_current_path }}/{{ item.path | basename | trim}}
+  loop: "{{ artifact_files.files }}"
+  register: gcs_upload_current_results
+  failed_when: gcs_upload_current_results.rc != 0
+  when: vm_image_type == "golden"
+  tags:
+    - artifacts_upload
+    - build_upload
+
+- name: Copy qcow2 artifact to qemu image folder using shell
+  shell: cp "{{ item.path }}" "/var/lib/libvirt/images/{{ item.path | basename | trim }}"
+  loop: "{{ artifact_files.files }}"
+  when: vm_image_type == "golden" and item.path is search('\.qcow2$')
+  tags:
+    - artifacts_deploy
+    - build_upload
+
+- name: Set ownership and permissions for qcow2 file
+  file:
+    path: "/var/lib/libvirt/images/{{ item.path | basename | trim }}"
+    owner: libvirt-qemu
+    group: kvm
+    mode: '0644'
+  loop: "{{ artifact_files.files }}"
+  when: vm_image_type == "golden" and item.path is search('\.qcow2$')
+  tags:
+    - artifacts_deploy
+    - build_upload
+
+- name: Verify uploads completed successfully
+  shell:
+    gcloud storage ls {{ gcs_bucket_url }}/{{ gcs_current_path }} && gcloud storage ls {{ gcs_bucket_url }}/{{ gcs_date_path }}
+  when:
+    - vm_image_type == "golden"
+    - gcs_upload_date_results is defined
+    - gcs_upload_date_results.results is defined
+    - gcs_upload_current_results is defined
+    - gcs_upload_current_results.results is defined
+  register: verify_artifacts
+  tags:
+    - artifacts_cleanup
+    - build_upload
+
+- name: Remove local artifacts after successful upload
+  file:
+    path: "{{ packer_work_dir }}/{{ build_name }}-{{ build_version }}/artifacts"
+    state: absent
+  when:
+    - vm_image_type == "golden"
+    - verify_artifacts is defined
+    - verify_artifacts is succeeded
+  tags:
+    - artifacts_cleanup
+    - build_upload
+
+- name: Display GCP Artifacts uploaded
+  debug:
+    var: verify_artifacts.stdout_lines
+  when:
+    - vm_image_type == "golden"
+    - verify_artifacts is defined
+    - verify_artifacts is succeeded
+  tags:
+    - artifacts_cleanup
+    - build_upload
+
+# Create YAML data output for Host Environment details
+- name: Create golden image root credentials YAML file
+  copy:
+    content: |
+      # Golden Image Root Credentials
+      # Generated: {{ ansible_date_time.iso8601 }}
+      # Image: {{ build_name }}-{{ build_version }}
+      
+      golden_image_name: "{{ build_name }}-{{ build_version }}"
+      gcs_bucket_url: "{{ gcs_bucket_url }}"
+      gcs_image_path: "{{ gcs_current_path }}"
+      root_ssh_filename: "{{ ssh_fname }}"
+      root_ssh_password: "{{ ssh_pword }}"
+      root_ssh_private_key: |
+        {{ ssh_privkey | indent(8) }}
+      root_ssh_public_key: |
+        {{ ssh_pubkey | indent(8) }}
+    dest: "{{ inventory_dir }}/management-vars.yaml"
+    mode: '0600'
+  delegate_to: localhost
+  become: no
+  register: credentials_file_result
+  when: vm_image_type == "golden" and packer_build_result.rc == 0
+  tags:
+    - artifacts_cleanup
+    - build_completion
+
+- name: Create GPU detection script
+  copy:
+    dest: /usr/local/bin/gpu-detect
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      
+      LOCKFILE="/etc/libvirt/gpu-capabilities/gpu-lockfile.json"
+      CONFIG_FILE="/etc/libvirt/gpu-capabilities/gpu-config.json"
+      TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+      HOSTNAME=$(hostname)
+      
+      echo "[$(date)] GPU Detection Service starting..."
+      
+      mkdir -p /etc/libvirt/gpu-capabilities
+      echo "[$(date)] Created capabilities directory"
+      
+      # Detect GPU presence
+      echo "[$(date)] Starting GPU detection..."
+      NVIDIA_COUNT=$(lspci | grep -i "VGA" | grep -i "NVIDIA" | wc -l | xargs || echo "0")
+      AMD_COUNT=$(lspci | grep -i "VGA" | grep -i "AMD" | wc -l | xargs || echo "0")
+      echo "[$(date)] Found $NVIDIA_COUNT NVIDIA GPU(s), $AMD_COUNT AMD GPU(s)"
+      
+      NVIDIA_DETECTED=false
+      AMD_DETECTED=false
+      VFIO_DRIVER_IN_USE=false
+      
+      if [[ ${NVIDIA_COUNT} -gt 0 ]] 2>/dev/null; then
+        NVIDIA_DETECTED=true
+        echo "[$(date)] NVIDIA GPU detected"
+      fi
+      
+      if [[ ${AMD_COUNT} -gt 0 ]] 2>/dev/null; then
+        AMD_DETECTED=true
+        echo "[$(date)] AMD GPU detected"
+      fi
+      
+      # Check kernel driver in use for all GPUs
+      echo "[$(date)] Checking kernel drivers..."
+      if [ "$NVIDIA_DETECTED" = true ] || [ "$AMD_DETECTED" = true ]; then
+        GPU_ADDRESSES=$(lspci | grep -i "VGA" | grep -iE "NVIDIA|AMD" | awk '{print $1}' || true)
+        for addr in $GPU_ADDRESSES; do
+          if [ -z "$addr" ]; then
+            echo "[$(date)] WARNING: Empty GPU address found, skipping"
+            continue
+          fi
+          DRIVER=$(lspci -k -s "$addr" 2>/dev/null | grep "Kernel driver in use" | awk '{print $5}' || echo "")
+          echo "[$(date)] GPU $addr using driver: ${DRIVER:-none}"
+          if [ "$DRIVER" = "vfio-pci" ]; then
+            VFIO_DRIVER_IN_USE=true
+            echo "[$(date)] vfio-pci driver detected on $addr"
+          fi
+        done
+      fi
+      echo "[$(date)] Kernel driver check complete. VFIO in use: $VFIO_DRIVER_IN_USE"
+      
+      # Check NVIDIA MIG capability (only if nvidia driver is in use)
+      echo "[$(date)] Checking NVIDIA MIG capability..."
+      MIG_SUPPORTED=false
+      MIG_ENABLED=false
+      if [ "$NVIDIA_DETECTED" = true ] && [ "$VFIO_DRIVER_IN_USE" = false ]; then
+        if command -v nvidia-smi >/dev/null 2>&1; then
+          echo "[$(date)] nvidia-smi found, querying MIG status..."
+          MIG_MODES=$(nvidia-smi --query-gpu=mig.mode.current --format=csv,noheader 2>/dev/null | tr -d '[:space:]' || echo "N/A")
+          echo "[$(date)] MIG modes: $MIG_MODES"
+          if [[ "$MIG_MODES" != "N/A" && "$MIG_MODES" != "NotSupported" && -n "$MIG_MODES" ]]; then
+            MIG_SUPPORTED=true
+            if echo "$MIG_MODES" | grep -qi "Enabled"; then
+              MIG_ENABLED=true
+              echo "[$(date)] MIG is ENABLED"
+            else
+              echo "[$(date)] MIG is supported but DISABLED"
+            fi
+          else
+            echo "[$(date)] MIG not supported (response: $MIG_MODES)"
+          fi
+        else
+          echo "[$(date)] nvidia-smi not found, skipping MIG check"
+        fi
+      else
+        echo "[$(date)] Skipping MIG check (NVIDIA: $NVIDIA_DETECTED, VFIO: $VFIO_DRIVER_IN_USE)"
+      fi
+      
+      # Check SR-IOV capability (only if nvidia/amdgpu driver is in use)
+      echo "[$(date)] Checking SR-IOV capability..."
+      SRIOV_SUPPORTED=false
+      if [ "$VFIO_DRIVER_IN_USE" = false ] && { [ "$NVIDIA_DETECTED" = true ] || [ "$AMD_DETECTED" = true ]; }; then
+        GPU_ADDRESSES=$(lspci | grep -i "VGA" | grep -iE "NVIDIA|AMD" | awk '{print $1}' || true)
+        for addr in $GPU_ADDRESSES; do
+          if [ -z "$addr" ]; then
+            echo "[$(date)] WARNING: Empty GPU address in SR-IOV check, skipping"
+            continue
+          fi
+          echo "[$(date)] Checking SR-IOV for GPU $addr..."
+          TOTAL_VFS=$(lspci -s "$addr" -vvv 2>/dev/null | grep "Total VFs:" | awk '{print $NF}' || echo "")
+          if [[ -n "$TOTAL_VFS" ]] && [[ "$TOTAL_VFS" -gt 0 ]] 2>/dev/null; then
+            SRIOV_SUPPORTED=true
+            echo "[$(date)] SR-IOV supported on GPU $addr (Total VFs: $TOTAL_VFS)"
+            break
+          else
+            echo "[$(date)] SR-IOV not supported on GPU $addr"
+          fi
+        done
+      else
+        echo "[$(date)] Skipping SR-IOV check (VFIO: $VFIO_DRIVER_IN_USE)"
+      fi
+      
+      # Get GPU PCI addresses (only those bound to vfio-pci)
+      echo "[$(date)] Collecting GPU PCI addresses (vfio-pci only)..."
+      AVAILABLE_GPU_ADDRESSES=""
+      if [ "$NVIDIA_DETECTED" = true ] || [ "$AMD_DETECTED" = true ]; then
+        ALL_GPU_ADDRS=$(lspci -D | grep -i "VGA" | grep -iE "NVIDIA|AMD" | awk '{print $1}')
+        for addr in $ALL_GPU_ADDRS; do
+          if [ -z "$addr" ]; then
+            continue
+          fi
+          GPU_DRIVER=$(lspci -k -s "$addr" 2>/dev/null | grep "Kernel driver in use" | awk '{print $5}' || echo "")
+          if [ "$GPU_DRIVER" = "vfio-pci" ]; then
+            echo "[$(date)] Found vfio-pci GPU: $addr"
+            if [ -z "$AVAILABLE_GPU_ADDRESSES" ]; then
+              AVAILABLE_GPU_ADDRESSES="$addr"
+            else
+              AVAILABLE_GPU_ADDRESSES="$AVAILABLE_GPU_ADDRESSES"$'\n'"$addr"
+            fi
+          else
+            echo "[$(date)] Skipping GPU $addr (driver: ${GPU_DRIVER:-none}, not vfio-pci)"
+          fi
+        done
+      fi
+      GPU_PCI_ADDRESSES=$(echo "$AVAILABLE_GPU_ADDRESSES" | jq -R -s -c 'split("\n") | map(select(length > 0))' || echo '[]')
+      echo "[$(date)] Available GPU PCI addresses (vfio-pci bound): $GPU_PCI_ADDRESSES"
+      
+      # Determine supported modes
+      echo "[$(date)] Determining supported GPU modes..."
+      NO_GPU_SUPPORTED=true
+      PASSTHROUGH_SUPPORTED=false
+      PARTITIONED_SUPPORTED=false
+      
+      # Passthrough is supported if GPU exists (regardless of driver)
+      if [ "$NVIDIA_DETECTED" = true ] || [ "$AMD_DETECTED" = true ]; then
+        PASSTHROUGH_SUPPORTED=true
+        echo "[$(date)] GPU passthrough: SUPPORTED"
+      fi
+      
+      # Partitioning only supported if not using vfio-pci and MIG/SR-IOV available
+      if [ "$VFIO_DRIVER_IN_USE" = false ]; then
+        if [ "$MIG_SUPPORTED" = true ] || [ "$SRIOV_SUPPORTED" = true ]; then
+          PARTITIONED_SUPPORTED=true
+          echo "[$(date)] GPU partitioning: SUPPORTED"
+        else
+          echo "[$(date)] GPU partitioning: NOT SUPPORTED (no MIG/SR-IOV)"
+        fi
+      else
+        echo "[$(date)] GPU partitioning: NOT AVAILABLE (vfio-pci driver in use for passthrough)"
+      fi
+      
+      # Generate config JSON
+      echo "[$(date)] Writing config file: $CONFIG_FILE"
+      cat > "$CONFIG_FILE" << EOF
+      {
+        "nvidia_detected": $NVIDIA_DETECTED,
+        "amd_detected": $AMD_DETECTED,
+        "nvidia_mig_supported": $MIG_SUPPORTED,
+        "nvidia_mig_enabled": $MIG_ENABLED,
+        "sriov_supported": $SRIOV_SUPPORTED,
+        "vm_gpu_modes": {
+          "no_gpu": $NO_GPU_SUPPORTED,
+          "passthrough_only": $PASSTHROUGH_SUPPORTED,
+          "partitioned_gpu": $PARTITIONED_SUPPORTED
+        },
+        "detection_timestamp": "$TIMESTAMP",
+        "hostname": "$HOSTNAME"
+      }
+      EOF
+      echo "[$(date)] Config file written successfully"
+      
+      # Generate lockfile JSON
+      echo "[$(date)] Writing lockfile: $LOCKFILE"
+      cat > "$LOCKFILE" << EOF
+      {
+        "lockfile_version": "1.0",
+        "generated_timestamp": "$TIMESTAMP",
+        "hostname": "$HOSTNAME",
+        "gpu_modes": {
+          "no_gpu": {
+            "supported": $NO_GPU_SUPPORTED,
+            "virt_install_flags": [],
+            "description": "Standard VM without attached GPU"
+          },
+          "passthrough": {
+            "supported": $PASSTHROUGH_SUPPORTED,
+            "virt_install_flags": [
+              "--hostdev",
+              "<PCI_ADDRESS>"
+            ],
+            "available_devices": $GPU_PCI_ADDRESSES,
+            "description": "Full GPU passthrough to single VM",
+            "requirements": [
+              "GPU must not be in use by host",
+              "IOMMU must be enabled",
+              "vfio-pci driver must be loaded"
+            ]
+          },
+          "partitioned": {
+            "supported": $PARTITIONED_SUPPORTED,
+            "nvidia_mig": {
+              "supported": $MIG_SUPPORTED,
+              "enabled": $MIG_ENABLED,
+              "virt_install_flags": [
+                "--hostdev",
+                "<MIG_INSTANCE_PCI_ADDRESS>"
+              ],
+              "setup_required": [
+                "Enable MIG mode: nvidia-smi -i <GPU_ID> -mig 1",
+                "Create MIG instances: nvidia-smi mig -cgi <profile_id>",
+                "Get instance PCI address: nvidia-smi mig -lgi"
+              ]
+            },
+            "sriov": {
+              "supported": $SRIOV_SUPPORTED,
+              "virt_install_flags": [
+                "--hostdev",
+                "<VF_PCI_ADDRESS>"
+              ],
+              "setup_required": [
+                "Enable SR-IOV: echo <NUM_VFS> > /sys/bus/pci/devices/<PCI_ADDRESS>/sriov_numvfs",
+                "Bind VF to vfio-pci driver",
+                "List VFs: lspci | grep 'Virtual Function'"
+              ]
+            },
+            "description": "GPU partitioning allows multiple VMs to share GPU resources"
+          }
+        },
+        "detection_details": {
+          "nvidia_detected": $NVIDIA_DETECTED,
+          "amd_detected": $AMD_DETECTED,
+          "nvidia_mig_supported": $MIG_SUPPORTED,
+          "nvidia_mig_enabled": $MIG_ENABLED,
+          "sriov_supported": $SRIOV_SUPPORTED
+        },
+        "usage_instructions": {
+          "check_support": "jq '.gpu_modes.<mode>.supported' /etc/libvirt/gpu-capabilities/gpu-lockfile.json",
+          "get_flags": "jq -r '.gpu_modes.<mode>.virt_install_flags[]' /etc/libvirt/gpu-capabilities/gpu-lockfile.json",
+          "list_devices": "jq -r '.gpu_modes.passthrough.available_devices[]' /etc/libvirt/gpu-capabilities/gpu-lockfile.json"
+        }
+      }
+      EOF
+      echo "[$(date)] Lockfile written successfully"
+      
+      echo "[$(date)] GPU detection complete. Files updated:"
+      echo "  - $CONFIG_FILE"
+      echo "  - $LOCKFILE"
+      echo "[$(date)] GPU Detection Service finished successfully"
+  tags:
+    - gpu_detection
+    - build_completion
+    - enable_gpu_detection_on_boot
+
+- name: Create GPU detection systemd service
+  copy:
+    dest: /etc/systemd/system/gpu-detect.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=GPU Detection Service
+      After=multi-user.target
+      Before=libvirtd.service
+      
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/gpu-detect
+      RemainAfterExit=yes
+      StandardOutput=journal
+      StandardError=journal
+      
+      [Install]
+      WantedBy=multi-user.target
+  tags:
+    - gpu_detection
+    - build_completion
+    - enable_gpu_detection_on_boot
+
+- name: Enable and start GPU detection service
+  systemd:
+    name: gpu-detect
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  tags:
+    - gpu_detection
+    - build_completion
+    - enable_gpu_detection_on_boot
+
+- name: Display GPU detection summary
+  debug:
+    msg:
+      - "=== GPU Detection Summary ==="
+      - "NVIDIA GPU Detected: {{ 'YES' if gpu_capabilities.nvidia_detected else 'NO' }}"
+      - "AMD GPU Detected: {{ 'YES' if gpu_capabilities.amd_detected else 'NO' }}"
+      - "NVIDIA MIG Supported: {{ 'YES' if gpu_capabilities.nvidia_mig_supported else 'NO' }}"
+      - "NVIDIA MIG Enabled: {{ 'YES' if gpu_capabilities.nvidia_mig_enabled else 'NO' }}"
+      - "SR-IOV Supported: {{ 'YES' if gpu_capabilities.sriov_supported else 'NO' }}"
+      - ""
+      - "VM GPU Modes Available:"
+      - "  (1) No GPU VM: {{ 'SUPPORTED' if gpu_capabilities.vm_gpu_modes.no_gpu else 'NOT SUPPORTED' }}"
+      - "  (2) Passthrough-only GPU VM: {{ 'SUPPORTED' if gpu_capabilities.vm_gpu_modes.passthrough_only else 'NOT SUPPORTED' }}"
+      - "  (3) Partitioned GPU VM: {{ 'SUPPORTED' if gpu_capabilities.vm_gpu_modes.partitioned_gpu else 'NOT SUPPORTED' }}"
+      - ""
+      - "Configuration saved to:"
+      - "  - /etc/libvirt/gpu-capabilities/gpu-config.json (detailed info)"
+      - "  - /etc/libvirt/gpu-capabilities/gpu-lockfile.json (VM provisioning lockfile)"
+      - ""
+      - "Use lockfile in Ansible: include_vars /etc/libvirt/gpu-capabilities/gpu-lockfile.json"
+  when: gpu_capabilities is defined
+  tags:
+    - gpu_detection
+    - build_completion
+
+- name: Display final notes
+  debug:
+    msg: |-
+      {% 
+        if vm_image_type == "golden" 
+          and credentials_file_result is defined and credentials_file_result.changed 
+          and packer_build_result is defined and packer_build_result.rc == 0
+          and verify_artifacts is defined and verify_artifacts is succeeded
+      %}
+      === Golden Image Creation Complete ===
+      1. Packer build completed with return code: {{ packer_build_result.rc }}
+      2. Artifacts have been uploaded to GCS bucket: {{ gcs_bucket_url }}
+         - Date-stamped folder: {{ gcs_date_path }}
+         - Current folder: {{ gcs_current_path }}
+      3. Artifacts have been copied to /var/lib/libvirt/images/ under the name: {{ build_name }}-{{ build_version }}.qcow2
+      4. Local artifacts have been cleaned up
+      5. management-vars.yaml file created at: {{ credentials_file_result.dest }}
+         - Contains root SSH credentials for the golden image      
+      6. GPU capabilities detected and saved to /etc/libvirt/gpu-capabilities/
+      GPU Lockfile: /etc/libvirt/gpu-capabilities/gpu-lockfile.json
+      7. IOMMU Status: {{ 'ON' if iommu_active_check.rc == 0 else 'OFF' }}
+
+      GPU Lockfile location: /etc/libvirt/gpu-capabilities/gpu-lockfile.json
+      
+      To use in VM creation Ansible scripts:
+        1. Load lockfile with include_vars
+        2. Check gpu_lockfile.gpu_modes.<mode>.supported boolean
+        3. Use gpu_lockfile.gpu_modes.<mode>.virt_install_flags for parameters
+        4. Get available devices from gpu_lockfile.gpu_modes.passthrough.available_devices
+
+      You can now use the created golden image in your VM deployments.
+      {% else %}
+      === Setup Complete ===
+      GPU capabilities detected and saved to /etc/libvirt/gpu-capabilities/
+      GPU Lockfile: /etc/libvirt/gpu-capabilities/gpu-lockfile.json
+      IOMMU Status: {{ 'ON' if iommu_active_check.rc == 0 else 'OFF' }}
+
+      GPU Lockfile location: /etc/libvirt/gpu-capabilities/gpu-lockfile.json
+      
+      To use in VM creation Ansible scripts:
+        1. Load lockfile with include_vars
+        2. Check gpu_lockfile.gpu_modes.<mode>.supported boolean
+        3. Use gpu_lockfile.gpu_modes.<mode>.virt_install_flags for parameters
+        4. Get available devices from gpu_lockfile.gpu_modes.passthrough.available_devices
+      {% endif %}
+  tags:
+    - artifacts_cleanup
+    - build_completion

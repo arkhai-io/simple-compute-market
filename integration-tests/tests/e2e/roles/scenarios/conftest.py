@@ -48,21 +48,16 @@ class DealState:
     _resources_seeded: bool = False
     _alkahest_configured: bool = False
     _provisioning_storefront_ok: bool = False
-    # Phase 1 — policy pipeline
-    _policy_dry_run_passed: bool = False
-    _policies_seeded: bool = False
     # Phase 2 — listing creation (paused)
-    _evaluate_create_passed: bool = False
     seller_listing_id: Optional[str] = None
     # Phase 3 — registry publication
     _registry_validate_passed: bool = False
     resume_confirmed: bool = False
-    _seller_agent_indexed: bool = False
     # Phase 5 — negotiation
     _evaluate_negotiate_passed: bool = False
     negotiation_id: Optional[str] = None
     negotiation_terminal_state: Optional[str] = None
-    agreed_price: Optional[float] = None
+    agreed_amount: Optional[int] = None
     # Buyer-CLI run-log identity from `market negotiate`; consumed by
     # `market settle --from <run_id>` in phase 08. Sentinel for the
     # "negotiation produced a usable agreed outcome" precondition.
@@ -181,49 +176,19 @@ def registry_client():
 
 
 @pytest.fixture(scope="module")
-def seller_agent_id(storefront_admin_client) -> str:
-    """Discover the seller's live canonical agent ID from /api/v1/system/status.
-
-    Reads the storefront's own agent_id rather than hardcoding it in the test
-    config. The hardcoded form (e.g. ``eip155:31337:0x8004A8...:2``) is only
-    deterministic on a strictly-fresh anvil where account #2 registers second
-    against IdentityRegistry — any prior registration shifts the on-chain ID
-    and breaks the auth header used by /admin/* and the provisioning service.
-
-    The storefront exposes its live agent_id at the top level of
-    /api/v1/system/status (added in 40b1b9b alongside chain_id and
-    resource_count diagnostics). Falls back to the configured ``SELLER.AGENT_ID``
-    if the status endpoint doesn't include one (e.g. seller hasn't completed
-    registration yet — should be a clear test failure rather than a silent
-    skip).
-    """
-    status = storefront_admin_client.get_system_status()
-    live = getattr(status, "agent_id", None)
-    if live:
-        return str(live)
-    fallback = str(settings.SELLER.AGENT_ID or "")
-    if not fallback:
-        pytest.skip(
-            "Storefront has no live agent_id and SELLER.AGENT_ID is not configured. "
-            "Either run `market-storefront register` against the storefront, "
-            "or set SELLER.AGENT_ID in config-<profile>.yml."
-        )
-    return fallback
-
-
-@pytest.fixture(scope="module")
-def provisioning_client(seller_agent_id):
+def provisioning_client():
     """Canonical SyncProvisioningClient.
 
-    Uses the seller's live agent ID for X-Agent-ID — provisioning jobs created
-    by the storefront carry the seller's agent_id, so reads need the same value
-    or get a 403.
+    Provisioning is an internal dependency of the storefront, gated by the
+    shared admin key (presented as X-Admin-Key). The seller's admin_api_key
+    is that shared secret, so reads use it directly.
     """
     from client.provisioning_client import SyncProvisioningClient
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
+    admin_key = str(settings.SELLER.ADMIN_API_KEY or "") or None
     client = SyncProvisioningClient(
         base_url=url,
-        agent_id=seller_agent_id or None,
+        admin_key=admin_key,
     )
     yield client
     client.close()
@@ -236,8 +201,84 @@ def provisioning_test_client():
     Only works when the provisioning service runs with ACTIVE_PROFILES=mock.
     """
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
-    with ProvisioningTestClient(base_url=url, timeout=20.0) as client:
+    admin_key = str(settings.SELLER.ADMIN_API_KEY or "") or None
+    with ProvisioningTestClient(base_url=url, timeout=20.0, admin_key=admin_key) as client:
         yield client
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _ensure_provisioning_host_registered():
+    """Idempotently register the e2e ``kvm1`` host in the provisioning service.
+
+    The scenario's seeded resource row declares ``attribute.vm_host=kvm1``,
+    so phase 08c's ``/test/evaluate-job`` lookup requires a matching row
+    in the provisioning ``hosts`` table. Compose-launched provisioning
+    starts with an empty inventory (no ``inventory_ini``/``inventory_path``
+    configured); production deployments seed the table via Helm secret
+    or a bind-mounted IaC inventory. Inserting the row here keeps the
+    e2e scenario hermetic and idempotent across re-runs.
+
+    The credentials are stub values (path-type, fake path) — mock
+    provisioning never SSHes into the host, so they never get used.
+    Real-host integration tests use a real key path; this fixture is
+    only relevant when ``ACTIVE_PROFILES=mock``.
+    """
+    import urllib.error
+    import urllib.request
+    import json as _json
+
+    url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
+    base = url.rstrip("/")
+    host_name = "kvm1"
+
+    # Provisioning gates non-health routes on the shared admin key (X-Admin-Key);
+    # the seller's admin_api_key is that shared secret.
+    admin_key = str(settings.SELLER.ADMIN_API_KEY or "")
+    auth_headers = {"X-Admin-Key": admin_key} if admin_key else {}
+
+    # Probe existence — provisioning's GET /hosts/{name} returns 404 when absent.
+    try:
+        probe = urllib.request.Request(
+            f"{base}/api/v1/hosts/{host_name}", headers=auth_headers,
+        )
+        with urllib.request.urlopen(probe, timeout=5) as resp:
+            if resp.status == 200:
+                log.info("[conftest] Provisioning host %r already registered", host_name)
+                return
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            pytest.skip(
+                f"Could not probe provisioning host {host_name!r}: "
+                f"{exc.code} {exc.reason}"
+            )
+    except urllib.error.URLError as exc:
+        pytest.skip(f"Could not reach provisioning service at {base}: {exc}")
+
+    body = {
+        "name": host_name,
+        "kvm_host": "127.0.0.1",
+        "ssh_user": "stub",
+        "ssh_key_type": "path",
+        "ssh_key_value": "/tmp/stub-e2e-key",
+        "gpu_count": 1,
+        "enabled": True,
+    }
+    req = urllib.request.Request(
+        f"{base}/api/v1/hosts/",
+        data=_json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", **auth_headers},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            resp.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")
+        pytest.skip(
+            f"Could not register provisioning host {host_name!r}: "
+            f"{exc.code} {exc.reason} — {detail}"
+        )
+    log.info("[conftest] Registered provisioning host %r", host_name)
 
 
 @pytest.fixture(scope="module")

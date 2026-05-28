@@ -1,9 +1,8 @@
 """``_extract_listing_token`` reads ``accepted_escrows[0]``.
 
 The negotiation validator pulls the expected payment token off the
-listing to compare against the buyer's escrow proposal. Post the
-demand_resource cutover the only source is
-``accepted_escrows[0].fields.token``; listings without an
+listing to compare against the buyer's escrow proposal. The only source
+is ``accepted_escrows[0].literal_fields.token``; listings without an
 entry (synthesis failed at publish, compute-for-compute) return
 ``None``.
 """
@@ -23,8 +22,8 @@ def test_reads_accepted_escrows_token():
         "accepted_escrows": [{
             "chain_name": "base_sepolia",
             "escrow_address": "0xescrow",
-            "fields": {"token": _TOKEN_NEW},
-            "price_per_hour": 1000,
+            "literal_fields": {"token": _TOKEN_NEW},
+            "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
         }],
     }
     assert _extract_listing_token(listing) == _TOKEN_NEW
@@ -38,8 +37,8 @@ def test_accepted_escrows_as_json_string_is_parsed():
         "accepted_escrows": json.dumps([{
             "chain_name": "base_sepolia",
             "escrow_address": "0xescrow",
-            "fields": {"token": _TOKEN_NEW},
-            "price_per_hour": 1000,
+            "literal_fields": {"token": _TOKEN_NEW},
+            "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
         }]),
     }
     assert _extract_listing_token(listing) == _TOKEN_NEW
@@ -58,7 +57,7 @@ def test_returns_none_when_entry_lacks_token():
         "accepted_escrows": [{
             "chain_name": "base_sepolia",
             "escrow_address": "0xescrow",
-            "fields": {},
+            "literal_fields": {},
         }],
     }
     assert _extract_listing_token(listing) is None

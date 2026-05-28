@@ -4,20 +4,19 @@
 # public registry only, while Bob fans out to both. DO NOT use these
 # keys on any public network.
 #
-# Account #4 (not #3): the contracts-deploy script reserves account
-# #3 (0x90F7...b906) as a sentinel agent that's pre-seeded into
-# IdentityRegistry. Reusing it for Alice would collide — her
+# Account #4 (not #3): account #3 (0x90F7...b906) is reserved as a
+# sentinel agent. Reusing it for Alice would collide — her
 # perform_registration() returns numeric_agent_id=0 ("no changes")
 # and she ends up sharing the sentinel agent's identity. So we pick
 # the next unclaimed Anvil account.
 #
-# Mounted into the alice_agent container at /etc/arkhai/storefront.toml.
+# Mounted into the alice-storefront container at /etc/arkhai/storefront.toml.
 # XDG_CONFIG_HOME=/etc tells dynaconf to look here.
 
 agent_id            = "alice"
 port                = 8002
-base_url            = "http://alice_agent:8002/"
-db_path             = "./src/market_storefront/data/alice-agent/agent.db"
+base_url            = "http://alice-storefront:8002/"
+db_path             = "./src/market_storefront/data/storefront/agent.db"
 log_file_path       = "./logs/alice.log"
 admin_api_key       = "test-api-key"
 resources_csv_path  = "/app/resources.csv"
@@ -27,8 +26,7 @@ address     = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
 private_key = "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a"
 ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess alice@example.com"
 
-[chain]
-name    = "anvil"
+[chains.anvil]
 rpc_url = "ws://anvil:8545"
 chain_id = 31337
 alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
@@ -41,20 +39,19 @@ alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_a
 # in registry-A. No [registry.auth] subsection because we don't talk
 # to registry-b at all.
 urls                      = ["http://registry:8080"]
-identity_registry_address = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
 
 [provisioning]
 # Shares Bob's provisioning service for now. The multi-registry test
 # stops at negotiation start so we never hit settle/lease/watchdog —
 # if Alice later needs to settle, this needs its own provisioning
 # instance (the provisioning service's PROVISIONING_STOREFRONT_URL
-# callback points at sell_agent, not alice_agent).
+# callback points at bob-storefront, not alice-storefront).
 service_url   = "http://provisioning:8081"
 mode          = "http"
 poll_interval = 1
 
 [negotiation]
-policy_mode = "bisection"
+policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 
 [pricing]
 default_min_price            = "100"

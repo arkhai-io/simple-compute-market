@@ -7,15 +7,10 @@ here, so any change is a cross-package break.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from enum import Enum
 from typing import Any, Literal
-
-UTC = timezone.utc
 
 from pydantic import (
     BaseModel,
-    ConfigDict,
     Field,
     SerializeAsAny,
     field_serializer,
@@ -23,6 +18,56 @@ from pydantic import (
 )
 
 from service.clients.token import ERC20TokenMetadata  # noqa: F401
+
+
+# ---------------------------------------------------------------------------
+# Identity: scheme-tagged seller / signer identity
+# ---------------------------------------------------------------------------
+# Replaces the prior "wallet address everywhere" convention. The protocol
+# layer treats every signed-request signer and every listings-registry
+# agent as a (scheme, identifier) pair. ``eip191`` is the default and the
+# only built-in scheme; the registry pattern (service.identity) lets other
+# schemes register their own verifier so the wire shape remains pluggable.
+
+
+class Identity(BaseModel):
+    """A scheme-tagged identity.
+
+    ``scheme`` names a verifier registered in :mod:`service.identity.registry`
+    (e.g. ``"eip191"``). ``identifier`` is the scheme-specific principal —
+    for ``eip191`` that's the lowercase 0x hex wallet address; other
+    schemes may carry DIDs, OIDC ``sub`` claims, etc.
+
+    Equality and hashing are case-sensitive on both fields. Callers that
+    want EIP-191-style case-insensitive matching should lowercase
+    ``identifier`` themselves before constructing the model — for the
+    ``eip191`` scheme this happens automatically via the field validator
+    here.
+    """
+
+    scheme: str = Field(
+        description=(
+            "Name of the identity scheme. Must match a verifier registered "
+            "via :func:`service.identity.registry.register_identity_scheme`."
+        ),
+    )
+    identifier: str = Field(
+        description=(
+            "Scheme-specific principal. For ``eip191`` this is the lowercase "
+            "0x-prefixed hex wallet address; for other schemes the value is "
+            "scheme-defined (DID URI, OIDC sub claim, ...)."
+        ),
+    )
+
+    @field_validator("identifier", mode="after")
+    @classmethod
+    def _normalize_identifier(cls, v: str, info: Any) -> str:
+        # Per-scheme normalization: for EIP-191, lowercase the hex address
+        # so identities are comparable byte-wise. Other schemes pass through.
+        scheme = info.data.get("scheme") if hasattr(info, "data") else None
+        if scheme == "eip191":
+            return v.lower()
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -74,34 +119,6 @@ def _parse_uint256_str(v: Any, field_name: str) -> int | None:
 
 def _serialize_uint256_str(v: int | None) -> str | None:
     return None if v is None else str(v)
-
-
-class ActionType(str, Enum):
-    """The full vocabulary of actions the policy engine can emit.
-
-    Lives here (next to DomainAction / DecisionContext) rather than in
-    the engine package because both the engine and the runtimes that
-    execute actions need to agree on the values.
-    """
-
-    # Market entry
-    RESPOND_TO_ORDER = "respond_to_order"
-    IGNORE_ORDER = "ignore_order"
-    MAKE_OFFER = "make_offer"
-
-    # Negotiation
-    ACCEPT_OFFER = "accept_offer"
-    REJECT_OFFER = "reject_offer"
-    COUNTER_OFFER = "counter_offer"
-    EXIT_NEGOTIATION = "exit_negotiation"
-    CLOSE_ORDER = "close_order"
-
-    # Resource management
-    RESOLVE_INTERNALLY = "resolve_internally"
-    OUTSOURCE = "outsource"
-
-    # No-op
-    NOOP = "noop"
 
 
 class Resource(BaseModel):
@@ -271,31 +288,162 @@ class EscrowTerms(BaseModel):
     )
 
 
+# ---------------------------------------------------------------------------
+# Rate slots: per-unit-time (or per-unit-anything) rates on obligation fields.
+# A rate carries the field path on the obligation data plus the unit it
+# scales by; the value is in the payment token's base units (uint256 domain).
+# At settlement time both sides compute the final field value as
+# ``value * duration_quantum // PER_UNIT_QUANTUM[per]`` (integer division;
+# sub-unit fractions truncate, matching the prior single-rate semantics).
+# ---------------------------------------------------------------------------
+
+# Allowed values for ``RateValue.per`` and the seconds-per-unit divisor used
+# at settlement. ``hour`` is the only one wired end-to-end today;
+# ``request`` / ``kWh`` etc. are reserved for the design's "non-time rate
+# units" open question — adding one is a single dict entry plus negotiated
+# quantity (request_count, energy_kwh) carried on the deal.
+PER_UNIT_SECONDS: dict[str, int] = {
+    "hour": 3600,
+}
+
+
+class RateValue(BaseModel):
+    """One rate-bearing slot on an accepted escrow / proposal.
+
+    ``field`` is the dotted/indexed path into the obligation data
+    (``"amount"`` for ERC-20 escrows; ``"erc20Amounts[0]"``,
+    ``"nativeAmount"`` etc. for TokenBundle). ``per`` is the unit the
+    rate scales by — ``"hour"`` for the time-rate case. ``value`` is
+    the rate itself in base units, uint256-domain (decimal-digit string
+    on the wire, Python int internally).
+
+    Negotiation pressure points at ``value``; ``field`` and ``per``
+    come from the seller's escrow template and are non-negotiable.
+    """
+
+    field: str = Field(description="Obligation-data field path the rate populates.")
+    per: str = Field(default="hour", description="Unit the rate scales by.")
+    value: int = Field(description="Rate amount in payment-token base units (uint256).")
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _parse_value(cls, v: Any) -> int:
+        parsed = _parse_uint256_str(v, "value")
+        if parsed is None:
+            raise ValueError("RateValue.value must not be null")
+        return parsed
+
+    @field_serializer("value")
+    def _serialize_value(self, v: int) -> str:
+        return _serialize_uint256_str(v) or "0"
+
+
+def compute_rate_total(rate: RateValue, duration_seconds: int) -> int:
+    """Multiply a rate by the negotiated duration.
+
+    Returns the final on-chain field value for ``rate.field``. Uses
+    integer division so sub-unit fractions truncate (i.e. for ERC20:
+    ``rate × duration_seconds // 3600``).
+    """
+    divisor = PER_UNIT_SECONDS.get(rate.per)
+    if divisor is None:
+        raise ValueError(f"unknown rate.per unit: {rate.per!r}")
+    return rate.value * duration_seconds // divisor
+
+
+# ---------------------------------------------------------------------------
+# AcceptedEscrow / EscrowProposal accessors
+# ---------------------------------------------------------------------------
+# Most consumers treat an accepted_escrows entry as a JSON dict (after a
+# round-trip through SQLite or the wire); these accessors operate on
+# either a Pydantic model OR a dict so the only change at the call site
+# is the accessor name.
+
+
+def primary_rate_value(accepted_or_proposal: Any) -> int | None:
+    """Return the headline rate's value for negotiation/display.
+
+    Today's negotiation engine treats every escrow as having a single
+    rate — that's true for ERC-20 (the ``amount`` rate) and ``None`` for
+    pure-attestation escrows. Multi-rate templates (TokenBundle) return
+    the *first* rate; vector negotiation is a deferred extension.
+
+    Returns ``None`` when the escrow advertises no rates (hidden-reserve
+    listings, attestation one-shots). Callers translate ``None`` into
+    either a hidden-reserve fallback (negotiation strategies) or a
+    "no scaling" path (settlement of pure-literal escrows).
+    """
+    rates = _rates_of(accepted_or_proposal)
+    if not rates:
+        return None
+    first = rates[0]
+    if isinstance(first, dict):
+        v = first.get("value")
+        if isinstance(v, str) and v.strip().isdigit():
+            return int(v.strip())
+        if isinstance(v, int) and not isinstance(v, bool):
+            return v
+        return None
+    v = getattr(first, "value", None)
+    if isinstance(v, int) and not isinstance(v, bool):
+        return v
+    return None
+
+
+def accepted_token_address(accepted_or_proposal: Any) -> str | None:
+    """Return the payment-token address from an ERC-20-style entry.
+
+    Reads ``literal_fields["token"]`` — the canonical place ERC-20 and
+    ERC-1155 escrows pin their payment-token. Returns ``None`` for
+    escrow kinds (NativeToken, TokenBundle, attestation) that don't
+    have a single ``token`` literal.
+    """
+    literals = _literal_fields_of(accepted_or_proposal)
+    val = literals.get("token") if isinstance(literals, dict) else None
+    return val if isinstance(val, str) and val else None
+
+
+def _rates_of(entry: Any) -> list[Any]:
+    if isinstance(entry, dict):
+        out = entry.get("rates")
+        return out if isinstance(out, list) else []
+    return list(getattr(entry, "rates", []) or [])
+
+
+def _literal_fields_of(entry: Any) -> dict[str, Any]:
+    if isinstance(entry, dict):
+        out = entry.get("literal_fields")
+        return out if isinstance(out, dict) else {}
+    return dict(getattr(entry, "literal_fields", {}) or {})
+
+
 class AcceptedEscrow(BaseModel):
     """One escrow shape the seller will accept for this listing.
 
-    Each entry pins the (chain, escrow contract) tuple plus a partial
-    EscrowData advertisement. The buyer's proposal must reference one
-    of the listing's accepted entries by (chain_name, escrow_address)
-    and supply the buyer-committable EscrowData keys in ``fields``.
+    Each entry pins the (chain, escrow contract) tuple plus the
+    obligation literals + rates the seller has fixed. The buyer's
+    proposal references one of these entries by
+    ``(chain_name, escrow_address)`` and inherits its ``literal_fields``.
 
-    ``fields`` is shape-only: keys present advertise a seller-preferred
-    value; keys absent are open. Whether a set field is a hard constraint
-    or a negotiable default is the seller's negotiation policy's concern,
-    not protocol infrastructure.
+    ``literal_fields`` is shape-only: keys present advertise a seller-
+    preferred value; keys absent are open. Never includes a rate-bearing
+    field directly — those live in ``rates`` so duration scaling stays
+    explicit.
 
-    ``amount`` is intentionally never present in ``fields`` — the
-    on-chain ObligationData.amount is a per-deal total derived at
-    settlement from ``price_per_hour * duration_seconds / 3600``. The
-    advertised per-hour rate lives in the sibling ``price_per_hour``
-    field so ``fields`` stays a pure Partial<ObligationData>.
+    ``rates`` carries every rate-bearing field on the obligation. For
+    ERC20 escrows that's a single ``{"field": "amount", "per": "hour",
+    "value": …}`` entry; multi-rate templates (TokenBundle) carry one
+    per rate-bearing field. Empty list = hidden reserve (seller did not
+    publish a rate; negotiation establishes one via the strategy's
+    ``default_min_price``). Readers use the ``primary_rate_value`` /
+    ``accepted_token_address`` helpers in this module.
     """
 
     chain_name: str = Field(
         description=(
             "Alkahest chain identifier (e.g. ``base_sepolia``, ``anvil``). "
             "Combined with ``escrow_address`` to look up the SDK codec via "
-            "``service.clients.alkahest.address_to_slot``."
+            "``service.clients.alkahest.get_escrow_codec_for``."
         ),
     )
     escrow_address: str = Field(
@@ -304,37 +452,25 @@ class AcceptedEscrow(BaseModel):
             "The (chain, address) pair determines the EscrowData ABI."
         ),
     )
-    fields: dict[str, Any] = Field(
+    literal_fields: dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "Partial EscrowData advertised by the seller. Keys present = "
-            "seller-preferred values; keys absent = open. Never includes "
-            "``amount`` (derived at settlement from ``price_per_hour`` × "
-            "duration / 3600)."
+            "Literal obligation-data keys the seller has fixed (e.g. "
+            "``token``, ``arbiter``). Keys present = seller-preferred "
+            "value; keys absent = open. Never includes a rate-bearing "
+            "field — those live in ``rates``."
         ),
     )
-    price_per_hour: int | None = Field(
-        default=None,
+    rates: list[RateValue] = Field(
+        default_factory=list,
         description=(
-            "Advertised per-hour rate in the escrow's payment token, in "
-            "base units (token-amount × 10^decimals). uint256-domain — on "
-            "the wire as a decimal-digit string, Python int internally. "
-            "Total settlement amount is ``price_per_hour × duration_seconds "
-            "// 3600`` (integer division; sub-hour fractions truncate). "
-            "``None`` = hidden reserve (seller did not publish a rate; "
-            "negotiation must establish one via the strategy's "
-            "``default_min_price``)."
+            "Rate-bearing obligation fields. Each entry pins one field "
+            "(``amount`` for ERC20, ``erc20Amounts[i]`` / ``nativeAmount`` "
+            "for TokenBundle, …) plus its ``per`` unit and the rate "
+            "``value`` in base units. Empty list = hidden reserve. "
+            "Readers use ``primary_rate_value`` for the headline rate."
         ),
     )
-
-    @field_validator("price_per_hour", mode="before")
-    @classmethod
-    def _parse_price_per_hour(cls, v: Any) -> int | None:
-        return _parse_uint256_str(v, "price_per_hour")
-
-    @field_serializer("price_per_hour")
-    def _serialize_price_per_hour(self, v: int | None) -> str | None:
-        return _serialize_uint256_str(v)
 
 
 class EscrowProposal(BaseModel):
@@ -368,6 +504,25 @@ class EscrowProposal(BaseModel):
             "which are derived at settlement."
         ),
     )
+    literal_fields: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Forward-looking sibling of ``fields`` for the generic-escrow "
+            "migration. When set, mirrors ``fields`` (literal obligation-"
+            "data keys the buyer commits to). Readers should prefer the "
+            "canonical accessor ``accepted_token_address`` which handles "
+            "either shape."
+        ),
+    )
+    rates: list[RateValue] | None = Field(
+        default=None,
+        description=(
+            "Forward-looking sibling for multi-rate templates. Today "
+            "negotiation produces a single scalar amount that becomes the "
+            "primary rate-bearing field at settlement; future TokenBundle "
+            "proposals carry one ``RateValue`` per rate-bearing field."
+        ),
+    )
     expiration_unix: int = Field(
         gt=0,
         description=(
@@ -378,60 +533,3 @@ class EscrowProposal(BaseModel):
     )
 
 
-class DomainEvent(BaseModel):
-    """Generic domain event transported through core orchestration."""
-
-    model_config = ConfigDict(use_enum_values=False)
-
-    event_id: str = Field(description="Unique event identifier")
-    event_type: Any = Field(description="Event type identifier")
-    source: str = Field(description="Source identifier")
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    data: dict[str, Any] = Field(default_factory=dict)
-
-
-class DomainAction(BaseModel):
-    """Generic domain action selected by policy and executed by action handlers."""
-
-    action_type: Any = Field(description="Action type identifier")
-    parameters: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
-
-
-class Decision(BaseModel):
-    """A policy decision and its execution outcome."""
-
-    decision_id: str = Field(description="Unique decision identifier")
-    agent_id: str = Field(description="Agent who made the decision")
-    context: "DecisionContext" = Field(description="Context that led to the decision")
-    action: DomainAction = Field(description="Chosen action")
-    policy_used: str = Field(description="Policy that produced the decision")
-    timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="When the decision was made",
-    )
-    outcome: dict[str, Any] | None = Field(
-        default=None,
-        description="Outcome of executing this decision",
-    )
-
-    def record_outcome(self, outcome: dict[str, Any]) -> None:
-        self.outcome = outcome
-
-
-class DecisionContext(BaseModel):
-    """Domain-neutral policy evaluation context."""
-
-    event: DomainEvent
-    agent_id: str
-    available_resources: dict[str, Any] = Field(default_factory=dict)
-    past_experiences: list[dict[str, Any]] = Field(default_factory=list)
-    market_state: dict[str, Any] = Field(default_factory=dict)
-    negotiation_history: list[dict[str, Any]] = Field(default_factory=list)
-
-    def get_event_type(self) -> str:
-        et = self.event.event_type
-        return et.value if hasattr(et, "value") else str(et)
-
-    def has_negotiation_context(self) -> bool:
-        return len(self.negotiation_history) > 0

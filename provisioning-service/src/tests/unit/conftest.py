@@ -21,7 +21,7 @@ def mock_settings():
         mock_settings.ansible_timeout_seconds = 60
     """
     settings = MagicMock()
-    settings.default_vm_host = "ww1"
+    settings.default_vm_host = "kvm1"
     settings.default_max_retries = 3
     settings.retry_backoff_initial_seconds = 60
     settings.retry_backoff_multiplier = 2.0

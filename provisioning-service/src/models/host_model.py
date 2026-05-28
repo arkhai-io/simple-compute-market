@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 class HostCreate(BaseModel):
     """Body accepted by ``POST /api/v1/hosts/``."""
 
-    name: str = Field(description="Ansible alias / hostname key (e.g. 'ww1').")
+    name: str = Field(description="Ansible alias / hostname key (e.g. 'kvm1').")
     kvm_host: str = Field(description="IP address or hostname for SSH.")
     ssh_user: str = Field(description="SSH login user on the KVM host.")
     ssh_key_type: Literal["path", "embedded"] = Field(

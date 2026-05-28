@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 BuildEscrowTermsFn = Callable[
     [EscrowProposal, str, int, int], list[EscrowTerms],
 ]
-"""``(proposal, seller_wallet, agreed_price, duration_seconds) -> list[EscrowTerms]``.
+"""``(proposal, seller_wallet, agreed_amount, duration_seconds) -> list[EscrowTerms]``.
 
 Materializes the seller-confirmed proposal (echoed back in the
 negotiation response) into the canonical EscrowTerms list. The list
@@ -65,7 +65,7 @@ def make_buyer_payment_escrow_terms_fn(
     chain_name: str,
     addr_config_path: Optional[str],
 ) -> BuildEscrowTermsFn:
-    """Build a ``(proposal, seller_wallet, agreed_price, duration_seconds)
+    """Build a ``(proposal, seller_wallet, agreed_amount, duration_seconds)
     -> [EscrowTerms]`` closure.
 
     The closure delegates to the canonical
@@ -77,11 +77,17 @@ def make_buyer_payment_escrow_terms_fn(
     supplies the token; ``fields["arbiter"]`` (when present) overrides
     the default ``recipient_arbiter``. The closure's chain config is
     purely local plumbing (how to talk to the chain), not negotiated.
+
+    ``agreed_amount`` is the absolute payment total in base units of the
+    payment token — the negotiated artifact, already multiplied out from
+    any per-hour rate. ``duration_seconds`` is carried into
+    ``AgreementContext`` for codecs that bind the lease window into
+    their demand.
     """
     def _build(
         proposal: EscrowProposal,
         seller_wallet_address: str,
-        agreed_price: float,
+        agreed_amount: int,
         duration_seconds: int,
     ) -> list[EscrowTerms]:
         # Late imports — alkahest is heavyweight; tests that mock this
@@ -89,16 +95,36 @@ def make_buyer_payment_escrow_terms_fn(
         from service.clients.alkahest import (
             address_to_slot,
             build_payment_obligation_data,
+            get_escrow_codec_for,
         )
+        from service.schemas import accepted_token_address
 
-        token = proposal.fields.get("token")
-        if not isinstance(token, str):
+        # ERC20-only dispatch gate. Resolve the codec at build time so we
+        # fail fast with a clear NotImplementedError when the proposal
+        # references a non-ERC20 escrow contract. Phase 5 of the
+        # generic-escrow templates rollout: other obligation kinds land
+        # in later phases.
+        codec = get_escrow_codec_for(
+            proposal.chain_name, proposal.escrow_address,
+            config_path=addr_config_path,
+        )
+        if codec.kind != "erc20_escrow_obligation_nontierable":
+            raise NotImplementedError(
+                f"Buyer dispatch not implemented for escrow kind "
+                f"{codec.kind!r} at address {proposal.escrow_address!r} "
+                f"(chain {proposal.chain_name!r}); ERC20 non-tierable only."
+            )
+
+        token = accepted_token_address(proposal)
+        if not isinstance(token, str) or not token:
             raise ValueError(
-                "EscrowProposal.fields['token'] missing or "
-                "non-string; cannot build buyer-side obligation_data"
+                "EscrowProposal token missing or non-string — checked "
+                "literal_fields['token']; cannot build buyer-side "
+                "obligation_data"
             )
         arbiter_kind = "recipient_arbiter"
-        proposal_arbiter = proposal.fields.get("arbiter")
+        proposal_literal = proposal.literal_fields or {}
+        proposal_arbiter = proposal_literal.get("arbiter")
         if isinstance(proposal_arbiter, str) and proposal_arbiter:
             arbiter_slot = address_to_slot(
                 proposal.chain_name, proposal_arbiter,
@@ -109,7 +135,7 @@ def make_buyer_payment_escrow_terms_fn(
 
         obligation_data = build_payment_obligation_data(
             seller_wallet=seller_wallet_address,
-            agreed_price=agreed_price,
+            agreed_amount=int(agreed_amount),
             duration_seconds=duration_seconds,
             token_contract_address=token,
             chain_name=chain_name,

@@ -1,212 +1,115 @@
 # Market CLI Installer
 
-Cross-platform installer for the Market CLI, supporting both offline and cloud-based distribution via Google Cloud Storage.
+The `market` CLI ships as a tarball attached to each GitHub Release. The
+remote installer downloads the tarball, verifies its checksum, and runs
+the bundled `install.sh` locally.
 
-## Installation Methods
+> A PyPI package is planned once the `arkhai` organization is approved.
+> Once published, `pipx install arkhai-market` will be the recommended path.
 
-### Remote Install (Latest)
-
-```bash
-curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash
-```
-
-### Remote Install (Specific Version)
+## Install
 
 ```bash
-curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash -s -- --version market-cli-v1.0.0
+curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh | bash
 ```
 
-### Self-Extracting Script (Offline)
+Pin a specific version:
 
 ```bash
-bash market-installer.sh
+curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh | \
+  bash -s -- --version market-cli-v1.0.0
 ```
 
-### Manual Development Install
+## Dev install (from a clone)
 
 ```bash
 cd buyer
-make init   # creates .venv with uv venv --python 3.12 + uv sync
+make init   # uv venv --python 3.12 + uv sync
 ```
 
-After `make init`, run the CLI through `uv run market <command>` from
-inside `buyer/`, or activate the venv directly with
-`source buyer/.venv/bin/activate`.
+Run via `uv run market <command>` from inside `buyer/`, or activate the
+venv directly: `source buyer/.venv/bin/activate`.
 
 ## Requirements
 
 - **OS**: macOS or Linux
-- **Architecture**: x86_64 or arm64
+- **Arch**: x86_64 or arm64
 - **Python**: 3.12+
-- **Tools**: curl or wget, make, git
+- **Tools**: `curl` or `wget`, `make`, `git`
 
-## Overall Flow
+## Release flow
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        CI/CD Pipeline                           │
-│  Tag push (market-cli-v*) or manual dispatch                     │
-│                                                                 │
-│  1. Checkout repo                                               │
-│  2. Determine version from tag or dev-{sha}                     │
-│  3. Create tarball (excluding .git, .venv, __pycache__, etc.)   │
-│  4. Authenticate to GCP via GCS_STG_WRITER_KEY                  │
-│  5. Upload to GCS bucket                                        │
-│  6. Create GitHub Release                                       │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     GCS Bucket Layout                           │
-│  gs://ww-migration-arkhai-installer-files/                               │
-│  ├── install.sh                  (remote installer entry point) │
-│  ├── releases/                                                   │
-│  │   ├── latest/                                                 │
-│  │   │   ├── market-cli.tar.gz        (always latest build)     │
-│  │   │   └── market-cli.tar.gz.sha256                            │
-│  │   ├── market-cli-v1.0.0/                                      │
-│  │   │   ├── market-cli.tar.gz        (pinned release)          │
-│  │   │   └── market-cli.tar.gz.sha256                            │
-│  │   └── dev-a1b2c3d/                                            │
-│  │       ├── market-cli.tar.gz        (dev build)               │
-│  │       └── market-cli.tar.gz.sha256                            │
-│  └── checksums/                                                   │
-│      └── market-cli-v1.0.0.sha256  (aggregate manifest)          │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              User Runs Remote Installer                         │
-│  curl ... -o install.sh && bash install.sh                      │
-│                                                                 │
-│  install-remote.sh:                                             │
-│  1. Parse --version flag (optional)                             │
-│  2. Download tarball from GCS (latest or versioned)             │
-│  3. Extract to temp directory                                   │
-│  4. Call bundled install.sh                                      │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      install.sh                                 │
-│                                                                 │
-│  1. Detect platform (macOS/Linux) and arch (x86_64/arm64)       │
-│  2. Validate Python 3.12+ is installed                          │
-│  3. Install/verify uv v0.8.13                                   │
-│  4. Copy project files to ~/.market                             │
-│  5. Create Python venv in cli/.venv                             │
-│  6. Run: uv pip install -e .                                    │
-│  7. Symlink ~/.local/bin/market → ~/.market/cli/.venv/bin/market │
-│  8. Add ~/.local/bin to PATH in shell RC file                   │
-│  9. Verify: market --help                                       │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ Trigger: push of tag `market-cli-v*.*.*` (or manual dispatch) │
+│                                                              │
+│ .github/workflows/release-cli.yml:                           │
+│   1. Build market-cli.tar.gz (repo minus build artifacts)    │
+│   2. Generate market-cli.tar.gz.sha256                       │
+│   3. Copy scripts/install-remote.sh -> install.sh            │
+│   4. Create GitHub Release with all three files attached     │
+└──────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌──────────────────────────────────────────────────────────────┐
+│ End user: curl <release-url>/install.sh | bash               │
+│                                                              │
+│ install.sh (= scripts/install-remote.sh):                    │
+│   1. Parse --version flag (default: latest)                  │
+│   2. Download market-cli.tar.gz and .sha256                  │
+│   3. Verify checksum                                         │
+│   4. Extract and hand off to bundled install.sh              │
+└──────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌──────────────────────────────────────────────────────────────┐
+│ Bundled install.sh (repo-root install.sh):                   │
+│   1. Detect platform (macOS/Linux, x86_64/arm64)             │
+│   2. Install system deps (curl, rsync, git, gcc, python3.12,│
+│      jq) via apt on Linux; prompt to use brew on macOS       │
+│   3. Install uv if missing                                   │
+│   4. rsync the tarball contents to $MARKET_INSTALL_DIR        │
+│      (default: ~/.market). .env files in target are preserved.│
+│   5. uv sync --project ~/.market/buyer (no-dev)              │
+│   6. Symlink ~/.local/bin/market -> ~/.market/buyer/.venv/bin/market │
+│   7. Append ~/.local/bin to PATH in the user's shell rc      │
+│   8. Verify with `market --help`                             │
+└──────────────────────────────────────────────────────────────┘
 ```
-
-### Build Phase
-
-The CI/CD pipeline (`.github/workflows/release-cli.yml`) triggers on `market-cli-v*` tag pushes or manual dispatch. It creates a tarball of the repository excluding build artifacts:
-
-```bash
-tar czf market-cli.tar.gz \
-  --transform 's,^\./,market-cli/,' \
-  --exclude='.git' --exclude='__pycache__' --exclude='.venv' ...
-```
-
-For offline distribution, `scripts/build-installer.sh` wraps the tarball into a single self-extracting shell script (`market-installer.sh`).
-
-### Upload Phase
-
-The workflow authenticates to GCP using the `GCS_STG_WRITER_KEY` secret and uploads three artifacts:
-
-| File | Destination | Purpose |
-|------|-------------|---------|
-| `market-cli.tar.gz` | `/releases/latest/` | Always points to the latest build |
-| `market-cli.tar.gz` | `/releases/{CLI_VERSION}/` | Version-pinned release |
-| `market-cli.tar.gz.sha256` | `/releases/latest/` and `/releases/{CLI_VERSION}/` | Checksum files |
-| `{CLI_VERSION}.sha256` | `/checksums/` | Aggregate checksum manifest |
-| `install.sh` | Bucket root | Remote installer entry point |
-
-### Download & Extract Phase
-
-When a user runs the remote installer (`scripts/install-remote.sh`):
-
-1. Detects available download tool (curl or wget)
-2. Downloads the tarball from GCS — latest or a specific `--version`
-3. Extracts to a temporary directory
-4. Hands off to the bundled `install.sh`
-
-### Install Phase
-
-The main script (`install.sh`) handles:
-
-1. **Platform detection** — OS (macOS/Linux) and architecture (x86_64/arm64)
-2. **Python validation** — Ensures Python 3.12+ is available
-3. **uv installation** — Installs or verifies `uv` v0.8.13
-4. **File copy** — Copies project to `$MARKET_INSTALL_DIR` (default: `~/.market`)
-5. **Virtual environment** — Creates a venv in `cli/.venv`
-6. **CLI install** — Runs `uv pip install -e .` (editable install)
-7. **Symlink** — Creates `~/.local/bin/market` pointing to the venv binary
-8. **Shell integration** — Adds `~/.local/bin` to PATH in `.zshrc`, `.bashrc`, or `config.fish`
-9. **Verification** — Runs `market --help` to confirm success
 
 ## Versioning
 
-Releases follow the tag format `market-cli-v{major}.{minor}.{patch}` (e.g., `market-cli-v1.0.0`).
+Releases are tagged `market-cli-v{major}.{minor}.{patch}` (e.g.
+`market-cli-v1.0.0`). The `latest` release pointer at GitHub always
+resolves to the most recent published tag.
 
-- **Tagged builds** → `/releases/{CLI_VERSION}/market-cli.tar.gz`
-- **Dev builds** → `/releases/dev-{short-sha}/market-cli.tar.gz`
-- **Latest** → always updated at `/releases/latest/market-cli.tar.gz`
-- **Checksums** → `/checksums/{CLI_VERSION}.sha256`
+Manual dispatch (no tag) produces a `dev-{short-sha}` build that is
+**not** published to a Release — the version string is only used in the
+build summary. To get a tagged dev release, push a `market-cli-vX.Y.Z`
+tag.
 
 ## Key Files
 
 | File | Description |
 |------|-------------|
-| `install.sh` | Main installation script (platform detection, venv setup, symlinks) |
-| `scripts/install-remote.sh` | Remote cURL installer — downloads tarball from GCS then calls `install.sh` |
-| `scripts/build-installer.sh` | Builds the self-extracting `market-installer.sh` for offline use |
-| `scripts/upload-gcs.sh` | Manual upload script for pushing artifacts to GCS |
-| `.github/workflows/release-cli.yml` | CI/CD workflow triggered by `market-cli-v*` tags or manual dispatch |
-| `Dockerfile.installer-test` | Docker image for testing the installer in a clean environment |
+| `install.sh` | Local installer (platform detection, deps, venv, symlink). Bundled inside the tarball. |
+| `scripts/install-remote.sh` | Remote curl installer. Uploaded to each Release as `install.sh`. |
+| `scripts/build-installer.sh` | Wraps the tarball into a self-extracting offline `market-installer.sh`. |
+| `.github/workflows/release-cli.yml` | CI flow triggered by `market-cli-v*` tags. |
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MARKET_INSTALL_DIR` | `~/.market` | Where the CLI is installed |
-| `CLI_VERSION` | latest | Target version for remote installs |
-| `GCS_BUCKET` | `ww-migration-arkhai-installer-files` | GCS bucket name (CI/CD and upload script only) |
-| `GCS_STG_WRITER_KEY` | — | GCP service account credentials (CI/CD secret) |
 
-## Creating a Dev Build
+## Offline install
 
-Dev builds are created by triggering the CI/CD workflow manually (without a `market-cli-v*` tag). The version will be `dev-{short-sha}`.
-
-**GitHub UI**: Go to Actions → "Release Market CLI" → "Run workflow".
-
-**GitHub CLI**:
+For air-gapped environments, build a self-extracting installer locally:
 
 ```bash
-gh workflow run release-cli.yml
+bash scripts/build-installer.sh
 ```
 
-The tarball is uploaded to `/releases/dev-{sha}/market-cli.tar.gz` in the GCS bucket and can be installed with:
-
-```bash
-curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash -s -- --version dev-abc1234
-```
-
-## Testing
-
-Run the installer in a clean Docker container:
-
-```bash
-docker build -f Dockerfile.installer-test .
-```
-
-Test against a remote URL:
-
-```bash
-docker build -f Dockerfile.installer-test \
-  --build-arg INSTALLER_URL=https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli .
-```
+This produces `market-installer.sh` -- a single shell script with the
+tarball embedded. Copy it to the target machine and run `bash market-installer.sh`.

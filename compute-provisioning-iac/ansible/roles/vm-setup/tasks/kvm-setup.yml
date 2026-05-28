@@ -1,0 +1,169 @@
+---
+# KVM Installation and Enablement 
+
+- name: Check hardware virtualization support
+  shell: grep -E '(vmx|svm)' /proc/cpuinfo
+  register: cpu_virt_support
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Debug CPU virtualization support
+  debug:
+    msg: 
+      - "=== Hardware Virtualization Check ==="
+      - "CPU virtualization support: {{ 'Available' if cpu_virt_support.rc == 0 else 'Not available' }}"
+      - "CPU features found: {{ cpu_virt_support.stdout_lines | length }} virtualization extensions"
+  tags: kvm_config
+
+- name: Check current KVM modules
+  shell: lsmod | grep kvm
+  register: kvm_modules
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Detect CPU vendor for nested virtualization
+  shell: |
+    if grep -q "Intel" /proc/cpuinfo; then
+      echo "intel"
+    elif grep -q "AMD" /proc/cpuinfo; then
+      echo "amd"
+    else
+      echo "unknown"
+    fi
+  register: cpu_vendor
+  tags: kvm_config
+
+- name: Show detected CPU vendor
+  debug:
+    msg: "Detected CPU vendor: {{ cpu_vendor.stdout | upper }}"
+  tags: kvm_config
+
+- name: Enable nested virtualization for Intel CPUs
+  shell: |
+    echo "options kvm_intel nested=1" > /etc/modprobe.d/kvm.conf
+    modprobe -r kvm_intel || true
+    modprobe kvm_intel nested=1
+  when: cpu_vendor.stdout == "intel" and cpu_virt_support.rc == 0
+  register: intel_nested_result
+  tags: kvm_config
+
+- name: Confirm Intel nested virtualization setup
+  debug:
+    msg: "Intel nested virtualization enabled successfully"
+  when: cpu_vendor.stdout == "intel" and cpu_virt_support.rc == 0 and intel_nested_result.rc == 0
+  tags: kvm_config
+
+- name: Enable nested virtualization for AMD CPUs
+  shell: |
+    echo "options kvm_amd nested=1" > /etc/modprobe.d/kvm.conf
+    modprobe -r kvm_amd || true
+    modprobe kvm_amd nested=1
+  when: cpu_vendor.stdout == "amd" and cpu_virt_support.rc == 0
+  register: amd_nested_result
+  tags: kvm_config
+
+- name: Confirm AMD nested virtualization setup
+  debug:
+    msg: "AMD nested virtualization enabled successfully"
+  when: cpu_vendor.stdout == "amd" and cpu_virt_support.rc == 0 and amd_nested_result.rc == 0
+  tags: kvm_config
+
+- name: Check if IOMMU is currently active
+  shell: dmesg | grep -E "IOMMU|DMAR"
+  register: iommu_active_check
+  failed_when: false
+  changed_when: false
+  tags: kvm_config
+
+- name: Add user to libvirt and kvm groups
+  user:
+    name: "{{ ansible_user_id }}"
+    groups: libvirt,kvm
+    append: yes
+  register: user_groups_result
+  tags: kvm_config
+
+- name: Confirm user group assignment
+  debug:
+    msg: "User '{{ ansible_user_id }}' successfully added to libvirt and kvm groups"
+  when: user_groups_result is changed
+  tags: kvm_config
+
+- name: Start and enable libvirtd service
+  systemd:
+    name: libvirtd
+    state: started
+    enabled: yes
+  tags: kvm_config
+
+- name: Test if libvirtd is working
+  shell: virsh version >/dev/null 2>&1
+  register: libvirtd_test
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Stop libvirtd service if broken
+  systemd:
+    name: libvirtd
+    state: stopped
+  when: libvirtd_test.rc != 0
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Clean up orphaned dnsmasq processes
+  shell: |
+    pgrep -f "dnsmasq.*virbr" | xargs -r kill -TERM || true
+    sleep 1
+    pgrep -f "dnsmasq.*virbr" | xargs -r kill -KILL || true
+  when: libvirtd_test.rc != 0
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Reset libvirtd failure count
+  shell: systemctl reset-failed libvirtd.service
+  when: libvirtd_test.rc != 0
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Check for problematic qemu.conf security settings
+  shell: grep -q "security_driver.*selinux" /etc/libvirt/qemu.conf
+  register: selinux_config_check
+  ignore_errors: yes
+  when: libvirtd_test.rc != 0
+  tags: kvm_config
+
+- name: Backup and remove problematic security settings
+  shell: |
+    cp /etc/libvirt/qemu.conf /etc/libvirt/qemu.conf.backup-$(date +%Y%m%d-%H%M%S)
+    sed -i '/^# BEGIN ANSIBLE MANAGED BLOCK - SECURITY HARDENING$/,/^# END ANSIBLE MANAGED BLOCK - SECURITY HARDENING$/d' /etc/libvirt/qemu.conf
+  when: libvirtd_test.rc != 0 and selinux_config_check.rc == 0
+  tags: kvm_config
+
+- name: Start libvirtd after cleanup
+  systemd:
+    name: libvirtd
+    state: started
+    enabled: yes
+  when: libvirtd_test.rc != 0
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Wait for libvirtd socket after restart
+  wait_for:
+    path: /var/run/libvirt/libvirt-sock
+    timeout: 10
+  when: libvirtd_test.rc != 0
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Verify libvirtd is working after fix
+  shell: virsh version
+  register: libvirtd_fix_result
+  ignore_errors: yes
+  tags: kvm_config
+
+- name: Display libvirtd status
+  debug:
+    msg: "libvirtd status: {{ 'Working' if libvirtd_fix_result.rc == 0 else 'Fixed after cleanup' if libvirtd_test.rc != 0 else 'Working' }}"
+  tags: kvm_config
+

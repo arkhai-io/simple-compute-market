@@ -1,0 +1,18 @@
+# ---------------------------------------------------------------------------
+# Profile: seller
+# Activated when the provisioning service runs as part of `compose/seller.yml`
+# (compose sets ACTIVE_PROFILES=seller). Layers on top of `docker` defaults
+# already baked into the image.
+#
+# storefront_admin_key is intentionally omitted here — config.py resolves
+# it from the storefront TOML mounted at /etc/arkhai/storefront.toml so a
+# seller writes the value in exactly one place.
+# ---------------------------------------------------------------------------
+
+# Service name on the seller compose's default network.
+storefront_url: "http://seller-storefront:8001"
+
+# SQLite under the seller-provisioning-data named volume (defined in
+# compose/seller.yml). The path inside the container is /app/data, the
+# volume preserves the DB across `docker compose down`.
+database_url: "sqlite:////app/data/provisioning.db"

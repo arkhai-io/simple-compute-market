@@ -51,13 +51,13 @@ def _listing(**offer_extras) -> dict:
     }
     return {
         "listing_id": "L1",
-        "seller": "",
+        "storefront_url": "",
         "offer_resource": offer,
         "accepted_escrows": [
             {
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"token": "0x" + "ab" * 20},
+                "literal_fields": {"token": "0x" + "ab" * 20},
             }
         ],
         "max_duration_seconds": 12960000,
@@ -151,7 +151,7 @@ class TestRangeFilters:
 
 
 # ---------------------------------------------------------------------------
-# Array-projection filter — accepted_escrows[*].fields.token
+# Array-projection filter — accepted_escrows[*].literal_fields.token
 # ---------------------------------------------------------------------------
 
 
@@ -159,8 +159,8 @@ class TestTokenArrayFilter:
     def test_token_matches_any_advertised(self, spec):
         listing = _listing()
         listing["accepted_escrows"] = [
-            {"chain_name": "anvil", "escrow_address": "0xa", "fields": {"token": "USDC"}},
-            {"chain_name": "anvil", "escrow_address": "0xb", "fields": {"token": "WETH"}},
+            {"chain_name": "anvil", "escrow_address": "0xa", "literal_fields": {"token": "USDC"}},
+            {"chain_name": "anvil", "escrow_address": "0xb", "literal_fields": {"token": "WETH"}},
         ]
         assert _match(spec, listing, token="USDC") is True
         assert _match(spec, listing, token="WETH") is True
@@ -234,8 +234,8 @@ class TestSetFormIn:
     def test_array_projection_token(self, spec):
         listing = _listing()
         listing["accepted_escrows"] = [
-            {"chain_name": "anvil", "escrow_address": "0xa", "fields": {"token": "USDC"}},
-            {"chain_name": "anvil", "escrow_address": "0xb", "fields": {"token": "WETH"}},
+            {"chain_name": "anvil", "escrow_address": "0xa", "literal_fields": {"token": "USDC"}},
+            {"chain_name": "anvil", "escrow_address": "0xb", "literal_fields": {"token": "WETH"}},
         ]
         assert _match(spec, listing, token="in:[USDC,DAI]") is True
         assert _match(spec, listing, token="in:[DAI,FRAX]") is False
@@ -257,7 +257,7 @@ class TestSetFormNotIn:
     def test_excluded_value_rejects(self, spec):
         listing = _listing()
         listing["accepted_escrows"] = [
-            {"chain_name": "anvil", "escrow_address": "0xa", "fields": {"token": "USDC"}},
+            {"chain_name": "anvil", "escrow_address": "0xa", "literal_fields": {"token": "USDC"}},
         ]
         assert _match(spec, listing, token_exclude="not_in:[USDC]") is False
         assert _match(spec, listing, token_exclude="not_in:[DAI,FRAX]") is True

@@ -1,0 +1,95 @@
+---
+# This file handles virt-install with multiple GPUs without retry logic
+# It will attach all specified GPUs to the VM during creation
+
+- name: Build hostdev arguments for multiple GPUs
+  set_fact:
+    gpu_hostdev_args: >-
+      {% set args = [] %}
+      {% if vm_gpu_devices is defined and vm_gpu_devices | length > 0 %}
+      {%   for gpu in vm_gpu_devices %}
+      {%     set gpu_arg = '--hostdev ' + gpu.pci %}
+      {%     if gpu.romfile is defined and gpu.romfile != '' %}
+      {%       set gpu_arg = gpu_arg + ',romfile=' + gpu.romfile %}
+      {%     endif %}
+      {%     set _ = args.append(gpu_arg) %}
+      {%     if gpu.audio is defined and gpu.audio != '' and gpu.audio != 'NO_AUDIO_DEVICE' %}
+      {%       set _ = args.append('--hostdev ' + gpu.audio) %}
+      {%     endif %}
+      {%   endfor %}
+      {% elif vm_gpu_device is defined and vm_gpu_device != '' %}
+      {%   set gpu_arg = '--hostdev ' + vm_gpu_device %}
+      {%   if vm_gpu_rom_file is defined and vm_gpu_rom_file != '' %}
+      {%     set gpu_arg = gpu_arg + ',romfile=' + vm_gpu_rom_file %}
+      {%   endif %}
+      {%   set _ = args.append(gpu_arg) %}
+      {%   if gpu_audio_device is defined and gpu_audio_device.stdout is defined and gpu_audio_device.stdout != 'NO_AUDIO_DEVICE' %}
+      {%     set _ = args.append('--hostdev ' + gpu_audio_device.stdout) %}
+      {%   endif %}
+      {% endif %}
+      {{ args | join(' ') }}
+
+- name: Debug GPU hostdev arguments
+  debug:
+    msg:
+      - "=== Multi-GPU Configuration ==="
+      - "Number of GPUs: {{ vm_gpu_devices | length if (vm_gpu_devices is defined) else 1 }}"
+      - "GPU hostdev arguments:"
+      - "{{ gpu_hostdev_args }}"
+
+- name: Execute virt-install with multiple GPUs (scratch/base image)
+  shell: |
+    virt-install \
+      --name {{ vm_name }} \
+      --ram {{ vm_ram }} \
+      --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \
+      {% if vm_image_type == 'scratch' %}--disk path=/var/lib/libvirt/images/{{ vm_name }}-init.iso,device=cdrom \
+      {% endif %}--vcpus {{ vm_vcpus }} \
+      --cpu host-passthrough,cache.mode=passthrough \
+      --machine q35 \
+      --boot uefi \
+      --features smm=on \
+      --tpm none \
+      --os-variant {{ vm_os_variant }} \
+      --network network=default,model=virtio \
+      --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 \
+      {{ gpu_hostdev_args }} \
+      --graphics none \
+      --console pty,target_type=serial \
+      --import \
+      --noautoconsole
+  register: vm_create_result
+  when: vm_image_type is defined and vm_image_type in ['scratch', 'base']
+  delegate_to: "{{ target_host }}"
+
+- name: Execute virt-install with multiple GPUs (golden image)
+  shell: |
+    virt-install \
+      --name {{ vm_name }} \
+      --ram {{ vm_ram }} \
+      --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \
+      --vcpus {{ vm_vcpus }} \
+      --cpu host-passthrough,cache.mode=passthrough \
+      --machine q35 \
+      --boot uefi \
+      --features smm=on \
+      --tpm none \
+      --os-variant {{ vm_os_variant }} \
+      --network network=default,model=virtio \
+      --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 \
+      {{ gpu_hostdev_args }} \
+      --graphics none \
+      --console pty,target_type=serial \
+      --import \
+      --noautoconsole
+  register: vm_create_result
+  when: vm_image_type is defined and vm_image_type == 'golden'
+  delegate_to: "{{ target_host }}"
+
+- name: Display VM creation success
+  debug:
+    msg:
+      - "=== VM Created Successfully ==="
+      - "VM Name: {{ vm_name }}"
+      - "GPUs Attached: {{ vm_gpu_devices | length if (vm_gpu_devices is defined) else 1 }}"
+      - "{% if vm_gpu_devices is defined %}GPU List: {{ vm_gpu_devices | map(attribute='pci') | join(', ') }}{% else %}GPU: {{ vm_gpu_device }}{% endif %}"

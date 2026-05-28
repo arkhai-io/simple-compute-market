@@ -1,15 +1,14 @@
 """Unit tests for the storefront's dynaconf-backed configuration.
 
 Exercises the layered load (``settings.toml`` defaults + XDG overlay files)
-and the composite functions (``AGENT_ID``, ``BASE_URL_OVERRIDE``,
-``chain_id()``). No live RPC, no real network — tests build dynaconf
-instances from in-memory dicts or temp files.
+and the composite functions (``AGENT_ID``, ``BASE_URL_OVERRIDE``, ``CHAINS``).
+No live RPC, no real network — tests build dynaconf instances from in-memory
+dicts or temp files.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 from dynaconf import Dynaconf
@@ -26,15 +25,21 @@ from market_storefront.utils import config as agent_config
 def test_settings_toml_provides_baseline_defaults():
     s = agent_config.settings
     assert s.port == 8000
-    assert s.chain.name == "ethereum_sepolia"
-    assert s.registry.urls == ["http://localhost:8080"]
+    # registry.urls intentionally defaults to [] — see settings.toml. Shipping
+    # a non-empty default would cause dynaconf's merge_enabled=True to *append*
+    # any user-supplied list rather than replace it, leaving the storefront
+    # heartbeating to both the default and the user's registry.
+    assert s.registry.urls == []
     assert s.registry.discovery_timeout == 5.0
     assert s.provisioning.service_url == "http://localhost:8085"
     assert s.provisioning.timeout == 3600
-    # Negotiation default is "bisection" (not ""/"rl") — prevents silent RL
-    # failures when torch is unavailable.
-    assert s.negotiation.policy_mode == "bisection"
-    assert s.auto_register is True
+    # Default policy chain ends in "bisection" (not "rl") — prevents
+    # silent RL failures when torch is unavailable.
+    assert s.negotiation.policies == [
+        "has_matching_inventory_guard",
+        "escrow_shape_guard",
+        "bisection",
+    ]
     assert s.pricing.publish_priceless is False
 
 
@@ -83,37 +88,36 @@ def test_base_url_override_uses_settings_default_when_zerotier_absent():
 
 
 # ---------------------------------------------------------------------------
-# chain_id() — explicit value wins; RPC fallback when zero; raises when
-# neither chain.chain_id nor chain.rpc_url is set.
+# CHAINS — built from the [chains.<name>] overlay tables, keyed by name.
 # ---------------------------------------------------------------------------
 
 
-def test_chain_id_returns_explicit_value_when_set():
-    from tests._settings_overrides import settings_overrides
+def test_chains_dict_built_from_overlay(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text(
+        """
+[chains.anvil]
+rpc_url = "http://localhost:8545"
 
-    with settings_overrides(**{"chain.chain_id": 31337}):
-        assert agent_config.chain_id() == 31337
+[chains.base_sepolia]
+rpc_url = "https://sepolia.base.org"
+chain_id = 84532
+"""
+    )
+    s = agent_config._build_settings()
+    chains = agent_config._build_chains(s)
+    assert set(chains) == {"anvil", "base_sepolia"}
+    assert chains["anvil"].rpc_url == "http://localhost:8545"
+    assert chains["anvil"].chain_id == 31337  # from KNOWN_CHAIN_IDS
+    assert chains["base_sepolia"].chain_id == 84532
 
 
-def test_chain_id_calls_rpc_when_explicit_is_zero():
-    from tests._settings_overrides import settings_overrides
-
-    mock_w3 = MagicMock()
-    mock_w3.eth.chain_id = 42161
-    with settings_overrides(**{
-        "chain.chain_id": 0,
-        "chain.rpc_url": "http://localhost:8545",
-    }):
-        with patch.object(agent_config, "Web3", return_value=mock_w3):
-            assert agent_config.chain_id() == 42161
-
-
-def test_chain_id_raises_when_zero_and_no_rpc():
-    from tests._settings_overrides import settings_overrides
-
-    with settings_overrides(**{"chain.chain_id": 0, "chain.rpc_url": ""}):
-        with pytest.raises(RuntimeError, match="chain.chain_id is not set"):
-            agent_config.chain_id()
+def test_chains_dict_empty_when_no_chains_section(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    s = agent_config._build_settings()
+    assert agent_config._build_chains(s) == {}
 
 
 # ---------------------------------------------------------------------------
@@ -147,16 +151,18 @@ def test_storefront_toml_overlay_wins_over_settings_defaults(tmp_path):
     overlay.write_text("""
 port = 8001
 
-[chain]
-name = "anvil"
+[chains.anvil]
 rpc_url = "http://localhost:8545"
 """)
     cfg = _build_isolated(tmp_path, [overlay])
     assert cfg.port == 8001
-    assert cfg.chain.name == "anvil"
-    assert cfg.chain.rpc_url == "http://localhost:8545"
+    assert cfg.chains.anvil.rpc_url == "http://localhost:8545"
     # Untouched key still has its settings.toml default.
-    assert cfg.negotiation.policy_mode == "bisection"
+    assert cfg.negotiation.policies == [
+        "has_matching_inventory_guard",
+        "escrow_shape_guard",
+        "bisection",
+    ]
 
 
 def test_secrets_overlay_wins_over_storefront_toml(tmp_path):
@@ -186,9 +192,100 @@ def test_env_var_wins_over_overlay_files(tmp_path, monkeypatch):
 
 
 def test_nested_env_var_via_double_underscore(tmp_path, monkeypatch):
-    """STOREFRONT_CHAIN__RPC_URL → settings.chain.rpc_url. The double
-    underscore separator is dynaconf's nested-key convention.
+    """STOREFRONT_CHAINS__ANVIL__RPC_URL → settings.chains.anvil.rpc_url.
+    The double underscore separator is dynaconf's nested-key convention.
     """
-    monkeypatch.setenv("STOREFRONT_CHAIN__RPC_URL", "http://env-host:8545")
+    monkeypatch.setenv("STOREFRONT_CHAINS__ANVIL__RPC_URL", "http://env-host:8545")
     cfg = _build_isolated(tmp_path, [])
-    assert cfg.chain.rpc_url == "http://env-host:8545"
+    assert cfg.chains.anvil.rpc_url == "http://env-host:8545"
+
+
+# ---------------------------------------------------------------------------
+# _build_settings derivation: wallet.address from private_key, chain.name
+# from rpc_url. These run the production builder so the post-process logic
+# is covered end-to-end.
+# ---------------------------------------------------------------------------
+
+
+_ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+_ANVIL_ADDR = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+
+
+def test_build_settings_derives_wallet_address_from_private_key(tmp_path, monkeypatch):
+    """When wallet.private_key is set but wallet.address is empty, the
+    builder fills wallet.address with the derived value. No RPC needed."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text(f"""
+[wallet]
+private_key = "{_ANVIL_KEY}"
+""")
+    cfg = agent_config._build_settings()
+    assert cfg.wallet.address == _ANVIL_ADDR
+    assert cfg.wallet.private_key == _ANVIL_KEY
+
+
+def test_build_settings_preserves_explicit_wallet_address(tmp_path, monkeypatch, caplog):
+    """When both wallet.address and wallet.private_key are set and they
+    disagree, the configured address wins but a warning is logged."""
+    import logging
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text(f"""
+[wallet]
+private_key = "{_ANVIL_KEY}"
+address     = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+""")
+    with caplog.at_level(logging.WARNING, logger="market_storefront.utils.config"):
+        cfg = agent_config._build_settings()
+    assert cfg.wallet.address == "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+    assert any("does not match" in rec.message for rec in caplog.records)
+
+
+def test_build_settings_skips_derivation_when_both_unset(tmp_path, monkeypatch):
+    """Empty wallet.private_key → no derivation; wallet.address stays empty."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    # No overlay file at all.
+    cfg = agent_config._build_settings()
+    assert cfg.wallet.address == ""
+    assert cfg.wallet.private_key == ""
+
+
+def test_build_chains_uses_known_chain_id_when_omitted(tmp_path, monkeypatch):
+    """A [chains.<name>] table that omits chain_id falls back to the
+    KNOWN_CHAIN_IDS lookup by name — operators don't have to repeat
+    canonical values like 31337 for anvil."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text(
+        """
+[chains.anvil]
+rpc_url = "http://localhost:8545"
+"""
+    )
+    s = agent_config._build_settings()
+    chains = agent_config._build_chains(s)
+    assert chains["anvil"].chain_id == 31337
+
+
+def test_build_chains_explicit_chain_id_wins(tmp_path, monkeypatch):
+    """An explicit chain_id in [chains.<name>] overrides the KNOWN
+    table — useful for chains the storefront doesn't ship a default
+    for, or for operators running a custom fork."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text(
+        """
+[chains.anvil]
+rpc_url = "http://localhost:8545"
+chain_id = 999999
+"""
+    )
+    s = agent_config._build_settings()
+    chains = agent_config._build_chains(s)
+    assert chains["anvil"].chain_id == 999999

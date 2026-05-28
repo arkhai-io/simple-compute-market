@@ -54,9 +54,9 @@ def svc(session_factory):
 
 
 def _make_lease(
-    resource_id: str = "compute-ww1-001",
+    resource_id: str = "compute-kvm1-001",
     escrow_uid: str = "escrow-abc",
-    vm_host: str = "ww1",
+    vm_host: str = "kvm1",
     vm_target: str = "tenant-a1b2",
     lease_start_utc=None,
     hours_from_now: int = 2,
@@ -159,11 +159,11 @@ class TestListLeases:
         assert all(l.status == LeaseStatus.pending.value for l in pending)
 
     def test_filters_by_vm_host(self, svc):
-        svc.create(_make_lease(escrow_uid="e1", vm_host="ww1"))
+        svc.create(_make_lease(escrow_uid="e1", vm_host="kvm1"))
         svc.create(_make_lease(escrow_uid="e2", vm_host="ww2"))
-        result = svc.list_leases(vm_host="ww1")
+        result = svc.list_leases(vm_host="kvm1")
         assert len(result) == 1
-        assert result[0].vm_host == "ww1"
+        assert result[0].vm_host == "kvm1"
 
     def test_filters_by_escrow_uid(self, svc):
         svc.create(_make_lease(escrow_uid="target"))
@@ -183,7 +183,7 @@ class TestListDue:
         data = LeaseCreate(
             resource_id="r1",
             escrow_uid="e-due",
-            vm_host="ww1",
+            vm_host="kvm1",
             vm_target="t1",
             lease_end_utc=past,
         )
@@ -200,7 +200,7 @@ class TestListDue:
         past = datetime.now(timezone.utc) - timedelta(seconds=1)
         lease = svc.create(LeaseCreate(
             resource_id="r2", escrow_uid="e-released",
-            vm_host="ww1", vm_target="t2", lease_end_utc=past,
+            vm_host="kvm1", vm_target="t2", lease_end_utc=past,
         ))
         svc.mark_released(lease.id)
         due = svc.list_due(datetime.now(timezone.utc))
@@ -212,7 +212,7 @@ class TestListDue:
         future_start = datetime.now(timezone.utc) + timedelta(hours=1)
         lease = svc.create(LeaseCreate(
             resource_id="r3", escrow_uid="e-pending-expired",
-            vm_host="ww1", vm_target="t3",
+            vm_host="kvm1", vm_target="t3",
             lease_start_utc=future_start,
             lease_end_utc=past,
         ))
@@ -251,7 +251,7 @@ class TestListPendingToActivate:
         future = datetime.now(timezone.utc) + timedelta(hours=1)
         lease = svc.create(LeaseCreate(
             resource_id="r1", escrow_uid="e-act",
-            vm_host="ww1", vm_target="t1",
+            vm_host="kvm1", vm_target="t1",
             lease_start_utc=future,
             lease_end_utc=future_end,
         ))

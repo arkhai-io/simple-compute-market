@@ -1,0 +1,61 @@
+# =============================================================================
+# VM Management – example variables (inventory/vm-vars-example.yaml)
+# =============================================================================
+# Copy to /tmp/vm-vars.yaml and adjust. We recommend using /tmp/ for vm-vars
+# so secrets are not committed. Example:
+#   ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
+#     -e "@inventory/management-vars.yaml" -e "@/tmp/vm-vars.yaml" --limit kvm_hosts
+# =============================================================================
+
+# --- Required: core VM operation ---------------------------------------------
+# Host from [kvm_hosts] in inventory/hosts (e.g. kvm1, vm1).
+vm_host: kvm1
+
+# VM name (libvirt domain name). Must not already exist when vm_action is create.
+vm_target: my-vm
+
+# Action: create | start | shutdown | destroy | reboot | undefine | monitor | reset_password | lease_end | lease_remove | list | check
+vm_action: create
+
+# Image source: scratch (cloud image + cloud-init) or golden (pre-built from GCS).
+# Golden requires management-vars.yaml (root_ssh_*, golden_image_name, gcs_*).
+image_setup_type: scratch   # or: golden
+
+# --- Optional: sizing --------------------------------------------------------
+# Defaults come from group_vars/all.yml (default_vm_settings) if unset.
+vm_ram: 4096               # MB
+vm_vcpus: 2
+vm_disk_size: 20G
+# vm_os_variant: ubuntu24.04
+
+# --- Optional: tenant SSH ---------------------------------------------------
+# SSH public key for the tenant user inside the VM. If unset, the role generates a keypair and you can fetch it after creation.
+# vm_tenant_pubkey: "ssh-ed25519 AAAA... comment"
+
+# --- Optional: GPU ----------------------------------------------------------
+# The playbook sets vm_gpu_provisioned from gpu_provisioned (use this name in vm-vars).
+gpu_provisioned: false      # true to attach a GPU (passthrough or partitioned)
+
+# Multi-GPU: request N GPUs (role picks from lockfile), or pin devices:
+# vm_gpu_count: 2
+# vm_gpu_device: "0000:01:00.0"
+# vm_gpu_devices: ["0000:01:00.0", "0000:02:00.0"]
+
+# Partitioned GPU (MIG or SR-IOV). Examples: "1g.5gb", "2g.10gb" (MIG), "vf0", "vf1" (SR-IOV).
+# vm_gpu_partition_size: "1g.5gb"
+
+# --- Optional: FRP (reverse proxy) ------------------------------------------
+# If set, VM gets a subdomain and port via FRP instead of direct port forwarding on the host.
+# frp_server_addr: "1.2.3.4"
+# frp_domain: "sub.example.com"
+# Required for FRP subdomain/port allocation (dashboard API). Prefer ansible-vault or -e "frp_dashboard_password=..."
+# frp_dashboard_password: "YOUR_FRP_DASHBOARD_PASSWORD"
+
+# --- Optional: lease end (vm_action: lease_end) ------------------------------
+# vm_lease_end: "2026-12-31 23:59"
+
+# --- Optional: golden image overrides ---------------------------------------
+# When image_setup_type: golden; otherwise values from management-vars.yaml are used.
+# golden_image_name: "ubuntu_noble-v0.0.2-gpu"
+# gcs_bucket_url: "gs://your-bucket"
+# gcs_image_path: "ubuntu_noble/20260128"

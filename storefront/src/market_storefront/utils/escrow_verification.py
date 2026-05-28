@@ -88,13 +88,14 @@ def _normalize_bytes(value: Any) -> str | None:
 
 def _extract_token_contract_from_listing(listing: dict[str, Any]) -> str:
     """Pull the negotiated token contract address from the seller's
-    listing's ``accepted_escrows[0].fields.token``.
+    listing's primary accepted-escrow entry.
 
     Used as the fallback when the buyer didn't include an
     ``escrow_proposal`` on the negotiation thread. With a proposal in
-    hand the verifier reads ``proposal.fields["token"]``
-    directly.
+    hand the verifier reads ``proposal.literal_fields["token"]`` directly.
     """
+    from service.schemas import accepted_token_address
+
     accepted = listing.get("accepted_escrows")
     if isinstance(accepted, str):
         try:
@@ -102,16 +103,12 @@ def _extract_token_contract_from_listing(listing: dict[str, Any]) -> str:
         except Exception:
             accepted = None
     if isinstance(accepted, list) and accepted:
-        first = accepted[0]
-        if isinstance(first, dict):
-            fields = first.get("fields")
-            if isinstance(fields, dict):
-                addr = fields.get("token")
-                if isinstance(addr, str) and addr:
-                    return addr
+        addr = accepted_token_address(accepted[0])
+        if addr:
+            return addr
     raise EscrowVerificationError(
         "Cannot extract token contract address from listing — "
-        "no accepted_escrows[0].fields.token"
+        "no accepted_escrows[0] token literal"
     )
 
 
@@ -180,9 +177,12 @@ async def verify_escrow_for_settlement(
         Our wallet address; participates in the expected obligation_data
         via the RecipientArbiter demand encoding.
     agreed_price, agreed_duration_seconds:
-        From the negotiation thread; together with the proposal's token +
-        arbiter and the chain config they determine the entire expected
-        obligation_data dict.
+        From the negotiation thread; ``agreed_price`` is the absolute
+        payment amount in base units (the DB column name is retained
+        from before the per-hour → absolute refactor — semantically it
+        is now the amount, not a rate). Together with the proposal's
+        token + arbiter and the chain config they determine the entire
+        expected obligation_data dict.
     listing:
         The seller's listing row (after ``load_listing``); used as the
         fallback source for the payment token when no proposal is
@@ -194,9 +194,13 @@ async def verify_escrow_for_settlement(
         addresses for the chain (a static config lookup, not an RPC call).
     escrow_proposal:
         The buyer's ``EscrowProposal``, persisted on the negotiation
-        thread at /negotiate/new. When present, supplies the payment
-        token via ``fields["token"]`` and the escrow slot via
-        the ``(chain_name, escrow_address)`` reverse lookup. None for
+        thread at /negotiate/new. When present, the verifier resolves
+        the escrow-kind codec from ``(chain_name, escrow_address)`` and
+        refuses to verify anything other than
+        ``erc20_escrow_obligation_nontierable`` with
+        ``NotImplementedError``. Token is read via
+        ``accepted_token_address`` (literal_fields-first, legacy fields
+        fallback). Arbiter override accepts either shape too. None for
         legacy threads — verifier falls back to the listing-derived
         token and the ``escrow_kind`` default.
     escrow_kind:
@@ -229,26 +233,59 @@ async def verify_escrow_for_settlement(
 
     # The proposal (when present) is the source of truth: its
     # (chain_name, escrow_address) identifies the escrow contract and
-    # its fields["token"] / fields["arbiter"] supply the
-    # buyer-committed values. Legacy threads with no proposal fall
-    # back to the kwarg defaults + a listing-derived token.
+    # its literal_fields / fields supply the buyer-committed values.
+    # Legacy threads with no proposal fall back to the kwarg defaults
+    # + a listing-derived token.
+    from service.schemas import accepted_token_address
+
     effective_arbiter_kind = "recipient_arbiter"
+    _codec = None
     if escrow_proposal is not None:
-        from service.clients.alkahest import address_to_slot
-        slot = address_to_slot(
-            escrow_proposal.chain_name,
-            escrow_proposal.escrow_address,
-            config_path=alkahest_address_config_path,
+        from service.clients.alkahest import (
+            address_to_slot,
+            get_escrow_codec_for,
         )
-        effective_escrow_kind = slot or escrow_kind
-        proposal_token = escrow_proposal.fields.get("token")
-        if not isinstance(proposal_token, str):
+        _addr = (escrow_proposal.escrow_address or "").lower()
+        # The buyer may leave the escrow contract unpinned — a zero-address
+        # placeholder — so negotiation gates on field equality rather than a
+        # specific (chain, address). An unpinned proposal escrows against the
+        # chain's default kind, so resolve the codec from ``escrow_kind``
+        # rather than the placeholder address (which matches no codec).
+        _unpinned = (not _addr) or set(_addr.removeprefix("0x")) <= {"0"}
+        if _unpinned:
+            effective_escrow_kind = escrow_kind
+        else:
+            try:
+                _codec = get_escrow_codec_for(
+                    escrow_proposal.chain_name,
+                    escrow_proposal.escrow_address,
+                    config_path=alkahest_address_config_path,
+                )
+            except ValueError as exc:
+                raise EscrowVerificationError(
+                    f"Cannot resolve escrow codec for proposal "
+                    f"(chain={escrow_proposal.chain_name!r}, "
+                    f"address={escrow_proposal.escrow_address!r}): {exc}"
+                ) from exc
+            if _codec.kind != "erc20_escrow_obligation_nontierable":
+                raise NotImplementedError(
+                    f"Seller verify not implemented for escrow kind "
+                    f"{_codec.kind!r} at address "
+                    f"{escrow_proposal.escrow_address!r} "
+                    f"(chain {escrow_proposal.chain_name!r}); "
+                    f"ERC20 non-tierable only."
+                )
+            effective_escrow_kind = _codec.kind
+        proposal_token = accepted_token_address(escrow_proposal)
+        if not isinstance(proposal_token, str) or not proposal_token:
             raise EscrowVerificationError(
-                f"escrow proposal for {escrow_uid} omitted "
-                f"fields['token']; cannot verify against chain"
+                f"escrow proposal for {escrow_uid} omitted token "
+                f"(literal_fields['token'] missing); cannot verify "
+                f"against chain"
             )
         effective_token = proposal_token
-        proposal_arbiter = escrow_proposal.fields.get("arbiter")
+        proposal_literal = escrow_proposal.literal_fields or {}
+        proposal_arbiter = proposal_literal.get("arbiter")
         if isinstance(proposal_arbiter, str) and proposal_arbiter:
             arbiter_slot = address_to_slot(
                 escrow_proposal.chain_name, proposal_arbiter,
@@ -262,12 +299,13 @@ async def verify_escrow_for_settlement(
 
     if get_obligation_fn is None:
         from service.clients.alkahest import get_escrow_kind_codec
-        try:
-            _codec = get_escrow_kind_codec(effective_escrow_kind)
-        except ValueError as exc:
-            raise EscrowVerificationError(
-                f"Cannot read escrow {escrow_uid}: {exc}"
-            ) from exc
+        if _codec is None:
+            try:
+                _codec = get_escrow_kind_codec(effective_escrow_kind)
+            except ValueError as exc:
+                raise EscrowVerificationError(
+                    f"Cannot read escrow {escrow_uid}: {exc}"
+                ) from exc
 
         async def get_obligation_fn(client, uid):  # type: ignore[no-redef]
             return await _codec.get_obligation(client, uid)
@@ -282,7 +320,7 @@ async def verify_escrow_for_settlement(
     try:
         expected_obligation_raw = build_obligation_data_fn(
             seller_wallet=seller_wallet,
-            agreed_price=float(agreed_price),
+            agreed_amount=int(agreed_price),
             duration_seconds=int(agreed_duration_seconds),
             token_contract_address=effective_token,
             chain_name=chain_name,

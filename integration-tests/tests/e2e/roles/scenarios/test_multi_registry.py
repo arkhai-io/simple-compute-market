@@ -10,12 +10,12 @@ through negotiation start, and they only become non-trivial with two
 
 The docker-compose stack runs:
   * ``registry``    on host port 8080 — public, no auth
-  * ``registry-b``  on host port 8082 — REGISTRY_REQUIRE_API_KEY=true,
-                    seeded with bearer ``test-buyer-token``
-  * ``sell_agent``  (Bob)   on host port 8001 — Anvil acct #2,
-                    [registry] urls = [registry, registry-b]
-  * ``alice_agent`` (Alice) on host port 8002 — Anvil acct #4,
-                    [registry] urls = [registry]
+  * ``registry-b``  on host port 8082 — read + write gated, seeded with
+                    a write-scoped bearer ``test-buyer-token``
+  * ``bob-storefront``   (Bob)   on host port 8001 — Anvil acct #2,
+                         [registry] urls = [registry, registry-b]
+  * ``alice-storefront`` (Alice) on host port 8002 — Anvil acct #4,
+                         [registry] urls = [registry]
 
 Provider topology
 -----------------
@@ -57,9 +57,8 @@ Phase 2 — inventory seed on both storefronts
   02b  Alice inventory seed (distinct resource_id)
 
 Phase 3 — create + publish listings on both
-  03a  Bob agent indexed by both registries
-  03b  Alice agent indexed by registry-A
   03c  Bob creates + resumes listing → fanned out to A + B
+       (publisher created lazily on this first signed publish)
   03d  Alice creates + resumes listing → published to A only
 
 Phase 4 — registry footprints differ as configured
@@ -74,8 +73,8 @@ Phase 5 — buyer-side discovery
   05b  Fan-in over [A, DEAD] still returns both (A has both)
 
 Phase 6 — simultaneous negotiations
-  06a  Buyer starts negotiation against Bob via sell_agent
-  06b  Buyer starts negotiation against Alice via alice_agent
+  06a  Buyer starts negotiation against Bob via bob-storefront
+  06b  Buyer starts negotiation against Alice via alice-storefront
   06c  Both negotiations independently recorded round-0 counter
 """
 
@@ -119,7 +118,6 @@ _REGISTRY_DEAD = "http://localhost:9"  # reserved discard port; connection refus
 
 DURATION_HOURS = 1
 BUYER_INITIAL_PRICE = 7_000
-ORDER_CREATE_CALLABLE = "oc.action.make_offer_from_order_create"
 
 DEMAND_RESOURCE = {
     "token": {
@@ -132,8 +130,8 @@ DEMAND_RESOURCE = {
 ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
     "escrow_address": "0x" + "11" * 20,
-    "fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
-    "price_per_hour": DEMAND_RESOURCE["amount"],
+    "literal_fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
+    "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_RESOURCE["amount"])}],
 }]
 
 BOB_OFFER = {
@@ -159,7 +157,7 @@ _BOB_CSV = (
     "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,"
     "attribute.vm_host\n"
     'compute-mr-bob-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-    'RTX 5080,90.0,"California, US",ww1\n'
+    'RTX 5080,90.0,"California, US",kvm1\n'
 )
 _ALICE_CSV = (
     "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
@@ -183,12 +181,8 @@ class MRState:
     registry_b_reachable: bool = False
     bob_strategy_ok: bool = False
     alice_strategy_ok: bool = False
-    bob_policies_seeded: bool = False
-    alice_policies_seeded: bool = False
     bob_inventory_seeded: bool = False
     alice_inventory_seeded: bool = False
-    bob_indexed: bool = False
-    alice_indexed: bool = False
     bob_listing_id: Optional[str] = None
     alice_listing_id: Optional[str] = None
     bob_in_a: bool = False
@@ -248,7 +242,7 @@ def alice_agent_id(alice_admin_client) -> str:
     live = getattr(status, "agent_id", None)
     if not live:
         pytest.skip(
-            "Alice has no live agent_id — the alice_agent container hasn't "
+            "Alice has no live agent_id — the alice-storefront container hasn't "
             "completed on-chain registration yet."
         )
     return str(live)
@@ -390,30 +384,6 @@ class TestStage00g_AliceStrategy:
 
 
 # ===========================================================================
-# Phase 1 — policy seed on both storefronts
-# ===========================================================================
-
-class TestStage01a_BobPolicySeed:
-    def test_01a_bob_seeds_policies(self, storefront_admin_client, mr_state):
-        _require(mr_state, "bob_strategy_ok")
-        result = storefront_admin_client.policy_seed()
-        assert result.get("callable_registry_count", 0) > 0, (
-            f"Bob's CALLABLE_REGISTRY empty after seed: {result}"
-        )
-        mr_state.bob_policies_seeded = True
-
-
-class TestStage01b_AlicePolicySeed:
-    def test_01b_alice_seeds_policies(self, alice_admin_client, mr_state):
-        _require(mr_state, "alice_strategy_ok")
-        result = alice_admin_client.policy_seed()
-        assert result.get("callable_registry_count", 0) > 0, (
-            f"Alice's CALLABLE_REGISTRY empty after seed: {result}"
-        )
-        mr_state.alice_policies_seeded = True
-
-
-# ===========================================================================
 # Phase 2 — inventory seed
 # ===========================================================================
 
@@ -443,50 +413,12 @@ class TestStage02b_AliceInventory:
 # Phase 3 — create + publish listings on both storefronts
 # ===========================================================================
 
-class TestStage03a_BobIndexed:
-    def test_03a_bob_indexed_in_both_registries(
-        self, storefront_admin_client, mr_state
-    ):
-        """Bob's wait_for_registry_agent_ready iterates his configured
-        URLs — once ok, both registries have indexed Bob's on-chain
-        registration."""
-        _require(mr_state, "bob_sees_both")
-        result = storefront_admin_client.wait_for_registry_agent_ready(timeout=90.0)
-        assert result.ready and result.registry_auth == "ok", (
-            f"Bob not indexed: ready={result.ready} auth={result.registry_auth!r}"
-        )
-        mr_state.bob_indexed = True
-
-
-class TestStage03b_AliceIndexed:
-    def test_03b_alice_indexed_in_registry_a(
-        self, alice_admin_client, mr_state
-    ):
-        _require(mr_state, "alice_sees_a")
-        result = alice_admin_client.wait_for_registry_agent_ready(timeout=90.0)
-        assert result.ready and result.registry_auth == "ok", (
-            f"Alice not indexed: ready={result.ready} auth={result.registry_auth!r}"
-        )
-        mr_state.alice_indexed = True
-
-
 class TestStage03c_BobPublishes:
     def test_03c_bob_creates_and_resumes(
         self, storefront_admin_client, seller_wallet, mr_state
     ):
         _require(
-            mr_state, "bob_indexed", "bob_policies_seeded", "bob_inventory_seeded"
-        )
-        # Validate dry-run first — catches policy/inventory misalignment
-        # before we commit a DB write.
-        evaluate = storefront_admin_client.evaluate_create_listing(
-            offer=BOB_OFFER,
-            accepted_escrows=ACCEPTED_ESCROWS,
-            max_duration_seconds=DURATION_HOURS * 3600,
-            paused=True,
-        )
-        assert evaluate.get("would_create") is True, (
-            f"Bob evaluate-create failed: {evaluate}"
+            mr_state, "bob_sees_both", "bob_inventory_seeded"
         )
 
         resp = storefront_admin_client.create_listing(
@@ -514,17 +446,7 @@ class TestStage03d_AlicePublishes:
         self, alice_admin_client, alice_wallet, mr_state
     ):
         _require(
-            mr_state, "alice_indexed", "alice_policies_seeded",
-            "alice_inventory_seeded",
-        )
-        evaluate = alice_admin_client.evaluate_create_listing(
-            offer=ALICE_OFFER,
-            accepted_escrows=ACCEPTED_ESCROWS,
-            max_duration_seconds=DURATION_HOURS * 3600,
-            paused=True,
-        )
-        assert evaluate.get("would_create") is True, (
-            f"Alice evaluate-create failed: {evaluate}"
+            mr_state, "alice_sees_a", "alice_inventory_seeded",
         )
 
         resp = alice_admin_client.create_listing(
@@ -672,7 +594,7 @@ class TestStage06a_NegotiateWithBob:
     def test_06a_buyer_starts_negotiation_with_bob(
         self, storefront_admin_client, buyer_config, mr_state
     ):
-        """Buyer hits sell_agent:8001 to start a negotiation against Bob's listing."""
+        """Buyer hits bob-storefront:8001 to start a negotiation against Bob's listing."""
         _require(mr_state, "bob_listing_id", "fanin_ok")
         from storefront_client import SyncStorefrontClient
         buyer_to_bob = SyncStorefrontClient(
@@ -683,7 +605,7 @@ class TestStage06a_NegotiateWithBob:
             resp = buyer_to_bob.negotiate_new(
                 listing_id=mr_state.bob_listing_id,
                 buyer_address=buyer_config["wallet_address"],
-                initial_price=BUYER_INITIAL_PRICE,
+                initial_amount=BUYER_INITIAL_PRICE,
                 duration_seconds=DURATION_HOURS * 3600,
                 token=DEMAND_RESOURCE["token"]["contract_address"],
             )
@@ -707,7 +629,7 @@ class TestStage06b_NegotiateWithAlice:
     def test_06b_buyer_starts_negotiation_with_alice(
         self, alice_admin_client, buyer_config, mr_state
     ):
-        """Buyer hits alice_agent:8002 to start a negotiation against Alice's listing.
+        """Buyer hits alice-storefront:8002 to start a negotiation against Alice's listing.
 
         Confirms the buyer can route to a different storefront for a
         different provider — same wire protocol, different URL. The
@@ -725,7 +647,7 @@ class TestStage06b_NegotiateWithAlice:
             resp = buyer_to_alice.negotiate_new(
                 listing_id=mr_state.alice_listing_id,
                 buyer_address=buyer_config["wallet_address"],
-                initial_price=BUYER_INITIAL_PRICE,
+                initial_amount=BUYER_INITIAL_PRICE,
                 duration_seconds=DURATION_HOURS * 3600,
                 token=DEMAND_RESOURCE["token"]["contract_address"],
             )

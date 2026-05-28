@@ -13,9 +13,11 @@ run by a different party in production:
    Run by: nobody in this repo (it's a real chain).
    Dev stand-in: `compose/external.yml` (Anvil + contract deployer).
 
-2. **Market** — the registry that indexes orders and agents.
+2. **Registry** — the indexer service that lists orders and agents so
+   buyers and sellers can discover each other.
    Run by: a marketplace operator (infra provider).
-   Deployment: `compose/market.yml`.
+   Deployment: `compose/registry.yml` (operator-facing) or
+   `compose/registry.dev.yml` (dev rig variant).
 
 3. **Seller node** — a seller's agent + their own provisioning service.
    Run by: each independent seller, on their own machine.
@@ -25,10 +27,10 @@ run by a different party in production:
    Run by: each independent buyer, on their own machine.
    Deployment: `compose/buyer.yml`.
 
-Layer fixtures (`external_world`, `market_registry`, `seller_node`,
+Layer fixtures (`external_world`, `registry_layer`, `seller_node`,
 `buyer_node`) correspond 1:1 to these units. A buyer-perspective test
-depends on `external_world + market_registry + buyer_node`. A seller
-test depends on `external_world + market_registry + seller_node`. A
+depends on `external_world + registry_layer + buyer_node`. A seller
+test depends on `external_world + registry_layer + seller_node`. A
 cross-role test depends on all four.
 
 ## Structure
@@ -37,7 +39,7 @@ cross-role test depends on all four.
 roles/
 ├── layers/                      # Layer verification + fixtures
 │   ├── test_external.py         # Chain + contracts → external_world
-│   ├── test_market.py           # Registry → market_registry
+│   ├── test_registry.py         # Registry/indexer → registry_layer
 │   ├── test_seller.py           # Seller's agent + provisioning → seller_node
 │   └── test_buyer.py            # Buyer's agent → buyer_node
 │

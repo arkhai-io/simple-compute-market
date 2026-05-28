@@ -115,8 +115,11 @@ def policy_train(
       arkhai_negotiator_seller.pt
       arkhai_negotiator_buyer.pt
 
-    Requires the training extras installed (pufferlib, torch). See
-    storefront/pyproject.toml's [rl] extra for the canonical install.
+    Requires the training extras installed (pufferlib, torch). Install
+    with ``uv pip install -e ".[training]"`` from the ``policy/``
+    directory (or ``market-policy[training]`` from a sibling). The
+    storefront / buyer ``[rl]`` extras are inference-only and don't
+    include pufferlib.
     """
     config_path = Path(config).resolve() if config else _CONFIG_DIR / "bilateral.ini"
 

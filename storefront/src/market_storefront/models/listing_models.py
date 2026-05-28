@@ -20,7 +20,7 @@ class CreateListingRequest(BaseModel):
     accepted_escrows: list[dict[str, Any]] = Field(
         description=(
             "List of escrow shapes the seller will accept for this listing. "
-            "Each entry: {chain_name, escrow_address, fields, price_per_hour}. "
+            "Each entry: {chain_name, escrow_address, literal_fields, rates}. "
             "Must be non-empty."
         ),
     )
@@ -155,35 +155,22 @@ class ArbitrateResponse(BaseModel):
     note: str = ""
 
 
-class AdminEvaluateCreateResponse(BaseModel):
-    """Response for POST /api/v1/admin/listings/evaluate-create.
-
-    Returns what the policy pipeline *would* do for a given CreateListingRequest
-    without writing anything to SQLite or the registry.
-    """
-    would_create: bool
-    action: str
-    listing_id_preview: str | None = None
-    policy_used: str | None = None
-    reason: str | None = None
-
-
-class AdminEvaluateCloseResponse(BaseModel):
-    """Response for POST /api/v1/admin/listings/{listing_id}/evaluate-close.
-
-    Returns what the policy pipeline *would* do for a close event.
-    """
-    would_close: bool
-    action: str
-    listing_id: str
-    policy_used: str | None = None
-    reason: str | None = None
-
-
 class EvaluateNegotiateRequest(BaseModel):
     """Body for POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate."""
-    their_proposed_price: float = Field(
-        description="The buyer's proposed price (in base token units) to evaluate"
+    proposal: dict[str, Any] = Field(
+        description=(
+            "The buyer's full EscrowProposal-shaped dict to evaluate, with "
+            "``fields['amount']`` carrying the absolute opening amount in base "
+            "units of the payment token."
+        )
+    )
+    requested_duration_seconds: int | None = Field(
+        default=None,
+        description=(
+            "Buyer's requested lease duration in seconds. Used to scale the "
+            "seller's per-hour reference rate into an absolute amount. "
+            "Defaults to 1 hour when omitted."
+        ),
     )
     buyer_address: str = Field(
         default="",
@@ -195,15 +182,16 @@ class EvaluateNegotiateResponse(BaseModel):
     """Response for POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate.
 
     Returns what the configured negotiation strategy *would* decide for a
-    buyer's opening offer at this listing — without creating any negotiation
+    buyer's opening proposal at this listing — without creating any negotiation
     thread or writing to the database.
     """
     listing_id: str
-    our_reference_price: float    # Seller's floor extracted from the listing's demand resource
-    their_proposed_price: float   # Echoed back from the request
-    direction: str              # "maximize" (seller always maximises price)
-    strategy: str               # e.g. "bisection" or "rl"
-    decision: str               # "accept" | "counter" | "exit"
-    decision_price: float | None = None
+    our_reference_amount: int        # Seller's absolute reference (per-hour × duration / 3600)
+    their_proposed_amount: int       # Echoed back from the request's proposal.fields.amount
+    direction: str                   # "maximize" (seller always maximises amount)
+    strategy: str                    # e.g. "bisection" or "rl"
+    decision: str                    # "accept" | "counter" | "exit"
+    decision_amount: int | None = None
+    decision_proposal: dict[str, Any] | None = None
     decision_reason: str | None = None
-    would_negotiate: bool       # True when decision != "exit"
+    would_negotiate: bool            # True when decision != "exit"

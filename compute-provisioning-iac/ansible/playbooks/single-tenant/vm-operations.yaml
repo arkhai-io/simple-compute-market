@@ -1,0 +1,35 @@
+---
+- name: VM Management Operations
+  hosts: kvm_hosts
+  gather_facts: no
+  # Pin every libvirt-client invocation in this play (bare `virsh`,
+  # `virt-install`, etc.) to the system-wide libvirtd socket. Without
+  # this, ansible's non-login SSH session inherits the target user's
+  # default URI — which on Debian/Ubuntu is `qemu:///session` for any
+  # non-root user, surfacing as "network 'default' not found" and other
+  # session-vs-system scope drift.
+  environment:
+    LIBVIRT_DEFAULT_URI: qemu:///system
+  vars:
+    target_host: "{{ vm_host | default('localhost') }}"
+    vm_name: "{{ vm_target | default('ubuntu-vm') }}"
+    vm_action: "{{ vm_action | default('list') }}"
+    vm_image_type: "{{ image_setup_type | default('golden') }}" # options: golden, scratch
+    vm_image_root_fname: "{{ root_ssh_filename }}"
+    vm_image_root_pword: "{{ root_ssh_password }}"
+    vm_golden_image_name: "{{ golden_image_name | default('ubuntu_noble-0.0.1') }}"
+    vm_golden_image_gcs_url: "{{ gcs_bucket_url | default(gcp_variables.gcs_bucket_url | default('gs://image-bucket')) }}"
+    vm_golden_image_gcs_path: "{{ gcs_image_path | default('ubuntu_noble/current') }}"
+    vm_gpu_provisioned: "{{ gpu_provisioned | default(false) }}"
+  
+  roles:
+    - ../../roles/vm-management
+
+  post_tasks:
+    - name: Summary of VM operation
+      debug:
+        msg: |
+          VM Management Summary:
+          - Target Host: {{ target_host }}
+          - Action Performed: {{ vm_action }}
+          - Operation completed successfully

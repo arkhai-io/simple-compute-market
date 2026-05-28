@@ -1,18 +1,12 @@
 """Utility functions for API routes."""
 
-import json
-import time
 import logging
-import asyncio
-import aiohttp
-import hashlib
 from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy.exc import IntegrityError
 
-from src.types import AgentCard, ERC8004RegistrationFile, Endpoint
-from src.db.models import Agent, Listing, OrderStatusEnum
+from src.db.models import Publisher, PublisherIdentity, Listing, OrderStatusEnum
 
 # Import for signature verification
 try:
@@ -25,265 +19,193 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def build_erc8004_canonical_id_from_components(chain_id: int, identity_registry: str, agent_id: int) -> str:
+# ---------------------------------------------------------------------------
+# Identity-scheme dispatch
+# ---------------------------------------------------------------------------
+# The registry runs on EIP-191 identities: a request is authenticated by
+# recovering the signer's wallet address from an EIP-191 signature. Verifier
+# calls go through this dispatcher so the call boundary accepts a
+# scheme-tagged Identity; adding a scheme is one dict entry.
+
+
+class Identity:
+    """Scheme-tagged identity, mirroring ``service.schemas.Identity``.
+
+    Kept self-contained inside the registry to avoid a build-time dependency
+    on the shared ``service`` package.
     """
-    Build ERC-8004 canonical ID from components.
-    
-    Format: eip155:{chainId}:{identityRegistry}:{agentId}
-    
-    Args:
-        chain_id: Chain ID (e.g., 1337 for Anvil, 84532 for Base Sepolia)
-        identity_registry: Registry contract address (will be normalized to lowercase)
-        agent_id: Numeric ERC-721 tokenId
-    
-    Returns:
-        Canonical ID string with lowercase address
-    """
-    normalized_registry = identity_registry.lower()
-    return f"eip155:{chain_id}:{normalized_registry}:{agent_id}"
+
+    __slots__ = ("scheme", "identifier")
+
+    def __init__(self, scheme: str, identifier: str) -> None:
+        self.scheme = scheme
+        # Normalize EIP-191 identifiers to lowercase for byte-wise comparability.
+        self.identifier = identifier.lower() if scheme == "eip191" else identifier
 
 
-def parse_erc8004_canonical_id(canonical_id: str) -> tuple[int, str, int]:
-    """
-    Parse ERC-8004 canonical ID into components.
-    
-    Format: eip155:{chainId}:{identityRegistry}:{agentId}
-    
-    Args:
-        canonical_id: Canonical ID string (e.g., "eip155:1337:0xRegistry:22")
-    
-    Returns:
-        Tuple of (chain_id, identity_registry, onchain_agent_id)
-    
-    Raises:
-        ValueError: If canonical ID format is invalid
-    """
-    if not canonical_id or not canonical_id.startswith("eip155:"):
-        raise ValueError(f"Invalid canonical ID format: must start with 'eip155:'")
-    
-    parts = canonical_id.split(":")
-    if len(parts) != 4:
-        raise ValueError(f"Invalid canonical ID format: expected 'eip155:chainId:registry:agentId', got {canonical_id}")
-    
-    namespace, chain_id_str, identity_registry, agent_id_str = parts
-    
-    if namespace != "eip155":
-        raise ValueError(f"Invalid namespace: expected 'eip155', got '{namespace}'")
-    
-    try:
-        chain_id = int(chain_id_str)
-        onchain_agent_id = int(agent_id_str)
-    except ValueError as e:
-        raise ValueError(f"Invalid canonical ID: chainId and agentId must be integers: {e}")
-    
-    if not identity_registry.startswith("0x") or len(identity_registry) != 42:
-        raise ValueError(f"Invalid registry address format: {identity_registry}")
-    
-    # Normalize registry address to lowercase for consistent comparison
-    identity_registry = identity_registry.lower()
-    
-    return (chain_id, identity_registry, onchain_agent_id)
-
-
-async def fetch_registration_file(url: str) -> dict:
-    """Fetch registration file from URL"""
-    timeout = aiohttp.ClientTimeout(total=10)  # 10 second timeout
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        try:
-            async with session.get(url) as response:
-                if response.status != 200:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Failed to fetch registration file from {url}: {response.status}"
-                    )
-                return await response.json()
-        except asyncio.TimeoutError:
-            raise HTTPException(
-                status_code=408,
-                detail=f"Timeout fetching registration file from {url}"
-            )
-
-
-def convert_agent_card_to_registration_file(
-    agent_card: AgentCard,
-    owner: str,
-    labels: dict
-) -> ERC8004RegistrationFile:
-    """Convert legacy agent_card format to ERC-8004 registration file format"""
-    # Extract A2A endpoint from agent card
-    endpoints = []
-    if agent_card.url:
-        a2a_endpoint = Endpoint(
-            name="A2A",
-            endpoint=str(agent_card.url),
-            version=agent_card.version,
-            a2a_skills=[skill.id for skill in agent_card.skills] if agent_card.skills else []
-        )
-        endpoints.append(a2a_endpoint)
-    
-    return ERC8004RegistrationFile(
-        type="https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
-        name=agent_card.name,
-        description=agent_card.description,
-        image=None,
-        endpoints=endpoints,
-        registrations=[],
-        supported_trust=[],
-        active=True,
-        x402support=False,
-        updated_at=int(time.time())
-    )
-
-
-def _verify_eip191_signature(message: str, signature: str, expected_owner: str) -> bool:
-    """Low-level EIP-191 signature verification. Recovers signer and checks against expected_owner."""
+def _verify_eip191(identity: Identity, message: bytes, proof: bytes) -> bool:
     if not HAS_ETH_ACCOUNT:
         return False
     try:
-        message_hash = encode_defunct(text=message)
-        recovered = Account.recover_message(message_hash, signature=signature)
-        return recovered.lower() == expected_owner.lower()
-    except Exception as e:
-        logger.error(f"[VERIFY] EIP-191 verification error: {e}")
+        text = message.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    try:
+        envelope = encode_defunct(text=text)
+        recovered = Account.recover_message(envelope, signature=proof)
+        return recovered.lower() == identity.identifier.lower()
+    except Exception as exc:  # noqa: BLE001 — eth_account raises many shapes
+        logger.error(f"[VERIFY] EIP-191 recovery failed: {exc}")
         return False
 
 
-def verify_heartbeat_signature(agent_id: str, timestamp: int, signature: str, owner_address: str) -> bool:
-    """Verify heartbeat signature. Message format: 'heartbeat:{agent_id}:{timestamp}'"""
-    if not HAS_ETH_ACCOUNT:
-        logger.warning("[Heartbeat] eth_account not available, signature verification disabled")
+# Scheme name → verifier callable. Adding a scheme is a single dict entry.
+_VERIFIERS: dict[str, "callable[[Identity, bytes, bytes], bool]"] = {
+    "eip191": _verify_eip191,
+}
+
+
+def _verify_identity_signature(identity: Identity, message: str, signature: str) -> bool:
+    """Dispatch signature verification by identity scheme."""
+    verifier = _VERIFIERS.get(identity.scheme)
+    if verifier is None:
+        logger.warning(f"[VERIFY] unknown identity scheme {identity.scheme!r}")
         return False
-    message = f"heartbeat:{agent_id}:{timestamp}"
-    logger.info(f"[Heartbeat] Verifying for agent={agent_id} owner={owner_address}")
-    is_valid = _verify_eip191_signature(message, signature, owner_address)
-    logger.info(f"[Heartbeat] Signature valid: {is_valid}")
-    return is_valid
+    try:
+        proof = bytes.fromhex(signature.removeprefix("0x"))
+    except ValueError:
+        logger.error("[VERIFY] malformed signature hex")
+        return False
+    return verifier(identity, message.encode("utf-8"), proof)
 
 
-def verify_order_signature(operation: str, resource_id: str, timestamp: int, signature: str, owner_address: str) -> bool:
+def verify_order_signature(
+    operation: str,
+    resource_id: str,
+    timestamp: int,
+    signature: str,
+    expected: "Identity | str",
+) -> bool:
     """Verify a listing mutation signature.
 
     Message format: '{operation}:{resource_id}:{timestamp}'
     operation: 'create_listing', 'update_listing', or 'delete_listing'
-    resource_id: agent_id for create_listing, listing_id for update/delete
+    resource_id: the signing identifier for create_listing, listing_id for
+    update/delete.
+
+    ``expected`` may be an :class:`Identity` (preferred) or a raw EIP-191
+    address string (coerced to ``eip191``).
     """
     if not HAS_ETH_ACCOUNT:
         logger.warning("[Order] eth_account not available, signature verification disabled")
         return False
+    identity = expected if isinstance(expected, Identity) else Identity(
+        scheme="eip191", identifier=expected
+    )
     message = f"{operation}:{resource_id}:{timestamp}"
-    logger.info(f"[Order] Verifying {operation} for resource={resource_id} owner={owner_address}")
-    is_valid = _verify_eip191_signature(message, signature, owner_address)
+    logger.info(
+        f"[Order] Verifying {operation} for resource={resource_id} "
+        f"scheme={identity.scheme} identifier={identity.identifier}"
+    )
+    is_valid = _verify_identity_signature(identity, message, signature)
     logger.info(f"[Order] Signature valid: {is_valid}")
     return is_valid
 
 
-def verify_registration_signature(
-    owner: str,
-    timestamp: int,
-    signature: str,
-    registration_data: dict
-) -> bool:
+# ---------------------------------------------------------------------------
+# Publisher / identity lookup
+# ---------------------------------------------------------------------------
+
+
+def find_publisher_by_identity(db: Session, identity: Identity) -> Optional[Publisher]:
+    """Resolve a publisher by one of its signing identities.
+
+    Returns ``None`` when no identity matches; callers handle 404 /
+    lazy-create themselves.
     """
-    Verify registration signature using EIP-191 personal sign format.
+    row = (
+        db.query(PublisherIdentity)
+        .filter(
+            PublisherIdentity.scheme == identity.scheme,
+            PublisherIdentity.identifier == identity.identifier,
+        )
+        .first()
+    )
+    return row.publisher if row is not None else None
 
-    Message format: "register:{owner}:{timestamp}:{hash_of_registration_data}"
 
-    Args:
-        owner: Owner wallet address
-        timestamp: Unix timestamp
-        signature: EIP-191 signature
-        registration_data: Registration data dictionary (sorted for consistent hashing)
+def find_publisher_by_id(db: Session, publisher_id: int) -> Optional[Publisher]:
+    """Look up a publisher by its surrogate id."""
+    return db.query(Publisher).filter(Publisher.publisher_id == publisher_id).first()
 
-    Returns:
-        True if signature is valid, False otherwise
+
+def ensure_publisher_for_identity(
+    db: Session,
+    identity: Identity,
+    storefront_url: Optional[str] = None,
+) -> Publisher:
+    """Find or create the publisher owning ``identity``.
+
+    Used by the publish path: the signed request is the trust anchor —
+    successful signature recovery proves control of the identity, so the
+    publisher (and its identity row) is created on first sighting. No
+    pre-registration. When ``storefront_url`` is supplied it is recorded on
+    create and refreshed on later publishes if it changed.
+
+    Pre-condition: signature verification has already passed.
     """
+    publisher = find_publisher_by_identity(db, identity)
+    if publisher is not None:
+        if storefront_url and publisher.storefront_url != storefront_url:
+            publisher.storefront_url = storefront_url
+            db.commit()
+            db.refresh(publisher)
+        return publisher
+
+    publisher = Publisher(storefront_url=storefront_url)
+    publisher.identities.append(
+        PublisherIdentity(scheme=identity.scheme, identifier=identity.identifier)
+    )
+    db.add(publisher)
     try:
-        import hashlib
-        import json
+        db.commit()
+        db.refresh(publisher)
+    except IntegrityError:
+        # Concurrent insert raced us on the unique (scheme, identifier) — re-query.
+        db.rollback()
+        return find_publisher_by_identity(db, identity)  # type: ignore[return-value]
 
-        # Check timestamp is within 5 minutes
-        current_time = int(time.time())
-        if abs(current_time - timestamp) > 300:  # 5 minutes
-            logger.warning(f"[Registration] Timestamp too old or in future: {timestamp}, current: {current_time}")
-            return False
-
-        # Create deterministic hash of registration data
-        # Remove signature and timestamp from data to create hash
-        data_to_hash = {k: v for k, v in registration_data.items()
-                       if k not in ['signature', 'timestamp']}
-
-        # Convert Pydantic models to dictionaries for serialization
-        def serialize_registration_data(obj):
-            if hasattr(obj, 'model_dump'):
-                return obj.model_dump()
-            elif isinstance(obj, dict):
-                return {k: serialize_registration_data(v) for k, v in obj.items()}
-            elif isinstance(obj, list):
-                return [serialize_registration_data(item) for item in obj]
-            elif hasattr(obj, '__class__') and 'HttpUrl' in str(type(obj)):
-                return str(obj)
-            else:
-                return obj
-
-        serializable_data = serialize_registration_data(data_to_hash)
-
-        # Sort keys for consistent ordering - keep A2A agent card in camelCase (protocol compliant)
-        data_str = json.dumps(serializable_data, sort_keys=True, separators=(',', ':'))
-        data_hash = hashlib.sha256(data_str.encode()).hexdigest()[:16]
-
-        message = f"register:{owner}:{timestamp}:{data_hash}"
-
-        # Ensure signature has 0x prefix
-        if not signature.startswith('0x'):
-            signature = '0x' + signature
-
-        logger.info(f"[Registration] Verifying signature for owner {owner}")
-        logger.info(f"[Registration] Expected message: {message}")
-        logger.info(f"[Registration] Data to hash: {data_str}")
-        logger.info(f"[Registration] Data hash: {data_hash}")
-        logger.info(f"[Registration] Received signature: {signature}")
-
-        is_valid = _verify_eip191_signature(message, signature, owner)
-        logger.info(f"[Registration] Address match: {is_valid}")
-        return is_valid
-    except Exception as e:
-        logger.error(f"[Registration] Signature verification error: {e}")
-        return False
+    logger.info(
+        f"[Publisher] Created publisher id={publisher.publisher_id} "
+        f"identity={identity.scheme}:{identity.identifier}"
+    )
+    return publisher
 
 
-def find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
-    """Find agent by ID (supports canonical ID format)"""
-    
-    # Try canonical ID (exact match)
-    agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
-    if agent:
-        return agent
-    
-    # Fallback: parse canonical ID and lookup by components
-    # This handles case where canonical ID format differs (e.g., address case)
-    try:
-        chain_id, identity_registry, onchain_agent_id = parse_erc8004_canonical_id(agent_id)
-        # Normalize identity_registry to lowercase for comparison
-        identity_registry_lower = identity_registry.lower()
-        agent = db.query(Agent).filter(
-            and_(
-                Agent.chain_id == chain_id,
-                Agent.identity_registry == identity_registry_lower,
-                Agent.onchain_agent_id == onchain_agent_id
-            )
-        ).first()
-        return agent
-    except ValueError:
-        return None
+def publisher_to_dict(publisher: Publisher) -> dict:
+    """Wire shape for a publisher entity."""
+    return {
+        "publisher_id": publisher.publisher_id,
+        "storefront_url": publisher.storefront_url,
+        "identities": [
+            {"scheme": i.scheme, "identifier": i.identifier}
+            for i in publisher.identities
+        ],
+        "created_at": publisher.created_at.isoformat(),
+    }
 
 
 def order_to_dict(listing: Listing) -> dict:
-    """Convert a Listing ORM row to its wire-shape dict."""
+    """Convert a Listing ORM row to its wire-shape dict.
+
+    ``storefront_url`` (where a buyer negotiates) is joined from the
+    owning publisher — the same value and key the publisher entity uses.
+    """
+    publisher = listing.publisher
     return {
         "listing_id": listing.listing_id,
-        "agent_id": listing.agent_id,
-        "seller": listing.seller,
-        "buyer": listing.buyer,
+        "publisher_id": listing.publisher_id,
+        "storefront_url": publisher.storefront_url if publisher else None,
         "offer_resource": listing.offer_resource or {},
         "accepted_escrows": listing.accepted_escrows or [],
         "max_duration_seconds": listing.max_duration_seconds,
@@ -300,5 +222,3 @@ def validate_order_status(status: str) -> OrderStatusEnum:
         return OrderStatusEnum(status)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
-
-

@@ -1,0 +1,39 @@
+---
+# VM Management - Shutdown Tasks
+
+- name: Shutdown VM gracefully
+  shell: virsh shutdown {{ vm_name }}
+  register: shutdown_result
+  delegate_to: "{{ target_host }}"
+
+- name: Wait for VM to shut down completely
+  shell: virsh domstate {{ vm_name }}
+  register: vm_state_check
+  until: vm_state_check.stdout.find('shut off') != -1
+  retries: 120
+  delay: 2
+  delegate_to: "{{ target_host }}"
+
+- name: Get current timestamp for shutdown action
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: shutdown_timestamp
+  delegate_to: localhost
+
+- name: Create JSON data structure for VM shutdown
+  set_fact:
+    vm_shutdown_data:
+      action: "shutdown"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ shutdown_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "{{ 'success' if (shutdown_result is defined and shutdown_result.rc == 0) else 'failed' }}"
+      operation_initiated: "{{ 'yes' if shutdown_result is defined else 'no' }}"
+      final_vm_state: "{{ vm_state_check.stdout if vm_state_check is defined else 'unknown' }}"
+      shutdown_method: "graceful"
+      result_message: "{{ shutdown_result.stdout if shutdown_result is defined else 'No output' }}"
+      error: "{{ shutdown_result.stderr | default('') if shutdown_result is defined and shutdown_result.rc != 0 else '' }}"
+
+- name: Display shutdown result
+  debug:
+    msg: "VM {{ vm_name }} {{ 'shutdown successfully' if shutdown_result.rc == 0 else 'failed to shutdown' }}"
+  when: shutdown_result is defined

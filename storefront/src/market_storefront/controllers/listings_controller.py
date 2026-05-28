@@ -22,8 +22,7 @@ Seller lifecycle (EIP-191 seller-signed):
   POST /api/v1/listings/{listing_id}/arbitrate
 
 Admin evaluation (X-Admin-Key, no side effects):
-  POST /api/v1/admin/listings/evaluate-create
-  POST /api/v1/admin/listings/{listing_id}/evaluate-close
+  POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate
 """
 from __future__ import annotations
 
@@ -37,8 +36,6 @@ import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
 from market_storefront.middleware.seller_auth import make_seller_auth_dep
 from market_storefront.models.listing_models import (
-    AdminEvaluateCloseResponse,
-    AdminEvaluateCreateResponse,
     ArbitrateRequest,
     ArbitrateResponse,
     ClaimRequest,
@@ -73,11 +70,9 @@ class ListingsController:
         self,
         db=Depends(lambda: _container.resolved_sqlite_client),
         listing_svc=Depends(lambda: _container.resolved_listing_service),
-        policy_svc=Depends(lambda: _container.resolved_policy_service),
     ) -> None:
         self._db = db
         self._listing_svc = listing_svc
-        self._policy_svc = policy_svc
 
     @router.get(
         "/listings",
@@ -156,12 +151,12 @@ class ListingsController:
     @router.post(
         "/listings/create",
         response_model=CreateListingResponse,
-        summary="Create a new listing via policy pipeline (seller auth)",
+        summary="Create a new listing (seller auth)",
         dependencies=[Depends(make_seller_auth_dep("create_listing"))],
     )
     async def create_listing(self, body: CreateListingRequest) -> CreateListingResponse:
         try:
-            result = await self._listing_svc.create_listing(body, self._policy_svc)
+            result = await self._listing_svc.create_listing(body)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:
@@ -177,7 +172,7 @@ class ListingsController:
     )
     async def close_listing(self, listing_id: str) -> CloseListingResponse:
         try:
-            result = await self._listing_svc.close_listing(listing_id, self._policy_svc)
+            result = await self._listing_svc.close_listing(listing_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:
@@ -251,47 +246,9 @@ class AdminListingsController:
     def __init__(
         self,
         listing_svc=Depends(lambda: _container.resolved_listing_service),
-        policy_svc=Depends(lambda: _container.resolved_policy_service),
         _key=Depends(require_admin_key),
     ) -> None:
         self._listing_svc = listing_svc
-        self._policy_svc = policy_svc
-
-    @admin_router.post(
-        "/evaluate-create",
-        response_model=AdminEvaluateCreateResponse,
-        summary="What would the policy do for this create request? (no side effects)",
-    )
-    async def evaluate_create(self, body: CreateListingRequest) -> AdminEvaluateCreateResponse:
-        """Consults the policy pipeline without writing to SQLite or the registry.
-
-        Use this to validate that a CreateListingRequest would result in
-        a listing being created before actually calling /listings/create.
-        """
-        try:
-            result = await self._listing_svc.evaluate_create(body, self._policy_svc)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        except Exception as exc:
-            logger.error("[ADMIN] evaluate-create: %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=str(exc))
-        return result
-
-    @admin_router.post(
-        "/{listing_id}/evaluate-close",
-        response_model=AdminEvaluateCloseResponse,
-        summary="What would the policy do for a close event? (no side effects)",
-    )
-    async def evaluate_close(self, listing_id: str) -> AdminEvaluateCloseResponse:
-        """Consults the policy pipeline for a close event without writing anything."""
-        try:
-            result = await self._listing_svc.evaluate_close(listing_id, self._policy_svc)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        except Exception as exc:
-            logger.error("[ADMIN] evaluate-close: %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=str(exc))
-        return result
 
     @admin_router.post(
         "/{listing_id}/evaluate-negotiate",
@@ -312,7 +269,9 @@ class AdminListingsController:
         """
         try:
             return await self._listing_svc.evaluate_negotiate(
-                listing_id, body.their_proposed_price
+                listing_id,
+                body.proposal,
+                requested_duration_seconds=body.requested_duration_seconds,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))

@@ -15,58 +15,6 @@ class HealthResponse(BaseModel):
     resource_count: int | None = None
 
 
-class PolicyEvaluateRequest(BaseModel):
-    event_type: str = "order_create"
-    offer: dict[str, Any] | None = None
-    accepted_escrows: list[dict[str, Any]] | None = None
-    max_duration_seconds: int | None = None
-    policy_components: list[str] = Field(
-        description=(
-            "Callable names to evaluate against (e.g. ['oc.action.make_offer_from_order_create']). "
-            "The endpoint checks each name against the CALLABLE_REGISTRY and runs the pipeline. "
-            "No DB lookup is performed — this is a pure data operation."
-        ),
-    )
-
-
-class PolicyComponentResponse(BaseModel):
-    name: str
-    resolvable: bool
-
-
-class PolicyEvaluateResponse(BaseModel):
-    action: str
-    policy_used: str | None = None
-    components: list[str] = Field(default_factory=list)  # callable names
-    resolvable: bool = True
-    reason: str | None = None
-
-
-class ImportErrorResponse(BaseModel):
-    module: str
-    error: str
-
-
-class SeedPoliciesResponse(BaseModel):
-    callable_registry_count: int
-    callables: list[str]
-    seeded_policies: list[str]
-    import_errors: list[ImportErrorResponse]
-
-
-class SeededPolicyInfo(BaseModel):
-    policy_name: str
-    trigger_type: str
-    components: list[str] = Field(default_factory=list)
-    components_resolvable: bool
-
-
-class PolicyStatusResponse(BaseModel):
-    callable_count: int
-    callable_registry: dict[str, Any] = Field(default_factory=dict)
-    seeded_policies: list[SeededPolicyInfo]
-
-
 class AdminPauseResponse(BaseModel):
     paused: bool
     message: str = ""
@@ -83,35 +31,30 @@ class ReleaseReservationsResponse(BaseModel):
     resource_ids: list[str]
 
 
+class ImportRowError(BaseModel):
+    """One failed CSV row in an /admin/portfolio/resources/import response.
+
+    `row_number` is 1-based and matches what a spreadsheet shows
+    (header = 1, first data row = 2). `errors` is the list of validation
+    messages from the importer for that row.
+    """
+    row_number: int
+    resource_id: str | None = None
+    resource_type: str | None = None
+    errors: list[str]
+
+
 class ImportResourcesResponse(BaseModel):
     """Response for POST /api/v1/admin/portfolio/resources/import."""
     imported_count: int
     failed_count: int
     total_rows: int
+    errors: list[ImportRowError] = []
 
 
 class StageEventResponse(BaseModel):
     events: list[dict[str, Any]]
     count: int
-
-
-class RegistryAgentReadyResponse(BaseModel):
-    """Response from GET /api/v1/system/wait-for-registry-agent.
-
-    ``ready=True`` means ``checks.registry_auth`` returned a definitive
-    non-pending value — either ``"ok"`` (agent indexed and owner verified)
-    or a terminal error (``"owner_mismatch"``, ``"unconfigured"``, etc.).
-    ``ready=False`` means the request timed out while the registry was still
-    returning ``"agent_not_found"`` (indexing in progress).
-
-    ``registry_auth`` carries the raw value from ``registry_auth_check()``
-    so callers can distinguish ``"ok"`` from ``"owner_mismatch"``.
-    ``elapsed_ms`` is the approximate server-side wait time.
-    """
-
-    ready: bool
-    registry_auth: str
-    elapsed_ms: int
 
 
 class ResourcePatchRequest(BaseModel):

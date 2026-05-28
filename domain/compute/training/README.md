@@ -2,6 +2,27 @@
 
 This project uses `ArkhaiPufferEnv` via `pufferlib` directly. Training produces `.pt` checkpoint files that are released as GitHub Release assets and downloaded at deployment time.
 
+Training pulls in pufferlib's C-backed env + trainer (heavy build, Python 3.12 only). **Inference does not** — the storefront and buyer load the trained `.pt` files into a small inline `ArkhaiInferencePolicy` (see `domain/compute/agent/app/policy/arkhai_common.py`) with just `torch` as a dep. The two paths are explicitly separate extras so a seller / buyer install doesn't drag in pufferlib.
+
+## Install
+
+```bash
+# Training (this folder + market-policy train/eval CLI)
+cd policy && uv pip install -e ".[training]"
+
+# Inference only (storefront / buyer at runtime)
+cd storefront && uv pip install -e ".[rl]"   # torch only, no pufferlib
+cd buyer     && uv pip install -e ".[rl]"
+```
+
+On macOS with uv-managed Python the pufferlib C extension build can pick up stale Xcode SDK paths from the Python sysconfig. If linking fails with `library 'c++' not found` or references to a non-existent `Xcode_15.2.app`, override the sysroot:
+
+```bash
+LDCXXSHARED="clang++ -bundle -undefined dynamic_lookup -arch arm64 \
+    -mmacosx-version-min=11.0 -isysroot $(xcrun --sdk macosx --show-sdk-path)" \
+  uv pip install -e ".[training]"
+```
+
 ## Source of Truth
 
 - Environment and training contracts come from upstream `pufferlib`.

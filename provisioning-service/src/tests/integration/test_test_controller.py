@@ -38,8 +38,7 @@ from services.job_service import AnsibleJobService
 from services.mock_ansible_service import MockRule, ProgrammableMockAnsibleService
 from services.system_service import SystemService
 
-AGENT_ID = "eip155:1337:0xdeadbeef:1"
-HOST = "ww1"
+HOST = "kvm1"
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +57,7 @@ def programmable_mock(fake_inventory_path) -> ProgrammableMockAnsibleService:
     svc = ProgrammableMockAnsibleService(mock_settings)
     import tempfile
     fake_inv = Path(tempfile.gettempdir()) / "test_inv.ini"
-    fake_inv.write_text("[kvm_hosts]\nww1  ansible_host=10.0.0.1  ansible_user=root\n")
+    fake_inv.write_text("[kvm_hosts]\nkvm1  ansible_host=10.0.0.1  ansible_user=root\n")
     svc.write_inventory = MagicMock(return_value=fake_inv)
     svc.check_connectivity_with_inventory = AsyncMock(
         return_value=MagicMock(reachable=True, detail="mock ping ok")
@@ -71,7 +70,7 @@ async def client_and_queue(
     session_factory, programmable_mock
 ) -> AsyncIterator[tuple[ProvisioningClient, AsyncJobQueue, ProgrammableMockAnsibleService, AsyncProvisioningTestClient]]:
     mock_settings = MagicMock(
-        default_vm_host="ww1",
+        default_vm_host="kvm1",
         default_max_retries=3,
         retry_backoff_initial_seconds=60,
         retry_backoff_multiplier=2.0,
@@ -139,7 +138,7 @@ async def client_and_queue(
     )
 
     transport = ASGITransport(app=app)
-    prov_client = ProvisioningClient("http://test", agent_id=AGENT_ID, transport=transport)
+    prov_client = ProvisioningClient("http://test", transport=transport)
     test_client = AsyncProvisioningTestClient(transport)
 
     yield prov_client, job_queue, programmable_mock, test_client

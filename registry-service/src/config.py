@@ -1,46 +1,22 @@
 import os
 from typing import Literal
-from pydantic import Field, field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from web3 import Web3
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        # Load local overrides, then the shared-env written by contracts-deploy at runtime
+        # Load local overrides, then the committed shared-env/.env (cross-service addresses)
         env_file=[".env.local", ".env", "/app/shared-env/.env"],
         env_file_encoding="utf-8",
         case_sensitive=False,
+        # Tolerate stale env vars left over from the ERC-8004 era so the
+        # registry boots cleanly against pre-Phase-4 .env files.
+        extra="ignore",
     )
     
     database_url: str = "sqlite:///./indexer.db"
-    
-    # Blockchain Configuration - Base Sepolia
-    chain_id: int = Field(default=1337, env="CHAIN_ID")
-    rpc_url: str = "https://sepolia.base.org"
-    
-    # ERC-8004 Contract Addresses (Base Sepolia)
-    identity_registry_address: str = "0x8004AA63c570c570eBF15376c0dB199918BFe9Fb"
-    reputation_registry_address: str = "0x8004bd8daB57f14Ed299135749a5CB5c42d341BF"
-    validation_registry_address: str = "0x8004C269D0A5647E51E121FeB226200ECE932d55"
-    
-    @field_validator(
-        "identity_registry_address",
-        "reputation_registry_address",
-        "validation_registry_address",
-        mode="before"
-    )
-    @classmethod
-    def convert_to_checksum_address(cls, v: str) -> str:
-        """Convert Ethereum address to checksum format (EIP-55)"""
-        if v and isinstance(v, str) and v.startswith("0x") and len(v) == 42:
-            try:
-                return Web3.to_checksum_address(v)
-            except (ValueError, AttributeError):
-                # If web3 is not available or address is invalid, return as-is
-                return v
-        return v
-    
+
     # Server Configuration
     port: int = 8080
     host: str = "0.0.0.0"
@@ -52,21 +28,24 @@ class Settings(BaseSettings):
 
     # Optional ZeroTier configuration (used by deployment/Makefile, not by app logic)
     zerotier_network: str | None = Field(default=None, env="ZEROTIER_NETWORK")
-    
-    # Health Check Configuration
-    enable_health_checks: bool = False  # Opt-in: Registry-initiated health checks (disabled by default)
-    health_check_interval: int = 60
-    endpoint_check_timeout: int = 10
-    heartbeat_ttl_secs: int = 60
-    
-    # API key authentication (opt-in; off by default for back-compat).
-    # When ``require_api_key=True`` every non-admin / non-health route
-    # rejects requests without ``Authorization: Bearer <key>`` matching
-    # an active row in the api_keys table. Operators mint and revoke
-    # keys via ``POST /admin/api-keys`` etc., gated by the
+
+    # API key authentication, gated independently for read and write
+    # access (both opt-in; off by default). Read routes (discovery,
+    # lookups, system diagnostics) require any active key when
+    # ``require_read_api_key`` is set; write routes (publish / update /
+    # delete listings, heartbeat) require a *write*-scoped key when
+    # ``require_write_api_key`` is set. The two toggles compose:
+    #   both off  → fully public registry
+    #   write on  → open discovery, gated publishing (vetted sellers)
+    #   both on   → private registry (buyers hold read keys, sellers write)
+    # Keys carry a scope; a write key implies read. Operators mint and
+    # revoke keys via ``POST /admin/api-keys`` etc., gated by the
     # ``admin_api_key`` env var (separate from the api_keys table).
-    require_api_key: bool = Field(
-        default=False, validation_alias="REGISTRY_REQUIRE_API_KEY",
+    require_read_api_key: bool = Field(
+        default=False, validation_alias="REGISTRY_REQUIRE_READ_API_KEY",
+    )
+    require_write_api_key: bool = Field(
+        default=False, validation_alias="REGISTRY_REQUIRE_WRITE_API_KEY",
     )
     admin_api_key: str | None = Field(
         default=None, validation_alias="REGISTRY_ADMIN_API_KEY",
@@ -83,18 +62,6 @@ class Settings(BaseSettings):
 
     # Logging
     log_level: str = "info"
-
-    # First-sync start block. ``None`` keeps the legacy behaviour of
-    # walking the last 1000 blocks at boot, which silently drops any
-    # agent registered before that window (catastrophic for a fresh
-    # indexer that must pick up historical agents). Set this to the
-    # contract deployment block (or any earlier block known to predate
-    # all agents you care about) so the first sync covers them. Only
-    # consulted when no rows exist yet in the agents table — once the
-    # indexer has data, normal incremental sync takes over.
-    start_block: int | None = Field(
-        default=None, validation_alias="REGISTRY_START_BLOCK",
-    )
 
     @property
     def is_postgres(self) -> bool:

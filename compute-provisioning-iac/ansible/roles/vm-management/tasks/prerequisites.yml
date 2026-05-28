@@ -1,0 +1,65 @@
+---
+# Prerequisites and Initial Setup
+# This file contains initial checks, validations, and setup tasks
+
+- name: Ensure we have root privileges
+  become: yes
+  become_method: sudo
+  set_fact:
+    ansible_become: yes
+  tags: always
+
+- name: Ensure libvirtd is running
+  service:
+    name: libvirtd
+    state: started
+    enabled: yes
+  become: yes
+  delegate_to: "{{ target_host }}"
+  tags: always
+
+- name: Use tenant-aware VM management
+  include_tasks: tenant_main.yml
+  when: 
+    - tenant_id is defined
+    - tenant_id != ""
+    - false  # TODO: tenant_main.yml doesn't exist yet, disable for now
+
+- name: Apply default VM settings from group_vars
+  set_fact:
+    vm_ram: "{{ vm_ram | default(default_vm_settings.ram | default(2048)) }}"
+    vm_vcpus: "{{ vm_vcpus | default(default_vm_settings.vcpus | default(2)) }}"
+    vm_disk_size: "{{ vm_disk_size | default(default_vm_settings.disk_size | default('20G')) }}"
+    vm_os_variant: "{{ vm_os_variant | default(default_vm_settings.os_variant | default('ubuntu-lts-latest')) }}"
+  when: 
+    - tenant_id is not defined or tenant_id == ""
+    - vm_action == "create"
+
+- name: Validate single-tenant resource limits
+  assert:
+    that:
+      - (vm_ram | int) <= ((default_tenant_quotas.max_total_ram_gb | default(32) | int) * 1024)
+      - (vm_vcpus | int) <= (default_tenant_quotas.max_total_vcpus | default(20) | int)
+    fail_msg: "VM resources exceed quota limits. RAM: {{ vm_ram }}MB (max: {{ (default_tenant_quotas.max_total_ram_gb | default(32) | int) * 1024 }}MB), vCPUs: {{ vm_vcpus }} (max: {{ default_tenant_quotas.max_total_vcpus | default(20) }})"
+    success_msg: "VM resources within acceptable limits"
+  when: 
+    - tenant_id is not defined or tenant_id == ""
+    - vm_action == "create"
+
+- name: Check if VM already exists (single-tenant mode)
+  shell: virsh list --all --name | grep -q "^{{ vm_name }}$"
+  register: vm_exists_check
+  ignore_errors: yes
+  when: 
+    - vm_action == "create"
+    - tenant_id is not defined or tenant_id == ""
+  delegate_to: "{{ target_host }}"
+
+- name: Fail if VM already exists
+  fail:
+    msg: "VM '{{ vm_name }}' already exists on host '{{ target_host }}'. Use a different name or remove the existing VM first."
+  when: 
+    - vm_action == "create"
+    - vm_exists_check is defined
+    - vm_exists_check.rc is defined
+    - vm_exists_check.rc == 0

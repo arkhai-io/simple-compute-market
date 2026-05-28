@@ -29,10 +29,11 @@ def _match(listing_id: str, *, price: int | None = None, seller: str = "http://s
     entry: dict[str, Any] = {
         "chain_name": "anvil",
         "escrow_address": "0xE",
-        "fields": {"token": "0xT"},
+        "literal_fields": {"token": "0xT"},
+        "rates": [],
     }
     if price is not None:
-        entry["price_per_hour"] = price
+        entry["rates"] = [{"field": "amount", "per": "hour", "value": str(price)}]
     return {
         "listing_id": listing_id,
         "seller": seller,
@@ -46,15 +47,18 @@ def _recorder(*, agree_at: int | None = None) -> tuple[list[str], NegotiateFn]:
     ``agree_at``: index into the call-order list at which to return
     ``status="agreed"``. None means everyone exits (no agreement).
     """
+    from service.schemas import primary_rate_value
+
     seen: list[str] = []
 
     async def _negotiate(match: dict[str, Any]) -> NegotiationOutcome:
         seen.append(match["listing_id"])
         if agree_at is not None and (len(seen) - 1) == agree_at:
+            first = (match.get("accepted_escrows") or [{}])[0]
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=f"neg-{match['listing_id']}",
-                agreed_price=(match.get("accepted_escrows") or [{}])[0].get("price_per_hour", 0),
+                agreed_amount=primary_rate_value(first) or 0,
             )
         return NegotiationOutcome(
             status="exited",
@@ -91,7 +95,7 @@ class TestCheapestFirst:
         assert result is not None
         winning_match, outcome = result
         assert winning_match["listing_id"] == "b"
-        assert outcome.agreed_price == 100
+        assert outcome.agreed_amount == 100
 
     def test_priceless_listings_sort_to_end(self):
         policy = load_aggregation_policy("cheapest_first")
@@ -111,9 +115,13 @@ class TestCheapestFirst:
         seen, neg = _recorder()
         matches = [
             {"listing_id": "a", "accepted_escrows": json.dumps(
-                [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 200}])},
+                [{"chain_name": "anvil", "escrow_address": "0xE",
+                  "literal_fields": {"token": "0xT"},
+                  "rates": [{"field": "amount", "per": "hour", "value": "200"}]}])},
             {"listing_id": "b", "accepted_escrows": json.dumps(
-                [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 100}])},
+                [{"chain_name": "anvil", "escrow_address": "0xE",
+                  "literal_fields": {"token": "0xT"},
+                  "rates": [{"field": "amount", "per": "hour", "value": "100"}]}])},
         ]
         _drive(policy, matches, neg)
         assert seen == ["b", "a"]
@@ -182,7 +190,7 @@ class TestFastestAgreed:
                 return NegotiationOutcome(
                     status="agreed",
                     negotiation_id="neg-fast",
-                    agreed_price=100,
+                    agreed_amount=100,
                 )
             # `slow` never finishes within the race; the policy must
             # not block on it.
@@ -190,7 +198,7 @@ class TestFastestAgreed:
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id="neg-slow",
-                agreed_price=50,
+                agreed_amount=50,
             )
 
         # Order `slow` first to make sure ordering doesn't decide.
@@ -198,7 +206,7 @@ class TestFastestAgreed:
         assert result is not None
         winner, outcome = result
         assert winner["listing_id"] == "fast"
-        assert outcome.agreed_price == 100
+        assert outcome.agreed_amount == 100
 
     def test_returns_none_when_no_candidate_agrees(self):
         policy = load_aggregation_policy("fastest_agreed")
@@ -227,7 +235,7 @@ class TestFastestAgreed:
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=f"neg-{match['listing_id']}",
-                agreed_price=50,
+                agreed_amount=50,
             )
 
         result = _drive(policy, [_match("exiter"), _match("good")], _mixed)
@@ -245,7 +253,7 @@ class TestFastestAgreed:
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=f"neg-{match['listing_id']}",
-                agreed_price=50,
+                agreed_amount=50,
             )
 
         result = _drive(policy, [_match("broken"), _match("good")], _flaky)
@@ -266,7 +274,7 @@ class TestFastestAgreed:
                 return NegotiationOutcome(
                     status="agreed",
                     negotiation_id="neg-fast",
-                    agreed_price=100,
+                    agreed_amount=100,
                 )
             # If the policy doesn't cancel, this sleep runs to
             # completion and increments the counter.
@@ -275,7 +283,7 @@ class TestFastestAgreed:
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=f"neg-{match['listing_id']}",
-                agreed_price=50,
+                agreed_amount=50,
             )
 
         matches = [_match("fast"), _match("slow1"), _match("slow2")]
@@ -290,7 +298,7 @@ class TestFastestAgreed:
 
 class TestBestPrice:
     def test_picks_lowest_agreed_across_all(self):
-        """All candidates negotiated in parallel; lowest agreed_price wins.
+        """All candidates negotiated in parallel; lowest agreed_amount wins.
 
         Distinct from cheapest_first: the *advertised* prices don't
         determine the winner, only the negotiated outcome does.
@@ -302,7 +310,7 @@ class TestBestPrice:
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=f"neg-{match['listing_id']}",
-                agreed_price=agreed,
+                agreed_amount=agreed,
             )
 
         matches = [
@@ -314,7 +322,7 @@ class TestBestPrice:
         assert result is not None
         winner, outcome = result
         assert winner["listing_id"] == "b"
-        assert outcome.agreed_price == 60
+        assert outcome.agreed_amount == 60
 
     def test_none_when_no_candidate_agrees(self):
         policy = load_aggregation_policy("best_price")
@@ -333,7 +341,7 @@ class TestBestPrice:
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=f"neg-{match['listing_id']}",
-                agreed_price=50,
+                agreed_amount=50,
             )
 
         matches = [_match("broken"), _match("good"), _match("alsogood")]
@@ -355,7 +363,7 @@ class TestBestPriceTimeoutResolver:
         # Patch the config load to return a single key. get_dotted
         # then traverses it normally — so we exercise the real
         # parsing path, not a stub.
-        cfg = {"buyer": {"aggregation": {"best_price_timeout": raw}}}
+        cfg = {"aggregation": {"best_price_timeout": raw}}
         with patch.object(agg, "_load_buyer_config", lambda: cfg):
             return agg._resolve_best_price_timeout()
 
@@ -387,7 +395,7 @@ class TestBestPriceTimeoutResolver:
 
 
 class TestBestPriceTimeout:
-    """The optional `[buyer.aggregation] best_price_timeout` knob.
+    """The optional `[aggregation] best_price_timeout` knob.
 
     Patches the resolver directly rather than touching real TOML —
     keeps the tests self-contained and avoids buyer-config singleton
@@ -410,13 +418,13 @@ class TestBestPriceTimeout:
                 return NegotiationOutcome(
                     status="agreed",
                     negotiation_id="neg-fast-expensive",
-                    agreed_price=100,
+                    agreed_amount=100,
                 )
             if match["listing_id"] == "fast_cheap":
                 return NegotiationOutcome(
                     status="agreed",
                     negotiation_id="neg-fast-cheap",
-                    agreed_price=70,
+                    agreed_amount=70,
                 )
             # `slow_cheapest` would have won on price had it agreed in
             # time, but it sleeps past the 50ms budget.
@@ -425,7 +433,7 @@ class TestBestPriceTimeout:
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id="neg-slow",
-                agreed_price=10,
+                agreed_amount=10,
             )
 
         matches = [
@@ -439,7 +447,7 @@ class TestBestPriceTimeout:
         assert result is not None
         winner, outcome = result
         assert winner["listing_id"] == "fast_cheap"
-        assert outcome.agreed_price == 70
+        assert outcome.agreed_amount == 70
         # The slow seller's task must have been cancelled — if not,
         # the test would have either slept the full 500ms or recorded
         # a completion.
@@ -453,7 +461,7 @@ class TestBestPriceTimeout:
         async def _all_slow(_m: dict[str, Any]) -> NegotiationOutcome:
             await asyncio.sleep(0.5)
             return NegotiationOutcome(
-                status="agreed", negotiation_id="x", agreed_price=10,
+                status="agreed", negotiation_id="x", agreed_amount=10,
             )
 
         with patch.object(agg, "_resolve_best_price_timeout", lambda: 0.05):
@@ -478,12 +486,12 @@ class TestBestPriceTimeout:
                 return NegotiationOutcome(
                     status="agreed",
                     negotiation_id="neg-slow",
-                    agreed_price=10,
+                    agreed_amount=10,
                 )
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=f"neg-{match['listing_id']}",
-                agreed_price=100,
+                agreed_amount=100,
             )
 
         with patch.object(agg, "_resolve_best_price_timeout", lambda: None):
@@ -495,7 +503,7 @@ class TestBestPriceTimeout:
         assert result is not None
         winner, outcome = result
         assert winner["listing_id"] == "slow_cheapest"
-        assert outcome.agreed_price == 10
+        assert outcome.agreed_amount == 10
 
 
 # ---------------------------------------------------------------------------
@@ -550,7 +558,7 @@ class TestHelpers:
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=f"neg-{match['listing_id']}",
-                agreed_price=50,
+                agreed_amount=50,
             )
 
         results = asyncio.run(gather_outcomes(_ok, [_match("a"), _match("b")]))
