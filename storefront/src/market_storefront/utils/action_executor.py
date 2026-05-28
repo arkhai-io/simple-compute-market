@@ -29,9 +29,8 @@ from market_storefront.resources import parse_resource_from_dict
 
 import httpx
 
-from market_storefront.utils.config import settings, chain_id, AGENT_ID, BASE_URL_OVERRIDE
+from market_storefront.utils.config import CHAINS, settings, AGENT_ID, BASE_URL_OVERRIDE
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
-from service.clients.erc8004.blockchain import build_erc8004_canonical_id  # type: ignore[import-not-found]
 from market_storefront.utils.sqlite_client import get_sqlite_client
 from client.provisioning_client import ProvisioningClient, ProvisioningError
 from models.vm_request_model import CreateVmRequest, ScheduleVmExpiryRequest
@@ -154,7 +153,6 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
             update_request = UpdateListingRequest(
                 updates={"status": "closed"},
                 private_key=settings.wallet.private_key,
-                agent_id=_canonical_agent_id(),
             )
             payloads = {url: update_request for url in target_urls}
             results = await registry_client.update_listing_per_registry(
@@ -200,10 +198,9 @@ async def _do_provision(
     in the settlement_jobs row so the buyer's GET /settle/{uid}/status can
     surface it while the job is still queued/running.
     """
-    canonical_id = _canonical_agent_id()
     client = ProvisioningClient(
         settings.provisioning.service_url,
-        agent_id=canonical_id,
+        admin_key=settings.admin_api_key,
         timeout=float(settings.provisioning.timeout),
     )
     async with client:
@@ -229,34 +226,32 @@ async def _do_provision(
             poll_interval=float(settings.provisioning.poll_interval),
         )
         result = job.result or {}
-        if canonical_id:
-            try:
-                creds_resp = await client.get_job_credentials(submit.job_id)
-                auth: dict = {}
-                for c in creds_resp.credentials:
-                    if c.role:
-                        auth[c.role] = {
-                            "password": c.password,
-                            "ssh_commands": c.ssh_commands,
-                            "ssh_key_path_host": c.ssh_key_path_host,
-                            "key_type": c.key_type,
-                        }
-                if auth:
-                    result["authentication"] = auth
-            except Exception as exc:
-                logger.warning(
-                    "[PROVISIONING] Failed to fetch credentials for job %s: %s",
-                    submit.job_id, exc,
-                )
+        try:
+            creds_resp = await client.get_job_credentials(submit.job_id)
+            auth: dict = {}
+            for c in creds_resp.credentials:
+                if c.role:
+                    auth[c.role] = {
+                        "password": c.password,
+                        "ssh_commands": c.ssh_commands,
+                        "ssh_key_path_host": c.ssh_key_path_host,
+                        "key_type": c.key_type,
+                    }
+            if auth:
+                result["authentication"] = auth
+        except Exception as exc:
+            logger.warning(
+                "[PROVISIONING] Failed to fetch credentials for job %s: %s",
+                submit.job_id, exc,
+            )
     return result
 
 
 async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
     """Schedule VM expiry via the provisioning service."""
-    canonical_id = _canonical_agent_id()
     client = ProvisioningClient(
         settings.provisioning.service_url,
-        agent_id=canonical_id,
+        admin_key=settings.admin_api_key,
         timeout=float(settings.provisioning.timeout),
     )
     async with client:
@@ -271,46 +266,20 @@ async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> d
     return job.result or {}
 
 
-@functools.lru_cache(maxsize=1)
-def _canonical_agent_id() -> str | None:
-    """Return the full ERC-8004 canonical ID for this agent (eip155:<chain>:0x<contract>:<id>).
+def _canonical_agent_id(chain_name: str | None = None) -> str | None:
+    """Return the storefront's identity for downstream services.
 
-    The provisioning service's X-Agent-ID header requires the canonical form, not the raw
-    numeric ONCHAIN_AGENT_ID.  If the ID is already canonical (starts with 'eip155:') it is
-    returned as-is; otherwise it is built from IDENTITY_REGISTRY_ADDRESS + ONCHAIN_AGENT_ID.
+    Post-pluggable-identity (Phase 4): the storefront's identity is the
+    EIP-191 wallet address (``settings.wallet.address``, lowercased).
+    The ``chain_name`` argument is accepted for back-compat with callers
+    that previously dispatched per-chain but no longer affects the
+    returned value — identity is chain-agnostic.
 
-    Resolution order:
-      1. settings.onchain_agent_id — explicit pin in config.toml (highest priority)
-      2. agent._AGENT_ID — set at startup by perform_registration when no pin is present
-      3. None — falls back to AGENT_ID in callers (last resort)
-
-    Returns None if no agent ID is available.
+    Returns ``None`` when no wallet is configured.
     """
-    raw = settings.onchain_agent_id
-    if not raw:
-        # Fall back to the in-memory ID set by perform_registration at startup.
-        # This covers the case where onchain_agent_id is not pinned in config.toml
-        # but the agent successfully registered and stored the result in agent._AGENT_ID.
-        try:
-            from market_storefront.agent import _AGENT_ID as _runtime_id
-            if _runtime_id is not None:
-                raw = str(_runtime_id)
-        except Exception:
-            pass
-    if not raw:
-        return None
-    if isinstance(raw, str) and raw.startswith("eip155:"):
-        return raw
-    try:
-        resolved_chain_id = chain_id()
-        return build_erc8004_canonical_id(
-            chain_id=resolved_chain_id,
-            identity_registry=settings.registry.identity_registry_address,
-            agent_id=int(raw),
-        )
-    except Exception as exc:
-        logger.warning("[PROVISIONING] Could not build canonical agent ID from %r: %s", raw, exc)
-        return str(raw)
+    del chain_name  # back-compat shim; identity is chain-agnostic now
+    address = (settings.wallet.address or "").strip().lower()
+    return address or None
 
 
 def _make_registry_client() -> "MultiRegistryClient":
@@ -360,8 +329,7 @@ def extract_compute_from_order(order: dict) -> dict:
 
 
 def _extract_initial_price_from_order(order: Listing | dict) -> float:
-    """Extract the initial negotiation floor from a listing's
-    ``accepted_escrows[0].price_per_hour``.
+    """Extract the initial negotiation floor from a listing's primary rate.
 
     Tristate semantics on the advertised price:
       * ``> 0`` — public price; returned directly.
@@ -372,13 +340,14 @@ def _extract_initial_price_from_order(order: Listing | dict) -> float:
         floor. If that's also unset, raises ``ValueError`` — the caller
         (sync_negotiation) translates that to a 409 refusal.
     """
+    from service.schemas import primary_rate_value
+
     if isinstance(order, dict):
         order = Listing.model_validate(order)
 
-    advertised: float | None = None
+    advertised: int | None = None
     if order.accepted_escrows:
-        first = order.accepted_escrows[0]
-        advertised = first.price_per_hour
+        advertised = primary_rate_value(order.accepted_escrows[0])
 
     # 0 is a meaningful value (free); only None falls through to the fallback.
     if advertised is not None:
@@ -401,7 +370,7 @@ def _extract_initial_price_from_order(order: Listing | dict) -> float:
 
     raise ValueError(
         f"Listing {order.listing_id} has hidden reserve "
-        "(accepted_escrows[0].price_per_hour=None) and "
+        "(accepted_escrows[0].rates is empty) and "
         "[seller.pricing].default_min_price is not configured. The seller "
         "has no floor to negotiate against; refusing the negotiation."
     )
@@ -432,18 +401,17 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
     accepted_escrows = order_dict.get("accepted_escrows") or []
 
     try:
-        agent_id_for_registry = _canonical_agent_id() or AGENT_ID
         async with _make_registry_client() as registry_client:
             order_request = ListingRequest(
                 listing_id=order_id,
                 offer=order_dict.get("offer_resource", {}),
                 accepted_escrows=accepted_escrows,
                 max_duration_seconds=order_dict.get("max_duration_seconds"),
-                seller=order_dict.get("seller") or BASE_URL_OVERRIDE,
+                storefront_url=order_dict.get("seller") or BASE_URL_OVERRIDE,
             )
             payloads = {url: order_request for url in registry_client.urls}
             results = await registry_client.publish_listing_per_registry(
-                agent_id_for_registry, payloads, private_key=settings.wallet.private_key,
+                payloads, private_key=settings.wallet.private_key,
             )
         await _record_publications(order_id, results)
         any_ok = any(r["success"] for r in results)
@@ -528,16 +496,17 @@ def _token_resource_from_accepted_escrow(
 ) -> TokenResource | None:
     """Build a ``TokenResource`` from an ``accepted_escrows[i]`` entry.
 
-    Looks up ERC20 metadata by the entry's ``fields.token`` address in
-    the chain-resolved cache, falling back to address-only metadata when
-    the cache doesn't yet know it. Returns ``None`` when the entry lacks
-    a token. The token amount is the entry's ``price_per_hour`` (per-hour
-    rate in base units); ``None`` becomes 0.
+    Looks up ERC20 metadata by the entry's ``literal_fields.token``
+    address in the chain-resolved cache, falling back to address-only
+    metadata when the cache doesn't yet know it. Returns ``None`` when
+    the entry lacks a token. The token amount is the entry's primary
+    rate value (per-hour rate in base units); ``None`` becomes 0.
     """
+    from service.schemas import accepted_token_address
+
     if not isinstance(accepted_escrow, dict):
         return None
-    fields = accepted_escrow.get("fields") or {}
-    token = fields.get("token")
+    token = accepted_token_address(accepted_escrow)
     if not isinstance(token, str) or not token:
         return None
     try:
@@ -554,18 +523,9 @@ def _token_resource_from_accepted_escrow(
             contract_address=token,
             decimals=0,
         )
-    price_per_hour = accepted_escrow.get("price_per_hour")
-    # price_per_hour is uint256-domain — decimal-digit string on the wire,
-    # int internally. Accept either form; treat anything else (None,
-    # malformed, bool) as 0.
-    if isinstance(price_per_hour, bool):
-        amount = 0
-    elif isinstance(price_per_hour, int):
-        amount = price_per_hour
-    elif isinstance(price_per_hour, str) and price_per_hour.strip().isdigit():
-        amount = int(price_per_hour.strip())
-    else:
-        amount = 0
+    from service.schemas import primary_rate_value
+
+    amount = primary_rate_value(accepted_escrow) or 0
     return TokenResource(token=meta, amount=amount)
 
 
@@ -889,7 +849,7 @@ async def fulfill_compute_obligation(
             )
             async with ProvisioningClient(
                 settings.provisioning.service_url,
-                agent_id=str(settings.onchain_agent_id or ""),
+                admin_key=settings.admin_api_key,
                 timeout=10,
             ) as prov_client:
                 await prov_client.register_lease(

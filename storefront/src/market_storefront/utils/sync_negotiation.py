@@ -137,14 +137,15 @@ def _match_accepted_escrow(
 
 
 def _extract_listing_token(listing: dict[str, Any]) -> str | None:
-    """Pull the payment-token contract address from a listing's
-    ``accepted_escrows[0].fields.token`` advertisement.
+    """Pull the payment-token contract address from a listing's primary
+    accepted-escrow entry.
 
     Returns ``None`` when no entry is advertised (compute-for-compute
     listings, or rows where synthesis at publish time couldn't resolve
     an escrow address).
     """
     import json as _json
+    from service.schemas import accepted_token_address
 
     accepted = listing.get("accepted_escrows")
     if isinstance(accepted, str):
@@ -153,13 +154,7 @@ def _extract_listing_token(listing: dict[str, Any]) -> str | None:
         except (ValueError, TypeError):
             return None
     if isinstance(accepted, list) and accepted:
-        first = accepted[0]
-        if isinstance(first, dict):
-            fields = first.get("fields")
-            if isinstance(fields, dict):
-                addr = fields.get("token")
-                if isinstance(addr, str) and addr:
-                    return addr
+        return accepted_token_address(accepted[0])
     return None
 
 
@@ -321,8 +316,8 @@ _DEFAULT_TERMINAL = "bisection"
 def _load_storefront_chain():
     """Resolve the storefront's configured negotiation middleware chain.
 
-    Reads ``[negotiation].chain`` from TOML. Back-compat fallback: if
-    ``chain`` is absent, synthesize one from the legacy ``policy_mode``
+    Reads ``[negotiation].policies`` from TOML. Back-compat fallback: if
+    ``policies`` is absent, synthesize one from the legacy ``policy_mode``
     key — `["has_matching_inventory_guard", "escrow_shape_guard", policy_mode]`.
     """
     from market_storefront.utils.config import settings
@@ -330,15 +325,15 @@ def _load_storefront_chain():
     _discover_file_policies()
 
     negotiation_cfg = getattr(settings, "negotiation", None)
-    chain_names = list(getattr(negotiation_cfg, "chain", []) or [])
-    if not chain_names:
+    policy_names = list(getattr(negotiation_cfg, "policies", []) or [])
+    if not policy_names:
         policy_mode = (getattr(negotiation_cfg, "policy_mode", "") or "").strip() or _DEFAULT_TERMINAL
-        chain_names = _DEFAULT_GUARDS + [policy_mode]
+        policy_names = _DEFAULT_GUARDS + [policy_mode]
 
-    if "rl" in chain_names:
+    if "rl" in policy_names:
         _maybe_register_rl_middleware()
 
-    return load_negotiation_chain(chain_names)
+    return load_negotiation_chain(policy_names)
 
 
 def _direction_from_strategy_label(strategy: str) -> str:
@@ -383,10 +378,10 @@ def _seller_reference_amount(
 ) -> int:
     """Compute the seller's absolute reference amount in base units.
 
-    Reads ``accepted_escrows[0].price_per_hour`` (the per-hour broadcast
-    rate from the listing) and scales it by the buyer-requested duration:
-    ``per_hour * duration_seconds / 3600``. Falls back to 1 hour when no
-    duration was provided.
+    Reads the primary rate from ``accepted_escrows[0]`` (the per-hour
+    broadcast rate from the listing) and scales it by the buyer-requested
+    duration: ``rate * duration_seconds / 3600``. Falls back to 1 hour
+    when no duration was provided.
 
     Per-hour rates only live on the listing as a broadcast; once
     negotiation begins, both sides reason in absolute base units, so

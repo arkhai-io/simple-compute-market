@@ -474,6 +474,7 @@ def _settle_kwargs():
         ssh_public_key="ssh-rsa AAAA...",
         buyer_address=_BUYER_ADDR,
         buyer_private_key=_BUYER_PK,
+        chain_name="anvil",
     )
 
 

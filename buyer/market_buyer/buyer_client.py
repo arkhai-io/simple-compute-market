@@ -53,18 +53,29 @@ def _maybe_register_rl_middleware() -> None:
         pass
 
 
-def _load_buyer_chain(name: str | None = None) -> list[NegotiationMiddleware]:
+def _load_buyer_chain(
+    *,
+    policies: list[str] | None = None,
+    policy_mode: str | None = None,
+) -> list[NegotiationMiddleware]:
     """Load the buyer's negotiation chain.
 
-    Default: ``[buyer_escrow_shape_guard, <terminal>]`` — the shape guard
-    vetoes if the seller silently mutates a buyer-pinned field of the
-    EscrowProposal (token swap, expiration push, escrow contract swap).
-    ``<terminal>`` is bisection unless overridden.
+    If ``policies`` is provided (from `[negotiation] policies = [...]`
+    in `buyer.toml`), uses the explicit ordered list. Otherwise
+    synthesizes the default chain `[buyer_escrow_shape_guard, <terminal>]`
+    — the shape guard vetoes if the seller silently mutates a buyer-pinned
+    field of the EscrowProposal (token swap, expiration push, escrow
+    contract swap). ``<terminal>`` is `policy_mode` if set, else
+    ``DEFAULT_TERMINAL`` (`"bisection"`).
     """
-    terminal = (name or "").strip() or DEFAULT_TERMINAL
-    if terminal == "rl":
+    if policies:
+        names = [str(p).strip() for p in policies if str(p).strip()]
+    else:
+        terminal = (policy_mode or "").strip() or DEFAULT_TERMINAL
+        names = ["buyer_escrow_shape_guard", terminal]
+    if "rl" in names:
         _maybe_register_rl_middleware()
-    return load_negotiation_chain(["buyer_escrow_shape_guard", terminal])
+    return load_negotiation_chain(names)
 
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
@@ -152,19 +163,30 @@ def _post(
     *,
     signature: str,
     timestamp: int,
+    identity_scheme: str = "eip191",
+    identity_identifier: str | None = None,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    """Signed POST with JSON body. Raises RuntimeError on non-2xx."""
+    """Signed POST with JSON body. Raises RuntimeError on non-2xx.
+
+    Emits ``X-Identity-Scheme`` + ``X-Identity`` so storefronts that have
+    adopted the pluggable-identity dispatch (Phase 2) can route by scheme.
+    Storefronts that haven't yet ignore the headers — back-compat is preserved.
+    """
     data = json.dumps(body).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-Signature": signature,
+        "X-Timestamp": str(timestamp),
+        "X-Identity-Scheme": identity_scheme,
+    }
+    if identity_identifier:
+        headers["X-Identity"] = identity_identifier
     req = urllib.request.Request(
         url,
         data=data,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "X-Signature": signature,
-            "X-Timestamp": str(timestamp),
-        },
+        headers=headers,
         method="POST",
     )
     try:
@@ -321,6 +343,7 @@ def negotiate_with_seller(
             "chain_name": escrow_proposal.chain_name,
             "escrow_address": escrow_proposal.escrow_address,
             "fields": pinned_fields,
+            "literal_fields": dict(escrow_proposal.literal_fields or escrow_proposal.fields or {}),
             "expiration_unix": escrow_proposal.expiration_unix,
         }
 
@@ -334,6 +357,7 @@ def negotiate_with_seller(
         reply = _post(
             f"{seller_url}/api/v1/negotiate/new", new_body,
             signature=sig, timestamp=ts,
+            identity_identifier=buyer_address,
         )
         if on_round:
             on_round(0, new_body, reply)
@@ -428,6 +452,7 @@ def negotiate_with_seller(
         reply = _post(
             f"{seller_url}/api/v1/negotiate/{neg_id}", body,
             signature=sig, timestamp=ts,
+            identity_identifier=buyer_address,
         )
         if on_round:
             on_round(round_idx, body, reply)

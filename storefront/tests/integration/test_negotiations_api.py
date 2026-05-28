@@ -58,7 +58,7 @@ async def _seed_order(db: SQLiteClient, order_id: str) -> None:
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
         offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
-        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "0x0000000000000000000000000000000000000001"}, "price_per_hour": 9000}],
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": "0x0000000000000000000000000000000000000001"}, "rates": [{"field": "amount", "per": "hour", "value": "9000"}]}],
         fulfillment_resource=None,
         max_duration_seconds=7200,
         seller="http://seller:8001",

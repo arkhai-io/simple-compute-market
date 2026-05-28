@@ -7,19 +7,20 @@
 # Bump `version` on backwards-incompatible changes.  Add filters
 # without bumping (etag changes; clients re-fetch).
 
-version: 2
+version: 4
 
 listing_shape:
   $schema: "https://json-schema.org/draft/2020-12/schema"
   type: object
   additionalProperties: true
-  # v2: seller is now required (storefront's publish path populates it).
-  # gpu_model is gated to a vetted NVIDIA vocabulary; region stays open
-  # because city/datacenter naming has no canonical list.
-  required: [listing_id, offer_resource, accepted_escrows, seller]
+  # v4: the publisher's storefront URL is `storefront_url` (was `seller`),
+  # matching the GET /publishers entity. gpu_model is gated to a vetted
+  # NVIDIA vocabulary; region stays open because city/datacenter naming
+  # has no canonical list.
+  required: [listing_id, offer_resource, accepted_escrows, storefront_url]
   properties:
     listing_id: {type: string, minLength: 1}
-    seller: {type: string, minLength: 1}
+    storefront_url: {type: string, minLength: 1}
     offer_resource:
       type: object
       required: [gpu_model, region]
@@ -109,16 +110,25 @@ listing_shape:
       minItems: 1
       items:
         type: object
-        required: [chain_name, escrow_address, fields]
+        required: [chain_name, escrow_address, literal_fields]
         additionalProperties: true
         properties:
           chain_name: {type: string, minLength: 1}
           escrow_address: {type: string, minLength: 1}
-          fields:
+          literal_fields:
             type: object
             additionalProperties: true
             properties:
               token: {type: string}
+          rates:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+              properties:
+                field: {type: string}
+                per: {type: string}
+                value: {type: string}
     max_duration_seconds:
       type: [integer, "null"]
       minimum: 1
@@ -155,17 +165,17 @@ filters:
   - {name: internet_upload_mbps_min,   path: $.offer_resource.internet_upload_mbps,   op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
   - {name: open_ports_count_min,       path: $.offer_resource.open_ports_count,       op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
 
-  # Payment-token filter: array projection over accepted_escrows[*].fields.token.
+  # Payment-token filter: array projection over accepted_escrows[*].literal_fields.token.
   # `on_missing: pass` is underreport-friendly — a seller advertising no
   # tokens shouldn't be invisible to a query asking for any specific token.
   # Buyers that want strict matching pass `?strict.token=true` per-query.
-  - {name: token,                      path: "$.accepted_escrows[*].fields.token",    op: in,     value_type: string,  on_missing: pass}
+  - {name: token,                      path: "$.accepted_escrows[*].literal_fields.token",    op: in,     value_type: string,  on_missing: pass}
 
   # Exclude-tokens filter: array projection, ``not_in`` semantics.
   # ``?token_exclude=not_in:[0x...]`` rejects listings that accept any of
   # the listed token addresses. `on_missing: pass` is again underreport-
   # friendly — a seller with no escrows has no conflict to assert.
-  - {name: token_exclude,              path: "$.accepted_escrows[*].fields.token",    op: not_in, value_type: string,  on_missing: pass}
+  - {name: token_exclude,              path: "$.accepted_escrows[*].literal_fields.token",    op: not_in, value_type: string,  on_missing: pass}
 
   # Oracle-presence filter: ``?has_oracle=exists:true`` matches listings
   # with a non-null oracle_address. Pure presence check — value of the

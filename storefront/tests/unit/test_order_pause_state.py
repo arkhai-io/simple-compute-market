@@ -40,8 +40,8 @@ async def db(tmp_path) -> SQLiteClient:
         accepted_escrows=[{
             "chain_name": "test",
             "escrow_address": "0x000000000000000000000000000000000000abcd",
-            "fields": {"token": "0x0000000000000000000000000000000000000001"},
-            "price_per_hour": 1000,
+            "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
+            "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
         }],
         fulfillment_resource=None,
         max_duration_seconds=3600,

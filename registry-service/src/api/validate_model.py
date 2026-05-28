@@ -10,15 +10,15 @@ from pydantic import BaseModel, Field
 class ValidatePublishRequest(BaseModel):
     """Body for POST /api/v1/listings/validate-publish.
 
-    Mirrors the non-auth fields of POST /agents/{agent_id}/listings so
-    tests can pass the same listing payload they constructed locally.
-    No agent_id or signature is required — this endpoint never writes.
+    Mirrors the non-auth fields of POST /listings so tests can pass the
+    same listing payload they constructed locally. No signature is
+    required — this endpoint never writes.
     """
 
     listing_id: str = Field(description="Listing ID to validate")
-    seller: str = Field(
+    storefront_url: str = Field(
         default="",
-        description="Seller agent-card URL. Required by listing_shape v2+.",
+        description="Publisher's storefront URL. Required by listing_shape v4+.",
     )
     offer_resource: dict[str, Any] = Field(
         default_factory=dict, description="Offered resource dict"

@@ -18,7 +18,7 @@ from the job_id alone.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi_utils.cbv import cbv
 
 import container as _container_module
@@ -55,7 +55,6 @@ class AnsibleJobsController:
     )
     def list_jobs(
         self,
-        request: Request,
         offset: int = Query(default=0, ge=0, description="Pagination offset"),
         limit: int = Query(default=20, ge=1, le=100, description="Max jobs per page"),
         status_filter: str | None = Query(
@@ -72,14 +71,8 @@ class AnsibleJobsController:
             description="Filter jobs by on-chain escrow UID (recovery query pattern)",
         ),
     ) -> JobListResponse:
-        """List Ansible jobs with pagination, filtering, and sorting.
-
-        Authenticated agents only see jobs where they are the seller or buyer.
-        Unauthenticated requests (when auth is disabled) see all jobs.
-        """
-        agent_id: str | None = getattr(request.state, "agent_id", None)
+        """List Ansible jobs with pagination, filtering, and sorting."""
         return self._job_service.list_jobs(
-            agent_id=agent_id,
             offset=offset,
             limit=limit,
             status_filter=status_filter,
@@ -97,19 +90,16 @@ class AnsibleJobsController:
         summary="Get job status",
         response_description="Full job status with params, result, and retry info",
     )
-    def get_job(self, job_id: str, request: Request) -> JobStatusResponse:
+    def get_job(self, job_id: str) -> JobStatusResponse:
         """Return the full status of a single Ansible job.
 
         Poll this endpoint after submitting any job-creating request.
         Terminal statuses: ``succeeded``, ``failed``, ``cancelled``.
         """
-        agent_id: str | None = getattr(request.state, "agent_id", None)
         try:
-            return self._job_service.get_job(job_id, agent_id)
+            return self._job_service.get_job(job_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc))
 
     # ------------------------------------------------------------------
     # Credentials
@@ -121,25 +111,16 @@ class AnsibleJobsController:
         summary="Get job credentials",
         response_description="Credentials granted to the requesting agent for this job",
     )
-    def get_credentials(self, job_id: str, request: Request) -> CredentialListResponse:
-        """Return credentials the requesting agent is granted for a job.
+    def get_credentials(self, job_id: str) -> CredentialListResponse:
+        """Return all credentials for a job.
 
-        Sellers receive root + tenant credentials.
-        Buyers receive tenant credentials only.
-        Returns **401** without ``X-Agent-ID``, **403** for unauthorised agents.
+        The storefront (the sole caller) decides which credentials to surface
+        to which tenant; provisioning does not gate per-agent.
         """
-        agent_id: str | None = getattr(request.state, "agent_id", None)
-        if not agent_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="X-Agent-ID header is required",
-            )
         try:
-            return self._job_service.get_credentials(job_id, agent_id)
+            return self._job_service.get_credentials(job_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc))
 
     # ------------------------------------------------------------------
     # Logs
@@ -151,15 +132,12 @@ class AnsibleJobsController:
         summary="Get Ansible playbook logs",
         response_description="Raw Ansible stdout/stderr for the job",
     )
-    def get_logs(self, job_id: str, request: Request) -> JobLogsResponse:
+    def get_logs(self, job_id: str) -> JobLogsResponse:
         """Return raw Ansible playbook output captured during job execution."""
-        agent_id: str | None = getattr(request.state, "agent_id", None)
         try:
-            return self._job_service.get_logs(job_id, agent_id)
+            return self._job_service.get_logs(job_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc))
 
     # ------------------------------------------------------------------
     # Cancel
@@ -170,18 +148,15 @@ class AnsibleJobsController:
         summary="Cancel a job",
         response_description="Cancellation confirmation with final job status",
     )
-    def cancel_job(self, job_id: str, request: Request) -> dict:
+    def cancel_job(self, job_id: str) -> dict:
         """Cancel a queued or running Ansible job.
 
         Sends SIGTERM to the Ansible process if the job is running.
         """
-        agent_id: str | None = getattr(request.state, "agent_id", None)
         try:
-            return self._job_service.cancel_job(job_id, agent_id)
+            return self._job_service.cancel_job(job_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc))
 
     @classmethod
     def make_router(cls) -> APIRouter:

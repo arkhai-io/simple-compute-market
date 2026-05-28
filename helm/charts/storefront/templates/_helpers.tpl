@@ -177,25 +177,24 @@ log_file_path       = {{ $seller.logFilePath | quote }}
 {{- if $seller.resourcesCsvPath }}
 resources_csv_path  = {{ $seller.resourcesCsvPath | quote }}
 {{- end }}
-{{- if $agent.agentId }}
-onchain_agent_id    = {{ $agent.agentId | quote }}
-{{- end }}
 auto_register       = {{ $agent.autoRegister | default true }}
 
 [wallet]
 ssh_public_key = {{ $seller.sshPublicKey | default "" | quote }}
 
-[chain]
-name    = {{ $chain.name | default "ethereum_sepolia" | quote }}
+[chains.{{ $chain.name | default "ethereum_sepolia" }}]
 rpc_url = {{ default (include "rpc.wsUrl" $root) $chain.rpcUrl | quote }}
 chain_id = {{ $root.Values.global.rpc.chainId | int }}
+identity_registry_address = {{ $root.Values.global.registry.identity_address | quote }}
 {{- if $chain.alkahestAddressConfigPath }}
 alkahest_address_config_path = {{ $chain.alkahestAddressConfigPath | quote }}
+{{- end }}
+{{- if $agent.agentId }}
+onchain_agent_id = {{ $agent.agentId | int }}
 {{- end }}
 
 [registry]
 urls = [{{ default (include "registry.url" $root) $cfg.registryUrl | quote }}]
-identity_registry_address = {{ $root.Values.global.registry.identity_address | quote }}
 {{- if $agent.rootPath }}
 
 [gateway]
@@ -215,7 +214,11 @@ poll_interval = {{ $prov.pollInterval | int }}
 {{- end }}
 
 [negotiation]
-policy_mode = {{ $neg.policyMode | default "" | quote }}
+{{- if $neg.policies }}
+policies = [{{ range $i, $mw := $neg.policies }}{{ if $i }}, {{ end }}{{ $mw | quote }}{{ end }}]
+{{- else if $neg.policyMode }}
+policy_mode = {{ $neg.policyMode | quote }}
+{{- end }}
 {{- end }}
 
 {{/*

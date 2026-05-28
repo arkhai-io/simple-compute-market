@@ -33,8 +33,8 @@ _COMPUTE_OFFER = {
 _ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
     "escrow_address": "0x" + "11" * 20,
-    "fields": {"token": "0x0000000000000000000000000000000000000001"},
-    "price_per_hour": 10,
+    "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
+    "rates": [{"field": "amount", "per": "hour", "value": "10"}],
 }]
 
 
@@ -135,25 +135,8 @@ class TestCloseOrderEndpoint:
 
 
 # ---------------------------------------------------------------------------
-# /.well-known/erc-8004-registration.json
-# ---------------------------------------------------------------------------
-
-class TestRegistrationEndpoint:
-    async def test_returns_200_with_json(self, identity_client):
-        resp = await identity_client.get("/.well-known/erc-8004-registration.json")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert isinstance(data, dict)
-
-    async def test_contains_expected_fields(self, identity_client):
-        resp = await identity_client.get("/.well-known/erc-8004-registration.json")
-        data = resp.json()
-        # ERC-8004 spec: either 'type' or 'name' must be present
-        assert "type" in data or "name" in data
-
-
-# ---------------------------------------------------------------------------
-# /.well-known/agent-wallet.json
+# /.well-known/agent-wallet.json — scheme-agnostic settlement affordance.
+# Post-Phase-4 the only well-known surviving from the ERC-8004 era.
 # ---------------------------------------------------------------------------
 
 class TestAgentWalletEndpoint:
@@ -162,21 +145,4 @@ class TestAgentWalletEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert "agent_wallet_address" in data
-        # Value is a string (may be empty if not configured)
         assert isinstance(data["agent_wallet_address"], str)
-
-
-# ---------------------------------------------------------------------------
-# /.well-known/agent-card.json
-# ---------------------------------------------------------------------------
-
-class TestAgentCardEndpoint:
-    async def test_returns_200_with_json(self, identity_client):
-        resp = await identity_client.get("/.well-known/agent-card.json")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert isinstance(data, dict)
-        # A2A AgentCard requires name + url + version + skills/capabilities.
-        assert "name" in data
-        assert "url" in data
-        assert "version" in data

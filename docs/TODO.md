@@ -6,28 +6,31 @@ Pending architectural work and known operational issues for the Arkhai market st
 
 ## Core Stack
 
-### Chain-Agnostic Contract Deployment
+### Market Core Extraction (from-above / from-below packaging)
 
-**Status:** Planned. CLI surface exists; the underlying deployer scripts still ignore it.
+**Status:** Planned. Full scope in [`design-market-core-extraction.md`](design-market-core-extraction.md); principle documented in `ARCHITECTURE.md` → "Organizing Principle".
 
-**Problem:** The `market-infra chain deploy-contracts` CLI accepts `--rpc-url`, `--deployer-key`, and per-suite flags (`--erc8004/--alkahest/--eas`) and exports `RPC_URL` / `ANVIL_RPC_URL` into the deployer subprocess environment. But `market-contract-deployer/deploy_alkahest.py:22` still has `RPC_URL = "http://anvil:8545"` as a module-level constant, line 27 uses Anvil account #0 (`0xf39Fd6…`) as the deployer, and `deploy-local.sh:12-14` hardcodes the ERC-8004 CREATE2 vanity addresses (`0x8004A8…`, `0x8004B6…`, `0x8004Cb…`) that are deterministic only on chain id 31337. The script does not read the env vars the CLI plumbs through, so passing `--rpc-url` to `market-infra` has no effect on the actual deployment.
+**Principle (the filing test):** a behavior belongs in the market core (composed *from above*) iff it is invariant across every possible listing schema; otherwise it is a from-below utility the core invokes through an injected hook. The core's universal surface is thin: negotiation is an exchange of opaque, schema-defined **messages**, and the only structural requirement is that `terms = negotiate(messages…); receipt = settle(terms)` is well-typed — negotiation reduces a message history to `Terms`, settlement consumes exactly that `Terms`. The core knows nothing about message content (offers/counters/bids/acceptances are schema vocabulary), how a participant picks its next message, an "acceptance set," floor/ceiling semantics, or how a mismatched message is answered; all of that is policy. Price and escrow shape are the same kind of thing (message content constrained by advertised data) and flow through the same negotiation chain.
 
-**Planned fix:**
-- Make `deploy_alkahest.py` actually read `RPC_URL` / `ANVIL_RPC_URL` and a deployer key from env (with sensible Anvil defaults preserved for the local-dev path).
-- Drop the CREATE2 vanity-address requirement in `deploy-local.sh`, or accept per-chain addresses passed in via flag/env so ERC-8004 contracts deploy at whatever address the deployer key gets.
-- The `--no-eas --alkahest` separation in `market-infra chain deploy-contracts` is upstream-blocked: the alkahest deploy fixture currently always bundles EAS. Until alkahest accepts an externally-deployed EAS address, the flags are coupled and the CLI warns when toggled apart.
+**Motivation:** the realistic first driver is heterogeneous listing schemas *within* compute that don't share a registry — not a different asset class. The registry is the schema-centralizing/platform point; per-schema instantiations (filter-spec + typed client + storefront/buyer plugins) become the registry operator's deliverable, depending on the core's from-above skeleton and from-below kit.
 
-This closes the bootstrapping path for a market operator standing up the stack against a real chain — the wiring is mostly in place, only `deploy_alkahest.py` and `deploy-local.sh` need to honour what the CLI already exposes.
+**Concrete seams to fix** (each filed against the principle today):
+- Escrow-shape validation runs as a pre-chain hard gate (`sync_negotiation._validate_escrow_proposal` raises before the chain) → demote to a negotiation middleware that may reject *or* counter-correct, symmetric with `bisection`.
+- **Minimal hook surface:** `run_buy` injects six behavior hooks (`build_escrow_proposal`, `derive_prices`, `build_escrow_terms`, `create_escrow`, `confirm_settlement`, `chain`); the well-typed `terms = negotiate(); receipt = settle(terms)` surface wants two. Collapse consecutive/bundled hooks — `negotiate` absorbs `chain` + `derive_prices` + opening-message construction + commit; `settle` absorbs `build_escrow_terms` + `create_escrow`. Further factoring is the implementation's business, not the core contract.
+- `ProvisionTerms` is compute-flavored (`ssh_public_key`/`duration_seconds`/`compute_resource`) → make the core carry delivery terms as an opaque schema blob (as the registry already does with `offer_resource`).
+- The market skeleton lives inside `buyer/` + `storefront/` tangled with compute code → extract `market-core` so the package graph expresses the joint the `run_buy(...)` signature already implies.
+
+**Not an immediate target** — this is the filing principle for *where new behavior goes*, captured so the next non-trivial change to negotiation/settlement is filed correctly rather than by precedent. The packaging extraction is the eventual payoff; the cheap wins (escrow guard → middleware, `derive_prices` placement) can land independently.
 
 ---
 
 ### Native Launch CLI for Provisioning Service
 
-**Status:** Planned. Registry has a wrapper (`market-infra registry start` → `make serve`); provisioning doesn't.
+**Status:** Planned. The registry is launched directly via `registry-service` (`make serve`); provisioning has no native launch path.
 
 **Problem:** The provisioning service is launched today only via raw `uvicorn` in its Dockerfile (`provisioning-service/Dockerfile:105`). There is no native, `pip install …` + run path — running it without docker-compose requires manually invoking uvicorn against the right module and managing the worker process separately. This blocks the "provider runs a provisioning service" half of the four-parties topology: a provider should be able to install and run the service on their own machine without inheriting the dev stack's container assumptions.
 
-**Planned fix:** add a `provisioning-service` console script that wraps both the API uvicorn process and the worker process (likely as two subcommands: `provisioning-service serve` and `provisioning-service worker`). Compose / Helm configs then invoke the console script instead of `uvicorn …` directly. Mirrors how `registry-service` is now reachable via `market-infra registry start`.
+**Planned fix:** add a `provisioning-service` console script that wraps both the API uvicorn process and the worker process (likely as two subcommands: `provisioning-service serve` and `provisioning-service worker`). Compose / Helm configs then invoke the console script instead of `uvicorn …` directly.
 
 The `provisioning-service` wheel stays its own distributable — it's operated by providers, who already install `market-storefront` from a separate wheel, and the existing Helm chart structure already treats it as a separate workload.
 
@@ -53,9 +56,9 @@ The `orders → listings` rename is already done; the plan's older framing of "d
 
 **Status:** Planned. The user-facing rename (CLI flags, wire JSON keys, table names, doc surfaces) is done; internal terminology has residue.
 
-**Context:** "agent" in this codebase has two meanings — the ERC-8004 protocol concept (`agent_card`, `agent_id` as on-chain numeric ID, `IdentityRegistry`, `AgentRegistered`, `register_onchain`, `agent_heartbeat`) and historical references to the seller's runtime process from the ADK era. The first set is protocol-defined and stays. The second set should be `storefront`. The user-facing pass (`market-storefront provide` → `publish`, `--agent-url` CLI flag → `--storefront-url`, `agent_settings` test fixtures) is done; the remaining items are internal:
+**Context:** "agent" in this codebase used to refer to two distinct things — the ERC-8004 protocol concept and historical references to the seller's runtime process from the ADK era. With ERC-8004 deleted in Phase 4 of the pluggable-identity refactor, the term now only ever means "seller's runtime process", which should be `storefront`. The user-facing rename is done; internal residue:
 
-- **`storefront/src/market_storefront/agent.py`** — residual startup-helpers module (docstring: "Storefront startup/background-task helpers"). A sibling `server.py` already exists; this file should be folded into `server.py` or renamed to something purpose-named (e.g. `startup.py`). Importers: `server.py` (lifespan), `identity_controller.py`.
+- **`storefront/src/market_storefront/agent.py`** — residual startup-helpers module (docstring: "Storefront startup hooks"). A sibling `server.py` already exists; this file should be folded into `server.py` or renamed to something purpose-named (e.g. `startup.py`). Importers: `server.py` (lifespan).
 
 **Not worth chasing:** the internal `agent_url` parameter name in `cli_publish.py`, `groups/escrow.py`, `action_executor.py`, `sync_negotiation.py`, `negotiation_models.py` (`buyer_agent_url`), etc. It's pervasive, internal-only (no wire surface), and the value plumbed through is consistently a storefront URL. Rename opportunistically; don't sweep.
 
@@ -69,7 +72,7 @@ The `orders → listings` rename is already done; the plan's older framing of "d
 
 **Planned fix:** when query latency on `/listings` starts mattering, wire the `indexed: true` path:
 - For scalar JSONPath filters (e.g. `$.offer_resource.gpu_model`): generated column + B-tree index, maintained by the publish/update writer.
-- For array-projection filters (e.g. `$.accepted_escrows[*].fields.token`): a side table keyed on `(listing_id, value)`, repopulated on publish/update.
+- For array-projection filters (e.g. `$.accepted_escrows[*].literal_fields.token`): a side table keyed on `(listing_id, value)`, repopulated on publish/update.
 - The evaluator narrows on indexed scalar filters first, then evaluates non-indexed and array-projection filters on the survivor set.
 
 Until then: the `indexed: bool` field stays as a no-op in the loader so the YAML stays forward-compatible. Current row counts make this a non-issue.
@@ -90,17 +93,9 @@ Until then: the `indexed: bool` field stays as a no-op in the loader so the YAML
 
 **Status:** Planned. Test file was on the original split-plan TODO and never landed.
 
-**Problem:** When the provider subcommands moved from the buyer CLI to `market_storefront.cli` (commit `a48ffb1`), the provider-side `register`/`serve`/`publish`/`portfolio` command tests were dropped from `buyer/tests/` and not re-added on the storefront side. `storefront/tests/unit/test_cli_publish_helpers.py` and `test_cli_serve.py` cover slices, but there's no umbrella `test_cli_admin.py` exercising the full subcommand surface.
+**Problem:** When the provider subcommands moved from the buyer CLI to `market_storefront.cli`, the provider-side command tests were dropped from `buyer/tests/` and not re-added on the storefront side. `storefront/tests/unit/test_cli_publish_helpers.py` and `test_cli_serve.py` cover slices, but there's no umbrella `test_cli_admin.py` exercising the full subcommand surface.
 
-**Planned fix:** add `storefront/tests/unit/test_cli_admin.py` covering each `market_storefront.cli` subcommand: argument parsing, config-file resolution, the `register` → `serve` → `publish` happy path against a mocked storefront, and the error cases for missing wallet / missing config / unreachable chain.
-
----
-
-### EVM-Level Registration Test
-
-**Status:** Planned. No EVM-level test for the `register_onchain_from_config` logic — detecting existing agents, idempotent updates, event parsing — beyond what the storefront integration tests cover indirectly.
-
-**Planned fix:** add `eth-tester[py-evm]` to `service` dev deps; fixture that deploys the IdentityRegistry bytecode into `EthereumTesterProvider`; tests for `register_onchain_from_config` against the local EVM. Requires bytecode in the repo (currently only ABI is vendored). Evaluate after `erc-8004-contracts` compilation artifacts are stable.
+**Planned fix:** add `storefront/tests/unit/test_cli_admin.py` covering each `market_storefront.cli` subcommand: argument parsing, config-file resolution, the `serve` → `publish` happy path against a mocked storefront, and the error cases for missing wallet / missing config / unreachable chain.
 
 ---
 
@@ -130,19 +125,13 @@ Genuine pending fixes — distinct from the operational gotchas in the [Known Is
 
 ### SQLite INTEGER overflow for token amounts with `decimals > 0`
 
-`negotiation_messages` stores `our_price`, `their_price`, and `proposed_price` as `INTEGER` columns (signed 64-bit, max `2**63 - 1 ≈ 9.2 × 10**18`). `accepted_escrows[i].price_per_hour` is stored in uint256-domain (already decimal-scaled at advertisement), and the negotiation pipeline carries those values into `our_price` / `their_price` unchanged. Any token with 18 decimals and a human-readable per-hour price above ~9.2 billion will overflow at the SQLite write.
+`negotiation_messages` stores `our_price`, `their_price`, and `proposed_price` as `INTEGER` columns (signed 64-bit, max `2**63 - 1 ≈ 9.2 × 10**18`). The primary rate on `accepted_escrows[i]` is in uint256-domain (already decimal-scaled at advertisement), and the negotiation pipeline carries those values into `our_price` / `their_price` unchanged. Any token with 18 decimals and a human-readable per-hour price above ~9.2 billion will overflow at the SQLite write.
 
-**Workaround in e2e tests:** use `decimals: 0` on the MOCK test token so the advertised `price_per_hour` is already in base units.
+**Workaround in e2e tests:** use `decimals: 0` on the MOCK test token so the advertised rate is already in base units.
 
-**Fix:** change `our_price`, `their_price`, `proposed_price` in `negotiation_messages` from `INTEGER` to `TEXT` and parse at read time. The `accepted_escrows` JSON column already serializes `price_per_hour` as a string-of-digits to dodge this on the listing side; the price-tracking columns need the same treatment.
+**Fix:** change `our_price`, `their_price`, `proposed_price` in `negotiation_messages` from `INTEGER` to `TEXT` and parse at read time. The `accepted_escrows` JSON column already serializes the rate value as a string-of-digits to dodge this on the listing side; the price-tracking columns need the same treatment.
 
 ---
-
-### `perform_registration` logs "Invalid explicit agent ID" when `ownerOf()` returns a tuple
-
-On the local Anvil state, `identityRegistry.ownerOf(agent_id).call()` returns a 2-tuple instead of a plain address string (ABI mismatch). The `except Exception` block in `registration.py` catches this, sets `agent_id = None`, and falls through to blockchain event search which recovers correctly. The `[REGISTRATION] Invalid explicit agent ID N: (addr, addr)` log line is expected and non-fatal.
-
-**Fix:** handle tuple returns explicitly in `registration.py` by unpacking `owner = result[0] if isinstance(result, (list, tuple)) else result`.
 
 ---
 
@@ -152,21 +141,13 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 
 - **Agent SQLite statefulness:** The agent carries significant local state in SQLite (policy configs, negotiation history, resource portfolio). Behavior around container restarts, state migration, and concurrent access is a known problem area. Details TBD.
 
-- **`ONCHAIN_AGENT_ID` clearing:** Both compose files explicitly clear `ONCHAIN_AGENT_ID=` to force re-registration on every fresh Anvil restart. This indicates the agent does not cleanly detect stale on-chain registrations on its own.
-
 - **Negotiation orphans:** The existence of `negotiation_watchdog.py` implies negotiations can get stuck. The trigger conditions and recovery behavior need documentation.
 
-- **Buyer's initial offer must meet the seller's floor price:** `_extract_initial_price_from_order()` returns `accepted_escrows[0].price_per_hour` (already in uint256-domain base units) as the seller's `our_price`. The `BisectionStrategy` in `maximize` direction exits with `"price_unreasonable"` if `their_price < our_price / 1.5`, and does not counter. If the buyer's `BUYER_INITIAL_PRICE` in the e2e test is below this floor, the seller exits at round 0 and `force-accept` returns 409. **Rule:** `BUYER_INITIAL_PRICE >= accepted_escrows[0].price_per_hour` in the e2e test constants.
-
-- **`wait_for_registry_agent` retries past transient network states:** `"timeout"` and `"unreachable"` returned by `registry_auth_check._probe()` are transient network conditions. The wait loop retries past `"agent_not_found"`, `"timeout"`, and `"unreachable"`. Only definitive states (`"ok"`, `"owner_mismatch"`, `"unconfigured"`, `"owner_unknown"`, `"wallet_unconfigured"`, `"http_*"`) exit the loop immediately.
+- **Buyer's initial offer must meet the seller's floor price:** `_extract_initial_price_from_order()` returns `primary_rate_value(accepted_escrows[0])` (already in uint256-domain base units) as the seller's `our_price`. The `BisectionStrategy` in `maximize` direction exits with `"price_unreasonable"` if `their_price < our_price / 1.5`, and does not counter. If the buyer's `BUYER_INITIAL_PRICE` in the e2e test is below this floor, the seller exits at round 0 and `force-accept` returns 409. **Rule:** `BUYER_INITIAL_PRICE >= primary_rate_value(accepted_escrows[0])` in the e2e test constants.
 
 - **Global pause state persists across e2e test runs:** The storefront's `_GLOBALLY_PAUSED` flag (toggled by `POST /admin/pause` — distinct from per-listing `paused=True`) is in-process memory, not reset between `pytest` sessions. Neither full-deal scenario currently calls global `admin_pause` (storefront integration tests do, but those have their own teardown). The risk is a developer or external script having toggled it manually; the next `/negotiate/new` then 503s with `{"reason": "global"}` regardless of any per-listing state. The `ensure_storefront_resumed` autouse fixture in `integration-tests/tests/e2e/roles/scenarios/conftest.py` mitigates this by calling `admin_resume()` in module teardown. If running against a live environment that may have been left paused, execute `curl -X POST http://localhost:8001/admin/resume -H "X-Admin-Key: <key>"` before running.
 
 - **Resource CSV importer DB path:** `scripts/import_resources_csv.py` resolves the target SQLite path via `--db-path` CLI arg → `STOREFRONT_DB_PATH` env var → `CONFIG.db_path`, in that order. If the importer writes to a different path than the server reads (e.g. via an unset `STOREFRONT_DB_PATH` falling through to a wrong default), the server starts with zero resources and rejects all `/negotiate/new` calls with `409 no_matching_inventory`. `compose/seller.yml` pins `--db-path src/market_storefront/data/storefront/agent.db` explicitly. **Detection:** `GET /api/v1/system/status` exposes `resource_count` as a top-level field; a value of `0` signals this misconfiguration. The smoke test `test_resource_portfolio_seeded` in `test_storefront_smoke.py` asserts `resource_count > 0` and fails with a remediation command.
-
-- **Registry indexer cold-start gate:** Agent rows are indexed just-in-time on the publish/heartbeat/lookup path (`registry-service/src/api/utils.py::ensure_agent_indexed`) — the indexer never pre-walks the chain. A fresh on-chain registration becomes queryable as soon as the indexer's RPC node has the tx mined. `GET /api/v1/system/sync/wait-for-agent` is a server-side long-poll that hammers JIT lookups until they succeed, used by stage 03c (`TestStage03c_SellerAgentIndexed`) to gate negotiation stages on chain visibility. **`wait-for-agent` is the canonical pattern for this class of problem**: when a test needs to gate on an async condition (chain mining, queue drain, etc.), add an admin/system endpoint that blocks server-side until the condition is met. Avoids client-side polling loops (fragile, sleep-based) and makes the wait observable.
-
-- **`settings.SELLER.AGENT_ID` in e2e config files can drift:** The e2e config files (`config/config-local.yml`, `config/config-docker.yml`) hard-code `seller.agent_id` to e.g. `"eip155:31337:...:2"`. The numeric suffix depends on chain state — on a fresh Anvil the sentinel agent registers as ID 0 and the seller as ID 1, so `:2` is stale. Stage 03c uses `storefront.wait_for_registry_agent_ready()` (live runtime agent ID), but `SyncProvisioningClient` (as the `X-Agent-ID` header) and smoke tests still consume `SELLER.AGENT_ID`. Update it to match `curl http://localhost:8080/agents` output for the seller's wallet when rebuilding the Anvil state.
 
 - **E2e test dependency graph is not mechanically verified:** The `require_state(deal_state, "field")` chain between stages is enforced by convention only. A field set by one stage but not consumed by `require_state` in any downstream stage is a silent gap — the first failure cascades to a skip rather than a fail in the stage that actually needed it. A field name typo in a `require_state` call produces the same symptom: `getattr(deal_state, "nonexistent_field", None)` silently returns `None` and the test skips regardless of pipeline state. **Rule:** when adding a new `DealState` field, always verify that at least one downstream `require_state` call consumes it, and that the field name in `require_state` exactly matches the attribute name on `DealState`. This gap class cannot be caught by unit or integration tests — it is a property of the test's own dependency graph.
 
@@ -181,23 +162,6 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 **Problem:** The `registry-service` is currently deployed as a subchart of the `arkhai-node-operator` Helm chart, implying it is part of every provider node's deployment. In practice the registry is a shared marketplace service — there is one per market, not one per provider. Multiple seller nodes should all register with and publish orders to the same registry instance run by the marketplace operator. Bundling it with the provider chart conflates the marketplace operator role with the provider role.
 
 **Planned fix:** Make `registry` an optional subchart (add `condition: registry.enabled`, default `false`). Provider deployments point at an externally-operated registry via `global.registry.api_url`. Only marketplace operator deployments enable the subchart. Document the two deployment topologies (operator vs. provider) in the Helm `values.yaml` and in `ARCHITECTURE.md`.
-
----
-
-### `/agents/register` HTTP endpoint removed
-
-**Status:** Done. Removed in the JIT switch.
-
-**Context:** The endpoint accepted a caller-provided `owner` field (with
-signature verification against that claimed owner) but never cross-checked
-against `ownerOf` on chain. That made it possible to register an agent row
-under a fake owner — subsequent legitimate publishes from the real on-chain
-owner would then fail signature verification against the cached fake owner.
-JIT lookup is strictly safer: every agent record sources `owner` from a
-fresh `ownerOf` call on chain. Note for the broader ERC-8004 keep/remove
-decision: if ERC-8004 stays, JIT covers the registration path completely;
-if it goes, agent identification collapses to wallet-address-as-seller and
-the whole `agents` table can be dropped.
 
 ---
 
@@ -391,10 +355,6 @@ Items where `ARCHITECTURE.md` has a "TODO: Document X" placeholder. Fill in as p
 ### Alkahest Contracts in the Baked State
 
 The exact set of Alkahest contracts deployed in the `test-env` baked state and their addresses — so operators can wire integrations without reading the deploy scripts.
-
-### Event Sync Polling Interval and Missed-Event Behavior
-
-The registry's event-sync polling cadence and any known lag or missed-event scenarios. Relevant when investigating why an agent is slow to appear in `/agents`.
 
 ### Symmetric Order Concept
 

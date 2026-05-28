@@ -9,8 +9,8 @@ buyer's wallet, the same way
 production — but inlined here because integration-tests doesn't
 depend on the buyer wheel.
 
-Token distribution is deploy-time (the alkahest deploy script funds
-account #1 with MockERC20). Escrow creation is runtime: in production
+Token distribution is baked into the chain state (account #1 holds
+MockERC20 — see test-env/generate_state.py). Escrow creation is runtime: in production
 the buyer signs and sends this transaction themselves, so the test
 does the same — with the buyer's private key, against the just-
 finalized negotiation terms.

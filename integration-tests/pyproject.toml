@@ -22,11 +22,11 @@ dependencies = [
     "httpx>=0.27",            # used by test_provisioning_smoke and SyncRegistryClient
     # Workspace dependency: tests use the real discovery/matching logic,
     # not a re-implementation. Keeps test behavior aligned with storefront behavior.
-    "arkhai-storefront-client>=0.10.0",
+    "arkhai-storefront-client>=0.11.0",
     "arkhai-registry-client>=0.6.0",
     "market-service>=0.1.0",
 	"market-storefront>=0.1.0",
-    "provisioning-service>=0.3.0",
+    "provisioning-service>=0.4.0",
 ]
 
 [tool.uv]

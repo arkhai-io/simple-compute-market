@@ -113,6 +113,12 @@ def register(app: typer.Typer) -> None:
             help="Payment token decimals. Logged for downstream "
                  "`market settle` / `escrow create`.",
         ),
+        chain_name: Optional[str] = typer.Option(
+            None, "--chain",
+            help="Which [chains.<name>] entry to negotiate against. When "
+                 "omitted the buyer prompts; required when --yes is set "
+                 "and the listing accepts more than one chain you have configured.",
+        ),
     ) -> None:
         """Drive a synchronous negotiation with one seller, round-by-round.
 
@@ -244,33 +250,33 @@ def register(app: typer.Typer) -> None:
         # chain all come from the listing. ``--token-contract`` (when
         # set) filters entries to one ERC-20.
         from ..escrow_selection import select_escrow_entry
+        from ..common import select_chain_for_listing
         picked_entry: Optional[dict] = None
+        chain_cfg = None
         if listing_dict is not None:
-            _chain_for_pick = resolve_config_value(
-                toml_path="chain.name", default="ethereum_sepolia",
-            )
-            _rpc_for_pick = resolve_config_value(
-                toml_path="chain.rpc_url", default="",
+            chain_cfg = select_chain_for_listing(
+                listing=listing_dict, override=chain_name, yes=assume_yes,
             )
             picked_entry = select_escrow_entry(
                 listing_dict,
-                chain_name=_chain_for_pick,
+                chain_name=chain_cfg.name,
                 token_contract_filter=token_contract,
                 assume_yes=assume_yes,
-                rpc_url=_rpc_for_pick or "",
+                rpc_url=chain_cfg.rpc_url,
                 buyer_address=addr,
                 console=console,
             )
             if picked_entry is None:
                 msg = (
                     f"Listing {listing_id!r} has no accepted_escrows entry on "
-                    f"chain {_chain_for_pick!r}"
+                    f"chain {chain_cfg.name!r}"
                 )
                 if token_contract:
                     msg += f" with token {token_contract}"
                 typer.secho(msg + ".", err=True, fg=typer.colors.RED)
                 raise typer.Exit(2)
-            entry_token = (picked_entry.get("fields") or {}).get("token")
+            from service.schemas import accepted_token_address
+            entry_token = accepted_token_address(picked_entry)
             if isinstance(entry_token, str) and entry_token.startswith("0x"):
                 # Surface the picked token back to the run-log + the
                 # downstream price-scaling step.
@@ -286,16 +292,14 @@ def register(app: typer.Typer) -> None:
                 int(token_decimals) if token_decimals is not None else None
             )
             if decimals is None:
-                from ..common import resolve_chain_id
                 from service.clients.token import (
                     resolve_token, TokenResolutionError,
                 )
-                rpc = resolve_config_value(toml_path="chain.rpc_url")
                 tc = token_contract
-                if tc and rpc:
+                if tc and chain_cfg is not None:
                     try:
                         meta = resolve_token(
-                            tc, rpc_url=rpc, chain_id=resolve_chain_id(rpc),
+                            tc, rpc_url=chain_cfg.rpc_url, chain_id=chain_cfg.chain_id,
                         )
                         decimals = meta.decimals
                     except (TokenResolutionError, RuntimeError):
@@ -303,8 +307,8 @@ def register(app: typer.Typer) -> None:
             if decimals is None:
                 typer.secho(
                     "Could not resolve token decimals to scale prices. "
-                    "Pass --token-decimals or set chain.rpc_url + a token "
-                    "contract.",
+                    "Pass --token-decimals or ensure the listing's accepted "
+                    "chain is configured in [chains.<name>].",
                     err=True, fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
@@ -345,6 +349,7 @@ def register(app: typer.Typer) -> None:
             token_contract=token_contract,
             token_decimals=token_decimals,
             resumed_from=from_run,
+            chain_name=(chain_cfg.name if chain_cfg is not None else None),
         )
 
         header = Table.grid(padding=(0, 2))
@@ -399,26 +404,31 @@ def register(app: typer.Typer) -> None:
                 duration_seconds=int(duration_seconds),
                 ssh_public_key="",  # negotiate-only flow; settle is a separate command
             )
-            _entry_fields = picked_entry.get("fields") or {}
+            from service.schemas import accepted_token_address
+            _entry_token = accepted_token_address(picked_entry)
             escrow_proposal = EscrowProposal(
                 chain_name=picked_entry.get("chain_name"),
                 escrow_address=picked_entry["escrow_address"],
-                fields={"token": _entry_fields.get("token")},
+                fields={"token": _entry_token},
+                literal_fields={"token": _entry_token},
                 expiration_unix=int(_time.time()) + 3600,
             )
 
-        # Honor an optional [negotiation].policy_mode override in
-        # buyer.toml, mirroring the seller's [negotiation] knob. The
-        # buyer wheel installs without torch by default — set "bisection"
-        # to avoid the RL self-register path blowing up. When unset,
-        # falls through to negotiate_with_seller's default chain.
+        # Honor optional [negotiation] policies / policy_mode overrides
+        # in buyer.toml, mirroring the seller's [negotiation] knob.
+        # `policies` is the explicit ordered list; `policy_mode` is the
+        # legacy single-terminal key. The buyer wheel installs without
+        # torch by default — set "bisection" to avoid the RL self-register
+        # path blowing up. When both are unset, negotiate_with_seller
+        # falls through to its default chain.
         chain = None
+        policies = resolve_config_value(toml_path="negotiation.policies")
         policy_mode = resolve_config_value(
             toml_path="negotiation.policy_mode",
         )
-        if policy_mode:
+        if policies or policy_mode:
             from market_buyer.buyer_client import _load_buyer_chain
-            chain = _load_buyer_chain(policy_mode)
+            chain = _load_buyer_chain(policies=policies, policy_mode=policy_mode)
 
         try:
             outcome = negotiate_with_seller(

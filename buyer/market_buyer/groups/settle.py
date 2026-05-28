@@ -28,6 +28,46 @@ from ..buy_orchestrator import (
     wait_for_settlement,
 )
 from ._deal import load_deal_context, open_run_log, resolve_chain_settings
+from ..run_log import read_run
+
+
+def _chain_name_from_run_log(run_id: str) -> Optional[str]:
+    """Look up the chain the deal targets, from the run-log.
+
+    Source priority:
+      1. ``escrow_created`` event (recorded at escrow creation time).
+      2. ``run_started`` event (recorded when ``market negotiate`` picked
+         the chain from the listing's accepted_escrows).
+
+    Settling on a different chain would fail, so we trust whichever
+    event the buyer wrote first.
+    """
+    for ev in read_run(run_id):
+        if ev.get("event") == "escrow_created":
+            cn = ev.get("chain_name")
+            if isinstance(cn, str) and cn:
+                return cn
+            terms = ev.get("terms") or {}
+            cn = terms.get("chain_name")
+            if isinstance(cn, str) and cn:
+                return cn
+        if ev.get("event") == "run_started":
+            cn = ev.get("chain_name")
+            if isinstance(cn, str) and cn:
+                return cn
+    return None
+
+
+def _first_listing_chain(deal) -> Optional[str]:
+    """Fallback: pick the chain from the deal's listing accepted_escrows."""
+    listing = getattr(deal, "listing", None)
+    if isinstance(listing, dict):
+        for entry in listing.get("accepted_escrows") or []:
+            if isinstance(entry, dict):
+                cn = entry.get("chain_name")
+                if isinstance(cn, str) and cn:
+                    return cn
+    return None
 
 
 def run_settle_from_log(
@@ -41,9 +81,7 @@ def run_settle_from_log(
     ssh_public_key: Optional[str],
     buyer_address: Optional[str],
     buyer_private_key: Optional[str],
-    rpc_url: Optional[str],
     chain_name: Optional[str],
-    alkahest_addr_config: Optional[str],
     poll_interval: float,
     settlement_timeout: float,
     console: Optional[Console] = None,
@@ -73,13 +111,21 @@ def run_settle_from_log(
         if token_decimals is not None
         else (int(deal.token_decimals) if deal.token_decimals is not None else None)
     )
+    from ..common import chain_by_name
+    chain_cfg_name = chain_name or _chain_name_from_run_log(run_id) or _first_listing_chain(deal)
+    if not chain_cfg_name:
+        typer.secho(
+            "Could not determine the chain from the run-log or deal context. "
+            "Pass --chain to specify which configured chain to settle on.",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
+    chain_cfg = chain_by_name(chain_cfg_name)
     chain = resolve_chain_settings(
         buyer_address=buyer_address,
         buyer_private_key=buyer_private_key,
         ssh_public_key=ssh_public_key,
-        rpc_url=rpc_url,
-        chain_name=chain_name,
-        alkahest_addr_config=alkahest_addr_config,
+        chain=chain_cfg,
         token_contract=effective_token,
         token_decimals=effective_token_decimals,
     )
@@ -155,6 +201,7 @@ def run_settle_from_log(
             chain_name=chain.chain_name,
             escrow_address=escrow_address,
             fields={"token": chain.token_contract},
+            literal_fields={"token": chain.token_contract},
             expiration_unix=int(_time.time()) + expiration_seconds,
         )
 
@@ -206,6 +253,7 @@ def run_settle_from_log(
             ssh_public_key=chain.ssh_public_key,
             buyer_address=chain.buyer_address,
             buyer_private_key=chain.buyer_private_key,
+            chain_name=chain.chain_name,
         )
     except RuntimeError as exc:
         log.event("settle_submit_failed", error=str(exc))
@@ -308,17 +356,11 @@ def register(app: typer.Typer) -> None:
             None, "--buyer-priv-key",
             help="Override buyer private key (default: wallet.private_key).",
         ),
-        rpc_url: Optional[str] = typer.Option(
-            None, "--rpc-url",
-            help="Chain RPC URL (default: chain.rpc_url).",
-        ),
         chain_name: Optional[str] = typer.Option(
-            None, "--chain-name",
-            help="Chain name for alkahest address resolution (default: chain.name).",
-        ),
-        alkahest_addr_config: Optional[str] = typer.Option(
-            None, "--alkahest-addr-config",
-            help="Path to alkahest address config JSON (default: chain.alkahest_address_config_path).",
+            None, "--chain",
+            help="Override which configured [chains.<name>] entry to settle on. "
+                 "When omitted, reads chain_name from the run-log's escrow_created "
+                 "event; falls back to the first listing.accepted_escrows entry.",
         ),
         poll_interval: float = typer.Option(
             DEFAULT_SETTLEMENT_POLL_INTERVAL, "--poll-interval",
@@ -354,9 +396,7 @@ def register(app: typer.Typer) -> None:
             ssh_public_key=ssh_public_key,
             buyer_address=buyer_address,
             buyer_private_key=buyer_private_key,
-            rpc_url=rpc_url,
             chain_name=chain_name,
-            alkahest_addr_config=alkahest_addr_config,
             poll_interval=poll_interval,
             settlement_timeout=settlement_timeout,
         )

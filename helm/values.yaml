@@ -123,7 +123,10 @@ storefront:
           provisioning:
             mode: "mock"
           negotiation:
-            policyMode: "bisection"
+            policies:
+              - "has_matching_inventory_guard"
+              - "escrow_shape_guard"
+              - "bisection"
           integrations:
             geminiApiKey: ""
         chain:
@@ -167,9 +170,6 @@ provisioning:
     database_url: "sqlite:////app/data/provisioning.db"
     ansible_timeout_seconds: 1800
     default_vm_host: "kvm1"
-    enable_auth: false
-    registry_cache_ttl_seconds: 300
-    registry_cache_max_size: 256
     lease_watchdog_enabled: true
     lease_watchdog_poll_interval_seconds: 60
     lease_watchdog_grace_period_seconds: 300

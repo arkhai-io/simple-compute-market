@@ -120,13 +120,6 @@ class TestHealthEndpoint:
         assert registry_check is not None
         assert isinstance(registry_check, str) and registry_check
 
-    async def test_system_status_includes_registry_auth_check(self, client):
-        c, _ = client
-        result = await c.get_system_status()
-        auth_check = result.checks.get("registry_auth")
-        assert auth_check is not None
-        assert isinstance(auth_check, str) and auth_check
-
     async def test_system_status_includes_negotiation_strategy_check(self, client):
         c, _ = client
         result = await c.get_system_status()

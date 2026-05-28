@@ -120,9 +120,6 @@ _INIT_USER_TEMPLATE = """\
 
 # agent_id = "alice"                           # must be a valid Python identifier
 # agent_name = "Alice"                         # display name (any string)
-# onchain_agent_id = ""                        # pin after first successful registration; otherwise the
-                                                # storefront auto-registers a fresh agent on every boot (gas).
-# auto_register = true                         # set false to refuse to start without a pinned onchain_agent_id
 
 # ---------------------------------------------------------------------------
 # HTTP server
@@ -170,18 +167,23 @@ _INIT_USER_TEMPLATE = """\
 # private_key = "0x..."
 # ssh_public_key = "ssh-ed25519 AAAA... user@host"
 
-[chain]
-# name = "ethereum_sepolia"                    # auto-derived from rpc_url via eth_chainId when omitted
-                                                # (anvil | base_sepolia | ethereum_sepolia | ethereum_mainnet
-                                                # | filecoin_calibration). Set explicitly for unknown chain IDs.
-# rpc_url = "https://sepolia.base.org"
+# One [chains.<name>] table per chain the storefront serves listings on.
+# Identity is the wallet (above); listings emit one accepted_escrows entry
+# per configured chain at publish time.
+
+[chains.ethereum_sepolia]
+# rpc_url = "https://sepolia.infura.io/v3/<project_id>"
+# chain_id = 11155111                          # optional; auto-fills for the canonical chain names
+                                                # (anvil | base_sepolia | ethereum_sepolia |
+                                                # ethereum_mainnet | filecoin_calibration).
 # alkahest_address_config_path = "/path/to/alkahest.json"  # required for anvil
+
+# Add additional chains by uncommenting and customizing:
+# [chains.base_sepolia]
+# rpc_url = "https://sepolia.base.org"
 
 [registry]
 # urls = ["http://localhost:8080"]             # one or more indexer URLs; publishes fan out to each.
-# identity_registry_address = "0x..."          # ERC-8004 IdentityRegistry. Auto-defaults from chain.name
-                                                # to the canonical CREATE2 vanity address; set only for
-                                                # non-canonical deployments.
 
 [registry.auth]
 # Free-form table of {url = "bearer-token"}. Keys must match urls above
@@ -203,7 +205,9 @@ _INIT_USER_TEMPLATE = """\
 # frp_dashboard_password = ""
 
 [negotiation]
-# policy_mode = "bisection"                    # "bisection" (default; no ML deps) | "rl" (requires torch)
+# policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
+#                                              # ordered list of policies; terminal policy is
+#                                              # `bisection` (default; no ML deps) or `rl` (torch + checkpoint)
 # seller_model_path = "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt"
 # buyer_model_path  = "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt"
 

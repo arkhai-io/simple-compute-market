@@ -66,7 +66,8 @@ rpc_url  = "https://base-sepolia.infura.io/v3/<YOUR_KEY>"
 urls = ["http://<INDEXER_HOST>:8080"]
 
 [registry.auth]
-# Required when the indexer runs with REGISTRY_REQUIRE_API_KEY=true.
+# Required when the indexer gates writes (REGISTRY_REQUIRE_WRITE_API_KEY=true);
+# the key must be write-scoped.
 # Keys must exactly match the URLs in [registry] urls (scheme, host,
 # port, trailing slash).
 "http://<INDEXER_HOST>:8080" = "<your-token>"
@@ -76,7 +77,12 @@ service_url = "http://seller-provisioning:8081"
 mode        = "http"                     # "mock" for a dry run
 
 [negotiation]
-policy_mode = "bisection"
+# Ordered policy chain run per round. Guards short-circuit
+# (`reject`/`exit`); the terminal policy (`bisection` here; `rl` for the
+# trained pufferlib checkpoint — requires torch) always returns
+# counter/accept/exit. See docs/configuration.md for the full list of
+# bundled policies + how to register custom ones.
+policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 
 [pricing]
 # Human / whole-token units, per hour. The publish CLI scales by the

@@ -38,7 +38,6 @@ from services.job_service import AnsibleJobService
 from services.mock_ansible_service import MockRule, ProgrammableMockAnsibleService
 from services.system_service import SystemService
 
-AGENT_ID = "eip155:1337:0xdeadbeef:1"
 HOST = "kvm1"
 
 
@@ -139,7 +138,7 @@ async def client_and_queue(
     )
 
     transport = ASGITransport(app=app)
-    prov_client = ProvisioningClient("http://test", agent_id=AGENT_ID, transport=transport)
+    prov_client = ProvisioningClient("http://test", transport=transport)
     test_client = AsyncProvisioningTestClient(transport)
 
     yield prov_client, job_queue, programmable_mock, test_client

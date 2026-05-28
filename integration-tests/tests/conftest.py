@@ -44,10 +44,6 @@ def rpc_settings() -> dict:
 def registry_settings() -> dict:
     return {
         "api_url": settings.REGISTRY.API_URL,
-		"identity_address": settings.REGISTRY.IDENTITY_ADDRESS,
-        "reputation_address": settings.REGISTRY.REPUTATION_ADDRESS,
-        "validation_address": settings.REGISTRY.VALIDATION_ADDRESS,
-        "owner_address": settings.REGISTRY.OWNER_ADDRESS,
     }
 
 

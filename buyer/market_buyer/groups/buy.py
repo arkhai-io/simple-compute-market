@@ -86,9 +86,7 @@ def _run_resume_from(
     ssh_public_key: Optional[str],
     token_contract: Optional[str],
     token_decimals: Optional[int],
-    rpc_url: Optional[str],
     chain_name: Optional[str],
-    alkahest_addr_config: Optional[str],
     expiration_seconds: int,
     max_rounds: int,
     poll_interval: float,
@@ -127,16 +125,22 @@ def _run_resume_from(
         # Sellers publish ``price_per_hour`` already in base units, so a
         # buyer ceiling of "2" against 6-decimal USDC means $2/hr → 2_000_000.
         # Resolve token_decimals via the user override or on-chain decimals().
-        if token_decimals is None:
-            from ..common import resolve_chain_id
+        if token_decimals is None and token_contract:
+            # When the buyer's resuming mid-stream, the chain hasn't been
+            # selected yet. Use the chain pulled from the run-log via
+            # _chain_name_from_run_log; falls back to skipping decimals
+            # if the chain isn't yet known.
             from service.clients.token import resolve_token, TokenResolutionError
-            tc_for_decimals = token_contract
-            if tc_for_decimals:
+            from ..common import chain_by_name
+            from .settle import _chain_name_from_run_log
+            cname = chain_name or _chain_name_from_run_log(from_run)
+            if cname:
                 try:
+                    chain_cfg = chain_by_name(cname)
                     meta = resolve_token(
-                        tc_for_decimals,
-                        rpc_url=rpc_url,
-                        chain_id=resolve_chain_id(rpc_url),
+                        token_contract,
+                        rpc_url=chain_cfg.rpc_url,
+                        chain_id=chain_cfg.chain_id,
                     )
                     token_decimals = meta.decimals
                 except (TokenResolutionError, RuntimeError):
@@ -242,9 +246,7 @@ def _run_resume_from(
         ssh_public_key=ssh_public_key,
         buyer_address=buyer_address,
         buyer_private_key=buyer_private_key,
-        rpc_url=rpc_url,
         chain_name=chain_name,
-        alkahest_addr_config=alkahest_addr_config,
         poll_interval=poll_interval,
         settlement_timeout=settlement_timeout,
         console=console,
@@ -348,14 +350,10 @@ def register(app: typer.Typer) -> None:
                  "Pass this only when you want to skip the RPC lookup.",
         ),
         chain_name: Optional[str] = typer.Option(
-            None, "--chain-name",
-            help="Chain name for alkahest address resolution "
-                 "(default: chain.name from config.toml).",
-        ),
-        alkahest_addr_config: Optional[str] = typer.Option(
-            None, "--alkahest-addr-config",
-            help="Path to alkahest address config JSON "
-                 "(default: chain.alkahest_address_config_path).",
+            None, "--chain",
+            help="Pick which configured [chains.<name>] entry to operate on. "
+                 "Required when --yes is set and the buyer has more than one "
+                 "chain configured; otherwise the buyer prompts.",
         ),
         expiration_seconds: int = typer.Option(
             3600, "--expiration",
@@ -398,10 +396,6 @@ def register(app: typer.Typer) -> None:
             None, "--ssh-public-key",
             help="SSH public key for provisioning (default: wallet.ssh_public_key).",
         ),
-        rpc_url: Optional[str] = typer.Option(
-            None, "--rpc-url",
-            help="Chain RPC URL (default: chain.rpc_url).",
-        ),
     ) -> None:
         """Run a buy end-to-end as a pure HTTP/web3 client.
 
@@ -424,9 +418,7 @@ def register(app: typer.Typer) -> None:
                 ssh_public_key=ssh_public_key,
                 token_contract=token_contract,
                 token_decimals=token_decimals,
-                rpc_url=rpc_url,
                 chain_name=chain_name,
-                alkahest_addr_config=alkahest_addr_config,
                 expiration_seconds=expiration_seconds,
                 max_rounds=max_rounds,
                 poll_interval=poll_interval,
@@ -458,9 +450,10 @@ def register(app: typer.Typer) -> None:
 
         # Resolution: CLI flag > config.toml > derivation > default.
         from ..common import (
-            resolve_buyer_wallet, resolve_chain_name,
+            resolve_buyer_wallet,
             resolve_ssh_public_key, resolve_indexer_urls,
             resolve_discovery_timeout, resolve_indexer_auth,
+            select_chain_for_listing,
         )
         addr, pk = resolve_buyer_wallet(
             override_addr=buyer_address, override_pk=buyer_private_key,
@@ -469,25 +462,23 @@ def register(app: typer.Typer) -> None:
         reg_urls = resolve_indexer_urls(override=registry_urls)
         deadline = resolve_discovery_timeout(override=discovery_timeout)
         reg_auth = resolve_indexer_auth()
-        rpc = resolve_config_value(
-            override=rpc_url, toml_path="chain.rpc_url",
+        # Pick a chain up-front when there's no listing context yet; the
+        # orchestrator only considers listings that accept this chain.
+        chain_cfg = select_chain_for_listing(
+            listing=None, override=chain_name, yes=assume_yes,
         )
-        chain = resolve_chain_name(override=chain_name, rpc_url=rpc)
-        addr_cfg = resolve_config_value(
-            override=alkahest_addr_config,
-            toml_path="chain.alkahest_address_config_path",
-        )
+        chain = chain_cfg.name
+        rpc = chain_cfg.rpc_url
+        addr_cfg = chain_cfg.alkahest_address_config_path
 
         _key_for = {
             "buyer_priv_key": "wallet.private_key",
             "ssh_public_key": "wallet.ssh_public_key",
             "registry_urls": "registry.urls",
-            "rpc_url": "chain.rpc_url",
         }
         missing = [n for n, v in (
             ("buyer_priv_key", pk),
             ("ssh_public_key", ssh), ("registry_urls", reg_urls),
-            ("rpc_url", rpc),
         ) if not v]
         if missing:
             typer.secho("Missing required config:", err=True, fg=typer.colors.RED)
@@ -519,17 +510,16 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(2)
         if explicit_prices:
             if token_decimals is None:
-                from ..common import resolve_chain_id
                 from service.clients.token import resolve_token, TokenResolutionError
                 try:
                     meta = resolve_token(
-                        tc, rpc_url=rpc, chain_id=resolve_chain_id(rpc),
+                        tc, rpc_url=rpc, chain_id=chain_cfg.chain_id,
                     )
                     token_decimals = meta.decimals
                 except (TokenResolutionError, RuntimeError) as exc:
                     typer.secho(
-                        f"Could not resolve token {tc} on chain — pass "
-                        f"--token-decimals or check chain.rpc_url. ({exc})",
+                        f"Could not resolve token {tc} on chain {chain_cfg.name!r} — pass "
+                        f"--token-decimals or check the chain's rpc_url. ({exc})",
                         err=True, fg=typer.colors.RED,
                     )
                     raise typer.Exit(2)
@@ -615,13 +605,6 @@ def register(app: typer.Typer) -> None:
             toml_path="aggregation.policy",
         ) or None
 
-        # Counter policy is config-only — no CLI flag yet. Strict_echo
-        # default rejects any seller modification to a buyer-pinned field;
-        # operators who want to accept counters set the TOML key.
-        counter_policy = resolve_config_value(
-            toml_path="counter_policy.policy",
-        ) or None
-
         config = BuyConfig(
             registry_urls=reg_urls,
             buyer_address=addr,
@@ -629,7 +612,6 @@ def register(app: typer.Typer) -> None:
             discovery_timeout=deadline,
             indexer_auth=reg_auth,
             aggregation_policy=aggregation_policy,
-            counter_policy=counter_policy,
         )
         constraints = BuyConstraints(
             max_price=max_price,
@@ -661,11 +643,13 @@ def register(app: typer.Typer) -> None:
             )
             if entry is None:
                 return None
-            entry_fields = entry.get("fields") or {}
+            from service.schemas import accepted_token_address
+            token = accepted_token_address(entry)
             return EscrowProposal(
                 chain_name=entry.get("chain_name", chain),
                 escrow_address=entry["escrow_address"],
-                fields={"token": entry_fields.get("token")},
+                fields={"token": token},
+                literal_fields={"token": token},
                 expiration_unix=int(_time.time()) + int(expiration_seconds),
             )
 
@@ -737,15 +721,18 @@ def register(app: typer.Typer) -> None:
                     terms=terms, listing=listing, console=console,
                 )
 
-        # Honor [negotiation].policy_mode from buyer.toml (mirrors
-        # `market negotiate`). Without this, the buyer falls through to
-        # the default terminal (RL needs torch — not installed in the
-        # lean buyer wheel).
-        chain = None
+        # Honor [negotiation] policies / policy_mode from buyer.toml
+        # (mirrors `market negotiate` and the seller's [negotiation] knob).
+        # `policies` is the explicit ordered list; `policy_mode` is the
+        # legacy single-terminal key that synthesizes the default chain.
+        # Without either, the buyer falls through to the default terminal
+        # (RL needs torch — not installed in the lean buyer wheel).
+        negotiation_chain = None
+        policies = resolve_config_value(toml_path="negotiation.policies")
         policy_mode = resolve_config_value(toml_path="negotiation.policy_mode")
-        if policy_mode:
+        if policies or policy_mode:
             from market_buyer.buyer_client import _load_buyer_chain
-            chain = _load_buyer_chain(policy_mode)
+            negotiation_chain = _load_buyer_chain(policies=policies, policy_mode=policy_mode)
 
         try:
             result = run_buy(
@@ -762,7 +749,7 @@ def register(app: typer.Typer) -> None:
                 settlement_total_timeout=settlement_timeout,
                 on_event=_observe,
                 confirm_settlement=confirm_settlement_cb,
-                chain=chain,
+                chain=negotiation_chain,
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))

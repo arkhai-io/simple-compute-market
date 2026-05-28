@@ -118,12 +118,6 @@ config:
   frp_domain: ""
   frp_dashboard_password: ""
 
-  # Authentication
-  enable_auth: false
-  registry_url: ""
-  registry_cache_ttl_seconds: 300
-  registry_cache_max_size: 256
-
   # Lease watchdog
   lease_watchdog_enabled: true
   lease_watchdog_poll_interval_seconds: 60

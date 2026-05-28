@@ -58,8 +58,8 @@ class TestPublishOrderRecordsPublications:
             "accepted_escrows": [{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"token": "0x" + "22" * 20},
-                "price_per_hour": 1000,
+                "literal_fields": {"token": "0x" + "22" * 20},
+                "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
             }],
             "max_duration_seconds": 3600,
         }
@@ -105,8 +105,8 @@ class TestPublishOrderRecordsPublications:
             "accepted_escrows": [{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"token": "0x" + "22" * 20},
-                "price_per_hour": 1000,
+                "literal_fields": {"token": "0x" + "22" * 20},
+                "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
             }],
             "max_duration_seconds": 3600,
         }

@@ -63,34 +63,133 @@ def resolve_buyer_wallet(
     return addr, pk
 
 
-def resolve_chain_name(
+def buyer_chains() -> dict[str, "ChainConfig"]:
+    """Return the buyer's configured ``[chains.<name>]`` tables.
+
+    Thin wrapper around :func:`service.config_loader.chains_from_config`
+    so the buyer codebase doesn't have to import from service everywhere.
+    Empty dict when no chains are configured — callers decide whether
+    that's fatal (most operations are; ``config show`` isn't).
+    """
+    from service.config_loader import chains_from_config, ChainConfig  # noqa: F401
+    return chains_from_config()
+
+
+def select_chain_for_listing(
+    listing: dict | None,
     *,
     override: str | None = None,
-    rpc_url: str | None = None,
-    default: str = "ethereum_sepolia",
-) -> str:
-    """Resolve ``chain.name`` with optional RPC-derived fallback.
+    yes: bool = False,
+) -> "ChainConfig":
+    """Pick a configured chain to use for this listing's escrow.
 
-    Precedence: override > ``chain.name`` in TOML > eth_chainId lookup
-    against ``rpc_url`` > ``default``. The RPC lookup is best-effort —
-    a transient failure falls through to the static default rather than
-    raising.
+    Intersection rules:
+      - ``override`` must match a name in ``buyer_chains()`` (raises otherwise).
+      - When the listing carries ``accepted_escrows``, the chosen chain
+        must also appear in the listing's chain_name set. The override is
+        validated against this intersection; the interactive default is
+        the first intersection member.
+      - When ``yes=True`` and no override is given, picks the first
+        intersection member silently (or raises if the intersection is
+        empty / multiple).
+
+    Returns the selected :class:`ChainConfig`. Raises :class:`typer.Exit`
+    on unrecoverable failure.
     """
+    chains = buyer_chains()
+    if not chains:
+        typer.secho(
+            "No [chains.<name>] tables configured in buyer.toml. Run "
+            "`market config init-user` to scaffold one.",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
+
+    listing_chain_names: set[str] = set()
+    if listing is not None:
+        for entry in listing.get("accepted_escrows") or []:
+            if isinstance(entry, dict):
+                name = entry.get("chain_name")
+                if isinstance(name, str) and name:
+                    listing_chain_names.add(name)
+
+    candidates: list[str]
+    if listing_chain_names:
+        candidates = [n for n in chains if n in listing_chain_names]
+        if not candidates:
+            typer.secho(
+                f"None of the buyer's configured chains ({sorted(chains)}) match "
+                f"the listing's accepted chains ({sorted(listing_chain_names)}).",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+    else:
+        candidates = list(chains)
+
     if override:
-        return override
-    from service.config_loader import (
-        chain_name_for_rpc,
-        get_dotted,
-        load_user_config,
+        if override not in chains:
+            typer.secho(
+                f"--chain {override!r} is not in [chains.<name>] config. "
+                f"Available: {sorted(chains)}.",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+        if listing_chain_names and override not in listing_chain_names:
+            typer.secho(
+                f"--chain {override!r} is not accepted by this listing "
+                f"({sorted(listing_chain_names)}).",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+        return chains[override]
+
+    if len(candidates) == 1:
+        return chains[candidates[0]]
+
+    if yes:
+        typer.secho(
+            f"Multiple matching chains ({candidates}); pass --chain to pick one "
+            "when running with --yes.",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
+
+    # Interactive prompt — default to first match.
+    default_idx = 0
+    typer.echo("Pick a chain to settle this deal on:")
+    for i, n in enumerate(candidates):
+        marker = " (default)" if i == default_idx else ""
+        typer.echo(f"  [{i}] {n}{marker}")
+    raw = typer.prompt(
+        "Select", default=str(default_idx), show_default=True,
     )
-    cfg_name = get_dotted(load_user_config(), "chain.name")
-    if isinstance(cfg_name, str) and cfg_name.strip():
-        return cfg_name.strip()
-    if rpc_url:
-        derived = chain_name_for_rpc(rpc_url)
-        if derived:
-            return derived
-    return default
+    try:
+        idx = int(raw)
+    except ValueError:
+        typer.secho(f"Not a number: {raw!r}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(2)
+    if idx < 0 or idx >= len(candidates):
+        typer.secho(f"Out of range: {idx}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(2)
+    return chains[candidates[idx]]
+
+
+def chain_by_name(name: str) -> "ChainConfig":
+    """Look up one chain by name from the buyer's config.
+
+    Raises :class:`typer.Exit` if the name isn't configured — used by
+    commands like ``market settle --from <run_id>`` that know which
+    chain they're on from a recorded source of truth.
+    """
+    chains = buyer_chains()
+    chain = chains.get(name)
+    if chain is None:
+        typer.secho(
+            f"Chain {name!r} not configured. Available: {sorted(chains)}.",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
+    return chain
 
 
 def resolve_ssh_public_key(*, override: str | None = None) -> str:
@@ -189,18 +288,13 @@ def resolve_discovery_timeout(*, override: float | None = None) -> float:
 
 
 def resolve_chain_id(rpc_url: str) -> int:
-    """Pinned ``chain.chain_id`` from config, falling back to ``eth_chainId``.
+    """Fallback ``eth_chainId`` resolver for code paths that haven't been
+    migrated to the multi-chain ChainConfig pattern yet.
 
-    Raises ``RuntimeError`` when neither source yields a chain id. Used by
-    on-chain token resolution to key the per-chain metadata cache.
+    Prefer reading ``chain.chain_id`` directly from a :class:`ChainConfig`
+    returned by :func:`select_chain_for_listing` / :func:`chain_by_name`
+    — that's the source of truth now and avoids the live RPC hop.
     """
-    from service.config_loader import get_dotted, load_user_config
-    pinned = get_dotted(load_user_config(), "chain.chain_id")
-    if pinned:
-        try:
-            return int(pinned)
-        except (TypeError, ValueError):
-            pass
     from web3 import Web3
     from web3.providers import HTTPProvider
     try:
@@ -208,8 +302,7 @@ def resolve_chain_id(rpc_url: str) -> int:
         return int(w3.eth.chain_id)
     except Exception as exc:
         raise RuntimeError(
-            f"chain.chain_id is not pinned in config.toml and the "
-            f"eth_chainId fallback failed: {exc}"
+            f"eth_chainId lookup against {rpc_url!r} failed: {exc}"
         ) from exc
 
 

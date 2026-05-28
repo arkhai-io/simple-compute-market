@@ -320,12 +320,15 @@ async def gather_outcomes(
 
 
 def _extract_advertised_price(match: dict[str, Any]) -> float | None:
-    """Pull the per-hour advertised price from a match's first accepted escrow.
+    """Pull the per-hour advertised rate from a match's first accepted escrow.
 
-    Mirrors what the seller advertises: ``accepted_escrows[0].price_per_hour``
-    (or 0 for free / None for hidden reserve). Returns ``None`` if no usable
-    rate is published — callers fall back to their own ``initial_price``.
+    Mirrors what the seller advertises: ``accepted_escrows[0]`` primary
+    rate (0 for free; ``None`` for hidden reserve, i.e. empty ``rates``).
+    Returns ``None`` if no usable rate is published — callers fall back
+    to their own ``initial_price``.
     """
+    from service.schemas import primary_rate_value
+
     accepted = match.get("accepted_escrows") or []
     if isinstance(accepted, str):
         try:
@@ -337,14 +340,10 @@ def _extract_advertised_price(match: dict[str, Any]) -> float | None:
     first = accepted[0]
     if not isinstance(first, dict):
         return None
-    amount = first.get("price_per_hour")
-    try:
-        parsed = float(amount) if amount is not None else None
-    except (ValueError, TypeError):
+    amount = primary_rate_value(first)
+    if amount is None or amount <= 0:
         return None
-    if parsed is None or parsed <= 0:
-        return None
-    return parsed
+    return float(amount)
 
 
 async def _sequential_first_agreed(

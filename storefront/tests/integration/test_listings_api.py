@@ -59,8 +59,8 @@ async def _seed_listing(db: SQLiteClient, listing_id: str, status: str = "open")
         accepted_escrows=[{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"token": "0x0000000000000000000000000000000000000001"},
-            "price_per_hour": 9000,
+            "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
+            "rates": [{"field": "amount", "per": "hour", "value": "9000"}],
         }],
         fulfillment_resource=None,
         max_duration_seconds=7200,
@@ -266,7 +266,7 @@ async def admin_client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient
     from market_storefront.services.listing_service import ListingService
 
     listing_svc = ListingService(
-        sqlite_client=db, alkahest_client=None
+        sqlite_client=db, alkahest_clients=None
     )
 
     _container.resolved_sqlite_client = db
@@ -295,7 +295,7 @@ async def admin_no_key_client(db) -> AsyncIterator[StorefrontClient]:
     from market_storefront.services.listing_service import ListingService
 
     listing_svc = ListingService(
-        sqlite_client=db, alkahest_client=None
+        sqlite_client=db, alkahest_clients=None
     )
 
     _container.resolved_sqlite_client = db
@@ -327,8 +327,8 @@ _OFFER = {
 _ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
     "escrow_address": "0x" + "11" * 20,
-    "fields": {"token": "0x0000000000000000000000000000000000000001"},
-    "price_per_hour": 5000,
+    "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
+    "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
 }]
 
 
@@ -478,7 +478,7 @@ async def seller_auth_full_client(db):
     from market_storefront.services.listing_service import ListingService
     from tests._settings_overrides import settings_overrides
 
-    listing_svc = ListingService(sqlite_client=db, alkahest_client=None)
+    listing_svc = ListingService(sqlite_client=db, alkahest_clients=None)
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = listing_svc

@@ -18,7 +18,6 @@ import logging
 import pytest
 
 from storefront_client import SyncStorefrontClient
-from registry_client import RegistryClientError
 
 log = logging.getLogger(__name__)
 
@@ -46,66 +45,37 @@ def seller_client(seller_api_url: str, seller_settings: dict) -> SyncStorefrontC
 
 @pytest.mark.storefront
 class TestStorefrontRegistration:
-    """Verify the deployed seller storefront is reachable and on-chain registered."""
+    """Verify the deployed seller storefront is reachable and its identity is published."""
 
-    def test_storefront_is_on_chain_registered(self, seller_client: SyncStorefrontClient) -> None:
-        """The registration file must contain at least one record with a
-        non-zero agentId. Confirms the agent has been indexed by the
-        registry and its on-chain identity is live.
-        """
-        try:
-            reg = seller_client.get_registration()
-        except RegistryClientError as exc:
-            pytest.fail(f"Could not fetch seller registration file.\n{exc}")
-
-        assert reg.registrations, (
-            "Seller has no registration records in its ERC-8004 file.\n"
-            "The agent may not have completed on-chain registration."
-        )
-        assert reg.is_registered, (
-            f"Seller registration records all have agentId == 0.\n"
-            f"Registrations: {reg.registrations}\n"
-            "The agent has not been indexed by the registry yet."
-        )
-        log.info(
-            "✓ Seller is registered — agentId(s): %s",
-            [r.agent_id for r in reg.registrations],
-        )
-
-    def test_storefront_registry_address_matches_config(
-        self,
-        seller_client: SyncStorefrontClient,
-        registry_settings: dict,
+    def test_storefront_publishes_agent_wallet(
+        self, seller_api_url: str, seller_settings: dict
     ) -> None:
-        """The agentRegistry field in the registration file must contain
-        the identity_address from configuration.
+        """GET /.well-known/agent-wallet.json must echo back the configured wallet.
 
-        Guards against the agent being registered against a different
-        registry contract than the one this test suite is configured to
-        use (e.g., wrong chain or stale deployment).
+        Post-pluggable-identity the agent-wallet well-known is the only
+        identity surface peers consult; it advertises the EVM address
+        settlement counterparties verify against.
         """
-        expected_address = registry_settings["identity_address"].lower()
+        import httpx
+
         try:
-            reg = seller_client.get_registration()
-        except RegistryClientError as exc:
-            pytest.fail(f"Could not fetch seller registration file.\n{exc}")
+            resp = httpx.get(
+                f"{seller_api_url}/.well-known/agent-wallet.json", timeout=5.0,
+            )
+        except Exception as exc:
+            pytest.fail(f"Could not reach /.well-known/agent-wallet.json: {exc}")
 
-        assert reg.registrations, "Seller has no registration records."
-
-        actual_addresses = [
-            (r.registry_address or "").lower()
-            for r in reg.registrations
-        ]
-        assert any(addr == expected_address for addr in actual_addresses), (
-            f"Seller is not registered against the expected identity registry.\n"
-            f"  Expected : {expected_address}\n"
-            f"  Got      : {actual_addresses}\n"
-            "Check registry.identity_address in config and the agent's "
-            "registry.identity_registry_address in config.toml."
+        assert resp.status_code == 200, (
+            f"agent-wallet returned {resp.status_code}: {resp.text[:200]}"
         )
-        log.info(
-            "✓ Seller registry address matches config: %s", expected_address
+        body = resp.json()
+        published = (body.get("agent_wallet_address") or "").lower()
+        configured = (seller_settings.get("wallet_address") or "").lower()
+        assert published, "agent-wallet returned an empty address."
+        assert published == configured, (
+            f"agent-wallet address {published!r} != configured {configured!r}"
         )
+        log.info("✓ Storefront publishes wallet %s", published)
 
     def test_storefront_registry_connectivity(
         self,
@@ -179,7 +149,7 @@ class TestStorefrontRegistration:
         )
         assert "exit_on_probe" not in strat, (
             f"Negotiation strategy would exit on every round: {strat!r}\n"
-            "Fix: set [seller.negotiation] policy_mode = 'bisection' in config.toml,\n"
+            "Fix: set [seller.negotiation] policies = ['has_matching_inventory_guard', 'escrow_shape_guard', 'bisection'] in config.toml,\n"
             "or install torch in the container if rl is required."
         )
         log.info("✓ Negotiation strategy viable: %s", strat)

@@ -58,20 +58,23 @@ def _fail_build_escrow_terms(*_a, **_kw):
 
 
 class TestExtractSellerMinPrice:
-    def test_list_with_price_per_hour(self):
-        listing = {"accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 1500}]}
+    def test_list_with_rate(self):
+        listing = {"accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                          "rates": [{"field": "amount", "per": "hour", "value": "1500"}]}]}
         assert extract_seller_min_price(listing) == 1500
 
     def test_string_json_list(self):
-        listing = {"accepted_escrows": json.dumps([{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 9000}])}
+        listing = {"accepted_escrows": json.dumps([{"chain_name": "anvil", "escrow_address": "0xE",
+                                                     "rates": [{"field": "amount", "per": "hour", "value": "9000"}]}])}
         assert extract_seller_min_price(listing) == 9000
 
-    def test_missing_price_returns_none(self):
+    def test_missing_rate_returns_none(self):
         listing = {"accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE"}]}
         assert extract_seller_min_price(listing) is None
 
-    def test_unparseable_price_returns_none(self):
-        listing = {"accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": "not-a-number"}]}
+    def test_unparseable_rate_returns_none(self):
+        listing = {"accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                          "rates": [{"field": "amount", "per": "hour", "value": "not-a-number"}]}]}
         assert extract_seller_min_price(listing) is None
 
     def test_empty_accepted_escrows_returns_none(self):
@@ -168,9 +171,11 @@ class TestRunBuyDerivePrices:
         )
         matches = [
             {"listing_id": "L1", "seller": "http://s1",
-             "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 100}]},
+             "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                    "rates": [{"field": "amount", "per": "hour", "value": "100"}]}]},
             {"listing_id": "L2", "seller": "http://s2",
-             "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 200}]},
+             "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                    "rates": [{"field": "amount", "per": "hour", "value": "200"}]}]},
         ]
 
         def derive(match):

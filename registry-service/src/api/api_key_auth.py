@@ -1,11 +1,14 @@
 """API key issuance, verification, and revocation for private registries.
 
-When ``settings.require_api_key`` is True, every request to a non-
-admin / non-health route is gated by ``Authorization: Bearer <key>``
-matching a non-revoked row in the ``api_keys`` table. Operators mint
-and revoke keys via the ``/admin/api-keys`` routes, which are
-themselves gated by the ``REGISTRY_ADMIN_API_KEY`` env var (a single
-shared secret distinct from the api_keys table).
+Access is gated independently per direction. When
+``settings.require_read_api_key`` is True, read routes (discovery,
+lookups, system diagnostics) require ``Authorization: Bearer <key>``
+matching a non-revoked row. When ``settings.require_write_api_key`` is
+True, write routes (publish / update / delete listings, heartbeat)
+require such a key carrying ``write`` scope. A write key satisfies read
+routes too. Operators mint and revoke keys via the ``/admin/api-keys``
+routes, themselves gated by the ``REGISTRY_ADMIN_API_KEY`` env var (a
+single shared secret distinct from the api_keys table).
 
 Storage model: only ``sha256(raw_key)`` is persisted; the raw key is
 returned to the operator exactly once at mint time. A DB leak
@@ -18,6 +21,7 @@ import hashlib
 import logging
 import secrets
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -28,22 +32,32 @@ from src.db.models import ApiKey
 
 logger = logging.getLogger(__name__)
 
+Scope = Literal["read", "write"]
+
 
 def _hash_key(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def mint_api_key(db: Session, *, name: str) -> tuple[str, ApiKey]:
+def mint_api_key(db: Session, *, name: str, scope: Scope = "read") -> tuple[str, ApiKey]:
     """Generate a fresh secret, store its hash, return both raw value
     and persisted row. The raw value is the operator's only chance to
     capture the key — emit it to the API response and never log it.
+
+    ``scope`` defaults to ``read`` (least privilege); pass ``write`` for
+    seller credentials that publish/update/delete listings.
     """
     raw = secrets.token_urlsafe(32)  # ~256 bits of entropy
-    row = ApiKey(name=name, key_hash=_hash_key(raw), created_at=datetime.now(timezone.utc))
+    row = ApiKey(
+        name=name,
+        key_hash=_hash_key(raw),
+        scope=scope,
+        created_at=datetime.now(timezone.utc),
+    )
     db.add(row)
     db.commit()
     db.refresh(row)
-    logger.info("[API_KEY] minted key id=%s name=%s", row.id, name)
+    logger.info("[API_KEY] minted key id=%s name=%s scope=%s", row.id, name, scope)
     return raw, row
 
 
@@ -99,18 +113,41 @@ def require_admin_api_key(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Invalid admin token")
 
 
-def require_valid_api_key(
-    request: Request, db: Session = Depends(get_db),
-) -> None:
-    """Dependency for non-admin routes. No-op when
-    ``settings.require_api_key`` is False (back-compat / public
-    registry); otherwise verifies the bearer header against the
-    api_keys table."""
-    if not settings.require_api_key:
-        return
+def _verify_bearer(request: Request, db: Session) -> ApiKey:
+    """Pull ``Authorization: Bearer <key>`` and resolve it to an active
+    row, or 401. Shared by the read and write gates."""
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="API key required")
     raw = auth.removeprefix("Bearer ").strip()
-    if not raw or verify_api_key(db, raw) is None:
+    row = verify_api_key(db, raw) if raw else None
+    if row is None:
         raise HTTPException(status_code=401, detail="Invalid or revoked API key")
+    return row
+
+
+def require_read_access(
+    request: Request, db: Session = Depends(get_db),
+) -> None:
+    """Dependency for read routes. No-op when
+    ``settings.require_read_api_key`` is False (public discovery);
+    otherwise any active key (read or write scope) is accepted."""
+    if not settings.require_read_api_key:
+        return
+    _verify_bearer(request, db)
+
+
+def require_write_access(
+    request: Request, db: Session = Depends(get_db),
+) -> None:
+    """Dependency for write routes. No-op when
+    ``settings.require_write_api_key`` is False (open publishing);
+    otherwise requires an active key carrying ``write`` scope. Note the
+    per-write signature checks still apply on top of this gate."""
+    if not settings.require_write_api_key:
+        return
+    row = _verify_bearer(request, db)
+    if row.scope != "write":
+        raise HTTPException(
+            status_code=403, detail="Write access requires a write-scoped API key"
+        )

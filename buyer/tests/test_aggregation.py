@@ -29,10 +29,11 @@ def _match(listing_id: str, *, price: int | None = None, seller: str = "http://s
     entry: dict[str, Any] = {
         "chain_name": "anvil",
         "escrow_address": "0xE",
-        "fields": {"token": "0xT"},
+        "literal_fields": {"token": "0xT"},
+        "rates": [],
     }
     if price is not None:
-        entry["price_per_hour"] = price
+        entry["rates"] = [{"field": "amount", "per": "hour", "value": str(price)}]
     return {
         "listing_id": listing_id,
         "seller": seller,
@@ -46,15 +47,18 @@ def _recorder(*, agree_at: int | None = None) -> tuple[list[str], NegotiateFn]:
     ``agree_at``: index into the call-order list at which to return
     ``status="agreed"``. None means everyone exits (no agreement).
     """
+    from service.schemas import primary_rate_value
+
     seen: list[str] = []
 
     async def _negotiate(match: dict[str, Any]) -> NegotiationOutcome:
         seen.append(match["listing_id"])
         if agree_at is not None and (len(seen) - 1) == agree_at:
+            first = (match.get("accepted_escrows") or [{}])[0]
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=f"neg-{match['listing_id']}",
-                agreed_amount=(match.get("accepted_escrows") or [{}])[0].get("price_per_hour", 0),
+                agreed_amount=primary_rate_value(first) or 0,
             )
         return NegotiationOutcome(
             status="exited",
@@ -111,9 +115,13 @@ class TestCheapestFirst:
         seen, neg = _recorder()
         matches = [
             {"listing_id": "a", "accepted_escrows": json.dumps(
-                [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 200}])},
+                [{"chain_name": "anvil", "escrow_address": "0xE",
+                  "literal_fields": {"token": "0xT"},
+                  "rates": [{"field": "amount", "per": "hour", "value": "200"}]}])},
             {"listing_id": "b", "accepted_escrows": json.dumps(
-                [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 100}])},
+                [{"chain_name": "anvil", "escrow_address": "0xE",
+                  "literal_fields": {"token": "0xT"},
+                  "rates": [{"field": "amount", "per": "hour", "value": "100"}]}])},
         ]
         _drive(policy, matches, neg)
         assert seen == ["b", "a"]

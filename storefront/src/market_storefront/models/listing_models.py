@@ -20,7 +20,7 @@ class CreateListingRequest(BaseModel):
     accepted_escrows: list[dict[str, Any]] = Field(
         description=(
             "List of escrow shapes the seller will accept for this listing. "
-            "Each entry: {chain_name, escrow_address, fields, price_per_hour}. "
+            "Each entry: {chain_name, escrow_address, literal_fields, rates}. "
             "Must be non-empty."
         ),
     )

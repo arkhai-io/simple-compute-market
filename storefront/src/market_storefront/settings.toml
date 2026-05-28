@@ -13,8 +13,6 @@
 # Identity
 agent_id        = ""        # must be a Python identifier; empty → "root_agent"
 agent_name      = ""        # display name; falls back to agent_id
-onchain_agent_id = ""       # pin after first successful registration
-auto_register   = true      # if onchain_agent_id is empty, register at startup
 
 # HTTP server
 port            = 8000
@@ -56,11 +54,16 @@ address        = ""
 private_key    = ""
 ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess demo@example"
 
-[chain]
-name     = ""                   # ethereum_sepolia | base_sepolia | anvil — auto-derived from rpc_url via eth_chainId when empty
-rpc_url  = ""
-chain_id = 0                    # 0 means unset — chain_id() falls back to live eth_chainId
-alkahest_address_config_path = ""
+# [chains.<name>] tables — one per chain the operator wants to transact
+# on. The operator provides these via storefront.toml; no defaults ship
+# here (the storefront refuses to start with zero configured chains, so
+# the absent-key state has a clear error path). Each entry supports:
+#   rpc_url                       (required)
+#   chain_id                      (optional, defaults to KNOWN_CHAIN_IDS lookup by name)
+#   alkahest_address_config_path  (optional, anvil-style file deployments only)
+# Listings advertise their accepted chains via
+# accepted_escrows[].chain_name tuples; the runtime dispatches to the
+# matching [chains.<name>] entry when settling.
 
 [registry]
 # Leave empty by default. Any user-supplied list at a higher overlay
@@ -68,9 +71,8 @@ alkahest_address_config_path = ""
 # a default URL here, dynaconf's merge_enabled=True would *append* the
 # user's list onto the default, leaving the storefront heartbeating to
 # both registries.
-urls                      = []
-discovery_timeout         = 5.0
-identity_registry_address = ""
+urls              = []
+discovery_timeout = 5.0
 
 [registry.auth]
 # Free-form table of {url = "bearer-token"} pairs for private registries.
@@ -92,9 +94,13 @@ frp_domain             = ""
 frp_dashboard_password = ""
 
 [negotiation]
-# "bisection" is the safe default — no ML deps required. Set "rl" to use the
-# trained pufferlib checkpoint (requires torch).
-policy_mode        = "bisection"
+# Ordered policies run per round. Guards short-circuit (`reject`/`exit`)
+# when their preconditions fail; the terminal policy (typically
+# `bisection` or `rl`) always returns a counter/accept/exit. `rl`
+# requires torch + the pufferlib checkpoint. The legacy
+# `policy_mode = "bisection"` key still works and synthesizes the same
+# default chain (kept for back-compat).
+policies           = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 seller_model_path  = "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt"
 buyer_model_path   = "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt"
 extra_policy_paths = []

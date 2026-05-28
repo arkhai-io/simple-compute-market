@@ -290,10 +290,12 @@ def fetch_listing_dict_multi(
 def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
     """Pull the seller's per-hour floor out of a registry listing dict.
 
-    Reads ``accepted_escrows[0].price_per_hour`` — the per-hour token rate
-    advertised on the seller's first accepted escrow tuple. Returns ``None``
-    if absent or unparseable (hidden-reserve listings).
+    Reads the primary rate on ``accepted_escrows[0]`` — the per-hour
+    token rate advertised on the seller's first accepted escrow tuple.
+    Returns ``None`` for hidden-reserve listings (empty ``rates``).
     """
+    from service.schemas import primary_rate_value
+
     accepted = listing.get("accepted_escrows") or []
     if isinstance(accepted, str):
         try:
@@ -305,11 +307,8 @@ def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
     first = accepted[0]
     if not isinstance(first, dict):
         return None
-    amount = first.get("price_per_hour")
-    try:
-        return float(amount) if amount is not None else None
-    except (ValueError, TypeError):
-        return None
+    amount = primary_rate_value(first)
+    return float(amount) if amount is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +342,7 @@ def submit_settlement(
     ssh_public_key: str,
     buyer_address: str,
     buyer_private_key: str,
+    chain_name: str,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
     max_attempts: int = 6,
     retry_backoff: float = 3.0,
@@ -355,18 +355,26 @@ def submit_settlement(
     public RPC nodes can lag the just-mined create-escrow tx by 5-15s,
     surfacing as ``"buffer overrun while deserializing"`` / "Failed to
     read escrow" detail. Non-matching errors bubble up immediately.
+
+    ``chain_name`` tells the seller which configured ``[chains.<name>]``
+    entry to dispatch the on-chain verify against — required since the
+    seller may serve multiple chains.
     """
     url = seller_url.rstrip("/") + f"/api/v1/settle/{escrow_uid}"
     body = {
         "negotiation_id": negotiation_id,
         "ssh_public_key": ssh_public_key,
         "buyer_address": buyer_address,
+        "chain_name": chain_name,
     }
     last_exc: RuntimeError | None = None
     for attempt in range(1, max_attempts + 1):
         sig, ts = _sign(f"settle_escrow:{escrow_uid}", buyer_private_key)
         try:
-            return _signed_json(url, body, sig, ts, method="POST", timeout=timeout)
+            return _signed_json(
+                url, body, sig, ts, method="POST", timeout=timeout,
+                identity_identifier=buyer_address,
+            )
         except RuntimeError as exc:
             last_exc = exc
             if not _looks_like_propagation_lag(exc) or attempt == max_attempts:
@@ -390,8 +398,11 @@ def poll_settlement_status(
         seller_url.rstrip("/")
         + f"/api/v1/settle/{escrow_uid}/status?buyer_address={buyer_address}"
     )
-    return _signed_json(url, body=None, signature=sig, timestamp=ts,
-                        method="GET", timeout=timeout)
+    return _signed_json(
+        url, body=None, signature=sig, timestamp=ts,
+        method="GET", timeout=timeout,
+        identity_identifier=buyer_address,
+    )
 
 
 def _signed_json(
@@ -402,12 +413,17 @@ def _signed_json(
     *,
     method: str,
     timeout: float,
+    identity_scheme: str = "eip191",
+    identity_identifier: str | None = None,
 ) -> dict[str, Any]:
     headers = {
         "Accept": "application/json",
         "X-Signature": signature,
         "X-Timestamp": str(timestamp),
+        "X-Identity-Scheme": identity_scheme,
     }
+    if identity_identifier:
+        headers["X-Identity"] = identity_identifier
     data = None
     if body is not None:
         headers["Content-Type"] = "application/json"
@@ -607,7 +623,7 @@ def run_buy(
     attempts: list[dict[str, Any]] = []
 
     async def _negotiate(match: dict[str, Any]) -> NegotiationOutcome:
-        seller_url = match.get("seller") or match.get("order_maker") or match.get("seller_url") or ""
+        seller_url = match.get("storefront_url") or match.get("seller") or match.get("seller_url") or ""
         listing_id = match.get("listing_id") or match.get("order_id") or ""
         if not seller_url or not listing_id:
             attempts.append({"match": match, "error": "missing_seller_url_or_listing_id"})
@@ -805,7 +821,7 @@ def _settle_one(
     structural, not just visual. Inputs are the policy's
     ``(match, outcome)`` plus the orchestrator's settlement deps.
     """
-    seller_url = match.get("seller") or match.get("order_maker") or match.get("seller_url") or ""
+    seller_url = match.get("storefront_url") or match.get("seller") or match.get("seller_url") or ""
     listing_id = match.get("listing_id") or match.get("order_id") or ""
 
     try:
@@ -943,7 +959,14 @@ def _settle_one(
             attempts=attempts,
         )
     escrow_uid = escrow_uids[0]
-    on_event("escrow_created", {"escrow_uid": escrow_uid, "all_uids": escrow_uids})
+    on_event(
+        "escrow_created",
+        {
+            "escrow_uid": escrow_uid,
+            "all_uids": escrow_uids,
+            "chain_name": accepted_proposal.chain_name,
+        },
+    )
 
     submit_settlement(
         seller_url=seller_url,
@@ -952,6 +975,7 @@ def _settle_one(
         ssh_public_key=provision.ssh_public_key,
         buyer_address=config.buyer_address,
         buyer_private_key=config.buyer_private_key,
+        chain_name=accepted_proposal.chain_name,
     )
     on_event("settlement_submitted", {"escrow_uid": escrow_uid})
 

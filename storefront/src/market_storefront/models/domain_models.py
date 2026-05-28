@@ -441,9 +441,9 @@ class Listing(BaseModel):
         default=None,
         description=(
             "Optional ceiling on lease duration in seconds. None = unlimited. "
-            "accepted_escrows[i].price_per_hour is the advertised per-hour "
-            "rate; total payment is computed at agreement time as "
-            "price_per_hour * agreed_duration_seconds / 3600."
+            "accepted_escrows[i].rates carries the advertised per-hour rate "
+            "for ERC20 escrows; total payment is computed at agreement time "
+            "as primary_rate * agreed_duration_seconds / 3600."
         ),
     )
     oracle_address: str | None = Field(

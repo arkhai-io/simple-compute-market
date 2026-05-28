@@ -61,14 +61,18 @@ rpc_url  = "https://base-sepolia.infura.io/v3/<YOUR_KEY>"
 urls = ["http://<INDEXER_HOST>:8080"]
 
 [registry.auth]
-# Required when the indexer runs with REGISTRY_REQUIRE_API_KEY=true.
+# Required when the indexer gates reads (REGISTRY_REQUIRE_READ_API_KEY=true).
 # Keys must match the URLs in [registry] urls exactly (scheme, host,
 # port, no trailing slash).
 "http://<INDEXER_HOST>:8080" = "<your-token>"
 
 [negotiation]
-# Bisection avoids a ~1GB torch download. Switch to "rl" if you want it.
-policy_mode = "bisection"
+# Ordered policy chain run per round. The buyer's default chain pairs
+# `buyer_escrow_shape_guard` (vetoes if the seller mutates a buyer-
+# pinned field) with the `bisection` terminal. Switch the terminal to
+# `"rl"` for the trained pufferlib checkpoint (~1GB torch download).
+# See docs/configuration.md for the full reference.
+policies = ["buyer_escrow_shape_guard", "bisection"]
 ```
 
 ## 3. Browse

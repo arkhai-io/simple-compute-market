@@ -43,8 +43,12 @@ async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
         accepted_escrows=[{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"token": _TOKEN},
-            "price_per_hour": demand_amount,
+            "literal_fields": {"token": _TOKEN},
+            "rates": (
+                []
+                if demand_amount is None
+                else [{"field": "amount", "per": "hour", "value": str(demand_amount)}]
+            ),
         }],
         fulfillment_resource=None,
         max_duration_seconds=7200,
@@ -195,8 +199,8 @@ class TestNegotiateNew:
             accepted_escrows=[{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"token": _TOKEN},
-                "price_per_hour": 5000,
+                "literal_fields": {"token": _TOKEN},
+                "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
             }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
@@ -230,8 +234,8 @@ class TestNegotiateNew:
             accepted_escrows=[{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"token": _TOKEN},
-                "price_per_hour": None,  # hidden reserve
+                "literal_fields": {"token": _TOKEN},
+                "rates": [],  # hidden reserve
             }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
@@ -282,8 +286,8 @@ class TestNegotiateNew:
             accepted_escrows=[{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"token": _TOKEN},
-                "price_per_hour": 5000,
+                "literal_fields": {"token": _TOKEN},
+                "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
             }],
             fulfillment_resource=None,
             max_duration_seconds=7200,

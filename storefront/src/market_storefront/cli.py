@@ -5,7 +5,6 @@ operations live in market-buyer (`market` console script). The two
 ship as separate wheels; install both if you both buy and sell.
 
 Subcommands:
-    register     Register agent on-chain (one-shot, before `serve`).
     serve        Run the storefront HTTP server in-process.
     publish      Post listings from the agent DB. Mirror of
                  `market buy` on the buyer side.
@@ -73,54 +72,6 @@ def main(
 ) -> None:
     """market-storefront — provider-side admin CLI."""
     pass
-
-
-# ---------------------------------------------------------------------------
-# register — one-shot on-chain registration
-# ---------------------------------------------------------------------------
-
-
-@app.command("register")
-def register_cmd(
-    chain_id: int = typer.Option(
-        None, "--chain-id",
-        help="Numeric chain ID for canonical-id construction. "
-             "When omitted, queried from chain.rpc_url via eth_chainId; "
-             "falls back to 1337 (local Anvil) if no RPC is configured.",
-    ),
-) -> None:
-    """Register the storefront on-chain via ERC-8004.
-
-    Inputs come from storefront.toml (TOML-only — no env vars or .env
-    files). Run this before `market-storefront serve` on a fresh
-    deployment; idempotent on subsequent runs.
-    """
-    from .commands.register import run_register
-    from .utils.config import settings
-
-    resolved_chain_id = chain_id
-    if resolved_chain_id is None:
-        resolved_chain_id = _query_chain_id(settings.chain.rpc_url) or 1337
-        typer.echo(f"Using chain_id={resolved_chain_id} (auto-detected).")
-
-    raise typer.Exit(asyncio.run(run_register(chain_id=resolved_chain_id)))
-
-
-def _query_chain_id(rpc_url: str | None) -> int | None:
-    """Thin wrapper around ``service.config_loader.query_chain_id_via_rpc``.
-
-    Kept as a local helper for backward compat with callers in this
-    module; the underlying RPC and ws→http translation lives in the
-    shared service helper.
-    """
-    from service.config_loader import query_chain_id_via_rpc
-    cid = query_chain_id_via_rpc(rpc_url)
-    if cid is None and rpc_url and rpc_url.strip():
-        typer.secho(
-            f"[register] eth_chainId lookup against {rpc_url!r} failed.",
-            err=True, fg=typer.colors.YELLOW,
-        )
-    return cid
 
 
 # ---------------------------------------------------------------------------

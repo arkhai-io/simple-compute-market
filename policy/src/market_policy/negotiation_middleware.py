@@ -555,12 +555,12 @@ def escrow_shape_guard(
     context: NegotiationContext,
 ) -> NegotiationStep:
     """Veto when the buyer's escrow proposal diverges from the seller's
-    advertised ``accepted_escrows`` entry on any seller-pinned field.
+    advertised ``accepted_escrows`` entry on any seller-pinned literal.
 
     Strict equality: every key the seller set on the matched entry's
-    ``fields`` map must equal the buyer's value. Operators wanting softer
-    matching (allow arbiter upgrade, swap payment token, etc.) drop this
-    guard from ``[negotiation].chain`` and write their own.
+    ``literal_fields`` map must equal the buyer's value. Operators wanting
+    softer matching (allow arbiter upgrade, swap payment token, etc.)
+    drop this guard from ``[negotiation].chain`` and write their own.
 
     Reads the buyer's latest proposal from history (rounds carry full
     EscrowProposal-shaped dicts; "them" = buyer from the seller's POV).
@@ -588,7 +588,7 @@ def escrow_shape_guard(
         return None, context
 
     proposal_chain = proposal.get("chain_name")
-    proposal_fields = proposal.get("fields") or {}
+    proposal_literal = proposal.get("literal_fields") or {}
 
     matched: dict[str, Any] | None = None
     for entry in accepted:
@@ -607,12 +607,12 @@ def escrow_shape_guard(
         # "address advertised but not in set". Don't double-report.
         return None, context
 
-    seller_fields = matched.get("fields") or {}
-    if not isinstance(seller_fields, dict):
+    seller_literal = matched.get("literal_fields") or {}
+    if not isinstance(seller_literal, dict):
         return None, context
 
-    for key, seller_value in seller_fields.items():
-        buyer_value = proposal_fields.get(key) if isinstance(proposal_fields, dict) else None
+    for key, seller_value in seller_literal.items():
+        buyer_value = proposal_literal.get(key) if isinstance(proposal_literal, dict) else None
         if _normalize_escrow_field(buyer_value) != _normalize_escrow_field(seller_value):
             return (
                 NegotiationDecision(

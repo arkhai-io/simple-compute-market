@@ -10,8 +10,8 @@ through negotiation start, and they only become non-trivial with two
 
 The docker-compose stack runs:
   * ``registry``    on host port 8080 — public, no auth
-  * ``registry-b``  on host port 8082 — REGISTRY_REQUIRE_API_KEY=true,
-                    seeded with bearer ``test-buyer-token``
+  * ``registry-b``  on host port 8082 — read + write gated, seeded with
+                    a write-scoped bearer ``test-buyer-token``
   * ``bob-storefront``   (Bob)   on host port 8001 — Anvil acct #2,
                          [registry] urls = [registry, registry-b]
   * ``alice-storefront`` (Alice) on host port 8002 — Anvil acct #4,
@@ -57,9 +57,8 @@ Phase 2 — inventory seed on both storefronts
   02b  Alice inventory seed (distinct resource_id)
 
 Phase 3 — create + publish listings on both
-  03a  Bob agent indexed by both registries
-  03b  Alice agent indexed by registry-A
   03c  Bob creates + resumes listing → fanned out to A + B
+       (publisher created lazily on this first signed publish)
   03d  Alice creates + resumes listing → published to A only
 
 Phase 4 — registry footprints differ as configured
@@ -131,8 +130,8 @@ DEMAND_RESOURCE = {
 ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
     "escrow_address": "0x" + "11" * 20,
-    "fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
-    "price_per_hour": DEMAND_RESOURCE["amount"],
+    "literal_fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
+    "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_RESOURCE["amount"])}],
 }]
 
 BOB_OFFER = {
@@ -184,8 +183,6 @@ class MRState:
     alice_strategy_ok: bool = False
     bob_inventory_seeded: bool = False
     alice_inventory_seeded: bool = False
-    bob_indexed: bool = False
-    alice_indexed: bool = False
     bob_listing_id: Optional[str] = None
     alice_listing_id: Optional[str] = None
     bob_in_a: bool = False
@@ -416,39 +413,12 @@ class TestStage02b_AliceInventory:
 # Phase 3 — create + publish listings on both storefronts
 # ===========================================================================
 
-class TestStage03a_BobIndexed:
-    def test_03a_bob_indexed_in_both_registries(
-        self, storefront_admin_client, mr_state
-    ):
-        """Bob's wait_for_registry_agent_ready iterates his configured
-        URLs — once ok, both registries have indexed Bob's on-chain
-        registration."""
-        _require(mr_state, "bob_sees_both")
-        result = storefront_admin_client.wait_for_registry_agent_ready(timeout=90.0)
-        assert result.ready and result.registry_auth == "ok", (
-            f"Bob not indexed: ready={result.ready} auth={result.registry_auth!r}"
-        )
-        mr_state.bob_indexed = True
-
-
-class TestStage03b_AliceIndexed:
-    def test_03b_alice_indexed_in_registry_a(
-        self, alice_admin_client, mr_state
-    ):
-        _require(mr_state, "alice_sees_a")
-        result = alice_admin_client.wait_for_registry_agent_ready(timeout=90.0)
-        assert result.ready and result.registry_auth == "ok", (
-            f"Alice not indexed: ready={result.ready} auth={result.registry_auth!r}"
-        )
-        mr_state.alice_indexed = True
-
-
 class TestStage03c_BobPublishes:
     def test_03c_bob_creates_and_resumes(
         self, storefront_admin_client, seller_wallet, mr_state
     ):
         _require(
-            mr_state, "bob_indexed", "bob_inventory_seeded"
+            mr_state, "bob_sees_both", "bob_inventory_seeded"
         )
 
         resp = storefront_admin_client.create_listing(
@@ -476,7 +446,7 @@ class TestStage03d_AlicePublishes:
         self, alice_admin_client, alice_wallet, mr_state
     ):
         _require(
-            mr_state, "alice_indexed", "alice_inventory_seeded",
+            mr_state, "alice_sees_a", "alice_inventory_seeded",
         )
 
         resp = alice_admin_client.create_listing(

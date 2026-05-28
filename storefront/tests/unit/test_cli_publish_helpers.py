@@ -42,7 +42,9 @@ def _stub_resolve_token(monkeypatch):
     The publish path now eth_calls ``symbol()``/``decimals()`` for every
     token address it sees. Unit tests don't have an RPC, so we stub the
     resolver to return canned metadata for the two addresses these tests
-    use.
+    use. Also injects a synthetic [chains.anvil] entry + stubs the alkahest
+    escrow-address lookup so the per-chain accepted_escrows iteration
+    produces at least one row.
     """
     def fake_resolve(address: str, *, rpc_url: str, chain_id: int, refresh: bool = False):
         key = address.lower()
@@ -61,6 +63,26 @@ def _stub_resolve_token(monkeypatch):
     # patch the source module too.
     monkeypatch.setattr(
         "service.clients.token.resolve_token", fake_resolve,
+    )
+    from service.clients import alkahest as alkahest_mod
+    monkeypatch.setattr(
+        alkahest_mod, "get_erc20_escrow_obligation_nontierable",
+        lambda chain_name, *, config_path=None: "0x" + "cd" * 20,
+    )
+    from service.config_loader import ChainConfig
+    from market_storefront.utils import config as agent_config
+    monkeypatch.setattr(
+        agent_config,
+        "CHAINS",
+        {
+            "anvil": ChainConfig(
+                name="anvil",
+                rpc_url="http://localhost:8545",
+                chain_id=31337,
+                alkahest_address_config_path=None,
+            ),
+        },
+        raising=False,
     )
 
 
@@ -228,8 +250,8 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     assert not failed
     assert calls[0]["offer"]["resource_id"] == "compute-002"
     entry = calls[0]["accepted_escrows"][0]
-    assert entry["fields"]["token"] == _MOCK_ADDRESS
-    assert entry["price_per_hour"] == "100"
+    assert entry["literal_fields"] == {"token": _MOCK_ADDRESS}
+    assert entry["rates"] == [{"field": "amount", "per": "hour", "value": "100"}]
 
 
 def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
@@ -290,10 +312,10 @@ def test_publish_round_per_row_pricing_overrides_default(tmp_path, monkeypatch):
     published, failed, _ = _publish_round(db_path=db, **_round_kwargs())
 
     by_rid = {c["offer"]["resource_id"]: c["accepted_escrows"][0] for c in calls}
-    assert by_rid["compute-cheap"]["fields"]["token"] == _USDC_ADDRESS
-    assert by_rid["compute-cheap"]["price_per_hour"] == "40000000"
-    assert by_rid["compute-default"]["fields"]["token"] == _MOCK_ADDRESS
-    assert by_rid["compute-default"]["price_per_hour"] == "100"
+    assert by_rid["compute-cheap"]["literal_fields"]["token"] == _USDC_ADDRESS
+    assert by_rid["compute-cheap"]["rates"][0]["value"] == "40000000"
+    assert by_rid["compute-default"]["literal_fields"]["token"] == _MOCK_ADDRESS
+    assert by_rid["compute-default"]["rates"][0]["value"] == "100"
     assert len(published) == 2
     assert not failed
 
@@ -333,10 +355,10 @@ def test_publish_round_skips_resources_without_pricing(tmp_path, monkeypatch):
     assert "min_price" in failed[0][1]
 
 
-def test_publish_round_priceless_publishes_with_amount_none(tmp_path, monkeypatch):
+def test_publish_round_priceless_publishes_with_empty_rates(tmp_path, monkeypatch):
     """publish_priceless=True publishes rows without a min_price as
-    price_per_hour=None (hidden reserve) — distinct from price_per_hour=0
-    (free)."""
+    empty ``rates`` (hidden reserve) — distinct from a single ``"0"``
+    rate (free)."""
     db = str(tmp_path / "agent.db")
     _init_db(db)
     _insert_resource(
@@ -362,13 +384,13 @@ def test_publish_round_priceless_publishes_with_amount_none(tmp_path, monkeypatc
     assert len(published) == 1
     assert len(failed) == 0
     entry = calls[0]["accepted_escrows"][0]
-    assert entry["price_per_hour"] is None
-    assert entry["fields"]["token"] == _MOCK_ADDRESS
+    assert entry["rates"] == []
+    assert entry["literal_fields"]["token"] == _MOCK_ADDRESS
 
 
 def test_publish_round_explicit_zero_publishes_as_free(tmp_path, monkeypatch):
-    """A row with min_price="0" publishes with price_per_hour="0" (explicit
-    free offering) — distinct semantically from price_per_hour=None (hidden
+    """A row with min_price="0" publishes with rate value "0" (explicit
+    free offering) — distinct semantically from empty ``rates`` (hidden
     reserve). The default_min_price does NOT override an explicit 0."""
     db = str(tmp_path / "agent.db")
     _init_db(db)
@@ -393,7 +415,7 @@ def test_publish_round_explicit_zero_publishes_as_free(tmp_path, monkeypatch):
 
     assert len(published) == 1
     assert len(failed) == 0
-    assert calls[0]["accepted_escrows"][0]["price_per_hour"] == "0"
+    assert calls[0]["accepted_escrows"][0]["rates"][0]["value"] == "0"
 
 
 def test_publish_round_priceless_off_still_skips(tmp_path, monkeypatch):

@@ -24,7 +24,10 @@ log_level = "info"
 database_url = "sqlite:///provisioning.db"
 
 # Ansible
-ansible_cfg = ""  # Path to ansible.cfg; set via active profile (e.g. config-docker.yml)
+# Path to ansible.cfg, exported as ANSIBLE_CONFIG at startup (see main.py).
+# Defaults to the baked /opt path like the other ansible paths below; mock
+# mode overrides it back to "".
+ansible_cfg = "/opt/compute-provisioning-iac/ansible/ansible.cfg"
 ansible_timeout_seconds = 1800
 default_vm_host = "kvm1"
 
@@ -75,12 +78,6 @@ frp_server_addr = ""
 frp_domain = ""
 frp_dashboard_password = ""
 
-# Authentication
-enable_auth = false
-registry_url = ""
-registry_cache_ttl_seconds = 300
-registry_cache_max_size = 256
-
 # Rate limiting
 enable_rate_limiting = false
 rate_limit_requests_per_minute = 30
@@ -105,4 +102,7 @@ lease_watchdog_enabled = true
 lease_watchdog_poll_interval_seconds = 60
 lease_watchdog_grace_period_seconds = 300
 storefront_url = ""
+# Shared secret with the storefront. Dual purpose: signs the outbound
+# lease-watchdog callback to the storefront, and gates every inbound request
+# (the storefront presents it as X-Admin-Key). Empty = auth disabled (dev only).
 storefront_admin_key = ""

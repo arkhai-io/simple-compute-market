@@ -54,8 +54,6 @@ class AnsibleJob(Base):
     result = Column(JSON, nullable=True)
     logs = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
-    agent_id = Column(String, nullable=True, index=True)  # ERC-8004 agent ID (seller) that submitted this job
-    buyer_agent_id = Column(String, nullable=True, index=True)  # ERC-8004 agent ID of the buyer
     process_id = Column(String, nullable=True)  # PID of running ansible process for cancellation
     retry_count = Column(Integer, default=0, nullable=False)  # Number of retry attempts made
     max_retries = Column(Integer, default=3, nullable=False)  # Maximum retry attempts allowed
@@ -75,7 +73,6 @@ class Credential(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     job_id = Column(String, ForeignKey("ansible_jobs.id"), nullable=False, index=True)
     role = Column(String, nullable=False)  # "root" or "tenant"
-    granted_to = Column(String, nullable=False, index=True)  # agent_id this credential is visible to
     password = Column(String, nullable=True)
     ssh_commands = Column(JSON, nullable=True)
     ssh_key_path_host = Column(String, nullable=True)

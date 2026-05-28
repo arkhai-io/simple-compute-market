@@ -34,8 +34,9 @@ def _normalize_to_dict(value: Any) -> dict[str, Any] | None:
 def synthesize_accepted_escrows_from_demand(
     demand_resource: Any,
 ) -> list[dict[str, Any]] | None:
-    """Build a single-entry ``accepted_escrows`` list from a legacy
-    ``demand_resource`` payload (``{token: {contract_address, ...}, amount}``).
+    """Build an ``accepted_escrows`` list from a legacy ``demand_resource``
+    payload (``{token: {contract_address, ...}, amount}``), one entry per
+    configured chain.
 
     Used by:
       * the one-shot schema-init backfill (pre-cutover rows still carrying
@@ -43,10 +44,12 @@ def synthesize_accepted_escrows_from_demand(
       * action_executor's MAKE_OFFER entry point (policy layer still emits
         ``demand``; storefront converts at the boundary before persisting).
 
-    Returns ``None`` when the demand can't be mapped (no token, missing
-    contract_address, or alkahest config can't resolve the erc20 escrow
-    obligation address for the configured chain).
+    Returns ``None`` when the demand can't be mapped to any chain (no
+    token, missing contract_address, or every chain's alkahest config
+    fails to resolve the erc20 escrow obligation address).
     """
+    from market_storefront.utils.config import CHAINS
+
     normalized = _normalize_to_dict(demand_resource)
     if not normalized:
         return None
@@ -56,40 +59,46 @@ def synthesize_accepted_escrows_from_demand(
     contract_address = token.get("contract_address")
     if not isinstance(contract_address, str) or not contract_address:
         return None
-    try:
-        from service.clients.alkahest import (
-            get_erc20_escrow_obligation_nontierable,
-        )
-        escrow_address = get_erc20_escrow_obligation_nontierable(
-            settings.chain.name,
-            config_path=settings.chain.alkahest_address_config_path,
-        )
-    except Exception as exc:
-        logger.debug(
-            "Skipping accepted_escrows synthesis for chain %r: %s",
-            settings.chain.name, exc,
-        )
-        return None
+
     amount = normalized.get("amount")
-    # ``price_per_hour`` is uint256-domain (base units) — emit as a
-    # decimal-digit string on the stored/wire JSON to stay safe past
-    # JS's 2^53 and SQLite int64 ceilings. Python callers parse it back
-    # with ``int(...)``.
+    # Rate value is uint256-domain (base units) — emit as a decimal-digit
+    # string on the stored/wire JSON to stay safe past JS's 2^53 and SQLite
+    # int64 ceilings. Python callers parse it back with ``int(...)``.
     if isinstance(amount, bool):
-        price_per_hour: str | None = None
+        rate_value: str | None = None
     elif isinstance(amount, int):
-        price_per_hour = str(amount)
+        rate_value = str(amount)
     elif isinstance(amount, str):
         s = amount.strip()
-        price_per_hour = s if s.isdigit() else None
+        rate_value = s if s.isdigit() else None
     else:
-        price_per_hour = None
-    return [{
-        "chain_name": settings.chain.name,
-        "escrow_address": escrow_address.lower(),
-        "fields": {"token": contract_address},
-        "price_per_hour": price_per_hour,
-    }]
+        rate_value = None
+
+    from service.clients.alkahest import get_erc20_escrow_obligation_nontierable
+
+    entries: list[dict[str, Any]] = []
+    for name, cc in CHAINS.items():
+        try:
+            escrow_address = get_erc20_escrow_obligation_nontierable(
+                name,
+                config_path=cc.alkahest_address_config_path,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Skipping accepted_escrows synthesis for chain %r: %s", name, exc,
+            )
+            continue
+        entries.append({
+            "chain_name": name,
+            "escrow_address": escrow_address.lower(),
+            "literal_fields": {"token": contract_address},
+            "rates": [{
+                "field": "amount",
+                "per": "hour",
+                "value": rate_value,
+            }] if rate_value is not None else [],
+        })
+    return entries or None
 
 
 def _publication_row_to_dict(row: tuple) -> dict[str, Any]:
@@ -422,7 +431,7 @@ class SQLiteClient:
             # ``escrows`` table joined via the winning ``negotiation_id``;
             # the buyer/match association lives on ``negotiation_threads``.
             # accepted_escrows is a JSON array of {chain_name, escrow_address,
-            # fields, price_per_hour} — the canonical pricing+escrow
+            # literal_fields, rates} — the canonical pricing+escrow
             # advertisement. The legacy ``demand_resource`` and per-deal
             # ``escrow_uid``/``buyer``/``matched_offer_id``/
             # ``seller_attestation``/``buyer_attestation`` columns are
@@ -507,6 +516,7 @@ class SQLiteClient:
                   min_price TEXT,
                   token TEXT,
                   max_duration_seconds INTEGER,
+                  accepted_escrows TEXT,
                   created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
                   updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
                 )
@@ -519,6 +529,7 @@ class SQLiteClient:
                 "ALTER TABLE resources ADD COLUMN min_price TEXT",
                 "ALTER TABLE resources ADD COLUMN token TEXT",
                 "ALTER TABLE resources ADD COLUMN max_duration_seconds INTEGER",
+                "ALTER TABLE resources ADD COLUMN accepted_escrows TEXT",
             ):
                 try:
                     cur.execute(col_ddl)
@@ -790,7 +801,7 @@ class SQLiteClient:
         """Return the ``accepted_escrows`` column as a Python list.
 
         The column is a JSON-serialised list of AcceptedEscrow entries
-        (``{chain_name, escrow_address, fields, price_per_hour}``).
+        (``{chain_name, escrow_address, literal_fields, rates}``).
         Returns ``None`` when the column is NULL — callers that need to
         synthesise an entry from the legacy ``demand_resource`` field
         do so themselves.
@@ -1022,6 +1033,7 @@ class SQLiteClient:
         min_price: str | None = None,
         token: str | None = None,
         max_duration_seconds: int | None = None,
+        accepted_escrows: list[dict[str, Any]] | None = None,
     ) -> None:
         """Create or update a generic resource snapshot row.
 
@@ -1055,9 +1067,9 @@ class SQLiteClient:
                     """
                     INSERT INTO resources(
                       resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                      min_price, token, max_duration_seconds, created_at, updated_at
+                      min_price, token, max_duration_seconds, accepted_escrows, created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(resource_id) DO UPDATE SET
                       resource_type=excluded.resource_type,
                       resource_subtype=excluded.resource_subtype,
@@ -1068,6 +1080,7 @@ class SQLiteClient:
                       min_price=excluded.min_price,
                       token=excluded.token,
                       max_duration_seconds=excluded.max_duration_seconds,
+                      accepted_escrows=excluded.accepted_escrows,
                       updated_at=excluded.updated_at
                     """,
                     (
@@ -1081,6 +1094,7 @@ class SQLiteClient:
                         min_price,
                         token,
                         max_duration_seconds,
+                        json.dumps(accepted_escrows) if accepted_escrows is not None else None,
                         now_iso,
                         now_iso,
                     ),
@@ -1117,7 +1131,7 @@ class SQLiteClient:
                 cur.execute(
                     f"""
                     SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                           min_price, token, max_duration_seconds, created_at, updated_at
+                           min_price, token, max_duration_seconds, accepted_escrows, created_at, updated_at
                     FROM resources
                     {where_clause}
                     ORDER BY updated_at DESC
@@ -1137,6 +1151,7 @@ class SQLiteClient:
                     row_min_price,
                     row_token,
                     row_max_duration_seconds,
+                    row_accepted_escrows,
                     row_created_at,
                     row_updated_at,
                 ) in rows:
@@ -1148,6 +1163,14 @@ class SQLiteClient:
                                 attrs = parsed
                         except Exception:
                             attrs = {}
+                    accepted: list[dict[str, Any]] | None = None
+                    if isinstance(row_accepted_escrows, str) and row_accepted_escrows.strip():
+                        try:
+                            parsed_ae = json.loads(row_accepted_escrows)
+                            if isinstance(parsed_ae, list):
+                                accepted = parsed_ae
+                        except Exception:
+                            accepted = None
                     result.append(
                         {
                             "resource_id": row_resource_id,
@@ -1160,6 +1183,7 @@ class SQLiteClient:
                             "min_price": row_min_price,
                             "token": row_token,
                             "max_duration_seconds": row_max_duration_seconds,
+                            "accepted_escrows": accepted,
                             "created_at": row_created_at,
                             "updated_at": row_updated_at,
                         }
@@ -1257,12 +1281,14 @@ class SQLiteClient:
         *,
         csv_path: str,
         dry_run: bool = False,
+        templates: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Import resources from CSV file and upsert rows into the resources table."""
         report = await upsert_resources_from_csv(
             csv_path=csv_path,
             sqlite_client=self,
             dry_run=dry_run,
+            templates=templates,
         )
         return report.to_dict()
 
@@ -1272,6 +1298,7 @@ class SQLiteClient:
         csv_content: str,
         source_label: str = "<inline>",
         dry_run: bool = False,
+        templates: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Import resources from a CSV string and upsert rows into the resources table.
 
@@ -1284,6 +1311,7 @@ class SQLiteClient:
             source_label=source_label,
             sqlite_client=self,
             dry_run=dry_run,
+            templates=templates,
         )
         return report.to_dict()
 

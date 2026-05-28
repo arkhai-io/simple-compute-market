@@ -57,25 +57,6 @@ class StageEventResponse(BaseModel):
     count: int
 
 
-class RegistryAgentReadyResponse(BaseModel):
-    """Response from GET /api/v1/system/wait-for-registry-agent.
-
-    ``ready=True`` means ``checks.registry_auth`` returned a definitive
-    non-pending value — either ``"ok"`` (agent indexed and owner verified)
-    or a terminal error (``"owner_mismatch"``, ``"unconfigured"``, etc.).
-    ``ready=False`` means the request timed out while the registry was still
-    returning ``"agent_not_found"`` (indexing in progress).
-
-    ``registry_auth`` carries the raw value from ``registry_auth_check()``
-    so callers can distinguish ``"ok"`` from ``"owner_mismatch"``.
-    ``elapsed_ms`` is the approximate server-side wait time.
-    """
-
-    ready: bool
-    registry_auth: str
-    elapsed_ms: int
-
-
 class ResourcePatchRequest(BaseModel):
     """Request body for PATCH /api/v1/admin/portfolio/resources/{resource_id}.
 

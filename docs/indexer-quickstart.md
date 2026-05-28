@@ -29,19 +29,21 @@ $EDITOR config.registry.env
 
 Fill in:
 
-- `CHAIN_ID`, `RPC_URL`, and the three contract addresses for the chain
-  this indexer should serve. The example file ships with Base Sepolia
-  values; any EVM chain with the ERC-8004 contracts deployed works.
 - `REGISTRY_ADMIN_API_KEY` — operator-only secret used to mint/revoke
   per-user keys at `/admin/api-keys`. Generate with `openssl rand -hex 32`.
 - `REGISTRY_BOOTSTRAP_API_KEY` — the bearer token sellers and buyers
   will use until per-user keys are minted. Same `openssl rand -hex 32`
   pattern. This is the shared secret you give out.
 
-`REGISTRY_REQUIRE_API_KEY=true` is the default (private indexer).
+The example file gates reads and writes independently and ships with
+both on (`REGISTRY_REQUIRE_READ_API_KEY=true`,
+`REGISTRY_REQUIRE_WRITE_API_KEY=true`) — a private indexer where buyers
+hold read keys and sellers hold write keys.
 
-For a fully public indexer (anyone can publish and query) set
-`REGISTRY_REQUIRE_API_KEY=false` and drop the two key vars.
+For a fully public indexer (anyone can publish and query) set both to
+`false` and drop the two key vars. For an open market — public
+discovery, publishing limited to vetted sellers — set only
+`REGISTRY_REQUIRE_WRITE_API_KEY=true` and hand write keys to sellers.
 
 ## 3. Bring it up
 
@@ -83,14 +85,16 @@ curl -s "http://<INDEXER_HOST>:8080/agents/eip155%3A84532%3A0x8004A818BFB912233c
 
 ## 6. Bearer-token auth
 
-`config.registry.env.example` ships with `REGISTRY_REQUIRE_API_KEY=true`
-already set. To disable auth (fully public indexer) flip it to `false`
-and drop the two key vars.
+`config.registry.env.example` ships with both gates on. To disable auth
+(fully public indexer) set `REGISTRY_REQUIRE_READ_API_KEY` and
+`REGISTRY_REQUIRE_WRITE_API_KEY` to `false` and drop the two key vars.
 
 Flow:
 
 - Admin mints/revokes per-user keys: `POST /admin/api-keys` with
-  `Authorization: Bearer <REGISTRY_ADMIN_API_KEY>`.
+  `Authorization: Bearer <REGISTRY_ADMIN_API_KEY>`. The request body
+  takes `scope` (`read` for buyers, `write` for sellers; defaults to
+  `read`). A write key also satisfies read routes.
 - Sellers and buyers send `Authorization: Bearer <api_key>` on every
   request, configured via each side's `[registry.auth]` block. Keys
   must match the URL in `[registry] urls` exactly (scheme, host, port,
