@@ -6,6 +6,24 @@ Pending architectural work and known operational issues for the Arkhai market st
 
 ## Core Stack
 
+### Market Core Extraction (from-above / from-below packaging)
+
+**Status:** Planned. Full scope in [`design-market-core-extraction.md`](design-market-core-extraction.md); principle documented in `ARCHITECTURE.md` → "Organizing Principle".
+
+**Principle (the filing test):** a behavior belongs in the market core (composed *from above*) iff it is invariant across every possible listing schema; otherwise it is a from-below utility the core invokes through an injected hook. The core's universal surface is thin: negotiation is an exchange of opaque, schema-defined **messages**, and the only structural requirement is that `terms = negotiate(messages…); receipt = settle(terms)` is well-typed — negotiation reduces a message history to `Terms`, settlement consumes exactly that `Terms`. The core knows nothing about message content (offers/counters/bids/acceptances are schema vocabulary), how a participant picks its next message, an "acceptance set," floor/ceiling semantics, or how a mismatched message is answered; all of that is policy. Price and escrow shape are the same kind of thing (message content constrained by advertised data) and flow through the same negotiation chain.
+
+**Motivation:** the realistic first driver is heterogeneous listing schemas *within* compute that don't share a registry — not a different asset class. The registry is the schema-centralizing/platform point; per-schema instantiations (filter-spec + typed client + storefront/buyer plugins) become the registry operator's deliverable, depending on the core's from-above skeleton and from-below kit.
+
+**Concrete seams to fix** (each filed against the principle today):
+- Escrow-shape validation runs as a pre-chain hard gate (`sync_negotiation._validate_escrow_proposal` raises before the chain) → demote to a negotiation middleware that may reject *or* counter-correct, symmetric with `bisection`.
+- **Minimal hook surface:** `run_buy` injects six behavior hooks (`build_escrow_proposal`, `derive_prices`, `build_escrow_terms`, `create_escrow`, `confirm_settlement`, `chain`); the well-typed `terms = negotiate(); receipt = settle(terms)` surface wants two. Collapse consecutive/bundled hooks — `negotiate` absorbs `chain` + `derive_prices` + opening-message construction + commit; `settle` absorbs `build_escrow_terms` + `create_escrow`. Further factoring is the implementation's business, not the core contract.
+- `ProvisionTerms` is compute-flavored (`ssh_public_key`/`duration_seconds`/`compute_resource`) → make the core carry delivery terms as an opaque schema blob (as the registry already does with `offer_resource`).
+- The market skeleton lives inside `buyer/` + `storefront/` tangled with compute code → extract `market-core` so the package graph expresses the joint the `run_buy(...)` signature already implies.
+
+**Not an immediate target** — this is the filing principle for *where new behavior goes*, captured so the next non-trivial change to negotiation/settlement is filed correctly rather than by precedent. The packaging extraction is the eventual payoff; the cheap wins (escrow guard → middleware, `derive_prices` placement) can land independently.
+
+---
+
 ### Chain-Agnostic Contract Deployment
 
 **Status:** Planned. CLI surface exists; the underlying deployer scripts still ignore it.

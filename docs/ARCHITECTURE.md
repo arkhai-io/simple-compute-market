@@ -12,6 +12,62 @@
 
 The stack is designed so that in production, multiple independent seller nodes each run their own agent + provisioning stack, while buyers can be ephemeral (a CLI invocation or a long-running agent). The `test-env` component exists only for local development.
 
+---
+
+## Organizing Principle: composition from above and below
+
+The README frames this as a market for "anything"; the structural test that makes that framing real is:
+
+> **A behavior belongs in the market core (composed "from above") if and only if it is invariant across every possible listing schema. If it varies by schema, it is a utility composed "from below" that the core invokes through an injected hook** — and "requiring the hook" is the from-above part; "implementing it" is from-below.
+
+- **From above** — the role contracts (buyer, seller, indexer) and the three market processes (discovery, negotiation/aggregation, settlement), expressed purely in terms of injected dependencies and schema-opaque primitives. `buy_orchestrator.run_buy(...)` is already this shape: a linear discover→negotiate→settle flow with every domain decision injected (`build_escrow_proposal`, `build_escrow_terms`, `create_escrow`, …).
+- **From below** — concrete, mutually-independent utilities: negotiation middlewares (`market-policy`), identity schemes (`service.identity`), generic schemas (`EscrowTerms`/`EscrowProposal`/`RateValue`), infra clients (alkahest, chain, registry-client). The defining property is "depended on, never depending up into the skeleton" — not "packaged as one wheel."
+- **A market instantiation** for a given asset class / listing schema wires from-below implementations into the from-above hooks, and *uses* the from-below utilities inside those implementations.
+
+Negotiation is an exchange of **messages** — opaque, schema-defined units passed between participants. The invariant the core rests on is that settlement composes with negotiation:
+
+```
+terms   = negotiate(messages…)
+receipt = settle(terms)
+```
+
+Negotiation reduces a message history to a `Terms` value; settlement consumes that `Terms` to produce a `Receipt`. That is the whole of what the core knows about the exchange:
+
+1. messages flow between participants (opaque content);
+2. a negotiation terminates by reducing its history to `Terms`;
+3. `settle(Terms) → Receipt`;
+4. settlement runs and reports success or failure.
+
+Everything else is schema-defined: message content (offer, counter, bid, acceptance are schema vocabulary), how a participant chooses its next message, and how `Terms` are validated. Seller-advertised fields (`accepted_escrows`, `min_price`, `max_duration_seconds`, …) are listing data; a policy decides whether to read them as a whitelist, a floor, a ceiling, or a soft predicate, and whether a mismatched message draws a rejection, a counter, a correction, or an acceptance. Every dimension of a message — price, escrow shape, duration — is handled the same way: by the negotiation chain, against the advertised data.
+
+Settlement verification requires both sides to derive the same `Terms`. That holds because `negotiate` is a pure reduction over a shared message history; the seller echoes the canonical confirmed message (the `accepted_*` fields on the wire response) so both histories stay identical.
+
+### What the core owns vs what schemas supply
+
+The core owns the *structure* of the exchange: the round loop, the signed request/response transport, history persistence, the middleware-chain execution semantics (a middleware that returns a value terminates the chain; returning none passes context to the next), and the determinism contract above. Schemas supply a small number of hooks within that structure.
+
+The composition wants two behavior hooks; `run_buy` injects six today:
+
+- **`negotiate`** — a per-turn message policy, `respond(history) → message | terms`, run by the core's negotiation engine. Today's `chain`, `derive_prices`, opening-message construction (`build_escrow_proposal`), and the buyer's commit (`confirm_settlement`) all belong here: each is a decision a participant makes during its turn.
+- **`settle`** — `Terms → Receipt`. Today's `build_escrow_terms` + `create_escrow` are one hook — "materialize the on-chain shape, then submit it" is internal factoring.
+
+Two hooks merge when the core does nothing between them: `build_escrow_terms → create_escrow` is a pure sequence. They stay separate when a core-enforced boundary sits in the gap — the determinism contract between `negotiate` and `settle` is such a boundary, so those remain two phases with `Terms` as the typed handoff. Hooks need not be interchangeable across schemas to warrant separation; a schema's `negotiate` and `settle` are co-designed and don't cross-compose. The core's leverage is the structure it provides around the hooks, not the count of hooks.
+
+The structure baked into the core is the structure shared by every market shape currently in view — request/response rounds driven by a middleware chain. A negotiation of a different shape (a sealed-bid auction, a continuous order book, an oracle-priced take-it-or-leave-it) would motivate factoring the round engine into a swappable protocol layer beneath the `settle ∘ negotiate` composition; until such a market is concrete, the round/chain model is part of the core.
+
+### The registry is the schema-centralizing point
+
+The indexer registry plays the platform role of existing compute markets: it is where a listing schema is *declared* (on the wire via `filter-spec.yaml`) and centralized. A registry typically serves a single schema, and the realistic first driver of the core/instantiation split is not a different asset class but **heterogeneous listing schemas within "compute"** that don't make sense on the same registry. Under this model a per-schema instantiation is the *registry operator's* deliverable: the core ships the from-above skeleton + the from-below kit; an operator stands up a registry and publishes a schema (its `filter-spec.yaml` plus the typed client counterpart, versioned together) and the storefront/buyer plugins that wire kit implementations into core hooks. The registry is already the most complete instance of this — it stores `offer_resource` as an opaque blob and drives discovery off a swappable filter-spec, with zero schema-specific code.
+
+### Where the current code deviates from the principle
+
+Parts of the code predate the principle and diverge from it. These seams are tracked in [`TODO.md`](TODO.md) / [`design-market-core-extraction.md`](design-market-core-extraction.md):
+
+- **Escrow-shape validation runs as a pre-chain hard gate.** `sync_negotiation._validate_escrow_proposal` raises `OfferUnfulfillableError` *before* `_compute_round_zero_decision`, baking "proposal out of `accepted_escrows` ⇒ reject" into the infrastructure. It belongs in the negotiation chain as a middleware — a guard that may reject or counter with a corrected shape (a `counter` already carries a `proposal`) — handled like any other message dimension. Field-equality is already a swappable policy callable; the `(chain, escrow_address)` membership check is the same kind of check, currently sitting at the protocol layer instead.
+- **`derive_prices` is an orchestrator-level injection.** It exists only because `bisection` needs `(initial, max)` bounds; a different negotiation policy has different inputs. It belongs folded into negotiation-policy setup (from below), not as a peer of the escrow hooks in `run_buy`'s signature.
+- **`ProvisionTerms` is compute-flavored.** It carries `ssh_public_key` / `duration_seconds` / `compute_resource`; the core should treat delivery terms as an opaque, schema-defined blob — exactly as the registry already treats `offer_resource`.
+- **The market skeleton is packaged inside `buyer/` + `storefront/`** alongside compute-specific code, so the package graph does not yet express the from-above/from-below joint that the function signatures already imply.
+
 ### Technology Anchors
 
 | Concern | Technology |
