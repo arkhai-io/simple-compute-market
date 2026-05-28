@@ -198,10 +198,9 @@ async def _do_provision(
     in the settlement_jobs row so the buyer's GET /settle/{uid}/status can
     surface it while the job is still queued/running.
     """
-    canonical_id = _canonical_agent_id()
     client = ProvisioningClient(
         settings.provisioning.service_url,
-        agent_id=canonical_id,
+        admin_key=settings.admin_api_key,
         timeout=float(settings.provisioning.timeout),
     )
     async with client:
@@ -227,34 +226,32 @@ async def _do_provision(
             poll_interval=float(settings.provisioning.poll_interval),
         )
         result = job.result or {}
-        if canonical_id:
-            try:
-                creds_resp = await client.get_job_credentials(submit.job_id)
-                auth: dict = {}
-                for c in creds_resp.credentials:
-                    if c.role:
-                        auth[c.role] = {
-                            "password": c.password,
-                            "ssh_commands": c.ssh_commands,
-                            "ssh_key_path_host": c.ssh_key_path_host,
-                            "key_type": c.key_type,
-                        }
-                if auth:
-                    result["authentication"] = auth
-            except Exception as exc:
-                logger.warning(
-                    "[PROVISIONING] Failed to fetch credentials for job %s: %s",
-                    submit.job_id, exc,
-                )
+        try:
+            creds_resp = await client.get_job_credentials(submit.job_id)
+            auth: dict = {}
+            for c in creds_resp.credentials:
+                if c.role:
+                    auth[c.role] = {
+                        "password": c.password,
+                        "ssh_commands": c.ssh_commands,
+                        "ssh_key_path_host": c.ssh_key_path_host,
+                        "key_type": c.key_type,
+                    }
+            if auth:
+                result["authentication"] = auth
+        except Exception as exc:
+            logger.warning(
+                "[PROVISIONING] Failed to fetch credentials for job %s: %s",
+                submit.job_id, exc,
+            )
     return result
 
 
 async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
     """Schedule VM expiry via the provisioning service."""
-    canonical_id = _canonical_agent_id()
     client = ProvisioningClient(
         settings.provisioning.service_url,
-        agent_id=canonical_id,
+        admin_key=settings.admin_api_key,
         timeout=float(settings.provisioning.timeout),
     )
     async with client:
@@ -852,7 +849,7 @@ async def fulfill_compute_obligation(
             )
             async with ProvisioningClient(
                 settings.provisioning.service_url,
-                agent_id=_canonical_agent_id() or "",
+                admin_key=settings.admin_api_key,
                 timeout=10,
             ) as prov_client:
                 await prov_client.register_lease(
