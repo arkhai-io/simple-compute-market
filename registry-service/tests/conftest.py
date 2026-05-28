@@ -73,7 +73,7 @@ def sample_order(db_session, sample_agent):
         agent_id=sample_agent.agent_id,
         order_maker="http://localhost:8001/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
-        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}}],
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": "USDC"}}],
         max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
@@ -110,7 +110,7 @@ def sample_order_no_owner(db_session, sample_agent_no_owner):
         agent_id=sample_agent_no_owner.agent_id,
         order_maker="http://localhost:8002/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
-        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}}],
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": "USDC"}}],
         max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )

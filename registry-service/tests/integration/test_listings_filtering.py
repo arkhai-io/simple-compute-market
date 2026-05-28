@@ -54,7 +54,7 @@ def _make_listing(db_session, agent, listing_id: str, **offer_extras) -> Listing
         accepted_escrows=[{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"token": "0x" + "ab" * 20},
+            "literal_fields": {"token": "0x" + "ab" * 20},
         }],
         max_duration_seconds=3600,
         status=OrderStatusEnum.open,
@@ -129,18 +129,18 @@ async def test_etag_match_passes_through(_raw_client, db_session, maker_agent):
 
 @pytest.mark.asyncio
 async def test_token_array_projection_filter(_raw_client, db_session, maker_agent):
-    """Filter on accepted_escrows[*].fields.token works via JSONPath."""
+    """Filter on accepted_escrows[*].literal_fields.token works via JSONPath."""
     usdc = "0x" + "ab" * 20
     weth = "0x" + "cd" * 20
 
     a = _make_listing(db_session, maker_agent, "usdc-only", gpu_model="A100")
     a.accepted_escrows = [
-        {"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": usdc}},
+        {"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": usdc}},
     ]
     b = _make_listing(db_session, maker_agent, "both", gpu_model="A100")
     b.accepted_escrows = [
-        {"chain_name": "anvil", "escrow_address": "0x" + "22" * 20, "fields": {"token": usdc}},
-        {"chain_name": "anvil", "escrow_address": "0x" + "33" * 20, "fields": {"token": weth}},
+        {"chain_name": "anvil", "escrow_address": "0x" + "22" * 20, "literal_fields": {"token": usdc}},
+        {"chain_name": "anvil", "escrow_address": "0x" + "33" * 20, "literal_fields": {"token": weth}},
     ]
     db_session.commit()
 
@@ -203,11 +203,11 @@ async def test_set_form_not_in_excludes_token(_raw_client, db_session, maker_age
 
     a = _make_listing(db_session, maker_agent, "usdc-listing", gpu_model="A100")
     a.accepted_escrows = [
-        {"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": usdc}},
+        {"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": usdc}},
     ]
     b = _make_listing(db_session, maker_agent, "weth-listing", gpu_model="A100")
     b.accepted_escrows = [
-        {"chain_name": "anvil", "escrow_address": "0x" + "22" * 20, "fields": {"token": weth}},
+        {"chain_name": "anvil", "escrow_address": "0x" + "22" * 20, "literal_fields": {"token": weth}},
     ]
     db_session.commit()
 

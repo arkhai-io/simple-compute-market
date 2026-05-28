@@ -30,7 +30,7 @@ def _valid_payload(**overrides: object) -> dict:
             {
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"token": "0x" + "ab" * 20},
+                "literal_fields": {"token": "0x" + "ab" * 20},
             }
         ],
         "max_duration_seconds": 3600,
@@ -81,7 +81,7 @@ async def test_empty_accepted_escrows_rejected() -> None:
 @pytest.mark.asyncio
 async def test_accepted_escrow_missing_required_keys_rejected() -> None:
     payload = _valid_payload(
-        accepted_escrows=[{"escrow_address": "0x" + "11" * 20}]  # missing chain_name + fields
+        accepted_escrows=[{"escrow_address": "0x" + "11" * 20}]  # missing chain_name + literal_fields
     )
     async with _client() as c:
         resp = await c.post("/api/v1/listings/validate-publish", json=payload)
@@ -89,7 +89,7 @@ async def test_accepted_escrow_missing_required_keys_rejected() -> None:
     assert body["valid"] is False
     joined = " ".join(body["errors"])
     assert "chain_name" in joined
-    assert "fields" in joined
+    assert "literal_fields" in joined
 
 
 @pytest.mark.asyncio
