@@ -213,26 +213,26 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "arkhai-registry-client"
-version = "0.8.1"
+version = "0.9.0"
 source = { registry = "/Users/mlegls/dev/simple-market-service/.dist" }
 dependencies = [
     { name = "eth-account" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/simple-market-service/.dist/arkhai_registry_client-0.8.1-py3-none-any.whl" },
+    { path = "/Users/mlegls/dev/simple-market-service/.dist/arkhai_registry_client-0.9.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-storefront-client"
-version = "0.13.0"
+version = "0.14.0"
 source = { registry = "/Users/mlegls/dev/simple-market-service/.dist" }
 dependencies = [
     { name = "eth-account" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/simple-market-service/.dist/arkhai_storefront_client-0.13.0-py3-none-any.whl" },
+    { path = "/Users/mlegls/dev/simple-market-service/.dist/arkhai_storefront_client-0.14.0-py3-none-any.whl" },
 ]
 
 [[package]]

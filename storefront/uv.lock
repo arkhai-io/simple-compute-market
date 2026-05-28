@@ -180,14 +180,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-registry-client"
-version = "0.7.0"
+version = "0.9.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "eth-account", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_registry_client-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_registry_client-0.9.0-py3-none-any.whl" },
 ]
 
 [[package]]
