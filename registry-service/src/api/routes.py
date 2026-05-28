@@ -3,10 +3,10 @@
 from fastapi import APIRouter, Depends
 
 from src.api.admin_routes import router as admin_router
-from src.api.agent_routes import router as agent_router
 from src.api.api_key_auth import require_read_access
 from src.api.filter_spec import router as filter_spec_router
 from src.api.listing_routes import router as listing_router
+from src.api.publisher_routes import router as publisher_router
 from src.api.system_routes import make_health_router, make_system_router
 from src.api.validate_routes import router as validate_router
 
@@ -27,8 +27,8 @@ _read_gate = [Depends(require_read_access)]
 router.include_router(make_system_router(), dependencies=_read_gate)
 router.include_router(filter_spec_router, dependencies=_read_gate)
 router.include_router(validate_router, dependencies=_read_gate)
+router.include_router(publisher_router, dependencies=_read_gate)
 
-# agent + listing routers mix reads and writes, so each endpoint
-# carries its own read- or write-scoped dependency.
-router.include_router(agent_router)
+# The listing router mixes reads and writes, so each endpoint carries its
+# own read- or write-scoped dependency.
 router.include_router(listing_router)

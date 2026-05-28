@@ -2,105 +2,54 @@ from datetime import datetime
 from sqlalchemy import Column, String, Integer, DateTime, Text, JSON, Enum as SQLEnum, ForeignKey, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import JSONB
 import enum
 
-
-class AgentStatusEnum(str, enum.Enum):
-    healthy = "healthy"
-    stale = "stale"
-    unreachable = "unreachable"
-    deprecated = "deprecated"
 
 Base = declarative_base()
 
 
-class Agent(Base):
-    __tablename__ = "agents"
+class Publisher(Base):
+    """A principal that owns listings.
 
-    # Integer primary key for internal DB use
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    Identified by one or more :class:`PublisherIdentity` rows — today a
+    single ``eip191`` wallet. Created lazily on the first signed publish;
+    nothing is registered ahead of time. ``publisher_id`` is local to this
+    indexer — correlating a publisher across registries goes through the
+    shared ``(scheme, identifier)`` claims, not this surrogate id.
+    """
+    __tablename__ = "publishers"
 
-    # ---- Pluggable identity (Phase 3 of the pluggable-identity refactor) ----
-    # Logical key is now (scheme, identifier). The defaults are nullable so
-    # the migration can leave legacy owner-less rows untagged until Phase 4
-    # cleanup. New rows must always set both — the ux_agents_scheme_identifier
-    # unique index enforces uniqueness among populated pairs.
-    scheme = Column(String, nullable=True)
-    identifier = Column(String, nullable=True)
-    scheme_metadata = Column(JSON, nullable=True)
-
-    # ---- Legacy ERC-8004 columns (deprecated; Phase 4 drops them) ----------
-    # ERC-8004 canonical identifier: eip155:{chainId}:{identityRegistry}:{agentId}
-    # Still consulted for back-compat lookups (URL paths shaped as eip155:...).
-    agent_id = Column(String, nullable=True, unique=True)
-
-    # Components of canonical ID for querying
-    chain_id = Column(Integer, nullable=False)
-    identity_registry = Column(String, nullable=True)  # Registry contract address
-    onchain_agent_id = Column(Integer, nullable=True)  # Numeric ERC-721 tokenId
-
-    # Legacy field name for backward compatibility (maps to identity_registry)
-    registry_address = Column(String, nullable=False)
-
-    owner = Column(String, nullable=True)  # Wallet address of agent owner (for signature verification)
-    token_uri = Column(Text, nullable=True)
-    metadata_json = Column("metadata", JSON, default=dict)  # Database column is "metadata", Python attr is "metadata_json" to avoid SQLAlchemy conflict
-    health_status = Column(SQLEnum(AgentStatusEnum), nullable=False, default=AgentStatusEnum.healthy)
-    last_heartbeat = Column(DateTime(timezone=True), nullable=True)
+    publisher_id = Column(Integer, primary_key=True, autoincrement=True)
+    # Where buyers reach this publisher's storefront to negotiate. Set from
+    # the publish payload on first sighting.
+    storefront_url = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationships
-    metadata_entries = relationship("AgentMetadataEntry", back_populates="agent", cascade="all, delete-orphan")
-    health_checks = relationship("HealthCheck", back_populates="agent", cascade="all, delete-orphan")
-
-    __table_args__ = (
-        Index("idx_agents_chain_id", "chain_id"),
-        Index("idx_agents_health_status", "health_status"),
-        Index("idx_agents_owner", "owner"),
-        Index("idx_agents_token_uri", "token_uri"),
-        Index("idx_agents_identity_registry", "identity_registry"),
-        Index("idx_agents_onchain_agent_id", "onchain_agent_id"),
-        Index("ux_agents_chain_registry_onchain", "chain_id", "identity_registry", "onchain_agent_id", unique=True),
-        Index("idx_agents_scheme", "scheme"),
-        Index("ux_agents_scheme_identifier", "scheme", "identifier", unique=True),
-    )
+    identities = relationship("PublisherIdentity", back_populates="publisher", cascade="all, delete-orphan")
+    listings = relationship("Listing", back_populates="publisher", cascade="all, delete-orphan")
 
 
-class AgentMetadataEntry(Base):
-    __tablename__ = "agent_metadata"
-    
+class PublisherIdentity(Base):
+    """A verified signing identity belonging to a publisher.
+
+    ``(scheme, identifier)`` is globally unique; ``eip191`` identifiers are
+    lowercased wallet addresses. One row per publisher today; the seam for
+    linking additional identities (other chains/schemes) later.
+    """
+    __tablename__ = "identities"
+
     id = Column(Integer, primary_key=True, autoincrement=True)
-    agent_id = Column(String, ForeignKey("agents.agent_id", ondelete="CASCADE"), nullable=False)
-    key = Column(String, nullable=False)
-    value = Column(String, nullable=False)
+    publisher_id = Column(Integer, ForeignKey("publishers.publisher_id", ondelete="CASCADE"), nullable=False)
+    scheme = Column(String, nullable=False)
+    identifier = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    
-    # Relationships
-    agent = relationship("Agent", back_populates="metadata_entries")
-    
-    __table_args__ = (
-        Index("idx_agent_metadata_agent_id", "agent_id"),
-    )
 
+    publisher = relationship("Publisher", back_populates="identities")
 
-class HealthCheck(Base):
-    __tablename__ = "health_checks"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    agent_id = Column(String, ForeignKey("agents.agent_id", ondelete="CASCADE"), nullable=False)
-    status = Column(String, nullable=False)
-    checked_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    response_time = Column(Integer, nullable=True)  # milliseconds
-    error = Column(Text, nullable=True)
-    
-    # Relationships
-    agent = relationship("Agent", back_populates="health_checks")
-    
     __table_args__ = (
-        Index("idx_health_checks_agent_id", "agent_id"),
-        Index("idx_health_checks_checked_at", "checked_at"),
+        Index("ux_identities_scheme_identifier", "scheme", "identifier", unique=True),
+        Index("idx_identities_publisher_id", "publisher_id"),
     )
 
 
@@ -115,11 +64,9 @@ class Listing(Base):
     __tablename__ = "listings"
 
     listing_id = Column(String, primary_key=True)
-    agent_id = Column(String, ForeignKey("agents.agent_id", ondelete="CASCADE"), nullable=False)
-    seller = Column(Text, nullable=False)  # Agent card URL of the listing seller
-    buyer = Column(Text, nullable=True)    # Agent card URL of the buyer (when accepted)
+    publisher_id = Column(Integer, ForeignKey("publishers.publisher_id", ondelete="CASCADE"), nullable=False)
     offer_resource = Column(JSON, nullable=False)  # registry-specific shape (e.g. ComputeResource)
-    accepted_escrows = Column(JSON, nullable=True)  # list[AcceptedEscrow] — escrows the seller will take
+    accepted_escrows = Column(JSON, nullable=True)  # settlement-schema blob; opaque to the indexer
     # Optional ceiling on lease duration (seconds). NULL = unlimited.
     # Buyers supply the actual duration at negotiation init.
     max_duration_seconds = Column(Integer, nullable=True)
@@ -128,11 +75,10 @@ class Listing(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationships
-    agent = relationship("Agent")
+    publisher = relationship("Publisher", back_populates="listings")
 
     __table_args__ = (
-        Index("idx_listings_agent_id", "agent_id"),
+        Index("idx_listings_publisher_id", "publisher_id"),
         Index("idx_listings_status", "status"),
         Index("idx_listings_created_at", "created_at"),
     )
@@ -150,8 +96,8 @@ class ApiKey(Base):
 
     ``scope`` is ``read`` or ``write``; a write key implies read. Read
     routes (discovery, lookups) accept any active key; write routes
-    (publish / update / delete listings, heartbeat) require a write key.
-    New keys default to ``read`` (least privilege).
+    (publish / update / delete listings) require a write key. New keys
+    default to ``read`` (least privilege).
 
     Auth gating is opt-in per direction: when
     ``settings.require_read_api_key`` / ``require_write_api_key`` are
@@ -171,4 +117,3 @@ class ApiKey(Base):
     __table_args__ = (
         Index("idx_api_keys_revoked_at", "revoked_at"),
     )
-

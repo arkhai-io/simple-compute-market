@@ -129,11 +129,15 @@ class TestApiKeyLifecycle:
 # Bearer-token gate on non-admin routes
 # ---------------------------------------------------------------------------
 
-# A write endpoint whose only pre-route logic is the write gate, then an
-# agent lookup that 404s for an unregistered id. So: 401 (no key) / 403
-# (read key) come from the gate; 404 means the gate let the request
-# through to the route. Avoids needing a signed payload to probe the gate.
-_WRITE_PROBE = "/agents/0x000000000000000000000000000000000000dEaD/heartbeat"
+# DELETE on a nonexistent listing: the write gate runs first, then the
+# route 404s on the missing listing (before its signature check). So 401
+# (no key) / 403 (read key) come from the gate; 404 means the gate let the
+# request through. Avoids needing a signed payload to probe the gate.
+_WRITE_PROBE = "/listings/gate-probe-nonexistent"
+
+
+async def _probe_write(raw_client, headers=None):
+    return await raw_client.delete(_WRITE_PROBE, headers=headers or {})
 
 
 class _GateBase:
@@ -156,8 +160,8 @@ class TestGatesDisabled(_GateBase):
         monkeypatch.setattr(settings, "require_read_api_key", False)
         monkeypatch.setattr(settings, "require_write_api_key", False)
         assert (await raw_client.get("/listings")).status_code == 200
-        # Write gate off → request reaches the route (404 for unknown agent).
-        assert (await raw_client.post(_WRITE_PROBE)).status_code == 404
+        # Write gate off → request reaches the route (404 for unknown listing).
+        assert (await _probe_write(raw_client)).status_code == 404
 
 
 class TestReadGate(_GateBase):
@@ -204,7 +208,7 @@ class TestReadGate(_GateBase):
 
     async def test_writes_open_when_only_read_gated(self, raw_client):
         """Read-gated but write-open: a write needs no key, reaches the route."""
-        assert (await raw_client.post(_WRITE_PROBE)).status_code == 404
+        assert (await _probe_write(raw_client)).status_code == 404
 
 
 class TestWriteGate(_GateBase):
@@ -218,25 +222,21 @@ class TestWriteGate(_GateBase):
         assert (await raw_client.get("/listings")).status_code == 200
 
     async def test_write_401_without_key(self, raw_client):
-        resp = await raw_client.post(_WRITE_PROBE)
+        resp = await _probe_write(raw_client)
         assert resp.status_code == 401
         assert "API key" in resp.json()["detail"]
 
     async def test_write_403_with_read_key(self, raw_client):
         raw, _ = await self._mint(raw_client, scope="read")
-        resp = await raw_client.post(
-            _WRITE_PROBE, headers={"Authorization": f"Bearer {raw}"},
-        )
+        resp = await _probe_write(raw_client, headers={"Authorization": f"Bearer {raw}"})
         assert resp.status_code == 403
         assert "write-scoped" in resp.json()["detail"]
 
     async def test_write_passes_gate_with_write_key(self, raw_client):
         """Write key clears the gate; 404 is the route rejecting an
-        unknown agent, not the gate rejecting the key."""
+        unknown listing, not the gate rejecting the key."""
         raw, _ = await self._mint(raw_client, scope="write")
-        resp = await raw_client.post(
-            _WRITE_PROBE, headers={"Authorization": f"Bearer {raw}"},
-        )
+        resp = await _probe_write(raw_client, headers={"Authorization": f"Bearer {raw}"})
         assert resp.status_code == 404
 
 

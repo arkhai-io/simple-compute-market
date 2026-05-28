@@ -28,13 +28,7 @@ class Settings(BaseSettings):
 
     # Optional ZeroTier configuration (used by deployment/Makefile, not by app logic)
     zerotier_network: str | None = Field(default=None, env="ZEROTIER_NETWORK")
-    
-    # Health Check Configuration
-    enable_health_checks: bool = False  # Opt-in: Registry-initiated health checks (disabled by default)
-    health_check_interval: int = 60
-    endpoint_check_timeout: int = 10
-    heartbeat_ttl_secs: int = 60
-    
+
     # API key authentication, gated independently for read and write
     # access (both opt-in; off by default). Read routes (discovery,
     # lookups, system diagnostics) require any active key when

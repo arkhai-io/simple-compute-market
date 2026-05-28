@@ -1,8 +1,7 @@
-"""Integration tests for the eip191 publish path (Phase 3).
+"""Integration tests for the signed publish path.
 
-Verifies that POSTing to ``/agents/0x{addr}/listings`` with valid EIP-191
-auth lazy-creates an Agent row and publishes the listing — no on-chain
-lookup required.
+POSTing to ``/listings`` with valid EIP-191 auth lazy-creates a publisher
+(plus its identity) and the listing — no pre-registration.
 """
 
 from __future__ import annotations
@@ -49,48 +48,57 @@ def asgi_client(db_session):
     ), db_session
 
 
-async def test_eip191_publish_creates_agent_and_listing(asgi_client):
+def _publish_body(listing_id: str, **overrides) -> dict:
+    ts = int(time.time())
+    sig = _sign(f"create_listing:{ADDRESS_LOWER}:{ts}")
+    body = {
+        "listing_id": listing_id,
+        "scheme": "eip191",
+        "identifier": ADDRESS_LOWER,
+        "seller": "http://my-storefront/",
+        "offer_resource": {"gpu_model": "H200", "region": "us"},
+        "accepted_escrows": [{
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "literal_fields": {"token": "0x" + "22" * 20},
+            "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+        }],
+        "max_duration_seconds": 3600,
+        "status": "open",
+        "signature": sig,
+        "timestamp": ts,
+    }
+    body.update(overrides)
+    return body
+
+
+async def test_publish_creates_publisher_and_listing(asgi_client):
     client, db = asgi_client
     try:
-        ts = int(time.time())
-        sig = _sign(f"create_listing:{ADDRESS_LOWER}:{ts}")
-        body = {
-            "listing_id": "eip191-listing-1",
-            "seller": "http://my-storefront/",
-            "offer_resource": {"gpu_model": "H200", "region": "us"},
-            "accepted_escrows": [{
-                "chain_name": "anvil",
-                "escrow_address": "0x" + "11" * 20,
-                "literal_fields": {"token": "0x" + "22" * 20},
-                "rates": [{"field": "amount", "per": "hour", "value": "100"}],
-            }],
-            "max_duration_seconds": 3600,
-            "status": "open",
-            "signature": sig,
-            "timestamp": ts,
-        }
-        resp = await client.post(f"/agents/{ADDRESS_LOWER}/listings", json=body)
+        resp = await client.post("/listings", json=_publish_body("eip191-listing-1"))
         assert resp.status_code == 201, resp.text
 
-        # Agent row created
-        from src.db.models import Agent, Listing
-        agent = db.query(Agent).filter(Agent.scheme == "eip191").first()
-        assert agent is not None
-        assert agent.identifier == ADDRESS_LOWER
-        assert agent.owner == ADDRESS_LOWER
+        from src.db.models import Publisher, PublisherIdentity, Listing
+        identity = db.query(PublisherIdentity).filter(PublisherIdentity.scheme == "eip191").first()
+        assert identity is not None
+        assert identity.identifier == ADDRESS_LOWER
+
+        publisher = db.query(Publisher).filter(Publisher.publisher_id == identity.publisher_id).first()
+        assert publisher is not None
+        assert publisher.storefront_url == "http://my-storefront/"
 
         listing = db.query(Listing).filter(Listing.listing_id == "eip191-listing-1").first()
         assert listing is not None
+        assert listing.publisher_id == publisher.publisher_id
     finally:
         await client.aclose()
         app.dependency_overrides.clear()
 
 
-async def test_eip191_publish_rejects_invalid_signature(asgi_client):
+async def test_publish_rejects_invalid_signature(asgi_client):
     client, _ = asgi_client
     try:
         ts = int(time.time())
-        # Sign with a different key
         from eth_account import Account
         from eth_account.messages import encode_defunct
 
@@ -100,47 +108,27 @@ async def test_eip191_publish_rejects_invalid_signature(asgi_client):
             bad_key,
         ).signature.hex()
 
-        body = {
-            "listing_id": "eip191-listing-bad-sig",
-            "seller": "http://my-storefront/",
-            "offer_resource": {},
-            "accepted_escrows": [],
-            "signature": sig,
-            "timestamp": ts,
-        }
-        resp = await client.post(f"/agents/{ADDRESS_LOWER}/listings", json=body)
+        body = _publish_body("eip191-listing-bad-sig", signature=sig, timestamp=ts)
+        resp = await client.post("/listings", json=body)
         assert resp.status_code == 401, resp.text
     finally:
         await client.aclose()
         app.dependency_overrides.clear()
 
 
-async def test_eip191_publish_reuses_existing_agent_row(asgi_client):
-    """Publishing twice should reuse the same Agent row (idempotent lazy-create)."""
+async def test_publish_reuses_existing_publisher(asgi_client):
+    """Publishing twice reuses the same publisher (idempotent lazy-create)."""
     client, db = asgi_client
     try:
-        from src.db.models import Agent
+        from src.db.models import Publisher
 
-        async def _publish(listing_id: str):
-            ts = int(time.time())
-            sig = _sign(f"create_listing:{ADDRESS_LOWER}:{ts}")
-            body = {
-                "listing_id": listing_id,
-                "seller": "http://my-storefront/",
-                "offer_resource": {},
-                "accepted_escrows": [],
-                "signature": sig,
-                "timestamp": ts,
-            }
-            return await client.post(f"/agents/{ADDRESS_LOWER}/listings", json=body)
-
-        r1 = await _publish("eip191-listing-a")
-        r2 = await _publish("eip191-listing-b")
+        r1 = await client.post("/listings", json=_publish_body("eip191-listing-a"))
+        r2 = await client.post("/listings", json=_publish_body("eip191-listing-b"))
         assert r1.status_code == 201
         assert r2.status_code == 201
 
-        agents = db.query(Agent).filter(Agent.scheme == "eip191").all()
-        assert len(agents) == 1
+        publishers = db.query(Publisher).all()
+        assert len(publishers) == 1
     finally:
         await client.aclose()
         app.dependency_overrides.clear()

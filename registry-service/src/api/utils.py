@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from src.db.models import Agent, Listing, OrderStatusEnum
+from src.db.models import Publisher, PublisherIdentity, Listing, OrderStatusEnum
 
 # Import for signature verification
 try:
@@ -20,22 +20,19 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Identity-scheme dispatch (Phase 2 of pluggable-identity refactor)
+# Identity-scheme dispatch
 # ---------------------------------------------------------------------------
-# The registry currently runs entirely on EIP-191 identities (Agent.owner is
-# a wallet address recovered from a signature). Verifier calls go through
-# this tiny inline dispatcher so the call-boundary already accepts a
-# scheme-tagged Identity. Phase 4 consolidates onto service.identity once
-# the build pipeline ships market-service into the registry image.
+# The registry runs on EIP-191 identities: a request is authenticated by
+# recovering the signer's wallet address from an EIP-191 signature. Verifier
+# calls go through this dispatcher so the call boundary accepts a
+# scheme-tagged Identity; adding a scheme is one dict entry.
 
 
 class Identity:
     """Scheme-tagged identity, mirroring ``service.schemas.Identity``.
 
-    Phase 2 keeps this self-contained inside the registry to avoid taking
-    a build-time dependency on the shared ``service`` package. Phase 4
-    swaps this out for the imported model when the registry image
-    consolidates with the rest of the workspace.
+    Kept self-contained inside the registry to avoid a build-time dependency
+    on the shared ``service`` package.
     """
 
     __slots__ = ("scheme", "identifier")
@@ -82,44 +79,6 @@ def _verify_identity_signature(identity: Identity, message: str, signature: str)
     return verifier(identity, message.encode("utf-8"), proof)
 
 
-def _verify_eip191_signature(message: str, signature: str, expected_owner: str) -> bool:
-    """Back-compat shim for callers that still pass raw owner addresses.
-
-    New code should construct an :class:`Identity` and call
-    :func:`_verify_identity_signature` directly.
-    """
-    return _verify_identity_signature(
-        Identity(scheme="eip191", identifier=expected_owner), message, signature
-    )
-
-
-def verify_heartbeat_signature(
-    agent_id: str,
-    timestamp: int,
-    signature: str,
-    expected: "Identity | str",
-) -> bool:
-    """Verify heartbeat signature. Message format: 'heartbeat:{agent_id}:{timestamp}'
-
-    ``expected`` may be an :class:`Identity` (preferred) or a raw owner
-    address string (back-compat — coerced to ``eip191``).
-    """
-    if not HAS_ETH_ACCOUNT:
-        logger.warning("[Heartbeat] eth_account not available, signature verification disabled")
-        return False
-    identity = expected if isinstance(expected, Identity) else Identity(
-        scheme="eip191", identifier=expected
-    )
-    message = f"heartbeat:{agent_id}:{timestamp}"
-    logger.info(
-        f"[Heartbeat] Verifying for agent={agent_id} "
-        f"scheme={identity.scheme} identifier={identity.identifier}"
-    )
-    is_valid = _verify_identity_signature(identity, message, signature)
-    logger.info(f"[Heartbeat] Signature valid: {is_valid}")
-    return is_valid
-
-
 def verify_order_signature(
     operation: str,
     resource_id: str,
@@ -131,10 +90,11 @@ def verify_order_signature(
 
     Message format: '{operation}:{resource_id}:{timestamp}'
     operation: 'create_listing', 'update_listing', or 'delete_listing'
-    resource_id: agent_id for create_listing, listing_id for update/delete
+    resource_id: the signing identifier for create_listing, listing_id for
+    update/delete.
 
-    ``expected`` may be an :class:`Identity` (preferred) or a raw owner
-    address string (back-compat — coerced to ``eip191``).
+    ``expected`` may be an :class:`Identity` (preferred) or a raw EIP-191
+    address string (coerced to ``eip191``).
     """
     if not HAS_ETH_ACCOUNT:
         logger.warning("[Order] eth_account not available, signature verification disabled")
@@ -152,94 +112,100 @@ def verify_order_signature(
     return is_valid
 
 
-def find_agent_by_identity(db: Session, identity: Identity) -> Optional[Agent]:
-    """Look up an Agent row by scheme-tagged identity (Phase 3).
+# ---------------------------------------------------------------------------
+# Publisher / identity lookup
+# ---------------------------------------------------------------------------
 
-    The canonical lookup post-migration. Returns ``None`` when no row
-    matches; callers handle 404 / lazy-create / JIT-index themselves.
+
+def find_publisher_by_identity(db: Session, identity: Identity) -> Optional[Publisher]:
+    """Resolve a publisher by one of its signing identities.
+
+    Returns ``None`` when no identity matches; callers handle 404 /
+    lazy-create themselves.
     """
-    return db.query(Agent).filter(
-        Agent.scheme == identity.scheme,
-        Agent.identifier == identity.identifier,
-    ).first()
-
-
-def ensure_agent_for_eip191(
-    db: Session,
-    identifier: str,
-) -> Agent:
-    """Find or create an Agent row for an EIP-191 identity.
-
-    Used by the publication path for sellers identifying via ``eip191``:
-    the signed request is the trust anchor — successful signature
-    recovery proves the publisher controls the wallet at ``identifier``,
-    so we create the row on first sighting. No on-chain lookup needed.
-
-    Pre-condition: signature verification has already passed. Calling
-    this without verifying first creates rows for arbitrary callers.
-
-    Returns the row (existing or newly created).
-    """
-    identity = Identity(scheme="eip191", identifier=identifier)
-    agent = find_agent_by_identity(db, identity)
-    if agent is not None:
-        return agent
-
-    # The legacy `chain_id` + `registry_address` columns are NOT NULL but
-    # meaningless for an eip191 agent. Pre-Phase-4 we fill them with
-    # placeholders; Phase 4 drops these columns entirely.
-    agent = Agent(
-        scheme=identity.scheme,
-        identifier=identity.identifier,
-        owner=identity.identifier,
-        chain_id=0,
-        registry_address="",
-        identity_registry=None,
-        onchain_agent_id=None,
+    row = (
+        db.query(PublisherIdentity)
+        .filter(
+            PublisherIdentity.scheme == identity.scheme,
+            PublisherIdentity.identifier == identity.identifier,
+        )
+        .first()
     )
-    db.add(agent)
+    return row.publisher if row is not None else None
+
+
+def find_publisher_by_id(db: Session, publisher_id: int) -> Optional[Publisher]:
+    """Look up a publisher by its surrogate id."""
+    return db.query(Publisher).filter(Publisher.publisher_id == publisher_id).first()
+
+
+def ensure_publisher_for_identity(
+    db: Session,
+    identity: Identity,
+    storefront_url: Optional[str] = None,
+) -> Publisher:
+    """Find or create the publisher owning ``identity``.
+
+    Used by the publish path: the signed request is the trust anchor —
+    successful signature recovery proves control of the identity, so the
+    publisher (and its identity row) is created on first sighting. No
+    pre-registration. When ``storefront_url`` is supplied it is recorded on
+    create and refreshed on later publishes if it changed.
+
+    Pre-condition: signature verification has already passed.
+    """
+    publisher = find_publisher_by_identity(db, identity)
+    if publisher is not None:
+        if storefront_url and publisher.storefront_url != storefront_url:
+            publisher.storefront_url = storefront_url
+            db.commit()
+            db.refresh(publisher)
+        return publisher
+
+    publisher = Publisher(storefront_url=storefront_url)
+    publisher.identities.append(
+        PublisherIdentity(scheme=identity.scheme, identifier=identity.identifier)
+    )
+    db.add(publisher)
     try:
         db.commit()
-        db.refresh(agent)
+        db.refresh(publisher)
     except IntegrityError:
-        # Concurrent insert raced us — re-query.
+        # Concurrent insert raced us on the unique (scheme, identifier) — re-query.
         db.rollback()
-        return find_agent_by_identity(db, identity)  # type: ignore[return-value]
+        return find_publisher_by_identity(db, identity)  # type: ignore[return-value]
 
     logger.info(
-        f"[Phase3] Created eip191 agent row identifier={identity.identifier}"
+        f"[Publisher] Created publisher id={publisher.publisher_id} "
+        f"identity={identity.scheme}:{identity.identifier}"
     )
-    return agent
+    return publisher
 
 
-def find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
-    """Find an Agent row by URL-form agent_id.
-
-    Post-pluggable-identity (Phase 4) the registry accepts two shapes:
-
-    * EIP-191 wallet address (``0x…``) — looked up via ``(scheme=eip191,
-      identifier=address.lower())``.
-    * Legacy ERC-8004 canonical (``eip155:<chain>:<registry>:<n>``) —
-      looked up against the deprecated ``agents.agent_id`` column for
-      back-compat with rows still tagged by migration 012.
-
-    Returns ``None`` on miss.
-    """
-    if agent_id.startswith("0x") and len(agent_id) == 42:
-        ident = Identity(scheme="eip191", identifier=agent_id)
-        return find_agent_by_identity(db, ident)
-
-    agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
-    return agent
+def publisher_to_dict(publisher: Publisher) -> dict:
+    """Wire shape for a publisher entity."""
+    return {
+        "publisher_id": publisher.publisher_id,
+        "storefront_url": publisher.storefront_url,
+        "identities": [
+            {"scheme": i.scheme, "identifier": i.identifier}
+            for i in publisher.identities
+        ],
+        "created_at": publisher.created_at.isoformat(),
+    }
 
 
 def order_to_dict(listing: Listing) -> dict:
-    """Convert a Listing ORM row to its wire-shape dict."""
+    """Convert a Listing ORM row to its wire-shape dict.
+
+    ``seller`` carries the publisher's storefront URL (where a buyer
+    negotiates), joined from the owning publisher.
+    """
+    publisher = listing.publisher
     return {
         "listing_id": listing.listing_id,
-        "agent_id": listing.agent_id,
-        "seller": listing.seller,
-        "buyer": listing.buyer,
+        "publisher_id": listing.publisher_id,
+        "seller": publisher.storefront_url if publisher else None,
         "offer_resource": listing.offer_resource or {},
         "accepted_escrows": listing.accepted_escrows or [],
         "max_duration_seconds": listing.max_duration_seconds,
@@ -256,5 +222,3 @@ def validate_order_status(status: str) -> OrderStatusEnum:
         return OrderStatusEnum(status)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
-
-

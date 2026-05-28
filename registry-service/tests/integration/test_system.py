@@ -5,8 +5,7 @@ from __future__ import annotations
 import pytest
 
 from registry_client import RegistryClient, RegistryClientError
-from registry_client.models import HealthResponse, SystemConfigResponse, SystemSyncResponse, SystemStatsResponse
-from tests.integration.conftest import IDENTITY_REGISTRY
+from registry_client.models import HealthResponse, SystemStatsResponse
 
 
 class TestHealth:
@@ -46,36 +45,18 @@ class TestHealth:
             app.dependency_overrides.clear()
 
 
-class TestSystemConfig:
-    async def test_heartbeat_ttl_positive(self, registry_client):
-        config = await registry_client.get_system_config()
-        assert isinstance(config.heartbeat_ttl_secs, int)
-        assert config.heartbeat_ttl_secs > 0
-
-
-class TestSystemSync:
-    async def test_response_shape(self, registry_client):
-        sync = await registry_client.get_system_sync()
-        assert isinstance(sync, SystemSyncResponse)
-
-    async def test_health_check_shape(self, registry_client):
-        sync = await registry_client.get_system_sync()
-        assert isinstance(sync.health_check_running, bool)
-        assert isinstance(sync.health_check_enabled, bool)
-
-
 class TestSystemStats:
     async def test_empty_db_returns_zero_counts(self, registry_client):
         stats = await registry_client.get_system_stats()
         assert isinstance(stats, SystemStatsResponse)
-        assert stats.agent_count == 0
+        assert stats.publisher_count == 0
         assert stats.order_count == 0
 
-    async def test_agent_count_reflects_fixtures(
-        self, registry_client, agent_no_owner, maker_agent
+    async def test_publisher_count_reflects_fixtures(
+        self, registry_client, maker_publisher, taker_publisher
     ):
         stats = await registry_client.get_system_stats()
-        assert stats.agent_count == 2
+        assert stats.publisher_count == 2
 
     async def test_order_counts_by_status(
         self, registry_client, open_order, authenticated_open_order
@@ -85,12 +66,11 @@ class TestSystemStats:
         assert stats.orders_by_status.get("open") == 2
         assert stats.orders_by_status.get("closed", 0) == 0
 
-    async def test_closed_order_counted(self, registry_client, db_session, agent_no_owner):
+    async def test_closed_order_counted(self, registry_client, db_session, maker_publisher):
         from src.db.models import Listing, OrderStatusEnum
         db_session.add(Listing(
             listing_id="stats-closed-1",
-            agent_id=agent_no_owner.agent_id,
-            seller=agent_no_owner.token_uri,
+            publisher_id=maker_publisher.publisher_id,
             offer_resource={"gpu_model": "A100"},
             accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": "USDC"}}],
             max_duration_seconds=3600,
@@ -99,5 +79,3 @@ class TestSystemStats:
         db_session.commit()
         stats = await registry_client.get_system_stats()
         assert stats.orders_by_status.get("closed") == 1
-
-

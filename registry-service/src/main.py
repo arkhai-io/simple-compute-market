@@ -3,7 +3,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.api.routes import router
-from src.services.health_check import HealthCheckService
 from src.config import settings
 from src.db.database import init_db
 
@@ -14,21 +13,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize services
-health_check: HealthCheckService | None = None
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown.
 
-    Post-pluggable-identity (Phase 4): no chain-walk, no ERC-8004 contract
-    probes. Agent rows are created lazily on first signed publication via
-    ``api/utils.py::ensure_agent_for_eip191``; legacy rows backfilled by
-    migration 012 sit alongside.
+    Publishers and their identities are created lazily on first signed
+    publish via ``api/utils.py::ensure_publisher_for_identity``; there is
+    no background indexer or chain probe.
     """
-    global health_check
-
     logger.info("Starting registry indexer service...")
 
     init_db()
@@ -57,21 +50,11 @@ async def lifespan(app: FastAPI):
             else:
                 logger.info("[BOOTSTRAP] api_keys table not empty; bootstrap key ignored")
 
-    # Start health check service (opt-in)
-    health_check = HealthCheckService()
-    if settings.enable_health_checks:
-        await health_check.start(settings.health_check_interval)
-        logger.info("Health check service started")
-    else:
-        logger.info("Health check service disabled (agent-initiated heartbeats are the default)")
-
     logger.info(f"🚀 Registry indexer server ready on {settings.host}:{settings.port}")
 
     yield
 
     logger.info("Shutting down...")
-    if health_check:
-        await health_check.stop()
     logger.info("Shutdown complete")
 
 
