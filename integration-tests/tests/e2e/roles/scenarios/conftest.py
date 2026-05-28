@@ -53,7 +53,6 @@ class DealState:
     # Phase 3 — registry publication
     _registry_validate_passed: bool = False
     resume_confirmed: bool = False
-    _seller_agent_indexed: bool = False
     # Phase 5 — negotiation
     _evaluate_negotiate_passed: bool = False
     negotiation_id: Optional[str] = None
