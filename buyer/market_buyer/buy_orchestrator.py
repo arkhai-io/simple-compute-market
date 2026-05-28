@@ -623,7 +623,7 @@ def run_buy(
     attempts: list[dict[str, Any]] = []
 
     async def _negotiate(match: dict[str, Any]) -> NegotiationOutcome:
-        seller_url = match.get("seller") or match.get("order_maker") or match.get("seller_url") or ""
+        seller_url = match.get("storefront_url") or match.get("seller") or match.get("seller_url") or ""
         listing_id = match.get("listing_id") or match.get("order_id") or ""
         if not seller_url or not listing_id:
             attempts.append({"match": match, "error": "missing_seller_url_or_listing_id"})

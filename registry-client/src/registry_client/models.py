@@ -167,16 +167,16 @@ class TokenResource:
 class ListingRequest:
     """Listing fields for POST /listings.
 
-    ``seller`` is the publisher's storefront URL (recorded on the publisher).
-    The signing identity and signature are added by the client at publish
-    time, not here.
+    ``storefront_url`` is the publisher's storefront URL (recorded on the
+    publisher). The signing identity and signature are added by the client
+    at publish time, not here.
     """
 
     offer: dict[str, Any]
     accepted_escrows: list[dict[str, Any]]
     max_duration_seconds: int | None = None
     listing_id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex)
-    seller: str = ""
+    storefront_url: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -184,7 +184,7 @@ class ListingRequest:
             "offer_resource": self.offer,
             "accepted_escrows": self.accepted_escrows,
             "max_duration_seconds": self.max_duration_seconds,
-            "seller": self.seller,
+            "storefront_url": self.storefront_url,
         }
 
 
@@ -193,13 +193,14 @@ class ListingSummary:
     """Single listing record as returned by GET /listings or
     GET /listings/{id}. Captures common fields defensively.
 
-    ``seller`` is the publisher's storefront URL — where a buyer negotiates.
+    ``storefront_url`` is the publisher's storefront URL — where a buyer
+    negotiates.
     """
 
     id: str | int | None = None
     status: str | None = None
     publisher_id: int | None = None
-    seller: str | None = None
+    storefront_url: str | None = None
     offer: dict[str, Any] = field(default_factory=dict)
     accepted_escrows: list[dict[str, Any]] = field(default_factory=list)
     max_duration_seconds: int | None = None
@@ -209,7 +210,7 @@ class ListingSummary:
     @classmethod
     def from_dict(cls, d: dict) -> "ListingSummary":
         known = {
-            "listing_id", "publisher_id", "seller",
+            "listing_id", "publisher_id", "storefront_url",
             "offer_resource", "accepted_escrows", "max_duration_seconds",
             "created_at", "updated_at", "status",
             "id", "offer", "maxDurationSeconds", "createdAt",
@@ -221,7 +222,7 @@ class ListingSummary:
             id=listing_id,
             status=d.get("status"),
             publisher_id=d.get("publisher_id"),
-            seller=d.get("seller"),
+            storefront_url=d.get("storefront_url"),
             offer=offer,
             accepted_escrows=accepted_escrows,
             max_duration_seconds=d.get("max_duration_seconds") or d.get("maxDurationSeconds"),
@@ -317,12 +318,12 @@ class ValidatePublishRequest:
     offer_resource: dict
     accepted_escrows: list[dict]
     max_duration_seconds: int | None = None
-    seller: str = ""
+    storefront_url: str = ""
 
     def to_dict(self) -> dict:
         d: dict = {
             "listing_id": self.listing_id,
-            "seller": self.seller,
+            "storefront_url": self.storefront_url,
             "offer_resource": self.offer_resource,
             "accepted_escrows": self.accepted_escrows,
         }

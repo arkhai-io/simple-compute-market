@@ -23,7 +23,7 @@ from registry_client.models import (
 # every constructed wrapper gets fakes back from its __aenter__.
 def _summary(listing_id: str, **overrides: Any) -> ListingSummary:
     base = dict(
-        id=listing_id, status="open", publisher_id=1, seller="http://seller:8001",
+        id=listing_id, status="open", publisher_id=1, storefront_url="http://seller:8001",
         offer={}, accepted_escrows=[], max_duration_seconds=3600, created_at=None,
     )
     base.update(overrides)
@@ -116,8 +116,8 @@ class TestListListings:
         """Same listing_id appearing in two registries is one row in
         the merged output — first registry seen wins."""
         from market_storefront.utils.multi_registry_client import MultiRegistryClient
-        first = _summary("dup", seller="http://r1-seller")
-        second = _summary("dup", seller="http://r2-seller")
+        first = _summary("dup", storefront_url="http://r1-seller")
+        second = _summary("dup", storefront_url="http://r2-seller")
         _FakeRegistry.responses = {
             "http://r1": {"list_listings": ListingListResponse(listings=[first])},
             "http://r2": {"list_listings": ListingListResponse(listings=[second])},
@@ -125,7 +125,7 @@ class TestListListings:
         async with MultiRegistryClient(["http://r1", "http://r2"]) as rc:
             result = await rc.list_listings()
         assert len(result.listings) == 1
-        assert result.listings[0].seller == "http://r1-seller"
+        assert result.listings[0].storefront_url == "http://r1-seller"
 
     @pytest.mark.asyncio
     async def test_swallows_per_registry_failure(self):

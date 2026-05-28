@@ -198,14 +198,14 @@ def publisher_to_dict(publisher: Publisher) -> dict:
 def order_to_dict(listing: Listing) -> dict:
     """Convert a Listing ORM row to its wire-shape dict.
 
-    ``seller`` carries the publisher's storefront URL (where a buyer
-    negotiates), joined from the owning publisher.
+    ``storefront_url`` (where a buyer negotiates) is joined from the
+    owning publisher — the same value and key the publisher entity uses.
     """
     publisher = listing.publisher
     return {
         "listing_id": listing.listing_id,
         "publisher_id": listing.publisher_id,
-        "seller": publisher.storefront_url if publisher else None,
+        "storefront_url": publisher.storefront_url if publisher else None,
         "offer_resource": listing.offer_resource or {},
         "accepted_escrows": listing.accepted_escrows or [],
         "max_duration_seconds": listing.max_duration_seconds,

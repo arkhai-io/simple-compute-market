@@ -484,7 +484,7 @@ class TestStage03a_ValidatePublish:
         from registry_client import ValidatePublishRequest
         req = ValidatePublishRequest(
             listing_id=deal_state.seller_listing_id,
-            seller="http://bob-storefront:8001/",
+            storefront_url="http://bob-storefront:8001/",
             offer_resource=OFFER_RESOURCE,
             accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,

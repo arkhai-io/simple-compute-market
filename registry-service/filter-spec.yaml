@@ -7,19 +7,20 @@
 # Bump `version` on backwards-incompatible changes.  Add filters
 # without bumping (etag changes; clients re-fetch).
 
-version: 3
+version: 4
 
 listing_shape:
   $schema: "https://json-schema.org/draft/2020-12/schema"
   type: object
   additionalProperties: true
-  # v2: seller is now required (storefront's publish path populates it).
-  # gpu_model is gated to a vetted NVIDIA vocabulary; region stays open
-  # because city/datacenter naming has no canonical list.
-  required: [listing_id, offer_resource, accepted_escrows, seller]
+  # v4: the publisher's storefront URL is `storefront_url` (was `seller`),
+  # matching the GET /publishers entity. gpu_model is gated to a vetted
+  # NVIDIA vocabulary; region stays open because city/datacenter naming
+  # has no canonical list.
+  required: [listing_id, offer_resource, accepted_escrows, storefront_url]
   properties:
     listing_id: {type: string, minLength: 1}
-    seller: {type: string, minLength: 1}
+    storefront_url: {type: string, minLength: 1}
     offer_resource:
       type: object
       required: [gpu_model, region]

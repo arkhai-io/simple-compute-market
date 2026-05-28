@@ -24,7 +24,7 @@ def _client() -> httpx.AsyncClient:
 def _valid_payload(**overrides: object) -> dict:
     base: dict = {
         "listing_id": "test-listing-1",
-        "seller": "http://seller.example/",
+        "storefront_url": "http://seller.example/",
         "offer_resource": {"gpu_model": "A100", "region": "us-west"},
         "accepted_escrows": [
             {

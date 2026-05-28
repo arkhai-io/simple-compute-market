@@ -55,7 +55,7 @@ def _publish_body(listing_id: str, **overrides) -> dict:
         "listing_id": listing_id,
         "scheme": "eip191",
         "identifier": ADDRESS_LOWER,
-        "seller": "http://my-storefront/",
+        "storefront_url": "http://my-storefront/",
         "offer_resource": {"gpu_model": "H200", "region": "us"},
         "accepted_escrows": [{
             "chain_name": "anvil",

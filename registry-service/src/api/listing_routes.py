@@ -58,7 +58,7 @@ async def publish_listing(
     ``identifier`` = the signing wallet), the listing fields, and an EIP-191
     ``signature`` over ``create_listing:<identifier>:<timestamp>``. The
     signature is the trust anchor: a publisher row is created lazily after it
-    verifies. ``seller`` is the publisher's storefront URL.
+    verifies. ``storefront_url`` is the publisher's storefront URL.
     """
     signature = body.pop("signature", None)
     timestamp = body.pop("timestamp", None)
@@ -84,7 +84,7 @@ async def publish_listing(
         raise HTTPException(status_code=400, detail="listing_id is required")
 
     publisher = ensure_publisher_for_identity(
-        db, identity, storefront_url=body.get("seller"),
+        db, identity, storefront_url=body.get("storefront_url"),
     )
 
     existing = db.query(Listing).filter(Listing.listing_id == listing_id).first()

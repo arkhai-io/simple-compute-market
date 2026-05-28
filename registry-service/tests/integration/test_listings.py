@@ -33,7 +33,7 @@ def _listing_request(listing_id: str | None = None, **offer_extras) -> ListingRe
             "rates": [{"field": "amount", "per": "hour", "value": "100"}],
         }],
         max_duration_seconds=3600,
-        seller="http://localhost:8001/",
+        storefront_url="http://localhost:8001/",
         **kwargs,
     )
 
@@ -59,7 +59,7 @@ class TestListOrders:
         order = next(o for o in result.listings if str(o.id) == open_order.listing_id)
         assert order.status == "open"
         assert order.publisher_id == open_order.publisher_id
-        assert order.seller == "http://localhost:8001/"
+        assert order.storefront_url == "http://localhost:8001/"
 
 
 class TestGetOrder:

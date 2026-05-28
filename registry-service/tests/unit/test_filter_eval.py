@@ -51,7 +51,7 @@ def _listing(**offer_extras) -> dict:
     }
     return {
         "listing_id": "L1",
-        "seller": "",
+        "storefront_url": "",
         "offer_resource": offer,
         "accepted_escrows": [
             {
