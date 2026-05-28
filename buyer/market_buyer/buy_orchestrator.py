@@ -821,7 +821,7 @@ def _settle_one(
     structural, not just visual. Inputs are the policy's
     ``(match, outcome)`` plus the orchestrator's settlement deps.
     """
-    seller_url = match.get("seller") or match.get("order_maker") or match.get("seller_url") or ""
+    seller_url = match.get("storefront_url") or match.get("seller") or match.get("seller_url") or ""
     listing_id = match.get("listing_id") or match.get("order_id") or ""
 
     try:

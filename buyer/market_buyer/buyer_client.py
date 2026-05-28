@@ -343,6 +343,7 @@ def negotiate_with_seller(
             "chain_name": escrow_proposal.chain_name,
             "escrow_address": escrow_proposal.escrow_address,
             "fields": pinned_fields,
+            "literal_fields": dict(escrow_proposal.literal_fields or escrow_proposal.fields or {}),
             "expiration_unix": escrow_proposal.expiration_unix,
         }
 

@@ -605,13 +605,6 @@ def register(app: typer.Typer) -> None:
             toml_path="aggregation.policy",
         ) or None
 
-        # Counter policy is config-only — no CLI flag yet. Strict_echo
-        # default rejects any seller modification to a buyer-pinned field;
-        # operators who want to accept counters set the TOML key.
-        counter_policy = resolve_config_value(
-            toml_path="counter_policy.policy",
-        ) or None
-
         config = BuyConfig(
             registry_urls=reg_urls,
             buyer_address=addr,
@@ -619,7 +612,6 @@ def register(app: typer.Typer) -> None:
             discovery_timeout=deadline,
             indexer_auth=reg_auth,
             aggregation_policy=aggregation_policy,
-            counter_policy=counter_policy,
         )
         constraints = BuyConstraints(
             max_price=max_price,
@@ -735,12 +727,12 @@ def register(app: typer.Typer) -> None:
         # legacy single-terminal key that synthesizes the default chain.
         # Without either, the buyer falls through to the default terminal
         # (RL needs torch — not installed in the lean buyer wheel).
-        chain = None
+        negotiation_chain = None
         policies = resolve_config_value(toml_path="negotiation.policies")
         policy_mode = resolve_config_value(toml_path="negotiation.policy_mode")
         if policies or policy_mode:
             from market_buyer.buyer_client import _load_buyer_chain
-            chain = _load_buyer_chain(policies=policies, policy_mode=policy_mode)
+            negotiation_chain = _load_buyer_chain(policies=policies, policy_mode=policy_mode)
 
         try:
             result = run_buy(
@@ -757,7 +749,7 @@ def register(app: typer.Typer) -> None:
                 settlement_total_timeout=settlement_timeout,
                 on_event=_observe,
                 confirm_settlement=confirm_settlement_cb,
-                chain=chain,
+                chain=negotiation_chain,
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))
