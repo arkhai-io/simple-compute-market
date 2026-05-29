@@ -10,6 +10,8 @@ client typed surface, which still carries the legacy parameter list
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -76,6 +78,48 @@ async def test_gpu_model_filter_narrows_results(_raw_client, db_session, maker_p
     ids = [item["listing_id"] for item in body["items"]]
     assert "a100-listing" in ids
     assert "h200-listing" not in ids
+
+
+@pytest.mark.asyncio
+async def test_filters_match_double_encoded_offer_resource(
+    _raw_client, db_session, maker_publisher
+):
+    """A listing whose offer_resource/accepted_escrows were stored as JSON
+    *strings* (a publisher that double-encoded them) is still filterable and
+    comes back decoded on the wire.
+
+    Regression for the discovery break: the storefront forwarded its
+    stringified offer_resource SQLite column into the registry's JSON
+    column, so the JSONPath filter ($.offer_resource.gpu_model) resolved to
+    nothing and on_missing:fail dropped every listing — a buyer's
+    ``market buy --gpu-model`` matched zero sellers. order_to_dict now
+    decodes on read so discovery (and the response shape) stay correct.
+    """
+    row = Listing(
+        listing_id="stringified-offer",
+        publisher_id=maker_publisher.publisher_id,
+        offer_resource=json.dumps({"gpu_model": "A100", "region": "us-west"}),
+        accepted_escrows=json.dumps([{
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "literal_fields": {"token": "0x" + "ab" * 20},
+        }]),
+        max_duration_seconds=3600,
+        status=OrderStatusEnum.open,
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    async with _raw_client as c:
+        resp = await c.get("/listings", params={"gpu_model": "A100"})
+    assert resp.status_code == 200
+    items = {item["listing_id"]: item for item in resp.json()["items"]}
+    assert "stringified-offer" in items, (
+        "double-encoded offer_resource should still match the gpu_model filter"
+    )
+    assert isinstance(items["stringified-offer"]["offer_resource"], dict), (
+        "offer_resource should be decoded to an object on the wire"
+    )
 
 
 @pytest.mark.asyncio

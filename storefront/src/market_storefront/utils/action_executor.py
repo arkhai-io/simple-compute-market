@@ -377,6 +377,24 @@ def _extract_initial_price_from_order(order: Listing | dict) -> int | float:
 
 
 
+def _ensure_json_obj(value: Any, default: Any) -> Any:
+    """Coerce a maybe-stringified JSON blob into a Python object.
+
+    offer_resource / accepted_escrows live in SQLite TEXT columns; some
+    load paths hand them back already parsed, others as the raw JSON
+    string. The registry stores them in JSON columns and runs JSONPath
+    discovery filters over them, so forwarding a string round-trips
+    double-encoded and silently breaks every offer_resource.* / token
+    filter — a buyer's ``market buy --gpu-model`` then matches nothing.
+    """
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (ValueError, TypeError):
+            return default
+    return default if value is None else value
+
+
 async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
     """Publish a new order to the registry so discoverers can find it.
 
@@ -398,13 +416,14 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
     if not settings.enable_registry_discovery:
         return {"status": "disabled", "listing_id": order_id}
 
-    accepted_escrows = order_dict.get("accepted_escrows") or []
+    offer_resource = _ensure_json_obj(order_dict.get("offer_resource"), {})
+    accepted_escrows = _ensure_json_obj(order_dict.get("accepted_escrows"), [])
 
     try:
         async with _make_registry_client() as registry_client:
             order_request = ListingRequest(
                 listing_id=order_id,
-                offer=order_dict.get("offer_resource", {}),
+                offer=offer_resource,
                 accepted_escrows=accepted_escrows,
                 max_duration_seconds=order_dict.get("max_duration_seconds"),
                 storefront_url=order_dict.get("seller") or BASE_URL_OVERRIDE,
@@ -421,7 +440,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
                 "discovery", "order_published",
                 order_id=order_id,
                 agent_url=BASE_URL_OVERRIDE,
-                offer=order_dict.get("offer_resource"),
+                offer=offer_resource,
                 accepted_escrows=accepted_escrows,
                 max_duration_seconds=order_dict.get("max_duration_seconds"),
             )
