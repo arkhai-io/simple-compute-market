@@ -122,6 +122,19 @@ def _require_setting(value: Any, name: str) -> str:
     return str(value)
 
 
+def _provisioning_agent_id() -> str:
+    """Build the ERC-8004 agent identity expected by provisioning auth."""
+    token_id = str(getattr(settings.SELLER, "AGENT_ID", None) or "").strip()
+    chain_id = str(getattr(settings.RPC, "CHAIN_ID", None) or "").strip()
+    identity = str(getattr(settings.REGISTRY, "IDENTITY_ADDRESS", None) or "").strip().lower()
+    if not token_id or not chain_id or not identity:
+        pytest.skip(
+            "SELLER.AGENT_ID, RPC.CHAIN_ID, and REGISTRY.IDENTITY_ADDRESS are "
+            "required for provisioning X-Agent-ID"
+        )
+    return f"eip155:{chain_id}:{identity}:{token_id}"
+
+
 # ---------------------------------------------------------------------------
 # Module-scoped fixtures
 # ---------------------------------------------------------------------------
@@ -180,8 +193,7 @@ def provisioning_client():
     """Canonical SyncProvisioningClient.
 
     Provisioning is an internal dependency of the storefront, gated by the
-    shared admin key (presented as X-Admin-Key). The seller's admin_api_key
-    is that shared secret, so reads use it directly.
+    shared admin key and the seller's ERC-8004 agent identity.
     """
     from client.provisioning_client import SyncProvisioningClient
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
@@ -189,6 +201,7 @@ def provisioning_client():
     client = SyncProvisioningClient(
         base_url=url,
         admin_key=admin_key,
+        agent_id=_provisioning_agent_id(),
     )
     yield client
     client.close()
@@ -207,7 +220,7 @@ def provisioning_test_client():
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _ensure_provisioning_host_registered():
+def _ensure_provisioning_host_registered(provisioning_client):
     """Idempotently register the e2e ``kvm1`` host in the provisioning service.
 
     The scenario's seeded resource row declares ``attribute.vm_host=kvm1``,
@@ -218,66 +231,38 @@ def _ensure_provisioning_host_registered():
     or a bind-mounted IaC inventory. Inserting the row here keeps the
     e2e scenario hermetic and idempotent across re-runs.
 
-    The credentials are stub values (path-type, fake path) — mock
+    The credentials are stub values (path-type, fake path) - mock
     provisioning never SSHes into the host, so they never get used.
     Real-host integration tests use a real key path; this fixture is
     only relevant when ``ACTIVE_PROFILES=mock``.
     """
-    import urllib.error
-    import urllib.request
-    import json as _json
+    from client.provisioning_client import ProvisioningError
+    from models.host_model import HostCreate
 
-    url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
-    base = url.rstrip("/")
     host_name = "kvm1"
 
-    # Provisioning gates non-health routes on the shared admin key (X-Admin-Key);
-    # the seller's admin_api_key is that shared secret.
-    admin_key = str(settings.SELLER.ADMIN_API_KEY or "")
-    auth_headers = {"X-Admin-Key": admin_key} if admin_key else {}
-
-    # Probe existence — provisioning's GET /hosts/{name} returns 404 when absent.
     try:
-        probe = urllib.request.Request(
-            f"{base}/api/v1/hosts/{host_name}", headers=auth_headers,
-        )
-        with urllib.request.urlopen(probe, timeout=5) as resp:
-            if resp.status == 200:
-                log.info("[conftest] Provisioning host %r already registered", host_name)
-                return
-    except urllib.error.HTTPError as exc:
-        if exc.code != 404:
-            pytest.skip(
-                f"Could not probe provisioning host {host_name!r}: "
-                f"{exc.code} {exc.reason}"
-            )
-    except urllib.error.URLError as exc:
-        pytest.skip(f"Could not reach provisioning service at {base}: {exc}")
+        provisioning_client.get_host(host_name)
+    except ProvisioningError as exc:
+        if exc.status_code != 404:
+            pytest.skip(f"Could not probe provisioning host {host_name!r}: {exc}")
+    else:
+        log.info("[conftest] Provisioning host %r already registered", host_name)
+        return
 
-    body = {
-        "name": host_name,
-        "kvm_host": "127.0.0.1",
-        "ssh_user": "stub",
-        "ssh_key_type": "path",
-        "ssh_key_value": "/tmp/stub-e2e-key",
-        "gpu_count": 1,
-        "enabled": True,
-    }
-    req = urllib.request.Request(
-        f"{base}/api/v1/hosts/",
-        data=_json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json", **auth_headers},
-        method="POST",
+    body = HostCreate(
+        name=host_name,
+        kvm_host="127.0.0.1",
+        ssh_user="stub",
+        ssh_key_type="path",
+        ssh_key_value="/tmp/stub-e2e-key",
+        gpu_count=1,
+        enabled=True,
     )
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            resp.read()
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")
-        pytest.skip(
-            f"Could not register provisioning host {host_name!r}: "
-            f"{exc.code} {exc.reason} — {detail}"
-        )
+        provisioning_client.register_host(body)
+    except ProvisioningError as exc:
+        pytest.skip(f"Could not register provisioning host {host_name!r}: {exc}")
     log.info("[conftest] Registered provisioning host %r", host_name)
 
 
