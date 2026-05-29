@@ -55,6 +55,9 @@ default_max_retries = 3
 retry_backoff_initial_seconds = 60
 retry_backoff_multiplier = 2.0
 retry_backoff_max_seconds = 3600
+# How often the retry scheduler sweeps for queued jobs whose backoff delay
+# has elapsed and re-enqueues them. Keep well below retry_backoff_initial_seconds.
+retry_scheduler_poll_interval_seconds = 10
 
 # Errors that bypass retry logic
 non_retryable_errors = [

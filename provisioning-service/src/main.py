@@ -116,6 +116,20 @@ async def lifespan(_: FastAPI):
         "Job processing loop started (max_concurrent=%d)", settings.max_concurrent_jobs
     )
 
+    # Retry scheduler — re-enqueues queued jobs whose backoff delay has
+    # elapsed (the failure path stamps next_retry_at but does not re-enqueue,
+    # since the queue is in-process/transient).
+    retry_poll_interval = float(
+        getattr(settings, "retry_scheduler_poll_interval_seconds", 10)
+    )
+    retry_task = asyncio.create_task(
+        _container_module.resolved_job_service.run_retry_scheduler(
+            job_queue, retry_poll_interval
+        ),
+        name="retry-scheduler",
+    )
+    logger.info("Retry scheduler started (interval=%ds)", int(retry_poll_interval))
+
     # Lease watchdog — only started when enabled in config (default: true).
     watchdog_task = None
     watchdog_enabled = bool(getattr(settings, "lease_watchdog_enabled", True))
@@ -138,6 +152,12 @@ async def lifespan(_: FastAPI):
     processing_task.cancel()
     try:
         await processing_task
+    except asyncio.CancelledError:
+        pass
+
+    retry_task.cancel()
+    try:
+        await retry_task
     except asyncio.CancelledError:
         pass
 
