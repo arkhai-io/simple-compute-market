@@ -42,7 +42,7 @@ Both clients cover:
 
 - `GET  /.well-known/erc-8004-registration.json`  → `get_registration`
 - `POST /listings/create`                            → `create_listing`
-- `POST /listings/close`                             → `close_listing`
+- `POST /api/v1/listings/{listing_id}/close`         → `close_listing`
 - `POST /listings/refund`                            → `refund_listing`
 - `POST /listings/claim`                             → `claim_listing`
 - `POST /listings/discover`                          → `discover_listings`
@@ -75,10 +75,11 @@ bump `storefront-client` version and update `_build_auth_headers` in
 
 ### 2. Endpoint signatures
 
-`/listings/{create,close,refund,claim,discover}`, `/alerts/resource`
-request and response shapes. If any field is added, removed, or
-renamed, bump the version and update the corresponding method in
-`client.py`.
+`/api/v1/listings/create`, `/api/v1/listings/{listing_id}/close`,
+`/api/v1/listings/{listing_id}/refund`, `/listings/{claim,discover}`,
+and `/alerts/resource` request and response shapes. If any field is
+added, removed, or renamed, bump the version and update the
+corresponding method in `client.py`.
 
 ### Version bump checklist
 

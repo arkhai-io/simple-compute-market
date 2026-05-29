@@ -47,17 +47,18 @@ class StorefrontListingCreateResponse:
 
 
 # ---------------------------------------------------------------------------
-# Listing close response  (POST /listings/close)
+# Listing close response  (POST /api/v1/listings/{listing_id}/close)
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class StorefrontListingCloseResponse:
-    """Response from POST /listings/close.
+    """Response from POST /api/v1/listings/{listing_id}/close.
 
     status values: ``"closed"``
     """
 
+    status: str | None = None
     listing_id: str | None = None
     root_agent_response: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
