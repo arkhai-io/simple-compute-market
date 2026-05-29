@@ -135,11 +135,12 @@ docker network rm anvil 2>/dev/null || true
 ## 3. Build Artifacts And Images
 
 ```bash
-make build
+make build-dev
 ```
 
 Expected build products include `.dist/`, `shared-env/.env`,
-`test-env/state/state.json`, and Docker images for the local stack.
+`test-env/state/state.json`, runtime Docker images, and dev/test Docker images
+for the local stack.
 
 ## 4. Code-Level Tests
 
@@ -754,8 +755,9 @@ Build and push the runtime artifacts after Artifact Registry exists:
 ```bash
 cd "$APP_REPO"
 
-make build
+make build-dev
 make push-runtime-artifacts AR_PROJECT="$GCP_PROJECT"
+make push-dev-images AR_PROJECT="$GCP_PROJECT"
 ```
 
 ## 20. Kubernetes App Bootstrap In Mock Mode

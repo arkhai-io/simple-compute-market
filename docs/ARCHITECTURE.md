@@ -1788,6 +1788,7 @@ repo. The registries and their IAM are managed there; this repo only pushes.
 | Artifact | AR format | Repo key | Tag at push |
 |---|---|---|---|
 | Docker images (registry, storefront, provisioning) | DOCKER | `docker` | git short SHA |
+| Docker dev images (test-env, integration-tests) | DOCKER | `docker` | git short SHA |
 | Helm chart (`arkhai-node-operator`) | DOCKER (OCI) | `helm` | git short SHA |
 | `arkhai-storefront-client` wheel | PYTHON | `python` | wheel version |
 | `arkhai-registry-client` wheel | PYTHON | `python` | wheel version |
@@ -1807,6 +1808,11 @@ make push-runtime-artifacts [AR_PROJECT=compute-market-1-dev]
   ├── push-helm     # helm push (OCI)
   ├── push-wheels   # gcloud existence check + uv publish for missing wheels
   └── push-cli      # gcloud artifacts generic upload
+
+make build-dev
+make push-dev-images [AR_PROJECT=compute-market-1-dev]
+  ├── arkhai:test-env
+  └── arkhai:integration-tests
 ```
 
 **Image naming convention:** All service images share the image name `arkhai`

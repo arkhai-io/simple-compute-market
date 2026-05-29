@@ -2,7 +2,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-dev build-seller dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-registry-service push-runtime-artifacts push-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: build build-dev build-seller dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-registry-service push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -228,6 +228,7 @@ PROVISIONING_VERSION      := $(shell sed -n 's/^version = "\(.*\)"/\1/p' provisi
 # Prerequisites:
 #   make dist              — wheels must exist in .dist/
 #   make build             — Docker images must be built locally
+#   make build-dev         — additionally required before push-dev-images
 #   make build-buyer       — buyer/dist/market binary must exist
 #
 # Targets can be run individually or all at once via push-runtime-artifacts.
@@ -290,6 +291,8 @@ push-images: _require-ar-project
 	$(call push_image,registry,registry)
 	$(call push_image,storefront,storefront)
 	$(call push_image,provisioning,provisioning)
+
+push-dev-images: _require-ar-project
 	$(call push_image,test-env,test-env)
 	$(call push_image,integration-tests,integration-tests)
 
