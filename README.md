@@ -1,12 +1,12 @@
 # Simple Compute Market
 
-A reference implementation of an open compute market: buyers find sellers through a listings registry, negotiate prices peer-to-peer over signed HTTP, and settle on-chain with escrow-backed obligations via [Alkahest](https://github.com/arkhai-io/alkahest). Buyers run a CLI, sellers run a storefront server, the registry is a listings index, and provisioning is the seller's own service.
+Simple Compute Market is a reference implementation of an open compute market. Buyers find sellers through a listings registry, negotiate prices peer-to-peer over signed HTTP, and settle on-chain with escrow-backed obligations via [Alkahest](https://github.com/arkhai-io/alkahest). Buyers run a CLI; sellers run a storefront server; the registry is only a listings index; provisioning stays with the seller's own service.
 
-Compute is the concrete domain. The architectural pattern — userland buyer, storefront, and registry roles with peer-to-peer negotiation and escrowed settlement — is intended to be portable; another asset class substitutes the resource schemas, escrow contracts, and execution modules.
+Compute is the concrete domain, but the goal is the pattern: userland buyer, storefront, and registry roles with peer-to-peer negotiation and escrowed settlement. Another asset class should be able to reuse that shape by substituting its own resource schemas, escrow contracts, and execution modules.
 
 ## Design notes
 
-[Compositional Game Theory (CGT)](https://github.com/arkhai-io/cgt) frames multi-agent interactions as compositions of atomic games — indivisible agent decisions with clear input/output contracts — combined into larger sequential and parallel structures. The protocol exposes its primitives as discrete affordances (signed HTTP endpoints, CLI commands, registered middlewares), so behaviors like multi-agent coordination, participants that buy and sell dynamically, and meta-strategies that adapt across markets can be built by composing those primitives externally. The buyer's cross-listing aggregation policy and both sides' per-round negotiation policy chains are instances of this shape.
+Simple Compute Market is inspired by [Compositional Game Theory (CGT)](https://github.com/arkhai-io/cgt), which frames multi-agent interactions as compositions of atomic games: indivisible agent decisions with clear input/output contracts, combined into larger sequential and parallel structures. The protocol exposes its primitives as signed HTTP endpoints, CLI commands, and registered middleware, so behaviors like multi-agent coordination, participants that buy and sell dynamically, and meta-strategies that adapt across markets can be built by composing those primitives externally. The buyer-side aggregation hook is one example: it receives candidate listings plus a per-listing negotiation callback, then decides whether to run those negotiations sequentially, in parallel, or through a custom scoring rule. Both sides' per-round negotiation policy chains follow the same pattern.
 
 ## Repository layout
 
