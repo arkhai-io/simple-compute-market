@@ -74,6 +74,38 @@ test-container-module:
 		.venv/bin/pytest -m $(MODULE) $(PYTEST_ARGS)
 
 # -----------------------------------------------------------------------
+# Tests — buyer machine (in-network, realistic two-machine topology)
+# -----------------------------------------------------------------------
+# Runs the buyer-side e2e from a one-shot container attached to the seller's
+# compose network, so discovery resolves the registry-advertised seller URL
+# (bob-storefront:8001) and the `market` subprocess reaches it directly — no
+# host port-forward or --seller override. Uses `docker run` (not `compose
+# run`) so it works under daemonless podman, where the docker-compose
+# provider can't reach a daemon.
+#
+# Prereqs: the stack is up (`docker compose up -d`) and the integration-tests
+# image is rebuilt with the buyer wheel (`make build` at the repo root, then
+# `make -C integration-tests build`).
+#
+# NETWORK defaults to the compose project's default network
+# (<repo-dir>_default). Override if your project name differs.
+NETWORK ?= simple-market-service_default
+BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
+
+test-buyer-machine:
+	docker run --rm \
+		--network=$(NETWORK) \
+		-e ACTIVE_PROFILES=docker \
+		-e CONFIG_DIRECTORY=/app/config \
+		-v $(CURDIR)/tests:/app/tests:ro \
+		-v $(CURDIR)/src:/app/src:ro \
+		-v $(CURDIR)/config:/app/config:ro \
+		-v $(CURDIR)/conftest.py:/app/conftest.py:ro \
+		-v $(CURDIR)/pyproject.toml:/app/pyproject.toml:ro \
+		$(IMAGE_NAME):$(IMAGE_TAG) \
+		.venv/bin/pytest -m "$(BUYER_MODULE)" $(PYTEST_ARGS)
+
+# -----------------------------------------------------------------------
 # Tests — CI (HTML report, no colour, exit-on-first-fail)
 # -----------------------------------------------------------------------
 

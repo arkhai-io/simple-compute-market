@@ -23,8 +23,19 @@ COPY integration-tests/src ./src
 COPY integration-tests/tests ./tests
 COPY integration-tests/pyproject.toml ./
 
+# --refresh-package the monorepo workspace wheels: they are rebuilt into
+# .dist/ without a version bump, so a cached same-version wheel in the uv
+# cache mount would otherwise shadow fresh content (e.g. a market-policy
+# 0.1.0 missing a newly-added module). Third-party deps still hit the cache.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --find-links /dist
+    uv sync --find-links /dist \
+        --refresh-package market-buyer \
+        --refresh-package market-policy \
+        --refresh-package market-service \
+        --refresh-package market-storefront \
+        --refresh-package provisioning-service \
+        --refresh-package arkhai-storefront-client \
+        --refresh-package arkhai-registry-client
 
 # Stage 2: Lean runtime image
 FROM python:${PYTHON_VERSION}-slim AS runtime

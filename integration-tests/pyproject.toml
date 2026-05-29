@@ -27,6 +27,13 @@ dependencies = [
     "market-service>=0.1.0",
 	"market-storefront>=0.1.0",
     "provisioning-service>=0.4.0",
+    # The buyer's `market` CLI, run as a subprocess by the buyer-machine
+    # e2e (tests/e2e/roles/buyer_cli.py). Installed so the binary is on
+    # PATH inside arkhai:integration-tests when the suite runs in-network.
+    # market-policy is the buyer's sibling negotiation-strategy dep,
+    # resolved from .dist alongside market-service.
+    "market-buyer>=0.1.0",
+    "market-policy>=0.1.0",
 ]
 
 [tool.uv]
@@ -67,6 +74,7 @@ markers = [
     "provisioning_write: Provisioning smoke tests that exercise write-path APIs",
     "e2e_deal: Full buyer-seller deal lifecycle e2e test (synthetic-buyer + force-accept, follows the dry-run + advance stage pattern)",
     "e2e_deal_buyer_cli: Full deal driven by the buyer's `market` CLI subprocess against the live storefront (two-machine production interaction)",
+    "e2e_buy: One-shot `market buy` (discovery-driven) lifecycle from the buyer machine, against the live storefront",
     "multi_registry: Multi-registry publish + discovery e2e scenario (stops at negotiation start)",
     "smoke: Quick smoke tests",
     "slow: Tests that may take longer due to RPC latency",

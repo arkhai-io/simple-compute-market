@@ -122,19 +122,6 @@ def _require_setting(value: Any, name: str) -> str:
     return str(value)
 
 
-def _provisioning_agent_id() -> str:
-    """Build the ERC-8004 agent identity expected by provisioning auth."""
-    token_id = str(getattr(settings.SELLER, "AGENT_ID", None) or "").strip()
-    chain_id = str(getattr(settings.RPC, "CHAIN_ID", None) or "").strip()
-    identity = str(getattr(settings.REGISTRY, "IDENTITY_ADDRESS", None) or "").strip().lower()
-    if not token_id or not chain_id or not identity:
-        pytest.skip(
-            "SELLER.AGENT_ID, RPC.CHAIN_ID, and REGISTRY.IDENTITY_ADDRESS are "
-            "required for provisioning X-Agent-ID"
-        )
-    return f"eip155:{chain_id}:{identity}:{token_id}"
-
-
 # ---------------------------------------------------------------------------
 # Module-scoped fixtures
 # ---------------------------------------------------------------------------
@@ -192,8 +179,9 @@ def registry_client():
 def provisioning_client():
     """Canonical SyncProvisioningClient.
 
-    Provisioning is an internal dependency of the storefront, gated by the
-    shared admin key and the seller's ERC-8004 agent identity.
+    Provisioning is an internal dependency of the storefront. Since the
+    ERC-8004 removal it gates every non-health route on a single shared
+    admin key (X-Admin-Key); there is no per-agent identity anymore.
     """
     from client.provisioning_client import SyncProvisioningClient
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
@@ -201,7 +189,6 @@ def provisioning_client():
     client = SyncProvisioningClient(
         base_url=url,
         admin_key=admin_key,
-        agent_id=_provisioning_agent_id(),
     )
     yield client
     client.close()
