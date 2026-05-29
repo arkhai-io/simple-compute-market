@@ -287,6 +287,13 @@ def register(app: typer.Typer) -> None:
                  "without a TTY — defaults are accepted automatically. "
                  "Set this for scripts, CI, or non-interactive runs.",
         ),
+        quiet: bool = typer.Option(
+            False, "--quiet", "-q",
+            help="Condensed output: drop the per-step progress panels and "
+                 "print one concise summary (deal, escrow, VM, connection) "
+                 "when the buy settles. Provisioning shows a simple progress "
+                 "line. Good for scripts and clean terminals.",
+        ),
         duration_hours: Optional[float] = typer.Option(
             None, "--duration-hours", "-t",
             help="Lease duration the buyer wants (hours, fractional ok). "
@@ -338,8 +345,10 @@ def register(app: typer.Typer) -> None:
         ),
         token_contract: Optional[str] = typer.Option(
             None, "--token-contract",
-            help="ERC-20 token contract address used for payment. "
-                 "Default: resolve 'MOCK' via the token registry.",
+            help="Optional filter: only consider listings whose accepted "
+                 "escrow uses this ERC-20. Omit to accept whatever token the "
+                 "seller's listing offers on your chain (the token, escrow "
+                 "contract, and chain all come from the chosen listing).",
         ),
         token_decimals: Optional[int] = typer.Option(
             None, "--token-decimals",
@@ -675,7 +684,8 @@ def register(app: typer.Typer) -> None:
         header.add_row("Max matches", str(max_matches))
         if active_filters:
             header.add_row("Filters", ", ".join(f"{k}={v}" for k, v in active_filters.items()))
-        console.print(Panel(header, title="market buy-sync", border_style="cyan"))
+        if not quiet:
+            console.print(Panel(header, title="market buy-sync", border_style="cyan"))
 
         def _observe(stage: str, body: dict) -> None:
             # Append a structured event to the run log so post-mortem
@@ -684,6 +694,15 @@ def register(app: typer.Typer) -> None:
             # listing_id (and negotiation_id once round 0 returns) so
             # consumers can group per-negotiation.
             run_log.event(stage, **body)
+
+            # Quiet mode: drop the per-step lines; show only a single
+            # "provisioning …" progress line built from the poll stream.
+            if quiet:
+                if stage == "settlement_submitted":
+                    console.print("provisioning ", end="")
+                elif stage == "settlement_poll":
+                    console.print(".", end="")
+                return
 
             # Plus a one-line console summary for the human.
             if stage == "discover":
@@ -765,6 +784,32 @@ def register(app: typer.Typer) -> None:
             fulfillment_uid=result.fulfillment_uid,
             reason=result.reason,
         )
+
+        # Quiet mode: one concise block instead of the full panel. The public
+        # host comes from the seller_url (the connection_details ssh_command
+        # carries the seller's internal host, not its public address).
+        if quiet:
+            from urllib.parse import urlparse
+            console.print()  # end the "provisioning …" line
+            cd: dict = {}
+            if result.connection_details:
+                try:
+                    cd = json.loads(result.connection_details)
+                except (ValueError, TypeError):
+                    cd = {}
+            host = urlparse(result.seller_url or "").hostname or "?"
+            port = (cd.get("ansible_result") or {}).get("external_ssh_port") or "?"
+            user = cd.get("tenant_user") or "?"
+            console.print(f"status   {result.status}")
+            if result.escrow_uid:
+                console.print(f"escrow   {result.escrow_uid}")
+            if cd.get("vm_name"):
+                console.print(f"vm       {cd['vm_name']} ({cd.get('vm_state', '?')})")
+            if user != "?" and port != "?":
+                console.print(f"connect  ssh -p {port} {user}@{host}")
+            if result.status != "ready":
+                raise typer.Exit(4)
+            return
 
         # Render the final outcome.
         tbl = Table.grid(padding=(0, 2))
