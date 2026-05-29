@@ -433,6 +433,33 @@ async def test_background_task_writes_failed_on_exception(client):
 
 
 @pytest.mark.asyncio
+async def test_background_task_reopens_listing_on_failure(client):
+    """A failed deal must return its listing to 'open' so it can be
+    re-negotiated — otherwise it stays 'accepted' and refuses all buyers."""
+    await _seed_seller_order(client, listing_id="seller-ord-1")
+    await client.update_listing(listing_id="seller-ord-1", status="accepted")
+    await _seed_escrow_provisioning(client)
+    mock_fulfill = AsyncMock(side_effect=RuntimeError("vm host unreachable"))
+
+    with patch(
+        "market_storefront.utils.action_executor.fulfill_compute_obligation",
+        new=mock_fulfill,
+    ):
+        await _run_settlement_job_bg(
+            escrow_uid="0xescrow",
+            provision=ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
+            listing_id="seller-ord-1",
+            order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
+            sqlite_client=client,
+            alkahest_client=MagicMock(),
+        )
+
+    assert (await client.load_escrow(escrow_uid="0xescrow"))["status"] == "failed"
+    listing = await client.load_listing(listing_id="seller-ord-1")
+    assert listing["status"] == "open"
+
+
+@pytest.mark.asyncio
 async def test_background_task_writes_failed_on_non_fulfilled_status(client):
     """fulfill_compute_obligation returned a non-exception but non-success result."""
     await _seed_escrow_provisioning(client)
