@@ -201,7 +201,7 @@ def _close_order(
     order_id: str,
     private_key: Optional[str],
 ) -> dict:
-    """POST /listings/close on the storefront; returns the response as a dict."""
+    """POST /api/v1/listings/{listing_id}/close; return the response as a dict."""
     with SyncStorefrontClient(agent_url, private_key=private_key) as client:
         try:
             resp = client.close_listing(order_id)

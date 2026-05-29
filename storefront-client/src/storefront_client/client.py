@@ -623,10 +623,14 @@ class StorefrontClient(_StorefrontClientBase):
         )
 
     async def close_listing(self, listing_id: str) -> StorefrontListingCloseResponse:
-        """POST /listings/close"""
+        """POST /api/v1/listings/{listing_id}/close"""
         headers = self._auth_headers("close_listing", listing_id)
         return StorefrontListingCloseResponse.from_dict(
-            await self._post("/listings/close", {"listing_id": listing_id}, extra_headers=headers)
+            await self._post(
+                f"/api/v1/listings/{listing_id}/close",
+                {},
+                extra_headers=headers,
+            )
         )
 
     async def refund_listing(
@@ -1362,10 +1366,14 @@ class SyncStorefrontClient(_StorefrontClientBase):
         )
 
     def close_listing(self, listing_id: str) -> StorefrontListingCloseResponse:
-        """POST /listings/close"""
+        """POST /api/v1/listings/{listing_id}/close"""
         headers = self._auth_headers("close_listing", listing_id)
         return StorefrontListingCloseResponse.from_dict(
-            self._post("/listings/close", {"listing_id": listing_id}, extra_headers=headers)
+            self._post(
+                f"/api/v1/listings/{listing_id}/close",
+                {},
+                extra_headers=headers,
+            )
         )
 
     def refund_listing(
@@ -1629,4 +1637,3 @@ class SyncStorefrontClient(_StorefrontClientBase):
             f"/api/v1/admin/settle/{escrow_uid}/evaluate", body,
             extra_headers=self._admin_headers(),
         )
-
