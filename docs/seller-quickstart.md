@@ -192,8 +192,21 @@ touching libvirt. To create real VMs:
    ```
 
    `attribute.vm_host` in `resources.csv` must match an alias under
-   `[kvm_hosts]` in this file. The provisioning image bakes the
-   inventory in at build time — rebuild after edits:
+   `[kvm_hosts]` in this file. Each host line's `ansible_host` is how the
+   provisioning service reaches the host over SSH. If buyers reach that host
+   on a **different** address than the provisioner does (e.g. the provisioner
+   is on a private/overlay network but the VM port-forwards are exposed on a
+   public IP), add a `public_host=` var — that's the address put in the
+   tenant's connection details:
+
+   ```ini
+   [kvm_hosts]
+   kvm1  ansible_host=10.0.0.5  public_host=203.0.113.9  ansible_user=ubuntu  ansible_ssh_private_key_file=~/.ssh/id_ed25519
+   ```
+
+   Without `public_host`, the connection details fall back to `ansible_host`.
+   The provisioning image bakes the inventory in at build time — rebuild
+   after edits:
 
    ```bash
    make build-seller

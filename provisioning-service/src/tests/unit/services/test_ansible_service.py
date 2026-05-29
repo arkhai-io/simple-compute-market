@@ -394,3 +394,56 @@ class TestExtractAnsibleJson:
             result = svc._extract_ansible_json(output, action)
             assert result is not None, f"Failed to extract for action={action}"
             assert result["action"] == action
+
+
+# ---------------------------------------------------------------------------
+# public_host -- tenant-facing advertised SSH host (distinct from kvm_host)
+# ---------------------------------------------------------------------------
+
+
+class _FakeHost:
+    def __init__(self, name, kvm_host, public_host=None):
+        self.name = name
+        self.kvm_host = kvm_host
+        self.public_host = public_host
+        self.ssh_user = "ubuntu"
+        self.ssh_key_type = "path"
+        self.ssh_key_value = "/home/appuser/.ssh/id_ed25519"
+
+
+class TestPublicHostInventory:
+    def test_emits_public_host_var_when_set(self):
+        svc = _make_service()
+        inv_path = svc.write_inventory([_FakeHost("kvm1", "10.0.0.5", "203.0.113.9")])
+        try:
+            content = inv_path.read_text(encoding="utf-8")
+        finally:
+            inv_path.unlink(missing_ok=True)
+        assert "ansible_host=10.0.0.5" in content  # management address
+        assert "public_host=203.0.113.9" in content  # tenant-facing address
+
+    def test_omits_public_host_var_when_unset(self):
+        svc = _make_service()
+        inv_path = svc.write_inventory([_FakeHost("kvm1", "10.0.0.5", None)])
+        try:
+            content = inv_path.read_text(encoding="utf-8")
+        finally:
+            inv_path.unlink(missing_ok=True)
+        assert "public_host=" not in content
+
+
+class TestPublicHostConnection:
+    def test_vm_host_ip_and_ssh_command_prefer_public_host(self):
+        from services.ansible_service import AnsibleResult
+
+        svc = _make_service()
+        result = AnsibleResult(
+            stdout='"external_ssh_port": "9000"\n"tenant_user": "tenantx"',
+            stderr="",
+            process_id=123,
+        )
+        parsed = svc.parse_playbook_result(
+            result, _base_params(vm_host="kvm1"), public_host="203.0.113.9"
+        )
+        assert parsed.vm_host_ip == "203.0.113.9"
+        assert parsed.ssh_command == "ssh -i <your_private_key> -p 9000 tenantx@203.0.113.9"

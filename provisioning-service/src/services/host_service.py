@@ -111,6 +111,7 @@ class HostService:
         host = Host(
             name=data.name,
             kvm_host=data.kvm_host,
+            public_host=data.public_host,
             ssh_user=data.ssh_user,
             ssh_key_type=data.ssh_key_type,
             ssh_key_value=key_value,
@@ -137,6 +138,8 @@ class HostService:
 
             if data.kvm_host is not None:
                 host.kvm_host = data.kvm_host
+            if data.public_host is not None:
+                host.public_host = data.public_host
             if data.ssh_user is not None:
                 host.ssh_user = data.ssh_user
             if data.gpu_count is not None:
@@ -225,6 +228,7 @@ class HostService:
                 existing = db.query(Host).filter(Host.name == entry["name"]).one_or_none()
                 if existing is not None:
                     existing.kvm_host = entry["kvm_host"]
+                    existing.public_host = entry["public_host"]
                     existing.ssh_user = entry["ssh_user"]
                     existing.ssh_key_type = ssh_key_type
                     existing.ssh_key_value = key_value
@@ -233,6 +237,7 @@ class HostService:
                     db.add(Host(
                         name=entry["name"],
                         kvm_host=entry["kvm_host"],
+                        public_host=entry["public_host"],
                         ssh_user=entry["ssh_user"],
                         ssh_key_type=ssh_key_type,
                         ssh_key_value=key_value,
@@ -326,6 +331,7 @@ def _parse_ini(ini_text: str) -> list[dict]:
 
     Variable mapping:
         ``gpus=``                         → ``gpu_count`` (int, default 0)
+        ``public_host=``                  → ``public_host`` (tenant-facing addr)
         ``ansible_ssh_private_key_file=`` → preserved verbatim
         All other variables              → ignored
     """
@@ -371,6 +377,7 @@ def _parse_ini(ini_text: str) -> list[dict]:
         results.append({
             "name": name,
             "kvm_host": kvm_host,
+            "public_host": host_vars.get("public_host"),
             "ssh_user": ssh_user,
             "gpu_count": gpu_count,
             "ansible_ssh_private_key_file": host_vars.get(

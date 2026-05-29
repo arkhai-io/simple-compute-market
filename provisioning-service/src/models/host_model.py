@@ -18,7 +18,16 @@ class HostCreate(BaseModel):
     """Body accepted by ``POST /api/v1/hosts/``."""
 
     name: str = Field(description="Ansible alias / hostname key (e.g. 'kvm1').")
-    kvm_host: str = Field(description="IP address or hostname for SSH.")
+    kvm_host: str = Field(description="IP/hostname the provisioner SSHes to.")
+    public_host: Optional[str] = Field(
+        default=None,
+        description=(
+            "Address tenants use to reach this host's VM port-forwards "
+            "(public IP, DNS, or overlay IP). Defaults to kvm_host when "
+            "omitted — set it when buyers reach the host on a different "
+            "network than the provisioner does."
+        ),
+    )
     ssh_user: str = Field(description="SSH login user on the KVM host.")
     ssh_key_type: Literal["path", "embedded"] = Field(
         default="path",
@@ -46,6 +55,7 @@ class HostUpdate(BaseModel):
     """
 
     kvm_host: Optional[str] = None
+    public_host: Optional[str] = None
     ssh_user: Optional[str] = None
     ssh_key_type: Optional[Literal["path", "embedded"]] = None
     ssh_key_value: Optional[str] = None
@@ -61,6 +71,7 @@ class HostResponse(BaseModel):
 
     name: str
     kvm_host: str
+    public_host: Optional[str] = None
     ssh_user: str
     ssh_key_type: str
     gpu_count: int

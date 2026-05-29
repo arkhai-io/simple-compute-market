@@ -282,9 +282,11 @@ class AnsibleJobService:
             # is wired and has a row for this host. rendered_inv_path is
             # initialised here so the outer finally block can always clean it up.
             rendered_inv_path = None
+            host_public_host = None
             if self._host_service is not None:
                 host = self._host_service.get_host(params.vm_host)
                 if host is not None:
+                    host_public_host = host.public_host
                     rendered_inv_path = self._ansible.write_inventory([host])
                     logger.debug(
                         "Job %s: using DB-rendered inventory at %s",
@@ -339,7 +341,7 @@ class AnsibleJobService:
                     log_callback=log_callback,
                 )
                 run_result: AnsibleRunResult = self._ansible.parse_playbook_result(
-                    ansible_result, params
+                    ansible_result, params, public_host=host_public_host
                 )
                 logs = run_result.stdout + (
                     "\n\nSTDERR:\n" + run_result.stderr if run_result.stderr else ""

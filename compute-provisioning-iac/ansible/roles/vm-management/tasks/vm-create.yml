@@ -2527,7 +2527,7 @@
       action: "create"
       vm_name: "{{ vm_name }}"
       timestamp: "{{ creation_timestamp.stdout }}"
-      host: "{{ target_host }}"
+      host: "{{ tenant_ssh_host }}"
       status: "success"
       vm_state: "running"
       vm_ip_internal: "{{ vm_ip }}"
@@ -2540,7 +2540,7 @@
           ssh_key_path_host: "~/.ssh/{{ vm_root_ssh_filename }}"
           ssh_commands:
             internal: "ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }}"
-            external: "{{ 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + external_ssh_port + ' root@' + target_host if (external_ssh_port is defined) else 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + frp_remote_port + ' root@' + frp_subdomain + '.' + (frp_domain | default('vm.arkhai.io')) }}"
+            external: "{{ 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + external_ssh_port + ' root@' + tenant_ssh_host if (external_ssh_port is defined) else 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + frp_remote_port + ' root@' + frp_subdomain + '.' + (frp_domain | default('vm.arkhai.io')) }}"
         tenant:
           password: "{{ tenant_password }}"
           key_type: "generated"
@@ -2548,10 +2548,10 @@
           ssh_key_path_downloaded: "keys/{{ vm_name }}_tenant_private_key"
           ssh_commands:
             internal: "ssh -i keys/{{ vm_name }}_tenant_private_key {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }}"
-            external: "{{ 'ssh -i keys/' + vm_name + '_tenant_private_key -p ' + external_ssh_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + target_host if (external_ssh_port is defined) else 'ssh -i keys/' + vm_name + '_tenant_private_key -p ' + frp_remote_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + frp_subdomain + '.' + (frp_domain | default('vm.arkhai.io')) }}"
+            external: "{{ 'ssh -i keys/' + vm_name + '_tenant_private_key -p ' + external_ssh_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + tenant_ssh_host if (external_ssh_port is defined) else 'ssh -i keys/' + vm_name + '_tenant_private_key -p ' + frp_remote_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + frp_subdomain + '.' + (frp_domain | default('vm.arkhai.io')) }}"
       network:
         mode: "{{ 'direct_port_forwarding' if (external_ssh_port is defined) else 'frp_proxy' }}"
-        port_forwarding: "{{ target_host + ':' + external_ssh_port + ' -> ' + vm_ip + ':22' if (external_ssh_port is defined) else 'N/A - Using FRP' }}"
+        port_forwarding: "{{ tenant_ssh_host + ':' + external_ssh_port + ' -> ' + vm_ip + ':22' if (external_ssh_port is defined) else 'N/A - Using FRP' }}"
       frp:
         enabled: "{{ true if (frp_server_addr is defined) else false }}"
         subdomain: "{{ frp_subdomain | default('N/A') }}"
@@ -2584,7 +2584,7 @@
       - "{% if frp_server_addr is defined %}FRP Mode: Subdomain {{ frp_subdomain }}.{{ frp_domain | default('vm.arkhai.io') }}, Remote Port {{ frp_remote_port }}{% else %}Direct Port Forwarding: {{ external_ssh_port }}{% endif %}"
       - "Root: ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }} (pwd: {{ root_password }})"
       - "Tenant: ssh -i keys/{{ vm_name }}_tenant_private_key {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }} (pwd: {{ tenant_password }})"
-      - "{% if frp_server_addr is defined %}External SSH: ssh -i keys/{{ vm_name }}_tenant_private_key -p {{ frp_remote_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ frp_subdomain }}.{{ frp_domain | default('vm.arkhai.io') }}{% else %}External SSH: ssh -i keys/{{ vm_name }}_tenant_private_key -p {{ external_ssh_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ target_host }}{% endif %}"
+      - "{% if frp_server_addr is defined %}External SSH: ssh -i keys/{{ vm_name }}_tenant_private_key -p {{ frp_remote_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ frp_subdomain }}.{{ frp_domain | default('vm.arkhai.io') }}{% else %}External SSH: ssh -i keys/{{ vm_name }}_tenant_private_key -p {{ external_ssh_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ tenant_ssh_host }}{% endif %}"
   when: 
     - vm_action == "create" 
     - vm_create_result is defined 
@@ -2597,7 +2597,7 @@
       action: "create"
       vm_name: "{{ vm_name }}"
       timestamp: "{{ creation_timestamp.stdout }}"
-      host: "{{ target_host }}"
+      host: "{{ tenant_ssh_host }}"
       status: "success"
       vm_state: "running"
       vm_ip_internal: "{{ vm_ip }}"
@@ -2610,17 +2610,17 @@
           ssh_key_path_host: "~/.ssh/{{ vm_root_ssh_filename }}"
           ssh_commands:
             internal: "ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }}"
-            external: "{{ 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + external_ssh_port + ' root@' + target_host if (external_ssh_port is defined) else 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + frp_remote_port + ' root@' + frp_subdomain + '.' + (frp_domain | default('vm.arkhai.io')) }}"
+            external: "{{ 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + external_ssh_port + ' root@' + tenant_ssh_host if (external_ssh_port is defined) else 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + frp_remote_port + ' root@' + frp_subdomain + '.' + (frp_domain | default('vm.arkhai.io')) }}"
         tenant:
           password: "{{ tenant_password }}"
           key_type: "provided"
           public_key: "{{ vm_tenant_pubkey }}"
           ssh_commands:
             internal: "ssh -i <your_private_key> {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }}"
-            external: "{{ 'ssh -i <your_private_key> -p ' + external_ssh_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + target_host if (external_ssh_port is defined) else 'ssh -i <your_private_key> -p ' + frp_remote_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + frp_subdomain + '.' + (frp_domain | default('vm.arkhai.io')) }}"
+            external: "{{ 'ssh -i <your_private_key> -p ' + external_ssh_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + tenant_ssh_host if (external_ssh_port is defined) else 'ssh -i <your_private_key> -p ' + frp_remote_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + frp_subdomain + '.' + (frp_domain | default('vm.arkhai.io')) }}"
       network:
         mode: "{{ 'direct_port_forwarding' if (external_ssh_port is defined) else 'frp_proxy' }}"
-        port_forwarding: "{{ target_host + ':' + external_ssh_port + ' -> ' + vm_ip + ':22' if (external_ssh_port is defined) else 'N/A - Using FRP' }}"
+        port_forwarding: "{{ tenant_ssh_host + ':' + external_ssh_port + ' -> ' + vm_ip + ':22' if (external_ssh_port is defined) else 'N/A - Using FRP' }}"
       frp:
         enabled: "{{ true if (frp_server_addr is defined) else false }}"
         subdomain: "{{ frp_subdomain | default('N/A') }}"
@@ -2654,7 +2654,7 @@
       - "{% if frp_server_addr is defined %}FRP Mode: Subdomain {{ frp_subdomain }}.{{ frp_domain | default('vm.arkhai.io') }}, Remote Port {{ frp_remote_port }}{% else %}Direct Port Forwarding: {{ external_ssh_port }}{% endif %}"
       - "Root access: ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }} (password: {{ root_password }})"
       - "Tenant access: ssh -i <your_private_key> {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }} (password: {{ tenant_password }})"
-      - "{% if frp_server_addr is defined %}External SSH: ssh -i <your_private_key> -p {{ frp_remote_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ frp_subdomain }}.{{ frp_domain | default('vm.arkhai.io') }}{% else %}External SSH: ssh -i <your_private_key> -p {{ external_ssh_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ target_host }}{% endif %}"
+      - "{% if frp_server_addr is defined %}External SSH: ssh -i <your_private_key> -p {{ frp_remote_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ frp_subdomain }}.{{ frp_domain | default('vm.arkhai.io') }}{% else %}External SSH: ssh -i <your_private_key> -p {{ external_ssh_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ tenant_ssh_host }}{% endif %}"
   when: 
     - vm_action == "create" 
     - vm_create_result is defined 

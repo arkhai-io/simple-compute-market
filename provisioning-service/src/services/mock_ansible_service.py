@@ -144,13 +144,16 @@ class MockAnsibleService:
         )
 
     def parse_playbook_result(
-        self, result: AnsibleResult, params: AnsibleJobParams
+        self,
+        result: AnsibleResult,
+        params: AnsibleJobParams,
+        public_host: str | None = None,
     ) -> AnsibleRunResult:
         """Delegate to real parsing logic — only subprocess boundary is mocked."""
         from services.ansible_service import AnsibleService
         real = AnsibleService.__new__(AnsibleService)
         real._settings = self._settings
-        return real.parse_playbook_result(result, params)
+        return real.parse_playbook_result(result, params, public_host=public_host)
 
     # ------------------------------------------------------------------
     # Inventory interface
