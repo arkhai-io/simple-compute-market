@@ -53,7 +53,7 @@ market --version
 private_key    = "0x<YOUR_BUYER_PRIVATE_KEY>"
 ssh_public_key = "ssh-ed25519 AAAA...your-key buyer@host"
 
-[chain]
+[chains.base_sepolia]
 chain_id = 84532
 rpc_url  = "https://base-sepolia.infura.io/v3/<YOUR_KEY>"
 

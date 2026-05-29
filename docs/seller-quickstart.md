@@ -58,7 +58,7 @@ private_key    = "0x<YOUR_SELLER_PRIVATE_KEY>"
 # placeholder; not used in buyer-driven flows
 ssh_public_key = "ssh-ed25519 AAAA...placeholder seller@host"
 
-[chain]
+[chains.base_sepolia]
 chain_id = 84532
 rpc_url  = "https://base-sepolia.infura.io/v3/<YOUR_KEY>"
 

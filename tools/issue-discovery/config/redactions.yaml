@@ -1,0 +1,14 @@
+schema_version: 1
+patterns:
+  - id: private_key_hex
+    regex: "(?i)(private[_-]?key[\"']?\\s*[:=]\\s*[\"']?)(?:0x)?[0-9a-f]{64}"
+    replacement: '\1<redacted-private-key>'
+  - id: admin_key
+    regex: "(?i)((?:x-admin-key|admin[_-]?key)[\"']?\\s*[:=]\\s*[\"']?)[^\"',\\s]+"
+    replacement: '\1<redacted-admin-key>'
+  - id: bearer_token
+    regex: "(?i)(authorization[\"']?\\s*[:=]\\s*[\"']?bearer\\s+)[A-Za-z0-9._~+/=-]+"
+    replacement: '\1<redacted-token>'
+  - id: home_path
+    regex: '/home/[^/\s]+'
+    replacement: '/home/<user>'

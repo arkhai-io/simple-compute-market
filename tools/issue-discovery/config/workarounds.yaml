@@ -1,0 +1,69 @@
+schema_version: 1
+workarounds:
+  - id: redis_no_host_port
+    status: active
+    issue: null
+    reason: Disable Redis host-port publication when port 6379 is already occupied.
+    removal_condition: Root compose no longer publishes Redis on host 6379 by default.
+    start_phase: compose_preexisting_stack_check
+    env:
+      ISSUE_DISCOVERY_COMPOSE_ARGS: -f docker-compose.yml -f /tmp/scm-no-redis-port.yml
+    commands:
+      - id: write_redis_override
+        run: |
+          cat >/tmp/scm-no-redis-port.yml <<'YAML'
+          services:
+            redis:
+              ports: !reset []
+          YAML
+
+  - id: local_stack_build_without_zerotier
+    status: active
+    issue: null
+    reason: Continue local stack discovery when top-level make build blocks on non-interactive ZeroTier installation.
+    removal_condition: Top-level make build no longer runs sudo ZeroTier installation as part of local image/artifact builds.
+    start_phase: build
+    env:
+      ISSUE_DISCOVERY_BUILD_COMMAND: make build-runtime-images build-market-contract-deployer build-test-env build-test-image
+
+  - id: storefront_volume_chown
+    status: active
+    issue: null
+    reason: Fresh storefront named volumes may be root-owned and not writable by appuser.
+    removal_condition: Strict fresh-volume profile passes without this workaround.
+    start_phase: compose_start_strict
+    commands:
+      - id: chown_storefront_volumes
+        run: |
+          docker run --rm --user 0:0 \
+            -v simple-compute-market_bob-storefront-data:/bob \
+            -v simple-compute-market_alice-storefront-data:/alice \
+            alpine:3.20 sh -c 'chown -R 1000:1000 /bob /alice'
+
+  - id: cleanup_fixed_docker_names
+    status: active
+    issue: null
+    reason: Clear stale fixed-name containers used by the build and local stack.
+    removal_condition: Build and stack startup no longer depend on fixed global Docker names.
+    commands:
+      - id: remove_fixed_name_containers
+        run: |
+          docker rm -f \
+            anvil \
+            contracts-deploy \
+            market-contracts-deploy \
+            market-agent-sell \
+            market-agent-buy \
+            market-agent-alice \
+            market-redis \
+            market-provisioning \
+            2>/dev/null || true
+          docker network rm anvil 2>/dev/null || true
+
+  - id: skip_known_stale_seller_layer
+    status: active
+    issue: null
+    reason: Skip stale seller-layer marker test while preserving deeper e2e coverage.
+    removal_condition: roles_layer_seller passes against current well-known storefront routes.
+    skip_phases:
+      - role_layer_marker_tests

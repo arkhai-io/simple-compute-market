@@ -155,7 +155,7 @@ async def verify_escrow_for_settlement(
     *,
     escrow_uid: str,
     seller_wallet: str,
-    agreed_price: float,
+    agreed_price: int,
     agreed_duration_seconds: int,
     listing: dict[str, Any],
     alkahest_client: Any,

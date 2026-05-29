@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema_version", "collectors"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "collectors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/collector" }
+    }
+  },
+  "$defs": {
+    "collector": {
+      "type": "object",
+      "required": ["id", "command", "output"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "description": { "type": "string" },
+        "command": { "type": "string", "minLength": 1 },
+        "workdir": { "type": "string" },
+        "output": { "type": "string", "minLength": 1 },
+        "timeout_seconds": { "type": "integer", "minimum": 1 },
+        "redact": { "type": "boolean" }
+      }
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_\\-]*$"
+    }
+  }
+}

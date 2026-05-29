@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema_version", "workarounds"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "workarounds": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/workaround" }
+    }
+  },
+  "$defs": {
+    "workaround": {
+      "type": "object",
+      "required": ["id", "status", "reason", "removal_condition"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "status": { "enum": ["active", "retired"] },
+        "issue": { "type": ["string", "null"] },
+        "start_phase": { "$ref": "#/$defs/id" },
+        "reason": { "type": "string", "minLength": 1 },
+        "removal_condition": { "type": "string", "minLength": 1 },
+        "commands": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/command" }
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "skip_phases": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/id" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "command": {
+      "type": "object",
+      "required": ["id", "run"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "run": { "type": "string", "minLength": 1 },
+        "workdir": { "type": "string" },
+        "timeout_seconds": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_\\-]*$"
+    }
+  }
+}

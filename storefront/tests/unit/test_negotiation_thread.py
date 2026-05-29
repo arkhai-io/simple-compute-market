@@ -4,6 +4,7 @@ import pytest
 import asyncio
 import tempfile
 import os
+import sqlite3
 from pathlib import Path
 
 from market_storefront.utils.sqlite_client import SQLiteClient
@@ -291,6 +292,174 @@ class TestSQLiteClientNegotiationMethods:
         thread = await sqlite_client.load_negotiation_thread(negotiation_id="test-direct")
         assert len(thread) == 1
         assert thread[0]["sender"] == "agent-1"
+
+    @pytest.mark.asyncio
+    async def test_save_negotiation_message_uint256_amounts(self, sqlite_client):
+        """Raw token amounts can exceed SQLite's signed 64-bit INTEGER range."""
+        large_amount = 150 * 10**18
+        await sqlite_client.save_negotiation_message(
+            negotiation_id="test-large-direct",
+            round=0,
+            sender="agent-1",
+            our_price=large_amount,
+            their_price=large_amount + 1,
+            proposed_price=large_amount + 2,
+            action_taken="COUNTER_OFFER",
+            message_type="proposal",
+            timestamp="2025-01-01T00:00:00",
+        )
+
+        thread = await sqlite_client.load_negotiation_thread(
+            negotiation_id="test-large-direct",
+        )
+        assert thread[0]["our_price"] == large_amount
+        assert thread[0]["their_price"] == large_amount + 1
+        assert thread[0]["proposed_price"] == large_amount + 2
+
+        conn = sqlite3.connect(sqlite_client.db_path)
+        try:
+            row = conn.execute(
+                """
+                SELECT typeof(our_price), our_price
+                FROM negotiation_messages
+                WHERE negotiation_id = ?
+                """,
+                ("test-large-direct",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row == ("text", str(large_amount))
+
+    @pytest.mark.asyncio
+    async def test_commit_agreed_terms_uint256_amount(self, sqlite_client):
+        large_amount = 150 * 10**18
+        await sqlite_client.save_negotiation_message(
+            negotiation_id="test-large-agreed",
+            round=0,
+            sender="agent-1",
+            our_price=large_amount,
+            their_price=large_amount,
+            proposed_price=large_amount,
+            action_taken="ACCEPT_OFFER",
+            message_type="accepted",
+            timestamp="2025-01-01T00:00:00",
+        )
+        await sqlite_client.commit_agreed_terms(
+            negotiation_id="test-large-agreed",
+            agreed_price=large_amount,
+            agreed_duration_seconds=3600,
+        )
+
+        row = await sqlite_client.load_negotiation_thread_row(
+            negotiation_id="test-large-agreed",
+        )
+        assert row is not None
+        assert row["agreed_price"] == large_amount
+
+        conn = sqlite3.connect(sqlite_client.db_path)
+        try:
+            stored = conn.execute(
+                """
+                SELECT typeof(agreed_price), agreed_price
+                FROM negotiation_threads
+                WHERE negotiation_id = ?
+                """,
+                ("test-large-agreed",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert stored == ("text", str(large_amount))
+
+    def test_legacy_amount_columns_migrate_to_text(self, tmp_path):
+        db_path = tmp_path / "legacy-amounts.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE negotiation_threads (
+                  negotiation_id TEXT PRIMARY KEY,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  agreed_price INTEGER
+                );
+                CREATE TABLE negotiation_local_state (
+                  negotiation_id TEXT NOT NULL,
+                  owner_id TEXT NOT NULL,
+                  our_initial_price INTEGER,
+                  our_strategy TEXT,
+                  PRIMARY KEY(negotiation_id, owner_id)
+                );
+                CREATE TABLE negotiation_messages (
+                  message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  negotiation_id TEXT NOT NULL,
+                  round INTEGER NOT NULL,
+                  sender TEXT NOT NULL,
+                  our_price INTEGER,
+                  their_price INTEGER,
+                  proposed_price INTEGER,
+                  action_taken TEXT NOT NULL,
+                  message_type TEXT NOT NULL,
+                  timestamp TEXT NOT NULL,
+                  UNIQUE(negotiation_id, round)
+                );
+                INSERT INTO negotiation_threads (
+                  negotiation_id, created_at, updated_at, agreed_price
+                ) VALUES ('legacy-neg', '2025-01-01T00:00:00', '2025-01-01T00:00:00', 9000);
+                INSERT INTO negotiation_local_state (
+                  negotiation_id, owner_id, our_initial_price, our_strategy
+                ) VALUES ('legacy-neg', 'owner', 8000, 'maximize');
+                INSERT INTO negotiation_messages (
+                  negotiation_id, round, sender, our_price, their_price,
+                  proposed_price, action_taken, message_type, timestamp
+                ) VALUES (
+                  'legacy-neg', 0, 'agent-1', 8000, 9000, 8500,
+                  'COUNTER_OFFER', 'proposal', '2025-01-01T00:00:00'
+                );
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        migrated = SQLiteClient(db_path=str(db_path))
+
+        conn = sqlite3.connect(migrated.db_path)
+        try:
+            thread_types = {
+                row[1]: row[2]
+                for row in conn.execute("PRAGMA table_info(negotiation_threads)")
+            }
+            local_types = {
+                row[1]: row[2]
+                for row in conn.execute("PRAGMA table_info(negotiation_local_state)")
+            }
+            message_types = {
+                row[1]: row[2]
+                for row in conn.execute("PRAGMA table_info(negotiation_messages)")
+            }
+        finally:
+            conn.close()
+
+        assert thread_types["agreed_price"] == "TEXT"
+        assert local_types["our_initial_price"] == "TEXT"
+        assert message_types["our_price"] == "TEXT"
+        assert message_types["their_price"] == "TEXT"
+        assert message_types["proposed_price"] == "TEXT"
+
+        thread = asyncio.run(
+            migrated.load_negotiation_thread(negotiation_id="legacy-neg"),
+        )
+        info = asyncio.run(
+            migrated.get_thread_info(negotiation_id="legacy-neg", owner_id="owner"),
+        )
+        row = asyncio.run(
+            migrated.load_negotiation_thread_row(negotiation_id="legacy-neg"),
+        )
+        assert thread[0]["proposed_price"] == 8500
+        assert info is not None
+        assert info["our_initial_price"] == 8000
+        assert row is not None
+        assert row["agreed_price"] == 9000
     
     @pytest.mark.asyncio
     async def test_load_negotiation_thread_ordered(self, sqlite_client):

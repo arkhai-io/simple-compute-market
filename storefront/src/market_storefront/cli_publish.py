@@ -42,6 +42,16 @@ from storefront_client import (
 from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
 
 
+def _normalize_max_duration_seconds(value: Any) -> int | None:
+    """Return a positive lease-duration ceiling, or None for unlimited."""
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    seconds = int(value)
+    return seconds if seconds > 0 else None
+
+
 def _import_csv(csv_path: str, db: Optional[str]) -> None:
     """Invoke the existing import_resources_csv.py script directly.
 
@@ -82,7 +92,12 @@ def _available_resources(db_path: str) -> list[dict]:
     try:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(resources)").fetchall()}
         has_accepted = "accepted_escrows" in cols
-        select_extra = ", accepted_escrows" if has_accepted else ""
+        has_max_duration = "max_duration_seconds" in cols
+        select_extra = ""
+        if has_accepted:
+            select_extra += ", accepted_escrows"
+        if has_max_duration:
+            select_extra += ", max_duration_seconds"
         rows = conn.execute(
             f"""SELECT resource_id, resource_subtype, unit, value, state, attributes,
                       min_price, token{select_extra}
@@ -118,6 +133,9 @@ def _available_resources(db_path: str) -> list[dict]:
             "min_price": row["min_price"],
             "token": row["token"],
             "accepted_escrows": accepted_escrows,
+            "max_duration_seconds": (
+                row["max_duration_seconds"] if has_max_duration else None
+            ),
         })
     return out
 
@@ -201,7 +219,7 @@ def _close_order(
     order_id: str,
     private_key: Optional[str],
 ) -> dict:
-    """POST /listings/close on the storefront; returns the response as a dict."""
+    """POST /api/v1/listings/{listing_id}/close; return the response as a dict."""
     with SyncStorefrontClient(agent_url, private_key=private_key) as client:
         try:
             resp = client.close_listing(order_id)
@@ -393,8 +411,13 @@ def _publish_round(
             except ValueError as exc:
                 failed.append((res, str(exc)))
                 continue
-            max_duration_seconds = (
-                res.get("max_duration_seconds") or default_max_duration_seconds
+            raw_max_duration_seconds = (
+                res.get("max_duration_seconds")
+                if res.get("max_duration_seconds") is not None
+                else default_max_duration_seconds
+            )
+            max_duration_seconds = _normalize_max_duration_seconds(
+                raw_max_duration_seconds
             )
             offer = {
                 "resource_id": res["resource_id"],
@@ -501,7 +524,14 @@ def _publish_round(
                 failed.append((res, f"min_price={min_price!r} is negative"))
                 continue
             advertised_amount = str(int(scaled))
-        max_duration_seconds = res.get("max_duration_seconds") or default_max_duration_seconds
+        raw_max_duration_seconds = (
+            res.get("max_duration_seconds")
+            if res.get("max_duration_seconds") is not None
+            else default_max_duration_seconds
+        )
+        max_duration_seconds = _normalize_max_duration_seconds(
+            raw_max_duration_seconds
+        )
         # Explicit resource_id pins this order to a specific DB row, so
         # multiple identical-spec resources each get a distinct order in
         # `--watch` mode.
@@ -740,6 +770,9 @@ def register(app: typer.Typer) -> None:
             max_duration_seconds
             if max_duration_seconds is not None
             else settings.pricing.default_max_duration_seconds
+        )
+        default_max_duration_seconds = _normalize_max_duration_seconds(
+            default_max_duration_seconds
         )
 
         from .utils.config import CHAINS
