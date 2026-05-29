@@ -328,7 +328,7 @@ def extract_compute_from_order(order: dict) -> dict:
     return offer_resource
 
 
-def _extract_initial_price_from_order(order: Listing | dict) -> float:
+def _extract_initial_price_from_order(order: Listing | dict) -> int | float:
     """Extract the initial negotiation floor from a listing's primary rate.
 
     Tristate semantics on the advertised price:
@@ -351,7 +351,7 @@ def _extract_initial_price_from_order(order: Listing | dict) -> float:
 
     # 0 is a meaningful value (free); only None falls through to the fallback.
     if advertised is not None:
-        return float(advertised)
+        return advertised
 
     # Hidden reserve: fall back to the seller's config default.
     from market_storefront.utils.config import settings, AGENT_ID, BASE_URL_OVERRIDE

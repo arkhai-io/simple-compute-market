@@ -16,9 +16,9 @@ class NegotiationMessage:
     """A single message in a negotiation thread."""
     round: int
     sender: str
-    our_price: float | None
-    their_price: float | None
-    proposed_price: float | None
+    our_price: int | str | float | None
+    their_price: int | str | float | None
+    proposed_price: int | str | float | None
     action_taken: str  # ACCEPT_OFFER, REJECT_OFFER, COUNTER_OFFER, EXIT_NEGOTIATION
     timestamp: str
     message_type: str  # initial_proposal, counter_proposal, etc.
@@ -193,7 +193,7 @@ class NegotiationThreadTransaction:
         their_listing_id: str,
         our_agent_id: str,
         their_agent_id: str,
-        our_initial_price: float | None = None,
+        our_initial_price: int | str | float | None = None,
         our_strategy: str | None = None,
         requested_duration_seconds: int | None = None,
         buyer_escrow_proposal: dict | None = None,
@@ -243,9 +243,9 @@ class NegotiationThreadTransaction:
         self,
         negotiation_id: str,
         sender: str,
-        our_price: float | None = None,
-        their_price: float | None = None,
-        proposed_price: float | None = None,
+        our_price: int | str | float | None = None,
+        their_price: int | str | float | None = None,
+        proposed_price: int | str | float | None = None,
         action_taken: str = "",
         message_type: str = "",
     ) -> None:
@@ -309,7 +309,7 @@ class NegotiationThreadStore:
         our_agent_id: str,
         their_agent_id: str,
         owner_id: str,
-        our_initial_price: float | None = None,
+        our_initial_price: int | str | float | None = None,
         our_strategy: str | None = None,
         requested_duration_seconds: int | None = None,
         buyer_escrow_proposal: dict | None = None,
@@ -382,9 +382,9 @@ class NegotiationThreadStore:
         self,
         negotiation_id: str,
         sender: str,
-        our_price: float | None,
-        their_price: float | None,
-        proposed_price: float | None,
+        our_price: int | str | float | None,
+        their_price: int | str | float | None,
+        proposed_price: int | str | float | None,
         action_taken: str,
         message_type: str = "proposal",
     ) -> int:

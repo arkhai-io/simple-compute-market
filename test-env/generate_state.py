@@ -31,8 +31,10 @@ from alkahest_py import EnvTestManager, MockERC20
 # buyer/seller configs use (integration-tests/config/*, the storefront .toml
 # files) — NOT alkahest's env.alice/env.bob, which newer alkahest randomizes.
 # The buyer (account #1) escrows MOCK during a deal with no runtime funding, so
-# it must hold a balance in the baked state; account #2 is funded likewise.
-FUNDING = 1_000_000_000
+# it must hold enough raw base units for bundled 18-decimal dev inventory;
+# account #2 is funded likewise.
+FUNDING = 1_000 * 10**18
+TRANSFER_CHUNK = 9 * 10**18
 FUNDED_ACCOUNTS = {
     "anvil #1 (buyer)": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
     "anvil #2": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
@@ -90,6 +92,14 @@ def extract_addresses(env: EnvTestManager) -> dict[str, dict[str, str]]:
     return out
 
 
+def transfer_mock_in_chunks(mock: MockERC20, addr: str, amount: int) -> None:
+    remaining = amount
+    while remaining > 0:
+        chunk = min(remaining, TRANSFER_CHUNK)
+        mock.transfer(addr, chunk)
+        remaining -= chunk
+
+
 def main() -> int:
     print("Starting EnvTestManager (boots Anvil + deploys Alkahest)...")
     env = EnvTestManager()
@@ -100,8 +110,8 @@ def main() -> int:
 
     mock = MockERC20(env.mock_addresses.erc20_a, env.god_wallet_provider)
     for label, addr in FUNDED_ACCOUNTS.items():
-        print(f"Funding {label} {addr} with {FUNDING:,} MOCK...")
-        mock.transfer(addr, FUNDING)
+        print(f"Funding {label} {addr} with {FUNDING:,} raw MOCK units...")
+        transfer_mock_in_chunks(mock, addr, FUNDING)
 
     # anvil_dumpState returns hex-encoded gzip of the SerializableState JSON;
     # `anvil --load-state` consumes the decompressed JSON form.
