@@ -25,7 +25,6 @@ def test_bundled_mock_inventory_prices_fit_one_hour_escrow_value_limit():
     inputs, so their one-hour scaled prices need to stay inside that range.
     """
     files = [
-        "btc1-machine.csv",
         "kvm1-machine.csv",
         "resources.sample.csv",
     ]

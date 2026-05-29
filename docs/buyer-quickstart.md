@@ -164,7 +164,7 @@ market escrow reclaim <escrow_uid>
   that fails after escrow creation locks funds until `expiration_unix`.
   Resume with `market buy --from <run_id>`, don't re-`buy` from scratch.
 - **VM SSH uses `vm_host_ip`, not the alias** the `ssh_command` field
-  prints (`tenant<id>@btc1` etc. — the host name is the seller's
+  prints (`tenant<id>@kvm1` etc. — the host name is the seller's
   inventory alias, not DNS).
 - **The tenant user has no sudo password.** Cloud-init only injects
   your SSH pubkey.
