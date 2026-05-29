@@ -52,7 +52,7 @@ class AdminSettleService:
         escrow_uid: str,
         listing_id: str,
         seller_wallet: str,
-        agreed_price: float,
+        agreed_price: int,
         agreed_duration_seconds: int,
         chain_name: str,
     ) -> dict:

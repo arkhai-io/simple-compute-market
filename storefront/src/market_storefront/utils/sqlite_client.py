@@ -8,6 +8,7 @@ import sqlite3
 import time
 import uuid
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from .config import settings
@@ -15,6 +16,58 @@ from .host_csv_importer import upsert_hosts_from_csv
 from .resource_csv_importer import upsert_resources_from_csv, upsert_resources_from_csv_content
 
 logger = logging.getLogger(__name__)
+
+
+def _amount_to_db_text(value: Any) -> str | None:
+    """Serialize a raw token amount for SQLite without int64 overflow.
+
+    Negotiation amounts are EVM ``uint256`` values. SQLite INTEGER cannot
+    represent many normal 18-decimal token amounts, so amount-bearing columns
+    store decimal-digit text and callers get Python ints back on read.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("raw token amounts must be numeric, not boolean")
+    if isinstance(value, int):
+        if value < 0:
+            raise ValueError("raw token amounts must be non-negative")
+        return str(value)
+
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"raw token amount {value!r} is not numeric") from exc
+    if parsed < 0:
+        raise ValueError("raw token amounts must be non-negative")
+    integral = parsed.to_integral_value()
+    if parsed != integral:
+        raise ValueError(f"raw token amount {value!r} is not an integer")
+    return str(int(integral))
+
+
+def _amount_from_db_text(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None
+    integral = parsed.to_integral_value()
+    if parsed != integral:
+        return None
+    amount = int(integral)
+    return amount if amount >= 0 else None
 
 
 def _normalize_to_dict(value: Any) -> dict[str, Any] | None:
@@ -287,7 +340,7 @@ class SQLiteClient:
                   -- Committed agreement artifact: populated when terminal_state='success'.
                   -- Captures the negotiation's output as queryable state so settlement
                   -- can run (or be retried) as a separate step without replaying rounds.
-                  agreed_price INTEGER,
+                  agreed_price TEXT,
                   agreed_duration_seconds INTEGER,
                   agreed_at TEXT,
                   -- Buyer↔listing pairing (moved off listings for multi-escrow).
@@ -331,7 +384,7 @@ class SQLiteClient:
                 pass
             # Committed-agreement columns (see CREATE TABLE above for semantics).
             try:
-                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN agreed_price INTEGER")
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN agreed_price TEXT")
             except sqlite3.OperationalError:
                 pass
             try:
@@ -395,7 +448,7 @@ class SQLiteClient:
                 CREATE TABLE IF NOT EXISTS negotiation_local_state (
                   negotiation_id TEXT NOT NULL,
                   owner_id TEXT NOT NULL,
-                  our_initial_price INTEGER,
+                  our_initial_price TEXT,
                   our_strategy TEXT,
                   PRIMARY KEY(negotiation_id, owner_id),
                   FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id)
@@ -410,9 +463,9 @@ class SQLiteClient:
                   negotiation_id TEXT NOT NULL,
                   round INTEGER NOT NULL,
                   sender TEXT NOT NULL,
-                  our_price INTEGER,
-                  their_price INTEGER,
-                  proposed_price INTEGER,
+                  our_price TEXT,
+                  their_price TEXT,
+                  proposed_price TEXT,
                   action_taken TEXT NOT NULL,
                   message_type TEXT NOT NULL,
                   timestamp TEXT NOT NULL,
@@ -421,6 +474,7 @@ class SQLiteClient:
                 )
                 """
             )
+            self._migrate_negotiation_amount_columns(cur)
             # Migrate listings table: add columns that may be missing from older DBs
             try:
                 cur.execute("ALTER TABLE listings ADD COLUMN oracle_address TEXT")
@@ -817,6 +871,155 @@ class SQLiteClient:
             except Exception:
                 return None
         return None
+
+    def _migrate_negotiation_amount_columns(self, cur: sqlite3.Cursor) -> None:
+        """Move EVM amount columns off SQLite INTEGER affinity.
+
+        SQLite cannot alter column types in-place. Rebuild only when an
+        existing DB still has INTEGER amount columns, preserving current rows
+        and letting the index creation below recreate any dropped indexes.
+        """
+        def _table_exists(name: str) -> bool:
+            return cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (name,),
+            ).fetchone() is not None
+
+        def _column_types(table: str) -> dict[str, str]:
+            return {
+                str(row[1]): str(row[2] or "").upper()
+                for row in cur.execute(f"PRAGMA table_info({table})")
+            }
+
+        def _needs_rebuild(table: str, columns: tuple[str, ...]) -> bool:
+            if not _table_exists(table):
+                return False
+            types = _column_types(table)
+            return any(types.get(column) != "TEXT" for column in columns)
+
+        if _table_exists("negotiation_threads"):
+            for col_ddl in (
+                "ALTER TABLE negotiation_threads ADD COLUMN buyer TEXT",
+                "ALTER TABLE negotiation_threads ADD COLUMN matched_offer_id TEXT",
+            ):
+                try:
+                    cur.execute(col_ddl)
+                except sqlite3.OperationalError:
+                    pass
+
+        if _needs_rebuild("negotiation_threads", ("agreed_price",)):
+            cur.execute("DROP TABLE IF EXISTS negotiation_threads__amount_migration")
+            cur.execute("ALTER TABLE negotiation_threads RENAME TO negotiation_threads__amount_migration")
+            cur.execute(
+                """
+                CREATE TABLE negotiation_threads (
+                  negotiation_id TEXT PRIMARY KEY,
+                  our_listing_id TEXT,
+                  their_listing_id TEXT,
+                  our_agent_id TEXT,
+                  their_agent_id TEXT,
+                  status TEXT DEFAULT 'active',
+                  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                  terminal_state TEXT,
+                  requested_duration_seconds INTEGER,
+                  buyer_escrow_proposal TEXT,
+                  agreed_price TEXT,
+                  agreed_duration_seconds INTEGER,
+                  agreed_at TEXT,
+                  buyer TEXT,
+                  matched_offer_id TEXT
+                )
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO negotiation_threads (
+                    negotiation_id, our_listing_id, their_listing_id,
+                    our_agent_id, their_agent_id, status, created_at,
+                    updated_at, terminal_state, requested_duration_seconds,
+                    buyer_escrow_proposal, agreed_price,
+                    agreed_duration_seconds, agreed_at, buyer, matched_offer_id
+                )
+                SELECT negotiation_id, our_listing_id, their_listing_id,
+                       our_agent_id, their_agent_id, status, created_at,
+                       updated_at, terminal_state, requested_duration_seconds,
+                       buyer_escrow_proposal,
+                       CASE WHEN agreed_price IS NULL THEN NULL ELSE CAST(agreed_price AS TEXT) END,
+                       agreed_duration_seconds, agreed_at, buyer, matched_offer_id
+                FROM negotiation_threads__amount_migration
+                """
+            )
+            cur.execute("DROP TABLE negotiation_threads__amount_migration")
+
+        if _needs_rebuild("negotiation_local_state", ("our_initial_price",)):
+            cur.execute("DROP TABLE IF EXISTS negotiation_local_state__amount_migration")
+            cur.execute("ALTER TABLE negotiation_local_state RENAME TO negotiation_local_state__amount_migration")
+            cur.execute(
+                """
+                CREATE TABLE negotiation_local_state (
+                  negotiation_id TEXT NOT NULL,
+                  owner_id TEXT NOT NULL,
+                  our_initial_price TEXT,
+                  our_strategy TEXT,
+                  PRIMARY KEY(negotiation_id, owner_id),
+                  FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id)
+                )
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO negotiation_local_state (
+                    negotiation_id, owner_id, our_initial_price, our_strategy
+                )
+                SELECT negotiation_id, owner_id,
+                       CASE WHEN our_initial_price IS NULL THEN NULL ELSE CAST(our_initial_price AS TEXT) END,
+                       our_strategy
+                FROM negotiation_local_state__amount_migration
+                """
+            )
+            cur.execute("DROP TABLE negotiation_local_state__amount_migration")
+
+        if _needs_rebuild(
+            "negotiation_messages",
+            ("our_price", "their_price", "proposed_price"),
+        ):
+            cur.execute("DROP TABLE IF EXISTS negotiation_messages__amount_migration")
+            cur.execute("ALTER TABLE negotiation_messages RENAME TO negotiation_messages__amount_migration")
+            cur.execute(
+                """
+                CREATE TABLE negotiation_messages (
+                  message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  negotiation_id TEXT NOT NULL,
+                  round INTEGER NOT NULL,
+                  sender TEXT NOT NULL,
+                  our_price TEXT,
+                  their_price TEXT,
+                  proposed_price TEXT,
+                  action_taken TEXT NOT NULL,
+                  message_type TEXT NOT NULL,
+                  timestamp TEXT NOT NULL,
+                  FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id),
+                  UNIQUE(negotiation_id, round)
+                )
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO negotiation_messages (
+                    message_id, negotiation_id, round, sender,
+                    our_price, their_price, proposed_price,
+                    action_taken, message_type, timestamp
+                )
+                SELECT message_id, negotiation_id, round, sender,
+                       CASE WHEN our_price IS NULL THEN NULL ELSE CAST(our_price AS TEXT) END,
+                       CASE WHEN their_price IS NULL THEN NULL ELSE CAST(their_price AS TEXT) END,
+                       CASE WHEN proposed_price IS NULL THEN NULL ELSE CAST(proposed_price AS TEXT) END,
+                       action_taken, message_type, timestamp
+                FROM negotiation_messages__amount_migration
+                """
+            )
+            cur.execute("DROP TABLE negotiation_messages__amount_migration")
 
     def _backfill_accepted_escrows(self, cur: sqlite3.Cursor) -> None:
         """One-shot in-place backfill of ``accepted_escrows`` from the
@@ -2074,9 +2277,9 @@ class SQLiteClient:
         negotiation_id: str,
         round: int | None = None,
         sender: str,
-        our_price: float | None,
-        their_price: float | None,
-        proposed_price: float | None,
+        our_price: int | str | float | None,
+        their_price: int | str | float | None,
+        proposed_price: int | str | float | None,
         action_taken: str,
         message_type: str,
         timestamp: str,
@@ -2101,6 +2304,9 @@ class SQLiteClient:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
+                our_price_text = _amount_to_db_text(our_price)
+                their_price_text = _amount_to_db_text(their_price)
+                proposed_price_text = _amount_to_db_text(proposed_price)
                 # Ensure thread exists
                 cur.execute(
                     """
@@ -2149,8 +2355,9 @@ class SQLiteClient:
                         timestamp = excluded.timestamp
                     """,
                     (
-                        negotiation_id, actual_round, sender, our_price, their_price,
-                        proposed_price, action_taken, message_type, timestamp
+                        negotiation_id, actual_round, sender, our_price_text,
+                        their_price_text, proposed_price_text, action_taken,
+                        message_type, timestamp
                     ),
                 )
                 conn.commit()
@@ -2186,9 +2393,9 @@ class SQLiteClient:
                     result.append({
                         "round": row[0],
                         "sender": row[1],
-                        "our_price": row[2],
-                        "their_price": row[3],
-                        "proposed_price": row[4],
+                        "our_price": _amount_from_db_text(row[2]),
+                        "their_price": _amount_from_db_text(row[3]),
+                        "proposed_price": _amount_from_db_text(row[4]),
                         "action_taken": row[5],
                         "message_type": row[6],
                         "timestamp": row[7],
@@ -2228,7 +2435,7 @@ class SQLiteClient:
         self,
         *,
         negotiation_id: str,
-        agreed_price: float,
+        agreed_price: int | str | float,
         agreed_duration_seconds: int,
     ) -> None:
         """Record the agreement artifact that comes out of a successful negotiation.
@@ -2249,6 +2456,7 @@ class SQLiteClient:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
+                agreed_price_text = _amount_to_db_text(agreed_price)
                 cur.execute(
                     """
                     UPDATE negotiation_threads
@@ -2259,7 +2467,7 @@ class SQLiteClient:
                     WHERE negotiation_id = ?
                     """,
                     (
-                        float(agreed_price),
+                        agreed_price_text,
                         int(agreed_duration_seconds),
                         now,
                         now,
@@ -2323,6 +2531,7 @@ class SQLiteClient:
                         # the caller can decide whether to error or proceed
                         # without the proposal.
                         pass
+                result["agreed_price"] = _amount_from_db_text(result.get("agreed_price"))
                 return result
             finally:
                 conn.close()
@@ -2744,7 +2953,7 @@ class SQLiteClient:
         their_agent_id: str,
         owner_id: str,  # The agent creating this record
         status: str = "active",
-        our_initial_price: float | None = None,
+        our_initial_price: int | str | float | None = None,
         our_strategy: str | None = None,
         requested_duration_seconds: int | None = None,
         buyer_escrow_proposal: dict[str, Any] | None = None,
@@ -2778,6 +2987,7 @@ class SQLiteClient:
                     if buyer_escrow_proposal is not None
                     else None
                 )
+                our_initial_price_text = _amount_to_db_text(our_initial_price)
 
                 # Insert public thread info (ignore if exists, it's shared)
                 cur.execute(
@@ -2811,7 +3021,10 @@ class SQLiteClient:
                         our_initial_price = excluded.our_initial_price,
                         our_strategy = excluded.our_strategy
                     """,
-                    (negotiation_id, owner_id, our_initial_price, our_strategy),
+                    (
+                        negotiation_id, owner_id, our_initial_price_text,
+                        our_strategy,
+                    ),
                 )
                 
                 conn.commit()
@@ -2860,7 +3073,7 @@ class SQLiteClient:
                         "their_agent_id": row[4],
                         "status": row[5],
                         # Default to None if no local state found for this owner
-                        "our_initial_price": row[6],
+                        "our_initial_price": _amount_from_db_text(row[6]),
                         "our_strategy": row[7],
                     }
                 return None
@@ -3262,7 +3475,12 @@ class SQLiteClient:
                     "agreed_amount", "agreed_duration_seconds",
                     "agreed_at", "created_at", "updated_at",
                 ]
-                return [dict(zip(keys, row)) for row in cur.fetchall()]
+                result = [dict(zip(keys, row)) for row in cur.fetchall()]
+                for item in result:
+                    item["agreed_amount"] = _amount_from_db_text(
+                        item.get("agreed_amount"),
+                    )
+                return result
             finally:
                 conn.close()
 
@@ -3312,6 +3530,9 @@ class SQLiteClient:
                     "created_at", "updated_at",
                 ]
                 thread = dict(zip(thread_keys, thread_row))
+                thread["agreed_amount"] = _amount_from_db_text(
+                    thread.get("agreed_amount"),
+                )
 
                 # Message log
                 cur.execute(
@@ -3329,6 +3550,16 @@ class SQLiteClient:
                     "action_taken", "message_type", "timestamp",
                 ]
                 messages = [dict(zip(msg_keys, row)) for row in cur.fetchall()]
+                for message in messages:
+                    message["our_price"] = _amount_from_db_text(
+                        message.get("our_price"),
+                    )
+                    message["their_price"] = _amount_from_db_text(
+                        message.get("their_price"),
+                    )
+                    message["proposed_price"] = _amount_from_db_text(
+                        message.get("proposed_price"),
+                    )
 
                 # Related stage events
                 cur.execute(

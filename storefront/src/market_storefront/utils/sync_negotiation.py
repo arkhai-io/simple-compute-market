@@ -35,6 +35,7 @@ import importlib.util
 import logging
 import os
 import uuid
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -389,9 +390,9 @@ def _seller_reference_amount(
     """
     from market_storefront.utils.action_executor import _extract_initial_price_from_order
 
-    per_hour = float(_extract_initial_price_from_order(listing))
+    per_hour = Decimal(str(_extract_initial_price_from_order(listing)))
     seconds = int(duration_seconds) if duration_seconds is not None else 3600
-    return int(round(per_hour * seconds / 3600.0))
+    return int(per_hour * seconds // Decimal(3600))
 
 
 def _coerce_pinned_proposal(value: Any) -> dict[str, Any] | None:
@@ -444,8 +445,8 @@ def _history_from_messages(
             action = "counter"
         amount_raw = m.get("proposed_price")
         try:
-            amount: int | None = int(float(amount_raw)) if amount_raw is not None else None
-        except (TypeError, ValueError):
+            amount: int | None = int(Decimal(str(amount_raw))) if amount_raw is not None else None
+        except (InvalidOperation, TypeError, ValueError):
             amount = None
         proposal = (
             _proposal_with_amount(buyer_pinned_proposal, amount)
@@ -772,7 +773,7 @@ async def continue_sync_negotiation(
     # Buyer-declared action short-circuits (accept / exit). No policy call.
     if buyer_action == "accept":
         last_seller_amount = next(
-            (int(float(m["proposed_price"])) for m in reversed(messages)
+            (int(Decimal(str(m["proposed_price"]))) for m in reversed(messages)
              if m.get("action_taken") == "counter_offer" and m.get("sender") != buyer_address),
             our_amount,
         )
