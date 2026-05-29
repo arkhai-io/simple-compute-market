@@ -728,8 +728,8 @@ def register(app: typer.Typer) -> None:
         # Without either, the buyer falls through to the default terminal
         # (RL needs torch — not installed in the lean buyer wheel).
         negotiation_chain = None
-        policies = resolve_config_value(toml_path="negotiation.policies")
-        policy_mode = resolve_config_value(toml_path="negotiation.policy_mode")
+        from ..common import resolve_negotiation_config
+        policies, policy_mode = resolve_negotiation_config()
         if policies or policy_mode:
             from market_buyer.buyer_client import _load_buyer_chain
             negotiation_chain = _load_buyer_chain(policies=policies, policy_mode=policy_mode)

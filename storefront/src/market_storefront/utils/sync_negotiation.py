@@ -602,7 +602,12 @@ async def start_sync_negotiation(
             listing_id=our_listing_id,
         )
 
-    listing_max_seconds = our_order_dict.get("max_duration_seconds")
+    raw_listing_max_seconds = our_order_dict.get("max_duration_seconds")
+    listing_max_seconds = (
+        int(raw_listing_max_seconds)
+        if raw_listing_max_seconds is not None and int(raw_listing_max_seconds) > 0
+        else None
+    )
     if (
         requested_duration_seconds is not None
         and listing_max_seconds is not None
