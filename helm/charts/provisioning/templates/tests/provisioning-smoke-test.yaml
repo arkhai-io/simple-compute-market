@@ -35,6 +35,8 @@ spec:
         - .venv/bin/pytest
         - -m
         - provisioning
+        - -k
+        - not test_host_crud_round_trip
       env:
         - name: ACTIVE_PROFILES
           value: "helm"

@@ -70,8 +70,32 @@ def _admin_key() -> str:
         return ""
 
 
-def _client() -> httpx.Client:
-    return httpx.Client(base_url=_api_url(), timeout=15.0)
+def _provisioning_agent_id() -> str:
+    try:
+        seller = dict(settings.get("seller", {}))
+        registry = dict(settings.get("registry", {}))
+        rpc = dict(settings.get("rpc", {}))
+    except Exception:
+        return ""
+
+    token_id = str(seller.get("agent_id", "") or "").strip()
+    chain_id = str(rpc.get("chain_id", "") or "").strip()
+    identity = str(registry.get("identity_address", "") or "").strip().lower()
+    if not (token_id and chain_id and identity):
+        return ""
+    return f"eip155:{chain_id}:{identity}:{token_id}"
+
+
+def _client(*, auth: bool = False) -> httpx.Client:
+    headers: dict[str, str] = {}
+    if auth:
+        agent_id = _provisioning_agent_id()
+        if agent_id:
+            headers["X-Agent-ID"] = agent_id
+        admin_key = _admin_key()
+        if admin_key:
+            headers["X-Admin-Key"] = admin_key
+    return httpx.Client(base_url=_api_url(), timeout=15.0, headers=headers)
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +108,7 @@ class TestProvisioningSmoke:
 
     def test_health_returns_ok(self):
         """GET /health → 200 with status field present."""
-        with _client() as client:
+        with _client(auth=True) as client:
             resp = client.get("/health")
         assert resp.status_code == 200, f"Health check failed: {resp.text}"
         data = resp.json()
@@ -143,6 +167,12 @@ class TestProvisioningSmoke:
         from a prior run (disable left the row in place), we update it rather
         than attempting a duplicate INSERT.
         """
+        if not _provisioning_agent_id():
+            pytest.skip(
+                "seller.agent_id is not pinned; cannot construct provisioning X-Agent-ID. "
+                "Pin storefront.agents[].agentId after registration to smoke-test write paths."
+            )
+
         test_host = {
             "name": "smoke-test-host",
             "kvm_host": "192.0.2.1",   # TEST-NET — never routes
@@ -152,7 +182,7 @@ class TestProvisioningSmoke:
             "gpu_count": 0,
             "enabled": True,
         }
-        with _client() as client:
+        with _client(auth=True) as client:
             # Upsert: try to register; if the host already exists (409) from a
             # prior test run, update it instead so the test is idempotent.
             reg = client.post("/api/v1/hosts/", json=test_host)

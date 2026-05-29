@@ -37,9 +37,14 @@ data:
       api_url:           {{ printf "http://%s-storefront-%s:%d" $.Release.Name $agent.name (int $agent.port) | quote }}
       base_url_override: {{ $agent.config.seller.baseUrl | quote }}
       agent_id:          {{ $agent.agentId | default "" | quote }}
+      private_key:       {{ (index $.Values "e2e-tests").seller.privateKey | default "" | quote }}
+      wallet_address:    {{ (index $.Values "e2e-tests").seller.walletAddress | default "" | quote }}
+      admin_api_key:     {{ (index $.Values "e2e-tests").seller.adminApiKey | default $.Values.global.adminApiKey | default "" | quote }}
     {{- end }}
 
     buyer:
+      private_key:    {{ (index .Values "e2e-tests").buyer.privateKey | default "" | quote }}
+      wallet_address: {{ (index .Values "e2e-tests").buyer.walletAddress | default "" | quote }}
       chain_rpc_url: {{ printf "ws://%s:%d" $.Values.global.rpc.host (int $.Values.global.rpc.port) | quote }}
 
     provisioning:

@@ -4,6 +4,10 @@
   {{- $repo = .Values.global.imageRepository | default "" -}}
 {{- end -}}
 {{- $itImage := "" -}}
+{{- $rpcUrl := .Values.rpcUrl -}}
+{{- if not $rpcUrl -}}
+  {{- $rpcUrl = printf "http://%s:%d" .Values.global.rpc.host (int .Values.global.rpc.port) -}}
+{{- end -}}
 {{- if $repo -}}
   {{- $itImage = printf "%s/%s:%s" $repo $it.name $it.tag -}}
 {{- else -}}
@@ -25,14 +29,45 @@ spec:
       image: {{ $itImage }}
       imagePullPolicy: {{ $it.pullPolicy }}
       command:
-        - .venv/bin/pytest
-        - -m
-        - contracts
+        - .venv/bin/python
+        - -c
+        - |
+          import os
+          from web3 import Web3
+
+          rpc_url = os.environ["RPC_URL"]
+          expected_chain_id = int(os.environ["CHAIN_ID"])
+          addresses = {
+              "identity": os.environ["IDENTITY_REGISTRY_ADDRESS"],
+              "reputation": os.environ["REPUTATION_REGISTRY_ADDRESS"],
+              "validation": os.environ["VALIDATION_REGISTRY_ADDRESS"],
+          }
+
+          w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 10}))
+          if not w3.is_connected():
+              raise SystemExit(f"RPC not reachable: {rpc_url}")
+          chain_id = w3.eth.chain_id
+          if chain_id != expected_chain_id:
+              raise SystemExit(f"chain_id mismatch: expected {expected_chain_id}, got {chain_id}")
+          print(f"RPC ok: {rpc_url} chain_id={chain_id}")
+
+          for label, address in addresses.items():
+              checksum = w3.to_checksum_address(address)
+              code = w3.eth.get_code(checksum)
+              if len(code) <= 2:
+                  raise SystemExit(f"No contract bytecode at {label} registry {checksum}")
+              print(f"{label} registry bytecode ok at {checksum} bytes={len(code)}")
       env:
-        # Override the dockerfile defaults so the container loads config-helm.yml
-        # from the mounted ConfigMap alongside the baked-in config.yml.
-        - name: ACTIVE_PROFILES
-          value: "helm"
+        - name: RPC_URL
+          value: {{ $rpcUrl | quote }}
+        - name: CHAIN_ID
+          value: {{ .Values.global.rpc.chainId | quote }}
+        - name: IDENTITY_REGISTRY_ADDRESS
+          value: {{ .Values.global.registry.identity_address | quote }}
+        - name: REPUTATION_REGISTRY_ADDRESS
+          value: {{ .Values.global.registry.reputation_address | quote }}
+        - name: VALIDATION_REGISTRY_ADDRESS
+          value: {{ .Values.global.registry.validation_address | quote }}
       volumeMounts:
         - name: helm-config
           mountPath: /app/config/config-helm.yml

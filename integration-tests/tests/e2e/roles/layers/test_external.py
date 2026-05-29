@@ -55,6 +55,7 @@ def external_world(w3: Web3, rpc_settings, registry_settings, buyer_settings, se
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.contracts
 @pytest.mark.roles_layer_external
 class TestExternalWorld:
     """Verify the external layer exists before any marketplace logic runs."""
