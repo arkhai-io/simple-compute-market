@@ -111,6 +111,45 @@ def test_round_0_seller_accepts_immediately(mock_urlopen):
 
 
 @patch("market_buyer.buyer_client.urllib.request.urlopen")
+def test_round_0_request_preserves_literal_fields(mock_urlopen):
+    seen_body = {}
+
+    def _capture(req, timeout=None):
+        seen_body.update(json.loads(req.data.decode("utf-8")))
+        return _MockResponse(
+            status=200,
+            text=json.dumps({
+                "negotiation_id": "neg-1",
+                "action": "accept",
+                "proposal": _seller_proposal(50),
+            }),
+        )
+
+    mock_urlopen.side_effect = _capture
+    token = "0x" + "ef" * 20
+    negotiate_with_seller(
+        seller_url="http://seller:8001",
+        buyer_address=_BUYER_ADDR,
+        buyer_private_key=_BUYER_PK,
+        listing_id="seller-1",
+        initial_price=50,
+        max_price=100,
+        provision_terms=_provision(3600),
+        escrow_proposal=EscrowProposal(
+            chain_name="anvil",
+            escrow_address="0x" + "cd" * 20,
+            fields={},
+            literal_fields={"token": token},
+            expiration_unix=1_800_000_000,
+        ),
+    )
+
+    proposal = seen_body["proposal"]
+    assert proposal["fields"] == {"amount": 50}
+    assert proposal["literal_fields"] == {"token": token}
+
+
+@patch("market_buyer.buyer_client.urllib.request.urlopen")
 def test_round_0_seller_exits(mock_urlopen):
     mock_urlopen.side_effect = _urlopen_fake([
         {"negotiation_id": "neg-1", "action": "exit", "reason": "price_unreasonable"},
