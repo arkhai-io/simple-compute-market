@@ -15,6 +15,7 @@ WORKDIR /app
 # Copy the pre-built wheels from the monorepo .dist/ directory.
 # These are built on the host by `make dist` before `docker build`.
 COPY .dist/ /dist/
+RUN ln -s /dist /.dist
 
 COPY storefront/pyproject.toml storefront/uv.lock storefront/entrypoint.sh ./
 COPY service/ ../service/
@@ -99,6 +100,9 @@ COPY --chown=appuser:appuser storefront-client/ ../storefront-client/
 # Sourcing from the build context means this layer invalidates whenever
 # .dist/ changes on disk, which is exactly what we want.
 COPY .dist/ /dist/
+USER root
+RUN ln -s /dist /.dist
+USER appuser
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --find-links /dist
 
