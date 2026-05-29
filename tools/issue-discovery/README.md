@@ -35,9 +35,9 @@ issue candidates when the workflow fails.
 
 - `../README.md` explains the repo tooling namespace and the available
   issue-discovery modes.
-- `../../docs/ISSUE_DISCOVERY.md` is the operator workflow for strict runs,
+- `../../docs/development/ISSUE_DISCOVERY.md` is the operator workflow for strict runs,
   continuations, profiles, clean-room runs, artifacts, and issue filing.
-- `../../docs/VALIDATION_RUNBOOK.md` is the manual validation runbook for local
+- `../../docs/development/VALIDATION_RUNBOOK.md` is the manual validation runbook for local
   mock, clean Ubuntu/Multipass, and GCP/KVM proof paths.
 
 ## Development

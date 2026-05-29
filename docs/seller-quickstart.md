@@ -26,7 +26,7 @@ via wildcard subdomains instead of direct port-forward NAT, see
 ## 1. Get the code and build
 
 ```bash
-git clone --recurse-submodules https://github.com/arkhai-io/simple-compute-market.git
+git clone https://github.com/arkhai-io/simple-compute-market.git
 cd simple-compute-market
 make build-seller
 ```
@@ -60,7 +60,7 @@ ssh_public_key = "ssh-ed25519 AAAA...placeholder seller@host"
 
 [chains.base_sepolia]
 chain_id = 84532
-rpc_url  = "https://base-sepolia.infura.io/v3/<YOUR_KEY>"
+rpc_url  = "https://sepolia.base.org"   # public RPC; or your own provider
 
 [registry]
 urls = ["http://<INDEXER_HOST>:8080"]

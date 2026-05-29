@@ -531,7 +531,7 @@ absent and the legacy `policy_mode` is set, synthesize
 `["has_matching_inventory_guard", "escrow_shape_guard", policy_mode]`.
 Custom middlewares are picked up by file discovery via
 `[negotiation] extra_policy_paths = [...]`. See
-[docs/configuration.md](./configuration.md) for the full reference
+[docs/configuration.md](../configuration.md) for the full reference
 including built-in policies, the buyer's aggregation policy, and how
 to write a custom one.
 

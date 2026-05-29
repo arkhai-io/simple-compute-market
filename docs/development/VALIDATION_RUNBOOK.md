@@ -20,7 +20,7 @@ then run a CLI-first GCP proof for real Ansible/KVM provisioning.
 - Keep issue evidence in `.scm-local/notes/issue-notes.md`; this runbook is
   for repeatable execution.
 - The issue-discovery harness is intentionally separate. Use
-  `docs/ISSUE_DISCOVERY.md` when the goal is issue candidate generation and
+  `docs/development/ISSUE_DISCOVERY.md` when the goal is issue candidate generation and
   filing.
 
 ## Local Mock Pass Criteria

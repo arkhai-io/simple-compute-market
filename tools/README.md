@@ -59,9 +59,9 @@ Modes:
 
 Primary docs:
 
-- `docs/ISSUE_DISCOVERY.md` - operator workflow for strict runs,
+- `docs/development/ISSUE_DISCOVERY.md` - operator workflow for strict runs,
   continuations, clean-room runs, artifacts, and issue filing.
-- `docs/VALIDATION_RUNBOOK.md` - manual validation runbook covering local mock,
+- `docs/development/VALIDATION_RUNBOOK.md` - manual validation runbook covering local mock,
   clean Ubuntu/Multipass, and GCP/KVM proof paths.
 - `tools/issue-discovery/README.md` - package-level note for the Python tool.
 
