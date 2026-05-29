@@ -467,7 +467,7 @@ def register(app: typer.Typer) -> None:
         chain_cfg = select_chain_for_listing(
             listing=None, override=chain_name, yes=assume_yes,
         )
-        chain = chain_cfg.name
+        selected_chain_name = chain_cfg.name
         rpc = chain_cfg.rpc_url
         addr_cfg = chain_cfg.alkahest_address_config_path
 
@@ -539,13 +539,13 @@ def register(app: typer.Typer) -> None:
         # Token + expiration come from the proposal (echoed by the seller).
         # The closure only needs chain config to resolve on-chain addresses.
         build_escrow_terms = make_buyer_payment_escrow_terms_fn(
-            chain_name=chain,
+            chain_name=selected_chain_name,
             addr_config_path=addr_cfg or None,
         )
         create_escrow = make_create_escrow_fn(
             private_key=pk,
             rpc_url=rpc,
-            chain_name=chain,
+            chain_name=selected_chain_name,
             addr_config_path=addr_cfg or None,
         )
 
@@ -634,7 +634,7 @@ def register(app: typer.Typer) -> None:
         def build_escrow_proposal_for_match(match: dict) -> EscrowProposal | None:
             entry = select_escrow_entry(
                 match,
-                chain_name=chain,
+                chain_name=selected_chain_name,
                 token_contract_filter=tc,
                 assume_yes=assume_yes,
                 rpc_url=rpc,
@@ -646,7 +646,7 @@ def register(app: typer.Typer) -> None:
             from service.schemas import accepted_token_address
             token = accepted_token_address(entry)
             return EscrowProposal(
-                chain_name=entry.get("chain_name", chain),
+                chain_name=entry.get("chain_name", selected_chain_name),
                 escrow_address=entry["escrow_address"],
                 fields={"token": token},
                 literal_fields={"token": token},
