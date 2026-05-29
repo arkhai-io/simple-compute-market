@@ -25,13 +25,15 @@ For the seller side see [`seller-quickstart.md`](./seller-quickstart.md).
 
 ## 1. Install
 
-From a release build:
+Released build (latest):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/.../market-installer.sh | bash
+curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh | bash
 ```
 
-Details in [`buyer/INSTALLER.md`](../buyer/INSTALLER.md).
+Installs `market` into `~/.local/bin` (needs Python 3.12+ and `curl`/`wget`;
+on macOS, `brew install python@3.12`). Pin a version with
+`... | bash -s -- --version market-cli-v0.5.3`.
 
 Or from the repo:
 
@@ -53,9 +55,9 @@ market --version
 private_key    = "0x<YOUR_BUYER_PRIVATE_KEY>"
 ssh_public_key = "ssh-ed25519 AAAA...your-key buyer@host"
 
-[chain]
+[chains.base_sepolia]
 chain_id = 84532
-rpc_url  = "https://base-sepolia.infura.io/v3/<YOUR_KEY>"
+rpc_url  = "https://sepolia.base.org"   # public RPC; or your own provider
 
 [registry]
 urls = ["http://<INDEXER_HOST>:8080"]
@@ -109,8 +111,9 @@ Useful flags:
   `--disk-gb-min` — additional listing filters.
 - `--settlement-timeout` — default 600s. Real cloud-init can take 5-10
   min; bump to 1800 if you see timeouts before progress.
-- `--token-contract` + `--token-decimals` — override config and skip
-  the on-chain `decimals()` lookup.
+- `--token-contract` — optional filter: only consider listings whose
+  accepted escrow uses this ERC-20. Omit it and the token comes from the
+  chosen listing. `--token-decimals` skips the on-chain `decimals()` lookup.
 
 The terminal output includes a `Connection` block. Use the `vm_host_ip`
 field (the printed `ssh_command` references the inventory alias, not the
@@ -161,7 +164,7 @@ market escrow reclaim <escrow_uid>
   that fails after escrow creation locks funds until `expiration_unix`.
   Resume with `market buy --from <run_id>`, don't re-`buy` from scratch.
 - **VM SSH uses `vm_host_ip`, not the alias** the `ssh_command` field
-  prints (`tenant<id>@btc1` etc. — the host name is the seller's
+  prints (`tenant<id>@kvm1` etc. — the host name is the seller's
   inventory alias, not DNS).
 - **The tenant user has no sudo password.** Cloud-init only injects
   your SSH pubkey.

@@ -143,7 +143,7 @@ class TestCreateVmToParams:
             vm_disk_size="40G",
             vm_os_variant="ubuntu22.04",
         )
-        p = req.to_ansible_job_params("btc1")
+        p = req.to_ansible_job_params("kvm1")
         assert p.vm_ram == 8192
         assert p.vm_vcpus == 8
         assert p.vm_disk_size == "40G"

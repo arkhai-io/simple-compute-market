@@ -3,6 +3,7 @@
   {{- $itValues = .Values.global.integrationTests | default dict -}}
 {{- end -}}
 {{- $rootIt := ((.Values).integrationTests) | default dict -}}
+{{- $tests := .Values.tests | default dict -}}
 {{- $itRepo := $rootIt.repository | default ($itValues.repository | default "") -}}
 {{- if and (not $itRepo) .Values.global -}}
   {{- $itRepo = .Values.global.imageRepository | default "" -}}
@@ -16,6 +17,7 @@
 {{- else -}}
   {{- $itImage = printf "%s:%s" $itName $itTag -}}
 {{- end -}}
+{{- $profiles := $tests.activeProfiles | default (include "registry.smokeTestActiveProfiles" .) -}}
 apiVersion: v1
 kind: Pod
 metadata:
@@ -37,13 +39,12 @@ spec:
         - registry
       env:
         - name: ACTIVE_PROFILES
-          value: "helm"
+          value: {{ $profiles | quote }}
       volumeMounts:
-        - name: helm-config
-          mountPath: /app/config/config-helm.yml
-          subPath: config-helm.yml
-          readOnly: true
+        {{- include "registry.smokeTestConfigVolumeMounts" . | nindent 8 }}
+        {{- include "registry.smokeTestSecretVolumeMounts" . | nindent 8 }}
   volumes:
-    - name: helm-config
+    - name: test-config
       configMap:
         name: {{ .Release.Name }}-test-config
+    {{- include "registry.smokeTestSecretVolume" . | nindent 4 }}

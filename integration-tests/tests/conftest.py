@@ -44,6 +44,10 @@ def rpc_settings() -> dict:
 def registry_settings() -> dict:
     return {
         "api_url": settings.REGISTRY.API_URL,
+        "identity_address": settings.REGISTRY.IDENTITY_ADDRESS,
+        "reputation_address": settings.REGISTRY.REPUTATION_ADDRESS,
+        "validation_address": settings.REGISTRY.VALIDATION_ADDRESS,
+        "owner_address": settings.REGISTRY.OWNER_ADDRESS,
     }
 
 
@@ -67,13 +71,30 @@ def seller_settings() -> dict:
         "base_url_override": settings.SELLER.BASE_URL_OVERRIDE,
         "private_key": settings.SELLER.PRIVATE_KEY,
         "wallet_address": settings.SELLER.WALLET_ADDRESS,
-        "admin_api_key": str(getattr(settings.SELLER, "ADMIN_API_KEY", None) or ""),
+        "admin_api_key": str(getattr(settings.SELLER, "ADMIN_API_KEY", None) or "").strip(),
+        "agent_id": str(getattr(settings.SELLER, "AGENT_ID", None) or ""),
     }
 
 
 @pytest.fixture(scope="session")
 def min_eth_balance() -> Decimal:
     return Decimal(str(settings.get("TESTS__MINIMUM_ETH_BALANCE", "0.01")))
+
+
+@pytest.fixture(scope="session")
+def provisioning_settings() -> dict:
+    return {
+        "api_url": settings.PROVISIONING.API_URL,
+    }
+
+
+@pytest.fixture(scope="session")
+def provisioning_auth_settings(rpc_settings, registry_settings, seller_settings) -> dict:
+    token_id = str(seller_settings.get("agent_id", "") or "").strip()
+    chain_id = str(rpc_settings.get("chain_id", "") or "").strip()
+    identity = str(registry_settings.get("identity_address", "") or "").strip().lower()
+    agent_id = f"eip155:{chain_id}:{identity}:{token_id}" if token_id and chain_id and identity else ""
+    return {"agent_id": agent_id}
 
 
 # ---------------------------------------------------------------------------

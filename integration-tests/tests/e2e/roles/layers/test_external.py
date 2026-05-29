@@ -59,6 +59,7 @@ def external_world(w3: Web3, rpc_settings, registry_settings, buyer_settings, se
 class TestExternalWorld:
     """Verify the external layer exists before any marketplace logic runs."""
 
+    @pytest.mark.contracts
     def test_rpc_reachable_with_expected_chain_id(self, external_world: dict):
         """Anvil (or whatever chain) is reachable and has the right chain ID."""
         w3 = external_world["w3"]
@@ -68,6 +69,7 @@ class TestExternalWorld:
             f"got {w3.eth.chain_id}"
         )
 
+    @pytest.mark.contracts
     @pytest.mark.parametrize("label", ["identity_registry", "reputation_registry", "validation_registry"])
     def test_erc8004_contract_deployed(self, external_world: dict, label: str):
         """ERC-8004 registry contracts have deployed bytecode."""

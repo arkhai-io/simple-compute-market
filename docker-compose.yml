@@ -87,9 +87,11 @@ services:
 
   # 3. Bob's storefront — the primary test seller.
   # Buyers are pure HTTP clients (the `market` CLI / market_buyer
-  # library) — no buyer container in this stack. To exercise a buy
-  # against this seller, run `market buy ...` from the host (or a
-  # one-shot pod / Job that sees the same network).
+  # library). The buyer-side e2e runs as a one-shot container on this same
+  # network (the integration-tests image, which bundles the `market`
+  # binary), so discovery resolves the seller's registry-advertised URL
+  # (bob-storefront:8001) and reaches it the way a real remote buyer would.
+  # See `make test-buyer-machine`.
   bob-storefront:
     image: arkhai:storefront
     platform: linux/amd64

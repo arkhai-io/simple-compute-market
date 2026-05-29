@@ -1,0 +1,19 @@
+schema_version: 1
+name: clean_ubuntu_bootstrap
+description: Bootstrap-focused phases for clean Ubuntu hosts.
+phases:
+  - id: source_identity
+    name: Source identity
+    category: identity
+    blocking: true
+    commands:
+      - id: git_head
+        run: git rev-parse HEAD
+
+  - id: bootstrap_check
+    name: Bootstrap check mode
+    category: prerequisite
+    blocking: true
+    commands:
+      - id: bootstrap_check
+        run: ./scripts/bootstrap-clean-host-ubuntu.sh check

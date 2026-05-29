@@ -1,6 +1,6 @@
 resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.vcpu_count,attribute.ram_gb,attribute.disk_gb,attribute.virtualization_type,attribute.symbol,attribute.contract_address,attribute.decimals,attribute.topic,attribute.soc_percent,attribute.max_kwh,attribute.power_kw
-compute-h200-001,compute.gpu,H200,count,8,available,200,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,604800,H200,99.0,"California, US",host-ca-h200-01,192,2048,20000,bare_metal,,,,,,,
-compute-h200-002,compute.gpu,h200,count,1,available,180,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,H200,95.0,"California, US",host-ca-h200-02,16,256,4000,vm,,,,,,,
+compute-h200-001,compute.gpu,H200,count,8,available,10,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,604800,H200,99.0,"California, US",host-ca-h200-01,192,2048,20000,bare_metal,,,,,,,
+compute-h200-002,compute.gpu,h200,count,1,available,10,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,H200,95.0,"California, US",host-ca-h200-02,16,256,4000,vm,,,,,,,
 token-usdc-main,token.erc20,usdc,base_units,100000000,available,,,,,,,,,,,,USDC,0xdac17f958d2ee523a2206206994597c13d831ec7,6,,,,
 battery-edge-01,energy.battery,kwh,kwh,56,discharging,,,,,,,,,,,,,,,,64.3,80.0,-1.52
 info-note-001,information.note,,,,available,,,,,,,,,,,,,,,market-overview,,,

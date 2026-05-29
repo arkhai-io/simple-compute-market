@@ -33,7 +33,12 @@ async def db(tmp_path):
     return SQLiteClient(db_path=str(tmp_path / "negotiate_test.db"))
 
 
-async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
+async def _seed_listing(
+    db,
+    listing_id: str,
+    demand_amount: int = 5000,
+    max_duration_seconds: int | None = 7200,
+) -> None:
     await db.upsert_listing(
         listing_id=listing_id,
         status="open",
@@ -51,7 +56,7 @@ async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
             ),
         }],
         fulfillment_resource=None,
-        max_duration_seconds=7200,
+        max_duration_seconds=max_duration_seconds,
         seller="http://seller:8001",
     )
     # Seed at least one matching available compute resource so the
@@ -149,6 +154,43 @@ class TestNegotiateNew:
         )
         assert "negotiation_id" in result
         assert result["action"] in ("accept", "counter", "exit")
+
+    async def test_zero_max_duration_means_unlimited(self, client, db):
+        c, db = client
+        await _seed_listing(
+            db,
+            "neg-listing-unlimited",
+            demand_amount=5000,
+            max_duration_seconds=0,
+        )
+        result = await c.negotiate_new(
+            listing_id="neg-listing-unlimited",
+            buyer_address=_BUYER,
+            initial_amount=5000,
+            duration_seconds=3600,
+            token=_TOKEN,
+        )
+        assert "negotiation_id" in result
+        assert result["action"] in ("accept", "counter", "exit")
+
+    async def test_valid_request_persists_uint256_amounts(self, client, db):
+        """18-decimal token rates exceed SQLite int64 but are normal EVM amounts."""
+        c, db = client
+        large_amount = 150 * 10**18
+        await _seed_listing(db, "neg-listing-large", demand_amount=large_amount)
+        result = await c.negotiate_new(
+            listing_id="neg-listing-large",
+            buyer_address=_BUYER,
+            initial_amount=large_amount,
+            duration_seconds=3600,
+            token=_TOKEN,
+        )
+
+        neg_id = result["negotiation_id"]
+        messages = await db.load_negotiation_thread(negotiation_id=neg_id)
+        assert messages[0]["our_price"] == large_amount
+        assert messages[0]["their_price"] == large_amount
+        assert messages[0]["proposed_price"] == large_amount
 
     async def test_zero_duration_returns_422(self, client):
         """duration_seconds=0 is rejected by Pydantic (gt=0)."""

@@ -531,7 +531,7 @@ absent and the legacy `policy_mode` is set, synthesize
 `["has_matching_inventory_guard", "escrow_shape_guard", policy_mode]`.
 Custom middlewares are picked up by file discovery via
 `[negotiation] extra_policy_paths = [...]`. See
-[docs/configuration.md](./configuration.md) for the full reference
+[docs/configuration.md](../configuration.md) for the full reference
 including built-in policies, the buyer's aggregation policy, and how
 to write a custom one.
 
@@ -1788,6 +1788,7 @@ repo. The registries and their IAM are managed there; this repo only pushes.
 | Artifact | AR format | Repo key | Tag at push |
 |---|---|---|---|
 | Docker images (registry, storefront, provisioning) | DOCKER | `docker` | git short SHA |
+| Docker dev images (test-env, integration-tests) | DOCKER | `docker` | git short SHA |
 | Helm chart (`arkhai-node-operator`) | DOCKER (OCI) | `helm` | git short SHA |
 | `arkhai-storefront-client` wheel | PYTHON | `python` | wheel version |
 | `arkhai-registry-client` wheel | PYTHON | `python` | wheel version |
@@ -1807,6 +1808,11 @@ make push-runtime-artifacts [AR_PROJECT=compute-market-1-dev]
   ├── push-helm     # helm push (OCI)
   ├── push-wheels   # gcloud existence check + uv publish for missing wheels
   └── push-cli      # gcloud artifacts generic upload
+
+make build-dev
+make push-dev-images [AR_PROJECT=compute-market-1-dev]
+  ├── arkhai:test-env
+  └── arkhai:integration-tests
 ```
 
 **Image naming convention:** All service images share the image name `arkhai`
@@ -2341,10 +2347,12 @@ This inverts the conceptual layer (provisioning is infrastructure; storefront is
 `arkhai-storefront-client` encodes two contracts with the agent server (`storefront/src/market_storefront/agent.py`) that are not enforced at import time — mismatches produce silent 403s or wrong response shapes at runtime:
 
 1. **Auth message format** — `_build_auth_headers` must match `_check_agent_request_auth` in `agent.py`:
-   - `create_order` → `"create_order:<agent_wallet_address>:<timestamp>"`
-   - `close_listing` → `"close_order:<listing_id>:<timestamp>"`
+   - `create_listing` → `"create_listing:<agent_wallet_address>:<timestamp>"`
+   - `close_listing` → `"close_listing:<listing_id>:<timestamp>"`
 
-2. **Endpoint signatures** — `/listings/create`, `/listings/close`, `/alerts/resource` request/response shapes.
+2. **Endpoint signatures** — `/api/v1/listings/create`,
+   `/api/v1/listings/{listing_id}/close`, and `/alerts/resource`
+   request/response shapes.
 
 When either contract changes: bump `version` in `storefront-client/pyproject.toml`, update the minimum version constraint in all consuming `pyproject.toml` files, rebuild the wheel with `make dist-storefront-client`, and run `make init` in each consumer. Keep all changes in one commit so the version boundary is auditable in git history. See `storefront-client/README.md` for the full checklist.
 

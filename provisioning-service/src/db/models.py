@@ -105,7 +105,12 @@ class Host(Base):
     __tablename__ = "hosts"
 
     name = Column(String, primary_key=True)  # Ansible alias, e.g. "kvm1"
-    kvm_host = Column(String, nullable=False)  # IP or hostname for SSH
+    kvm_host = Column(String, nullable=False)  # IP/hostname the provisioner SSHes to
+    # Address tenants use to reach this host's VM port-forwards (public IP,
+    # DNS, or overlay IP). Distinct from kvm_host: the provisioner may reach
+    # the host over a different network than buyers do. NULL → fall back to
+    # kvm_host in tenant-facing connection info.
+    public_host = Column(String, nullable=True)
     ssh_user = Column(String, nullable=False)  # SSH login user on the KVM host
     ssh_key_type = Column(String, nullable=False, default="path")  # "path" | "embedded"
     ssh_key_value = Column(String, nullable=False)  # path string or encrypted PEM

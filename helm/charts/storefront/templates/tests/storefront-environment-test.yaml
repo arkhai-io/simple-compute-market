@@ -3,6 +3,7 @@
   {{- $itValues = .Values.global.integrationTests | default dict -}}
 {{- end -}}
 {{- $rootIt := ((.Values).integrationTests) | default dict -}}
+{{- $tests := .Values.tests | default dict -}}
 {{- $itRepo := $rootIt.repository | default ($itValues.repository | default "") -}}
 {{- if and (not $itRepo) .Values.global -}}
   {{- $itRepo = .Values.global.imageRepository | default "" -}}
@@ -16,14 +17,46 @@
 {{- else -}}
   {{- $itImage = printf "%s:%s" $itName $itTag -}}
 {{- end -}}
-{{/*
-Build the dynaconf profile list as "helm" + one "{component}-secret"
-entry per agent, joined by commas.
-*/}}
-{{- $profiles := list "helm" -}}
-{{- range $agent := .Values.agents -}}
-  {{- $profiles = append $profiles (printf "%s-secret" ($agent.component | default $agent.name)) -}}
+{{- if not .Values.agents -}}
+  {{- fail "storefront smoke test requires at least one configured agent" -}}
 {{- end -}}
+{{- $targetName := $tests.targetAgentName | default "" -}}
+{{- $targetAgent := first .Values.agents -}}
+{{- if $targetName -}}
+  {{- $found := false -}}
+  {{- range $agent := .Values.agents -}}
+    {{- if eq $agent.name $targetName -}}
+      {{- $targetAgent = $agent -}}
+      {{- $found = true -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if not $found -}}
+    {{- fail (printf "storefront smoke test targetAgentName %q did not match any agent" $targetName) -}}
+  {{- end -}}
+{{- end -}}
+{{- $component := $targetAgent.component | default $targetAgent.name -}}
+{{- $globalSecretEnabled := false -}}
+{{- if and .Values.global .Values.global.smokeTests .Values.global.smokeTests.secret -}}
+  {{- $globalSecretEnabled = .Values.global.smokeTests.secret.enabled | default false -}}
+{{- end -}}
+{{- $profiles := $tests.activeProfiles | default "" -}}
+{{- if not $profiles -}}
+  {{- if $globalSecretEnabled -}}
+    {{- $profiles = include "storefront.smokeTestActiveProfiles" . -}}
+  {{- else -}}
+    {{- $profileList := list -}}
+    {{- $configProfiles := include "storefront.smokeTestConfigProfiles" . -}}
+    {{- if $configProfiles -}}
+      {{- range $profile := splitList "," $configProfiles -}}
+        {{- $profileList = append $profileList $profile -}}
+      {{- end -}}
+    {{- end -}}
+    {{- $profileList = append $profileList (printf "%s-secret" $component) -}}
+    {{- $profiles = join "," $profileList -}}
+  {{- end -}}
+{{- end -}}
+{{- $secretName := $tests.secretName | default (include "storefront.agentSecretName" (dict "root" $ "agent" $targetAgent)) -}}
+{{- $secretKey := $tests.secretKey | default (printf "config-%s-secret.yml" $component) -}}
 apiVersion: v1
 kind: Pod
 metadata:
@@ -45,26 +78,25 @@ spec:
         - storefront
       env:
         - name: ACTIVE_PROFILES
-          value: {{ join "," $profiles | quote }}
+          value: {{ $profiles | quote }}
       volumeMounts:
-        - name: test-config
-          mountPath: /app/config/config-helm.yml
-          subPath: config-helm.yml
-          readOnly: true
-        {{- range $agent := .Values.agents }}
-        {{- $component := $agent.component | default $agent.name }}
-        - name: {{ $component }}-secret-config
-          mountPath: /app/config/config-{{ $component }}-secret.yml
-          subPath: config-{{ $component }}-secret.yml
+        {{- include "storefront.smokeTestConfigVolumeMounts" . | nindent 8 }}
+        {{- if $globalSecretEnabled }}
+        {{- include "storefront.smokeTestSecretVolumeMounts" . | nindent 8 }}
+        {{- else }}
+        - name: selected-storefront-secret-config
+          mountPath: /app/config/{{ $secretKey }}
+          subPath: {{ $secretKey }}
           readOnly: true
         {{- end }}
   volumes:
     - name: test-config
       configMap:
         name: {{ .Release.Name }}-test-config
-    {{- range $agent := .Values.agents }}
-    {{- $component := $agent.component | default $agent.name }}
-    - name: {{ $component }}-secret-config
+    {{- if $globalSecretEnabled }}
+    {{- include "storefront.smokeTestSecretVolume" . | nindent 4 }}
+    {{- else }}
+    - name: selected-storefront-secret-config
       secret:
-        secretName: {{ include "storefront.agentSecretName" (dict "root" $ "agent" $agent) }}
+        secretName: {{ $secretName }}
     {{- end }}

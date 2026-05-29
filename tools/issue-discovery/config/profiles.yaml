@@ -1,0 +1,43 @@
+schema_version: 1
+profiles:
+  - id: fresh-volumes
+    description: Reproduce fresh named-volume behavior without pre-chown.
+    phase_file: phases/targeted_repros.yaml
+    env:
+      ISSUE_DISCOVERY_COMPOSE_ARGS: -f docker-compose.yml -f /tmp/scm-no-redis-port.yml
+    phases:
+      - source_identity
+      - host_identity
+      - redis_no_host_port_override
+      - fresh_volume_reset
+      - compose_preexisting_stack_check
+      - compose_start_strict
+      - readiness_checks
+      - teardown
+
+  - id: host-redis-conflict
+    description: Exercise strict compose startup with host Redis still published.
+    phase_file: phases/targeted_repros.yaml
+    phases:
+      - source_identity
+      - host_identity
+      - redis_port_conflict_setup
+      - compose_preexisting_stack_check
+      - compose_start_strict
+      - redis_port_conflict_cleanup
+      - teardown
+
+  - id: zerotier-build-path
+    description: Exercise the build path that invokes ZeroTier installation.
+    phase_file: phases/targeted_repros.yaml
+    phases:
+      - source_identity
+      - host_identity
+      - zerotier_build_path
+
+  - id: clean-ubuntu-bootstrap
+    description: Validate clean Ubuntu host bootstrap script behavior.
+    phase_file: phases/clean_ubuntu_bootstrap.yaml
+    phases:
+      - source_identity
+      - bootstrap_check

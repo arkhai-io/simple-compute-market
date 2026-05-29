@@ -86,6 +86,17 @@ agents:
       chain:
         name: "anvil"
 
+# ---------------------------------------------------------------------------
+# Helm smoke-test configuration.
+# targetAgentName empty = first configured agent. activeProfiles empty =
+# "helm,<selected-component>-secret". secretName empty = selected agent Secret.
+# ---------------------------------------------------------------------------
+tests:
+  targetAgentName: ""
+  activeProfiles: ""
+  secretName: ""
+  secretKey: ""
+
 # Number of replicas per agent.
 replicaCount: 1
 

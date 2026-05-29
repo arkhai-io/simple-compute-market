@@ -4,8 +4,6 @@ set -euo pipefail
 # ── Configuration ──────────────────────────────────────────────
 INSTALL_DIR="${MARKET_INSTALL_DIR:-$HOME/.market}"
 BIN_DIR="$HOME/.local/bin"
-MIN_PYTHON_MAJOR=3
-MIN_PYTHON_MINOR=12
 UV_VERSION="0.8.13"
 
 # ── System dependency mapping ─────────────────────────────────
@@ -29,29 +27,11 @@ error() { printf '\033[1;31m[error]\033[0m %s\n' "$*" >&2; }
 ok()    { printf '\033[1;32m[ok]\033[0m %s\n' "$*"; }
 
 # ── Prerequisite checks ───────────────────────────────────────
-
-check_python_version() {
-    local python_cmd=""
-    if command -v python3 &>/dev/null; then
-        python_cmd="python3"
-    elif command -v python &>/dev/null; then
-        python_cmd="python"
-    else
-        error "Python 3.12+ is required but neither 'python3' nor 'python' was found."
-        exit 1
-    fi
-
-    local version
-    version=$($python_cmd -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-    local major minor
-    major=$(echo "$version" | cut -d. -f1)
-    minor=$(echo "$version" | cut -d. -f2)
-
-    if [ "$major" -lt "$MIN_PYTHON_MAJOR" ] || { [ "$major" -eq "$MIN_PYTHON_MAJOR" ] && [ "$minor" -lt "$MIN_PYTHON_MINOR" ]; }; then
-        error "Python >= ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR} is required, but found $version."
-        exit 1
-    fi
-}
+#
+# Note: there is no system-Python version gate. `uv sync` (install_cli)
+# provisions a managed CPython matching the buyer's requires-python
+# (>=3.12), downloading it if absent. Gating on the system `python3`
+# wrongly rejected macOS, which ships only python3 (3.9).
 
 detect_platform() {
     local os arch
@@ -131,6 +111,9 @@ check_and_install_dependencies() {
         local mac_missing=()
         for entry in "${LINUX_SYSTEM_DEPS[@]}"; do
             local cmd="${entry%%:*}"
+            # uv provisions a managed Python 3.12 during `uv sync`, so a
+            # system python3.12 is not required (macOS ships only python3).
+            [ "$cmd" = "python3.12" ] && continue
             if ! command -v "$cmd" &>/dev/null; then
                 mac_missing+=("$cmd")
             fi
@@ -374,7 +357,6 @@ main() {
 
     detect_platform
     check_and_install_dependencies
-    check_python_version
     install_uv
     install_repo
     install_cli

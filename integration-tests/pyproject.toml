@@ -19,7 +19,7 @@ dependencies = [
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
     "rich>=13.0",
-    "httpx>=0.27",            # used by test_provisioning_smoke and SyncRegistryClient
+    "httpx>=0.27",            # used by storefront smoke and canonical service clients
     # Workspace dependency: tests use the real discovery/matching logic,
     # not a re-implementation. Keeps test behavior aligned with storefront behavior.
     "arkhai-storefront-client>=0.11.0",
@@ -27,6 +27,13 @@ dependencies = [
     "market-service>=0.1.0",
 	"market-storefront>=0.1.0",
     "provisioning-service>=0.4.0",
+    # The buyer's `market` CLI, run as a subprocess by the buyer-machine
+    # e2e (tests/e2e/roles/buyer_cli.py). Installed so the binary is on
+    # PATH inside arkhai:integration-tests when the suite runs in-network.
+    # market-policy is the buyer's sibling negotiation-strategy dep,
+    # resolved from .dist alongside market-service.
+    "market-buyer>=0.1.0",
+    "market-policy>=0.1.0",
 ]
 
 [tool.uv]
@@ -62,9 +69,12 @@ markers = [
     "wallets: Smoke tests that validate wallet balances and key pairs",
     "registry: Smoke tests that validate the Registry REST API",
     "storefront: Smoke tests that validate seller storefront",
-	"provisioning: Smoke tests for the deployed provisioning service REST API",
+    "provisioning: Smoke tests for the deployed provisioning service REST API",
+    "provisioning_readonly: Read-only provisioning smoke tests safe for default Helm hooks",
+    "provisioning_write: Provisioning smoke tests that exercise write-path APIs",
     "e2e_deal: Full buyer-seller deal lifecycle e2e test (synthetic-buyer + force-accept, follows the dry-run + advance stage pattern)",
     "e2e_deal_buyer_cli: Full deal driven by the buyer's `market` CLI subprocess against the live storefront (two-machine production interaction)",
+    "e2e_buy: One-shot `market buy` (discovery-driven) lifecycle from the buyer machine, against the live storefront",
     "multi_registry: Multi-registry publish + discovery e2e scenario (stops at negotiation start)",
     "smoke: Quick smoke tests",
     "slow: Tests that may take longer due to RPC latency",

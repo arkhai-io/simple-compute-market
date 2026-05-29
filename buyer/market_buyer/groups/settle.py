@@ -327,7 +327,8 @@ def register(app: typer.Typer) -> None:
         ),
         token_contract: Optional[str] = typer.Option(
             None, "--token-contract",
-            help="ERC-20 contract address. Default: resolve 'MOCK' via the token registry.",
+            help="ERC-20 payment token. Optional override — defaults to the "
+                 "token recorded in the deal/run-log.",
         ),
         token_decimals: Optional[int] = typer.Option(
             None, "--token-decimals",

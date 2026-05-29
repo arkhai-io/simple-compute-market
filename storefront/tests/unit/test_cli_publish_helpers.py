@@ -103,6 +103,7 @@ def _init_db(path: str) -> None:
                 attributes TEXT,
                 min_price TEXT,
                 token TEXT,
+                max_duration_seconds INTEGER,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
@@ -129,15 +130,23 @@ def _insert_resource(
     *,
     min_price: str | None = None,
     token: str | None = None,
+    max_duration_seconds: int | None = None,
 ) -> None:
     conn = sqlite3.connect(path)
     try:
         conn.execute(
             """INSERT INTO resources
                (resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                min_price, token)
-               VALUES (?, 'compute.gpu', 'rtx4090', 'count', 1, ?, ?, ?, ?)""",
-            (resource_id, state, json.dumps(attrs), min_price, token),
+                min_price, token, max_duration_seconds)
+               VALUES (?, 'compute.gpu', 'rtx4090', 'count', 1, ?, ?, ?, ?, ?)""",
+            (
+                resource_id,
+                state,
+                json.dumps(attrs),
+                min_price,
+                token,
+                max_duration_seconds,
+            ),
         )
         conn.commit()
     finally:
@@ -232,7 +241,10 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
 
     calls: list[dict] = []
 
-    def fake_publish(agent_url, offer, accepted_escrows, max_duration_seconds, wallet_address, private_key):
+    def fake_publish(
+        agent_url, offer, accepted_escrows,
+        max_duration_seconds, wallet_address, private_key,
+    ):
         calls.append({"offer": offer, "accepted_escrows": accepted_escrows})
         rid = offer["resource_id"]
         return {"status": "created", "listing_id": f"listing-for-{rid}"}
@@ -273,6 +285,66 @@ def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
     assert len(published) == 1
     assert not failed
     assert not skipped
+
+
+def test_publish_round_normalizes_zero_duration_to_unlimited(tmp_path, monkeypatch):
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_resource(
+        db, "compute-001", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "New York, US"},
+    )
+
+    calls: list[int | None] = []
+
+    def fake_publish(
+        agent_url, offer, accepted_escrows,
+        max_duration_seconds, wallet_address, private_key,
+    ):
+        calls.append(max_duration_seconds)
+        return {"status": "created", "listing_id": "o1"}
+
+    monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
+
+    published, failed, skipped = _publish_round(
+        db_path=db,
+        skip_ids=None,
+        **_round_kwargs(default_max_duration_seconds=0),
+    )
+
+    assert len(published) == 1
+    assert not failed
+    assert not skipped
+    assert calls == [None]
+
+
+def test_publish_round_preserves_positive_row_duration(tmp_path, monkeypatch):
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_resource(
+        db, "compute-001", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "New York, US"},
+        max_duration_seconds=3600,
+    )
+
+    calls: list[int | None] = []
+
+    def fake_publish(agent_url, offer, accepted_escrows, max_duration_seconds, wallet_address, private_key):
+        calls.append(max_duration_seconds)
+        return {"status": "created", "listing_id": "o1"}
+
+    monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
+
+    published, failed, skipped = _publish_round(
+        db_path=db,
+        skip_ids=None,
+        **_round_kwargs(default_max_duration_seconds=0),
+    )
+
+    assert len(published) == 1
+    assert not failed
+    assert not skipped
+    assert calls == [3600]
 
 
 def test_open_order_ids_returns_only_open(tmp_path):

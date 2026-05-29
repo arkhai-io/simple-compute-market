@@ -1,7 +1,8 @@
 """Utility functions for API routes."""
 
+import json
 import logging
-from typing import Optional
+from typing import Any, Optional
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -195,6 +196,26 @@ def publisher_to_dict(publisher: Publisher) -> dict:
     }
 
 
+def _as_json_obj(value: Any, default: Any) -> Any:
+    """Decode a column that may hold a JSON string into a Python object.
+
+    offer_resource / accepted_escrows are ``Column(JSON)``, so a well-formed
+    publisher stores (and we read) real objects. But a publisher that
+    forwards an already-stringified blob double-encodes it, leaving a JSON
+    *string* in the column. The discovery filters run JSONPath over these
+    fields (``$.offer_resource.gpu_model`` etc.), which only resolves
+    against an object — a string would silently match nothing. Decoding on
+    read keeps discovery (and the wire response) correct regardless of how
+    the value was stored.
+    """
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (ValueError, TypeError):
+            return default
+    return default if value is None else value
+
+
 def order_to_dict(listing: Listing) -> dict:
     """Convert a Listing ORM row to its wire-shape dict.
 
@@ -206,8 +227,8 @@ def order_to_dict(listing: Listing) -> dict:
         "listing_id": listing.listing_id,
         "publisher_id": listing.publisher_id,
         "storefront_url": publisher.storefront_url if publisher else None,
-        "offer_resource": listing.offer_resource or {},
-        "accepted_escrows": listing.accepted_escrows or [],
+        "offer_resource": _as_json_obj(listing.offer_resource, {}),
+        "accepted_escrows": _as_json_obj(listing.accepted_escrows, []),
         "max_duration_seconds": listing.max_duration_seconds,
         "oracle_address": listing.oracle_address,
         "status": listing.status.value,

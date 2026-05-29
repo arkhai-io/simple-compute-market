@@ -21,7 +21,14 @@ mcp_server_url  = "http://localhost:8080/mcp"
 zerotier_network = ""
 
 # Storage / logging
-db_path         = "/tmp/agent.db"
+# Persist by default: this is the path the seller compose mounts a named
+# volume at (compose/seller.yml -> .../data/storefront) and the one the
+# quickstart documents, so a config that omits db_path still survives a
+# container recreate. The parent dir is auto-created on first start. An
+# ephemeral default (e.g. /tmp) silently loses all listing/deal state on
+# restart. Operators running outside the container should set an absolute
+# db_path in storefront.toml.
+db_path         = "./src/market_storefront/data/storefront/agent.db"
 log_file_path   = ""
 log_level       = "INFO"
 

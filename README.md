@@ -19,8 +19,10 @@ Compute is the concrete domain. The architectural pattern — userland buyer, st
 - `registry-client/` — Async + sync Python client for the registry HTTP API
 - `compose/` — Docker Compose stacks for the seller side
 - `helm/` — Kubernetes/Helm charts for production seller + registry deployments
-- `infra/zerotier/` — ZeroTier controller scripts
-- `docs/` — Architecture notes, quickstarts, configuration reference
+- `scripts/zerotier/` — ZeroTier controller scripts
+- `docs/` — User/operator quickstarts and configuration reference (developer/internal docs live under `docs/development/`)
+- `scripts/` — Repo-root wrappers for build, install, validation, and clean-room workflows
+- `tools/` — Repo-owned developer and validation tools
 
 ## Getting started
 
@@ -41,8 +43,13 @@ market buy --gpu-model H200 --duration-hours 1
 
 The CLI handles negotiation rounds, creates the on-chain escrow, polls for provisioning, and prints the connection + tenant credentials when the VM is ready.
 
+Validation and issue-discovery docs:
+
+- **Manual validation runbook** → [`docs/development/VALIDATION_RUNBOOK.md`](./docs/development/VALIDATION_RUNBOOK.md)
+- **Issue discovery harness** → [`docs/development/ISSUE_DISCOVERY.md`](./docs/development/ISSUE_DISCOVERY.md)
+- **Repo tooling overview** → [`tools/README.md`](./tools/README.md)
+
 ## Reference
 
-- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — end-to-end design: components, request flow, on-chain schema, negotiation policy machinery
+- [`docs/development/ARCHITECTURE.md`](./docs/development/ARCHITECTURE.md) — end-to-end design: components, request flow, on-chain schema, negotiation policy machinery
 - [`docs/configuration.md`](./docs/configuration.md) — config reference: bundled negotiation + aggregation policies and how to write custom ones
-

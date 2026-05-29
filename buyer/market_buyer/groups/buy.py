@@ -287,6 +287,13 @@ def register(app: typer.Typer) -> None:
                  "without a TTY — defaults are accepted automatically. "
                  "Set this for scripts, CI, or non-interactive runs.",
         ),
+        quiet: bool = typer.Option(
+            False, "--quiet", "-q",
+            help="Condensed output: drop the per-step progress panels and "
+                 "print one concise summary (deal, escrow, VM, connection) "
+                 "when the buy settles. Provisioning shows a simple progress "
+                 "line. Good for scripts and clean terminals.",
+        ),
         duration_hours: Optional[float] = typer.Option(
             None, "--duration-hours", "-t",
             help="Lease duration the buyer wants (hours, fractional ok). "
@@ -338,8 +345,10 @@ def register(app: typer.Typer) -> None:
         ),
         token_contract: Optional[str] = typer.Option(
             None, "--token-contract",
-            help="ERC-20 token contract address used for payment. "
-                 "Default: resolve 'MOCK' via the token registry.",
+            help="Optional filter: only consider listings whose accepted "
+                 "escrow uses this ERC-20. Omit to accept whatever token the "
+                 "seller's listing offers on your chain (the token, escrow "
+                 "contract, and chain all come from the chosen listing).",
         ),
         token_decimals: Optional[int] = typer.Option(
             None, "--token-decimals",
@@ -467,7 +476,7 @@ def register(app: typer.Typer) -> None:
         chain_cfg = select_chain_for_listing(
             listing=None, override=chain_name, yes=assume_yes,
         )
-        chain = chain_cfg.name
+        selected_chain_name = chain_cfg.name
         rpc = chain_cfg.rpc_url
         addr_cfg = chain_cfg.alkahest_address_config_path
 
@@ -539,13 +548,13 @@ def register(app: typer.Typer) -> None:
         # Token + expiration come from the proposal (echoed by the seller).
         # The closure only needs chain config to resolve on-chain addresses.
         build_escrow_terms = make_buyer_payment_escrow_terms_fn(
-            chain_name=chain,
+            chain_name=selected_chain_name,
             addr_config_path=addr_cfg or None,
         )
         create_escrow = make_create_escrow_fn(
             private_key=pk,
             rpc_url=rpc,
-            chain_name=chain,
+            chain_name=selected_chain_name,
             addr_config_path=addr_cfg or None,
         )
 
@@ -605,13 +614,6 @@ def register(app: typer.Typer) -> None:
             toml_path="aggregation.policy",
         ) or None
 
-        # Counter policy is config-only — no CLI flag yet. Strict_echo
-        # default rejects any seller modification to a buyer-pinned field;
-        # operators who want to accept counters set the TOML key.
-        counter_policy = resolve_config_value(
-            toml_path="counter_policy.policy",
-        ) or None
-
         config = BuyConfig(
             registry_urls=reg_urls,
             buyer_address=addr,
@@ -619,7 +621,6 @@ def register(app: typer.Typer) -> None:
             discovery_timeout=deadline,
             indexer_auth=reg_auth,
             aggregation_policy=aggregation_policy,
-            counter_policy=counter_policy,
         )
         constraints = BuyConstraints(
             max_price=max_price,
@@ -642,7 +643,7 @@ def register(app: typer.Typer) -> None:
         def build_escrow_proposal_for_match(match: dict) -> EscrowProposal | None:
             entry = select_escrow_entry(
                 match,
-                chain_name=chain,
+                chain_name=selected_chain_name,
                 token_contract_filter=tc,
                 assume_yes=assume_yes,
                 rpc_url=rpc,
@@ -654,7 +655,7 @@ def register(app: typer.Typer) -> None:
             from service.schemas import accepted_token_address
             token = accepted_token_address(entry)
             return EscrowProposal(
-                chain_name=entry.get("chain_name", chain),
+                chain_name=entry.get("chain_name", selected_chain_name),
                 escrow_address=entry["escrow_address"],
                 fields={"token": token},
                 literal_fields={"token": token},
@@ -683,7 +684,8 @@ def register(app: typer.Typer) -> None:
         header.add_row("Max matches", str(max_matches))
         if active_filters:
             header.add_row("Filters", ", ".join(f"{k}={v}" for k, v in active_filters.items()))
-        console.print(Panel(header, title="market buy-sync", border_style="cyan"))
+        if not quiet:
+            console.print(Panel(header, title="market buy-sync", border_style="cyan"))
 
         def _observe(stage: str, body: dict) -> None:
             # Append a structured event to the run log so post-mortem
@@ -692,6 +694,15 @@ def register(app: typer.Typer) -> None:
             # listing_id (and negotiation_id once round 0 returns) so
             # consumers can group per-negotiation.
             run_log.event(stage, **body)
+
+            # Quiet mode: drop the per-step lines; show only a single
+            # "provisioning …" progress line built from the poll stream.
+            if quiet:
+                if stage == "settlement_submitted":
+                    console.print("provisioning ", end="")
+                elif stage == "settlement_poll":
+                    console.print(".", end="")
+                return
 
             # Plus a one-line console summary for the human.
             if stage == "discover":
@@ -735,12 +746,12 @@ def register(app: typer.Typer) -> None:
         # legacy single-terminal key that synthesizes the default chain.
         # Without either, the buyer falls through to the default terminal
         # (RL needs torch — not installed in the lean buyer wheel).
-        chain = None
-        policies = resolve_config_value(toml_path="negotiation.policies")
-        policy_mode = resolve_config_value(toml_path="negotiation.policy_mode")
+        negotiation_chain = None
+        from ..common import resolve_negotiation_config
+        policies, policy_mode = resolve_negotiation_config()
         if policies or policy_mode:
             from market_buyer.buyer_client import _load_buyer_chain
-            chain = _load_buyer_chain(policies=policies, policy_mode=policy_mode)
+            negotiation_chain = _load_buyer_chain(policies=policies, policy_mode=policy_mode)
 
         try:
             result = run_buy(
@@ -757,7 +768,7 @@ def register(app: typer.Typer) -> None:
                 settlement_total_timeout=settlement_timeout,
                 on_event=_observe,
                 confirm_settlement=confirm_settlement_cb,
-                chain=chain,
+                chain=negotiation_chain,
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))
@@ -773,6 +784,32 @@ def register(app: typer.Typer) -> None:
             fulfillment_uid=result.fulfillment_uid,
             reason=result.reason,
         )
+
+        # Quiet mode: one concise block instead of the full panel. The public
+        # host comes from the seller_url (the connection_details ssh_command
+        # carries the seller's internal host, not its public address).
+        if quiet:
+            from urllib.parse import urlparse
+            console.print()  # end the "provisioning …" line
+            cd: dict = {}
+            if result.connection_details:
+                try:
+                    cd = json.loads(result.connection_details)
+                except (ValueError, TypeError):
+                    cd = {}
+            host = urlparse(result.seller_url or "").hostname or "?"
+            port = (cd.get("ansible_result") or {}).get("external_ssh_port") or "?"
+            user = cd.get("tenant_user") or "?"
+            console.print(f"status   {result.status}")
+            if result.escrow_uid:
+                console.print(f"escrow   {result.escrow_uid}")
+            if cd.get("vm_name"):
+                console.print(f"vm       {cd['vm_name']} ({cd.get('vm_state', '?')})")
+            if user != "?" and port != "?":
+                console.print(f"connect  ssh -p {port} {user}@{host}")
+            if result.status != "ready":
+                raise typer.Exit(4)
+            return
 
         # Render the final outcome.
         tbl = Table.grid(padding=(0, 2))

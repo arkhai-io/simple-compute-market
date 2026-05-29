@@ -552,9 +552,11 @@ class TestStage03b_ResumePublishesToRegistry:
 # e2e tests.
 # ===========================================================================
 
-# The integration-tests venv reaches the primary registry directly rather than
-# going through CONFIG.indexer_urls, which lives inside the storefront container.
-_REGISTRY_A = "http://localhost:8080"
+# Primary registry, reached directly from the buyer machine — the same URL
+# the seller publishes to. Under the docker profile (buyer running in-network)
+# this is the service DNS (http://registry:8080); host/local profiles resolve
+# it to the published port (http://localhost:8080).
+_REGISTRY_A = str(settings.REGISTRY.API_URL or "http://registry:8080")
 
 class TestStage04a_PrimaryRegistryPublish:
     def test_04a_listing_appears_in_primary_registry(

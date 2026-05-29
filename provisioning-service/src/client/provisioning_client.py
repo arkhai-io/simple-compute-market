@@ -9,6 +9,7 @@ Both clients:
 - Own their HTTP session internally — callers never create or pass a session
 - Accept a ``transport=`` kwarg at construction for in-process test injection
 - Send ``X-Admin-Key`` on every request when ``admin_key`` is set
+- Send ``X-Agent-ID`` on every request when ``agent_id`` is set
 - Raise ``ProvisioningError`` on non-2xx responses
 - Return typed model objects from all methods
 
@@ -92,9 +93,16 @@ class ProvisioningTimeoutError(ProvisioningError):
 
 
 class _ProvisioningClientBase:
-    def __init__(self, base_url: str, admin_key: Optional[str], timeout: float) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        admin_key: Optional[str],
+        timeout: float,
+        agent_id: Optional[str] = None,
+    ) -> None:
         self._base = base_url.rstrip("/")
         self._admin_key = admin_key
+        self._agent_id = agent_id
         self._timeout = timeout
 
     def _url(self, path: str) -> str:
@@ -104,6 +112,8 @@ class _ProvisioningClientBase:
         h: dict[str, str] = {}
         if self._admin_key:
             h["X-Admin-Key"] = self._admin_key
+        if self._agent_id:
+            h["X-Agent-ID"] = self._agent_id
         return h
 
     @staticmethod
@@ -134,6 +144,9 @@ class ProvisioningClient(_ProvisioningClientBase):
         Shared operator admin key sent as ``X-Admin-Key`` on every request
         (the storefront's ``admin_api_key``). ``None`` for local dev where
         the service runs with no key configured.
+    agent_id:
+        ERC-8004 agent identity sent as ``X-Agent-ID`` when provisioning
+        auth is enabled.
     timeout:
         HTTP timeout in seconds.
     transport:
@@ -144,11 +157,12 @@ class ProvisioningClient(_ProvisioningClientBase):
         self,
         base_url: str,
         admin_key: Optional[str] = None,
+        agent_id: Optional[str] = None,
         *,
         timeout: float = 60.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        super().__init__(base_url, admin_key, timeout)
+        super().__init__(base_url, admin_key, timeout, agent_id)
         self._client = httpx.AsyncClient(
             base_url=self._base,
             timeout=timeout,
@@ -512,6 +526,9 @@ class SyncProvisioningClient(_ProvisioningClientBase):
     admin_key:
         Shared operator admin key sent as ``X-Admin-Key`` on every request
         (the storefront's ``admin_api_key``). ``None`` for local dev.
+    agent_id:
+        ERC-8004 agent identity sent as ``X-Agent-ID`` when provisioning
+        auth is enabled.
     timeout:
         HTTP timeout in seconds.
     transport:
@@ -522,11 +539,12 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         self,
         base_url: str,
         admin_key: Optional[str] = None,
+        agent_id: Optional[str] = None,
         *,
         timeout: float = 60.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        super().__init__(base_url, admin_key, timeout)
+        super().__init__(base_url, admin_key, timeout, agent_id)
         self._client = httpx.Client(
             base_url=self._base,
             timeout=timeout,

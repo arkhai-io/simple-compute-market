@@ -90,3 +90,152 @@ Compose the registry (indexer) URL from global.registry.host and global.registry
 {{- define "registry.url" -}}
 {{- printf "http://%s:%d" .Values.global.registry.host (int .Values.global.registry.port) -}}
 {{- end }}
+
+
+{{/* Smoke-test profile helpers. Kept local to this subchart because Helm does
+not expose root helper templates reliably inside dependency charts. */}}
+{{- define "provisioning.smokeTestSecretName" -}}
+{{- $smoke := dict -}}
+{{- if .Values.global -}}
+  {{- $smoke = .Values.global.smokeTests | default dict -}}
+{{- end -}}
+{{- $secret := $smoke.secret | default dict -}}
+{{- if $secret.name -}}
+{{- $secret.name -}}
+{{- else -}}
+{{- printf "%s-test-secret" .Release.Name -}}
+{{- end -}}
+{{- end }}
+
+{{- define "provisioning.smokeTestConfigProfiles" -}}
+{{- $smoke := dict -}}
+{{- if .Values.global -}}
+  {{- $smoke = .Values.global.smokeTests | default dict -}}
+{{- end -}}
+{{- $config := $smoke.config | default dict -}}
+{{- $profiles := list -}}
+{{- if $config.profileFiles -}}
+  {{- range $profile := keys $config.profileFiles | sortAlpha -}}
+    {{- $profiles = append $profiles $profile -}}
+  {{- end -}}
+{{- else if $config.profile -}}
+  {{- $profiles = append $profiles $config.profile -}}
+{{- end -}}
+{{- join "," $profiles -}}
+{{- end }}
+
+{{- define "provisioning.smokeTestSecretProfiles" -}}
+{{- $smoke := dict -}}
+{{- if .Values.global -}}
+  {{- $smoke = .Values.global.smokeTests | default dict -}}
+{{- end -}}
+{{- $secret := $smoke.secret | default dict -}}
+{{- $internal := $secret.internal | default dict -}}
+{{- $external := $secret.external | default dict -}}
+{{- $profiles := list -}}
+{{- if $secret.enabled -}}
+  {{- if and (eq ($secret.type | default "internal") "internal") $internal.profileFiles -}}
+    {{- range $profile := keys $internal.profileFiles | sortAlpha -}}
+      {{- $profiles = append $profiles $profile -}}
+    {{- end -}}
+  {{- else if and (eq ($secret.type | default "internal") "external") $external.profileRefs -}}
+    {{- range $profile := keys $external.profileRefs | sortAlpha -}}
+      {{- $profiles = append $profiles $profile -}}
+    {{- end -}}
+  {{- else if $secret.profile -}}
+    {{- $profiles = append $profiles $secret.profile -}}
+  {{- end -}}
+{{- end -}}
+{{- join "," $profiles -}}
+{{- end }}
+
+{{- define "provisioning.smokeTestActiveProfiles" -}}
+{{- $smoke := dict -}}
+{{- if .Values.global -}}
+  {{- $smoke = .Values.global.smokeTests | default dict -}}
+{{- end -}}
+{{- if $smoke.activeProfiles -}}
+{{- $smoke.activeProfiles -}}
+{{- else -}}
+{{- $profiles := list -}}
+{{- $configProfiles := include "provisioning.smokeTestConfigProfiles" . -}}
+{{- if $configProfiles -}}
+  {{- range $profile := splitList "," $configProfiles -}}
+    {{- $profiles = append $profiles $profile -}}
+  {{- end -}}
+{{- end -}}
+{{- $secretProfiles := include "provisioning.smokeTestSecretProfiles" . -}}
+{{- if $secretProfiles -}}
+  {{- range $profile := splitList "," $secretProfiles -}}
+    {{- $profiles = append $profiles $profile -}}
+  {{- end -}}
+{{- end -}}
+{{- join "," $profiles -}}
+{{- end -}}
+{{- end }}
+
+{{- define "provisioning.smokeTestConfigVolumeMounts" -}}
+{{- $smoke := dict -}}
+{{- if .Values.global -}}
+  {{- $smoke = .Values.global.smokeTests | default dict -}}
+{{- end -}}
+{{- $config := $smoke.config | default dict -}}
+{{- if $config.profileFiles -}}
+{{- range $profile := keys $config.profileFiles | sortAlpha }}
+- name: test-config
+  mountPath: /app/config/config-{{ $profile }}.yml
+  subPath: config-{{ $profile }}.yml
+  readOnly: true
+{{- end -}}
+{{- else if $config.profile }}
+- name: test-config
+  mountPath: /app/config/config-{{ $config.profile }}.yml
+  subPath: config-{{ $config.profile }}.yml
+  readOnly: true
+{{- end -}}
+{{- end }}
+
+{{- define "provisioning.smokeTestSecretVolumeMounts" -}}
+{{- $smoke := dict -}}
+{{- if .Values.global -}}
+  {{- $smoke = .Values.global.smokeTests | default dict -}}
+{{- end -}}
+{{- $secret := $smoke.secret | default dict -}}
+{{- $internal := $secret.internal | default dict -}}
+{{- $external := $secret.external | default dict -}}
+{{- if $secret.enabled -}}
+  {{- if and (eq ($secret.type | default "internal") "internal") $internal.profileFiles -}}
+{{- range $profile := keys $internal.profileFiles | sortAlpha }}
+- name: test-secret
+  mountPath: /app/config/config-{{ $profile }}.yml
+  subPath: config-{{ $profile }}.yml
+  readOnly: true
+{{- end -}}
+  {{- else if and (eq ($secret.type | default "internal") "external") $external.profileRefs -}}
+{{- range $profile := keys $external.profileRefs | sortAlpha }}
+- name: test-secret
+  mountPath: /app/config/config-{{ $profile }}.yml
+  subPath: config-{{ $profile }}.yml
+  readOnly: true
+{{- end -}}
+  {{- else if $secret.profile }}
+- name: test-secret
+  mountPath: /app/config/config-{{ $secret.profile }}.yml
+  subPath: config-{{ $secret.profile }}.yml
+  readOnly: true
+  {{- end -}}
+{{- end -}}
+{{- end }}
+
+{{- define "provisioning.smokeTestSecretVolume" -}}
+{{- $smoke := dict -}}
+{{- if .Values.global -}}
+  {{- $smoke = .Values.global.smokeTests | default dict -}}
+{{- end -}}
+{{- $secret := $smoke.secret | default dict -}}
+{{- if $secret.enabled }}
+- name: test-secret
+  secret:
+    secretName: {{ include "provisioning.smokeTestSecretName" . }}
+{{- end -}}
+{{- end }}

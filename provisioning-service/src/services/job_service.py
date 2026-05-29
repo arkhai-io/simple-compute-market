@@ -107,6 +107,68 @@ class AnsibleJobService:
         await job_queue.enqueue(job_id)
         return JobSubmitResponse(job_id=job_id, status=JobStatus.queued.value)
 
+    # ------------------------------------------------------------------
+    # Retry scheduler — re-enqueue jobs whose backoff delay has elapsed
+    # ------------------------------------------------------------------
+
+    async def requeue_due_retries(self, job_queue) -> int:
+        """Re-enqueue queued jobs whose scheduled retry time has arrived.
+
+        On a retryable failure ``_process_job`` flips the job back to
+        ``queued`` and stamps ``next_retry_at`` for backoff, but does not
+        put it back on the in-process queue (which is intentionally
+        transient). This sweep finds those jobs once their delay elapses,
+        clears ``next_retry_at`` to mark them claimed, and enqueues them.
+
+        Clearing ``next_retry_at`` before enqueue is what prevents a
+        double-enqueue: the row no longer matches the due-retry filter on
+        the next sweep, and ``_process_job`` flips it to ``running`` when it
+        picks it up. ``retry_count`` is untouched, so ``max_retries`` still
+        bounds the attempts. Returns the number re-enqueued.
+        """
+        now = datetime.utcnow()
+        with self._session_factory() as db:
+            due = (
+                db.query(AnsibleJob)
+                .filter(
+                    AnsibleJob.status == JobStatus.queued.value,
+                    AnsibleJob.next_retry_at.isnot(None),
+                    AnsibleJob.next_retry_at <= now,
+                )
+                .all()
+            )
+            job_ids = [job.id for job in due]
+            for job in due:
+                job.next_retry_at = None
+            if job_ids:
+                db.commit()
+
+        for job_id in job_ids:
+            await job_queue.enqueue(job_id)
+            logger.info("Retry scheduler re-enqueued job %s", job_id)
+        return len(job_ids)
+
+    async def run_retry_scheduler(
+        self, job_queue, poll_interval_seconds: float
+    ) -> None:
+        """Long-lived loop: sweep for due retries every poll interval.
+
+        Started as an asyncio task in the FastAPI lifespan; exits cleanly on
+        cancellation.
+        """
+        logger.info(
+            "Retry scheduler started (interval=%.0fs)", poll_interval_seconds
+        )
+        while True:
+            try:
+                await asyncio.sleep(poll_interval_seconds)
+                await self.requeue_due_retries(job_queue)
+            except asyncio.CancelledError:
+                logger.info("Retry scheduler cancelled")
+                break
+            except Exception as exc:
+                logger.exception("Retry scheduler sweep failed: %s", exc)
+
     def list_jobs(
         self,
         offset: int = 0,
@@ -263,7 +325,8 @@ class AnsibleJobService:
                 return
 
             # Respect scheduled retry delay: if the job's next_retry_at is in
-            # the future just return; the retry-scheduler TODO will re-enqueue it.
+            # the future just return; the retry scheduler (run_retry_scheduler)
+            # re-enqueues it once the delay elapses.
             if job.next_retry_at and datetime.utcnow() < job.next_retry_at:
                 return
 
@@ -282,9 +345,11 @@ class AnsibleJobService:
             # is wired and has a row for this host. rendered_inv_path is
             # initialised here so the outer finally block can always clean it up.
             rendered_inv_path = None
+            host_public_host = None
             if self._host_service is not None:
                 host = self._host_service.get_host(params.vm_host)
                 if host is not None:
+                    host_public_host = host.public_host
                     rendered_inv_path = self._ansible.write_inventory([host])
                     logger.debug(
                         "Job %s: using DB-rendered inventory at %s",
@@ -339,7 +404,7 @@ class AnsibleJobService:
                     log_callback=log_callback,
                 )
                 run_result: AnsibleRunResult = self._ansible.parse_playbook_result(
-                    ansible_result, params
+                    ansible_result, params, public_host=host_public_host
                 )
                 logs = run_result.stdout + (
                     "\n\nSTDERR:\n" + run_result.stderr if run_result.stderr else ""
@@ -384,9 +449,8 @@ class AnsibleJobService:
                     job.logs = logs
                     db.add(job)
                     db.commit()
-                    # TODO(retry-scheduler): add a dedicated retry-scheduler task
-                    # that polls for queued jobs with next_retry_at < now and
-                    # re-enqueues them via job_queue.enqueue(job_id).
+                    # The job now sits in `queued` with next_retry_at set;
+                    # run_retry_scheduler re-enqueues it once the delay elapses.
                     logger.warning(
                         "Job %s failed (attempt %d/%d), retry at %s: %s",
                         job_id,
@@ -413,6 +477,12 @@ class AnsibleJobService:
         except Exception as exc:
             logger.exception("Unexpected error processing job %s: %s", job_id, exc)
             try:
+                # The error may have come from a failed flush/commit (e.g. an
+                # IntegrityError while storing credentials), which leaves the
+                # session in an aborted transaction. Roll back first so the
+                # recovery query/update below can run instead of silently
+                # re-raising and leaving the job stuck in `running`.
+                db.rollback()
                 job = (
                     db.query(AnsibleJob)
                     .filter(AnsibleJob.id == job_id)
@@ -426,7 +496,10 @@ class AnsibleJobService:
                         error=f"Internal error: {exc}",
                     )
             except Exception:
-                pass
+                logger.exception(
+                    "Failed to mark job %s as failed after an unexpected error",
+                    job_id,
+                )
         finally:
             # Clean up the DB-rendered temp inventory file if one was created.
             if rendered_inv_path is not None:

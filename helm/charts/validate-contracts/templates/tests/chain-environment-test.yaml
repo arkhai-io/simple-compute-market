@@ -9,6 +9,7 @@
 {{- else -}}
   {{- $itImage = printf "%s:%s" $it.name $it.tag -}}
 {{- end -}}
+{{- $profiles := .Values.activeProfiles | default (include "validate-contracts.smokeTestActiveProfiles" .) -}}
 apiVersion: v1
 kind: Pod
 metadata:
@@ -29,16 +30,13 @@ spec:
         - -m
         - contracts
       env:
-        # Override the dockerfile defaults so the container loads config-helm.yml
-        # from the mounted ConfigMap alongside the baked-in config.yml.
         - name: ACTIVE_PROFILES
-          value: "helm"
+          value: {{ $profiles | quote }}
       volumeMounts:
-        - name: helm-config
-          mountPath: /app/config/config-helm.yml
-          subPath: config-helm.yml
-          readOnly: true
+        {{- include "validate-contracts.smokeTestConfigVolumeMounts" . | nindent 8 }}
+        {{- include "validate-contracts.smokeTestSecretVolumeMounts" . | nindent 8 }}
   volumes:
-    - name: helm-config
+    - name: test-config
       configMap:
         name: {{ .Release.Name }}-test-config
+    {{- include "validate-contracts.smokeTestSecretVolume" . | nindent 4 }}

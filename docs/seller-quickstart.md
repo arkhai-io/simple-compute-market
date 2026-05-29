@@ -26,7 +26,7 @@ via wildcard subdomains instead of direct port-forward NAT, see
 ## 1. Get the code and build
 
 ```bash
-git clone --recurse-submodules https://github.com/arkhai-io/simple-compute-market.git
+git clone https://github.com/arkhai-io/simple-compute-market.git
 cd simple-compute-market
 make build-seller
 ```
@@ -58,9 +58,9 @@ private_key    = "0x<YOUR_SELLER_PRIVATE_KEY>"
 # placeholder; not used in buyer-driven flows
 ssh_public_key = "ssh-ed25519 AAAA...placeholder seller@host"
 
-[chain]
+[chains.base_sepolia]
 chain_id = 84532
-rpc_url  = "https://base-sepolia.infura.io/v3/<YOUR_KEY>"
+rpc_url  = "https://sepolia.base.org"   # public RPC; or your own provider
 
 [registry]
 urls = ["http://<INDEXER_HOST>:8080"]
@@ -192,8 +192,21 @@ touching libvirt. To create real VMs:
    ```
 
    `attribute.vm_host` in `resources.csv` must match an alias under
-   `[kvm_hosts]` in this file. The provisioning image bakes the
-   inventory in at build time — rebuild after edits:
+   `[kvm_hosts]` in this file. Each host line's `ansible_host` is how the
+   provisioning service reaches the host over SSH. If buyers reach that host
+   on a **different** address than the provisioner does (e.g. the provisioner
+   is on a private/overlay network but the VM port-forwards are exposed on a
+   public IP), add a `public_host=` var — that's the address put in the
+   tenant's connection details:
+
+   ```ini
+   [kvm_hosts]
+   kvm1  ansible_host=10.0.0.5  public_host=203.0.113.9  ansible_user=ubuntu  ansible_ssh_private_key_file=~/.ssh/id_ed25519
+   ```
+
+   Without `public_host`, the connection details fall back to `ansible_host`.
+   The provisioning image bakes the inventory in at build time — rebuild
+   after edits:
 
    ```bash
    make build-seller
