@@ -395,6 +395,7 @@ class TestBuyFrom:
 
         def fake_run_buy(**kwargs):
             captured["config"] = kwargs["config"]
+            captured["proposal"] = kwargs["build_escrow_proposal"](listing)
             return BuyResult(status="ready", negotiation_id="neg-1", rounds=1)
 
         monkeypatch.setattr("market_buyer.groups.buy.run_buy", fake_run_buy)
@@ -413,6 +414,7 @@ class TestBuyFrom:
         assert result.exit_code == 0, result.output
         assert captured["config"].registry_urls == ["http://reg"]
         assert captured["config"].buyer_address == _BUYER_ADDR
+        assert captured["proposal"].chain_name == "anvil"
 
     def test_buy_from_mid_stream_without_max_price_errors(
         self, runner, monkeypatch,
