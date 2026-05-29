@@ -123,18 +123,6 @@ Until then: the `indexed: bool` field stays as a no-op in the loader so the YAML
 
 Genuine pending fixes — distinct from the operational gotchas in the [Known Issues](#known-issues--areas-of-concern) section below, which the current code lives with.
 
-### SQLite INTEGER overflow for token amounts with `decimals > 0`
-
-`negotiation_messages` stores `our_price`, `their_price`, and `proposed_price` as `INTEGER` columns (signed 64-bit, max `2**63 - 1 ≈ 9.2 × 10**18`). The primary rate on `accepted_escrows[i]` is in uint256-domain (already decimal-scaled at advertisement), and the negotiation pipeline carries those values into `our_price` / `their_price` unchanged. Any token with 18 decimals and a human-readable per-hour price above ~9.2 billion will overflow at the SQLite write.
-
-**Workaround in e2e tests:** use `decimals: 0` on the MOCK test token so the advertised rate is already in base units.
-
-**Fix:** change `our_price`, `their_price`, `proposed_price` in `negotiation_messages` from `INTEGER` to `TEXT` and parse at read time. The `accepted_escrows` JSON column already serializes the rate value as a string-of-digits to dodge this on the listing side; the price-tracking columns need the same treatment.
-
----
-
----
-
 ## Known Issues & Areas of Concern
 
 Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes](#latent-bug-fixes) above (which need code changes) and from [Planned Rework](#core-stack) (which needs design + code). Expand as investigation proceeds.
