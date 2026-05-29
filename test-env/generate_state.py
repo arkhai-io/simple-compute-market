@@ -90,6 +90,23 @@ def extract_addresses(env: EnvTestManager) -> dict[str, dict[str, str]]:
     return out
 
 
+def normalize_anvil_state(state_json: bytes) -> bytes:
+    """Patch older anvil_dumpState output so Foundry v1.5 can load it."""
+    state = json.loads(state_json)
+    patched = 0
+
+    for tx in state.get("transactions", []):
+        for trace in tx.get("info", {}).get("traces", []):
+            for fallback_index, log in enumerate(trace.get("logs") or []):
+                if log.get("index") is None:
+                    log["index"] = log.get("position", fallback_index)
+                    patched += 1
+
+    if patched:
+        print(f"Added missing trace log index fields: {patched}")
+    return json.dumps(state, separators=(",", ":"), sort_keys=False).encode()
+
+
 def main() -> int:
     print("Starting EnvTestManager (boots Anvil + deploys Alkahest)...")
     env = EnvTestManager()
@@ -109,6 +126,7 @@ def main() -> int:
     dump_hex = rpc(rpc_url, "anvil_dumpState", [])
     assert isinstance(dump_hex, str)
     state_json = gzip.decompress(bytes.fromhex(dump_hex[2:] if dump_hex.startswith("0x") else dump_hex))
+    state_json = normalize_anvil_state(state_json)
 
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_bytes(state_json)
