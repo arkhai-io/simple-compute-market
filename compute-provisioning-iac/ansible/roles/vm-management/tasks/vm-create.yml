@@ -2960,6 +2960,23 @@
         track_step "remove_dhcp_lease" "skipped"
       fi
       
+      # Stop the VM before undefining — undefine --remove-all-storage
+      # cannot remove disks still in use by a running domain, so a missing
+      # destroy leaves the VM running and its storage behind.
+      log "=== Stopping VM before undefine ==="
+      if virsh domstate $VM_NAME 2>/dev/null | grep -q running; then
+        if virsh destroy $VM_NAME 2>&1; then
+          log "VM $VM_NAME stopped"
+          track_step "destroy_vm" "success"
+        else
+          log_error "virsh destroy failed; undefine may not remove storage"
+          track_step "destroy_vm" "partial"
+        fi
+      else
+        log "VM $VM_NAME is not running"
+        track_step "destroy_vm" "skipped"
+      fi
+
       # Remove VM definition and storage
       log "=== Undefining VM and removing storage ==="
       if virsh undefine $VM_NAME --remove-all-storage --nvram 2>&1; then
