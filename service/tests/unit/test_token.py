@@ -75,6 +75,19 @@ def test_resolve_token_calls_rpc_on_miss_and_caches(isolated_cache):
     assert address.lower() in payload
 
 
+def test_resolve_token_normalizes_websocket_rpc_url():
+    from service.clients.token import resolve_token
+    address = "0xA0b86991c6218b36c1D19D4A2e9eb0Ce3606eB48"
+    fake = _fake_web3("USDC", 6, "USD Coin")
+    with patch("web3.providers.HTTPProvider", side_effect=lambda url: f"provider:{url}") as provider, \
+         patch("web3.Web3", return_value=fake) as web3_cls, \
+         patch("web3.Web3.to_checksum_address", return_value=address):
+        resolve_token(address, rpc_url="ws://anvil:8545", chain_id=31337)
+
+    provider.assert_called_once_with("http://anvil:8545")
+    web3_cls.assert_called_once_with("provider:http://anvil:8545")
+
+
 def test_resolve_token_refresh_bypasses_cache():
     from service.clients.token import resolve_token
     address = "0xA0b86991c6218b36c1D19D4A2e9eb0Ce3606eB48"

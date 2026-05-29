@@ -47,6 +47,15 @@ _MEMORY_CACHE: dict[int, dict[str, ERC20TokenMetadata]] = {}
 _LOCK = RLock()
 
 
+def _http_rpc_url(rpc_url: str) -> str:
+    """Return an HTTP(S) URL suitable for web3 HTTP providers."""
+    if rpc_url.startswith("ws://"):
+        return "http://" + rpc_url[len("ws://"):]
+    if rpc_url.startswith("wss://"):
+        return "https://" + rpc_url[len("wss://"):]
+    return rpc_url
+
+
 def _load_chain_cache(chain_id: int) -> dict[str, ERC20TokenMetadata]:
     with _LOCK:
         cached = _MEMORY_CACHE.get(chain_id)
@@ -149,7 +158,7 @@ def resolve_token(
     ]
 
     try:
-        w3 = Web3(HTTPProvider(rpc_url))
+        w3 = Web3(HTTPProvider(_http_rpc_url(rpc_url)))
         checksum = Web3.to_checksum_address(address)
         contract = w3.eth.contract(address=checksum, abi=abi)
         symbol = contract.functions.symbol().call()
@@ -226,7 +235,7 @@ async def get_wallet_token_balance(
         from web3 import AsyncWeb3
         from web3.providers import AsyncHTTPProvider
 
-        w3 = AsyncWeb3(AsyncHTTPProvider(rpc_url))
+        w3 = AsyncWeb3(AsyncHTTPProvider(_http_rpc_url(rpc_url)))
         contract = w3.eth.contract(
             address=AsyncWeb3.to_checksum_address(token_address),
             abi=abi,
