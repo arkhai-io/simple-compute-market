@@ -17,7 +17,7 @@ Pin a specific version:
 
 ```bash
 curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh | \
-  bash -s -- --version market-cli-v0.4.1
+  bash -s -- --version market-cli-v0.5.1
 ```
 
 ## Dev install (from a clone)
@@ -80,7 +80,7 @@ venv directly: `source buyer/.venv/bin/activate`.
 ## Versioning
 
 Releases are tagged `market-cli-v{major}.{minor}.{patch}` (e.g.
-`market-cli-v0.4.1`). The `latest` release pointer at GitHub always
+`market-cli-v0.5.1`). The `latest` release pointer at GitHub always
 resolves to the most recent published tag.
 
 Manual dispatch (no tag) produces a `dev-{short-sha}` build that is

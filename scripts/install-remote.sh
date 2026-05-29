@@ -8,7 +8,7 @@ set -euo pipefail
 #
 # Usage (specific version):
 #   curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh | \
-#     bash -s -- --version market-cli-v1.0.0
+#     bash -s -- --version market-cli-v0.5.1
 #
 # Downloads the Market CLI tarball from the corresponding GitHub
 # Release, extracts it, and runs the bundled install.sh.
@@ -75,7 +75,7 @@ parse_args() {
         case "$1" in
             --version)
                 if [ -z "${2:-}" ]; then
-                    error "--version requires a value (e.g. --version market-cli-v1.0.0)"
+                    error "--version requires a value (e.g. --version market-cli-v0.5.1)"
                     exit 1
                 fi
                 CLI_VERSION="$2"
