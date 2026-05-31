@@ -46,6 +46,10 @@ cd compute-provisioning-iac/ansible
 ansible-galaxy collection install -r requirements.yml
 ```
 
+Collection versions are pinned because the documented Ansible baseline includes
+older control-node runtimes. Updating the pins should be paired with a matching
+Ansible baseline update and validation of the playbook syntax checks below.
+
 ### 3. Setup Inventory
 Configure your hosts in `inventory/hosts`:
 
