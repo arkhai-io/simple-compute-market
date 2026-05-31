@@ -124,6 +124,78 @@ def _coerce_agent_reference_to_url(agent_ref: str | None) -> str | None:
 
 
 
+async def sync_listing_status_to_registry(
+    listing_id: str,
+    status: str,
+) -> dict[str, Any]:
+    """Propagate a local listing lifecycle status to configured registries.
+
+    The storefront SQLite row is the seller-side source of truth for
+    negotiation. Registries are discovery indexes, so lifecycle transitions
+    that change buyer visibility must be mirrored there with the existing
+    owner-signed update endpoint.
+    """
+    if not isinstance(listing_id, str) or not listing_id.strip():
+        return {
+            "status": "error",
+            "message": "Missing listing_id for registry status sync",
+        }
+    if not isinstance(status, str) or not status.strip():
+        return {
+            "status": "error",
+            "message": "Missing status for registry status sync",
+            "listing_id": listing_id,
+        }
+    if not settings.enable_registry_discovery:
+        return {
+            "status": "skipped",
+            "message": "Registry discovery is disabled; listing not updated in registry",
+            "listing_id": listing_id,
+            "listing_status": status,
+        }
+
+    try:
+        async with _make_registry_client() as registry_client:
+            target_urls = await _registries_to_target(listing_id, registry_client.urls)
+            update_request = UpdateListingRequest(
+                updates={"status": status},
+                private_key=settings.wallet.private_key,
+            )
+            payloads = {url: update_request for url in target_urls}
+            results = await registry_client.update_listing_per_registry(
+                listing_id, payloads,
+            )
+        await _record_publications(listing_id, results)
+        first_ok = next(
+            (r["response"] for r in results if r["success"] and r["response"]),
+            None,
+        )
+        if first_ok:
+            return {
+                "status": status,
+                "message": f"Listing {listing_id} marked {status} in registry",
+                "listing_id": listing_id,
+                "registry_result": first_ok,
+            }
+        return {
+            "status": "error",
+            "message": f"Failed to update listing {listing_id} in registry",
+            "listing_id": listing_id,
+            "listing_status": status,
+        }
+    except Exception as exc:
+        logger.warning(
+            "[REGISTRY] Failed to sync listing %s status %s: %s",
+            listing_id, status, exc,
+        )
+        return {
+            "status": "error",
+            "message": f"Registry update failed for listing {listing_id}: {exc}",
+            "listing_id": listing_id,
+            "listing_status": status,
+        }
+
+
 async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any]:
     """Close an order locally and in the registry (if enabled)."""
     parameters = parameters or {}
@@ -140,48 +212,10 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
     except Exception as exc:
         logger.warning("[LOCAL DB] Failed to update order %s as closed: %s", order_id, exc)
 
-    if not settings.enable_registry_discovery:
-        return {
-            "status": "skipped",
-            "message": "Registry discovery is disabled; order not updated in registry",
-            "listing_id": order_id,
-        }
-
-    try:
-        async with _make_registry_client() as registry_client:
-            target_urls = await _registries_to_target(order_id, registry_client.urls)
-            update_request = UpdateListingRequest(
-                updates={"status": "closed"},
-                private_key=settings.wallet.private_key,
-            )
-            payloads = {url: update_request for url in target_urls}
-            results = await registry_client.update_listing_per_registry(
-                order_id, payloads,
-            )
-        await _record_publications(order_id, results)
-        first_ok = next(
-            (r["response"] for r in results if r["success"] and r["response"]),
-            None,
-        )
-        if first_ok:
-            return {
-                "status": "closed",
-                "message": f"Order {order_id} marked closed in registry",
-                "listing_id": order_id,
-                "registry_result": first_ok,
-            }
-        return {
-            "status": "error",
-            "message": f"Failed to update order {order_id} in registry",
-            "listing_id": order_id,
-        }
-    except Exception as exc:
-        logger.warning("[REGISTRY] Failed to close order %s in registry: %s", order_id, exc)
-        return {
-            "status": "error",
-            "message": f"Registry update failed for order {order_id}: {exc}",
-            "listing_id": order_id,
-        }
+    result = await sync_listing_status_to_registry(order_id, "closed")
+    if result.get("status") == "closed":
+        result["message"] = f"Order {order_id} marked closed in registry"
+    return result
 
 
 async def _do_provision(

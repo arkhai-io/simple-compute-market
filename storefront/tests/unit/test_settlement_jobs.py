@@ -292,6 +292,36 @@ async def test_start_happy_path_inserts_row_and_kicks_off_task(client):
 
 
 @pytest.mark.asyncio
+async def test_start_marks_listing_accepted_in_registry(client):
+    await _seed_seller_order(client)
+    await _seed_negotiation(client)
+    sync_mock = AsyncMock(return_value={"status": "accepted"})
+
+    with patch(
+        "market_storefront.utils.settlement_jobs._run_settlement_job_bg",
+        new=AsyncMock(),
+    ), patch(
+        "market_storefront.utils.escrow_verification.verify_escrow_for_settlement",
+        new=AsyncMock(),
+    ), patch(
+        "market_storefront.utils.action_executor.sync_listing_status_to_registry",
+        new=sync_mock,
+    ):
+        await start_settlement_job(
+            escrow_uid="0xescrow",
+            negotiation_id="neg-1",
+            ssh_public_key="ssh-rsa ...",
+            sqlite_client=client,
+            alkahest_client=MagicMock(),
+            chain_name='anvil',
+        )
+
+    listing = await client.load_listing(listing_id="seller-ord-1")
+    assert listing["status"] == "accepted"
+    sync_mock.assert_awaited_once_with("seller-ord-1", "accepted")
+
+
+@pytest.mark.asyncio
 async def test_start_aborts_when_escrow_verification_rejects(client):
     """If on-chain verification fails, no escrows row is inserted and no
     background task is scheduled — fail-closed."""
@@ -457,6 +487,33 @@ async def test_background_task_reopens_listing_on_failure(client):
     assert (await client.load_escrow(escrow_uid="0xescrow"))["status"] == "failed"
     listing = await client.load_listing(listing_id="seller-ord-1")
     assert listing["status"] == "open"
+
+
+@pytest.mark.asyncio
+async def test_background_task_reopens_registry_listing_on_failure(client):
+    await _seed_seller_order(client, listing_id="seller-ord-1")
+    await client.update_listing(listing_id="seller-ord-1", status="accepted")
+    await _seed_escrow_provisioning(client)
+    mock_fulfill = AsyncMock(side_effect=RuntimeError("vm host unreachable"))
+    sync_mock = AsyncMock(return_value={"status": "open"})
+
+    with patch(
+        "market_storefront.utils.action_executor.fulfill_compute_obligation",
+        new=mock_fulfill,
+    ), patch(
+        "market_storefront.utils.action_executor.sync_listing_status_to_registry",
+        new=sync_mock,
+    ):
+        await _run_settlement_job_bg(
+            escrow_uid="0xescrow",
+            provision=ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
+            listing_id="seller-ord-1",
+            order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
+            sqlite_client=client,
+            alkahest_client=MagicMock(),
+        )
+
+    sync_mock.assert_awaited_once_with("seller-ord-1", "open")
 
 
 @pytest.mark.asyncio

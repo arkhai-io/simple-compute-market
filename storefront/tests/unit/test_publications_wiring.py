@@ -191,3 +191,50 @@ class TestRegistriesToTarget:
             "L1", ["http://r1", "http://r2"],
         )
         assert urls == ["http://r1"]
+
+
+class TestSyncListingStatusToRegistry:
+    """Lifecycle transitions should keep registry discovery state current."""
+
+    @pytest.mark.asyncio
+    async def test_updates_active_publication_registries(self, patched_sqlite):
+        await patched_sqlite.upsert_publication(
+            listing_id="Laccepted", registry_url="http://r1",
+            payload={"listing_id": "Laccepted"}, status="published",
+        )
+        await patched_sqlite.upsert_publication(
+            listing_id="Laccepted", registry_url="http://r2",
+            payload={"listing_id": "Laccepted"}, status="unpublished",
+        )
+        results = [
+            PublishResult(
+                registry_url="http://r1", success=True,
+                response={"listing_id": "Laccepted", "status": "accepted"},
+                error=None, payload={"status": "accepted"},
+                registry_assigned_id="Laccepted",
+            ),
+        ]
+        cm, client = _mock_multi_registry(["http://r1", "http://r2"], results)
+
+        with (
+            patch("market_storefront.utils.action_executor._make_registry_client",
+                  return_value=cm),
+            settings_overrides(enable_registry_discovery=True,
+                               **{"wallet.private_key": "0xkey"}),
+        ):
+            out = await action_executor.sync_listing_status_to_registry(
+                "Laccepted", "accepted",
+            )
+
+        assert out["status"] == "accepted"
+        client.update_listing_per_registry.assert_awaited_once()
+        listing_id, payloads = client.update_listing_per_registry.await_args.args
+        assert listing_id == "Laccepted"
+        assert list(payloads) == ["http://r1"]
+        assert payloads["http://r1"].updates == {"status": "accepted"}
+
+        row = await patched_sqlite.load_publication(
+            listing_id="Laccepted", registry_url="http://r1",
+        )
+        assert row["status"] == "published"
+        assert row["payload"] == {"status": "accepted"}

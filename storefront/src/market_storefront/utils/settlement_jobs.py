@@ -209,6 +209,10 @@ async def start_settlement_job(
             "[SETTLE_JOB] Could not mark order %s as accepted: %s",
             our_listing_id, exc,
         )
+    else:
+        await _sync_listing_status_to_registry_best_effort(
+            our_listing_id, "accepted", action="mark accepted",
+        )
 
     asyncio.create_task(
         _run_settlement_job_bg(
@@ -239,6 +243,9 @@ async def _reopen_listing_after_failure(sqlite_client: Any, listing_id: str) -> 
     """
     try:
         await sqlite_client.update_listing(listing_id=listing_id, status="open")
+        await _sync_listing_status_to_registry_best_effort(
+            listing_id, "open", action="reopen after failure",
+        )
         logger.info(
             "[SETTLE_JOB] Reopened listing %s after provisioning failure", listing_id
         )
@@ -246,6 +253,29 @@ async def _reopen_listing_after_failure(sqlite_client: Any, listing_id: str) -> 
         logger.warning(
             "[SETTLE_JOB] Could not reopen listing %s after failure: %s",
             listing_id, exc,
+        )
+
+
+async def _sync_listing_status_to_registry_best_effort(
+    listing_id: str,
+    status: str,
+    *,
+    action: str,
+) -> None:
+    """Mirror local lifecycle status to registry without blocking settlement."""
+    try:
+        from market_storefront.utils.action_executor import sync_listing_status_to_registry
+        sync_result = await sync_listing_status_to_registry(listing_id, status)
+    except Exception as exc:
+        logger.warning(
+            "[SETTLE_JOB] Could not %s registry listing %s: %s",
+            action, listing_id, exc,
+        )
+        return
+    if sync_result.get("status") == "error":
+        logger.warning(
+            "[SETTLE_JOB] Could not %s registry listing %s: %s",
+            action, listing_id, sync_result.get("message"),
         )
 
 
