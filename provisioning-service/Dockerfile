@@ -57,10 +57,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 USER appuser
 RUN mkdir -p /tmp/galaxy-tarballs && \
     for col in \
-        "community-general-12.6.0" \
-        "community-docker-5.2.0" \
-        "community-crypto-3.2.0" \
-        "community-library_inventory_filtering_v1-1.1.5" \
+        "community-general-4.8.7" \
+        "community-docker-2.7.2" \
+        "community-crypto-2.5.0" \
     ; do \
         curl --retry 8 --retry-all-errors --retry-delay 5 -fSL \
             "https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/artifacts/${col}.tar.gz" \
@@ -68,10 +67,9 @@ RUN mkdir -p /tmp/galaxy-tarballs && \
             || (echo "Failed to fetch ${col}.tar.gz" && exit 1); \
     done && \
     /app/.venv/bin/ansible-galaxy collection install \
-        /tmp/galaxy-tarballs/community-crypto-3.2.0.tar.gz \
-        /tmp/galaxy-tarballs/community-docker-5.2.0.tar.gz \
-        /tmp/galaxy-tarballs/community-library_inventory_filtering_v1-1.1.5.tar.gz \
-        /tmp/galaxy-tarballs/community-general-12.6.0.tar.gz
+        /tmp/galaxy-tarballs/community-crypto-2.5.0.tar.gz \
+        /tmp/galaxy-tarballs/community-docker-2.7.2.tar.gz \
+        /tmp/galaxy-tarballs/community-general-4.8.7.tar.gz
 
 # Stage 2: Runtime
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime

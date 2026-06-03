@@ -269,7 +269,9 @@ class AdminListingsController:
         """
         try:
             return await self._listing_svc.evaluate_negotiate(
-                listing_id, body.their_proposed_price
+                listing_id,
+                body.proposal,
+                requested_duration_seconds=body.requested_duration_seconds,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))

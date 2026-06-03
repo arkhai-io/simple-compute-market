@@ -12,9 +12,9 @@
 # inventory_path: "/home/you/code/compute-provisioning-iac/ansible/inventory/hosts"
 # management_vars_path: "/home/you/code/compute-provisioning-iac/ansible/inventory/management-vars.yaml"
 
-# Enable auth against a local registry instance:
-# enable_auth: true
-# registry_url: "http://localhost:8080"
+# Shared admin key with the storefront (X-Admin-Key gate + callback secret).
+# Leave unset locally to disable auth; set to match the storefront's admin_api_key.
+# storefront_admin_key: "dev-shared-secret"
 
 # Golden image credentials for local testing:
 # golden_root_ssh_filename: "id_ed25519"

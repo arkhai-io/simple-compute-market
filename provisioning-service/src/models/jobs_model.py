@@ -66,9 +66,6 @@ class AnsibleJobParams:
     # Lease scheduling
     vm_expiry_at: Optional[str] = None
 
-    # Buyer identity (stored on the job record)
-    buyer_agent_id: Optional[str] = None
-
     # Deal linkage — on-chain escrow UID for recovery queries
     escrow_uid: Optional[str] = None
 
@@ -133,12 +130,6 @@ class JobStatusResponse(BaseModel):
         default=None,
         description="Scheduled time for the next retry attempt (UTC)",
     )
-    agent_id: Optional[str] = Field(
-        default=None, description="ERC-8004 agent ID (seller) that submitted the job"
-    )
-    buyer_agent_id: Optional[str] = Field(
-        default=None, description="ERC-8004 agent ID of the buyer"
-    )
     escrow_uid: Optional[str] = Field(
         default=None,
         description="On-chain escrow UID linking this job to a deal (set at submission time)",
@@ -165,12 +156,12 @@ class JobListResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Credential response models (unchanged in shape, renamed for consistency)
+# Credential response models
 # ---------------------------------------------------------------------------
 
 
 class CredentialResponse(BaseModel):
-    """A single credential granted to the requesting agent."""
+    """A single credential (one role) for a job."""
 
     role: str = Field(description="Credential role: 'root' or 'tenant'")
     password: Optional[str] = Field(default=None, description="Login password")
@@ -186,9 +177,9 @@ class CredentialResponse(BaseModel):
 
 
 class CredentialListResponse(BaseModel):
-    """List of credentials the requesting agent is granted for a job."""
+    """All credentials for a job, one entry per role."""
 
     job_id: str = Field(description="Unique job identifier")
     credentials: list[CredentialResponse] = Field(
-        description="Credentials granted to the requesting agent"
+        description="Every role's credentials for the job"
     )

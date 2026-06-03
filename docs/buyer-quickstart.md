@@ -25,13 +25,24 @@ For the seller side see [`seller-quickstart.md`](./seller-quickstart.md).
 
 ## 1. Install
 
-From a release build:
+Released build (latest):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/.../market-installer.sh | bash
+curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh | bash
 ```
 
-Details in [`buyer/INSTALLER.md`](../buyer/INSTALLER.md).
+Installs `market` into `~/.local/bin`. The installer uses `uv` to provision
+the Python version required by the buyer CLI; a literal `python3.12` system
+command is not required. Pin a version with
+`... | bash -s -- --version market-cli-v0.5.3`.
+
+In noninteractive Linux environments, allow apt dependency installation
+explicitly:
+
+```bash
+curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh \
+  | MARKET_INSTALL_ASSUME_YES=1 bash
+```
 
 Or from the repo:
 
@@ -53,24 +64,26 @@ market --version
 private_key    = "0x<YOUR_BUYER_PRIVATE_KEY>"
 ssh_public_key = "ssh-ed25519 AAAA...your-key buyer@host"
 
-[chain]
+[chains.base_sepolia]
 chain_id = 84532
-rpc_url  = "https://base-sepolia.infura.io/v3/<YOUR_KEY>"
+rpc_url  = "https://sepolia.base.org"   # public RPC; or your own provider
 
 [registry]
 urls = ["http://<INDEXER_HOST>:8080"]
 
 [registry.auth]
-# Required when the indexer runs with REGISTRY_REQUIRE_API_KEY=true.
+# Required when the indexer gates reads (REGISTRY_REQUIRE_READ_API_KEY=true).
 # Keys must match the URLs in [registry] urls exactly (scheme, host,
 # port, no trailing slash).
 "http://<INDEXER_HOST>:8080" = "<your-token>"
 
-default_token_address = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
-
 [negotiation]
-# Bisection avoids a ~1GB torch download. Switch to "rl" if you want it.
-policy_mode = "bisection"
+# Ordered policy chain run per round. The buyer's default chain pairs
+# `buyer_escrow_shape_guard` (vetoes if the seller mutates a buyer-
+# pinned field) with the `bisection` terminal. Switch the terminal to
+# `"rl"` for the trained pufferlib checkpoint (~1GB torch download).
+# See docs/configuration.md for the full reference.
+policies = ["buyer_escrow_shape_guard", "bisection"]
 ```
 
 ## 3. Browse
@@ -107,8 +120,9 @@ Useful flags:
   `--disk-gb-min` — additional listing filters.
 - `--settlement-timeout` — default 600s. Real cloud-init can take 5-10
   min; bump to 1800 if you see timeouts before progress.
-- `--token-contract` + `--token-decimals` — override config and skip
-  the on-chain `decimals()` lookup.
+- `--token-contract` — optional filter: only consider listings whose
+  accepted escrow uses this ERC-20. Omit it and the token comes from the
+  chosen listing. `--token-decimals` skips the on-chain `decimals()` lookup.
 
 The terminal output includes a `Connection` block. Use the `vm_host_ip`
 field (the printed `ssh_command` references the inventory alias, not the
@@ -159,7 +173,7 @@ market escrow reclaim <escrow_uid>
   that fails after escrow creation locks funds until `expiration_unix`.
   Resume with `market buy --from <run_id>`, don't re-`buy` from scratch.
 - **VM SSH uses `vm_host_ip`, not the alias** the `ssh_command` field
-  prints (`tenant<id>@btc1` etc. — the host name is the seller's
+  prints (`tenant<id>@kvm1` etc. — the host name is the seller's
   inventory alias, not DNS).
 - **The tenant user has no sudo password.** Cloud-init only injects
   your SSH pubkey.

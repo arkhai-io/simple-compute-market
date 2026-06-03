@@ -1,0 +1,13 @@
+# Normalize all text files to LF in the repository.
+# Prevents CRLF from breaking shell scripts on Linux/container builds
+# when checked out on Windows.
+* text=auto eol=lf
+
+# Explicitly mark binary types so they are never normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.whl binary
+*.pyc binary

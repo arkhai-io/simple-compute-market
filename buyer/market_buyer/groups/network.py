@@ -1,9 +1,8 @@
-"""`market network` — operator-side ZeroTier membership.
+"""`market network` — ZeroTier overlay membership.
 
-Per-operator actions only: `join` a network and inspect its `peers`.
-Network-owner actions (`install` / `create` / `add` <member>) live in
-`market-infra` because they're run once per market by the trust
-authority, not per-agent.
+`join` a network and inspect its `peers`. Network-owner actions
+(`install` / `create` / `add` <member>) are Make targets in
+`scripts/zerotier/`, run by whoever stands up the overlay.
 
 Mirror of `market-storefront network`. Buyers and sellers each manage
 their own membership; the surface is identical.
@@ -42,7 +41,7 @@ def network_join(
     run_step(
         f"Join ZeroTier network {network_id}",
         ["make", "join", f"NETWORK_ID={network_id}"],
-        REPO_ROOT / "infra",
+        REPO_ROOT / "scripts" / "zerotier",
     )
 
 
@@ -52,5 +51,5 @@ def network_get_peers() -> None:
     run_step(
         "Get ZeroTier peers (make get-peers)",
         ["make", "get-peers"],
-        REPO_ROOT / "infra",
+        REPO_ROOT / "scripts" / "zerotier",
     )

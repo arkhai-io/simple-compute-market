@@ -219,49 +219,189 @@ def test_load_storefront_config_returns_empty_when_neither_file_present(monkeypa
 
 
 # ---------------------------------------------------------------------------
-# identity_registry_address — chain-name fallback to the canonical CREATE2
-# vanity address. Saves users from having to copy a fixed hex string into
-# every config for the standard chains.
+# chains_from_config — the [chains.<name>] tables become ChainConfig
+# entries keyed by chain name. Each entry inherits per-chain defaults
+# (KNOWN_CHAIN_IDS for chain_id, KNOWN_IDENTITY_REGISTRY for identity
+# registry) when the table omits them, so the standard chains need
+# only ``rpc_url`` set.
 # ---------------------------------------------------------------------------
 
 
-def test_identity_registry_address_uses_explicit_toml_value():
-    cfg = {"registry": {"identity_registry_address": "0xCUSTOM"}, "chain": {"name": "base_sepolia"}}
-    assert config_loader.identity_registry_address(config=cfg) == "0xCUSTOM"
+def test_chains_from_config_returns_empty_when_no_chains_table():
+    assert config_loader.chains_from_config({}) == {}
+    assert config_loader.chains_from_config({"chains": "not a dict"}) == {}
 
 
-def test_identity_registry_address_falls_back_to_chain_name_default():
-    """No address in config → use canonical CREATE2 vanity for known chain."""
-    cfg = {"chain": {"name": "base_sepolia"}}
-    canonical = config_loader.KNOWN_IDENTITY_REGISTRY["base_sepolia"]
-    assert config_loader.identity_registry_address(config=cfg) == canonical
+def test_chains_from_config_skips_entries_without_rpc_url():
+    cfg = {"chains": {"orphan": {"chain_id": 1}}}
+    assert config_loader.chains_from_config(cfg) == {}
 
 
-def test_identity_registry_address_known_chains_all_match():
-    """base_sepolia, ethereum_sepolia, and anvil all share the canonical
-    CREATE2 deployment, so the default should be the same address."""
-    addresses = {
-        chain: config_loader.identity_registry_address(config={"chain": {"name": chain}})
-        for chain in ("base_sepolia", "ethereum_sepolia", "anvil")
+def test_chains_from_config_chain_id_explicit_wins():
+    cfg = {"chains": {"base_sepolia": {
+        "rpc_url": "https://x",
+        "chain_id": 999999,
+    }}}
+    chains = config_loader.chains_from_config(cfg)
+    assert chains["base_sepolia"].chain_id == 999999
+
+
+def test_chains_from_config_chain_id_falls_back_to_known_table():
+    cfg = {"chains": {"base_sepolia": {"rpc_url": "https://x"}}}
+    chains = config_loader.chains_from_config(cfg)
+    assert chains["base_sepolia"].chain_id == config_loader.KNOWN_CHAIN_IDS["base_sepolia"]
+
+
+def test_chains_from_config_chain_id_zero_when_unknown_and_omitted():
+    cfg = {"chains": {"some_random_chain": {"rpc_url": "https://x"}}}
+    chains = config_loader.chains_from_config(cfg)
+    assert chains["some_random_chain"].chain_id == 0
+
+
+def test_chains_from_config_alkahest_path_preserved():
+    cfg = {"chains": {"anvil": {
+        "rpc_url": "http://localhost:8545",
+        "alkahest_address_config_path": "/etc/arkhai/alkahest.json",
+    }}}
+    chains = config_loader.chains_from_config(cfg)
+    assert chains["anvil"].alkahest_address_config_path == "/etc/arkhai/alkahest.json"
+
+
+def test_chains_from_config_name_field_matches_dict_key():
+    cfg = {"chains": {
+        "base_sepolia": {"rpc_url": "https://x"},
+        "anvil": {"rpc_url": "http://localhost:8545"},
+    }}
+    chains = config_loader.chains_from_config(cfg)
+    for key, entry in chains.items():
+        assert entry.name == key
+
+
+# ---------------------------------------------------------------------------
+# escrow_templates_from_config — [escrow_templates.<name>] tables become
+# EscrowTemplate entries. ``auto:`` escrow addresses route through the
+# chain's alkahest address config; literal ``0x...`` addresses pass
+# through unchanged.
+# ---------------------------------------------------------------------------
+
+
+def test_escrow_templates_returns_empty_when_no_table():
+    assert config_loader.escrow_templates_from_config({}) == {}
+    assert config_loader.escrow_templates_from_config(
+        {"escrow_templates": "not a dict"}
+    ) == {}
+
+
+def test_escrow_templates_skips_template_with_unknown_chain(capsys):
+    cfg = {
+        "chains": {"anvil": {"rpc_url": "http://localhost:8545"}},
+        "escrow_templates": {
+            "ghost": {"chain": "polygon", "escrow_address": "0x" + "ab" * 20},
+        },
     }
-    assert len(set(addresses.values())) == 1
+    out = config_loader.escrow_templates_from_config(cfg)
+    assert out == {}
+    captured = capsys.readouterr()
+    assert "unknown chain 'polygon'" in captured.err
 
 
-def test_identity_registry_address_unknown_chain_returns_none():
-    cfg = {"chain": {"name": "some_random_chain"}}
-    assert config_loader.identity_registry_address(config=cfg) is None
+def test_escrow_templates_literal_address_passes_through():
+    cfg = {
+        "chains": {"anvil": {
+            "rpc_url": "http://localhost:8545",
+            "alkahest_address_config_path": None,
+        }},
+        "escrow_templates": {
+            "usdc": {
+                "chain": "anvil",
+                "escrow_address": "0xDEADBEEF" + "00" * 16,
+                "literal": {"token": "0xCAFEBABE" + "00" * 16},
+                "rates": {
+                    "amount": {"field": "amount", "per": "hour"},
+                },
+            },
+        },
+    }
+    out = config_loader.escrow_templates_from_config(cfg)
+    tpl = out["usdc"]
+    assert tpl.chain == "anvil"
+    assert tpl.escrow_address.lower() == ("0xDEADBEEF" + "00" * 16).lower()
+    assert tpl.literal_fields == {"token": "0xCAFEBABE" + "00" * 16}
+    assert "amount" in tpl.rate_slots
+    assert tpl.rate_slots["amount"].field == "amount"
+    assert tpl.rate_slots["amount"].per == "hour"
 
 
-def test_identity_registry_address_flag_overrides_everything(monkeypatch):
-    monkeypatch.setenv("IDENTITY_REGISTRY_ADDRESS", "0xENV")
-    cfg = {"registry": {"identity_registry_address": "0xTOML"}, "chain": {"name": "base_sepolia"}}
-    assert config_loader.identity_registry_address(flag="0xFLAG", config=cfg) == "0xFLAG"
+def test_escrow_templates_skips_when_field_missing(capsys):
+    cfg = {
+        "chains": {"anvil": {"rpc_url": "http://localhost:8545"}},
+        "escrow_templates": {
+            "bad": {
+                "chain": "anvil",
+                "escrow_address": "0x" + "ab" * 20,
+                "rates": {"x": {"per": "hour"}},
+            },
+        },
+    }
+    out = config_loader.escrow_templates_from_config(cfg)
+    assert out == {}
+    err = capsys.readouterr().err
+    assert "missing 'field'" in err
 
 
-def test_identity_registry_address_env_beats_toml(monkeypatch):
-    monkeypatch.setenv("IDENTITY_REGISTRY_ADDRESS", "0xENV")
-    cfg = {"registry": {"identity_registry_address": "0xTOML"}, "chain": {"name": "base_sepolia"}}
-    assert config_loader.identity_registry_address(config=cfg) == "0xENV"
+def test_escrow_templates_preserves_rate_slot_order():
+    cfg = {
+        "chains": {"anvil": {"rpc_url": "http://localhost:8545"}},
+        "escrow_templates": {
+            "bundle": {
+                "chain": "anvil",
+                "escrow_address": "0x" + "ab" * 20,
+                "rates": {
+                    "usdc":    {"field": "erc20Amounts[0]", "per": "hour"},
+                    "credits": {"field": "erc20Amounts[1]", "per": "hour"},
+                    "eth":     {"field": "nativeAmount",    "per": "hour"},
+                },
+            },
+        },
+    }
+    tpl = config_loader.escrow_templates_from_config(cfg)["bundle"]
+    assert list(tpl.rate_slots) == ["usdc", "credits", "eth"]
+
+
+def test_escrow_templates_zero_rate_slots_is_legal():
+    """Attestation escrows have no rate-bearing fields."""
+    cfg = {
+        "chains": {"anvil": {"rpc_url": "http://localhost:8545"}},
+        "escrow_templates": {
+            "svc": {
+                "chain": "anvil",
+                "escrow_address": "0x" + "ab" * 20,
+                "literal": {"attestationUid": "0x" + "cd" * 32},
+            },
+        },
+    }
+    tpl = config_loader.escrow_templates_from_config(cfg)["svc"]
+    assert tpl.rate_slots == {}
+    assert tpl.literal_fields == {"attestationUid": "0x" + "cd" * 32}
+
+
+def test_escrow_templates_unknown_auto_key_drops_template(capsys):
+    cfg = {
+        "chains": {"anvil": {
+            "rpc_url": "http://localhost:8545",
+            "alkahest_address_config_path": None,
+        }},
+        "escrow_templates": {
+            "weird": {
+                "chain": "anvil",
+                "escrow_address": "auto:nonsense_kind",
+            },
+        },
+    }
+    out = config_loader.escrow_templates_from_config(cfg)
+    assert out == {}
+    err = capsys.readouterr().err
+    assert "unknown auto:" in err
 
 
 def test_deep_merge_recurses_into_nested_tables():
@@ -442,7 +582,7 @@ def test_write_escapes_quotes_and_backslashes(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Structured shortcuts (wallet_address, chain_name, etc.)
+# Structured shortcuts (wallet_address, etc.)
 # ---------------------------------------------------------------------------
 
 
@@ -456,11 +596,6 @@ def test_wallet_address_falls_back_to_toml(monkeypatch):
     monkeypatch.delenv("AGENT_WALLET_ADDRESS", raising=False)
     cfg = {"wallet": {"address": "0xfromtoml"}}
     assert config_loader.wallet_address(config=cfg) == "0xfromtoml"
-
-
-def test_chain_name_default_when_everything_missing(monkeypatch):
-    monkeypatch.delenv("CHAIN_NAME", raising=False)
-    assert config_loader.chain_name(config={}) == "ethereum_sepolia"
 
 
 # ---------------------------------------------------------------------------

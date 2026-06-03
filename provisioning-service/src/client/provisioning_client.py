@@ -8,13 +8,14 @@ Two clients with identical method signatures:
 Both clients:
 - Own their HTTP session internally — callers never create or pass a session
 - Accept a ``transport=`` kwarg at construction for in-process test injection
+- Send ``X-Admin-Key`` on every request when ``admin_key`` is set
 - Send ``X-Agent-ID`` on every request when ``agent_id`` is set
 - Raise ``ProvisioningError`` on non-2xx responses
 - Return typed model objects from all methods
 
 Usage (async)::
 
-    client = ProvisioningClient("http://provisioning:8081", agent_id="eip155:1:0x…:42")
+    client = ProvisioningClient("http://provisioning:8081", admin_key="…")
     async with client:
         submit = await client.create_vm("kvm1", CreateVmRequest(...))
         result = await client.poll_until_complete(submit.job_id)
@@ -92,22 +93,27 @@ class ProvisioningTimeoutError(ProvisioningError):
 
 
 class _ProvisioningClientBase:
-    def __init__(self, base_url: str, agent_id: Optional[str], timeout: float) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        admin_key: Optional[str],
+        timeout: float,
+        agent_id: Optional[str] = None,
+    ) -> None:
         self._base = base_url.rstrip("/")
+        self._admin_key = admin_key
         self._agent_id = agent_id
         self._timeout = timeout
 
     def _url(self, path: str) -> str:
         return f"{self._base}{path}"
 
-    def _headers(self, require_agent_id: bool = False) -> dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         h: dict[str, str] = {}
+        if self._admin_key:
+            h["X-Admin-Key"] = self._admin_key
         if self._agent_id:
             h["X-Agent-ID"] = self._agent_id
-        elif require_agent_id:
-            raise ProvisioningError(
-                "X-Agent-ID is required for this endpoint but agent_id was not set"
-            )
         return h
 
     @staticmethod
@@ -134,8 +140,13 @@ class ProvisioningClient(_ProvisioningClientBase):
     ----------
     base_url:
         Base URL of the provisioning service.
+    admin_key:
+        Shared operator admin key sent as ``X-Admin-Key`` on every request
+        (the storefront's ``admin_api_key``). ``None`` for local dev where
+        the service runs with no key configured.
     agent_id:
-        Canonical ERC-8004 agent ID sent as ``X-Agent-ID`` on every request.
+        ERC-8004 agent identity sent as ``X-Agent-ID`` when provisioning
+        auth is enabled.
     timeout:
         HTTP timeout in seconds.
     transport:
@@ -145,12 +156,13 @@ class ProvisioningClient(_ProvisioningClientBase):
     def __init__(
         self,
         base_url: str,
+        admin_key: Optional[str] = None,
         agent_id: Optional[str] = None,
         *,
         timeout: float = 60.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        super().__init__(base_url, agent_id, timeout)
+        super().__init__(base_url, admin_key, timeout, agent_id)
         self._client = httpx.AsyncClient(
             base_url=self._base,
             timeout=timeout,
@@ -166,21 +178,19 @@ class ProvisioningClient(_ProvisioningClientBase):
     async def __aexit__(self, *_: Any) -> None:
         await self.close()
 
-    async def _get(self, path: str, *, params: dict | None = None,
-                   require_agent_id: bool = False) -> dict:
+    async def _get(self, path: str, *, params: dict | None = None) -> dict:
         url = self._url(path)
         resp = await self._client.get(
-            path, params=params, headers=self._headers(require_agent_id)
+            path, params=params, headers=self._headers()
         )
         self._raise_for_status("GET", url, resp.status_code, resp.text)
         return resp.json()
 
-    async def _post(self, path: str, body: Any, *,
-                    require_agent_id: bool = False) -> dict:
+    async def _post(self, path: str, body: Any) -> dict:
         url = self._url(path)
         payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
         resp = await self._client.post(
-            path, json=payload, headers=self._headers(require_agent_id)
+            path, json=payload, headers=self._headers()
         )
         self._raise_for_status("POST", url, resp.status_code, resp.text)
         return resp.json()
@@ -383,9 +393,9 @@ class ProvisioningClient(_ProvisioningClientBase):
         return JobStatusResponse(**(await self._get(f"/api/v1/jobs/{job_id}")))
 
     async def get_job_credentials(self, job_id: str) -> CredentialListResponse:
-        """GET /api/v1/jobs/{job_id}/credentials — requires agent_id."""
+        """GET /api/v1/jobs/{job_id}/credentials — returns all job credentials."""
         return CredentialListResponse(**(await self._get(
-            f"/api/v1/jobs/{job_id}/credentials", require_agent_id=True
+            f"/api/v1/jobs/{job_id}/credentials"
         )))
 
     async def get_job_logs(self, job_id: str) -> JobLogsResponse:
@@ -513,8 +523,12 @@ class SyncProvisioningClient(_ProvisioningClientBase):
     ----------
     base_url:
         Base URL of the provisioning service.
+    admin_key:
+        Shared operator admin key sent as ``X-Admin-Key`` on every request
+        (the storefront's ``admin_api_key``). ``None`` for local dev.
     agent_id:
-        Canonical ERC-8004 agent ID sent as ``X-Agent-ID`` on every request.
+        ERC-8004 agent identity sent as ``X-Agent-ID`` when provisioning
+        auth is enabled.
     timeout:
         HTTP timeout in seconds.
     transport:
@@ -524,12 +538,13 @@ class SyncProvisioningClient(_ProvisioningClientBase):
     def __init__(
         self,
         base_url: str,
+        admin_key: Optional[str] = None,
         agent_id: Optional[str] = None,
         *,
         timeout: float = 60.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        super().__init__(base_url, agent_id, timeout)
+        super().__init__(base_url, admin_key, timeout, agent_id)
         self._client = httpx.Client(
             base_url=self._base,
             timeout=timeout,
@@ -545,17 +560,16 @@ class SyncProvisioningClient(_ProvisioningClientBase):
     def __exit__(self, *_: Any) -> None:
         self.close()
 
-    def _get(self, path: str, *, params: dict | None = None,
-             require_agent_id: bool = False) -> dict:
+    def _get(self, path: str, *, params: dict | None = None) -> dict:
         url = self._url(path)
-        resp = self._client.get(path, params=params, headers=self._headers(require_agent_id))
+        resp = self._client.get(path, params=params, headers=self._headers())
         self._raise_for_status("GET", url, resp.status_code, resp.text)
         return resp.json()
 
-    def _post(self, path: str, body: Any, *, require_agent_id: bool = False) -> dict:
+    def _post(self, path: str, body: Any) -> dict:
         url = self._url(path)
         payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
-        resp = self._client.post(path, json=payload, headers=self._headers(require_agent_id))
+        resp = self._client.post(path, json=payload, headers=self._headers())
         self._raise_for_status("POST", url, resp.status_code, resp.text)
         return resp.json()
 
@@ -703,7 +717,7 @@ class SyncProvisioningClient(_ProvisioningClientBase):
 
     def get_job_credentials(self, job_id: str) -> CredentialListResponse:
         return CredentialListResponse(**(self._get(
-            f"/api/v1/jobs/{job_id}/credentials", require_agent_id=True
+            f"/api/v1/jobs/{job_id}/credentials"
         )))
 
     def get_job_logs(self, job_id: str) -> JobLogsResponse:

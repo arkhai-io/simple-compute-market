@@ -5,7 +5,7 @@ Starts the full FastAPI application with:
   - A real in-memory SQLite database (fresh per test)
   - A real AsyncJobQueue (fresh per test, with on_job_started seam)
   - AnsibleService overridden with a MagicMock — the only external boundary
-  - Auth disabled (PROVISIONING_ENABLE_AUTH=false)
+  - Auth gate open (storefront_admin_key unset in test settings)
 
 Pattern for exercising the background job loop without sleeps
 -------------------------------------------------------------
@@ -41,7 +41,6 @@ import container as _container_module
 from client.provisioning_client import ProvisioningClient
 from db.database import create_session_factory
 
-AGENT_ID = "eip155:1337:0xdeadbeef:1"
 from db.models import Base
 
 
@@ -405,7 +404,6 @@ async def client_and_queue(
     async with AsyncClient(transport=transport, base_url="http://test") as http:
         client = ProvisioningClient(
             "http://test",
-            agent_id=AGENT_ID,
             transport=transport,
         )
         yield client, job_queue

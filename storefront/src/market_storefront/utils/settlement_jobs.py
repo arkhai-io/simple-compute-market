@@ -72,6 +72,7 @@ async def start_settlement_job(
     ssh_public_key: str,
     sqlite_client: Any,
     alkahest_client: Any,
+    chain_name: str,
 ) -> dict[str, Any]:
     """Kick off provisioning for an already-on-chain escrow.
 
@@ -91,10 +92,16 @@ async def start_settlement_job(
             negotiated terms (wrong token, insufficient amount, wrong
             recipient, expired, revoked, etc).
     """
-    from market_storefront.utils.config import settings
+    from market_storefront.utils.config import CHAINS, settings
     from market_storefront.utils.escrow_verification import (
         verify_escrow_for_settlement,
     )
+
+    chain_cfg = CHAINS.get(chain_name)
+    if chain_cfg is None:
+        raise ValueError(
+            f"chain {chain_name!r} is not configured on this storefront"
+        )
 
     thread = await sqlite_client.load_negotiation_thread_row(
         negotiation_id=negotiation_id,
@@ -142,12 +149,12 @@ async def start_settlement_job(
     await verify_escrow_for_settlement(
         escrow_uid=escrow_uid,
         seller_wallet=settings.wallet.address or "",
-        agreed_price=float(thread["agreed_price"]),
+        agreed_price=int(thread["agreed_price"]),
         agreed_duration_seconds=provision.duration_seconds,
         listing=our_order_dict,
         alkahest_client=alkahest_client,
-        chain_name=settings.chain.name,
-        alkahest_address_config_path=settings.chain.alkahest_address_config_path,
+        chain_name=chain_name,
+        alkahest_address_config_path=chain_cfg.alkahest_address_config_path,
         escrow_proposal=proposal,
     )
 
@@ -155,18 +162,27 @@ async def start_settlement_job(
     # absent (legacy threads), fall back to the listing's first accepted
     # escrow. Multi-escrow deals (bond, penalty, etc.) get one row each, with
     # is_primary=1 on the payment lockup that drives provisioning.
-    chain_name = proposal.chain_name if proposal is not None else None
+    proposal_chain = proposal.chain_name if proposal is not None else None
     escrow_address = proposal.escrow_address if proposal is not None else None
-    if chain_name is None or escrow_address is None:
+    if proposal_chain is None or escrow_address is None:
         accepted = our_order_dict.get("accepted_escrows") or []
         if accepted and isinstance(accepted[0], dict):
-            chain_name = chain_name or accepted[0].get("chain_name")
+            proposal_chain = proposal_chain or accepted[0].get("chain_name")
             escrow_address = escrow_address or accepted[0].get("escrow_address")
+    # The DB row records the chain the escrow lives on — preserve the
+    # caller's (proposal-derived) chain_name rather than the request-level
+    # ``chain_name`` parameter, which should already agree but keep the
+    # proposal as the source of truth.
+    if proposal_chain and proposal_chain != chain_name:
+        logger.warning(
+            "[SETTLE_JOB] Proposal chain %r diverges from request chain %r; "
+            "using proposal chain.", proposal_chain, chain_name,
+        )
 
     inserted = await sqlite_client.insert_escrow(
         escrow_uid=escrow_uid,
         negotiation_id=negotiation_id,
-        chain_name=chain_name,
+        chain_name=proposal_chain or chain_name,
         escrow_address=escrow_address,
         is_primary=True,
         status="provisioning",
@@ -179,20 +195,6 @@ async def start_settlement_job(
             escrow_uid, (existing or {}).get("status"),
         )
         return existing or {}
-
-    # Mark the seller's listing as accepted. The buyer-attestation/escrow
-    # linkage now lives on the escrows row (joined via negotiation_id), so
-    # only the lifecycle status is patched here.
-    try:
-        await sqlite_client.update_listing(
-            listing_id=our_listing_id,
-            status="accepted",
-        )
-    except Exception as exc:
-        logger.warning(
-            "[SETTLE_JOB] Could not mark order %s as accepted: %s",
-            our_listing_id, exc,
-        )
 
     asyncio.create_task(
         _run_settlement_job_bg(

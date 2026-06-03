@@ -1,47 +1,74 @@
 {{/*
-Shared helm-test configuration mounted by all test pods.
+Shared helm-test configuration mounted by smoke-test pods.
 
-The storefront block iterates over .Values.storefront.agents and renders
-one entry per agent under its `component` label (or .name as fallback).
-Tests typically expect "buyer" and "seller" keys; that's an application-
-level convention, not a deployment one — agents with those component
-labels render at those keys, others render at their name.
+Preferred smoke-test mode: global.smokeTests.config.profileFiles renders
+complete Dynaconf profile files directly. The generated profile is still kept
+when its name does not collide, so non-smoke hooks that mount config-helm.yml
+continue to work.
 */}}
+{{- $smoke := .Values.global.smokeTests | default dict -}}
+{{- $config := $smoke.config | default dict -}}
 {{- $rpcUrl := (index .Values "validate-contracts").rpcUrl -}}
 {{- if not $rpcUrl -}}
   {{- $rpcUrl = printf "http://%s:%d" .Values.global.rpc.host (int .Values.global.rpc.port) -}}
 {{- end -}}
+{{- $agents := .Values.storefront.agents | default list -}}
+{{- if not $agents -}}
+  {{- fail "helm test config requires at least one storefront agent" -}}
+{{- end -}}
+{{- $storefrontTests := .Values.storefront.tests | default dict -}}
+{{- $targetName := $storefrontTests.targetAgentName | default "" -}}
+{{- $targetAgent := first $agents -}}
+{{- if $targetName -}}
+  {{- $found := false -}}
+  {{- range $agent := $agents -}}
+    {{- if eq $agent.name $targetName -}}
+      {{- $targetAgent = $agent -}}
+      {{- $found = true -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if not $found -}}
+    {{- fail (printf "storefront test targetAgentName %q did not match any agent" $targetName) -}}
+  {{- end -}}
+{{- end -}}
+{{- $targetConfig := $targetAgent.config | default dict -}}
+{{- $sellerConfig := $targetConfig.seller | default dict -}}
+{{- $component := $targetAgent.component | default $targetAgent.name -}}
+{{- $generated := dict -}}
+{{- $_ := set $generated "rpc" (dict "url" $rpcUrl "chain_id" .Values.global.rpc.chainId) -}}
+{{- $_ := set $generated "registry" (dict
+  "identity_address" .Values.global.registry.identity_address
+  "reputation_address" .Values.global.registry.reputation_address
+  "validation_address" .Values.global.registry.validation_address
+  "owner_address" .Values.global.registry.owner_address
+  "api_url" (printf "http://%s-registry:%d" .Release.Name (int .Values.registry.service.port))
+) -}}
+{{- $_ := set $generated $component (dict
+  "api_url" (printf "http://%s-storefront-%s:%d" .Release.Name $targetAgent.name (int $targetAgent.port))
+  "base_url_override" ($sellerConfig.baseUrl | default "")
+  "agent_id" ($targetAgent.agentId | default "")
+) -}}
+{{- $_ := set $generated "buyer" (dict
+  "chain_rpc_url" (printf "ws://%s:%d" $.Values.global.rpc.host (int $.Values.global.rpc.port))
+) -}}
+{{- $_ := set $generated "provisioning" (dict
+  "api_url" (printf "http://%s-provisioning:%d" .Release.Name (int .Values.provisioning.server.port))
+) -}}
+{{- $rendered := mergeOverwrite (deepCopy $generated) (deepCopy ($config.values | default dict)) -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ .Release.Name }}-test-config
   labels:
-    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    {{- include "arkhai-node-operator.labels" . | nindent 4 }}
 data:
-  config-helm.yml: |
-    rpc:
-      url: {{ $rpcUrl | quote }}
-      chain_id: {{ .Values.global.rpc.chainId }}
-
-    registry:
-      identity_address:   {{ .Values.global.registry.identity_address | quote }}
-      reputation_address: {{ .Values.global.registry.reputation_address | quote }}
-      validation_address: {{ .Values.global.registry.validation_address | quote }}
-      owner_address:      {{ .Values.global.registry.owner_address | quote }}
-      api_url:            {{ printf "http://%s-registry:%d" .Release.Name (int .Values.registry.service.port) | quote }}
-
-    {{- range $agent := .Values.storefront.agents }}
-    {{- $component := $agent.component | default $agent.name }}
-    {{ $component }}:
-      api_url:           {{ printf "http://%s-storefront-%s:%d" $.Release.Name $agent.name (int $agent.port) | quote }}
-      base_url_override: {{ $agent.config.seller.baseUrl | quote }}
-      agent_id:          {{ $agent.agentId | default "" | quote }}
-    {{- end }}
-
-    buyer:
-      chain_rpc_url: {{ printf "ws://%s:%d" $.Values.global.rpc.host (int $.Values.global.rpc.port) | quote }}
-
-    provisioning:
-      api_url:     {{ printf "http://%s-provisioning:%d" .Release.Name (int .Values.provisioning.server.port) | quote }}
-      enable_auth: {{ .Values.provisioning.config.enable_auth }}
+  {{- if $config.profileFiles }}
+  {{- range $profile, $content := $config.profileFiles }}
+  config-{{ $profile }}.yml: |
+    {{- $content | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  {{- if and $config.profile (not (hasKey ($config.profileFiles | default dict) $config.profile)) }}
+  config-{{ $config.profile }}.yml: |
+    {{- toYaml $rendered | nindent 4 }}
+  {{- end }}

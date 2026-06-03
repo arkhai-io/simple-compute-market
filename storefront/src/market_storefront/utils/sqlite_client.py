@@ -8,6 +8,7 @@ import sqlite3
 import time
 import uuid
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from .config import settings
@@ -15,6 +16,58 @@ from .host_csv_importer import upsert_hosts_from_csv
 from .resource_csv_importer import upsert_resources_from_csv, upsert_resources_from_csv_content
 
 logger = logging.getLogger(__name__)
+
+
+def _amount_to_db_text(value: Any) -> str | None:
+    """Serialize a raw token amount for SQLite without int64 overflow.
+
+    Negotiation amounts are EVM ``uint256`` values. SQLite INTEGER cannot
+    represent many normal 18-decimal token amounts, so amount-bearing columns
+    store decimal-digit text and callers get Python ints back on read.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("raw token amounts must be numeric, not boolean")
+    if isinstance(value, int):
+        if value < 0:
+            raise ValueError("raw token amounts must be non-negative")
+        return str(value)
+
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"raw token amount {value!r} is not numeric") from exc
+    if parsed < 0:
+        raise ValueError("raw token amounts must be non-negative")
+    integral = parsed.to_integral_value()
+    if parsed != integral:
+        raise ValueError(f"raw token amount {value!r} is not an integer")
+    return str(int(integral))
+
+
+def _amount_from_db_text(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None
+    integral = parsed.to_integral_value()
+    if parsed != integral:
+        return None
+    amount = int(integral)
+    return amount if amount >= 0 else None
 
 
 def _normalize_to_dict(value: Any) -> dict[str, Any] | None:
@@ -34,8 +87,9 @@ def _normalize_to_dict(value: Any) -> dict[str, Any] | None:
 def synthesize_accepted_escrows_from_demand(
     demand_resource: Any,
 ) -> list[dict[str, Any]] | None:
-    """Build a single-entry ``accepted_escrows`` list from a legacy
-    ``demand_resource`` payload (``{token: {contract_address, ...}, amount}``).
+    """Build an ``accepted_escrows`` list from a legacy ``demand_resource``
+    payload (``{token: {contract_address, ...}, amount}``), one entry per
+    configured chain.
 
     Used by:
       * the one-shot schema-init backfill (pre-cutover rows still carrying
@@ -43,10 +97,12 @@ def synthesize_accepted_escrows_from_demand(
       * action_executor's MAKE_OFFER entry point (policy layer still emits
         ``demand``; storefront converts at the boundary before persisting).
 
-    Returns ``None`` when the demand can't be mapped (no token, missing
-    contract_address, or alkahest config can't resolve the erc20 escrow
-    obligation address for the configured chain).
+    Returns ``None`` when the demand can't be mapped to any chain (no
+    token, missing contract_address, or every chain's alkahest config
+    fails to resolve the erc20 escrow obligation address).
     """
+    from market_storefront.utils.config import CHAINS
+
     normalized = _normalize_to_dict(demand_resource)
     if not normalized:
         return None
@@ -56,40 +112,46 @@ def synthesize_accepted_escrows_from_demand(
     contract_address = token.get("contract_address")
     if not isinstance(contract_address, str) or not contract_address:
         return None
-    try:
-        from service.clients.alkahest import (
-            get_erc20_escrow_obligation_nontierable,
-        )
-        escrow_address = get_erc20_escrow_obligation_nontierable(
-            settings.chain.name,
-            config_path=settings.chain.alkahest_address_config_path,
-        )
-    except Exception as exc:
-        logger.debug(
-            "Skipping accepted_escrows synthesis for chain %r: %s",
-            settings.chain.name, exc,
-        )
-        return None
+
     amount = normalized.get("amount")
-    # ``price_per_hour`` is uint256-domain (base units) — emit as a
-    # decimal-digit string on the stored/wire JSON to stay safe past
-    # JS's 2^53 and SQLite int64 ceilings. Python callers parse it back
-    # with ``int(...)``.
+    # Rate value is uint256-domain (base units) — emit as a decimal-digit
+    # string on the stored/wire JSON to stay safe past JS's 2^53 and SQLite
+    # int64 ceilings. Python callers parse it back with ``int(...)``.
     if isinstance(amount, bool):
-        price_per_hour: str | None = None
+        rate_value: str | None = None
     elif isinstance(amount, int):
-        price_per_hour = str(amount)
+        rate_value = str(amount)
     elif isinstance(amount, str):
         s = amount.strip()
-        price_per_hour = s if s.isdigit() else None
+        rate_value = s if s.isdigit() else None
     else:
-        price_per_hour = None
-    return [{
-        "chain_name": settings.chain.name,
-        "escrow_address": escrow_address.lower(),
-        "fields": {"token": contract_address},
-        "price_per_hour": price_per_hour,
-    }]
+        rate_value = None
+
+    from service.clients.alkahest import get_erc20_escrow_obligation_nontierable
+
+    entries: list[dict[str, Any]] = []
+    for name, cc in CHAINS.items():
+        try:
+            escrow_address = get_erc20_escrow_obligation_nontierable(
+                name,
+                config_path=cc.alkahest_address_config_path,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Skipping accepted_escrows synthesis for chain %r: %s", name, exc,
+            )
+            continue
+        entries.append({
+            "chain_name": name,
+            "escrow_address": escrow_address.lower(),
+            "literal_fields": {"token": contract_address},
+            "rates": [{
+                "field": "amount",
+                "per": "hour",
+                "value": rate_value,
+            }] if rate_value is not None else [],
+        })
+    return entries or None
 
 
 def _publication_row_to_dict(row: tuple) -> dict[str, Any]:
@@ -278,7 +340,7 @@ class SQLiteClient:
                   -- Committed agreement artifact: populated when terminal_state='success'.
                   -- Captures the negotiation's output as queryable state so settlement
                   -- can run (or be retried) as a separate step without replaying rounds.
-                  agreed_price INTEGER,
+                  agreed_price TEXT,
                   agreed_duration_seconds INTEGER,
                   agreed_at TEXT,
                   -- Buyer↔listing pairing (moved off listings for multi-escrow).
@@ -322,7 +384,7 @@ class SQLiteClient:
                 pass
             # Committed-agreement columns (see CREATE TABLE above for semantics).
             try:
-                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN agreed_price INTEGER")
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN agreed_price TEXT")
             except sqlite3.OperationalError:
                 pass
             try:
@@ -386,7 +448,7 @@ class SQLiteClient:
                 CREATE TABLE IF NOT EXISTS negotiation_local_state (
                   negotiation_id TEXT NOT NULL,
                   owner_id TEXT NOT NULL,
-                  our_initial_price INTEGER,
+                  our_initial_price TEXT,
                   our_strategy TEXT,
                   PRIMARY KEY(negotiation_id, owner_id),
                   FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id)
@@ -401,9 +463,9 @@ class SQLiteClient:
                   negotiation_id TEXT NOT NULL,
                   round INTEGER NOT NULL,
                   sender TEXT NOT NULL,
-                  our_price INTEGER,
-                  their_price INTEGER,
-                  proposed_price INTEGER,
+                  our_price TEXT,
+                  their_price TEXT,
+                  proposed_price TEXT,
                   action_taken TEXT NOT NULL,
                   message_type TEXT NOT NULL,
                   timestamp TEXT NOT NULL,
@@ -412,6 +474,7 @@ class SQLiteClient:
                 )
                 """
             )
+            self._migrate_negotiation_amount_columns(cur)
             # Migrate listings table: add columns that may be missing from older DBs
             try:
                 cur.execute("ALTER TABLE listings ADD COLUMN oracle_address TEXT")
@@ -422,7 +485,7 @@ class SQLiteClient:
             # ``escrows`` table joined via the winning ``negotiation_id``;
             # the buyer/match association lives on ``negotiation_threads``.
             # accepted_escrows is a JSON array of {chain_name, escrow_address,
-            # fields, price_per_hour} — the canonical pricing+escrow
+            # literal_fields, rates} — the canonical pricing+escrow
             # advertisement. The legacy ``demand_resource`` and per-deal
             # ``escrow_uid``/``buyer``/``matched_offer_id``/
             # ``seller_attestation``/``buyer_attestation`` columns are
@@ -507,6 +570,7 @@ class SQLiteClient:
                   min_price TEXT,
                   token TEXT,
                   max_duration_seconds INTEGER,
+                  accepted_escrows TEXT,
                   created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
                   updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
                 )
@@ -519,6 +583,7 @@ class SQLiteClient:
                 "ALTER TABLE resources ADD COLUMN min_price TEXT",
                 "ALTER TABLE resources ADD COLUMN token TEXT",
                 "ALTER TABLE resources ADD COLUMN max_duration_seconds INTEGER",
+                "ALTER TABLE resources ADD COLUMN accepted_escrows TEXT",
             ):
                 try:
                     cur.execute(col_ddl)
@@ -790,7 +855,7 @@ class SQLiteClient:
         """Return the ``accepted_escrows`` column as a Python list.
 
         The column is a JSON-serialised list of AcceptedEscrow entries
-        (``{chain_name, escrow_address, fields, price_per_hour}``).
+        (``{chain_name, escrow_address, literal_fields, rates}``).
         Returns ``None`` when the column is NULL — callers that need to
         synthesise an entry from the legacy ``demand_resource`` field
         do so themselves.
@@ -806,6 +871,155 @@ class SQLiteClient:
             except Exception:
                 return None
         return None
+
+    def _migrate_negotiation_amount_columns(self, cur: sqlite3.Cursor) -> None:
+        """Move EVM amount columns off SQLite INTEGER affinity.
+
+        SQLite cannot alter column types in-place. Rebuild only when an
+        existing DB still has INTEGER amount columns, preserving current rows
+        and letting the index creation below recreate any dropped indexes.
+        """
+        def _table_exists(name: str) -> bool:
+            return cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (name,),
+            ).fetchone() is not None
+
+        def _column_types(table: str) -> dict[str, str]:
+            return {
+                str(row[1]): str(row[2] or "").upper()
+                for row in cur.execute(f"PRAGMA table_info({table})")
+            }
+
+        def _needs_rebuild(table: str, columns: tuple[str, ...]) -> bool:
+            if not _table_exists(table):
+                return False
+            types = _column_types(table)
+            return any(types.get(column) != "TEXT" for column in columns)
+
+        if _table_exists("negotiation_threads"):
+            for col_ddl in (
+                "ALTER TABLE negotiation_threads ADD COLUMN buyer TEXT",
+                "ALTER TABLE negotiation_threads ADD COLUMN matched_offer_id TEXT",
+            ):
+                try:
+                    cur.execute(col_ddl)
+                except sqlite3.OperationalError:
+                    pass
+
+        if _needs_rebuild("negotiation_threads", ("agreed_price",)):
+            cur.execute("DROP TABLE IF EXISTS negotiation_threads__amount_migration")
+            cur.execute("ALTER TABLE negotiation_threads RENAME TO negotiation_threads__amount_migration")
+            cur.execute(
+                """
+                CREATE TABLE negotiation_threads (
+                  negotiation_id TEXT PRIMARY KEY,
+                  our_listing_id TEXT,
+                  their_listing_id TEXT,
+                  our_agent_id TEXT,
+                  their_agent_id TEXT,
+                  status TEXT DEFAULT 'active',
+                  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                  terminal_state TEXT,
+                  requested_duration_seconds INTEGER,
+                  buyer_escrow_proposal TEXT,
+                  agreed_price TEXT,
+                  agreed_duration_seconds INTEGER,
+                  agreed_at TEXT,
+                  buyer TEXT,
+                  matched_offer_id TEXT
+                )
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO negotiation_threads (
+                    negotiation_id, our_listing_id, their_listing_id,
+                    our_agent_id, their_agent_id, status, created_at,
+                    updated_at, terminal_state, requested_duration_seconds,
+                    buyer_escrow_proposal, agreed_price,
+                    agreed_duration_seconds, agreed_at, buyer, matched_offer_id
+                )
+                SELECT negotiation_id, our_listing_id, their_listing_id,
+                       our_agent_id, their_agent_id, status, created_at,
+                       updated_at, terminal_state, requested_duration_seconds,
+                       buyer_escrow_proposal,
+                       CASE WHEN agreed_price IS NULL THEN NULL ELSE CAST(agreed_price AS TEXT) END,
+                       agreed_duration_seconds, agreed_at, buyer, matched_offer_id
+                FROM negotiation_threads__amount_migration
+                """
+            )
+            cur.execute("DROP TABLE negotiation_threads__amount_migration")
+
+        if _needs_rebuild("negotiation_local_state", ("our_initial_price",)):
+            cur.execute("DROP TABLE IF EXISTS negotiation_local_state__amount_migration")
+            cur.execute("ALTER TABLE negotiation_local_state RENAME TO negotiation_local_state__amount_migration")
+            cur.execute(
+                """
+                CREATE TABLE negotiation_local_state (
+                  negotiation_id TEXT NOT NULL,
+                  owner_id TEXT NOT NULL,
+                  our_initial_price TEXT,
+                  our_strategy TEXT,
+                  PRIMARY KEY(negotiation_id, owner_id),
+                  FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id)
+                )
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO negotiation_local_state (
+                    negotiation_id, owner_id, our_initial_price, our_strategy
+                )
+                SELECT negotiation_id, owner_id,
+                       CASE WHEN our_initial_price IS NULL THEN NULL ELSE CAST(our_initial_price AS TEXT) END,
+                       our_strategy
+                FROM negotiation_local_state__amount_migration
+                """
+            )
+            cur.execute("DROP TABLE negotiation_local_state__amount_migration")
+
+        if _needs_rebuild(
+            "negotiation_messages",
+            ("our_price", "their_price", "proposed_price"),
+        ):
+            cur.execute("DROP TABLE IF EXISTS negotiation_messages__amount_migration")
+            cur.execute("ALTER TABLE negotiation_messages RENAME TO negotiation_messages__amount_migration")
+            cur.execute(
+                """
+                CREATE TABLE negotiation_messages (
+                  message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  negotiation_id TEXT NOT NULL,
+                  round INTEGER NOT NULL,
+                  sender TEXT NOT NULL,
+                  our_price TEXT,
+                  their_price TEXT,
+                  proposed_price TEXT,
+                  action_taken TEXT NOT NULL,
+                  message_type TEXT NOT NULL,
+                  timestamp TEXT NOT NULL,
+                  FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id),
+                  UNIQUE(negotiation_id, round)
+                )
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO negotiation_messages (
+                    message_id, negotiation_id, round, sender,
+                    our_price, their_price, proposed_price,
+                    action_taken, message_type, timestamp
+                )
+                SELECT message_id, negotiation_id, round, sender,
+                       CASE WHEN our_price IS NULL THEN NULL ELSE CAST(our_price AS TEXT) END,
+                       CASE WHEN their_price IS NULL THEN NULL ELSE CAST(their_price AS TEXT) END,
+                       CASE WHEN proposed_price IS NULL THEN NULL ELSE CAST(proposed_price AS TEXT) END,
+                       action_taken, message_type, timestamp
+                FROM negotiation_messages__amount_migration
+                """
+            )
+            cur.execute("DROP TABLE negotiation_messages__amount_migration")
 
     def _backfill_accepted_escrows(self, cur: sqlite3.Cursor) -> None:
         """One-shot in-place backfill of ``accepted_escrows`` from the
@@ -1022,6 +1236,7 @@ class SQLiteClient:
         min_price: str | None = None,
         token: str | None = None,
         max_duration_seconds: int | None = None,
+        accepted_escrows: list[dict[str, Any]] | None = None,
     ) -> None:
         """Create or update a generic resource snapshot row.
 
@@ -1055,9 +1270,9 @@ class SQLiteClient:
                     """
                     INSERT INTO resources(
                       resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                      min_price, token, max_duration_seconds, created_at, updated_at
+                      min_price, token, max_duration_seconds, accepted_escrows, created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(resource_id) DO UPDATE SET
                       resource_type=excluded.resource_type,
                       resource_subtype=excluded.resource_subtype,
@@ -1068,6 +1283,7 @@ class SQLiteClient:
                       min_price=excluded.min_price,
                       token=excluded.token,
                       max_duration_seconds=excluded.max_duration_seconds,
+                      accepted_escrows=excluded.accepted_escrows,
                       updated_at=excluded.updated_at
                     """,
                     (
@@ -1081,6 +1297,7 @@ class SQLiteClient:
                         min_price,
                         token,
                         max_duration_seconds,
+                        json.dumps(accepted_escrows) if accepted_escrows is not None else None,
                         now_iso,
                         now_iso,
                     ),
@@ -1117,7 +1334,7 @@ class SQLiteClient:
                 cur.execute(
                     f"""
                     SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                           min_price, token, max_duration_seconds, created_at, updated_at
+                           min_price, token, max_duration_seconds, accepted_escrows, created_at, updated_at
                     FROM resources
                     {where_clause}
                     ORDER BY updated_at DESC
@@ -1137,6 +1354,7 @@ class SQLiteClient:
                     row_min_price,
                     row_token,
                     row_max_duration_seconds,
+                    row_accepted_escrows,
                     row_created_at,
                     row_updated_at,
                 ) in rows:
@@ -1148,6 +1366,14 @@ class SQLiteClient:
                                 attrs = parsed
                         except Exception:
                             attrs = {}
+                    accepted: list[dict[str, Any]] | None = None
+                    if isinstance(row_accepted_escrows, str) and row_accepted_escrows.strip():
+                        try:
+                            parsed_ae = json.loads(row_accepted_escrows)
+                            if isinstance(parsed_ae, list):
+                                accepted = parsed_ae
+                        except Exception:
+                            accepted = None
                     result.append(
                         {
                             "resource_id": row_resource_id,
@@ -1160,6 +1386,7 @@ class SQLiteClient:
                             "min_price": row_min_price,
                             "token": row_token,
                             "max_duration_seconds": row_max_duration_seconds,
+                            "accepted_escrows": accepted,
                             "created_at": row_created_at,
                             "updated_at": row_updated_at,
                         }
@@ -1257,12 +1484,14 @@ class SQLiteClient:
         *,
         csv_path: str,
         dry_run: bool = False,
+        templates: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Import resources from CSV file and upsert rows into the resources table."""
         report = await upsert_resources_from_csv(
             csv_path=csv_path,
             sqlite_client=self,
             dry_run=dry_run,
+            templates=templates,
         )
         return report.to_dict()
 
@@ -1272,6 +1501,7 @@ class SQLiteClient:
         csv_content: str,
         source_label: str = "<inline>",
         dry_run: bool = False,
+        templates: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Import resources from a CSV string and upsert rows into the resources table.
 
@@ -1284,6 +1514,7 @@ class SQLiteClient:
             source_label=source_label,
             sqlite_client=self,
             dry_run=dry_run,
+            templates=templates,
         )
         return report.to_dict()
 
@@ -2046,9 +2277,9 @@ class SQLiteClient:
         negotiation_id: str,
         round: int | None = None,
         sender: str,
-        our_price: float | None,
-        their_price: float | None,
-        proposed_price: float | None,
+        our_price: int | str | float | None,
+        their_price: int | str | float | None,
+        proposed_price: int | str | float | None,
         action_taken: str,
         message_type: str,
         timestamp: str,
@@ -2073,6 +2304,9 @@ class SQLiteClient:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
+                our_price_text = _amount_to_db_text(our_price)
+                their_price_text = _amount_to_db_text(their_price)
+                proposed_price_text = _amount_to_db_text(proposed_price)
                 # Ensure thread exists
                 cur.execute(
                     """
@@ -2121,8 +2355,9 @@ class SQLiteClient:
                         timestamp = excluded.timestamp
                     """,
                     (
-                        negotiation_id, actual_round, sender, our_price, their_price,
-                        proposed_price, action_taken, message_type, timestamp
+                        negotiation_id, actual_round, sender, our_price_text,
+                        their_price_text, proposed_price_text, action_taken,
+                        message_type, timestamp
                     ),
                 )
                 conn.commit()
@@ -2158,9 +2393,9 @@ class SQLiteClient:
                     result.append({
                         "round": row[0],
                         "sender": row[1],
-                        "our_price": row[2],
-                        "their_price": row[3],
-                        "proposed_price": row[4],
+                        "our_price": _amount_from_db_text(row[2]),
+                        "their_price": _amount_from_db_text(row[3]),
+                        "proposed_price": _amount_from_db_text(row[4]),
                         "action_taken": row[5],
                         "message_type": row[6],
                         "timestamp": row[7],
@@ -2200,7 +2435,7 @@ class SQLiteClient:
         self,
         *,
         negotiation_id: str,
-        agreed_price: float,
+        agreed_price: int | str | float,
         agreed_duration_seconds: int,
     ) -> None:
         """Record the agreement artifact that comes out of a successful negotiation.
@@ -2209,14 +2444,19 @@ class SQLiteClient:
         run (or be retried) as a separate step by reading these columns,
         without replaying the round-by-round message history.
 
-        ``agreed_duration_seconds`` echoes the buyer's negotiation-init ask;
-        total payment = agreed_price (per-hour) × agreed_duration_seconds / 3600.
+        ``agreed_price`` is the absolute payment amount in base units of
+        the payment token (the column name is retained from before the
+        per-hour → absolute refactor; semantically it now holds the
+        amount, not a per-hour rate). ``agreed_duration_seconds`` echoes
+        the buyer's negotiation-init ask and is used by settlement-time
+        arbiter codecs that bind the seller's delivery window.
         """
         def _save() -> None:
             now = datetime.now().isoformat()
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
+                agreed_price_text = _amount_to_db_text(agreed_price)
                 cur.execute(
                     """
                     UPDATE negotiation_threads
@@ -2227,7 +2467,7 @@ class SQLiteClient:
                     WHERE negotiation_id = ?
                     """,
                     (
-                        float(agreed_price),
+                        agreed_price_text,
                         int(agreed_duration_seconds),
                         now,
                         now,
@@ -2291,6 +2531,7 @@ class SQLiteClient:
                         # the caller can decide whether to error or proceed
                         # without the proposal.
                         pass
+                result["agreed_price"] = _amount_from_db_text(result.get("agreed_price"))
                 return result
             finally:
                 conn.close()
@@ -2712,7 +2953,7 @@ class SQLiteClient:
         their_agent_id: str,
         owner_id: str,  # The agent creating this record
         status: str = "active",
-        our_initial_price: float | None = None,
+        our_initial_price: int | str | float | None = None,
         our_strategy: str | None = None,
         requested_duration_seconds: int | None = None,
         buyer_escrow_proposal: dict[str, Any] | None = None,
@@ -2746,6 +2987,7 @@ class SQLiteClient:
                     if buyer_escrow_proposal is not None
                     else None
                 )
+                our_initial_price_text = _amount_to_db_text(our_initial_price)
 
                 # Insert public thread info (ignore if exists, it's shared)
                 cur.execute(
@@ -2779,7 +3021,10 @@ class SQLiteClient:
                         our_initial_price = excluded.our_initial_price,
                         our_strategy = excluded.our_strategy
                     """,
-                    (negotiation_id, owner_id, our_initial_price, our_strategy),
+                    (
+                        negotiation_id, owner_id, our_initial_price_text,
+                        our_strategy,
+                    ),
                 )
                 
                 conn.commit()
@@ -2828,7 +3073,7 @@ class SQLiteClient:
                         "their_agent_id": row[4],
                         "status": row[5],
                         # Default to None if no local state found for this owner
-                        "our_initial_price": row[6],
+                        "our_initial_price": _amount_from_db_text(row[6]),
                         "our_strategy": row[7],
                     }
                 return None
@@ -3225,10 +3470,17 @@ class SQLiteClient:
                     "negotiation_id", "our_listing_id", "buyer_address",
                     "status", "terminal_state",
                     "requested_duration_seconds",
-                    "agreed_price", "agreed_duration_seconds",
+                    # Column stays ``agreed_price``; wire field is
+                    # ``agreed_amount`` (absolute amount in base units).
+                    "agreed_amount", "agreed_duration_seconds",
                     "agreed_at", "created_at", "updated_at",
                 ]
-                return [dict(zip(keys, row)) for row in cur.fetchall()]
+                result = [dict(zip(keys, row)) for row in cur.fetchall()]
+                for item in result:
+                    item["agreed_amount"] = _amount_from_db_text(
+                        item.get("agreed_amount"),
+                    )
+                return result
             finally:
                 conn.close()
 
@@ -3271,10 +3523,16 @@ class SQLiteClient:
                     "negotiation_id", "our_listing_id", "their_listing_id",
                     "our_agent_id", "their_agent_id", "status", "terminal_state",
                     "requested_duration_seconds",
-                    "agreed_price", "agreed_duration_seconds", "agreed_at",
+                    # Column is named ``agreed_price`` (kept from before the
+                    # per-hour → absolute refactor); the wire field is
+                    # ``agreed_amount`` since it holds an absolute amount.
+                    "agreed_amount", "agreed_duration_seconds", "agreed_at",
                     "created_at", "updated_at",
                 ]
                 thread = dict(zip(thread_keys, thread_row))
+                thread["agreed_amount"] = _amount_from_db_text(
+                    thread.get("agreed_amount"),
+                )
 
                 # Message log
                 cur.execute(
@@ -3292,6 +3550,16 @@ class SQLiteClient:
                     "action_taken", "message_type", "timestamp",
                 ]
                 messages = [dict(zip(msg_keys, row)) for row in cur.fetchall()]
+                for message in messages:
+                    message["our_price"] = _amount_from_db_text(
+                        message.get("our_price"),
+                    )
+                    message["their_price"] = _amount_from_db_text(
+                        message.get("their_price"),
+                    )
+                    message["proposed_price"] = _amount_from_db_text(
+                        message.get("proposed_price"),
+                    )
 
                 # Related stage events
                 cur.execute(

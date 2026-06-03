@@ -41,6 +41,22 @@ def _escrow_proposal() -> EscrowProposal:
     )
 
 
+def _seller_proposal(amount: int) -> dict:
+    """Mirror of ``_escrow_proposal`` with ``fields["amount"]`` set.
+
+    The buyer's chain default includes ``buyer_escrow_shape_guard`` which
+    vetoes if the seller's response diverges from the buyer's pinned
+    shape on any non-amount field. Tests use this helper for realistic
+    counter / accept echoes.
+    """
+    return {
+        "chain_name": "anvil",
+        "escrow_address": "0x" + "cd" * 20,
+        "fields": {"amount": int(amount), "token": "0x" + "ab" * 20},
+        "expiration_unix": 1_800_000_000,
+    }
+
+
 # ---------------------------------------------------------------------------
 # negotiate_with_seller — integration through mocked HTTP
 # ---------------------------------------------------------------------------
@@ -79,7 +95,7 @@ _BUYER_ADDR = "0x" + "cc" * 20
 @patch("market_buyer.buyer_client.urllib.request.urlopen")
 def test_round_0_seller_accepts_immediately(mock_urlopen):
     mock_urlopen.side_effect = _urlopen_fake([
-        {"negotiation_id": "neg-1", "action": "accept", "price": 50},
+        {"negotiation_id": "neg-1", "action": "accept", "proposal": _seller_proposal(50)},
     ])
     outcome = negotiate_with_seller(
         seller_url="http://seller:8001",
@@ -89,9 +105,48 @@ def test_round_0_seller_accepts_immediately(mock_urlopen):
         max_price=100, provision_terms=_provision(3600), escrow_proposal=_escrow_proposal(),
     )
     assert outcome.status == "agreed"
-    assert outcome.agreed_price == 50
+    assert outcome.agreed_amount == 50
     assert outcome.rounds == 0
     assert outcome.negotiation_id == "neg-1"
+
+
+@patch("market_buyer.buyer_client.urllib.request.urlopen")
+def test_round_0_request_preserves_literal_fields(mock_urlopen):
+    seen_body = {}
+
+    def _capture(req, timeout=None):
+        seen_body.update(json.loads(req.data.decode("utf-8")))
+        return _MockResponse(
+            status=200,
+            text=json.dumps({
+                "negotiation_id": "neg-1",
+                "action": "accept",
+                "proposal": _seller_proposal(50),
+            }),
+        )
+
+    mock_urlopen.side_effect = _capture
+    token = "0x" + "ef" * 20
+    negotiate_with_seller(
+        seller_url="http://seller:8001",
+        buyer_address=_BUYER_ADDR,
+        buyer_private_key=_BUYER_PK,
+        listing_id="seller-1",
+        initial_price=50,
+        max_price=100,
+        provision_terms=_provision(3600),
+        escrow_proposal=EscrowProposal(
+            chain_name="anvil",
+            escrow_address="0x" + "cd" * 20,
+            fields={},
+            literal_fields={"token": token},
+            expiration_unix=1_800_000_000,
+        ),
+    )
+
+    proposal = seen_body["proposal"]
+    assert proposal["fields"] == {"amount": 50}
+    assert proposal["literal_fields"] == {"token": token}
 
 
 @patch("market_buyer.buyer_client.urllib.request.urlopen")
@@ -113,9 +168,9 @@ def test_counter_loop_converges_to_accept(mock_urlopen):
     """Seller keeps countering, buyer accepts when under ceiling."""
     mock_urlopen.side_effect = _urlopen_fake([
         # Round 0: seller counters at 90
-        {"negotiation_id": "neg-1", "action": "counter", "price": 90},
+        {"negotiation_id": "neg-1", "action": "counter", "proposal": _seller_proposal(90)},
         # Round 1: buyer accepts (90 < ceiling 100) → seller echoes accept
-        {"action": "accept", "price": 90},
+        {"action": "accept", "proposal": _seller_proposal(90)},
     ])
     outcome = negotiate_with_seller(
         seller_url="http://seller:8001",
@@ -123,7 +178,7 @@ def test_counter_loop_converges_to_accept(mock_urlopen):
         initial_price=50, max_price=100, provision_terms=_provision(3600), escrow_proposal=_escrow_proposal(),
     )
     assert outcome.status == "agreed"
-    assert outcome.agreed_price == 90
+    assert outcome.agreed_amount == 90
     assert outcome.rounds == 1
 
 
@@ -132,7 +187,7 @@ def test_counter_loop_seller_walks_away(mock_urlopen):
     """Buyer counters, seller exits."""
     mock_urlopen.side_effect = _urlopen_fake([
         # Round 0: seller counters at 150 (buyer ceiling 100 → buyer counters at 100 clamp)
-        {"negotiation_id": "neg-1", "action": "counter", "price": 150},
+        {"negotiation_id": "neg-1", "action": "counter", "proposal": _seller_proposal(150)},
         # Round 1: seller exits
         {"action": "exit", "reason": "price_unreasonable"},
     ])
@@ -150,7 +205,7 @@ def test_counter_loop_seller_walks_away(mock_urlopen):
 def test_buyer_exits_when_seller_unreasonable(mock_urlopen):
     """Seller counters far above ceiling → buyer exits."""
     mock_urlopen.side_effect = _urlopen_fake([
-        {"negotiation_id": "neg-1", "action": "counter", "price": 500},
+        {"negotiation_id": "neg-1", "action": "counter", "proposal": _seller_proposal(500)},
         # Seller receives our exit and echoes terminal.
         {"action": "exit", "reason": "buyer_exit"},
     ])
@@ -171,7 +226,7 @@ def test_signed_requests_include_signature_and_timestamp(mock_urlopen):
     def _capture(req, timeout=None):
         seen_headers.append(dict(req.header_items()))
         return _MockResponse(status=200, text=json.dumps({
-            "negotiation_id": "neg-1", "action": "accept", "price": 50,
+            "negotiation_id": "neg-1", "action": "accept", "proposal": _seller_proposal(50),
         }))
 
     mock_urlopen.side_effect = _capture
@@ -192,8 +247,8 @@ def test_signed_requests_include_signature_and_timestamp(mock_urlopen):
 @patch("market_buyer.buyer_client.urllib.request.urlopen")
 def test_on_round_hook_receives_each_round(mock_urlopen):
     mock_urlopen.side_effect = _urlopen_fake([
-        {"negotiation_id": "neg-1", "action": "counter", "price": 90},
-        {"action": "accept", "price": 90},
+        {"negotiation_id": "neg-1", "action": "counter", "proposal": _seller_proposal(90)},
+        {"action": "accept", "proposal": _seller_proposal(90)},
     ])
     seen = []
     negotiate_with_seller(
@@ -209,11 +264,11 @@ def test_on_round_hook_receives_each_round(mock_urlopen):
 
 def test_outcome_to_dict_shape():
     o = NegotiationOutcome(
-        status="agreed", negotiation_id="neg-1", agreed_price=99, rounds=3,
+        status="agreed", negotiation_id="neg-1", agreed_amount=99, rounds=3,
     )
     assert o.to_dict() == {
         "status": "agreed", "negotiation_id": "neg-1",
-        "agreed_price": 99, "rounds": 3,
+        "agreed_amount": 99, "rounds": 3,
     }
     assert NegotiationOutcome(status="exited", negotiation_id="neg-1",
                               reason="max_rounds", rounds=10).to_dict() == {

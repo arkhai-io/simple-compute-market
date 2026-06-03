@@ -5,6 +5,7 @@
 # which resolves to the test-env deployment when that subchart is enabled.
 # Set this to a production or staging endpoint when test-env is disabled.
 rpcUrl: ""
+activeProfiles: ""
 
 integrationTests:
   repository: ""

@@ -130,7 +130,7 @@ class TestListingRequestConstructor:
         req = ListingRequest(
             listing_id=uuid.uuid4().hex,
             offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "CA"},
-            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "0x" + "22" * 20}, "price_per_hour": 10_000}],
+            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": "0x" + "22" * 20}, "rates": [{"field": "amount", "per": "hour", "value": "10000"}]}],
             max_duration_seconds=3600,
         )
         assert req.max_duration_seconds == 3600
@@ -217,29 +217,37 @@ class TestPublishListingWireFormat:
     """
 
     async def test_posts_to_correct_url(self, capturing_client):
-        """publish_listing must POST to /agents/{agent_id}/listings."""
+        """publish_listing must POST to /listings."""
         client, transport = capturing_client
         req = ListingRequest(
             listing_id=uuid.uuid4().hex,
             offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "CA"},
-            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "0x" + "22" * 20}, "price_per_hour": 10_000}],
+            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": "0x" + "22" * 20}, "rates": [{"field": "amount", "per": "hour", "value": "10000"}]}],
             max_duration_seconds=3600,
         )
-        await client.publish_listing(AGENT_CANONICAL_ID, req, private_key=AGENT_PRIVATE_KEY)
+        await client.publish_listing(req, private_key=AGENT_PRIVATE_KEY)
 
-        expected_path = f"/agents/{AGENT_CANONICAL_ID}/listings"
-        assert transport.last_request_path == expected_path, (
+        assert transport.last_request_path == "/listings", (
             f"publish_listing posted to {transport.last_request_path!r}, "
-            f"expected {expected_path!r}. "
+            "expected '/listings'. "
             "URL path has changed — update the registry-client wheel or storefront."
         )
+
+    async def test_body_contains_signing_identity(self, capturing_client):
+        """Request body must carry the publishing identity (scheme + identifier)."""
+        client, transport = capturing_client
+        req = ListingRequest(listing_id=uuid.uuid4().hex, offer={}, accepted_escrows=[])
+        await client.publish_listing(req, private_key=AGENT_PRIVATE_KEY)
+        body = transport.last_request_body
+        assert body.get("scheme") == "eip191"
+        assert isinstance(body.get("identifier"), str) and body["identifier"].startswith("0x")
 
     async def test_body_contains_listing_id(self, capturing_client):
         """Request body must include listing_id."""
         client, transport = capturing_client
         listing_id = uuid.uuid4().hex
         req = ListingRequest(listing_id=listing_id, offer={}, accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}])
-        await client.publish_listing(AGENT_CANONICAL_ID, req, private_key=AGENT_PRIVATE_KEY)
+        await client.publish_listing(req, private_key=AGENT_PRIVATE_KEY)
         assert transport.last_request_body.get("listing_id") == listing_id
 
     async def test_body_contains_offer_resource(self, capturing_client):
@@ -247,7 +255,7 @@ class TestPublishListingWireFormat:
         client, transport = capturing_client
         offer = {"gpu_model": "RTX4090", "gpu_count": 2, "sla": 95.0, "region": "NY"}
         req = ListingRequest(listing_id=uuid.uuid4().hex, offer=offer, accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}])
-        await client.publish_listing(AGENT_CANONICAL_ID, req, private_key=AGENT_PRIVATE_KEY)
+        await client.publish_listing(req, private_key=AGENT_PRIVATE_KEY)
         body = transport.last_request_body
         assert "offer_resource" in body, (
             f"'offer_resource' absent from request body. Keys present: {list(body)}"
@@ -260,11 +268,11 @@ class TestPublishListingWireFormat:
         entries = [{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"token": "0x" + "22" * 20},
-            "price_per_hour": 8_000,
+            "literal_fields": {"token": "0x" + "22" * 20},
+            "rates": [{"field": "amount", "per": "hour", "value": "8000"}],
         }]
         req = ListingRequest(listing_id=uuid.uuid4().hex, offer={}, accepted_escrows=entries)
-        await client.publish_listing(AGENT_CANONICAL_ID, req, private_key=AGENT_PRIVATE_KEY)
+        await client.publish_listing(req, private_key=AGENT_PRIVATE_KEY)
         body = transport.last_request_body
         assert "accepted_escrows" in body, (
             f"'accepted_escrows' absent from request body. Keys present: {list(body)}"
@@ -280,7 +288,7 @@ class TestPublishListingWireFormat:
             accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}],
             max_duration_seconds=7200,
         )
-        await client.publish_listing(AGENT_CANONICAL_ID, req, private_key=AGENT_PRIVATE_KEY)
+        await client.publish_listing(req, private_key=AGENT_PRIVATE_KEY)
         body = transport.last_request_body
         assert "max_duration_seconds" in body, (
             f"'max_duration_seconds' absent from request body. Keys present: {list(body)}"
@@ -295,7 +303,7 @@ class TestPublishListingWireFormat:
         """
         client, transport = capturing_client
         req = ListingRequest(listing_id=uuid.uuid4().hex, offer={}, accepted_escrows=[])
-        await client.publish_listing(AGENT_CANONICAL_ID, req, private_key=AGENT_PRIVATE_KEY)
+        await client.publish_listing(req, private_key=AGENT_PRIVATE_KEY)
         body = transport.last_request_body
         assert "signature" in body, (
             f"'signature' absent from request body. Keys present: {list(body)}. "

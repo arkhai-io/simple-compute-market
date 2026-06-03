@@ -72,12 +72,30 @@ agents:
         provisioning:
           mode: "mock"
         negotiation:
-          policyMode: "bisection"
+          # Ordered list of policies. Terminal policy is "bisection" (no
+          # ML deps) or "rl" (torch + checkpoint). The legacy `policyMode`
+          # key still works (rendered as `policy_mode = "<value>"`) and the
+          # storefront synthesizes the default chain from it.
+          policies:
+            - "has_matching_inventory_guard"
+            - "escrow_shape_guard"
+            - "bisection"
         # Runtime credentials the agent reads. Empty = absent in TOML.
         integrations:
           geminiApiKey: ""
       chain:
         name: "anvil"
+
+# ---------------------------------------------------------------------------
+# Helm smoke-test configuration.
+# targetAgentName empty = first configured agent. activeProfiles empty =
+# "helm,<selected-component>-secret". secretName empty = selected agent Secret.
+# ---------------------------------------------------------------------------
+tests:
+  targetAgentName: ""
+  activeProfiles: ""
+  secretName: ""
+  secretKey: ""
 
 # Number of replicas per agent.
 replicaCount: 1

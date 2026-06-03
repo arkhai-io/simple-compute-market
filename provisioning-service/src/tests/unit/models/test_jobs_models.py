@@ -120,7 +120,6 @@ class TestCreateVmDefaults:
         assert req.vm_ram is None
         assert req.ssh_pubkey is None
         assert req.gpu_provisioned is None
-        assert req.buyer_agent_id is None
         assert req.frp_server_addr is None
 
 
@@ -144,7 +143,7 @@ class TestCreateVmToParams:
             vm_disk_size="40G",
             vm_os_variant="ubuntu22.04",
         )
-        p = req.to_ansible_job_params("btc1")
+        p = req.to_ansible_job_params("kvm1")
         assert p.vm_ram == 8192
         assert p.vm_vcpus == 8
         assert p.vm_disk_size == "40G"
@@ -186,11 +185,6 @@ class TestCreateVmToParams:
         assert p.image_setup_type == "golden"
         assert p.golden_image_name == "base-v3"
 
-    def test_buyer_agent_id_propagated(self):
-        req = CreateVmRequest(vm_target="t", buyer_agent_id="agent-42")
-        p = req.to_ansible_job_params("kvm1")
-        assert p.buyer_agent_id == "agent-42"
-
 
 # ---------------------------------------------------------------------------
 # ScheduleVmExpiryRequest — required field and adapter
@@ -209,14 +203,6 @@ class TestScheduleVmExpiry:
         assert p.vm_target == "agent-vm-01"
         assert p.vm_expiry_at == "2025-12-31T23:59:00"
 
-    def test_buyer_agent_id_propagated(self):
-        req = ScheduleVmExpiryRequest(
-            vm_expiry_at="2025-12-31T23:59:00",
-            buyer_agent_id="buyer-7",
-        )
-        p = req.to_ansible_job_params("kvm1", "vm-1")
-        assert p.buyer_agent_id == "buyer-7"
-
 
 # ---------------------------------------------------------------------------
 # VmActionRequest — max_retries constraint
@@ -233,7 +219,6 @@ class TestVmActionRequest:
 
     def test_empty_body_valid(self):
         req = VmActionRequest()
-        assert req.buyer_agent_id is None
         assert req.max_retries is None
 
 

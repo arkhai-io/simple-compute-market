@@ -40,9 +40,6 @@ class VmActionRequest(BaseModel):
     only the override/metadata fields that have no path equivalent.
     """
 
-    buyer_agent_id: Optional[str] = Field(
-        default=None, description="ERC-8004 agent ID of the buyer (tenant)"
-    )
     max_retries: Optional[int] = Field(
         default=None,
         ge=0,
@@ -68,7 +65,7 @@ class CreateVmRequest(BaseModel):
     configured, the external tunnel address.
 
     Credentials (root + tenant) are stored separately and accessible via
-    ``GET /api/v1/jobs/{job_id}/credentials`` using the ``X-Agent-ID`` header.
+    ``GET /api/v1/jobs/{job_id}/credentials``.
     """
 
     model_config = {
@@ -177,9 +174,6 @@ class CreateVmRequest(BaseModel):
     )
 
     # Shared overrides
-    buyer_agent_id: Optional[str] = Field(
-        default=None, description="ERC-8004 agent ID of the buyer (tenant)"
-    )
     max_retries: Optional[int] = Field(
         default=None,
         ge=0,
@@ -218,7 +212,6 @@ class CreateVmRequest(BaseModel):
             golden_image_name=self.golden_image_name,
             gcs_bucket_url=self.gcs_bucket_url,
             gcs_image_path=self.gcs_image_path,
-            buyer_agent_id=self.buyer_agent_id,
             max_retries=self.max_retries,
         )
 
@@ -245,9 +238,6 @@ class ScheduleVmExpiryRequest(BaseModel):
             "(e.g. '2025-12-31T23:59:00'). The VM will be destroyed at this time."
         )
     )
-    buyer_agent_id: Optional[str] = Field(
-        default=None, description="ERC-8004 agent ID of the buyer (tenant)"
-    )
     max_retries: Optional[int] = Field(
         default=None, ge=0, le=10,
         description="Per-job retry limit override",
@@ -259,7 +249,6 @@ class ScheduleVmExpiryRequest(BaseModel):
             vm_action="lease_end",
             vm_target=vm_name,
             vm_expiry_at=self.vm_expiry_at,
-            buyer_agent_id=self.buyer_agent_id,
             max_retries=self.max_retries,
         )
 
@@ -286,6 +275,5 @@ def build_simple_params(
         vm_host=host,
         vm_action=action,
         vm_target=vm_name,
-        buyer_agent_id=body.buyer_agent_id,
         max_retries=body.max_retries,
     )

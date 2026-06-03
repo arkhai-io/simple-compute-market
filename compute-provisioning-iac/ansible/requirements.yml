@@ -1,4 +1,7 @@
 collections:
   - name: community.general
+    version: "4.8.7"
   - name: community.docker
+    version: "2.7.2"
   - name: community.crypto
+    version: "2.5.0"

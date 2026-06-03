@@ -1,94 +1,70 @@
-"""
-Smoke tests for the deployed provisioning service.
+"""Smoke tests for the deployed provisioning service.
 
-Scope (per Architecture.md — Smoke Tests jurisdiction):
-  - The service is reachable and healthy
-  - The host registry API responds correctly
-  - Ansible readiness endpoint returns structured diagnostics
-  - Auth enforcement is tested only when enable_auth=true in the
-    provisioning config profile
-
-These tests are stateless and idempotent. They do not submit Ansible jobs
-or modify persistent state (other than a transient test-host registration
-that is cleaned up in the same test).
-
-Run against a deployed stack::
-
-    pytest -m provisioning_smoke
-
-Required config (via ACTIVE_PROFILES + mounted config file, or env var override):
-  provisioning:
-    api_url: "http://<host>:<port>"
-    enable_auth: false
+Read-only checks are selected by the Helm smoke hook. Write-path checks are
+kept under a separate marker because deployed environments may require a pinned
+ERC-8004 agent identity before mutating provisioning state.
 """
 
 from __future__ import annotations
 
 import logging
 
-import httpx
 import pytest
 
-from src.settings import settings
+from client.provisioning_client import ProvisioningError, SyncProvisioningClient
+from models.host_model import HostCreate, HostUpdate
+from models.vm_request_model import CreateVmRequest
 
 log = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def _client(
+    provisioning_settings: dict,
+    seller_settings: dict,
+    provisioning_auth_settings: dict,
+    *,
+    auth: bool = False,
+) -> SyncProvisioningClient:
+    admin_key = (seller_settings.get("admin_api_key") or None) if auth else None
+    agent_id = (provisioning_auth_settings.get("agent_id") or None) if auth else None
+    return SyncProvisioningClient(
+        base_url=provisioning_settings["api_url"],
+        admin_key=admin_key,
+        agent_id=agent_id,
+        timeout=15.0,
+    )
 
 
-def _provisioning_settings() -> dict:
-    try:
-        return dict(settings.get("provisioning", {}))
-    except Exception:
-        return {}
-
-
-def _api_url() -> str:
-    url = _provisioning_settings().get("api_url", "")
-    if not url:
-        pytest.fail(
-            "provisioning.api_url is not configured.\n"
-            "Set it via your active config profile or "
-            "ARKHAI_PROVISIONING__API_URL env var."
+def _require_agent_id(provisioning_auth_settings: dict) -> str:
+    agent_id = str(provisioning_auth_settings.get("agent_id") or "")
+    if not agent_id:
+        pytest.skip(
+            "seller.agent_id is not pinned; cannot construct provisioning X-Agent-ID. "
+            "Pin storefront.agents[].agentId after registration to smoke-test write paths."
         )
-    return url.rstrip("/")
-
-
-def _enable_auth() -> bool:
-    return bool(_provisioning_settings().get("enable_auth", False))
-
-
-def _client() -> httpx.Client:
-    return httpx.Client(base_url=_api_url(), timeout=15.0)
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
+    return agent_id
 
 
 @pytest.mark.provisioning
 class TestProvisioningSmoke:
-
-    def test_health_returns_ok(self):
-        """GET /health → 200 with status field present."""
-        with _client() as client:
-            resp = client.get("/health")
-        assert resp.status_code == 200, f"Health check failed: {resp.text}"
-        data = resp.json()
+    @pytest.mark.provisioning_readonly
+    def test_health_returns_ok(
+        self, provisioning_settings: dict, seller_settings: dict, provisioning_auth_settings: dict
+    ):
+        """GET /health -> 200 with status field present."""
+        with _client(provisioning_settings, seller_settings, provisioning_auth_settings) as client:
+            data = client.get_health()
         assert "status" in data, f"Missing status field: {data}"
         assert data["status"] in ("ok", "degraded"), f"Unexpected status: {data['status']}"
         log.info("Health: %s", data)
 
-    def test_ansible_readiness_returns_structured_response(self):
-        """GET /api/v1/system/ansible/readiness → 200 with inventory and playbook fields."""
-        with _client() as client:
-            resp = client.get("/api/v1/system/ansible/readiness")
-        assert resp.status_code == 200, f"Readiness check failed: {resp.text}"
-        data = resp.json()
+    @pytest.mark.provisioning_readonly
+    def test_ansible_readiness_returns_structured_response(
+        self, provisioning_settings: dict, seller_settings: dict, provisioning_auth_settings: dict
+    ):
+        """GET /api/v1/system/ansible/readiness returns structured diagnostics."""
+        with _client(provisioning_settings, seller_settings, provisioning_auth_settings) as client:
+            data = client.get_ansible_readiness()
         assert "inventory" in data, f"Missing inventory field: {data}"
         assert "playbook" in data, f"Missing playbook field: {data}"
         assert "ssh_keys" in data, f"Missing ssh_keys field: {data}"
@@ -101,102 +77,94 @@ class TestProvisioningSmoke:
             inv.get("host_count"),
         )
 
-    def test_list_hosts_returns_200(self):
-        """GET /api/v1/hosts/ → 200 with a hosts list."""
-        with _client() as client:
-            resp = client.get("/api/v1/hosts/")
-        assert resp.status_code == 200, f"List hosts failed: {resp.text}"
-        data = resp.json()
-        assert "hosts" in data, f"Missing hosts field: {data}"
-        log.info("Registered hosts: %d", len(data["hosts"]))
+    @pytest.mark.provisioning_readonly
+    def test_list_hosts_returns_200(
+        self, provisioning_settings: dict, seller_settings: dict, provisioning_auth_settings: dict
+    ):
+        """GET /api/v1/hosts/ returns a hosts list."""
+        with _client(provisioning_settings, seller_settings, provisioning_auth_settings) as client:
+            data = client.list_hosts()
+        assert isinstance(data.hosts, list), f"Missing hosts list: {data}"
+        log.info("Registered hosts: %d", len(data.hosts))
 
-    def test_connectivity_check_on_first_host_if_available(self):
-        """If any hosts are registered, GET /hosts/{name}/connectivity returns a result."""
-        with _client() as client:
-            list_resp = client.get("/api/v1/hosts/")
-        assert list_resp.status_code == 200
-        hosts = list_resp.json().get("hosts", [])
-        if not hosts:
-            pytest.skip("No hosts registered — skipping connectivity check")
+    @pytest.mark.provisioning_readonly
+    def test_connectivity_check_on_first_host_if_available(
+        self, provisioning_settings: dict, seller_settings: dict, provisioning_auth_settings: dict
+    ):
+        """If any hosts are registered, connectivity returns a structured result."""
+        with _client(provisioning_settings, seller_settings, provisioning_auth_settings) as client:
+            hosts = client.list_hosts().hosts
+            if not hosts:
+                pytest.skip("No hosts registered - skipping connectivity check")
+            first = hosts[0].name
+            data = client.check_connectivity(first)
+        assert isinstance(data.reachable, bool), f"Missing reachable field: {data}"
+        log.info("Connectivity for %s: reachable=%s", first, data.reachable)
 
-        first = hosts[0]["name"]
-        with _client() as client:
-            resp = client.get(f"/api/v1/hosts/{first}/connectivity")
-        assert resp.status_code == 200, f"Connectivity check failed: {resp.text}"
-        data = resp.json()
-        assert "reachable" in data, f"Missing reachable field: {data}"
-        log.info("Connectivity for %s: reachable=%s", first, data["reachable"])
+    @pytest.mark.provisioning_write
+    def test_host_crud_round_trip(
+        self, provisioning_settings: dict, seller_settings: dict, provisioning_auth_settings: dict
+    ):
+        """Register -> GET -> disable -> re-enable -> cleanup a transient test host."""
+        _require_agent_id(provisioning_auth_settings)
+        test_host = HostCreate(
+            name="smoke-test-host",
+            kvm_host="192.0.2.1",
+            ssh_user="ubuntu",
+            ssh_key_type="path",
+            ssh_key_value="/home/appuser/.ssh/id_ed25519",
+            gpu_count=0,
+            enabled=True,
+        )
 
-    def test_host_crud_round_trip(self):
-        """Register → GET → disable → re-enable → cleanup a transient test host.
+        with _client(provisioning_settings, seller_settings, provisioning_auth_settings, auth=True) as client:
+            try:
+                reg = client.register_host(test_host)
+            except ProvisioningError as exc:
+                if exc.status_code != 409:
+                    raise
+                log.info("smoke-test-host already exists - updating instead of inserting")
+                reg = client.update_host(
+                    "smoke-test-host",
+                    HostUpdate(kvm_host=test_host.kvm_host, ssh_user=test_host.ssh_user),
+                )
+                client.enable_host("smoke-test-host")
 
-        Idempotent against a persistent DB: if smoke-test-host already exists
-        from a prior run (disable left the row in place), we update it rather
-        than attempting a duplicate INSERT.
-        """
-        test_host = {
-            "name": "smoke-test-host",
-            "kvm_host": "192.0.2.1",   # TEST-NET — never routes
-            "ssh_user": "ubuntu",
-            "ssh_key_type": "path",
-            "ssh_key_value": "/home/appuser/.ssh/id_ed25519",
-            "gpu_count": 0,
-            "enabled": True,
-        }
-        with _client() as client:
-            # Upsert: try to register; if the host already exists (409) from a
-            # prior test run, update it instead so the test is idempotent.
-            reg = client.post("/api/v1/hosts/", json=test_host)
-            if reg.status_code == 409:
-                log.info("smoke-test-host already exists — updating instead of inserting")
-                reg = client.put("/api/v1/hosts/smoke-test-host", json={
-                    "kvm_host": test_host["kvm_host"],
-                    "ssh_user": test_host["ssh_user"],
-                })
-                assert reg.status_code == 200, f"Update failed: {reg.text}"
-                # Re-enable in case it was left disabled
-                client.post("/api/v1/hosts/smoke-test-host/enable")
-            else:
-                assert reg.status_code == 201, f"Register failed: {reg.text}"
-            assert reg.json()["name"] == "smoke-test-host"
-            assert "ssh_key_value" not in reg.json(), "ssh_key_value must never be returned"
+            assert reg.name == "smoke-test-host"
+            assert not hasattr(reg, "ssh_key_value"), "ssh_key_value must never be returned"
 
-            # GET
-            get = client.get("/api/v1/hosts/smoke-test-host")
-            assert get.status_code == 200
-            assert get.json()["kvm_host"] == "192.0.2.1"
+            got = client.get_host("smoke-test-host")
+            assert got.kvm_host == "192.0.2.1"
 
-            # Disable
-            dis = client.post("/api/v1/hosts/smoke-test-host/disable")
-            assert dis.status_code == 200
-            assert dis.json()["enabled"] is False
+            disabled = client.disable_host("smoke-test-host")
+            assert disabled.enabled is False
 
-            # Confirm excluded from default list
-            lst = client.get("/api/v1/hosts/")
-            names = [h["name"] for h in lst.json()["hosts"]]
+            names = [h.name for h in client.list_hosts().hosts]
             assert "smoke-test-host" not in names
 
-            # Re-enable
-            ena = client.post("/api/v1/hosts/smoke-test-host/enable")
-            assert ena.status_code == 200
-            assert ena.json()["enabled"] is True
+            enabled = client.enable_host("smoke-test-host")
+            assert enabled.enabled is True
 
-            # Cleanup — disable (no hard delete)
-            client.post("/api/v1/hosts/smoke-test-host/disable")
+            client.disable_host("smoke-test-host")
 
         log.info("Host CRUD round-trip passed")
 
-    def test_auth_enforcement_when_enabled(self):
-        """POST /api/v1/hosts/{host}/vms/ without X-Agent-ID → 401 when auth is on."""
-        if not _enable_auth():
-            pytest.skip("Auth is not enabled on this deployment — skipping 401 check")
-        with _client() as client:
-            resp = client.post(
-                "/api/v1/hosts/kvm1/vms/",
-                json={"vm_target": "smoke-test-vm"},
-                # Intentionally no X-Agent-ID header
-            )
-        assert resp.status_code == 401, (
-            f"Expected 401 with auth enabled, got {resp.status_code}: {resp.text}"
-        )
-        log.info("Auth enforcement confirmed: 401 without X-Agent-ID")
+    @pytest.mark.provisioning_write
+    def test_auth_enforcement_when_enabled(
+        self, provisioning_settings: dict, seller_settings: dict, provisioning_auth_settings: dict
+    ):
+        """POST without X-Admin-Key returns 401 when a key is configured."""
+        if not seller_settings.get("admin_api_key"):
+            pytest.skip("No admin key configured on this deployment - skipping 401 check")
+        _require_agent_id(provisioning_auth_settings)
+
+        with SyncProvisioningClient(
+            base_url=provisioning_settings["api_url"],
+            admin_key=None,
+            agent_id=provisioning_auth_settings["agent_id"],
+            timeout=15.0,
+        ) as client:
+            with pytest.raises(ProvisioningError) as err:
+                client.create_vm("kvm1", CreateVmRequest(vm_target="smoke-test-vm"))
+        assert err.value.status_code == 401
+        log.info("Auth enforcement confirmed: 401 without X-Admin-Key")

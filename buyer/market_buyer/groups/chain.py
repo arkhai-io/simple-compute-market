@@ -22,110 +22,94 @@ chain_app = typer.Typer(no_args_is_help=True)
 
 @chain_app.command("check")
 def chain_check(
-    rpc_url: Optional[str] = typer.Option(
-        None, "--rpc-url",
-        help="Override chain.rpc_url from config.toml.",
-    ),
     chain_name: Optional[str] = typer.Option(
-        None, "--chain-name",
-        help="Override chain.name from config.toml.",
-    ),
-    alkahest_addr_config: Optional[str] = typer.Option(
-        None, "--alkahest-addr-config",
-        help="Override chain.alkahest_address_config_path from config.toml.",
+        None, "--chain",
+        help="Only probe one chain by name. When omitted, probes every "
+             "configured [chains.<name>] entry.",
     ),
 ) -> None:
     """Probe configured contract addresses for deployed bytecode.
 
-    Reads the buyer's chain config (override flags > config.toml > SDK
-    defaults), then issues one eth_getCode per address that the buyer
-    will interact with at runtime. Reports which addresses have
+    Iterates the buyer's ``[chains.<name>]`` tables (filtered by
+    ``--chain`` if given), issuing one ``eth_getCode`` per address the
+    buyer will interact with at runtime. Reports which addresses have
     bytecode and which don't.
 
     Exits 0 on full match, 4 if any address has no bytecode.
     """
-    from ..common import resolve_config_value
+    from ..common import buyer_chains
 
-    rpc = rpc_url or resolve_config_value(toml_path="chain.rpc_url")
-    chain = chain_name or resolve_config_value(
-        toml_path="chain.name", default="ethereum_sepolia",
-    )
-    addr_cfg = alkahest_addr_config or resolve_config_value(
-        toml_path="chain.alkahest_address_config_path",
-    ) or None
-
-    if not rpc:
+    chains = buyer_chains()
+    if not chains:
         typer.secho(
-            "chain.rpc_url is not configured. Set it with "
-            "`market config set chain.rpc_url <url>` or pass --rpc-url.",
+            "No [chains.<name>] tables configured in buyer.toml.",
             err=True, fg=typer.colors.RED,
         )
         raise typer.Exit(2)
+
+    if chain_name is not None:
+        if chain_name not in chains:
+            typer.secho(
+                f"Chain {chain_name!r} not configured. Available: {sorted(chains)}",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+        targets = {chain_name: chains[chain_name]}
+    else:
+        targets = chains
 
     from service.clients.alkahest import resolve_alkahest_address_config
     from service.clients.chain_probe import probe_addresses_sync
 
-    addresses: dict[str, str] = {}
-    try:
-        cfg = resolve_alkahest_address_config(chain, config_path=addr_cfg)
-    except Exception as exc:
-        typer.secho(
-            f"Could not resolve alkahest config for chain={chain!r}: {exc}",
-            err=True, fg=typer.colors.RED,
-        )
-        raise typer.Exit(2)
-
-    if cfg is not None:
-        for path, label in (
-            (("arbiters_addresses", "recipient_arbiter"), "alkahest.recipient_arbiter"),
-            (("arbiters_addresses", "eas"), "alkahest.eas"),
-            (("erc20_addresses", "escrow_obligation_nontierable"),
-             "alkahest.erc20_escrow_obligation"),
-        ):
-            obj: object | None = cfg
-            for attr in path:
-                obj = getattr(obj, attr, None)
-                if obj is None:
-                    break
-            if isinstance(obj, str) and obj.strip():
-                addresses[label] = obj
-
-    # ERC-8004 IdentityRegistry — buyer reads it for seller-attestation lookups.
-    # Falls back to the canonical CREATE2 vanity address for known chains.
-    from service.config_loader import identity_registry_address
-    identity_registry = identity_registry_address()
-    if identity_registry:
-        addresses["identity_registry"] = identity_registry
-
-    # Default token contract — buyer transfers it during settle.
-    from ..common import resolve_default_token_address
-    default_address = resolve_default_token_address()
-    if default_address:
-        from service.clients.token import resolve_token_cached
-        cached = resolve_token_cached(default_address)
-        label = f"token.{cached.symbol}" if cached and cached.symbol else f"token.{default_address[:10]}"
-        addresses[label] = default_address
-
-    if not addresses:
-        typer.secho(
-            "No contract addresses to probe. Configure chain.alkahest_address_config_path "
-            "(or pick a SDK-known chain.name) and registry.identity_registry_address.",
-            err=True, fg=typer.colors.YELLOW,
-        )
-        raise typer.Exit(2)
-
     console = Console()
-    typer.echo(f"Probing {len(addresses)} address(es) on {rpc} (chain={chain})…")
-    results = probe_addresses_sync(rpc, addresses)
+    all_results: dict[str, dict[str, bool]] = {}
+    for name, chain in targets.items():
+        addresses: dict[str, str] = {}
+        try:
+            cfg = resolve_alkahest_address_config(
+                name, config_path=chain.alkahest_address_config_path,
+            )
+        except Exception as exc:
+            typer.secho(
+                f"chain={name!r} could not resolve alkahest config: {exc}",
+                err=True, fg=typer.colors.YELLOW,
+            )
+            cfg = None
 
-    table = Table(show_header=True)
-    table.add_column("Label", overflow="fold")
-    table.add_column("Address", overflow="fold")
-    table.add_column("Has bytecode", justify="center")
-    for label, addr in addresses.items():
-        ok = results.get(label, False)
-        table.add_row(label, addr, "✓" if ok else "✗")
-    console.print(table)
+        if cfg is not None:
+            for path, label in (
+                (("arbiters_addresses", "recipient_arbiter"), "alkahest.recipient_arbiter"),
+                (("arbiters_addresses", "eas"), "alkahest.eas"),
+                (("erc20_addresses", "escrow_obligation_nontierable"),
+                 "alkahest.erc20_escrow_obligation"),
+            ):
+                obj: object | None = cfg
+                for attr in path:
+                    obj = getattr(obj, attr, None)
+                    if obj is None:
+                        break
+                if isinstance(obj, str) and obj.strip():
+                    addresses[label] = obj
 
-    if not all(results.values()):
+        if not addresses:
+            typer.secho(
+                f"chain={name!r}: no contract addresses to probe.",
+                err=True, fg=typer.colors.YELLOW,
+            )
+            continue
+
+        typer.echo(f"Probing {len(addresses)} address(es) on {chain.rpc_url} (chain={name})…")
+        results = probe_addresses_sync(chain.rpc_url, addresses)
+        all_results[name] = results
+
+        table = Table(show_header=True, title=name)
+        table.add_column("Label", overflow="fold")
+        table.add_column("Address", overflow="fold")
+        table.add_column("Has bytecode", justify="center")
+        for label, addr in addresses.items():
+            ok = results.get(label, False)
+            table.add_row(label, addr, "✓" if ok else "✗")
+        console.print(table)
+
+    if any(not all(r.values()) for r in all_results.values()):
         raise typer.Exit(4)

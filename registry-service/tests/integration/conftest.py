@@ -31,16 +31,11 @@ from src.db.database import get_db
 # Test constants — Hardhat/Anvil deterministic key pairs
 # ---------------------------------------------------------------------------
 
-MAKER_AGENT_ID = "eip155:31337:0x21df544947ba3e8b3c32561399e88b52dc8b2823:1"
-TAKER_AGENT_ID = "eip155:31337:0x21df544947ba3e8b3c32561399e88b52dc8b2823:3"
-
 MAKER_PRIVATE_KEY = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
 MAKER_ADDRESS     = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 
 TAKER_PRIVATE_KEY = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6"
 TAKER_ADDRESS     = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
-
-IDENTITY_REGISTRY = "0x21df544947ba3e8b3c32561399e88b52dc8b2823"
 
 
 # ---------------------------------------------------------------------------
@@ -77,72 +72,37 @@ async def registry_client(db_session) -> RegistryClient:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def agent_no_owner(db_session):
-    from src.db.models import Agent
-    agent = Agent(
-        id=10,
-        agent_id="eip155:31337:0x21df544947ba3e8b3c32561399e88b52dc8b2823:10",
-        chain_id=31337,
-        identity_registry=IDENTITY_REGISTRY,
-        onchain_agent_id=10,
-        registry_address=IDENTITY_REGISTRY,
-        owner=None,
-        token_uri="http://localhost:8010/.well-known/agent-card.json",
+def _make_publisher(db_session, identifier: str, storefront_url: str):
+    """Create a Publisher with a single eip191 identity."""
+    from src.db.models import Publisher, PublisherIdentity
+    publisher = Publisher(storefront_url=storefront_url)
+    publisher.identities.append(
+        PublisherIdentity(scheme="eip191", identifier=identifier.lower())
     )
-    db_session.add(agent)
+    db_session.add(publisher)
     db_session.commit()
-    db_session.refresh(agent)
-    return agent
+    db_session.refresh(publisher)
+    return publisher
 
 
 @pytest.fixture
-def maker_agent(db_session):
-    from src.db.models import Agent
-    agent = Agent(
-        id=1,
-        agent_id=MAKER_AGENT_ID,
-        chain_id=31337,
-        identity_registry=IDENTITY_REGISTRY,
-        onchain_agent_id=1,
-        registry_address=IDENTITY_REGISTRY,
-        owner=MAKER_ADDRESS,
-        token_uri="http://localhost:8001/.well-known/agent-card.json",
-    )
-    db_session.add(agent)
-    db_session.commit()
-    db_session.refresh(agent)
-    return agent
+def maker_publisher(db_session):
+    return _make_publisher(db_session, MAKER_ADDRESS, "http://localhost:8001/")
 
 
 @pytest.fixture
-def taker_agent(db_session):
-    from src.db.models import Agent
-    agent = Agent(
-        id=3,
-        agent_id=TAKER_AGENT_ID,
-        chain_id=31337,
-        identity_registry=IDENTITY_REGISTRY,
-        onchain_agent_id=3,
-        registry_address=IDENTITY_REGISTRY,
-        owner=TAKER_ADDRESS,
-        token_uri="http://localhost:8003/.well-known/agent-card.json",
-    )
-    db_session.add(agent)
-    db_session.commit()
-    db_session.refresh(agent)
-    return agent
+def taker_publisher(db_session):
+    return _make_publisher(db_session, TAKER_ADDRESS, "http://localhost:8003/")
 
 
 @pytest.fixture
-def open_order(db_session, agent_no_owner):
+def open_order(db_session, maker_publisher):
     from src.db.models import Listing, OrderStatusEnum
     order = Listing(
         listing_id="integ-open-order-1",
-        agent_id=agent_no_owner.agent_id,
-        seller=agent_no_owner.token_uri,
+        publisher_id=maker_publisher.publisher_id,
         offer_resource={"gpu_model": "A100", "region": "us-west", "quantity": 1, "sla": 99.0},
-        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}, "price_per_hour": 100}],
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": "USDC"}}],
         max_duration_seconds=3600,
         status=OrderStatusEnum.open,
     )
@@ -153,14 +113,13 @@ def open_order(db_session, agent_no_owner):
 
 
 @pytest.fixture
-def authenticated_open_order(db_session, maker_agent):
+def authenticated_open_order(db_session, maker_publisher):
     from src.db.models import Listing, OrderStatusEnum
     order = Listing(
         listing_id="integ-auth-order-1",
-        agent_id=maker_agent.agent_id,
-        seller=maker_agent.token_uri,
+        publisher_id=maker_publisher.publisher_id,
         offer_resource={"gpu_model": "A100", "region": "us-west", "quantity": 1, "sla": 99.0},
-        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}, "price_per_hour": 100}],
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": "USDC"}}],
         max_duration_seconds=3600,
         status=OrderStatusEnum.open,
     )

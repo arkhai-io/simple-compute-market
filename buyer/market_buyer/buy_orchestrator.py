@@ -65,11 +65,14 @@ class BuyConfig:
     # ``aggregation.load_aggregation_policy``. None = default
     # (best_price). See buyer/market_buyer/aggregation.py.
     aggregation_policy: Optional[str] = None
-    # Buyer-side response to the seller's accepted_escrow_proposal echo.
-    # Looked up via ``counter_policy.load_counter_policy``. None =
-    # default (strict_echo — reject any change to a buyer-pinned field).
-    # See buyer/market_buyer/counter_policy.py.
-    counter_policy: Optional[str] = None
+
+
+# Factory: build the EscrowProposal for a specific candidate listing.
+# Returns None when the listing carries no accepted_escrows entry
+# compatible with the buyer's chain + filters — the orchestrator then
+# skips that candidate. The caller closes over chain config + selection
+# rules; the orchestrator just invokes per match.
+BuildEscrowProposalFn = Callable[[dict[str, Any]], Optional["EscrowProposal"]]
 
 
 @dataclass
@@ -89,7 +92,7 @@ class BuyResult:
     status: str
     negotiation_id: Optional[str] = None
     seller_url: Optional[str] = None
-    agreed_price: Optional[float] = None
+    agreed_amount: Optional[int] = None
     escrow_uid: Optional[str] = None
     fulfillment_uid: Optional[str] = None
     connection_details: Optional[str] = None
@@ -101,7 +104,7 @@ class BuyResult:
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"status": self.status, "rounds": self.rounds}
         for k in (
-            "negotiation_id", "seller_url", "agreed_price", "escrow_uid",
+            "negotiation_id", "seller_url", "agreed_amount", "escrow_uid",
             "fulfillment_uid", "connection_details", "tenant_credentials",
             "reason",
         ):
@@ -287,10 +290,12 @@ def fetch_listing_dict_multi(
 def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
     """Pull the seller's per-hour floor out of a registry listing dict.
 
-    Reads ``accepted_escrows[0].price_per_hour`` — the per-hour token rate
-    advertised on the seller's first accepted escrow tuple. Returns ``None``
-    if absent or unparseable (hidden-reserve listings).
+    Reads the primary rate on ``accepted_escrows[0]`` — the per-hour
+    token rate advertised on the seller's first accepted escrow tuple.
+    Returns ``None`` for hidden-reserve listings (empty ``rates``).
     """
+    from service.schemas import primary_rate_value
+
     accepted = listing.get("accepted_escrows") or []
     if isinstance(accepted, str):
         try:
@@ -302,11 +307,8 @@ def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
     first = accepted[0]
     if not isinstance(first, dict):
         return None
-    amount = first.get("price_per_hour")
-    try:
-        return float(amount) if amount is not None else None
-    except (ValueError, TypeError):
-        return None
+    amount = primary_rate_value(first)
+    return float(amount) if amount is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +342,7 @@ def submit_settlement(
     ssh_public_key: str,
     buyer_address: str,
     buyer_private_key: str,
+    chain_name: str,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
     max_attempts: int = 6,
     retry_backoff: float = 3.0,
@@ -352,18 +355,26 @@ def submit_settlement(
     public RPC nodes can lag the just-mined create-escrow tx by 5-15s,
     surfacing as ``"buffer overrun while deserializing"`` / "Failed to
     read escrow" detail. Non-matching errors bubble up immediately.
+
+    ``chain_name`` tells the seller which configured ``[chains.<name>]``
+    entry to dispatch the on-chain verify against — required since the
+    seller may serve multiple chains.
     """
     url = seller_url.rstrip("/") + f"/api/v1/settle/{escrow_uid}"
     body = {
         "negotiation_id": negotiation_id,
         "ssh_public_key": ssh_public_key,
         "buyer_address": buyer_address,
+        "chain_name": chain_name,
     }
     last_exc: RuntimeError | None = None
     for attempt in range(1, max_attempts + 1):
         sig, ts = _sign(f"settle_escrow:{escrow_uid}", buyer_private_key)
         try:
-            return _signed_json(url, body, sig, ts, method="POST", timeout=timeout)
+            return _signed_json(
+                url, body, sig, ts, method="POST", timeout=timeout,
+                identity_identifier=buyer_address,
+            )
         except RuntimeError as exc:
             last_exc = exc
             if not _looks_like_propagation_lag(exc) or attempt == max_attempts:
@@ -387,8 +398,11 @@ def poll_settlement_status(
         seller_url.rstrip("/")
         + f"/api/v1/settle/{escrow_uid}/status?buyer_address={buyer_address}"
     )
-    return _signed_json(url, body=None, signature=sig, timestamp=ts,
-                        method="GET", timeout=timeout)
+    return _signed_json(
+        url, body=None, signature=sig, timestamp=ts,
+        method="GET", timeout=timeout,
+        identity_identifier=buyer_address,
+    )
 
 
 def _signed_json(
@@ -399,12 +413,17 @@ def _signed_json(
     *,
     method: str,
     timeout: float,
+    identity_scheme: str = "eip191",
+    identity_identifier: str | None = None,
 ) -> dict[str, Any]:
     headers = {
         "Accept": "application/json",
         "X-Signature": signature,
         "X-Timestamp": str(timestamp),
+        "X-Identity-Scheme": identity_scheme,
     }
+    if identity_identifier:
+        headers["X-Identity"] = identity_identifier
     data = None
     if body is not None:
         headers["Content-Type"] = "application/json"
@@ -479,7 +498,7 @@ class AgreedTerms:
     seller_wallet_address: str
     negotiation_id: str
     listing_id: str
-    agreed_price: float               # base units, per-hour rate
+    agreed_amount: int                # base units, absolute payment total
     duration_seconds: int           # buyer's lease ask (negotiation init)
 
 
@@ -514,7 +533,7 @@ def run_buy(
     config: BuyConfig,
     constraints: BuyConstraints,
     provision: ProvisionTerms,
-    escrow_proposal: EscrowProposal,
+    build_escrow_proposal: BuildEscrowProposalFn,
     build_escrow_terms: BuildEscrowTermsFn,
     create_escrow: CreateEscrowFn,
     matches: Optional[list[dict[str, Any]]] = None,
@@ -532,14 +551,16 @@ def run_buy(
 
     Parameters
     ----------
-    config, constraints, provision, escrow_proposal
-        Buyer identity + price bounds + what to provision + the on-chain
-        escrow shape the buyer proposes. Immutable for this call.
-        ``provision.duration_seconds`` is the lease window;
-        ``provision.ssh_public_key`` is sent in the settle request;
-        ``escrow_proposal`` (chain_name + escrow_address + fields +
-        expiration_unix) goes on the negotiate-init request and the
-        seller validates it against the listing's accepted_escrows.
+    config, constraints, provision, build_escrow_proposal
+        Buyer identity + price bounds + what to provision + a factory
+        that yields the on-chain escrow shape *per candidate listing*.
+        Immutable for this call. ``provision.duration_seconds`` is the
+        lease window; ``provision.ssh_public_key`` is sent in the settle
+        request. ``build_escrow_proposal(match) -> EscrowProposal | None``
+        picks one entry from ``match.accepted_escrows`` (token / escrow
+        contract / chain come from the listing); ``None`` skips the
+        candidate when no entry is compatible with the buyer's chain
+        and token filters.
     build_escrow_terms
         Materializes the agreed negotiation into the canonical
         ``list[EscrowTerms]`` (the escrow specs that will be submitted
@@ -579,11 +600,6 @@ def run_buy(
         if on_event:
             on_event(stage, payload)
 
-    # Resolve the buyer's counter policy up-front so a bad name in config
-    # fails before any registry / negotiation traffic.
-    from .counter_policy import load_counter_policy
-    counter_policy = load_counter_policy(config.counter_policy)
-
     # --- 1. Discover ---------------------------------------------------
     if matches is None:
         kwargs: dict[str, Any] = {}
@@ -607,7 +623,7 @@ def run_buy(
     attempts: list[dict[str, Any]] = []
 
     async def _negotiate(match: dict[str, Any]) -> NegotiationOutcome:
-        seller_url = match.get("seller") or match.get("order_maker") or match.get("seller_url") or ""
+        seller_url = match.get("storefront_url") or match.get("seller") or match.get("seller_url") or ""
         listing_id = match.get("listing_id") or match.get("order_id") or ""
         if not seller_url or not listing_id:
             attempts.append({"match": match, "error": "missing_seller_url_or_listing_id"})
@@ -617,6 +633,22 @@ def run_buy(
                 status="exited",
                 negotiation_id=None,
                 reason="missing_seller_url_or_listing_id",
+            )
+
+        # Per-candidate escrow proposal: token, escrow contract, and chain
+        # come from the listing's accepted_escrows. None ⇒ no entry on
+        # the buyer's chain (or no entry matching --token-contract).
+        escrow_proposal = build_escrow_proposal(match)
+        if escrow_proposal is None:
+            attempts.append({
+                "seller_url": seller_url,
+                "listing_id": listing_id,
+                "error": "no_compatible_accepted_escrow",
+            })
+            return NegotiationOutcome(
+                status="exited",
+                negotiation_id=None,
+                reason="no_compatible_accepted_escrow",
             )
 
         neg_ctx: dict[str, Any] = {"listing_id": listing_id}
@@ -706,36 +738,15 @@ def run_buy(
         if outcome.negotiation_id and "negotiation_id" not in neg_ctx:
             neg_ctx["negotiation_id"] = outcome.negotiation_id
 
-        # Counter policy: did the seller modify the proposal we sent? On
-        # reject, rewrite outcome to exited so the aggregation policy
-        # treats this candidate as failed without ever reaching settle.
-        if outcome.status == "agreed":
-            decision = counter_policy(escrow_proposal, outcome.accepted_escrow_proposal)
-            if decision.action == "reject":
-                _emit_neg(
-                    "counter_rejected",
-                    sent_proposal=escrow_proposal.model_dump(),
-                    returned_proposal=(
-                        outcome.accepted_escrow_proposal.model_dump()
-                        if outcome.accepted_escrow_proposal is not None
-                        else None
-                    ),
-                    reason=decision.reason,
-                )
-                outcome = NegotiationOutcome(
-                    status="exited",
-                    negotiation_id=outcome.negotiation_id,
-                    agreed_price=outcome.agreed_price,
-                    duration_seconds=outcome.duration_seconds,
-                    rounds=outcome.rounds,
-                    reason=f"counter_rejected:{decision.reason or 'unknown'}",
-                )
+        # Note: the buyer-side ``buyer_escrow_shape_guard`` middleware
+        # (default in the buyer's chain) handles seller-pin-mutation
+        # vetoes per round — no separate post-agreement audit is needed.
 
         _emit_neg(
             "negotiation_completed",
             seller_url=seller_url,
             status=outcome.status,
-            agreed_price=outcome.agreed_price,
+            agreed_amount=outcome.agreed_amount,
             rounds=outcome.rounds,
             reason=outcome.reason,
         )
@@ -810,7 +821,7 @@ def _settle_one(
     structural, not just visual. Inputs are the policy's
     ``(match, outcome)`` plus the orchestrator's settlement deps.
     """
-    seller_url = match.get("seller") or match.get("order_maker") or match.get("seller_url") or ""
+    seller_url = match.get("storefront_url") or match.get("seller") or match.get("seller_url") or ""
     listing_id = match.get("listing_id") or match.get("order_id") or ""
 
     try:
@@ -821,7 +832,7 @@ def _settle_one(
             status="exited",
             negotiation_id=outcome.negotiation_id,
             seller_url=seller_url,
-            agreed_price=outcome.agreed_price,
+            agreed_amount=outcome.agreed_amount,
             reason=f"resolve_seller_wallet_failed: {exc}",
             rounds=outcome.rounds,
             attempts=attempts,
@@ -832,7 +843,7 @@ def _settle_one(
         seller_wallet_address=seller_wallet,
         negotiation_id=outcome.negotiation_id or "",
         listing_id=listing_id,
-        agreed_price=outcome.agreed_price or 0,
+        agreed_amount=outcome.agreed_amount or 0,
         duration_seconds=provision.duration_seconds,
     )
 
@@ -845,7 +856,7 @@ def _settle_one(
                 status="exited",
                 negotiation_id=outcome.negotiation_id,
                 seller_url=seller_url,
-                agreed_price=outcome.agreed_price,
+                agreed_amount=outcome.agreed_amount,
                 reason=f"confirm_settlement_callback_raised: {exc}",
                 rounds=outcome.rounds,
                 attempts=attempts,
@@ -856,7 +867,7 @@ def _settle_one(
                 status="exited",
                 negotiation_id=outcome.negotiation_id,
                 seller_url=seller_url,
-                agreed_price=outcome.agreed_price,
+                agreed_amount=outcome.agreed_amount,
                 reason="user_declined",
                 rounds=outcome.rounds,
                 attempts=attempts,
@@ -877,7 +888,7 @@ def _settle_one(
             status="exited",
             negotiation_id=outcome.negotiation_id,
             seller_url=seller_url,
-            agreed_price=outcome.agreed_price,
+            agreed_amount=outcome.agreed_amount,
             reason="missing_accepted_escrow_proposal",
             rounds=outcome.rounds,
             attempts=attempts,
@@ -885,7 +896,7 @@ def _settle_one(
     try:
         escrows = build_escrow_terms(
             accepted_proposal, seller_wallet,
-            terms.agreed_price, terms.duration_seconds,
+            terms.agreed_amount, terms.duration_seconds,
         )
     except Exception as exc:
         on_event("escrow_create_failed", {"error": f"build_escrow_terms: {exc}"})
@@ -893,7 +904,7 @@ def _settle_one(
             status="exited",
             negotiation_id=outcome.negotiation_id,
             seller_url=seller_url,
-            agreed_price=outcome.agreed_price,
+            agreed_amount=outcome.agreed_amount,
             reason=f"build_escrow_terms_failed: {exc}",
             rounds=outcome.rounds,
             attempts=attempts,
@@ -911,7 +922,7 @@ def _settle_one(
             status="exited",
             negotiation_id=outcome.negotiation_id,
             seller_url=seller_url,
-            agreed_price=outcome.agreed_price,
+            agreed_amount=outcome.agreed_amount,
             reason=f"escrow_create_failed: {exc}",
             rounds=outcome.rounds,
             attempts=attempts,
@@ -931,7 +942,7 @@ def _settle_one(
             status="exited",
             negotiation_id=outcome.negotiation_id,
             seller_url=seller_url,
-            agreed_price=outcome.agreed_price,
+            agreed_amount=outcome.agreed_amount,
             reason="create_escrow_uid_count_mismatch",
             rounds=outcome.rounds,
             attempts=attempts,
@@ -942,13 +953,20 @@ def _settle_one(
             status="exited",
             negotiation_id=outcome.negotiation_id,
             seller_url=seller_url,
-            agreed_price=outcome.agreed_price,
+            agreed_amount=outcome.agreed_amount,
             reason="no_buyer_made_escrow",
             rounds=outcome.rounds,
             attempts=attempts,
         )
     escrow_uid = escrow_uids[0]
-    on_event("escrow_created", {"escrow_uid": escrow_uid, "all_uids": escrow_uids})
+    on_event(
+        "escrow_created",
+        {
+            "escrow_uid": escrow_uid,
+            "all_uids": escrow_uids,
+            "chain_name": accepted_proposal.chain_name,
+        },
+    )
 
     submit_settlement(
         seller_url=seller_url,
@@ -957,6 +975,7 @@ def _settle_one(
         ssh_public_key=provision.ssh_public_key,
         buyer_address=config.buyer_address,
         buyer_private_key=config.buyer_private_key,
+        chain_name=accepted_proposal.chain_name,
     )
     on_event("settlement_submitted", {"escrow_uid": escrow_uid})
 
@@ -977,7 +996,7 @@ def _settle_one(
             status="timeout",
             negotiation_id=outcome.negotiation_id,
             seller_url=seller_url,
-            agreed_price=outcome.agreed_price,
+            agreed_amount=outcome.agreed_amount,
             escrow_uid=escrow_uid,
             reason=str(exc),
             rounds=outcome.rounds,
@@ -989,7 +1008,7 @@ def _settle_one(
             status="ready",
             negotiation_id=outcome.negotiation_id,
             seller_url=seller_url,
-            agreed_price=outcome.agreed_price,
+            agreed_amount=outcome.agreed_amount,
             escrow_uid=escrow_uid,
             fulfillment_uid=final.get("fulfillment_uid"),
             connection_details=final.get("connection_details"),
@@ -1001,7 +1020,7 @@ def _settle_one(
         status="failed",
         negotiation_id=outcome.negotiation_id,
         seller_url=seller_url,
-        agreed_price=outcome.agreed_price,
+        agreed_amount=outcome.agreed_amount,
         escrow_uid=escrow_uid,
         reason=final.get("reason") or "provisioning_failed",
         rounds=outcome.rounds,

@@ -27,7 +27,9 @@ import pytest
 from typer.testing import CliRunner
 
 from market_buyer.cli import app
+from market_buyer.buy_orchestrator import BuyResult
 from market_buyer.run_log import RunLog, read_run
+from service.config_loader import ChainConfig
 
 
 # Test wallet — derived address must match _BUYER_ADDR below for
@@ -88,8 +90,8 @@ def _seed_partial_negotiation(seller_url: str, listing_id: str) -> str:
     log.event(
         "negotiation_round",
         round=0,
-        our_message={"action": "initial", "price": 50},
-        their_reply={"negotiation_id": "neg-mid", "action": "counter", "price": 90},
+        our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
+        their_reply={"negotiation_id": "neg-mid", "action": "counter", "proposal": {"fields": {"amount": 90}}},
     )
     return log.run_id
 
@@ -105,18 +107,18 @@ def _seed_agreed_negotiation(seller_url: str, listing_id: str) -> str:
     log.event(
         "negotiation_round",
         round=0,
-        our_message={"action": "initial", "price": 50},
-        their_reply={"negotiation_id": "neg-done", "action": "accept", "price": 70},
+        our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
+        their_reply={"negotiation_id": "neg-done", "action": "accept", "proposal": {"fields": {"amount": 70}}},
     )
     log.event(
         "negotiation_completed",
         status="agreed",
-        agreed_price=70,
+        agreed_amount=70,
         rounds=0,
         negotiation_id="neg-done",
         listing_id=listing_id,
     )
-    log.end("agreed", negotiation_id="neg-done", agreed_price=70, rounds=0)
+    log.end("agreed", negotiation_id="neg-done", agreed_amount=70, rounds=0)
     return log.run_id
 
 
@@ -136,7 +138,7 @@ class TestNegotiateFrom:
         # Seller's accept response to our resumed continue.
         monkeypatch.setattr(
             "market_buyer.buyer_client.urllib.request.urlopen",
-            _urlopen_for([{"action": "accept", "price": 70}]),
+            _urlopen_for([{"action": "accept", "proposal": {"fields": {"amount": 70}}}]),
         )
         # Best-effort wallet fetch in negotiate.py — make it succeed
         # cheaply so it doesn't perturb the test path.
@@ -174,7 +176,7 @@ class TestNegotiateFrom:
 
         monkeypatch.setattr(
             "market_buyer.buyer_client.urllib.request.urlopen",
-            _urlopen_for([{"action": "accept", "price": 70}]),
+            _urlopen_for([{"action": "accept", "proposal": {"fields": {"amount": 70}}}]),
         )
         monkeypatch.setattr(
             "market_buyer.buy_orchestrator._resolve_seller_wallet",
@@ -221,7 +223,7 @@ class TestBuyFrom:
 
         monkeypatch.setattr(
             "market_buyer.buyer_client.urllib.request.urlopen",
-            _urlopen_for([{"action": "accept", "price": 70}]),
+            _urlopen_for([{"action": "accept", "proposal": {"fields": {"amount": 70}}}]),
         )
 
         settle_calls: list[dict] = []
@@ -253,7 +255,7 @@ class TestBuyFrom:
         assert "negotiation_completed" in ev_names
         agreed = next(e for e in events if e["event"] == "negotiation_completed")
         assert agreed["status"] == "agreed"
-        assert agreed["agreed_price"] == 70
+        assert agreed["agreed_amount"] == 70
 
     def test_buy_from_already_agreed_skips_negotiation(self, runner, monkeypatch):
         """If the run-log shows an agreed outcome, --from goes
@@ -348,6 +350,71 @@ class TestBuyFrom:
         ])
         assert result.exit_code == 2
         assert "initial-price" in result.output.lower() or "max-price" in result.output.lower()
+
+    def test_buy_fresh_constructs_buy_config(self, runner, monkeypatch):
+        """Fresh buy reaches run_buy with a valid BuyConfig and chain proposal."""
+        listing = {
+            "listing_id": "L-1",
+            "storefront_url": "http://seller:8001",
+            "accepted_escrows": [
+                {
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "aa" * 20,
+                    "literal_fields": {"token": "0x" + "bb" * 20},
+                    "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+                }
+            ],
+        }
+        captured = {}
+
+        monkeypatch.setattr(
+            "market_buyer.common.select_chain_for_listing",
+            lambda listing, override, yes: ChainConfig(
+                name="anvil",
+                rpc_url="http://rpc",
+                chain_id=31337,
+                alkahest_address_config_path="/tmp/alkahest.json",
+            ),
+        )
+        monkeypatch.setattr(
+            "market_buyer.groups.buy.query_registry_for_matches_multi",
+            lambda *a, **kw: [listing],
+        )
+        monkeypatch.setattr(
+            "market_buyer.groups.buy._resolve_prices_from_matches",
+            lambda **kw: (100, 150),
+        )
+        monkeypatch.setattr(
+            "market_buyer.escrow_client.make_buyer_payment_escrow_terms_fn",
+            lambda **kw: lambda *a, **inner_kw: [],
+        )
+        monkeypatch.setattr(
+            "market_buyer.escrow_client.make_create_escrow_fn",
+            lambda **kw: lambda escrows: [],
+        )
+
+        def fake_run_buy(**kwargs):
+            captured["config"] = kwargs["config"]
+            captured["proposal"] = kwargs["build_escrow_proposal"](listing)
+            return BuyResult(status="ready", negotiation_id="neg-1", rounds=1)
+
+        monkeypatch.setattr("market_buyer.groups.buy.run_buy", fake_run_buy)
+
+        result = runner.invoke(app, [
+            "buy",
+            "--duration-hours", "1",
+            "--buyer-address", _BUYER_ADDR,
+            "--buyer-priv-key", _BUYER_PK,
+            "--ssh-public-key", "ssh-ed25519 AAAA buyer@test",
+            "--registry-urls", "http://reg",
+            "--chain", "anvil",
+            "--yes",
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert captured["config"].registry_urls == ["http://reg"]
+        assert captured["config"].buyer_address == _BUYER_ADDR
+        assert captured["proposal"].chain_name == "anvil"
 
     def test_buy_from_mid_stream_without_max_price_errors(
         self, runner, monkeypatch,

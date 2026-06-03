@@ -1,6 +1,6 @@
 """Shared helpers for deal-recovery commands (`settle`, `escrow create`).
 
-Both pull deal context (seller_url, agreed_price, …) from a buyer
+Both pull deal context (seller_url, agreed_amount, …) from a buyer
 run-log JSONL, then feed `buy_orchestrator` stage helpers and
 `escrow_client.make_create_escrow_fn` to advance the deal.
 
@@ -11,12 +11,15 @@ chain-config resolution between the two commands.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 import typer
 
 from ..common import resolve_config_value
 from ..run_log import RunLog, read_run
+
+if TYPE_CHECKING:
+    from service.config_loader import ChainConfig
 
 
 @dataclass
@@ -25,7 +28,7 @@ class DealContext:
     seller_url: str
     listing_id: str
     negotiation_id: str
-    agreed_price: float
+    agreed_amount: float
     escrow_uid: Optional[str] = None
     # Buyer's lease ask, in seconds. Captured at /negotiate/new time and
     # echoed by the seller in the agreement; settlement multiplies the
@@ -58,7 +61,7 @@ def load_deal_context(run_id: str) -> DealContext:
     seller_url: Optional[str] = None
     listing_id: Optional[str] = None
     negotiation_id: Optional[str] = None
-    agreed_price: Optional[float] = None
+    agreed_amount: Optional[float] = None
     escrow_uid: Optional[str] = None
     duration_seconds: int = 3600
     seller_wallet_address: Optional[str] = None
@@ -69,19 +72,19 @@ def load_deal_context(run_id: str) -> DealContext:
     for ev in events:
         ev_type = ev.get("event")
 
-        # `negotiate` end carries the agreed_price + negotiation_id.
+        # `negotiate` end carries the agreed_amount + negotiation_id.
         if ev_type == "run_ended":
             last_status = ev.get("status")
-            if ev.get("agreed_price") is not None:
-                agreed_price = float(ev["agreed_price"])
+            if ev.get("agreed_amount") is not None:
+                agreed_amount = float(ev["agreed_amount"])
             if ev.get("negotiation_id"):
                 negotiation_id = str(ev["negotiation_id"])
 
         # `market buy`-style log.
         if ev_type == "negotiation_completed" and ev.get("status") == "agreed":
             seller_url = ev.get("seller_url") or seller_url
-            if ev.get("agreed_price") is not None:
-                agreed_price = float(ev["agreed_price"])
+            if ev.get("agreed_amount") is not None:
+                agreed_amount = float(ev["agreed_amount"])
             if ev.get("negotiation_id"):
                 negotiation_id = str(ev["negotiation_id"])
             if ev.get("listing_id"):
@@ -123,7 +126,7 @@ def load_deal_context(run_id: str) -> DealContext:
             ("seller_url", seller_url),
             ("listing_id", listing_id),
             ("negotiation_id", negotiation_id),
-            ("agreed_price", agreed_price),
+            ("agreed_amount", agreed_amount),
         ) if not v
     ]
     if missing:
@@ -137,7 +140,7 @@ def load_deal_context(run_id: str) -> DealContext:
         seller_url=seller_url,                # type: ignore[arg-type]
         listing_id=listing_id,                # type: ignore[arg-type]
         negotiation_id=negotiation_id,        # type: ignore[arg-type]
-        agreed_price=agreed_price,            # type: ignore[arg-type]
+        agreed_amount=agreed_amount,            # type: ignore[arg-type]
         escrow_uid=escrow_uid,
         duration_seconds=duration_seconds,
         seller_wallet_address=seller_wallet_address,
@@ -169,43 +172,35 @@ def resolve_chain_settings(
     buyer_address: Optional[str],
     buyer_private_key: Optional[str],
     ssh_public_key: Optional[str],
-    rpc_url: Optional[str],
-    chain_name: Optional[str],
-    alkahest_addr_config: Optional[str],
+    chain: "ChainConfig",
     token_contract: Optional[str],
     token_decimals: Optional[int],
     require_ssh: bool = True,
 ) -> ChainSettings:
-    """Resolve chain/token flags + config.toml fallbacks.
+    """Resolve wallet/SSH/token credentials around a pre-selected ChainConfig.
 
-    Mirrors `market buy`'s resolution. Default token is "MOCK" via the
-    bundled token registry; explicit `--token-contract` skips the
-    lookup. Errors with typer.Exit(2) on missing required values.
+    Callers pick the chain first — via :func:`select_chain_for_listing` (buy /
+    negotiate), :func:`chain_by_name` (escrow ops with --chain), or by
+    looking it up from the run-log (settle --from). This function only
+    validates the wallet/ssh credentials and resolves token decimals against
+    the chosen chain's RPC.
 
-    `require_ssh=False` skips the SSH-key check for commands that
-    don't submit settlement (the SSH key only matters for the seller's
-    provisioning step).
+    `require_ssh=False` skips the SSH-key check for commands that don't
+    submit settlement.
     """
-    from ..common import resolve_buyer_wallet, resolve_chain_name, resolve_ssh_public_key
+    from ..common import resolve_buyer_wallet, resolve_ssh_public_key
 
     addr, pk = resolve_buyer_wallet(
         override_addr=buyer_address, override_pk=buyer_private_key,
     )
     ssh = resolve_ssh_public_key(override=ssh_public_key)
-    rpc = resolve_config_value(override=rpc_url, toml_path="chain.rpc_url")
-    chain = resolve_chain_name(override=chain_name, rpc_url=rpc)
-    addr_cfg = resolve_config_value(
-        override=alkahest_addr_config, toml_path="chain.alkahest_address_config_path",
-    )
 
     _key_for = {
         "buyer_priv_key": "wallet.private_key",
-        "rpc_url": "chain.rpc_url",
         "ssh_public_key": "wallet.ssh_public_key",
     }
     missing = [n for n, v in (
         ("buyer_priv_key", pk),
-        ("rpc_url", rpc),
     ) if not v]
     if require_ssh and not ssh:
         missing.append("ssh_public_key")
@@ -225,28 +220,25 @@ def resolve_chain_settings(
     tc = token_contract
     decimals: Optional[int] = token_decimals
     if not tc:
-        from ..common import resolve_default_token_address
-        tc = resolve_default_token_address()
-        if not tc:
-            typer.secho(
-                "No --token-contract given and top-level default_token_address "
-                "is unset in buyer.toml.",
-                err=True, fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
+        typer.secho(
+            "No --token-contract given and no token recorded on the run-log. "
+            "Pass --token-contract or resume from a run-log that captured the "
+            "negotiated token (`market buy` / `market negotiate` log it as "
+            "part of round 0).",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
     if decimals is None:
-        # No explicit --token-decimals — resolve on chain.
-        from ..common import resolve_chain_id
         from service.clients.token import resolve_token, TokenResolutionError
         try:
             meta = resolve_token(
-                tc, rpc_url=rpc, chain_id=resolve_chain_id(rpc),
+                tc, rpc_url=chain.rpc_url, chain_id=chain.chain_id,
             )
             decimals = meta.decimals
         except (TokenResolutionError, RuntimeError) as exc:
             typer.secho(
-                f"Could not resolve token {tc} on chain — pass "
-                f"--token-decimals or check chain.rpc_url. ({exc})",
+                f"Could not resolve token {tc} on chain {chain.name!r} — pass "
+                f"--token-decimals or check the chain's rpc_url. ({exc})",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(2)
@@ -255,9 +247,9 @@ def resolve_chain_settings(
         buyer_address=addr,
         buyer_private_key=pk,
         ssh_public_key=ssh,
-        rpc_url=rpc,
-        chain_name=chain,
-        alkahest_addr_config=addr_cfg or None,
+        rpc_url=chain.rpc_url,
+        chain_name=chain.name,
+        alkahest_addr_config=chain.alkahest_address_config_path,
         token_contract=tc,
         token_decimals=decimals,
     )
@@ -281,7 +273,7 @@ class NegotiationResumePoint:
     listing_id: str
     negotiation_id: str
     transcript: list  # list[NegotiationRound] — typed downstream
-    last_seller_price: Optional[float]
+    last_seller_proposal: Optional[dict]
     rounds_completed: int
     last_status: Optional[str]
 
@@ -304,7 +296,7 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
     """Reconstruct a partial negotiation from a prior run-log.
 
     Reads ``negotiation_round`` events to rebuild the transcript and
-    pick the most recent seller counter price. Raises
+    pick the most recent seller counter proposal. Raises
     ``typer.BadParameter`` if the log doesn't have enough state to
     resume (no negotiation_id, no recorded rounds, etc.).
     """
@@ -321,7 +313,7 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
     listing_id: Optional[str] = None
     negotiation_id: Optional[str] = None
     transcript: list = []
-    last_seller_price: Optional[float] = None
+    last_seller_proposal: Optional[dict] = None
     last_status: Optional[str] = None
     rounds_completed = 0
 
@@ -342,23 +334,23 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
             round_idx = int(ev.get("round", rounds_completed))
             rounds_completed = max(rounds_completed, round_idx + 1)
             our_action = our.get("action") or "initial"
-            our_price_raw = our.get("price") or our.get("initial_price")
+            our_proposal = our.get("proposal")
             transcript.append(NegotiationRound(
                 round_number=round_idx,
                 sender="us",
                 action=our_action,
-                price=float(our_price_raw) if our_price_raw is not None else None,
+                proposal=our_proposal if isinstance(our_proposal, dict) else None,
             ))
             their_action = their.get("action") or "counter"
-            their_price_raw = their.get("price")
+            their_proposal = their.get("proposal")
             transcript.append(NegotiationRound(
                 round_number=round_idx,
                 sender="them",
                 action=their_action,
-                price=float(their_price_raw) if their_price_raw is not None else None,
+                proposal=their_proposal if isinstance(their_proposal, dict) else None,
             ))
-            if their_action == "counter" and their_price_raw is not None:
-                last_seller_price = float(their_price_raw)
+            if their_action == "counter" and isinstance(their_proposal, dict):
+                last_seller_proposal = their_proposal
         elif et == "negotiation_completed":
             last_status = ev.get("status") or last_status
             if ev.get("negotiation_id"):
@@ -382,7 +374,7 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
         listing_id=listing_id,                # type: ignore[arg-type]
         negotiation_id=negotiation_id,        # type: ignore[arg-type]
         transcript=transcript,
-        last_seller_price=last_seller_price,
+        last_seller_proposal=last_seller_proposal,
         rounds_completed=rounds_completed,
         last_status=last_status,
     )

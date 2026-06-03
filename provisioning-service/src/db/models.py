@@ -54,8 +54,6 @@ class AnsibleJob(Base):
     result = Column(JSON, nullable=True)
     logs = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
-    agent_id = Column(String, nullable=True, index=True)  # ERC-8004 agent ID (seller) that submitted this job
-    buyer_agent_id = Column(String, nullable=True, index=True)  # ERC-8004 agent ID of the buyer
     process_id = Column(String, nullable=True)  # PID of running ansible process for cancellation
     retry_count = Column(Integer, default=0, nullable=False)  # Number of retry attempts made
     max_retries = Column(Integer, default=3, nullable=False)  # Maximum retry attempts allowed
@@ -75,7 +73,6 @@ class Credential(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     job_id = Column(String, ForeignKey("ansible_jobs.id"), nullable=False, index=True)
     role = Column(String, nullable=False)  # "root" or "tenant"
-    granted_to = Column(String, nullable=False, index=True)  # agent_id this credential is visible to
     password = Column(String, nullable=True)
     ssh_commands = Column(JSON, nullable=True)
     ssh_key_path_host = Column(String, nullable=True)
@@ -108,7 +105,12 @@ class Host(Base):
     __tablename__ = "hosts"
 
     name = Column(String, primary_key=True)  # Ansible alias, e.g. "kvm1"
-    kvm_host = Column(String, nullable=False)  # IP or hostname for SSH
+    kvm_host = Column(String, nullable=False)  # IP/hostname the provisioner SSHes to
+    # Address tenants use to reach this host's VM port-forwards (public IP,
+    # DNS, or overlay IP). Distinct from kvm_host: the provisioner may reach
+    # the host over a different network than buyers do. NULL → fall back to
+    # kvm_host in tenant-facing connection info.
+    public_host = Column(String, nullable=True)
     ssh_user = Column(String, nullable=False)  # SSH login user on the KVM host
     ssh_key_type = Column(String, nullable=False, default="path")  # "path" | "embedded"
     ssh_key_value = Column(String, nullable=False)  # path string or encrypted PEM

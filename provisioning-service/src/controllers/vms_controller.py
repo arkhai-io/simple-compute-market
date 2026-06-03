@@ -30,7 +30,7 @@ the ``/hosts/{host}/...`` tree.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi_utils.cbv import cbv
 
 import container as _container_module
@@ -75,7 +75,6 @@ class VmController:
         self,
         host: str,
         body: CreateVmRequest,
-        request: Request,
     ) -> JobSubmitResponse:
         """Provision a new KVM virtual machine on ``host``.
 
@@ -88,10 +87,9 @@ class VmController:
         Credentials are stored separately — fetch with
         ``GET /api/v1/jobs/{job_id}/credentials``.
         """
-        agent_id: str | None = getattr(request.state, "agent_id", None)
         params = body.to_ansible_job_params(host)
         return await self._job_service.submit(
-            params, agent_id, _container_module.resolved_job_queue
+            params, _container_module.resolved_job_queue
         )
 
     @router.get(
@@ -104,7 +102,6 @@ class VmController:
         self,
         host: str,
         body: VmActionRequest = Depends(),
-        request: Request = None,
     ) -> JobSubmitResponse:
         """Submit a job to list all VMs on ``host``.
 
@@ -116,10 +113,9 @@ class VmController:
 
         ``result.vms`` contains the list of VM names and states on success.
         """
-        agent_id: str | None = getattr(request.state, "agent_id", None) if request else None
         params = build_simple_params("list", host, body)
         return await self._job_service.submit(
-            params, agent_id, _container_module.resolved_job_queue
+            params, _container_module.resolved_job_queue
         )
 
     # ------------------------------------------------------------------
@@ -137,13 +133,11 @@ class VmController:
         host: str,
         vm_name: str,
         body: VmActionRequest,
-        request: Request,
     ) -> JobSubmitResponse:
         """Start a stopped VM. """ + _POLL_NOTE
-        agent_id: str | None = getattr(request.state, "agent_id", None)
         params = build_simple_params("start", host, body, vm_name)
         return await self._job_service.submit(
-            params, agent_id, _container_module.resolved_job_queue
+            params, _container_module.resolved_job_queue
         )
 
     @router.post(
@@ -157,13 +151,11 @@ class VmController:
         host: str,
         vm_name: str,
         body: VmActionRequest,
-        request: Request,
     ) -> JobSubmitResponse:
         """Send an ACPI shutdown signal to ``vm_name``. """ + _POLL_NOTE
-        agent_id: str | None = getattr(request.state, "agent_id", None)
         params = build_simple_params("shutdown", host, body, vm_name)
         return await self._job_service.submit(
-            params, agent_id, _container_module.resolved_job_queue
+            params, _container_module.resolved_job_queue
         )
 
     @router.post(
@@ -177,13 +169,11 @@ class VmController:
         host: str,
         vm_name: str,
         body: VmActionRequest,
-        request: Request,
     ) -> JobSubmitResponse:
         """Reboot ``vm_name``. """ + _POLL_NOTE
-        agent_id: str | None = getattr(request.state, "agent_id", None)
         params = build_simple_params("reboot", host, body, vm_name)
         return await self._job_service.submit(
-            params, agent_id, _container_module.resolved_job_queue
+            params, _container_module.resolved_job_queue
         )
 
     @router.post(
@@ -197,7 +187,6 @@ class VmController:
         host: str,
         vm_name: str,
         body: VmActionRequest,
-        request: Request,
     ) -> JobSubmitResponse:
         """Force-kill ``vm_name`` (equivalent to pulling the power cord).
 
@@ -205,10 +194,9 @@ class VmController:
         Use ``POST /{vm_name}/undefine`` to remove the definition afterwards.
 
         """ + _POLL_NOTE
-        agent_id: str | None = getattr(request.state, "agent_id", None)
         params = build_simple_params("destroy", host, body, vm_name)
         return await self._job_service.submit(
-            params, agent_id, _container_module.resolved_job_queue
+            params, _container_module.resolved_job_queue
         )
 
     @router.post(
@@ -222,7 +210,6 @@ class VmController:
         host: str,
         vm_name: str,
         body: VmActionRequest,
-        request: Request,
     ) -> JobSubmitResponse:
         """Remove ``vm_name``'s libvirt definition.
 
@@ -230,10 +217,9 @@ class VmController:
         the lease cleanup script for full VM teardown.
 
         """ + _POLL_NOTE
-        agent_id: str | None = getattr(request.state, "agent_id", None)
         params = build_simple_params("undefine", host, body, vm_name)
         return await self._job_service.submit(
-            params, agent_id, _container_module.resolved_job_queue
+            params, _container_module.resolved_job_queue
         )
 
     # ------------------------------------------------------------------
@@ -251,7 +237,6 @@ class VmController:
         host: str,
         vm_name: str,
         body: VmActionRequest = Depends(),
-        request: Request = None,
     ) -> JobSubmitResponse:
         """Submit a job to collect CPU, memory, storage, and network stats.
 
@@ -266,10 +251,9 @@ class VmController:
 
         ``result.resources`` contains the stats snapshot on success.
         """
-        agent_id: str | None = getattr(request.state, "agent_id", None) if request else None
         params = build_simple_params("monitor", host, body, vm_name)
         return await self._job_service.submit(
-            params, agent_id, _container_module.resolved_job_queue
+            params, _container_module.resolved_job_queue
         )
 
     # ------------------------------------------------------------------
@@ -287,7 +271,6 @@ class VmController:
         host: str,
         vm_name: str,
         body: VmActionRequest,
-        request: Request,
     ) -> JobSubmitResponse:
         """Reset the tenant user password on a running VM.
 
@@ -296,10 +279,9 @@ class VmController:
         New credentials are available via
         ``GET /api/v1/jobs/{job_id}/credentials`` once the job succeeds.
         """
-        agent_id: str | None = getattr(request.state, "agent_id", None)
         params = build_simple_params("reset_password", host, body, vm_name)
         return await self._job_service.submit(
-            params, agent_id, _container_module.resolved_job_queue
+            params, _container_module.resolved_job_queue
         )
 
     # ------------------------------------------------------------------
@@ -317,7 +299,6 @@ class VmController:
         host: str,
         vm_name: str,
         body: ScheduleVmExpiryRequest,
-        request: Request,
     ) -> JobSubmitResponse:
         """Schedule automatic VM destruction at a future UTC datetime.
 
@@ -327,10 +308,9 @@ class VmController:
         daemon.
 
         """ + _POLL_NOTE
-        agent_id: str | None = getattr(request.state, "agent_id", None)
         params = body.to_ansible_job_params(host, vm_name)
         return await self._job_service.submit(
-            params, agent_id, _container_module.resolved_job_queue
+            params, _container_module.resolved_job_queue
         )
 
     @router.delete(
@@ -344,7 +324,6 @@ class VmController:
         host: str,
         vm_name: str,
         body: VmActionRequest,
-        request: Request,
     ) -> JobSubmitResponse:
         """Cancel a previously scheduled VM expiry.
 
@@ -356,10 +335,9 @@ class VmController:
         DB-driven lease watchdog is implemented.
 
         """ + _POLL_NOTE
-        agent_id: str | None = getattr(request.state, "agent_id", None)
         params = build_simple_params("lease_remove", host, body, vm_name)
         return await self._job_service.submit(
-            params, agent_id, _container_module.resolved_job_queue
+            params, _container_module.resolved_job_queue
         )
 
     @classmethod

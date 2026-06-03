@@ -10,6 +10,8 @@ client typed surface, which still carries the legacy parameter list
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -38,7 +40,7 @@ def _raw_client(db_session):
         app.dependency_overrides.clear()
 
 
-def _make_listing(db_session, agent, listing_id: str, **offer_extras) -> Listing:
+def _make_listing(db_session, publisher, listing_id: str, **offer_extras) -> Listing:
     offer = {
         "gpu_model": "A100",
         "region": "us-west",
@@ -48,13 +50,12 @@ def _make_listing(db_session, agent, listing_id: str, **offer_extras) -> Listing
     }
     row = Listing(
         listing_id=listing_id,
-        agent_id=agent.agent_id,
-        seller="",
+        publisher_id=publisher.publisher_id,
         offer_resource=offer,
         accepted_escrows=[{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"token": "0x" + "ab" * 20},
+            "literal_fields": {"token": "0x" + "ab" * 20},
         }],
         max_duration_seconds=3600,
         status=OrderStatusEnum.open,
@@ -66,9 +67,9 @@ def _make_listing(db_session, agent, listing_id: str, **offer_extras) -> Listing
 
 
 @pytest.mark.asyncio
-async def test_gpu_model_filter_narrows_results(_raw_client, db_session, maker_agent):
-    _make_listing(db_session, maker_agent, "a100-listing", gpu_model="A100")
-    _make_listing(db_session, maker_agent, "h200-listing", gpu_model="H200")
+async def test_gpu_model_filter_narrows_results(_raw_client, db_session, maker_publisher):
+    _make_listing(db_session, maker_publisher, "a100-listing", gpu_model="A100")
+    _make_listing(db_session, maker_publisher, "h200-listing", gpu_model="H200")
 
     async with _raw_client as c:
         resp = await c.get("/listings", params={"gpu_model": "A100"})
@@ -80,9 +81,51 @@ async def test_gpu_model_filter_narrows_results(_raw_client, db_session, maker_a
 
 
 @pytest.mark.asyncio
-async def test_ram_gb_min_lower_bound_alias(_raw_client, db_session, maker_agent):
-    _make_listing(db_session, maker_agent, "small", ram_gb=128)
-    _make_listing(db_session, maker_agent, "big", ram_gb=1024)
+async def test_filters_match_double_encoded_offer_resource(
+    _raw_client, db_session, maker_publisher
+):
+    """A listing whose offer_resource/accepted_escrows were stored as JSON
+    *strings* (a publisher that double-encoded them) is still filterable and
+    comes back decoded on the wire.
+
+    Regression for the discovery break: the storefront forwarded its
+    stringified offer_resource SQLite column into the registry's JSON
+    column, so the JSONPath filter ($.offer_resource.gpu_model) resolved to
+    nothing and on_missing:fail dropped every listing — a buyer's
+    ``market buy --gpu-model`` matched zero sellers. order_to_dict now
+    decodes on read so discovery (and the response shape) stay correct.
+    """
+    row = Listing(
+        listing_id="stringified-offer",
+        publisher_id=maker_publisher.publisher_id,
+        offer_resource=json.dumps({"gpu_model": "A100", "region": "us-west"}),
+        accepted_escrows=json.dumps([{
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "literal_fields": {"token": "0x" + "ab" * 20},
+        }]),
+        max_duration_seconds=3600,
+        status=OrderStatusEnum.open,
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    async with _raw_client as c:
+        resp = await c.get("/listings", params={"gpu_model": "A100"})
+    assert resp.status_code == 200
+    items = {item["listing_id"]: item for item in resp.json()["items"]}
+    assert "stringified-offer" in items, (
+        "double-encoded offer_resource should still match the gpu_model filter"
+    )
+    assert isinstance(items["stringified-offer"]["offer_resource"], dict), (
+        "offer_resource should be decoded to an object on the wire"
+    )
+
+
+@pytest.mark.asyncio
+async def test_ram_gb_min_lower_bound_alias(_raw_client, db_session, maker_publisher):
+    _make_listing(db_session, maker_publisher, "small", ram_gb=128)
+    _make_listing(db_session, maker_publisher, "big", ram_gb=1024)
 
     async with _raw_client as c:
         resp = await c.get("/listings", params={"ram_gb_min": "512"})
@@ -92,8 +135,8 @@ async def test_ram_gb_min_lower_bound_alias(_raw_client, db_session, maker_agent
 
 
 @pytest.mark.asyncio
-async def test_unknown_filter_returns_400(_raw_client, db_session, maker_agent):
-    _make_listing(db_session, maker_agent, "x", gpu_model="A100")
+async def test_unknown_filter_returns_400(_raw_client, db_session, maker_publisher):
+    _make_listing(db_session, maker_publisher, "x", gpu_model="A100")
 
     async with _raw_client as c:
         resp = await c.get("/listings", params={"banana": "yellow"})
@@ -102,8 +145,8 @@ async def test_unknown_filter_returns_400(_raw_client, db_session, maker_agent):
 
 
 @pytest.mark.asyncio
-async def test_etag_mismatch_returns_412(_raw_client, db_session, maker_agent):
-    _make_listing(db_session, maker_agent, "x", gpu_model="A100")
+async def test_etag_mismatch_returns_412(_raw_client, db_session, maker_publisher):
+    _make_listing(db_session, maker_publisher, "x", gpu_model="A100")
 
     async with _raw_client as c:
         resp = await c.get(
@@ -117,8 +160,8 @@ async def test_etag_mismatch_returns_412(_raw_client, db_session, maker_agent):
 
 
 @pytest.mark.asyncio
-async def test_etag_match_passes_through(_raw_client, db_session, maker_agent):
-    _make_listing(db_session, maker_agent, "x", gpu_model="A100")
+async def test_etag_match_passes_through(_raw_client, db_session, maker_publisher):
+    _make_listing(db_session, maker_publisher, "x", gpu_model="A100")
     current = compute_etag(get_loaded_spec())
 
     async with _raw_client as c:
@@ -128,19 +171,19 @@ async def test_etag_match_passes_through(_raw_client, db_session, maker_agent):
 
 
 @pytest.mark.asyncio
-async def test_token_array_projection_filter(_raw_client, db_session, maker_agent):
-    """Filter on accepted_escrows[*].fields.token works via JSONPath."""
+async def test_token_array_projection_filter(_raw_client, db_session, maker_publisher):
+    """Filter on accepted_escrows[*].literal_fields.token works via JSONPath."""
     usdc = "0x" + "ab" * 20
     weth = "0x" + "cd" * 20
 
-    a = _make_listing(db_session, maker_agent, "usdc-only", gpu_model="A100")
+    a = _make_listing(db_session, maker_publisher, "usdc-only", gpu_model="A100")
     a.accepted_escrows = [
-        {"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": usdc}},
+        {"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": usdc}},
     ]
-    b = _make_listing(db_session, maker_agent, "both", gpu_model="A100")
+    b = _make_listing(db_session, maker_publisher, "both", gpu_model="A100")
     b.accepted_escrows = [
-        {"chain_name": "anvil", "escrow_address": "0x" + "22" * 20, "fields": {"token": usdc}},
-        {"chain_name": "anvil", "escrow_address": "0x" + "33" * 20, "fields": {"token": weth}},
+        {"chain_name": "anvil", "escrow_address": "0x" + "22" * 20, "literal_fields": {"token": usdc}},
+        {"chain_name": "anvil", "escrow_address": "0x" + "33" * 20, "literal_fields": {"token": weth}},
     ]
     db_session.commit()
 
@@ -153,10 +196,10 @@ async def test_token_array_projection_filter(_raw_client, db_session, maker_agen
 
 
 @pytest.mark.asyncio
-async def test_no_filters_returns_all_open(_raw_client, db_session, maker_agent):
-    _make_listing(db_session, maker_agent, "a")
-    _make_listing(db_session, maker_agent, "b")
-    _make_listing(db_session, maker_agent, "c")
+async def test_no_filters_returns_all_open(_raw_client, db_session, maker_publisher):
+    _make_listing(db_session, maker_publisher, "a")
+    _make_listing(db_session, maker_publisher, "b")
+    _make_listing(db_session, maker_publisher, "c")
 
     async with _raw_client as c:
         resp = await c.get("/listings")
@@ -171,10 +214,10 @@ async def test_no_filters_returns_all_open(_raw_client, db_session, maker_agent)
 
 
 @pytest.mark.asyncio
-async def test_set_form_in_multi_value(_raw_client, db_session, maker_agent):
-    _make_listing(db_session, maker_agent, "a100", gpu_model="A100")
-    _make_listing(db_session, maker_agent, "h200", gpu_model="H200")
-    _make_listing(db_session, maker_agent, "b200", gpu_model="B200")
+async def test_set_form_in_multi_value(_raw_client, db_session, maker_publisher):
+    _make_listing(db_session, maker_publisher, "a100", gpu_model="A100")
+    _make_listing(db_session, maker_publisher, "h200", gpu_model="H200")
+    _make_listing(db_session, maker_publisher, "b200", gpu_model="B200")
 
     async with _raw_client as c:
         resp = await c.get("/listings", params={"gpu_model": "in:[A100,B200]"})
@@ -184,10 +227,10 @@ async def test_set_form_in_multi_value(_raw_client, db_session, maker_agent):
 
 
 @pytest.mark.asyncio
-async def test_set_form_range_full_interval(_raw_client, db_session, maker_agent):
-    _make_listing(db_session, maker_agent, "small", ram_gb=64)
-    _make_listing(db_session, maker_agent, "mid", ram_gb=256)
-    _make_listing(db_session, maker_agent, "big", ram_gb=1024)
+async def test_set_form_range_full_interval(_raw_client, db_session, maker_publisher):
+    _make_listing(db_session, maker_publisher, "small", ram_gb=64)
+    _make_listing(db_session, maker_publisher, "mid", ram_gb=256)
+    _make_listing(db_session, maker_publisher, "big", ram_gb=1024)
 
     async with _raw_client as c:
         resp = await c.get("/listings", params={"ram_gb_min": "range:[128,512]"})
@@ -197,17 +240,17 @@ async def test_set_form_range_full_interval(_raw_client, db_session, maker_agent
 
 
 @pytest.mark.asyncio
-async def test_set_form_not_in_excludes_token(_raw_client, db_session, maker_agent):
+async def test_set_form_not_in_excludes_token(_raw_client, db_session, maker_publisher):
     usdc = "0x" + "ab" * 20
     weth = "0x" + "cd" * 20
 
-    a = _make_listing(db_session, maker_agent, "usdc-listing", gpu_model="A100")
+    a = _make_listing(db_session, maker_publisher, "usdc-listing", gpu_model="A100")
     a.accepted_escrows = [
-        {"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": usdc}},
+        {"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": usdc}},
     ]
-    b = _make_listing(db_session, maker_agent, "weth-listing", gpu_model="A100")
+    b = _make_listing(db_session, maker_publisher, "weth-listing", gpu_model="A100")
     b.accepted_escrows = [
-        {"chain_name": "anvil", "escrow_address": "0x" + "22" * 20, "fields": {"token": weth}},
+        {"chain_name": "anvil", "escrow_address": "0x" + "22" * 20, "literal_fields": {"token": weth}},
     ]
     db_session.commit()
 
@@ -222,10 +265,10 @@ async def test_set_form_not_in_excludes_token(_raw_client, db_session, maker_age
 
 
 @pytest.mark.asyncio
-async def test_set_form_exists_oracle(_raw_client, db_session, maker_agent):
-    a = _make_listing(db_session, maker_agent, "with-oracle", gpu_model="A100")
+async def test_set_form_exists_oracle(_raw_client, db_session, maker_publisher):
+    a = _make_listing(db_session, maker_publisher, "with-oracle", gpu_model="A100")
     a.oracle_address = "0x" + "ff" * 20
-    _make_listing(db_session, maker_agent, "no-oracle", gpu_model="A100")
+    _make_listing(db_session, maker_publisher, "no-oracle", gpu_model="A100")
     db_session.commit()
 
     async with _raw_client as c:
@@ -236,7 +279,7 @@ async def test_set_form_exists_oracle(_raw_client, db_session, maker_agent):
 
 
 @pytest.mark.asyncio
-async def test_strict_token_tightens_default(_raw_client, db_session, maker_agent):
+async def test_strict_token_tightens_default(_raw_client, db_session, maker_publisher):
     """token defaults to on_missing: pass; strict tightens for this query.
 
     A listing with no escrows passes the default token filter (lenient)
@@ -244,9 +287,9 @@ async def test_strict_token_tightens_default(_raw_client, db_session, maker_agen
     """
     usdc = "0x" + "ab" * 20
 
-    a = _make_listing(db_session, maker_agent, "no-escrows", gpu_model="A100")
+    a = _make_listing(db_session, maker_publisher, "no-escrows", gpu_model="A100")
     a.accepted_escrows = []
-    _make_listing(db_session, maker_agent, "has-escrows", gpu_model="A100")  # default usdc-stand-in
+    _make_listing(db_session, maker_publisher, "has-escrows", gpu_model="A100")  # default usdc-stand-in
     db_session.commit()
 
     async with _raw_client as c:
@@ -265,8 +308,8 @@ async def test_strict_token_tightens_default(_raw_client, db_session, maker_agen
 
 
 @pytest.mark.asyncio
-async def test_strict_unknown_filter_returns_400(_raw_client, db_session, maker_agent):
-    _make_listing(db_session, maker_agent, "x", gpu_model="A100")
+async def test_strict_unknown_filter_returns_400(_raw_client, db_session, maker_publisher):
+    _make_listing(db_session, maker_publisher, "x", gpu_model="A100")
     async with _raw_client as c:
         resp = await c.get("/listings", params={"strict.banana": "true"})
     assert resp.status_code == 400
@@ -274,9 +317,9 @@ async def test_strict_unknown_filter_returns_400(_raw_client, db_session, maker_
 
 
 @pytest.mark.asyncio
-async def test_set_form_op_mismatch_returns_400(_raw_client, db_session, maker_agent):
+async def test_set_form_op_mismatch_returns_400(_raw_client, db_session, maker_publisher):
     """``gpu_model`` declares op: in; not_in:[...] in set-form must 400."""
-    _make_listing(db_session, maker_agent, "x", gpu_model="A100")
+    _make_listing(db_session, maker_publisher, "x", gpu_model="A100")
     async with _raw_client as c:
         resp = await c.get("/listings", params={"gpu_model": "not_in:[H100]"})
     assert resp.status_code == 400

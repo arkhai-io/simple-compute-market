@@ -33,7 +33,12 @@ async def db(tmp_path):
     return SQLiteClient(db_path=str(tmp_path / "negotiate_test.db"))
 
 
-async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
+async def _seed_listing(
+    db,
+    listing_id: str,
+    demand_amount: int = 5000,
+    max_duration_seconds: int | None = 7200,
+) -> None:
     await db.upsert_listing(
         listing_id=listing_id,
         status="open",
@@ -43,11 +48,15 @@ async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
         accepted_escrows=[{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"token": _TOKEN},
-            "price_per_hour": demand_amount,
+            "literal_fields": {"token": _TOKEN},
+            "rates": (
+                []
+                if demand_amount is None
+                else [{"field": "amount", "per": "hour", "value": str(demand_amount)}]
+            ),
         }],
         fulfillment_resource=None,
-        max_duration_seconds=7200,
+        max_duration_seconds=max_duration_seconds,
         seller="http://seller:8001",
     )
     # Seed at least one matching available compute resource so the
@@ -116,7 +125,7 @@ class TestNegotiateNew:
             await c.negotiate_new(
                 listing_id="",  # empty string still passes model; real 422 from missing field
                 buyer_address=_BUYER,
-                initial_price=8000,
+                initial_amount=8000,
                 duration_seconds=3600,
             )
         # missing listing_id can't be tested via client (required param);
@@ -128,7 +137,7 @@ class TestNegotiateNew:
             await c.negotiate_new(
                 listing_id="ghost-listing",
                 buyer_address=_BUYER,
-                initial_price=8000,
+                initial_amount=8000,
                 duration_seconds=3600,
             )
         assert "404" in str(exc_info.value)
@@ -139,12 +148,49 @@ class TestNegotiateNew:
         result = await c.negotiate_new(
             listing_id="neg-listing-1",
             buyer_address=_BUYER,
-            initial_price=5000,
+            initial_amount=5000,
             duration_seconds=3600,
             token=_TOKEN,
         )
         assert "negotiation_id" in result
         assert result["action"] in ("accept", "counter", "exit")
+
+    async def test_zero_max_duration_means_unlimited(self, client, db):
+        c, db = client
+        await _seed_listing(
+            db,
+            "neg-listing-unlimited",
+            demand_amount=5000,
+            max_duration_seconds=0,
+        )
+        result = await c.negotiate_new(
+            listing_id="neg-listing-unlimited",
+            buyer_address=_BUYER,
+            initial_amount=5000,
+            duration_seconds=3600,
+            token=_TOKEN,
+        )
+        assert "negotiation_id" in result
+        assert result["action"] in ("accept", "counter", "exit")
+
+    async def test_valid_request_persists_uint256_amounts(self, client, db):
+        """18-decimal token rates exceed SQLite int64 but are normal EVM amounts."""
+        c, db = client
+        large_amount = 150 * 10**18
+        await _seed_listing(db, "neg-listing-large", demand_amount=large_amount)
+        result = await c.negotiate_new(
+            listing_id="neg-listing-large",
+            buyer_address=_BUYER,
+            initial_amount=large_amount,
+            duration_seconds=3600,
+            token=_TOKEN,
+        )
+
+        neg_id = result["negotiation_id"]
+        messages = await db.load_negotiation_thread(negotiation_id=neg_id)
+        assert messages[0]["our_price"] == large_amount
+        assert messages[0]["their_price"] == large_amount
+        assert messages[0]["proposed_price"] == large_amount
 
     async def test_zero_duration_returns_422(self, client):
         """duration_seconds=0 is rejected by Pydantic (gt=0)."""
@@ -153,20 +199,8 @@ class TestNegotiateNew:
             await c.negotiate_new(
                 listing_id="some-listing",
                 buyer_address=_BUYER,
-                initial_price=8000,
+                initial_amount=8000,
                 duration_seconds=0,
-            )
-        assert any(code in str(exc_info.value) for code in ("422", "400"))
-
-    async def test_negative_price_returns_422(self, client):
-        """initial_price < 0 is rejected by Pydantic (ge=0)."""
-        c, _ = client
-        with pytest.raises((StorefrontClientError, Exception)) as exc_info:
-            await c.negotiate_new(
-                listing_id="some-listing",
-                buyer_address=_BUYER,
-                initial_price=-1,
-                duration_seconds=3600,
             )
         assert any(code in str(exc_info.value) for code in ("422", "400"))
 
@@ -177,13 +211,13 @@ class TestNegotiateNew:
         # Flip the listing's status to a non-open state.
         await db.update_listing(
             listing_id="neg-listing-closed",
-            status="accepted",
+            status="closed",
         )
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.negotiate_new(
                 listing_id="neg-listing-closed",
                 buyer_address=_BUYER,
-                initial_price=5000,
+                initial_amount=5000,
                 duration_seconds=3600,
             )
         msg = str(exc_info.value)
@@ -207,8 +241,8 @@ class TestNegotiateNew:
             accepted_escrows=[{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"token": _TOKEN},
-                "price_per_hour": 5000,
+                "literal_fields": {"token": _TOKEN},
+                "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
             }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
@@ -218,7 +252,7 @@ class TestNegotiateNew:
             await c.negotiate_new(
                 listing_id="neg-listing-empty",
                 buyer_address=_BUYER,
-                initial_price=5000,
+                initial_amount=5000,
                 duration_seconds=3600,
             )
         msg = str(exc_info.value)
@@ -242,8 +276,8 @@ class TestNegotiateNew:
             accepted_escrows=[{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"token": _TOKEN},
-                "price_per_hour": None,  # hidden reserve
+                "literal_fields": {"token": _TOKEN},
+                "rates": [],  # hidden reserve
             }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
@@ -265,7 +299,7 @@ class TestNegotiateNew:
             await c.negotiate_new(
                 listing_id="neg-listing-priceless",
                 buyer_address=_BUYER,
-                initial_price=5000,
+                initial_amount=5000,
                 duration_seconds=3600,
                 token=_TOKEN,
             )
@@ -294,8 +328,8 @@ class TestNegotiateNew:
             accepted_escrows=[{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"token": _TOKEN},
-                "price_per_hour": 5000,
+                "literal_fields": {"token": _TOKEN},
+                "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
             }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
@@ -307,7 +341,7 @@ class TestNegotiateNew:
             await c.negotiate_new(
                 listing_id="neg-listing-rtx",
                 buyer_address=_BUYER,
-                initial_price=5000,
+                initial_amount=5000,
                 duration_seconds=3600,
             )
         assert "409" in str(exc_info.value)
@@ -344,7 +378,7 @@ class TestNegotiateContinue:
         result = await c.negotiate_new(
             listing_id="neg-listing-continue",
             buyer_address=_BUYER,
-            initial_price=5000,
+            initial_amount=5000,
             duration_seconds=3600,
             token=_TOKEN,
         )

@@ -119,7 +119,7 @@ def test_resume_buyer_accepts_recovered_seller_price(mock_urlopen):
     decides to accept. The seller echoes accept → outcome.agreed at 90."""
     fake, seen = _urlopen_capture([
         # Single response: seller's accept echo to our continue-with-accept.
-        {"action": "accept", "price": 90},
+        {"action": "accept", "proposal": {"fields": {"amount": 90}}},
     ])
     mock_urlopen.side_effect = fake
 
@@ -131,21 +131,21 @@ def test_resume_buyer_accepts_recovered_seller_price(mock_urlopen):
         initial_price=0,           # ignored in resume mode
         max_price=100,
         chain=_fixed_chain([
-            NegotiationDecision(action="accept", price=90),
+            NegotiationDecision(action="accept", proposal={"fields": {"amount": 90}}),
         ]),
         resume=ResumeState(
             negotiation_id="neg-resumed",
             transcript=[
-                NegotiationRound(round_number=0, sender="us", action="initial", price=50),
-                NegotiationRound(round_number=0, sender="them", action="counter", price=90),
+                NegotiationRound(round_number=0, sender="us", action="initial", proposal={"fields": {"amount": 50}}),
+                NegotiationRound(round_number=0, sender="them", action="counter", proposal={"fields": {"amount": 90}}),
             ],
-            last_seller_price=90,
+            last_seller_proposal={"fields": {"amount": 90}},
             rounds_completed=1,
         ),
     )
 
     assert outcome.status == "agreed"
-    assert outcome.agreed_price == 90
+    assert outcome.agreed_amount == 90
     assert outcome.negotiation_id == "neg-resumed"
     # We made exactly one HTTP call — to /negotiate/{id}, never to /new.
     assert len(seen) == 1
@@ -161,7 +161,7 @@ def test_resume_signed_message_uses_continue_not_new(mock_urlopen):
     from eth_account.messages import encode_defunct
 
     fake, seen = _urlopen_capture([
-        {"action": "accept", "price": 80},
+        {"action": "accept", "proposal": {"fields": {"amount": 80}}},
     ])
     mock_urlopen.side_effect = fake
 
@@ -173,12 +173,12 @@ def test_resume_signed_message_uses_continue_not_new(mock_urlopen):
         initial_price=0,
         max_price=100,
         chain=_fixed_chain([
-            NegotiationDecision(action="accept", price=80),
+            NegotiationDecision(action="accept", proposal={"fields": {"amount": 80}}),
         ]),
         resume=ResumeState(
             negotiation_id="neg-xyz",
             transcript=[],
-            last_seller_price=80,
+            last_seller_proposal={"fields": {"amount": 80}},
             rounds_completed=1,
         ),
     )
@@ -197,7 +197,7 @@ def test_resume_signed_message_uses_continue_not_new(mock_urlopen):
 def test_resume_buyer_counters_then_seller_accepts(mock_urlopen):
     """Two-round resume: buyer counters at 70, seller accepts."""
     fake, seen = _urlopen_capture([
-        {"action": "accept", "price": 70},
+        {"action": "accept", "proposal": {"fields": {"amount": 70}}},
     ])
     mock_urlopen.side_effect = fake
 
@@ -209,21 +209,21 @@ def test_resume_buyer_counters_then_seller_accepts(mock_urlopen):
         initial_price=0,
         max_price=100,
         chain=_fixed_chain([
-            NegotiationDecision(action="counter", price=70),
+            NegotiationDecision(action="counter", proposal={"fields": {"amount": 70}}),
         ]),
         resume=ResumeState(
             negotiation_id="neg-2",
             transcript=[],
-            last_seller_price=80,
+            last_seller_proposal={"fields": {"amount": 80}},
             rounds_completed=1,
         ),
     )
 
     assert outcome.status == "agreed"
-    assert outcome.agreed_price == 70
+    assert outcome.agreed_amount == 70
     assert outcome.negotiation_id == "neg-2"
     assert seen[0]["body"]["action"] == "counter"
-    assert seen[0]["body"]["price"] == 70
+    assert seen[0]["body"]["proposal"]["fields"]["amount"] == 70
 
 
 @patch("market_buyer.buyer_client.urllib.request.urlopen")
@@ -249,7 +249,7 @@ def test_resume_buyer_exits(mock_urlopen):
         resume=ResumeState(
             negotiation_id="neg-3",
             transcript=[],
-            last_seller_price=500,
+            last_seller_proposal={"fields": {"amount": 500}},
             rounds_completed=2,
         ),
     )
@@ -269,7 +269,7 @@ def test_resume_without_last_seller_price_raises(mock_urlopen):
     counter — the strategy needs `their_proposed_price`."""
     mock_urlopen.side_effect = AssertionError("must not be called")
 
-    with pytest.raises(RuntimeError, match="no seller counter price"):
+    with pytest.raises(RuntimeError, match="no seller counter proposal"):
         negotiate_with_seller(
             seller_url="http://seller:8001",
             buyer_address=_BUYER_ADDR,
@@ -281,7 +281,7 @@ def test_resume_without_last_seller_price_raises(mock_urlopen):
             resume=ResumeState(
                 negotiation_id="neg-x",
                 transcript=[],
-                last_seller_price=None,
+                last_seller_proposal=None,
                 rounds_completed=0,
             ),
         )
@@ -292,7 +292,7 @@ def test_resume_carries_rounds_completed_into_outcome(mock_urlopen):
     """When resume points at rounds_completed=3, an immediate accept
     in the next round should report rounds=3 (not 1)."""
     fake, _ = _urlopen_capture([
-        {"action": "accept", "price": 60},
+        {"action": "accept", "proposal": {"fields": {"amount": 60}}},
     ])
     mock_urlopen.side_effect = fake
 
@@ -304,12 +304,12 @@ def test_resume_carries_rounds_completed_into_outcome(mock_urlopen):
         initial_price=0,
         max_price=100,
         chain=_fixed_chain([
-            NegotiationDecision(action="accept", price=60),
+            NegotiationDecision(action="accept", proposal={"fields": {"amount": 60}}),
         ]),
         resume=ResumeState(
             negotiation_id="neg-late",
             transcript=[],
-            last_seller_price=60,
+            last_seller_proposal={"fields": {"amount": 60}},
             rounds_completed=3,
         ),
     )
@@ -322,8 +322,8 @@ def test_resume_skips_negotiate_new_endpoint_entirely(mock_urlopen):
     """Cross-cutting check: every HTTP call's URL contains the neg_id
     (i.e. /negotiate/{id}); none hit /negotiate/new."""
     fake, seen = _urlopen_capture([
-        {"action": "counter", "price": 75},
-        {"action": "accept", "price": 70},
+        {"action": "counter", "proposal": {"fields": {"amount": 75}}},
+        {"action": "accept", "proposal": {"fields": {"amount": 70}}},
     ])
     mock_urlopen.side_effect = fake
 
@@ -335,13 +335,13 @@ def test_resume_skips_negotiate_new_endpoint_entirely(mock_urlopen):
         initial_price=0,
         max_price=100,
         chain=_fixed_chain([
-            NegotiationDecision(action="counter", price=70),
-            NegotiationDecision(action="accept", price=70),
+            NegotiationDecision(action="counter", proposal={"fields": {"amount": 70}}),
+            NegotiationDecision(action="accept", proposal={"fields": {"amount": 70}}),
         ]),
         resume=ResumeState(
             negotiation_id="neg-multi",
             transcript=[],
-            last_seller_price=85,
+            last_seller_proposal={"fields": {"amount": 85}},
             rounds_completed=1,
         ),
     )

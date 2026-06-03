@@ -305,9 +305,17 @@ class AnsibleService:
                 companion_key_paths.append(key_file)
                 key_ref = str(key_file)
 
+            # public_host is the tenant-facing address; emit it as a host var
+            # so the playbook can use it for the connection strings it returns.
+            public_seg = (
+                f"  public_host={host.public_host}"
+                if getattr(host, "public_host", None)
+                else ""
+            )
             lines.append(
                 f"{host.name}"
                 f"  ansible_host={host.kvm_host}"
+                f"{public_seg}"
                 f"  ansible_user={host.ssh_user}"
                 f"  ansible_ssh_private_key_file={key_ref}"
             )
@@ -429,12 +437,28 @@ class AnsibleService:
     # ------------------------------------------------------------------
 
     def parse_playbook_result(
-        self, result: AnsibleResult, params: AnsibleJobParams
+        self,
+        result: AnsibleResult,
+        params: AnsibleJobParams,
+        public_host: str | None = None,
     ) -> AnsibleRunResult:
-        """Parse raw ``AnsibleResult`` output into a structured ``AnsibleRunResult``."""
+        """Parse raw ``AnsibleResult`` output into a structured ``AnsibleRunResult``.
+
+        ``vm_host_ip`` (the tenant-facing address in the returned connection
+        info) prefers the host's advertised ``public_host`` — passed in by the
+        caller from the host record, or read from the inventory ``public_host``
+        var — and only falls back to the management ``ansible_host`` when no
+        public address is configured. The provisioner may reach the KVM host on
+        a different network than buyers do, so the management address is not
+        necessarily reachable by the tenant.
+        """
         ssh_port = self._extract_ssh_port(result.stdout, params.vm_host)
         tenant_user = self._extract_tenant_user(result.stdout, params.vm_host)
-        vm_host_ip = self.lookup_host_ip(params.vm_host)
+        vm_host_ip = (
+            public_host
+            or self.lookup_public_host(params.vm_host)
+            or self.lookup_host_ip(params.vm_host)
+        )
         ssh_command = None
         if ssh_port and tenant_user and vm_host_ip:
             ssh_command = (
@@ -614,6 +638,20 @@ class AnsibleService:
         except Exception as exc:
             logger.warning("Failed to read inventory: %s", exc)
         logger.warning("No ansible_host found for %s in inventory", vm_host)
+        return None
+
+    def lookup_public_host(self, vm_host: str) -> Optional[str]:
+        """Return the ``public_host`` inventory var for *vm_host*, if set.
+
+        This is the tenant-facing address; returns ``None`` when the host
+        doesn't declare one (callers then fall back to ``lookup_host_ip``).
+        """
+        try:
+            for host in self.parse_inventory():
+                if host.name == vm_host:
+                    return host.vars.get("public_host") or None
+        except Exception as exc:
+            logger.warning("Failed to read inventory: %s", exc)
         return None
 
     # ------------------------------------------------------------------

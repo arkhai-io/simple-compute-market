@@ -17,7 +17,7 @@ import pytest
 
 from registry_client import SyncRegistryClient as RegistryClient
 from registry_client import RegistryClientError
-from registry_client.models import AgentListResponse
+from registry_client.models import PublisherListResponse
 
 log = logging.getLogger(__name__)
 
@@ -88,69 +88,29 @@ class TestRegistryHealth:
 
 
 # ---------------------------------------------------------------------------
-# Test suite 2 — Agent registry population
+# Test suite 2 — Publisher registry population
 # ---------------------------------------------------------------------------
 
 @pytest.mark.registry
-class TestRegistryAgents:
-    """Verify the deployed registry contains at least one registered agent."""
+class TestRegistryPublishers:
+    """Verify the deployed registry's publisher listing route is wired up."""
 
-    def test_list_agents_returns_200(self, registry_client: RegistryClient) -> None:
-        """
-        GET /agents must respond with HTTP 200.
+    def test_list_publishers_returns_200(self, registry_client: RegistryClient) -> None:
+        """GET /publishers must respond with HTTP 200 and a parseable body.
 
-        Validates basic API reachability beyond /health and confirms the
-        agent listing route is wired up correctly in the deployment.
-        """
-        try:
-            result = registry_client.list_agents(limit=1)
-        except RegistryClientError as exc:
-            pytest.fail(f"GET /agents failed — route may be misconfigured in this deployment.\n{exc}")
-
-        assert isinstance(result, AgentListResponse), (
-            f"Expected AgentListResponse, got {type(result)}"
-        )
-
-        log.info("GET /agents responded successfully (agents_in_page=%d)", len(result.agents))
-
-    def test_at_least_one_agent_registered(self, registry_client: RegistryClient) -> None:
-        """
-        The registry must contain at least one registered agent.
-
-        In a test-env deployment this is satisfied by the sentinel agent
-        registered on-chain during build-anvil-state (Anvil account #3,
-        unrelated to buyer/seller agents).  In production this is satisfied
-        by the seller agent registering on startup.
-
-        An empty registry indicates either:
-          - the sentinel registration or agent startup failed, or
-          - the event sync did not replay the Registered event on startup.
+        Publishers are created lazily on the first signed publish, so a
+        fresh stack is empty — this smoke test verifies the endpoint
+        contract, not population (the e2e suite covers data flow).
         """
         try:
-            result = registry_client.list_agents(limit=1)
+            result = registry_client.list_publishers(limit=1)
         except RegistryClientError as exc:
-            pytest.fail(f"GET /agents failed — cannot verify agent population.\n{exc}")
+            pytest.fail(f"GET /publishers failed — route may be misconfigured.\n{exc}")
 
-        log.info(
-            "Agent registry population — agents_in_page=%d total=%s",
-            len(result.agents),
-            result.total,
+        assert isinstance(result, PublisherListResponse), (
+            f"Expected PublisherListResponse, got {type(result)}"
         )
 
-        assert len(result.agents) >= 1, (
-            "No agents found in the registry.\n"
-            "Expected at least one registered agent in a healthy deployment.\n"
-            "In test-env: check that build-anvil-state ran seed_agent.py successfully.\n"
-            "In production: check that the seller agent registered on startup.\n"
-            f"Response: total={result.total} agents_in_page={len(result.agents)}"
-        )
-
-        first = result.agents[0]
-        log.info(
-            "✓ Registry contains agents — first: id=%s name=%s owner=%s",
-            first.agent_id or first.id,
-            first.name,
-            first.owner,
-        )
+        log.info("GET /publishers responded (publishers_in_page=%d)", len(result.publishers))
 
 

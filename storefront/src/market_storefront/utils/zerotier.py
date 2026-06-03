@@ -143,7 +143,7 @@ def _check_zerotier_cli() -> bool:
         )
         return True
     except FileNotFoundError:
-        logger.warning("ZeroTier CLI not found. Install with: cd infra && make install")
+        logger.warning("ZeroTier CLI not found. Install with: cd scripts/zerotier && make install")
         return False
 
 

@@ -59,8 +59,8 @@ async def _seed_listing(db: SQLiteClient, listing_id: str, status: str = "open")
         accepted_escrows=[{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"token": "0x0000000000000000000000000000000000000001"},
-            "price_per_hour": 9000,
+            "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
+            "rates": [{"field": "amount", "per": "hour", "value": "9000"}],
         }],
         fulfillment_resource=None,
         max_duration_seconds=7200,
@@ -266,7 +266,7 @@ async def admin_client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient
     from market_storefront.services.listing_service import ListingService
 
     listing_svc = ListingService(
-        sqlite_client=db, alkahest_client=None
+        sqlite_client=db, alkahest_clients=None
     )
 
     _container.resolved_sqlite_client = db
@@ -295,7 +295,7 @@ async def admin_no_key_client(db) -> AsyncIterator[StorefrontClient]:
     from market_storefront.services.listing_service import ListingService
 
     listing_svc = ListingService(
-        sqlite_client=db, alkahest_client=None
+        sqlite_client=db, alkahest_clients=None
     )
 
     _container.resolved_sqlite_client = db
@@ -327,8 +327,8 @@ _OFFER = {
 _ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
     "escrow_address": "0x" + "11" * 20,
-    "fields": {"token": "0x0000000000000000000000000000000000000001"},
-    "price_per_hour": 5000,
+    "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
+    "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
 }]
 
 
@@ -347,7 +347,7 @@ class TestEvaluateNegotiate:
             "market_storefront.utils.sync_negotiation._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
-            result = await c.evaluate_negotiate("neg-eval-1", their_proposed_price=5000)
+            result = await c.evaluate_negotiate("neg-eval-1", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
         assert isinstance(result.would_negotiate, bool)
 
     async def test_returns_decision_fields(self, admin_client):
@@ -358,10 +358,10 @@ class TestEvaluateNegotiate:
             "market_storefront.utils.sync_negotiation._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
-            result = await c.evaluate_negotiate("neg-eval-2", their_proposed_price=5000)
+            result = await c.evaluate_negotiate("neg-eval-2", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
         assert result.decision in ("accept", "counter", "exit")
         assert result.direction == "maximize"
-        assert result.our_reference_price > 0
+        assert result.our_reference_amount > 0
         assert result.strategy  # non-empty string
 
     async def test_price_at_floor_does_not_exit(self, admin_client):
@@ -373,19 +373,19 @@ class TestEvaluateNegotiate:
             return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate(
-                "neg-eval-floor", their_proposed_price=9000
+                "neg-eval-floor", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 9000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000}
             )
         # At exactly the floor price, bisection should accept or counter, not exit
         assert result.would_negotiate is True, (
             f"Strategy exited at floor price 9000. decision={result.decision!r} "
-            f"reason={result.decision_reason!r} our_price={result.our_reference_price}"
+            f"reason={result.decision_reason!r} our_price={result.our_reference_amount}"
         )
 
     async def test_unknown_listing_returns_404(self, admin_client):
         """Non-existent listing_id returns 404."""
         c, _ = admin_client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.evaluate_negotiate("ghost-listing", their_proposed_price=1000)
+            await c.evaluate_negotiate("ghost-listing", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 1000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
         assert "404" in str(exc_info.value)
 
     async def test_no_negotiation_thread_created(self, admin_client):
@@ -396,7 +396,7 @@ class TestEvaluateNegotiate:
             "market_storefront.utils.sync_negotiation._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
-            await c.evaluate_negotiate("neg-eval-no-thread", their_proposed_price=5000)
+            await c.evaluate_negotiate("neg-eval-no-thread", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
         threads = await db.get_active_negotiations_for_listing(listing_id="neg-eval-no-thread")
         assert len(threads) == 0, (
             "evaluate-negotiate created a negotiation thread — it must be a pure dry-run"
@@ -405,7 +405,7 @@ class TestEvaluateNegotiate:
     async def test_requires_admin_key(self, admin_no_key_client):
         """Admin key required — missing key returns 403."""
         with pytest.raises(StorefrontClientError) as exc_info:
-            await admin_no_key_client.evaluate_negotiate("any", their_proposed_price=1000)
+            await admin_no_key_client.evaluate_negotiate("any", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 1000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
         assert "403" in str(exc_info.value)
 
 
@@ -478,7 +478,7 @@ async def seller_auth_full_client(db):
     from market_storefront.services.listing_service import ListingService
     from tests._settings_overrides import settings_overrides
 
-    listing_svc = ListingService(sqlite_client=db, alkahest_client=None)
+    listing_svc = ListingService(sqlite_client=db, alkahest_clients=None)
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = listing_svc

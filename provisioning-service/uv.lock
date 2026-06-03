@@ -142,14 +142,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-storefront-client"
-version = "0.10.0"
-source = { registry = "/Users/mlegls/dev/simple-market-service/.dist" }
+version = "0.15.0"
+source = { registry = "../.dist" }
 dependencies = [
     { name = "eth-account" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/simple-market-service/.dist/arkhai_storefront_client-0.10.0-py3-none-any.whl" },
+    { path = "arkhai_storefront_client-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -1142,7 +1142,7 @@ wheels = [
 
 [[package]]
 name = "provisioning-service"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -1172,7 +1172,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
-    { name = "arkhai-storefront-client", specifier = ">=0.10.0" },
+    { name = "arkhai-storefront-client", specifier = ">=0.11.0" },
     { name = "cachetools", specifier = ">=5.3" },
     { name = "cryptography", specifier = ">=42.0" },
     { name = "dependency-injector", specifier = ">=4.41.0" },

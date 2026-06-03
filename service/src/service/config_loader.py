@@ -1,24 +1,34 @@
-"""Buyer-side TOML config, XDG-aware.
+"""Buyer- and storefront-side TOML config, XDG-aware.
 
-Canonical location: `$XDG_CONFIG_HOME/arkhai/buyer.toml`, defaulting to
-`~/.config/arkhai/buyer.toml` when XDG is unset. Read by the buyer's
-`market` CLI; the storefront's server + `market-storefront` CLI use a
-separate `storefront.toml` in the same dir (see :func:`storefront_config_file`).
+Canonical locations:
 
-The shape is small and deliberately flat-ish:
+* buyer:      ``$XDG_CONFIG_HOME/arkhai/buyer.toml``
+* storefront: ``$XDG_CONFIG_HOME/arkhai/storefront.toml``
+
+Both default to ``~/.config/arkhai/`` when XDG is unset.
+
+Schema (storefront and buyer share wallet/chains/registry tables):
 
     [wallet]
     address = "0x..."
-    private_key = "0x..."            # or leave out & set AGENT_PRIV_KEY env
-    ssh_public_key = "ssh-ed25519 …" # used as the pubkey delivered at settle
+    private_key = "0x..."            # one key signs for every configured chain
+    ssh_public_key = "ssh-ed25519 ..." # used as the pubkey delivered at settle
 
-    [chain]
-    name = "ethereum_sepolia"        # ethereum_sepolia | base_sepolia | anvil
+    # One [chains.<name>] table per chain the operator wants to transact
+    # on. Listings advertise their accepted chains via the
+    # accepted_escrows[].chain_name tuples; the runtime picks the matching
+    # entry here when settling.
+    [chains.ethereum_sepolia]
     rpc_url = "https://..."
-    alkahest_address_config_path = "/etc/arkhai/alkahest.json"  # anvil only
+    chain_id = 11155111
+    # alkahest_address_config_path = "/etc/arkhai/alkahest.json"  # anvil only
+
+    [chains.base_sepolia]
+    rpc_url = "https://..."
+    chain_id = 84532
 
     [registry]
-    url = "http://localhost:8080"
+    urls = ["http://localhost:8080"]
 
     [seller]                         # optional; seller-specific overrides
     port = 8000
@@ -37,6 +47,7 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, TypeVar
 
@@ -44,6 +55,26 @@ import tomllib
 
 
 T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class ChainConfig:
+    """One entry from the operator's ``[chains.<name>]`` config table.
+
+    ``name`` is the table key — the dict returned by
+    :func:`chains_from_config` is keyed by this exact value, and listings
+    advertise it in their ``accepted_escrows[].chain_name`` tuples.
+
+    Identity is no longer carried per-chain: after the pluggable-identity
+    refactor the storefront's identity is its EIP-191 wallet address,
+    advertised once at the registry layer and reused across every chain
+    it supports.
+    """
+
+    name: str
+    rpc_url: str
+    chain_id: int
+    alkahest_address_config_path: Optional[str] = None
 
 
 def user_config_dir() -> Path:
@@ -343,51 +374,6 @@ def ssh_public_key(flag: Optional[str] = None,
     )
 
 
-def chain_name(flag: Optional[str] = None,
-               config: Optional[dict[str, Any]] = None,
-               default: str = "ethereum_sepolia") -> str:
-    return resolve_value(
-        flag=flag,
-        env_name="CHAIN_NAME",
-        toml_path="chain.name",
-        default=default,
-        config=config,
-    )  # type: ignore[return-value]
-
-
-def chain_rpc_url(flag: Optional[str] = None,
-                  config: Optional[dict[str, Any]] = None) -> Optional[str]:
-    return resolve_value(
-        flag=flag,
-        env_name="CHAIN_RPC_URL",
-        toml_path="chain.rpc_url",
-        config=config,
-    )
-
-
-def alkahest_address_config_path(flag: Optional[str] = None,
-                                 config: Optional[dict[str, Any]] = None) -> Optional[str]:
-    return resolve_value(
-        flag=flag,
-        env_name="ALKAHEST_ADDRESS_CONFIG_PATH",
-        toml_path="chain.alkahest_address_config_path",
-        config=config,
-    )
-
-
-# Canonical ERC-8004 v0.1 IdentityRegistry CREATE2 vanity address. The
-# alkahest deployer uses the same salt across every chain it deploys to,
-# so for the canonical deployment this address is the same on every chain.
-# Custom deployments override via ``[registry] identity_registry_address``
-# in the TOML.
-_CANONICAL_IDENTITY_REGISTRY = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
-KNOWN_IDENTITY_REGISTRY: dict[str, str] = {
-    "base_sepolia":     _CANONICAL_IDENTITY_REGISTRY,
-    "ethereum_sepolia": _CANONICAL_IDENTITY_REGISTRY,
-    "anvil":            _CANONICAL_IDENTITY_REGISTRY,
-}
-
-
 def derive_wallet_address(private_key: Optional[str]) -> Optional[str]:
     """Compute the checksummed EVM address from an ECDSA private key.
 
@@ -479,35 +465,294 @@ def chain_name_for_rpc(
     return CHAIN_NAME_BY_ID.get(cid)
 
 
-def identity_registry_address(
-    flag: Optional[str] = None,
+def chains_from_config(
     config: Optional[dict[str, Any]] = None,
-) -> Optional[str]:
-    """Resolve the ERC-8004 IdentityRegistry contract address.
+) -> dict[str, ChainConfig]:
+    """Return every ``[chains.<name>]`` table from the merged TOML config.
 
-    Hierarchy: flag > ``IDENTITY_REGISTRY_ADDRESS`` env > TOML
-    ``registry.identity_registry_address`` > per-chain known default
-    (looked up by ``chain.name``).
+    Resolves each entry to a :class:`ChainConfig`. ``chain_id`` falls
+    back to :data:`KNOWN_CHAIN_IDS` lookup by name when the table
+    omits it. Empty or malformed entries (missing ``rpc_url``) are
+    dropped silently — operators get one warning surface (the empty
+    dict) rather than a partial-load that pretends to succeed.
 
-    The canonical deployment uses a CREATE2 vanity address that's the
-    same on every chain — so for the standard ``base_sepolia`` /
-    ``ethereum_sepolia`` / ``anvil`` setups the user doesn't need to
-    set the address explicitly. Custom deployments override via the
-    TOML key.
-
-    Returns ``None`` only when neither resolution nor chain-name
-    lookup yields an address — callers decide whether that's fatal.
+    The dict's iteration order matches TOML order (Python 3.7+).
+    Callers that want a deterministic default chain pick
+    ``next(iter(chains.values()))``.
     """
-    resolved = resolve_value(
-        flag=flag,
-        env_name="IDENTITY_REGISTRY_ADDRESS",
-        toml_path="registry.identity_registry_address",
-        config=config,
+    cfg = config if config is not None else load_user_config()
+    raw = cfg.get("chains")
+    if not isinstance(raw, dict):
+        return {}
+
+    out: dict[str, ChainConfig] = {}
+    for name, sub in raw.items():
+        if not isinstance(name, str) or not isinstance(sub, dict):
+            continue
+        rpc_url = str(sub.get("rpc_url", "") or "").strip()
+        if not rpc_url:
+            continue
+
+        chain_id = int(sub.get("chain_id", 0) or 0)
+        if not chain_id:
+            chain_id = KNOWN_CHAIN_IDS.get(name, 0)
+
+        alkahest_path = (
+            str(sub.get("alkahest_address_config_path", "") or "").strip()
+            or None
+        )
+
+        out[name] = ChainConfig(
+            name=name,
+            rpc_url=rpc_url,
+            chain_id=chain_id,
+            alkahest_address_config_path=alkahest_path,
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Escrow templates — operator-defined shapes for accepted_escrows entries
+# ---------------------------------------------------------------------------
+# A template captures the part of an escrow that doesn't change between
+# resources: the chain it lives on, the escrow contract address, every
+# literal field on the obligation data (token addresses, tokenIds,
+# array indices), and a named slot for each field whose value scales per
+# unit of negotiated quantity (the canonical case is `amount per hour`).
+#
+# CSV rows reference templates by name and supply rate values via a
+# `template:slot=value` DSL — the per-resource override surface is just
+# numbers, never contract field paths.
+#
+# Wire-format mapping at publish time (cli_publish):
+#   literal_fields      ← template.literal_fields
+#   rates[i].field      ← template.rate_slots[name].field
+#   rates[i].per        ← template.rate_slots[name].per
+#   rates[i].value      ← per-resource CSV cell (multiplied by duration
+#                          on the buyer side)
+
+
+@dataclass(frozen=True)
+class RateSlot:
+    """One rate-bearing field on an escrow template.
+
+    ``field`` is the dotted/indexed path into the obligation data
+    (``"amount"``, ``"erc20Amounts[0]"``). ``per`` is the unit the
+    rate scales by (``"hour"`` is the only one wired through today;
+    ``"request"``, ``"kWh"``, etc. are reserved for later).
+    """
+
+    field: str
+    per: str = "hour"
+
+
+@dataclass(frozen=True)
+class EscrowTemplate:
+    """One ``[escrow_templates.<name>]`` table.
+
+    ``name`` is the TOML table key — CSV cells reference templates by
+    this identifier. ``chain`` must match a configured ``[chains.<name>]``
+    entry. ``escrow_address`` is resolved at config-load time: a literal
+    ``0x...`` string passes through; an ``auto:<obligation-kind>`` value
+    routes through the chain's alkahest address config (override JSON
+    when present, alkahest-py SDK default otherwise).
+
+    ``literal_fields`` covers obligation-data keys whose values are
+    fixed by the operator. ``rate_slots`` covers fields whose values
+    scale per ``per`` unit; the dict is order-preserving so single-slot
+    ergonomic sugar (drop the slot name in the CSV cell when only one
+    slot exists) has a well-defined target.
+    """
+
+    name: str
+    chain: str
+    escrow_address: str
+    literal_fields: dict[str, Any]
+    rate_slots: dict[str, RateSlot]
+
+
+# Maps the ``auto:<obligation-kind>`` suffix to ``(category_attr, field)``
+# on the alkahest address config tree. Keep in sync with
+# ``service.clients.alkahest._ADDRESS_CATEGORIES``. Tierable/nontierable
+# split mirrors the contract names; attestation v2 lives in the same
+# ``attestation_addresses`` category as v1.
+_AUTO_ESCROW_LOOKUP: dict[str, tuple[str, str]] = {
+    "erc20_nontierable":         ("erc20_addresses", "escrow_obligation_nontierable"),
+    "erc20_tierable":            ("erc20_addresses", "escrow_obligation_tierable"),
+    "erc721_nontierable":        ("erc721_addresses", "escrow_obligation_nontierable"),
+    "erc721_tierable":           ("erc721_addresses", "escrow_obligation_tierable"),
+    "erc1155_nontierable":       ("erc1155_addresses", "escrow_obligation_nontierable"),
+    "erc1155_tierable":          ("erc1155_addresses", "escrow_obligation_tierable"),
+    "native_token_nontierable":  ("native_token_addresses", "escrow_obligation_nontierable"),
+    "native_token_tierable":     ("native_token_addresses", "escrow_obligation_tierable"),
+    "token_bundle_nontierable":  ("token_bundle_addresses", "escrow_obligation_nontierable"),
+    "token_bundle_tierable":     ("token_bundle_addresses", "escrow_obligation_tierable"),
+    "attestation_nontierable":   ("attestation_addresses", "escrow_obligation"),
+    "attestation2_nontierable":  ("attestation_addresses", "escrow_obligation2"),
+}
+
+
+def _resolve_auto_escrow(
+    auto_key: str,
+    chain: ChainConfig,
+) -> str:
+    """Resolve an ``auto:<obligation-kind>`` reference to a concrete address.
+
+    Raises ``ValueError`` when the auto key is unrecognised, the chain
+    lacks alkahest support, or the resolved address slot is the zero
+    address (contract not deployed on this chain).
+    """
+    if auto_key not in _AUTO_ESCROW_LOOKUP:
+        valid = ", ".join(sorted(_AUTO_ESCROW_LOOKUP))
+        raise ValueError(
+            f"unknown auto: escrow kind {auto_key!r}; expected one of: {valid}"
+        )
+    category, field = _AUTO_ESCROW_LOOKUP[auto_key]
+    from service.clients.alkahest import (
+        _load_override_config,
+        _sdk_addresses_for_chain,
+        get_alkahest_network,
+        NETWORK_ANVIL,
     )
-    if resolved:
-        return resolved
-    chain = chain_name(config=config)
-    return KNOWN_IDENTITY_REGISTRY.get(chain)
+
+    override = _load_override_config(chain.alkahest_address_config_path)
+    if override is not None:
+        cat = override.get(category)
+        if not isinstance(cat, dict) or field not in cat:
+            raise ValueError(
+                f"auto:{auto_key} not present in {chain.alkahest_address_config_path} "
+                f"(missing {category}.{field})"
+            )
+        addr = str(cat[field])
+    else:
+        selected = get_alkahest_network(chain.name)
+        if selected == NETWORK_ANVIL:
+            raise ValueError(
+                f"auto:{auto_key} on chain {chain.name!r}: anvil requires "
+                f"alkahest_address_config_path"
+            )
+        cfg = _sdk_addresses_for_chain(selected)
+        category_obj = getattr(cfg, category, None)
+        if category_obj is None or not hasattr(category_obj, field):
+            raise ValueError(
+                f"auto:{auto_key}: alkahest SDK has no {category}.{field} for "
+                f"chain {chain.name!r}"
+            )
+        addr = str(getattr(category_obj, field))
+    if not addr.startswith("0x") or int(addr, 16) == 0:
+        raise ValueError(
+            f"auto:{auto_key} on chain {chain.name!r}: resolved to zero address "
+            "(contract not deployed)"
+        )
+    return addr
+
+
+def escrow_templates_from_config(
+    config: Optional[dict[str, Any]] = None,
+    *,
+    chains: Optional[dict[str, ChainConfig]] = None,
+) -> dict[str, EscrowTemplate]:
+    """Return every ``[escrow_templates.<name>]`` table from the merged TOML.
+
+    Each template's ``chain`` must match a key in ``chains``; templates
+    referencing an unknown chain are dropped with a stderr warning so a
+    typo never silently changes which escrow the publish path picks.
+    ``escrow_address`` values starting with ``auto:`` resolve through the
+    chain's alkahest address config; literal ``0x...`` values pass
+    through unchanged.
+
+    Invalid templates (missing chain, unresolvable auto: key, malformed
+    rates) are dropped with a warning rather than raising, so a bad
+    template never prevents the operator from starting the storefront.
+    """
+    cfg = config if config is not None else load_user_config()
+    raw = cfg.get("escrow_templates")
+    if not isinstance(raw, dict):
+        return {}
+    if chains is None:
+        chains = chains_from_config(cfg)
+
+    out: dict[str, EscrowTemplate] = {}
+    for name, sub in raw.items():
+        if not isinstance(name, str) or not isinstance(sub, dict):
+            continue
+        chain_name = str(sub.get("chain", "") or "").strip()
+        if not chain_name:
+            print(
+                f"[config] escrow_templates.{name}: missing 'chain'; skipping",
+                file=sys.stderr,
+            )
+            continue
+        chain_cfg = chains.get(chain_name)
+        if chain_cfg is None:
+            print(
+                f"[config] escrow_templates.{name}: unknown chain {chain_name!r}; "
+                f"skipping",
+                file=sys.stderr,
+            )
+            continue
+        raw_addr = str(sub.get("escrow_address", "") or "").strip()
+        if not raw_addr:
+            print(
+                f"[config] escrow_templates.{name}: missing 'escrow_address'; "
+                f"skipping",
+                file=sys.stderr,
+            )
+            continue
+        if raw_addr.startswith("auto:"):
+            try:
+                escrow_address = _resolve_auto_escrow(raw_addr[len("auto:"):], chain_cfg)
+            except ValueError as exc:
+                print(
+                    f"[config] escrow_templates.{name}: {exc}; skipping",
+                    file=sys.stderr,
+                )
+                continue
+        else:
+            escrow_address = raw_addr
+        literal_raw = sub.get("literal") or {}
+        if not isinstance(literal_raw, dict):
+            print(
+                f"[config] escrow_templates.{name}: 'literal' must be a table; skipping",
+                file=sys.stderr,
+            )
+            continue
+        literal_fields = dict(literal_raw)
+
+        rates_raw = sub.get("rates") or {}
+        if not isinstance(rates_raw, dict):
+            print(
+                f"[config] escrow_templates.{name}: 'rates' must be a table; skipping",
+                file=sys.stderr,
+            )
+            continue
+        rate_slots: dict[str, RateSlot] = {}
+        slot_ok = True
+        for slot_name, slot_sub in rates_raw.items():
+            if not isinstance(slot_name, str) or not isinstance(slot_sub, dict):
+                continue
+            field_name = str(slot_sub.get("field", "") or "").strip()
+            if not field_name:
+                print(
+                    f"[config] escrow_templates.{name}.rates.{slot_name}: "
+                    f"missing 'field'; skipping template",
+                    file=sys.stderr,
+                )
+                slot_ok = False
+                break
+            per_unit = str(slot_sub.get("per", "hour") or "hour").strip() or "hour"
+            rate_slots[slot_name] = RateSlot(field=field_name, per=per_unit)
+        if not slot_ok:
+            continue
+
+        out[name] = EscrowTemplate(
+            name=name,
+            chain=chain_name,
+            escrow_address=escrow_address,
+            literal_fields=literal_fields,
+            rate_slots=rate_slots,
+        )
+    return out
 
 
 def registry_urls(

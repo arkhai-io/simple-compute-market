@@ -213,7 +213,7 @@ class LeaseLifecycleService:
                 vm_target=lease.vm_target,
             )
             submit = await self._job_svc.submit(
-                params, agent_id=None, job_queue=job_queue
+                params, job_queue=job_queue
             )
             self._lease_svc.begin_releasing(lease.id, check_job_id=submit.job_id)
             logger.info(
@@ -245,7 +245,7 @@ class LeaseLifecycleService:
         job_ok: Optional[bool] = None
         if lease.check_job_id and self._job_svc is not None:
             try:
-                job = self._job_svc.get_job(lease.check_job_id, agent_id=None)
+                job = self._job_svc.get_job(lease.check_job_id)
                 if job.status == "succeeded":
                     job_ok = True
                 elif job.status in ("failed", "cancelled"):

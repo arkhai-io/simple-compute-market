@@ -1,201 +1,71 @@
-# Copyright 2025 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+"""Storefront startup hooks.
 
-"""Storefront startup/background-task helpers.
-
-Module-level state (`_AGENT_ID`, `agent_card_data`, `ALERTS_USER_ID`) and
-the `_startup_tasks` coroutine are imported by `server.py` (lifespan) and
-`identity_controller.py`.
+After the pluggable-identity refactor (Phase 4) the storefront's
+identity is just ``settings.wallet.address`` — there is no per-chain
+on-chain registration step, no agent-card publication, and no
+heartbeat loop. ``_startup_tasks`` is what ``server.py``'s lifespan
+imports.
 """
 
 import asyncio
 import logging
 
-from market_storefront.utils.config import settings, AGENT_NAME, BASE_URL_OVERRIDE
+from market_storefront.utils.config import (
+    CHAINS,
+    settings,
+    BASE_URL_OVERRIDE,
+)
 from market_storefront.utils.logging_config import setup_file_logging
 
 setup_file_logging(settings.log_file_path or None, settings.log_level)
 
 logger = logging.getLogger(__name__)
 
-ALKAHEST_NETWORK = None  # populated lazily; agent_card_data does not need it
-
 ALERTS_USER_ID = "resource-monitor"
 
-# Build the agent card once at import — identity_controller reads this.
-from market_storefront.utils.agent_card import build_agent_card_data
-agent_card_data = build_agent_card_data(
-    agent_name=AGENT_NAME,
-    base_url=BASE_URL_OVERRIDE,
-    agent_wallet_address=settings.wallet.address,
-)
 
+async def _probe_chain_addresses() -> None:
+    """For each configured chain, eth_getCode-check the alkahest addresses.
 
-# Runtime agent identity — set once by _ensure_agent_identity() during startup.
-_AGENT_ID: int | None = None
-
-
-async def _ensure_agent_identity() -> int:
-    """Resolve the numeric on-chain agent ID, registering if necessary.
-
-    Resolution order:
-      1. settings.onchain_agent_id (pinned in TOML / helm values) — fast path,
-         no chain interaction.
-      2. auto_register=True → call perform_registration() and hold the result
-         in memory for this process lifetime.
-      3. auto_register=False and no ID pinned → crash with a clear message.
-         This protects operators who have already registered an agent and
-         don't want a misconfigured deploy to silently mint a new one.
-
-    Sets the module-level _AGENT_ID and returns it.
+    Catches operator typos and wrong-chain configs. Warns rather than
+    fails so other endpoints stay available while the operator fixes
+    the misconfig.
     """
-    global _AGENT_ID
+    if not CHAINS:
+        return
+    from service.clients.alkahest import resolve_alkahest_address_config
+    from service.clients.chain_probe import probe_addresses
 
-    if settings.onchain_agent_id:
+    for chain in CHAINS.values():
+        addresses: dict[str, str] = {}
         try:
-            _AGENT_ID = int(settings.onchain_agent_id)
-            logger.info(
-                "[IDENTITY] Using pinned agent ID %d from config", _AGENT_ID
+            cfg = resolve_alkahest_address_config(
+                chain.name,
+                config_path=chain.alkahest_address_config_path,
             )
-        except ValueError:
-            raise RuntimeError(
-                f"[IDENTITY] seller.onchain_agent_id '{settings.onchain_agent_id}' "
-                "is not a valid integer."
-            )
-
-        # Validate that this wallet actually owns the pinned ID on-chain.
-        # Skipped when chain config is absent (local dev without a node).
-        if settings.chain.rpc_url and settings.registry.identity_registry_address and settings.wallet.address:
-            try:
-                from service.clients.erc8004.blockchain import (
-                    get_identity_registry_contract,
-                )
-                from web3 import Web3
-                from web3.providers import HTTPProvider
-
-                rpc = settings.chain.rpc_url
-                if rpc.startswith("ws"):
-                    # Use HTTP fallback for the ownership check — websocket is
-                    # only needed for event subscriptions, not one-shot calls.
-                    rpc_http = rpc.replace("ws://", "http://").replace("wss://", "https://")
-                    w3 = Web3(HTTPProvider(rpc_http, request_kwargs={"timeout": 5}))
-                else:
-                    w3 = Web3(HTTPProvider(rpc, request_kwargs={"timeout": 5}))
-
-                contract = get_identity_registry_contract(w3, settings.registry.identity_registry_address)
-                owner = contract.functions.ownerOf(_AGENT_ID).call()
-                expected = settings.wallet.address
-
-                if owner.lower() != expected.lower():
-                    raise RuntimeError(
-                        f"[IDENTITY] Pinned onchain_agent_id={_AGENT_ID} is owned by "
-                        f"{owner} on-chain, but [seller].wallet_address in config is "
-                        f"{expected}. These must match.\n"
-                        "Fix: either update [seller].onchain_agent_id to the correct "
-                        "agent ID for this wallet, or correct [seller].wallet_address."
-                    )
-                logger.info(
-                    "[IDENTITY] Ownership confirmed: agent %d owned by %s",
-                    _AGENT_ID, owner,
-                )
-            except RuntimeError:
-                raise
-            except Exception as exc:
-                # Chain unreachable / contract not deployed — log but don't block
-                # startup.  This matches the existing behaviour for ZeroTier
-                # environments where the chain may not be reachable until the
-                # ZeroTier IP is assigned.
-                logger.warning(
-                    "[IDENTITY] Could not verify ownership of agent %d on-chain: %s. "
-                    "Proceeding with pinned ID.",
-                    _AGENT_ID, exc,
-                )
-
-        return _AGENT_ID
-
-    if not settings.auto_register:
-        raise RuntimeError(
-            "[IDENTITY] seller.onchain_agent_id is not set and "
-            "seller.auto_register is false. "
-            "Either pin [seller].onchain_agent_id in config.toml / helm values, "
-            "or set seller.auto_register = true to allow automatic registration."
-        )
-
-    # Before registering a fresh agent, see whether this wallet already
-    # owns one on the IdentityRegistry. Without this, restarting a pod
-    # whose onchain_agent_id wasn't pinned would mint a brand-new agent
-    # every time the container comes up — gas burn + duplicate
-    # registrations the operator then has to manually reconcile.
-    if settings.chain.rpc_url and settings.registry.identity_registry_address and settings.wallet.address:
-        try:
-            from service.clients.erc8004.blockchain import (
-                find_agent_id_by_owner,
-                get_identity_registry_contract,
-            )
-            from web3 import Web3
-            from web3.providers import HTTPProvider
-
-            rpc = settings.chain.rpc_url
-            if rpc.startswith("ws"):
-                rpc_http = rpc.replace("ws://", "http://").replace("wss://", "https://")
-                w3 = Web3(HTTPProvider(rpc_http, request_kwargs={"timeout": 5}))
-            else:
-                w3 = Web3(HTTPProvider(rpc, request_kwargs={"timeout": 5}))
-
-            contract = get_identity_registry_contract(
-                w3, settings.registry.identity_registry_address
-            )
-            existing = find_agent_id_by_owner(w3, contract, settings.wallet.address)
-            if existing is not None:
-                _AGENT_ID = int(existing)
-                logger.info(
-                    "[IDENTITY] Found existing agent %d owned by %s on-chain — "
-                    "skipping registration. Pin onchain_agent_id = \"%d\" in "
-                    "your config to skip this lookup on the next start.",
-                    _AGENT_ID, settings.wallet.address, _AGENT_ID,
-                )
-                return _AGENT_ID
         except Exception as exc:
             logger.warning(
-                "[IDENTITY] Wallet-lookup fallback failed (%s) — falling through "
-                "to fresh registration.", exc,
+                "[STARTUP] chain=%s could not resolve alkahest config: %s",
+                chain.name, exc,
             )
-
-    logger.info("[IDENTITY] No agent ID pinned — performing on-chain registration.")
-    from market_storefront.commands.register import perform_registration
-    _AGENT_ID = await perform_registration(chain_id=settings.chain.chain_id)
-    logger.info("[IDENTITY] Registered with agent ID %d", _AGENT_ID)
-    return _AGENT_ID
-
-
-async def _start_heartbeat():
-    """Start heartbeat loop after server is ready."""
-    from service.clients.erc8004.heartbeat import start_agent_heartbeat
-    auth_section = getattr(settings.registry, "auth", None)
-    try:
-        indexer_auth = dict(auth_section) if auth_section else {}
-    except (TypeError, ValueError):
-        indexer_auth = {}
-    await start_agent_heartbeat({
-        "indexer_urls": settings.registry.urls,
-        "identity_registry_address": settings.registry.identity_registry_address,
-        "agent_wallet_address": settings.wallet.address,
-        "onchain_agent_id": str(_AGENT_ID) if _AGENT_ID is not None else None,
-        "chain_rpc_url": settings.chain.rpc_url,
-        "agent_priv_key": settings.wallet.private_key,
-        "indexer_auth": indexer_auth,
-    })
+            cfg = None
+        if cfg is not None:
+            for path, label in (
+                (("arbiters_addresses", "recipient_arbiter"), f"{chain.name}/alkahest.recipient_arbiter"),
+                (("arbiters_addresses", "eas"), f"{chain.name}/alkahest.eas"),
+                (("erc20_addresses", "escrow_obligation_nontierable"),
+                 f"{chain.name}/alkahest.erc20_escrow_obligation"),
+            ):
+                obj: object | None = cfg
+                for attr in path:
+                    obj = getattr(obj, attr, None)
+                    if obj is None:
+                        break
+                if isinstance(obj, str) and obj.strip():
+                    addresses[label] = obj
+        if not addresses:
+            continue
+        await probe_addresses(chain.rpc_url, addresses)
 
 
 async def _preflight_provisioning() -> None:
@@ -257,57 +127,6 @@ async def _preflight_provisioning() -> None:
     logger.error(msg + " Continuing because fail_on_unreachable=false.")
 
 
-async def _probe_chain_addresses() -> None:
-    """Verify each configured contract address has bytecode on the RPC.
-
-    Cheap one-shot ``eth_getCode`` per address. Catches the operator
-    typing the wrong address into config.toml, pointing at the wrong
-    chain, or running before the contract deployer step has finished
-    (fresh anvil). Logs a warning naming the missing addresses; doesn't
-    fail-close because the storefront can serve unrelated endpoints
-    while the operator fixes the config.
-    """
-    if not settings.chain.rpc_url:
-        return
-    from service.clients.alkahest import resolve_alkahest_address_config
-    from service.clients.chain_probe import probe_addresses
-
-    addresses: dict[str, str] = {}
-    if settings.registry.identity_registry_address:
-        addresses["identity_registry"] = settings.registry.identity_registry_address
-    try:
-        cfg = resolve_alkahest_address_config(
-            settings.chain.name,
-            config_path=settings.chain.alkahest_address_config_path,
-        )
-    except Exception as exc:
-        logger.warning(
-            "[STARTUP] Could not resolve alkahest config for probe: %s", exc,
-        )
-        cfg = None
-    if cfg is not None:
-        # arbiters_addresses + erc20_addresses are the contracts we touch
-        # at runtime (RecipientArbiter for fulfillment, EAS for the
-        # underlying attestation, escrow_obligation for buyer escrows).
-        for path, label in (
-            (("arbiters_addresses", "recipient_arbiter"), "alkahest.recipient_arbiter"),
-            (("arbiters_addresses", "eas"), "alkahest.eas"),
-            (("erc20_addresses", "escrow_obligation_nontierable"),
-             "alkahest.erc20_escrow_obligation"),
-        ):
-            obj: object | None = cfg
-            for attr in path:
-                obj = getattr(obj, attr, None)
-                if obj is None:
-                    break
-            if isinstance(obj, str) and obj.strip():
-                addresses[label] = obj
-
-    if not addresses:
-        return
-    await probe_addresses(settings.chain.rpc_url, addresses)
-
-
 def _maybe_join_zerotier_network() -> None:
     """If a ZeroTier network is configured, ask the local zerotier-one
     daemon to join it. The daemon itself is brought up by the deploy
@@ -341,17 +160,24 @@ async def _startup_tasks():
 
     _maybe_join_zerotier_network()
 
-    # Resolve agent identity first — everything else (heartbeat, registration
-    # file endpoint) depends on having a valid numeric agent ID.
-    # Raises RuntimeError on hard failure (missing config + auto_register=False),
-    # which crashes the startup and surfaces as a clear pod CrashLoopBackOff.
-    await _ensure_agent_identity()
+    # Initialize the global NegotiationThreadStore so any subsequent
+    # request handler can call NegotiationThreadTransaction (which
+    # reaches into get_thread_store() with no args). Must run before
+    # any request can hit /api/v1/negotiate/*.
+    import market_storefront.container as _container
+    from market_policy.identity import Identity
+    from market_policy.negotiation_thread import get_thread_store
+    _agent_url = BASE_URL_OVERRIDE or f"http://localhost:{settings.port}"
+    get_thread_store(
+        sqlite_client=_container.resolved_sqlite_client,
+        identity=Identity(agent_url=_agent_url),
+    )
+    logger.info("[STARTUP] Negotiation thread store initialized (agent_url=%s)", _agent_url)
 
     # Seed the resources table on startup if it is empty. Source priority:
     # inline CSV content (Helm Secret injection) > explicit resources_csv_path
     # > auto-discovery of /app/resources.csv (compose bind-mount default).
     # Must run before the resource poller so the poller has rows to query.
-    import market_storefront.container as _container
     try:
         result = await _container.resolved_system_service.seed_resources_if_empty(
             csv_inline=settings.resources_csv_inline,
@@ -374,18 +200,8 @@ async def _startup_tasks():
         logger.error("[STARTUP] Resource seeding failed: %s", exc)
         raise
 
-    # Probe configured contract addresses for bytecode. Logs a warning
-    # naming any address that has nothing deployed at it on the
-    # configured RPC. Doesn't crash startup — operators may want the
-    # storefront serving while they fix a chain misconfig.
+    # Probe each chain's configured alkahest addresses for bytecode.
     await _probe_chain_addresses()
-
-    # Start heartbeat after server is ready
-    asyncio.create_task(_start_heartbeat())
-
-    # Resource availability poller removed — lease lifecycle is now owned by
-    # the provisioning service's LeaseWatchdog, which calls back to
-    # PATCH /api/v1/admin/portfolio/resources/{id} when leases expire.
 
     # Start negotiation watchdog (marks stale threads as abandoned)
     asyncio.create_task(_neg_watchdog_loop())

@@ -70,13 +70,13 @@ def resolve_prices_from_matches(
     table = Table(title="Matched listings (per-hour rates)", show_header=True)
     table.add_column("#", justify="right", style="dim")
     table.add_column("Listing ID", overflow="fold")
-    table.add_column("Seller", overflow="fold")
+    table.add_column("Storefront URL", overflow="fold")
     table.add_column("min_price", justify="right")
     for i, (p, m) in enumerate(priced, start=1):
         table.add_row(
             str(i),
             str(m.get("listing_id", "-")),
-            str(m.get("seller", "-"))[:48],
+            str(m.get("storefront_url") or m.get("seller", "-"))[:48],
             str(p),
         )
     console.print(table)

@@ -34,10 +34,8 @@ class SettleController:
     def __init__(
         self,
         db=Depends(lambda: _container.resolved_sqlite_client),
-        alkahest=Depends(lambda: _container.resolved_alkahest_client),
     ) -> None:
         self._db = db
-        self._alkahest = alkahest
 
     @router.post(
         "/{escrow_uid}",
@@ -61,10 +59,14 @@ class SettleController:
 
         buyer_auth._verify(request, "settle_escrow", escrow_uid, body.buyer_address)
 
-        if self._alkahest is None:
+        alkahest = _container.get_alkahest_client(body.chain_name)
+        if alkahest is None:
             raise HTTPException(
-                status_code=500,
-                detail="Alkahest client not configured — AGENT_PRIV_KEY and CHAIN_RPC_URL must be set",
+                status_code=400,
+                detail=(
+                    f"chain {body.chain_name!r} not configured on this storefront — "
+                    f"available chains: {sorted(_container.configured_chain_names())}"
+                ),
             )
         try:
             result = await start_settlement_job(
@@ -72,7 +74,8 @@ class SettleController:
                 negotiation_id=body.negotiation_id,
                 ssh_public_key=body.ssh_public_key,
                 sqlite_client=self._db,
-                alkahest_client=self._alkahest,
+                alkahest_client=alkahest,
+                chain_name=body.chain_name,
             )
         except EscrowVerificationError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -126,7 +129,7 @@ class AdminSettleController:
         self._db = db
         self._svc = AdminSettleService(
             sqlite_client=db,
-            alkahest_client=_container.resolved_alkahest_client,
+            alkahest_clients=_container.resolved_alkahest_clients,
         )
 
     @admin_settle_router.post(
@@ -148,6 +151,7 @@ class AdminSettleController:
                 seller_wallet=body.seller_wallet,
                 agreed_price=body.agreed_price,
                 agreed_duration_seconds=body.agreed_duration_seconds,
+                chain_name=body.chain_name,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
@@ -200,11 +204,7 @@ class AdminSettleController:
         timeout: float = Query(default=60.0, gt=0, le=120,
                                description="Maximum seconds to wait (server-enforced, max 120)"),
     ) -> SettleWaitResponse:
-        """Server-side long-poll: block until settlement is terminal or timeout elapses.
-
-        Mirrors the registry-agent wait pattern from
-        GET /api/v1/system/wait-for-registry-agent.
-        """
+        """Server-side long-poll: block until settlement is terminal or timeout elapses."""
         _terminal = {"ready", "failed"}
         start = time.monotonic()
         deadline = start + timeout

@@ -26,7 +26,7 @@ via wildcard subdomains instead of direct port-forward NAT, see
 ## 1. Get the code and build
 
 ```bash
-git clone --recurse-submodules https://github.com/arkhai-io/simple-compute-market.git
+git clone https://github.com/arkhai-io/simple-compute-market.git
 cd simple-compute-market
 make build-seller
 ```
@@ -58,15 +58,16 @@ private_key    = "0x<YOUR_SELLER_PRIVATE_KEY>"
 # placeholder; not used in buyer-driven flows
 ssh_public_key = "ssh-ed25519 AAAA...placeholder seller@host"
 
-[chain]
+[chains.base_sepolia]
 chain_id = 84532
-rpc_url  = "https://base-sepolia.infura.io/v3/<YOUR_KEY>"
+rpc_url  = "https://sepolia.base.org"   # public RPC; or your own provider
 
 [registry]
 urls = ["http://<INDEXER_HOST>:8080"]
 
 [registry.auth]
-# Required when the indexer runs with REGISTRY_REQUIRE_API_KEY=true.
+# Required when the indexer gates writes (REGISTRY_REQUIRE_WRITE_API_KEY=true);
+# the key must be write-scoped.
 # Keys must exactly match the URLs in [registry] urls (scheme, host,
 # port, trailing slash).
 "http://<INDEXER_HOST>:8080" = "<your-token>"
@@ -76,7 +77,12 @@ service_url = "http://seller-provisioning:8081"
 mode        = "http"                     # "mock" for a dry run
 
 [negotiation]
-policy_mode = "bisection"
+# Ordered policy chain run per round. Guards short-circuit
+# (`reject`/`exit`); the terminal policy (`bisection` here; `rl` for the
+# trained pufferlib checkpoint — requires torch) always returns
+# counter/accept/exit. See docs/configuration.md for the full list of
+# bundled policies + how to register custom ones.
+policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 
 [pricing]
 # Human / whole-token units, per hour. The publish CLI scales by the
@@ -186,8 +192,21 @@ touching libvirt. To create real VMs:
    ```
 
    `attribute.vm_host` in `resources.csv` must match an alias under
-   `[kvm_hosts]` in this file. The provisioning image bakes the
-   inventory in at build time — rebuild after edits:
+   `[kvm_hosts]` in this file. Each host line's `ansible_host` is how the
+   provisioning service reaches the host over SSH. If buyers reach that host
+   on a **different** address than the provisioner does (e.g. the provisioner
+   is on a private/overlay network but the VM port-forwards are exposed on a
+   public IP), add a `public_host=` var — that's the address put in the
+   tenant's connection details:
+
+   ```ini
+   [kvm_hosts]
+   kvm1  ansible_host=10.0.0.5  public_host=203.0.113.9  ansible_user=ubuntu  ansible_ssh_private_key_file=~/.ssh/id_ed25519
+   ```
+
+   Without `public_host`, the connection details fall back to `ansible_host`.
+   The provisioning image bakes the inventory in at build time — rebuild
+   after edits:
 
    ```bash
    make build-seller

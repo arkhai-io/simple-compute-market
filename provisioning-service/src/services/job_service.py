@@ -24,7 +24,6 @@ import signal
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from config import Settings
@@ -80,7 +79,6 @@ class AnsibleJobService:
     async def submit(
         self,
         params: AnsibleJobParams,
-        agent_id: str | None,
         job_queue,
     ) -> JobSubmitResponse:
         """Persist a new job and place it on the in-process queue."""
@@ -98,8 +96,6 @@ class AnsibleJobService:
                 id=job_id,
                 status=JobStatus.queued.value,
                 params=raw_params,
-                agent_id=agent_id,
-                buyer_agent_id=params.buyer_agent_id,
                 escrow_uid=params.escrow_uid,
                 retry_count=0,
                 max_retries=max_retries,
@@ -111,9 +107,70 @@ class AnsibleJobService:
         await job_queue.enqueue(job_id)
         return JobSubmitResponse(job_id=job_id, status=JobStatus.queued.value)
 
+    # ------------------------------------------------------------------
+    # Retry scheduler — re-enqueue jobs whose backoff delay has elapsed
+    # ------------------------------------------------------------------
+
+    async def requeue_due_retries(self, job_queue) -> int:
+        """Re-enqueue queued jobs whose scheduled retry time has arrived.
+
+        On a retryable failure ``_process_job`` flips the job back to
+        ``queued`` and stamps ``next_retry_at`` for backoff, but does not
+        put it back on the in-process queue (which is intentionally
+        transient). This sweep finds those jobs once their delay elapses,
+        clears ``next_retry_at`` to mark them claimed, and enqueues them.
+
+        Clearing ``next_retry_at`` before enqueue is what prevents a
+        double-enqueue: the row no longer matches the due-retry filter on
+        the next sweep, and ``_process_job`` flips it to ``running`` when it
+        picks it up. ``retry_count`` is untouched, so ``max_retries`` still
+        bounds the attempts. Returns the number re-enqueued.
+        """
+        now = datetime.utcnow()
+        with self._session_factory() as db:
+            due = (
+                db.query(AnsibleJob)
+                .filter(
+                    AnsibleJob.status == JobStatus.queued.value,
+                    AnsibleJob.next_retry_at.isnot(None),
+                    AnsibleJob.next_retry_at <= now,
+                )
+                .all()
+            )
+            job_ids = [job.id for job in due]
+            for job in due:
+                job.next_retry_at = None
+            if job_ids:
+                db.commit()
+
+        for job_id in job_ids:
+            await job_queue.enqueue(job_id)
+            logger.info("Retry scheduler re-enqueued job %s", job_id)
+        return len(job_ids)
+
+    async def run_retry_scheduler(
+        self, job_queue, poll_interval_seconds: float
+    ) -> None:
+        """Long-lived loop: sweep for due retries every poll interval.
+
+        Started as an asyncio task in the FastAPI lifespan; exits cleanly on
+        cancellation.
+        """
+        logger.info(
+            "Retry scheduler started (interval=%.0fs)", poll_interval_seconds
+        )
+        while True:
+            try:
+                await asyncio.sleep(poll_interval_seconds)
+                await self.requeue_due_retries(job_queue)
+            except asyncio.CancelledError:
+                logger.info("Retry scheduler cancelled")
+                break
+            except Exception as exc:
+                logger.exception("Retry scheduler sweep failed: %s", exc)
+
     def list_jobs(
         self,
-        agent_id: str | None,
         offset: int = 0,
         limit: int = 20,
         status_filter: str | None = None,
@@ -126,13 +183,6 @@ class AnsibleJobService:
         }
         with self._session_factory() as db:
             query = db.query(AnsibleJob)
-            if agent_id:
-                query = query.filter(
-                    or_(
-                        AnsibleJob.agent_id == agent_id,
-                        AnsibleJob.buyer_agent_id == agent_id,
-                    )
-                )
             if status_filter:
                 query = query.filter(AnsibleJob.status == status_filter)
             if escrow_uid:
@@ -147,8 +197,8 @@ class AnsibleJobService:
                 limit=limit,
             )
 
-    def get_job(self, job_id: str, agent_id: str | None) -> JobStatusResponse:
-        """Return full job status. Raises LookupError for 404, PermissionError for 403."""
+    def get_job(self, job_id: str) -> JobStatusResponse:
+        """Return full job status. Raises LookupError for 404."""
         with self._session_factory() as db:
             job = (
                 db.query(AnsibleJob)
@@ -157,19 +207,14 @@ class AnsibleJobService:
             )
             if not job:
                 raise LookupError(f"Job {job_id} not found")
-
-            # agent_id=None means "skip auth" — test endpoints under /test/*
-            # call this from a server-side admin context (mock profile only).
-            if job.agent_id and agent_id is not None:
-                is_seller = job.agent_id == agent_id
-                is_buyer = job.buyer_agent_id and job.buyer_agent_id == agent_id
-                if not is_seller and not is_buyer:
-                    raise PermissionError(f"Job {job_id} belongs to another agent")
-
             return self._to_status_response(job)
 
-    def get_credentials(self, job_id: str, agent_id: str) -> CredentialListResponse:
-        """Return credentials for the requesting agent. Raises on auth failures."""
+    def get_credentials(self, job_id: str) -> CredentialListResponse:
+        """Return all credentials for a job. Raises LookupError for 404.
+
+        The provisioning service trusts its caller (the storefront); the
+        storefront decides which credentials to surface to which tenant.
+        """
         with self._session_factory() as db:
             job = (
                 db.query(AnsibleJob)
@@ -178,20 +223,10 @@ class AnsibleJobService:
             )
             if not job:
                 raise LookupError(f"Job {job_id} not found")
-
-            is_seller = job.agent_id and job.agent_id == agent_id
-            is_buyer = job.buyer_agent_id and job.buyer_agent_id == agent_id
-            if not is_seller and not is_buyer:
-                raise PermissionError(
-                    "Access denied: you are not the seller or buyer of this job"
-                )
 
             creds = (
                 db.query(Credential)
-                .filter(
-                    Credential.job_id == job_id,
-                    Credential.granted_to == agent_id,
-                )
+                .filter(Credential.job_id == job_id)
                 .all()
             )
             return CredentialListResponse(
@@ -208,7 +243,7 @@ class AnsibleJobService:
                 ],
             )
 
-    def get_logs(self, job_id: str, agent_id: str | None) -> JobLogsResponse:
+    def get_logs(self, job_id: str) -> JobLogsResponse:
         """Return raw Ansible logs for a job."""
         with self._session_factory() as db:
             job = (
@@ -219,15 +254,9 @@ class AnsibleJobService:
             if not job:
                 raise LookupError(f"Job {job_id} not found")
 
-            if job.agent_id and agent_id:
-                is_seller = job.agent_id == agent_id
-                is_buyer = job.buyer_agent_id and job.buyer_agent_id == agent_id
-                if not is_seller and not is_buyer:
-                    raise PermissionError(f"Job {job_id} belongs to another agent")
-
             return JobLogsResponse(job_id=job.id, status=job.status, logs=job.logs)
 
-    def cancel_job(self, job_id: str, agent_id: str | None) -> dict:
+    def cancel_job(self, job_id: str) -> dict:
         """Cancel a queued or running job. Sends SIGTERM if Ansible is running."""
         with self._session_factory() as db:
             job = (
@@ -237,9 +266,6 @@ class AnsibleJobService:
             )
             if not job:
                 raise LookupError(f"Job {job_id} not found")
-
-            if agent_id and job.agent_id and job.agent_id != agent_id:
-                raise PermissionError("Cannot cancel another agent's job")
 
             if job.status not in (JobStatus.queued.value, JobStatus.running.value):
                 return {
@@ -299,7 +325,8 @@ class AnsibleJobService:
                 return
 
             # Respect scheduled retry delay: if the job's next_retry_at is in
-            # the future just return; the retry-scheduler TODO will re-enqueue it.
+            # the future just return; the retry scheduler (run_retry_scheduler)
+            # re-enqueues it once the delay elapses.
             if job.next_retry_at and datetime.utcnow() < job.next_retry_at:
                 return
 
@@ -318,9 +345,11 @@ class AnsibleJobService:
             # is wired and has a row for this host. rendered_inv_path is
             # initialised here so the outer finally block can always clean it up.
             rendered_inv_path = None
+            host_public_host = None
             if self._host_service is not None:
                 host = self._host_service.get_host(params.vm_host)
                 if host is not None:
+                    host_public_host = host.public_host
                     rendered_inv_path = self._ansible.write_inventory([host])
                     logger.debug(
                         "Job %s: using DB-rendered inventory at %s",
@@ -375,7 +404,7 @@ class AnsibleJobService:
                     log_callback=log_callback,
                 )
                 run_result: AnsibleRunResult = self._ansible.parse_playbook_result(
-                    ansible_result, params
+                    ansible_result, params, public_host=host_public_host
                 )
                 logs = run_result.stdout + (
                     "\n\nSTDERR:\n" + run_result.stderr if run_result.stderr else ""
@@ -420,9 +449,8 @@ class AnsibleJobService:
                     job.logs = logs
                     db.add(job)
                     db.commit()
-                    # TODO(retry-scheduler): add a dedicated retry-scheduler task
-                    # that polls for queued jobs with next_retry_at < now and
-                    # re-enqueues them via job_queue.enqueue(job_id).
+                    # The job now sits in `queued` with next_retry_at set;
+                    # run_retry_scheduler re-enqueues it once the delay elapses.
                     logger.warning(
                         "Job %s failed (attempt %d/%d), retry at %s: %s",
                         job_id,
@@ -449,6 +477,12 @@ class AnsibleJobService:
         except Exception as exc:
             logger.exception("Unexpected error processing job %s: %s", job_id, exc)
             try:
+                # The error may have come from a failed flush/commit (e.g. an
+                # IntegrityError while storing credentials), which leaves the
+                # session in an aborted transaction. Roll back first so the
+                # recovery query/update below can run instead of silently
+                # re-raising and leaving the job stuck in `running`.
+                db.rollback()
                 job = (
                     db.query(AnsibleJob)
                     .filter(AnsibleJob.id == job_id)
@@ -462,7 +496,10 @@ class AnsibleJobService:
                         error=f"Internal error: {exc}",
                     )
             except Exception:
-                pass
+                logger.exception(
+                    "Failed to mark job %s as failed after an unexpected error",
+                    job_id,
+                )
         finally:
             # Clean up the DB-rendered temp inventory file if one was created.
             if rendered_inv_path is not None:
@@ -544,7 +581,6 @@ class AnsibleJobService:
             gcs_bucket_url=params.get("gcs_bucket_url"),
             gcs_image_path=params.get("gcs_image_path"),
             vm_expiry_at=params.get("vm_expiry_at"),
-            buyer_agent_id=params.get("buyer_agent_id"),
             max_retries=params.get("max_retries"),
         )
 
@@ -574,13 +610,12 @@ class AnsibleJobService:
 
         sanitized = copy.deepcopy(result_payload)
 
-        def _store_role(role_name: str, role_data: dict, granted_to: str) -> None:
-            if not role_data or not granted_to:
+        def _store_role(role_name: str, role_data: dict) -> None:
+            if not role_data:
                 return
             cred = Credential(
                 job_id=job.id,
                 role=role_name,
-                granted_to=granted_to,
                 password=role_data.get("password"),
                 ssh_commands=role_data.get("ssh_commands"),
                 ssh_key_path_host=role_data.get("ssh_key_path_host"),
@@ -588,17 +623,8 @@ class AnsibleJobService:
             )
             db.add(cred)
 
-        tenant_data = auth.get("tenant", {})
-        root_data = auth.get("root", {})
-
-        if job.agent_id:
-            if root_data:
-                _store_role(CredentialRole.root.value, root_data, job.agent_id)
-            if tenant_data:
-                _store_role(CredentialRole.tenant.value, tenant_data, job.agent_id)
-
-        if job.buyer_agent_id and tenant_data:
-            _store_role(CredentialRole.tenant.value, tenant_data, job.buyer_agent_id)
+        _store_role(CredentialRole.root.value, auth.get("root", {}))
+        _store_role(CredentialRole.tenant.value, auth.get("tenant", {}))
 
         sanitized.pop("authentication", None)
         if isinstance(sanitized.get("ansible_result"), dict):
@@ -701,7 +727,5 @@ class AnsibleJobService:
             retry_count=job.retry_count,
             max_retries=job.max_retries,
             next_retry_at=job.next_retry_at,
-            agent_id=job.agent_id,
-            buyer_agent_id=job.buyer_agent_id,
             escrow_uid=job.escrow_uid,
         )

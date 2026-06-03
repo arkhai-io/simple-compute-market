@@ -13,7 +13,7 @@ import container as _container_module
 from container import Container, container
 from config import settings
 from db.database import init_db
-from middleware.auth import AgentAuthMiddleware
+from middleware.auth import StorefrontAuthMiddleware
 from middleware.rate_limit import AgentRateLimitMiddleware
 from services.async_job_queue import AsyncJobQueue
 
@@ -116,6 +116,20 @@ async def lifespan(_: FastAPI):
         "Job processing loop started (max_concurrent=%d)", settings.max_concurrent_jobs
     )
 
+    # Retry scheduler — re-enqueues queued jobs whose backoff delay has
+    # elapsed (the failure path stamps next_retry_at but does not re-enqueue,
+    # since the queue is in-process/transient).
+    retry_poll_interval = float(
+        getattr(settings, "retry_scheduler_poll_interval_seconds", 10)
+    )
+    retry_task = asyncio.create_task(
+        _container_module.resolved_job_service.run_retry_scheduler(
+            job_queue, retry_poll_interval
+        ),
+        name="retry-scheduler",
+    )
+    logger.info("Retry scheduler started (interval=%ds)", int(retry_poll_interval))
+
     # Lease watchdog — only started when enabled in config (default: true).
     watchdog_task = None
     watchdog_enabled = bool(getattr(settings, "lease_watchdog_enabled", True))
@@ -141,6 +155,12 @@ async def lifespan(_: FastAPI):
     except asyncio.CancelledError:
         pass
 
+    retry_task.cancel()
+    try:
+        await retry_task
+    except asyncio.CancelledError:
+        pass
+
     if watchdog_task is not None:
         watchdog_task.cancel()
         try:
@@ -158,10 +178,12 @@ app = FastAPI(
     description=(
         "Asynchronous VM provisioning for a multi-agent compute marketplace.\n\n"
         "## Authentication\n\n"
-        "POST/DELETE requests require an **ERC-8004 agent identity** header:\n\n"
-        "```\nX-Agent-ID: eip155:<chain_id>:0x<address>:<token_id>\n```\n\n"
-        "GET requests accept the header optionally for agent-scoped filtering.\n"
-        "`/health`, `/docs`, and `/redoc` bypass authentication entirely.\n\n"
+        "The service is an internal dependency of a single storefront. When an\n"
+        "admin key is configured, every non-health request must present it:\n\n"
+        "```\nX-Admin-Key: <admin_api_key>\n```\n\n"
+        "This is the same shared secret the provisioning→storefront callback\n"
+        "uses, so the link can cross an untrusted network. `/health`, `/docs`,\n"
+        "and `/redoc` bypass authentication entirely.\n\n"
         "## Job lifecycle\n\n"
         "```\n"
         "queued --> running --> succeeded\n"
@@ -203,9 +225,8 @@ app.add_middleware(
     max_requests=settings.rate_limit_requests_per_minute,
 )
 app.add_middleware(
-    AgentAuthMiddleware,
-    registry_url=str(settings.registry_url or ""),
-    enabled=settings.enable_auth,
+    StorefrontAuthMiddleware,
+    admin_key=str(settings.storefront_admin_key or ""),
 )
 app.add_middleware(
     CORSMiddleware,

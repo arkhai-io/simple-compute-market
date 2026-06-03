@@ -46,6 +46,10 @@ cd compute-provisioning-iac/ansible
 ansible-galaxy collection install -r requirements.yml
 ```
 
+Collection versions are pinned because the documented Ansible baseline includes
+older control-node runtimes. Updating the pins should be paired with a matching
+Ansible baseline update and validation of the playbook syntax checks below.
+
 ### 3. Setup Inventory
 Configure your hosts in `inventory/hosts`:
 
@@ -1734,37 +1738,37 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 - **Smart Contract Integration**: Connects to Ethereum-compatible chains (e.g., Base Sepolia) via RPC endpoints
 - **Health Monitoring**: Configurable health checks and heartbeat mechanisms for service reliability
 
-**Deploy ERC Registry from GCP Artifact Registry**:
+**Deploy Registry from GCP Artifact Registry**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
   -e "docker_registry_type=gcp" \
   -e "gcp_project_id=<gcp-project-id>" \
   -e "gcp_registry_region=asia-southeast1" \
-  -e "gcp_repository=erc-8004-registry" \
+  -e "gcp_repository=arkhai" \
   -e "gcp_service_account_key=/path/to/sa-key.json" \
-  -e "docker_image_name=erc-8004-registry-py" \
+  -e "docker_image_name=registry" \
   -e "docker_image_tag=latest" \
-  -e "app_container_name=erc-registry" \
+  -e "app_container_name=arkhai-registry" \
   -e "app_container_internal_port=8080" \
   -e "app_container_port=8001" \
   -e "app_nginx_port=8888" \
   -e "frp_subdomain_host=vm.arkhai.io" \
   -e "enable_ssl=true" \
   -e "certbot_email=admin@vm.arkhai.io" \
-  -e "app_nginx_site_name=erc-registry" \
-  -e '{"app_container_env":{"DATABASE_URL":"postgresql://neondb_owner:password@us-east-1.aws.neon.tech/erc-8004-registry?sslmode=require&channel_binding=require","CHAIN_ID":"84532","RPC_URL":"https://base-sepolia.infura.io/v3/<infura-project-id>","IDENTITY_REGISTRY_ADDRESS":"0x<identity-registry-address>","REPUTATION_REGISTRY_ADDRESS":"0x<reputation-registry-address>","VALIDATION_REGISTRY_ADDRESS":"","PORT":"8080","HOST":"0.0.0.0","ENABLE_HEALTH_CHECKS":"false","HEALTH_CHECK_INTERVAL":"60","ENDPOINT_CHECK_TIMEOUT":"10","HEARTBEAT_TTL_SECS":"60","LOG_LEVEL":"info"}}' \
+  -e "app_nginx_site_name=arkhai-registry" \
+  -e '{"app_container_env":{"DATABASE_URL":"postgresql://neondb_owner:password@us-east-1.aws.neon.tech/arkhai-registry?sslmode=require&channel_binding=require","PORT":"8080","HOST":"0.0.0.0","ENABLE_HEALTH_CHECKS":"false","HEALTH_CHECK_INTERVAL":"60","ENDPOINT_CHECK_TIMEOUT":"10","HEARTBEAT_TTL_SECS":"60","LOG_LEVEL":"info"}}' \
   --limit proxy-dev
 ```
 
 > The service account key JSON file is read from the **Ansible controller machine**, copied securely to the VM, used to activate the SA in gcloud and configure the Docker credential helper, then deleted from the VM. Docker is logged out from the GCP endpoint after the image is pulled.
 
-**ERC Registry Specific Parameters**:
+**Registry Specific Parameters**:
 - `docker_registry_type`: Set to `gcp` for GCP Artifact Registry
 - `gcp_project_id`: GCP project ID containing the Artifact Registry
 - `gcp_registry_region`: Registry region (e.g., `asia-southeast1`)
-- `gcp_repository`: Artifact Registry repository name (`erc-8004-registry`)
+- `gcp_repository`: Artifact Registry repository name (`arkhai`)
 - `gcp_service_account_key`: Local path on Ansible controller machine to the service account JSON key file
-- `docker_image_name`: Image name in the repository (`erc-8004-registry-py`)
+- `docker_image_name`: Image name in the repository (`registry`)
 - `docker_image_tag`: Image version tag (`latest`)
 - `app_container_name`: Container identifier (`erc-registry`)
 - `app_container_internal_port`: Port the application listens on inside the container (`8080`)

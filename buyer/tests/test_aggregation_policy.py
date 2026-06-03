@@ -70,7 +70,11 @@ def _escrow_proposal() -> EscrowProposal:
     )
 
 
-def _build_escrow_terms_stub(proposal, seller_wallet, agreed_price, duration_seconds):
+def _build_escrow_proposal():
+    return lambda _match: _escrow_proposal()
+
+
+def _build_escrow_terms_stub(proposal, seller_wallet, agreed_amount, duration_seconds):
     """Stub builder for aggregation tests — escrow terms aren't the point here."""
     return [EscrowTerms(
         maker="buyer",
@@ -79,7 +83,7 @@ def _build_escrow_terms_stub(proposal, seller_wallet, agreed_price, duration_sec
             "arbiter": "0x" + "cd" * 20,
             "demand": "0x" + "00" * 32,
             "token": proposal.fields["token"],
-            "amount": int(float(agreed_price) * max(duration_seconds, 1) / 3600),
+            "amount": int(float(agreed_amount) * max(duration_seconds, 1) / 3600),
         },
         expiration_unix=proposal.expiration_unix,
     )]
@@ -147,19 +151,23 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
         "registry": [
             {"items": [
                 {"listing_id": "list-a", "seller": "http://seller-a:8001",
-                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 50}]},
+                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                       "literal_fields": {"token": "0x" + "ab" * 20},
+                                       "rates": [{"field": "amount", "per": "hour", "value": "50"}]}]},
                 {"listing_id": "list-b", "seller": "http://seller-b:8001",
-                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 70}]},
+                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                       "literal_fields": {"token": "0x" + "ab" * 20},
+                                       "rates": [{"field": "amount", "per": "hour", "value": "70"}]}]},
             ]},
         ],
         "seller-a": [
             # /negotiate/new — seller-a accepts at 80 (worse for buyer)
-            {"negotiation_id": "neg-a", "action": "accept", "price": 80, **_ACCEPTED_ECHO_AGG},
+            {"negotiation_id": "neg-a", "action": "accept", "proposal": {"fields": {"amount": 80}}, **_ACCEPTED_ECHO_AGG},
             # Settlement flow only runs for the *winner*; seller-a never gets here
         ],
         "seller-b": [
             # /negotiate/new — seller-b accepts at 60 (better for buyer)
-            {"negotiation_id": "neg-b", "action": "accept", "price": 60, **_ACCEPTED_ECHO_AGG},
+            {"negotiation_id": "neg-b", "action": "accept", "proposal": {"fields": {"amount": 60}}, **_ACCEPTED_ECHO_AGG},
             # Wallet + settle for the winner
             {"agent_wallet_address": _SELLER_WALLET_B},
             {"escrow_uid": "0xescrow", "status": "provisioning"},
@@ -175,7 +183,7 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
             config=_config(aggregation_policy="best_price"),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -185,7 +193,7 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
         f"got status={result.status} reason={result.reason} attempts={result.attempts}"
     )
     assert result.seller_url == "http://seller-b:8001"
-    assert result.agreed_price == 60
+    assert result.agreed_amount == 60
     assert result.negotiation_id == "neg-b"
     seller_urls = {a.get("seller_url") for a in result.attempts}
     assert seller_urls == {"http://seller-a:8001", "http://seller-b:8001"}
@@ -203,14 +211,18 @@ def test_cheapest_first_preserves_first_agreed_semantics():
             {"items": [
                 # Higher advertised price first in the registry response.
                 {"listing_id": "expensive", "seller": "http://seller-b:8001",
-                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 70}]},
+                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                       "literal_fields": {"token": "0x" + "ab" * 20},
+                                       "rates": [{"field": "amount", "per": "hour", "value": "70"}]}]},
                 # Cheaper advertised — should be tried first under cheapest_first.
                 {"listing_id": "cheap", "seller": "http://seller-a:8001",
-                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 50}]},
+                 "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
+                                       "literal_fields": {"token": "0x" + "ab" * 20},
+                                       "rates": [{"field": "amount", "per": "hour", "value": "50"}]}]},
             ]},
         ],
         "seller-a": [
-            {"negotiation_id": "neg-a", "action": "accept", "price": 50, **_ACCEPTED_ECHO_AGG},
+            {"negotiation_id": "neg-a", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO_AGG},
             {"agent_wallet_address": _SELLER_WALLET_A},
             {"escrow_uid": "0xescrow", "status": "provisioning"},
             {"status": "ready", "fulfillment_uid": "0xattest"},
@@ -227,7 +239,7 @@ def test_cheapest_first_preserves_first_agreed_semantics():
             config=_config(aggregation_policy="cheapest_first"),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -235,7 +247,7 @@ def test_cheapest_first_preserves_first_agreed_semantics():
 
     assert result.status == "ready"
     assert result.seller_url == "http://seller-a:8001"
-    assert result.agreed_price == 50
+    assert result.agreed_amount == 50
     # Only seller-a was negotiated — cheapest_first short-circuited.
     seller_urls = {a.get("seller_url") for a in result.attempts}
     assert seller_urls == {"http://seller-a:8001"}
@@ -258,7 +270,7 @@ def test_custom_policy_can_short_circuit():
         return (matches[1], NegotiationOutcome(
             status="agreed",
             negotiation_id="synthetic-1",
-            agreed_price=42,
+            agreed_amount=42,
             duration_seconds=3600,
             accepted_provision_terms=_provision(),
             accepted_escrow_proposal=_escrow_proposal(),
@@ -287,7 +299,7 @@ def test_custom_policy_can_short_circuit():
             config=_config(aggregation_policy="pick_second_no_negotiate"),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -295,7 +307,7 @@ def test_custom_policy_can_short_circuit():
 
     assert result.status == "ready"
     assert result.seller_url == "http://seller-b:8001"
-    assert result.agreed_price == 42
+    assert result.agreed_amount == 42
 
 
 def test_policy_returning_none_yields_exited():
@@ -315,7 +327,7 @@ def test_policy_returning_none_yields_exited():
             config=_config(aggregation_policy="always_none"),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_proposal=_escrow_proposal(),
+            build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xnever"],
             sleep=lambda _: None,
@@ -336,7 +348,7 @@ def test_gather_outcomes_captures_exceptions_per_candidate():
         return NegotiationOutcome(
             status="agreed",
             negotiation_id=f"neg-{match['listing_id']}",
-            agreed_price=50,
+            agreed_amount=50,
         )
 
     candidates = [

@@ -58,8 +58,8 @@ def derive_refund_params(
       ``payload["token"]`` — optional 0x address overriding the escrow's
         token. Symbol strings are rejected.
       ``payload["amount"]`` — optional integer in base units; omitted ⇒
-        derive from the listing's accepted_escrows[0].price_per_hour
-        × agreed_duration_seconds (also base units).
+        derive from the listing's accepted_escrows[0] primary rate
+        × agreed_duration_seconds / 3600 (also base units).
 
     `resolve_token(address)` returns a dict with contract_address,
     decimals, symbol. Injected so unit tests don't need TokenRegistry.
@@ -106,10 +106,10 @@ def derive_refund_params(
             )
         token_meta = resolve_token(token_override)
     else:
+        from service.schemas import accepted_token_address
         token_addr_from_escrow = None
         if first_escrow is not None:
-            fields = first_escrow.get("fields") or {}
-            candidate = fields.get("token")
+            candidate = accepted_token_address(first_escrow)
             if isinstance(candidate, str) and candidate:
                 token_addr_from_escrow = candidate
         if token_addr_from_escrow:
@@ -158,32 +158,17 @@ def derive_refund_params(
                 {"error": "Order has no accepted_escrows entry; "
                           "pass explicit 'amount'"},
             )
-        amount_raw_in = first_escrow.get("price_per_hour")
-        if amount_raw_in is None:
-            # Hidden-reserve listing: refund total can't be derived from
+        from service.schemas import primary_rate_value
+        base_rate = primary_rate_value(first_escrow)
+        if base_rate is None:
+            # Hidden reserve (no advertised rate, or pre-cutover row with
+            # price_per_hour=None): refund total can't be derived from
             # the listing alone. Caller must pass an explicit --amount.
             return (
                 "error",
                 400,
                 {"error": "Listing was published with hidden reserve "
-                          "(price_per_hour=None); pass explicit 'amount' to refund"},
-            )
-        # price_per_hour is uint256-domain — decimal string on the wire,
-        # int internally. Accept either; reject anything else.
-        if isinstance(amount_raw_in, bool):
-            return ("error", 400, {"error":
-                "Order accepted_escrows[0].price_per_hour must be a "
-                "non-negative decimal; got bool"})
-        if isinstance(amount_raw_in, int):
-            base_rate = amount_raw_in
-        elif isinstance(amount_raw_in, str) and amount_raw_in.strip().isdigit():
-            base_rate = int(amount_raw_in.strip())
-        else:
-            return (
-                "error",
-                400,
-                {"error": "Order accepted_escrows[0].price_per_hour must be "
-                          "a non-negative decimal integer/string; pass explicit 'amount'"},
+                          "(no advertised rate); pass explicit 'amount' to refund"},
             )
         # Refund uses the agreed duration from the negotiation thread when
         # available (Slice C), else falls back to the listing's max ceiling,

@@ -13,6 +13,8 @@ from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
 
+from service.schemas import EscrowProposal
+
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.sync_negotiation import (
     OfferUnfulfillableError,
@@ -38,8 +40,8 @@ async def db(tmp_path) -> SQLiteClient:
         accepted_escrows=[{
             "chain_name": "test",
             "escrow_address": "0x000000000000000000000000000000000000abcd",
-            "fields": {"token": "0x0000000000000000000000000000000000000001"},
-            "price_per_hour": 1000,
+            "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
+            "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
         }],
         fulfillment_resource=None,
         max_duration_seconds=3600,
@@ -190,7 +192,7 @@ class TestStartSyncNegotiationPauseGuard:
                 sqlite_client=db,
                 our_listing_id="order-001",
                 buyer_address="0xBuyer",
-                their_proposed_price=5000,
+                proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
                 our_base_url="http://seller:8001",
                 their_agent_url="0xBuyer",
             )
@@ -208,7 +210,7 @@ class TestStartSyncNegotiationPauseGuard:
                 sqlite_client=db,
                 our_listing_id="order-001",
                 buyer_address="0xBuyer",
-                their_proposed_price=5000,
+                proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
                 our_base_url="http://seller:8001",
                 their_agent_url="0xBuyer",
             )
@@ -227,7 +229,7 @@ class TestStartSyncNegotiationPauseGuard:
                 sqlite_client=db,
                 our_listing_id="order-001",
                 buyer_address="0xBuyer",
-                their_proposed_price=5000,
+                proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
                 our_base_url="http://seller:8001",
                 their_agent_url="0xBuyer",
             )
@@ -247,13 +249,13 @@ class TestStartSyncNegotiationPauseGuard:
         monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", False)
 
         from market_storefront.utils.sync_negotiation import start_sync_negotiation
-        from service.schemas import ProvisionTerms
+        from service.schemas import EscrowProposal, ProvisionTerms
         with pytest.raises(OfferUnfulfillableError) as exc_info:
             await start_sync_negotiation(
                 sqlite_client=db,
                 our_listing_id="order-001",
                 buyer_address="0xBuyer",
-                their_proposed_price=5000,
+                proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
                 provision_terms=ProvisionTerms(
                     duration_seconds=1800, ssh_public_key="ssh-rsa AAAA",
                 ),

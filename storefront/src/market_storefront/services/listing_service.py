@@ -32,27 +32,57 @@ logger = logging.getLogger(__name__)
 
 
 class ListingService:
-    def __init__(self, *, sqlite_client, alkahest_client) -> None:
-        from market_storefront.utils.config import settings
+    def __init__(self, *, sqlite_client, alkahest_clients: dict[str, Any] | None = None) -> None:
+        from market_storefront.utils.config import CHAINS, settings
 
         self._db = sqlite_client
-        self._alkahest = alkahest_client
+        self._alkahest_clients: dict[str, Any] = alkahest_clients or {}
 
         priv_key = (settings.wallet.private_key or "").strip()
-        rpc_url = (settings.chain.rpc_url or "").strip()
-        self._token_transfers_available: bool = bool(priv_key and rpc_url)
-        self._alkahest_available: bool = alkahest_client is not None
+        self._token_transfers_available: bool = bool(priv_key and CHAINS)
+        self._alkahest_available: bool = bool(self._alkahest_clients)
 
         if not self._token_transfers_available:
             logger.warning(
                 "[STOREFRONT] Token transfer operations (refund) unavailable — "
-                "wallet.private_key and chain.rpc_url must both be set in storefront config."
+                "wallet.private_key and at least one [chains.<name>] entry must be set."
             )
         if not self._alkahest_available:
             logger.warning(
                 "[STOREFRONT] On-chain escrow operations (claim, reclaim, arbitrate) unavailable — "
-                "wallet.private_key and chain.rpc_url must both be set in storefront config."
+                "wallet.private_key and at least one [chains.<name>] entry must be set."
             )
+
+    async def _resolve_chain_for_escrow(self, escrow_uid: str) -> tuple[str | None, Any]:
+        """Look up an escrow's chain_name + matching AlkahestClient.
+
+        Returns ``(chain_name, alkahest_client)`` or ``(None, None)`` if the
+        escrow row is missing, has no chain_name persisted, or the chain is
+        not currently configured.
+        """
+        row = await self._db.load_escrow(escrow_uid=escrow_uid)
+        if not row:
+            return None, None
+        chain_name = row.get("chain_name")
+        if not chain_name:
+            return None, None
+        return chain_name, self._alkahest_clients.get(chain_name)
+
+    @staticmethod
+    def _resolve_chain_for_listing(listing: dict[str, Any]) -> str | None:
+        """Pick the primary chain for a listing's payment operations.
+
+        Walks the listing's ``accepted_escrows`` and returns the first
+        chain_name. For refund (which doesn't bind to a specific escrow
+        uid), this is the seller's "primary" chain on this listing.
+        """
+        accepted = listing.get("accepted_escrows") or []
+        for entry in accepted:
+            if isinstance(entry, dict):
+                name = entry.get("chain_name")
+                if isinstance(name, str) and name.strip():
+                    return name.strip()
+        return None
 
     @staticmethod
     def _normalize_token_resource(resource_payload: dict) -> dict:
@@ -167,7 +197,7 @@ class ListingService:
         if not request.accepted_escrows:
             raise ValueError(
                 "accepted_escrows must be a non-empty list "
-                "of {chain_name, escrow_address, fields, price_per_hour} entries."
+                "of {chain_name, escrow_address, literal_fields, rates} entries."
             )
         return offer_resource, list(request.accepted_escrows)
 
@@ -250,7 +280,10 @@ class ListingService:
         )
 
     async def evaluate_negotiate(
-        self, listing_id: str, their_proposed_price: float
+        self,
+        listing_id: str,
+        proposal: dict[str, Any],
+        requested_duration_seconds: int | None = None,
     ) -> EvaluateNegotiateResponse:
         """Dry-run the round-0 negotiation decision without creating a thread.
 
@@ -262,6 +295,7 @@ class ListingService:
         Raises ``ValueError`` if the listing doesn't exist or has no usable
         negotiation strategy. The controller converts these to HTTP 404.
         """
+        from market_policy.negotiation_middleware import _amount_from_proposal
         from market_storefront.models.domain_models import Listing
         from market_storefront.utils.sync_negotiation import _compute_round_zero_decision
 
@@ -269,21 +303,30 @@ class ListingService:
         if not row:
             raise ValueError(f"Listing {listing_id} not found")
         listing = Listing.model_validate(row)
-        our_price, _strategy_label, direction, strategy_name, decision = (
+        their_amount_raw = _amount_from_proposal(proposal)
+        if their_amount_raw is None:
+            raise ValueError(
+                "proposal must include fields.amount (absolute amount in base units)"
+            )
+        their_amount = int(their_amount_raw)
+        our_amount, _strategy_label, direction, strategy_name, decision = (
             await _compute_round_zero_decision(
                 sqlite_client=self._db,
                 listing=listing,
-                their_proposed_price=their_proposed_price,
+                their_proposal=proposal,
+                requested_duration_seconds=requested_duration_seconds,
             )
         )
+        decision_amount = _amount_from_proposal(decision.proposal)
         return EvaluateNegotiateResponse(
             listing_id=listing_id,
-            our_reference_price=our_price,
-            their_proposed_price=their_proposed_price,
+            our_reference_amount=int(our_amount),
+            their_proposed_amount=their_amount,
             direction=direction,
             strategy=strategy_name,
             decision=decision.action,
-            decision_price=decision.price,
+            decision_amount=int(decision_amount) if decision_amount is not None else None,
+            decision_proposal=decision.proposal,
             decision_reason=decision.reason,
             would_negotiate=(decision.action != "exit"),
         )
@@ -292,7 +335,7 @@ class ListingService:
         if not self._token_transfers_available:
             return 503, {
                 "error": "Token transfer not configured",
-                "detail": "AGENT_PRIV_KEY and CHAIN_RPC_URL must both be set in storefront config.",
+                "detail": "wallet.private_key and at least one [chains.<name>] entry must be set in storefront config.",
             }
         order = await self._db.load_listing(listing_id=listing_id)
         from service.clients.token import resolve_token_cached, ERC20TokenMetadata
@@ -326,12 +369,23 @@ class ListingService:
             _, status, body = outcome
             return status, body
         params = outcome[1]
-        from market_storefront.utils.config import settings
+        from market_storefront.utils.config import CHAINS, settings
         from market_storefront.utils.token_transfer import transfer_erc20
+
+        chain_name = self._resolve_chain_for_listing(order or {})
+        chain_cfg = CHAINS.get(chain_name) if chain_name else None
+        if chain_cfg is None:
+            return 503, {
+                "error": "No chain configured for this listing",
+                "detail": (
+                    "Listing's accepted_escrows refer to a chain not present in "
+                    "[chains.<name>] config; refund cannot pick an RPC."
+                ),
+            }
         try:
             result = await transfer_erc20(
                 private_key=settings.wallet.private_key.strip(),
-                rpc_url=settings.chain.rpc_url.strip(),
+                rpc_url=chain_cfg.rpc_url,
                 token_address=params["token_address"],
                 to_address=params["buyer_address"],
                 amount_raw=params["amount_raw"],
@@ -357,9 +411,18 @@ class ListingService:
     async def claim(self, listing_id: str, payload: ClaimRequest) -> tuple[int, dict]:
         if not self._alkahest_available:
             return 503, {"error": "On-chain escrow operations not configured",
-                         "detail": "AGENT_PRIV_KEY and CHAIN_RPC_URL must both be set in storefront config."}
+                         "detail": "wallet.private_key and at least one [chains.<name>] entry must be set in storefront config."}
+        chain_name, alkahest = await self._resolve_chain_for_escrow(payload.escrow_uid)
+        if alkahest is None:
+            return 503, {
+                "error": "Chain not configured for this escrow",
+                "detail": (
+                    f"Escrow {payload.escrow_uid} is on chain "
+                    f"{chain_name!r}, which is not currently configured."
+                ),
+            }
         try:
-            collect_result = await self._alkahest.erc20.escrow.non_tierable.collect(
+            collect_result = await alkahest.erc20.escrow.non_tierable.collect(
                 payload.escrow_uid, payload.fulfillment_uid)
         except Exception as exc:
             return 502, {"error": "Escrow collect failed on-chain", "detail": str(exc),
@@ -375,9 +438,18 @@ class ListingService:
     async def reclaim(self, listing_id: str, payload: ReclaimRequest) -> tuple[int, dict]:
         if not self._alkahest_available:
             return 503, {"error": "On-chain escrow operations not configured",
-                         "detail": "AGENT_PRIV_KEY and CHAIN_RPC_URL must both be set in storefront config."}
+                         "detail": "wallet.private_key and at least one [chains.<name>] entry must be set in storefront config."}
+        chain_name, alkahest = await self._resolve_chain_for_escrow(payload.escrow_uid)
+        if alkahest is None:
+            return 503, {
+                "error": "Chain not configured for this escrow",
+                "detail": (
+                    f"Escrow {payload.escrow_uid} is on chain "
+                    f"{chain_name!r}, which is not currently configured."
+                ),
+            }
         try:
-            reclaim_result = await self._alkahest.erc20.escrow.non_tierable.reclaim_expired(
+            reclaim_result = await alkahest.erc20.escrow.non_tierable.reclaim_expired(
                 payload.escrow_uid)
         except Exception as exc:
             return 502, {"error": "Escrow reclaim failed on-chain", "detail": str(exc),
@@ -392,11 +464,25 @@ class ListingService:
     async def arbitrate(self, listing_id: str, payload: ArbitrateRequest) -> tuple[int, dict]:
         if not self._alkahest_available:
             return 503, {"error": "On-chain escrow operations not configured",
-                         "detail": "AGENT_PRIV_KEY and CHAIN_RPC_URL must both be set in storefront config."}
+                         "detail": "wallet.private_key and at least one [chains.<name>] entry must be set in storefront config."}
+        # Arbitration acts against a fulfillment_uid, not an escrow_uid, so
+        # we derive the chain from the listing's primary accepted_escrow
+        # rather than from an escrows DB row.
+        listing = await self._db.load_listing(listing_id=listing_id) or {}
+        chain_name = self._resolve_chain_for_listing(listing)
+        alkahest = self._alkahest_clients.get(chain_name) if chain_name else None
+        if alkahest is None:
+            return 503, {
+                "error": "Chain not configured for this listing",
+                "detail": (
+                    f"Listing's primary chain {chain_name!r} is not currently "
+                    "configured in [chains.<name>]."
+                ),
+            }
         try:
             from alkahest_py import ArbitrationMode
             async def decision_function(_a, _d): return bool(payload.decision)
-            decisions = await self._alkahest.oracle.arbitrate_many(
+            decisions = await alkahest.oracle.arbitrate_many(
                 decision_function, lambda _d: None,
                 ArbitrationMode.PastUnarbitrated, timeout_seconds=5.0)
         except Exception as exc:

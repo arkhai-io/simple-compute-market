@@ -53,12 +53,11 @@ class DealState:
     # Phase 3 — registry publication
     _registry_validate_passed: bool = False
     resume_confirmed: bool = False
-    _seller_agent_indexed: bool = False
     # Phase 5 — negotiation
     _evaluate_negotiate_passed: bool = False
     negotiation_id: Optional[str] = None
     negotiation_terminal_state: Optional[str] = None
-    agreed_price: Optional[float] = None
+    agreed_amount: Optional[int] = None
     # Buyer-CLI run-log identity from `market negotiate`; consumed by
     # `market settle --from <run_id>` in phase 08. Sentinel for the
     # "negotiation produced a usable agreed outcome" precondition.
@@ -110,6 +109,22 @@ def require_state(deal_state: DealState, *fields: str) -> None:
                 f"Prerequisite not satisfied: DealState.{f} is {val!r}. "
                 f"An earlier test likely failed."
             )
+
+
+def delete_mock_rules_if_present(provisioning_test_client, *rule_ids: str) -> None:
+    """Best-effort cleanup for stateful provisioning mock rules.
+
+    The mock-rule service preserves insertion order. When multiple e2e
+    scenarios run in one pytest process against one compose stack, a stale
+    broad ``{"vm_action": "create"}`` rule can match before the rule that the
+    current scenario just armed. Delete known scenario rule ids before arming
+    a new create rule so each scenario controls its own evaluation order.
+    """
+    for rule_id in rule_ids:
+        try:
+            provisioning_test_client.delete_mock_rule(rule_id)
+        except Exception as exc:
+            log.debug("[conftest] Could not delete mock rule %s: %s", rule_id, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -177,49 +192,19 @@ def registry_client():
 
 
 @pytest.fixture(scope="module")
-def seller_agent_id(storefront_admin_client) -> str:
-    """Discover the seller's live canonical agent ID from /api/v1/system/status.
-
-    Reads the storefront's own agent_id rather than hardcoding it in the test
-    config. The hardcoded form (e.g. ``eip155:31337:0x8004A8...:2``) is only
-    deterministic on a strictly-fresh anvil where account #2 registers second
-    against IdentityRegistry — any prior registration shifts the on-chain ID
-    and breaks the auth header used by /admin/* and the provisioning service.
-
-    The storefront exposes its live agent_id at the top level of
-    /api/v1/system/status (added in 40b1b9b alongside chain_id and
-    resource_count diagnostics). Falls back to the configured ``SELLER.AGENT_ID``
-    if the status endpoint doesn't include one (e.g. seller hasn't completed
-    registration yet — should be a clear test failure rather than a silent
-    skip).
-    """
-    status = storefront_admin_client.get_system_status()
-    live = getattr(status, "agent_id", None)
-    if live:
-        return str(live)
-    fallback = str(settings.SELLER.AGENT_ID or "")
-    if not fallback:
-        pytest.skip(
-            "Storefront has no live agent_id and SELLER.AGENT_ID is not configured. "
-            "Either run `market-storefront register` against the storefront, "
-            "or set SELLER.AGENT_ID in config-<profile>.yml."
-        )
-    return fallback
-
-
-@pytest.fixture(scope="module")
-def provisioning_client(seller_agent_id):
+def provisioning_client():
     """Canonical SyncProvisioningClient.
 
-    Uses the seller's live agent ID for X-Agent-ID — provisioning jobs created
-    by the storefront carry the seller's agent_id, so reads need the same value
-    or get a 403.
+    Provisioning is an internal dependency of the storefront. Since the
+    ERC-8004 removal it gates every non-health route on a single shared
+    admin key (X-Admin-Key); there is no per-agent identity anymore.
     """
     from client.provisioning_client import SyncProvisioningClient
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
+    admin_key = str(settings.SELLER.ADMIN_API_KEY or "") or None
     client = SyncProvisioningClient(
         base_url=url,
-        agent_id=seller_agent_id or None,
+        admin_key=admin_key,
     )
     yield client
     client.close()
@@ -232,8 +217,56 @@ def provisioning_test_client():
     Only works when the provisioning service runs with ACTIVE_PROFILES=mock.
     """
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
-    with ProvisioningTestClient(base_url=url, timeout=20.0) as client:
+    admin_key = str(settings.SELLER.ADMIN_API_KEY or "") or None
+    with ProvisioningTestClient(base_url=url, timeout=20.0, admin_key=admin_key) as client:
         yield client
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _ensure_provisioning_host_registered(provisioning_client):
+    """Idempotently register the e2e ``kvm1`` host in the provisioning service.
+
+    The scenario's seeded resource row declares ``attribute.vm_host=kvm1``,
+    so phase 08c's ``/test/evaluate-job`` lookup requires a matching row
+    in the provisioning ``hosts`` table. Compose-launched provisioning
+    starts with an empty inventory (no ``inventory_ini``/``inventory_path``
+    configured); production deployments seed the table via Helm secret
+    or a bind-mounted IaC inventory. Inserting the row here keeps the
+    e2e scenario hermetic and idempotent across re-runs.
+
+    The credentials are stub values (path-type, fake path) - mock
+    provisioning never SSHes into the host, so they never get used.
+    Real-host integration tests use a real key path; this fixture is
+    only relevant when ``ACTIVE_PROFILES=mock``.
+    """
+    from client.provisioning_client import ProvisioningError
+    from models.host_model import HostCreate
+
+    host_name = "kvm1"
+
+    try:
+        provisioning_client.get_host(host_name)
+    except ProvisioningError as exc:
+        if exc.status_code != 404:
+            pytest.skip(f"Could not probe provisioning host {host_name!r}: {exc}")
+    else:
+        log.info("[conftest] Provisioning host %r already registered", host_name)
+        return
+
+    body = HostCreate(
+        name=host_name,
+        kvm_host="127.0.0.1",
+        ssh_user="stub",
+        ssh_key_type="path",
+        ssh_key_value="/tmp/stub-e2e-key",
+        gpu_count=1,
+        enabled=True,
+    )
+    try:
+        provisioning_client.register_host(body)
+    except ProvisioningError as exc:
+        pytest.skip(f"Could not register provisioning host {host_name!r}: {exc}")
+    log.info("[conftest] Registered provisioning host %r", host_name)
 
 
 @pytest.fixture(scope="module")

@@ -1,16 +1,17 @@
-"""Domain-agnostic policy engine.
+"""Shared negotiation machinery for buyer + seller.
 
 Provides:
-- A callable registry (`@policy_callable`) plus discovery helpers.
-- A composable policy store backed by a persistence port.
+- A negotiation middleware chain (`NegotiationMiddleware`,
+  `run_negotiation_chain`, `register_negotiation_middleware`,
+  `load_negotiation_chain`) with built-in bisection terminal + guards
+  (inventory match, escrow shape, max rounds).
 - A negotiation thread store keyed off an injected `Identity`.
-- A symmetric negotiation middleware chain (`NegotiationMiddleware`,
-  `run_negotiation_chain`) with built-in bisection terminal + ported
-  guards (inventory match, escrow shape, max rounds).
 
-Both buyer and provider drive negotiation through the same chain
-abstraction. Data model is symmetric; nothing here depends on a
-specific server runtime or protocol.
+Both buyer and seller drive per-round negotiation through the same
+chain abstraction. Data model is symmetric; nothing here depends on a
+specific server runtime or protocol. The seller's chain is configured
+in `[negotiation] chain = [...]`; the buyer's CLI builds its chain
+internally per `[negotiation] policy_mode`.
 """
 
 from market_policy.negotiation_middleware import (
@@ -20,6 +21,7 @@ from market_policy.negotiation_middleware import (
     NegotiationRound,
     NegotiationStep,
     bisection_middleware,
+    buyer_escrow_shape_guard,
     escrow_shape_guard,
     has_matching_inventory_guard,
     load_negotiation_chain,
@@ -35,6 +37,7 @@ __all__ = [
     "NegotiationRound",
     "NegotiationStep",
     "bisection_middleware",
+    "buyer_escrow_shape_guard",
     "escrow_shape_guard",
     "has_matching_inventory_guard",
     "load_negotiation_chain",

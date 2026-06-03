@@ -81,7 +81,7 @@ class NegotiationsController:
         try:
             result = await self._svc.advance(
                 listing_id=listing_id, neg_id=neg_id,
-                action=body.action, price=body.price, reason=body.reason,
+                action=body.action, proposal=body.proposal, reason=body.reason,
             )
         except NegotiationServiceError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc))
@@ -101,7 +101,7 @@ class NegotiationsController:
     ) -> ForceAcceptResponse:
         try:
             result = await self._svc.force_accept(
-                listing_id=listing_id, neg_id=neg_id, price=body.price
+                listing_id=listing_id, neg_id=neg_id, amount=body.amount
             )
         except NegotiationServiceError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc))

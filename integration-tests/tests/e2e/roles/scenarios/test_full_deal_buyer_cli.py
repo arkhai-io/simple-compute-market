@@ -26,10 +26,6 @@ Phase 3 — Registry publication
   03b  Resume + registry confirm:
          POST /api/v1/listings/{id}/resume → registry_status=published
          GET registry/listings → listing present
-  03c  Seller agent indexed:
-         GET storefront /api/v1/system/wait-for-registry-agent → registry_auth=ok
-         (long-poll; storefront blocks until registry EventSync indexes
-         the on-chain registration; gates publication/negotiation)
 
 Phase 4 — Registry publication
   04a  Primary registry: listing visible in the registry used by this topology
@@ -65,7 +61,7 @@ Phase 9 — Provisioning completion
          wait_for_event("settle_terminal", predicate=status=="ready")
          body.tenant_credentials present
          Popen.wait → returncode 0
-         GET /api/v1/listings/{id} → status=accepted or closed
+         GET /api/v1/listings/{id} → status=open
          GET .../negotiations/{neg_id} → primary escrow ready + fulfillment_uid
   09c  Lease registered:
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
@@ -96,7 +92,11 @@ from service.clients.alkahest import (
     resolve_alkahest_address_config,
 )
 from src.settings import settings
-from tests.e2e.roles.scenarios.conftest import DealState, require_state
+from tests.e2e.roles.scenarios.conftest import (
+    DealState,
+    delete_mock_rules_if_present,
+    require_state,
+)
 
 log = logging.getLogger(__name__)
 
@@ -118,12 +118,11 @@ OFFER_RESOURCE = {
 DEMAND_RESOURCE = {
     "token": {
         "symbol": "MOCK",
-        # MockERC20 deployed by alkahest at fixed deterministic address —
-        # see market-contract-deployer/alkahest-transactions.json `_mock_erc20`.
-        # Stage 07 escrows real tokens against this contract so that
-        # storefront's pre-settlement on-chain verifier (commit 03e47bf)
-        # actually finds the EAS attestation. Account #1 (test buyer)
-        # is pre-funded by the alkahest deploy script.
+        # MockERC20 deployed by alkahest at a fixed deterministic address.
+        # The buyer (account #1) is pre-funded with it in the baked chain
+        # state (see test-env/generate_state.py). Stage 07 escrows real
+        # tokens against this contract so the storefront's pre-settlement
+        # on-chain verifier (commit 03e47bf) finds the EAS attestation.
         "contract_address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
         "decimals": 0,   # listing-display only; raw amounts are what land on-chain
     },
@@ -146,8 +145,8 @@ ACCEPTED_ESCROWS = [{
     "escrow_address": str(
         _ALKAHEST_CFG.erc20_addresses.escrow_obligation_nontierable
     ).lower(),
-    "fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
-    "price_per_hour": DEMAND_RESOURCE["amount"],
+    "literal_fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
+    "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_RESOURCE["amount"])}],
 }]
 DURATION_HOURS = 1
 BUYER_INITIAL_PRICE = 7_000    # below seller floor (10_000) — forces counter at round 0
@@ -238,7 +237,7 @@ class TestStage00d_NegotiationStrategy:
         """GET /api/v1/system/status → checks.negotiation_strategy not exit-on-probe.
 
         Catches the rl-strategy-but-no-torch failure mode before any negotiation
-        attempt. If this fails, set [seller.negotiation] policy_mode = 'bisection'
+        attempt. If this fails, set [seller.negotiation] policies = ['has_matching_inventory_guard', 'escrow_shape_guard', 'bisection']
         in config.toml and restart the storefront.
         """
         require_state(deal_state, "_storefront_healthy", "_registry_reachable")
@@ -250,7 +249,7 @@ class TestStage00d_NegotiationStrategy:
         )
         assert "exit_on_probe" not in strat, (
             f"Negotiation strategy would exit every round: {strat!r}\n"
-            "Set [seller.negotiation] policy_mode = 'bisection' in config.toml "
+            "Set [seller.negotiation] policies = ['has_matching_inventory_guard', 'escrow_shape_guard', 'bisection'] in config.toml "
             "and restart the storefront."
         )
         deal_state._negotiation_strategy_viable = True
@@ -326,39 +325,20 @@ class TestStage00g_AlkahestConfigured:
     def test_00g_alkahest_is_configured(
         self, storefront_admin_client, deal_state: DealState
     ):
-        """GET /api/v1/system/status → checks.alkahest=ok.
+        """GET /api/v1/system/status → checks.alkahest reports configured chain names.
 
-        Alkahest must be configured before the on-chain escrow phases (07/07b).
-        If this fails with alkahest='unconfigured', the storefront config.toml
-        is missing the [chain] section or the alkahest address config path.
-
-        Common cause on Helm deployments: the values.yaml key under
-        agents[].config.chain uses snake_case ``alkahest_address_config_path``
-        but the _helpers.tpl template reads the camelCase
-        ``alkahestAddressConfigPath`` key — so the path is never written into
-        config.toml.
-
-        Fix: use camelCase in helm/values.yaml::
-
-            chain:
-              name: "anvil"
-              alkahestAddressConfigPath: "/app/src/.../alkahest_anvil_addresses.json"
-
-        For docker-compose, ensure config.bob.toml contains::
-
-            [chain]
-            alkahest_address_config_path = "/app/src/.../alkahest_anvil_addresses.json"
+        After the multi-chain refactor, ``checks.alkahest`` is a comma-joined
+        list of chain names; the test only requires that ``anvil`` is present.
         """
         require_state(deal_state, "_storefront_healthy")
         status = storefront_admin_client.get_system_status()
         alkahest_check = (status.checks or {}).get("alkahest", "absent")
-        assert alkahest_check == "ok", (
-            f"Storefront alkahest client is not configured: checks.alkahest={alkahest_check!r}\n"
+        assert "anvil" in alkahest_check, (
+            f"Storefront alkahest client is not configured for anvil: "
+            f"checks.alkahest={alkahest_check!r}\n"
             "The on-chain escrow phases (07, 07b) will fail without a working AlkahestClient.\n"
-            "Fix for Helm: use camelCase key 'alkahestAddressConfigPath' in values.yaml "
-            "under agents[].config.chain.\n"
-            "Fix for docker-compose: set alkahest_address_config_path in config.bob.toml "
-            "under [chain]."
+            "Fix for docker-compose: ensure [chains.anvil] in config.bob.toml has "
+            "rpc_url + alkahest_address_config_path set."
         )
         deal_state._alkahest_configured = True
         log.info("[00g] Alkahest configured: checks.alkahest=%s", alkahest_check)
@@ -507,7 +487,7 @@ class TestStage03a_ValidatePublish:
         from registry_client import ValidatePublishRequest
         req = ValidatePublishRequest(
             listing_id=deal_state.seller_listing_id,
-            seller="http://bob-storefront:8001/",
+            storefront_url="http://bob-storefront:8001/",
             offer_resource=OFFER_RESOURCE,
             accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
@@ -525,61 +505,6 @@ class TestStage03a_ValidatePublish:
                  result.valid, result.offer_resource_type, result.accepted_escrows_count)
 
 
-class TestStage03c_SellerAgentIndexed:
-    def test_03c_seller_agent_indexed_in_registry(
-        self, storefront_admin_client, deal_state: DealState
-    ):
-        """Storefront confirms its own agent is indexed in the registry.
-
-        Long-poll (server-side via storefront): the storefront calls
-        ``registry_auth_check()`` repeatedly until the result is definitive —
-        i.e. the registry's EventSync has indexed the on-chain registration
-        and the storefront can confirm ownership — or until the timeout elapses.
-
-        This stage runs **before** 03b so that when 03b calls
-        ``resume_listing`` → ``publish_order_to_registry``, the agent row
-        already exists in the registry and the publish does not receive a 404.
-
-        Using the storefront's own ``/api/v1/system/wait-for-registry-agent``
-        endpoint instead of querying the registry directly means:
-          1. No agent ID config is required — the storefront uses its live
-             runtime agent ID (set by ``_ensure_agent_identity`` at startup).
-          2. The wait is single-call with no client-side polling loop.
-          3. The definitive states (``"ok"``, ``"owner_mismatch"``, etc.)
-             are the storefront's own evaluation, not ours.
-        """
-        require_state(deal_state, "seller_listing_id", "_registry_validate_passed")
-
-        result = storefront_admin_client.wait_for_registry_agent_ready(timeout=90.0)
-        assert result.ready, (
-            f"Storefront's agent was not indexed by the registry within 90 s.\n"
-            f"registry_auth={result.registry_auth!r} elapsed_ms={result.elapsed_ms}\n"
-            "Check:\n"
-            "  1. The registry EventSync is running: "
-            "GET http://localhost:8080/api/v1/system/sync\n"
-            "  2. The agent is registered on-chain: run "
-            "'market-storefront register' and confirm it prints a numeric agent ID.\n"
-            "  3. The storefront config has the correct registry URL and identity "
-            "registry address."
-        )
-        assert result.registry_auth == "ok", (
-            f"Registry auth check returned a definitive but non-ok result: "
-            f"{result.registry_auth!r}\n"
-            "Possible causes:\n"
-            "  'owner_mismatch' — the agent on-chain is owned by a different wallet "
-            "than the storefront's configured wallet address.\n"
-            "  'unconfigured' — registry.url or seller.onchain_agent_id not set in "
-            "config.toml.\n"
-            f"elapsed_ms={result.elapsed_ms}"
-        )
-
-        deal_state._seller_agent_indexed = True
-        log.info(
-            "[03c] Registry auth ok — seller agent indexed (elapsed=%d ms)",
-            result.elapsed_ms,
-        )
-
-
 class TestStage03b_ResumePublishesToRegistry:
     def test_03b_resume_listing_publishes_and_registry_confirms(
         self, storefront_admin_client, registry_client, deal_state: DealState
@@ -590,7 +515,7 @@ class TestStage03b_ResumePublishesToRegistry:
         synchronously, so when registry_status=published is in the response the
         registry row already exists — no polling required.
         """
-        require_state(deal_state, "seller_listing_id", "_registry_validate_passed", "_seller_agent_indexed")
+        require_state(deal_state, "seller_listing_id", "_registry_validate_passed")
 
         result = storefront_admin_client.resume_listing(deal_state.seller_listing_id)
         assert result.paused is False, (
@@ -631,9 +556,11 @@ class TestStage03b_ResumePublishesToRegistry:
 # e2e tests.
 # ===========================================================================
 
-# The integration-tests venv reaches the primary registry directly rather than
-# going through CONFIG.indexer_urls, which lives inside the storefront container.
-_REGISTRY_A = "http://localhost:8080"
+# Primary registry, reached directly from the buyer machine — the same URL
+# the seller publishes to. Under the docker profile (buyer running in-network)
+# this is the service DNS (http://registry:8080); host/local profiles resolve
+# it to the published port (http://localhost:8080).
+_REGISTRY_A = str(settings.REGISTRY.API_URL or "http://registry:8080")
 
 class TestStage04a_PrimaryRegistryPublish:
     def test_04a_listing_appears_in_primary_registry(
@@ -675,21 +602,30 @@ class TestStage05a_EvaluateNegotiate:
         without creating a thread. Catches price_unreasonable and
         torch_unavailable before committing a real negotiation.
         """
-        require_state(deal_state, "seller_listing_id", "resume_confirmed", "_seller_agent_indexed")
+        require_state(deal_state, "seller_listing_id", "resume_confirmed")
 
         result = storefront_admin_client.evaluate_negotiate(
             deal_state.seller_listing_id,
-            their_proposed_price=BUYER_INITIAL_PRICE,
+            proposal={
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "0" * 40,
+                "fields": {
+                    "amount": BUYER_INITIAL_PRICE,
+                    "token": DEMAND_RESOURCE["token"]["contract_address"],
+                },
+                "expiration_unix": 2_000_000_000,
+            },
+            requested_duration_seconds=DURATION_HOURS * 3600,
             buyer_address=buyer_config["wallet_address"],
         )
         assert result.would_negotiate, (
             f"Strategy would exit at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}.\n"
             f"decision={result.decision!r} reason={result.decision_reason!r}\n"
-            f"our_reference_price={result.our_reference_price} "
-            f"their_proposed_price={result.their_proposed_price}\n"
-            "If reason is 'torch_unavailable': set policy_mode='bisection' in config.toml.\n"
+            f"our_reference_amount={result.our_reference_amount} "
+            f"their_proposed_amount={result.their_proposed_amount}\n"
+            "If reason is 'torch_unavailable': set policies=['has_matching_inventory_guard', 'escrow_shape_guard', 'bisection'] in config.toml.\n"
             "If reason is 'price_unreasonable': increase BUYER_INITIAL_PRICE to >= "
-            f"{result.our_reference_price} (seller floor)."
+            f"{result.our_reference_amount} (seller floor)."
         )
         assert result.decision == "counter", (
             f"Strategy accepted at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}. "
@@ -767,13 +703,13 @@ class TestStage05b_BuyerCliDrivesNegotiation:
             f"reason={terminal.get('reason')!r}"
         )
         neg_id = terminal.get("negotiation_id")
-        agreed_price = terminal.get("agreed_price")
+        agreed_amount = terminal.get("agreed_amount")
         assert neg_id, f"run_ended missing negotiation_id: {terminal!r}"
-        assert agreed_price is not None, f"run_ended missing agreed_price: {terminal!r}"
+        assert agreed_amount is not None, f"run_ended missing agreed_amount: {terminal!r}"
 
         deal_state.buyer_run_id = run.run_id
         deal_state.negotiation_id = str(neg_id)
-        deal_state.agreed_price = float(agreed_price)
+        deal_state.agreed_amount = int(agreed_amount)
         deal_state.negotiation_terminal_state = "success"
 
         # Seller-side sanity: the same round_decided event the synthetic
@@ -790,7 +726,7 @@ class TestStage05b_BuyerCliDrivesNegotiation:
         log.info(
             "[05b] `market negotiate` run=%s agreed at %s after %s round(s); "
             "seller stage events: %d round_decided",
-            run.run_id, agreed_price, terminal.get("rounds"), len(round_events),
+            run.run_id, agreed_amount, terminal.get("rounds"), len(round_events),
         )
 
 
@@ -815,9 +751,14 @@ class TestStage07_ArmProvisioningGate:
         escrow under the buyer's wallet, the same way a buyer would in
         production. The test verifies the resulting uid in 07b.
         """
-        require_state(deal_state, "negotiation_terminal_state", "agreed_price",
+        require_state(deal_state, "negotiation_terminal_state", "agreed_amount",
                       "_provisioning_mock_mode")
 
+        delete_mock_rules_if_present(
+            provisioning_test_client,
+            "e2e-buy-create",
+            PROV_RULE_ID,
+        )
         provisioning_test_client.add_mock_rule(
             rule_id=PROV_RULE_ID,
             match={"vm_action": "create"},
@@ -899,13 +840,13 @@ class TestStage07b_VerifyEscrow:
         Exercises getRecordFromChain in isolation: reads the escrow from chain
         and confirms token, amount, and seller recipient match. No DB writes.
         """
-        require_state(deal_state, "real_escrow_uid", "seller_listing_id", "agreed_price",
+        require_state(deal_state, "real_escrow_uid", "seller_listing_id", "agreed_amount",
                       "_alkahest_configured")
 
         result = storefront_admin_client.verify_settle(
             deal_state.real_escrow_uid,
             seller_wallet=seller_wallet,
-            agreed_price=deal_state.agreed_price,
+            agreed_price=deal_state.agreed_amount,
             agreed_duration_seconds=DURATION_HOURS * 3600,
             listing_id=deal_state.seller_listing_id,
         )
@@ -1034,7 +975,7 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
         credentials to its run-log, then `run_ended`, then exits.
 
         Seller-side cross-checks (HTTP, not in the run-log):
-          - listing → status accepted/closed
+          - listing → status open
           - per-negotiation primary escrow → status=ready,
             fulfillment_uid populated
         """
@@ -1064,9 +1005,7 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
         )
 
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
-        assert listing.status in ("accepted", "closed"), (
-            f"Expected listing status=accepted/closed, got {listing.status!r}"
-        )
+        assert listing.status == "open", f"Expected listing status=open, got {listing.status!r}"
 
         # Canonical per-deal attestation data on the negotiation endpoint
         # (was previously rolled up into the registry's now-removed

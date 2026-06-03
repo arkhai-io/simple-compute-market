@@ -1,12 +1,12 @@
 """Tests for the seller's price-extraction logic.
 
 ``_extract_initial_price_from_order(order)`` is the seller's read of the
-listing's price floor. Source is ``accepted_escrows[0].price_per_hour``.
+listing's price floor. Source is ``accepted_escrows[0].rates[0].value``.
 Tristate semantics:
 
   * positive int — public price, returned directly.
   * ``0``         — free / public-test offering, returned as 0.
-  * ``None``      — hidden reserve, falls back to
+  * empty rates  — hidden reserve, falls back to
     ``[pricing].default_min_price``; raises ValueError if that's also
     unset (sync_negotiation translates to a 409 refusal).
 """
@@ -35,14 +35,19 @@ def _make_listing(*, demand_amount: int | None) -> Listing:
         sla=99.0,
         region=Region.CALIFORNIA_US,
     )
+    rates = (
+        []
+        if demand_amount is None
+        else [{"field": "amount", "per": "hour", "value": str(demand_amount)}]
+    )
     return Listing(
         listing_id="lst-1",
         offer_resource=compute,
         accepted_escrows=[{
             "chain_name": "test_chain",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"token": _TOKEN_ADDR},
-            "price_per_hour": demand_amount,
+            "literal_fields": {"token": _TOKEN_ADDR},
+            "rates": rates,
         }],
         seller="http://seller:8001",
     )

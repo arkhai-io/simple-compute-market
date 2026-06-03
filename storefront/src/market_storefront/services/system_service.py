@@ -14,7 +14,12 @@ import time
 from typing import Any
 
 import market_storefront.container as _container
-from market_storefront.utils.config import settings, chain_id, AGENT_ID
+from market_storefront.utils.config import (
+    CHAINS,
+    ESCROW_TEMPLATES,
+    settings,
+    AGENT_ID,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,29 +70,32 @@ class SystemService:
 
         if include_registry:
             checks["registry"] = await self.registry_check()
-            checks["registry_auth"] = await self.registry_auth_check()
             checks["negotiation_strategy"] = self.negotiation_strategy_check()
 
-        # agent_not_found is a transient post-registration state (registry indexing lag)
-        # and is not a service degradation. Only hard errors cause degraded status.
         # alkahest configured?
-        checks["alkahest"] = "ok" if _container.resolved_alkahest_configured else "unconfigured"
+        configured = _container.configured_chain_names()
+        if configured:
+            checks["alkahest"] = ",".join(sorted(configured))
+        else:
+            checks["alkahest"] = "unconfigured"
 
         def _check_is_healthy(key: str, value: str) -> bool:
             """Return True if this check value does not indicate a service degradation.
 
             The ``negotiation_strategy`` check returns a human-readable strategy
             name (e.g. ``"bisection"``) on success rather than the literal ``"ok"``,
-            so it gets its own rule: healthy unless the value contains the
-            ``exit_on_probe`` marker or starts with a known error prefix.
+            so it gets its own rule. The ``alkahest`` check returns the
+            comma-joined list of configured chain names when at least one chain
+            is up — also handled with its own rule.
             """
-            _ok_literals = {"ok", "unconfigured", "agent_not_found", "indexing"}
-            if value in _ok_literals:
+            if value in ("ok", "unconfigured"):
                 return True
             if key == "negotiation_strategy":
                 return "exit_on_probe" not in value and not value.startswith(
                     ("unknown:", "error:")
                 )
+            if key == "alkahest":
+                return bool(value) and not value.startswith(("unknown:", "error:"))
             return False
 
         all_ok = all(_check_is_healthy(k, v) for k, v in checks.items())
@@ -95,21 +103,22 @@ class SystemService:
         result: dict = {"status": "ok" if all_ok else "degraded", "checks": checks}
 
         if include_registry:
-            # Populate top-level diagnostic fields — not checks, just facts.
-            try:
-                from market_storefront.agent import _AGENT_ID as _live_agent_id
-                onchain_id = _live_agent_id or settings.onchain_agent_id
-                if onchain_id:
-                    from market_storefront.utils.action_executor import _canonical_agent_id
-                    result["agent_id"] = _canonical_agent_id()
-                else:
-                    result["agent_id"] = None
-            except Exception:
-                result["agent_id"] = None
-            try:
-                result["chain_id"] = chain_id()
-            except Exception:
-                result["chain_id"] = None
+            # Top-level diagnostic facts. Identity is the wallet (eip191),
+            # not a per-chain ERC-8004 NFT — a single chain-agnostic value.
+            # ``agent_id`` is the identity the storefront presents to the
+            # provisioning service (X-Agent-ID); consumers read it here to
+            # address jobs the storefront owns. ``identities`` keeps the
+            # per-chain breakdown for multi-chain operators.
+            wallet = (settings.wallet.address or "").lower() or None
+            result["agent_id"] = wallet
+            identities: dict[str, dict[str, Any]] = {}
+            for name, chain in CHAINS.items():
+                identities[name] = {
+                    "chain_id": chain.chain_id,
+                    "identity": wallet,
+                    "scheme": "eip191" if wallet else None,
+                }
+            result["identities"] = identities
             try:
                 resources = await self._db.list_resources()
                 result["resource_count"] = len(resources)
@@ -136,8 +145,7 @@ class SystemService:
         async def _probe(url: str) -> str:
             # /health is unauthenticated by design (so liveness probes
             # don't need credentials), so the auth header is optional
-            # here; we attach it anyway to be consistent with
-            # registry_auth_check and so private registries that ever
+            # here; we attach it anyway so private registries that ever
             # gate /health treat us identically to non-health requests.
             headers = {}
             token = auth.get(url) or auth.get(url + "/")
@@ -160,120 +168,6 @@ class SystemService:
             return "ok"
         # Surface the most recent non-ok result (all are non-ok here).
         return results[-1]
-
-    async def registry_auth_check(self) -> str:
-        """Verify this agent's wallet owns its configured on-chain agent ID.
-
-        Probes every configured registry concurrently. Returns 'ok' if
-        at least one registry confirms the agent's owner matches our
-        wallet. ``agent_not_found`` only when *every* registry reports
-        404 (none have indexed us yet). Other definitive non-ok
-        results win over agent_not_found because they're more
-        actionable for the operator.
-        """
-        urls = [u.rstrip("/") for u in (settings.registry.urls or []) if u]
-        if not urls:
-            return "unconfigured"
-        auth = settings.registry.auth or {}
-        # Read the live runtime ID (set by _ensure_agent_identity at startup),
-        # not the config-file value (which may be stale or absent when auto_register=True).
-        from market_storefront.agent import _AGENT_ID as _live_agent_id
-        onchain_id = _live_agent_id or settings.onchain_agent_id
-        if not onchain_id:
-            return "unconfigured"
-        resolved_chain_id = chain_id()
-        identity_addr = (settings.registry.identity_registry_address or "").lower()
-        canonical = f"eip155:{resolved_chain_id}:{identity_addr}:{onchain_id}"
-        wallet = (settings.wallet.address or "").lower()
-
-        async def _probe(url: str) -> str:
-            headers = {}
-            token = auth.get(url) or auth.get(url + "/")
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-            try:
-                async with httpx.AsyncClient(timeout=2.0) as client:
-                    resp = await client.get(
-                        f"{url}/agents/{canonical}", headers=headers,
-                    )
-                if resp.status_code == 404:
-                    return "agent_not_found"
-                if resp.status_code >= 400:
-                    return f"http_{resp.status_code}"
-                data = resp.json()
-                owner = (data.get("owner") or "").lower()
-                if not owner:
-                    return "owner_unknown"
-                if not wallet:
-                    return "wallet_unconfigured"
-                return "ok" if owner == wallet else "owner_mismatch"
-            except httpx.ConnectError:
-                return "unreachable"
-            except httpx.TimeoutException:
-                return "timeout"
-            except Exception as exc:
-                return f"error: {exc}"
-
-        import asyncio
-        results = await asyncio.gather(*[_probe(u) for u in urls])
-        if "ok" in results:
-            return "ok"
-        # Prefer a definitive non-ok result over agent_not_found, since
-        # the latter is the transient "registry hasn't EventSynced yet"
-        # state that wait_for_registry_agent retries past.
-        for r in results:
-            if r not in ("agent_not_found",):
-                return r
-        return "agent_not_found"
-
-    async def wait_for_registry_agent(self, timeout: float) -> dict:
-        """Block until registry_auth_check() returns a definitive result.
-
-        Polls registry_auth_check() every second until the result is anything
-        other than 'agent_not_found' (the transient state while the registry's
-        EventSync is catching up after a fresh on-chain registration), or until
-        *timeout* seconds elapse.
-
-        Returns a dict with keys:
-          ready       — True if a definitive result was reached before timeout
-          registry_auth — the raw registry_auth_check() value
-          elapsed_ms  — approximate wall-clock wait time in milliseconds
-
-        'ready=True' does not imply 'registry_auth="ok"' — callers must check
-        registry_auth independently.  Definitive non-ok values include
-        'owner_mismatch', 'unconfigured', 'unreachable', and error strings.
-
-        Intended consumers:
-          - GET /api/v1/system/wait-for-registry-agent (thin controller wrapper)
-          - Storefront startup sequence (agent.py) — wait before starting the
-            heartbeat loop so the first heartbeat is not guaranteed to 404.
-        """
-        _pending = {"agent_not_found", "timeout", "unreachable"}
-        poll_interval = 1.0
-        start = time.monotonic()
-        deadline = start + timeout
-        registry_auth = "unknown"
-
-        while True:
-            registry_auth = await self.registry_auth_check()
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-            if registry_auth not in _pending:
-                return {
-                    "ready": True,
-                    "registry_auth": registry_auth,
-                    "elapsed_ms": elapsed_ms,
-                }
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            await asyncio.sleep(min(poll_interval, remaining))
-
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        return {
-            "ready": False,
-            "registry_auth": registry_auth,
-            "elapsed_ms": elapsed_ms,
-        }
 
     # Canonical bind-mount target for the inventory CSV inside a container.
     # When neither csv_inline nor csv_path is set explicitly,
@@ -321,13 +215,18 @@ class SystemService:
             report = await self._db.upsert_resources_from_csv_content(
                 csv_content=csv_inline,
                 source_label="resources_csv_inline (config)",
+                templates=ESCROW_TEMPLATES,
             )
             source = "resources_csv_inline (config)"
         elif csv_path:
-            report = await self._db.upsert_resources_from_csv(csv_path=csv_path)
+            report = await self._db.upsert_resources_from_csv(
+                csv_path=csv_path, templates=ESCROW_TEMPLATES,
+            )
             source = csv_path
         elif os.path.exists(self._DEFAULT_CSV_PATH):
-            report = await self._db.upsert_resources_from_csv(csv_path=self._DEFAULT_CSV_PATH)
+            report = await self._db.upsert_resources_from_csv(
+                csv_path=self._DEFAULT_CSV_PATH, templates=ESCROW_TEMPLATES,
+            )
             source = f"{self._DEFAULT_CSV_PATH} (auto-discovered)"
         else:
             logger.info("[RESOURCE SEED] No resource source configured — starting with empty inventory")
@@ -369,11 +268,12 @@ class SystemService:
             chain = _load_storefront_chain()
             label = f"chain[{len(chain)}]"
             history = [NegotiationRound(
-                round_number=0, sender="them", action="initial", price=10_000,
+                round_number=0, sender="them", action="initial",
+                proposal={"fields": {"amount": 10_000}},
             )]
             context = NegotiationContext(
                 direction="maximize",
-                our_reference_price=10_000,
+                our_reference_amount=10_000.0,
             )
             probe = run_negotiation_chain(chain, history, context)
             if probe.action in ("exit", "reject"):

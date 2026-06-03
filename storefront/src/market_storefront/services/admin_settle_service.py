@@ -33,18 +33,18 @@ class AdminSettleService:
 
     Args:
         sqlite_client: SQLite client for DB lookups (read-only in this service).
-        alkahest_client: Optional ``AlkahestClient`` used by ``verify_escrow_dry_run``
-            to read the on-chain escrow attestation. May be None on hosts where
-            chain config is incomplete; verify_escrow_dry_run will surface that as
-            ``valid=False, reason="AlkahestClient not configured"`` rather than
-            crash.
+        alkahest_clients: Per-chain ``AlkahestClient`` dict, keyed by chain
+            name. ``verify_escrow_dry_run`` picks the entry matching the
+            caller-supplied ``chain_name``; an unknown chain surfaces as
+            ``valid=False, reason="chain '<name>' not configured"`` rather
+            than crashing.
     """
 
     def __init__(
-        self, sqlite_client: Any, alkahest_client: Any = None
+        self, sqlite_client: Any, alkahest_clients: dict[str, Any] | None = None
     ) -> None:
         self._db = sqlite_client
-        self._alkahest = alkahest_client
+        self._alkahest_clients = alkahest_clients or {}
 
     async def verify_escrow_dry_run(
         self,
@@ -52,8 +52,9 @@ class AdminSettleService:
         escrow_uid: str,
         listing_id: str,
         seller_wallet: str,
-        agreed_price: float,
+        agreed_price: int,
         agreed_duration_seconds: int,
+        chain_name: str,
     ) -> dict:
         """Read the escrow from chain and confirm it matches the supplied terms.
 
@@ -70,7 +71,23 @@ class AdminSettleService:
         if not listing:
             raise ValueError(f"Listing {listing_id!r} not found")
 
-        from market_storefront.utils.config import settings
+        alkahest = self._alkahest_clients.get(chain_name)
+        if alkahest is None:
+            return {
+                "valid": False,
+                "escrow_uid": escrow_uid,
+                "reason": f"chain {chain_name!r} not configured on this storefront",
+            }
+
+        from market_storefront.utils.config import CHAINS
+        chain_cfg = CHAINS.get(chain_name)
+        if chain_cfg is None:
+            return {
+                "valid": False,
+                "escrow_uid": escrow_uid,
+                "reason": f"chain {chain_name!r} missing from [chains] config",
+            }
+
         try:
             await verify_escrow_for_settlement(
                 escrow_uid=escrow_uid,
@@ -78,9 +95,9 @@ class AdminSettleService:
                 agreed_price=agreed_price,
                 agreed_duration_seconds=agreed_duration_seconds,
                 listing=listing,
-                alkahest_client=self._alkahest,
-                chain_name=settings.chain.name,
-                alkahest_address_config_path=settings.chain.alkahest_address_config_path,
+                alkahest_client=alkahest,
+                chain_name=chain_name,
+                alkahest_address_config_path=chain_cfg.alkahest_address_config_path,
             )
         except EscrowVerificationError as exc:
             return {"valid": False, "escrow_uid": escrow_uid, "reason": str(exc)}

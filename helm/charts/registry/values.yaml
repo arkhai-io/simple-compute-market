@@ -33,6 +33,13 @@ config:
   # Leave empty for local dev (direct access, no gateway prefix stripping).
   rootPath: ""
 
+# ---------------------------------------------------------------------------
+# Helm smoke-test configuration. Empty activeProfiles derives from
+# global.smokeTests.
+# ---------------------------------------------------------------------------
+tests:
+  activeProfiles: ""
+
 # Number of replicas.
 replicaCount: 1
 

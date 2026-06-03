@@ -45,12 +45,21 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class NegotiationRound:
-    """One round's transcript entry. Both parties contribute one per round."""
+    """One round's transcript entry. Both parties contribute one per round.
+
+    ``proposal`` is the full EscrowProposal-shaped dict for the round
+    (``chain_name``, ``escrow_address``, ``fields``, ``expiration_unix``).
+    The negotiated scalar — the absolute payment amount in base units of
+    the escrow's payment token — lives in ``proposal["fields"]["amount"]``
+    for ERC20-style escrows. Per-hour rates are a broadcast-only concept
+    on listings; once a negotiation starts, every round carries an
+    absolute amount (duration is fixed at round 0).
+    """
 
     round_number: int
     sender: Literal["us", "them"]
     action: Literal["initial", "counter", "accept", "exit", "reject"]
-    price: float | None = None  # set for initial / counter / accept; base units per hour
+    proposal: dict[str, Any] | None = None  # full EscrowProposal dict
 
 
 @dataclass(frozen=True)
@@ -60,16 +69,20 @@ class NegotiationDecision:
     ``action="reject"`` is reserved for pre-flight guard vetoes (caller
     maps to HTTP 409). Terminal strategies use ``"counter"``, ``"accept"``,
     or ``"exit"``.
+
+    ``proposal`` is the full EscrowProposal dict for ``counter`` / ``accept``
+    (with ``fields["amount"]`` carrying the absolute payment amount).
+    ``exit`` / ``reject`` decisions leave it None.
     """
 
     action: Literal["accept", "counter", "exit", "reject"]
-    price: float | None = None  # required for counter / accept; base units per hour
+    proposal: dict[str, Any] | None = None
     reason: str | None = None  # required for exit / reject; optional otherwise
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"action": self.action}
-        if self.price is not None:
-            d["price"] = self.price
+        if self.proposal is not None:
+            d["proposal"] = self.proposal
         if self.reason is not None:
             d["reason"] = self.reason
         return d
@@ -86,11 +99,15 @@ class NegotiationContext:
 
     Fields:
         direction: ``"maximize"`` (seller) or ``"minimize"`` (buyer).
-        our_reference_price: Seller's floor or buyer's ceiling.
+        our_reference_amount: Seller's absolute floor or buyer's absolute
+            ceiling (base units of the escrow's payment token). Computed
+            at round 0 from a per-hour rate × ``duration_seconds`` / 3600.
         listing: Full listing row (offer_resource, accepted_escrows, status, ...).
             Guards consult this; the terminal strategy typically doesn't.
-        escrow_proposal: Buyer's escrow shape proposal (set by seller side
-            on round 0; None on buyer side).
+        our_escrow_proposal: Our own pinned escrow proposal (the seller's
+            advertised entry on the seller side; the buyer's first-round
+            proposal on the buyer side). Used by shape-guard middlewares
+            to detect peer mutations to fields we pinned.
         available_resources: Snapshot of the seller's portfolio at negotiation
             start, for the inventory guard. ``{"resources": [...]}``. Empty
             dict on buyer side.
@@ -99,9 +116,9 @@ class NegotiationContext:
     """
 
     direction: Literal["minimize", "maximize"]
-    our_reference_price: float
+    our_reference_amount: float
     listing: dict[str, Any] = field(default_factory=dict)
-    escrow_proposal: dict[str, Any] | None = None
+    our_escrow_proposal: dict[str, Any] | None = None
     available_resources: dict[str, Any] = field(default_factory=dict)
     max_rounds: int = 10
     intermediate: dict[str, Any] = field(default_factory=dict)
@@ -116,20 +133,69 @@ NegotiationMiddleware = Callable[
 ]
 
 
-def their_proposed_price(history: list[NegotiationRound]) -> Optional[float]:
-    """Most recent price the other side proposed. None if they haven't yet."""
+def _amount_from_proposal(proposal: dict[str, Any] | None) -> Optional[float]:
+    """Pull the absolute payment amount out of an EscrowProposal-shaped dict.
+
+    The amount lives in ``fields["amount"]`` for ERC20-style escrows. Coerces
+    decimal-digit strings (uint256 wire form) to int. Returns None on a
+    missing or unparseable value.
+    """
+    if not isinstance(proposal, dict):
+        return None
+    fields = proposal.get("fields") or {}
+    if not isinstance(fields, dict):
+        return None
+    raw = fields.get("amount")
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    if isinstance(raw, str):
+        s = raw.strip()
+        if s.isdigit():
+            return float(int(s))
+    return None
+
+
+def their_proposed_amount(history: list[NegotiationRound]) -> Optional[float]:
+    """Most recent absolute amount the other side proposed. None if not yet."""
     for round_ in reversed(history):
-        if round_.sender == "them" and round_.price is not None:
-            return float(round_.price)
+        if round_.sender == "them":
+            amount = _amount_from_proposal(round_.proposal)
+            if amount is not None:
+                return amount
+    return None
+
+
+def their_last_proposal(history: list[NegotiationRound]) -> Optional[dict[str, Any]]:
+    """Most recent full proposal from the other side. None if not yet."""
+    for round_ in reversed(history):
+        if round_.sender == "them" and round_.proposal is not None:
+            return round_.proposal
     return None
 
 
 def our_previous_counters(history: list[NegotiationRound]) -> list[float]:
-    """Prices we counter-proposed in earlier rounds, oldest first."""
-    return [
-        h.price for h in history
-        if h.sender == "us" and h.action == "counter" and h.price is not None
-    ]
+    """Absolute amounts we counter-proposed in earlier rounds, oldest first."""
+    out: list[float] = []
+    for h in history:
+        if h.sender == "us" and h.action == "counter":
+            amount = _amount_from_proposal(h.proposal)
+            if amount is not None:
+                out.append(amount)
+    return out
+
+
+def our_first_proposal(history: list[NegotiationRound]) -> Optional[dict[str, Any]]:
+    """Our earliest proposal in the transcript — the field shape we pinned.
+
+    Used by ``buyer_escrow_shape_guard`` to detect peer mutations to fields
+    we set on opening.
+    """
+    for h in history:
+        if h.sender == "us" and h.proposal is not None:
+            return h.proposal
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -274,24 +340,41 @@ DEFAULT_CONVERGENCE_RATIO = 0.01  # accept when peer is within 1% of our referen
 DEFAULT_REASONABLE_MULTIPLIER = 1.5  # exit when peer is more than 1.5× off our reference
 
 
+def _set_proposal_amount(proposal: dict[str, Any], amount: float) -> dict[str, Any]:
+    """Return a shallow copy of ``proposal`` with ``fields["amount"]``
+    updated to the given absolute amount (rounded to int — uint256 wire).
+    """
+    out = dict(proposal)
+    fields = dict(out.get("fields") or {})
+    fields["amount"] = int(round(amount))
+    out["fields"] = fields
+    return out
+
+
 @register_negotiation_middleware("bisection")
 def bisection_middleware(
     history: list[NegotiationRound],
     context: NegotiationContext,
 ) -> NegotiationStep:
-    """Price-midpoint counter-offer with convergence + stale-counter guards.
+    """Amount-midpoint counter-offer with convergence + stale-counter guards.
 
     The historical default. Rule-based, deterministic, no model files.
     Terminal: always returns Some (never defers).
 
-    For ``direction="minimize"`` (buyer-shape): accept if peer price ≤
-    our ceiling × (1 + ε); counter at the midpoint of (our_ceiling,
-    their_price), clamped to ≤ our_ceiling; exit if peer price > our
-    ceiling × 1.5.
+    Operates on the absolute payment amount carried in
+    ``proposal.fields["amount"]``. Counter decisions return a new proposal
+    that copies the peer's last proposal (preserving chain / escrow /
+    fields shape) with only the amount updated. When the peer has not
+    yet proposed (round 0 on our side), opens with our pinned reference
+    proposal (``context.our_escrow_proposal``).
 
-    For ``direction="maximize"`` (seller-shape): accept if peer price ≥
-    our floor × (1 - ε); counter at the midpoint of (our_floor, their_price);
-    exit if peer price < our_floor / 1.5.
+    For ``direction="minimize"`` (buyer-shape): accept if peer amount ≤
+    our ceiling × (1 + ε); counter at midpoint, clamped to ≤ our ceiling;
+    exit if peer amount > our ceiling × 1.5.
+
+    For ``direction="maximize"`` (seller-shape): accept if peer amount ≥
+    our floor × (1 - ε); counter at midpoint; exit if peer amount <
+    our floor / 1.5.
 
     Both sides exit after ``context.max_rounds`` rounds or two consecutive
     identical counters (built-in stale-counter guard).
@@ -303,38 +386,71 @@ def bisection_middleware(
     if len(counters) >= 2 and counters[-1] == counters[-2]:
         return NegotiationDecision(action="exit", reason="stale_negotiation"), context
 
-    our_price = context.our_reference_price
-    their_price = their_proposed_price(history)
+    our_amount = context.our_reference_amount
+    their_amount = their_proposed_amount(history)
+    their_proposal = their_last_proposal(history)
 
-    if their_price is None:
-        # First call: open with our reference (ceiling for minimize, floor for maximize).
-        return NegotiationDecision(action="counter", price=our_price), context
+    if their_amount is None:
+        # Round 0 on our side: open with our reference amount on our
+        # pinned proposal. (Buyer: our_escrow_proposal carries our ask;
+        # seller: it carries the listing's accepted_escrows entry.)
+        base = context.our_escrow_proposal or {}
+        return (
+            NegotiationDecision(
+                action="counter",
+                proposal=_set_proposal_amount(base, our_amount),
+            ),
+            context,
+        )
 
     conv = DEFAULT_CONVERGENCE_RATIO
     reasonable = DEFAULT_REASONABLE_MULTIPLIER
+    # Use the peer's last proposal as the shape skeleton so accept/counter
+    # echo the same chain / escrow / fields they sent (only amount differs).
+    skeleton = their_proposal or context.our_escrow_proposal or {}
 
     if context.direction == "minimize":
-        if their_price <= our_price * (1 + conv):
+        if their_amount <= our_amount * (1 + conv):
             return (
-                NegotiationDecision(action="accept", price=their_price, reason="convergence"),
+                NegotiationDecision(
+                    action="accept",
+                    proposal=_set_proposal_amount(skeleton, their_amount),
+                    reason="convergence",
+                ),
                 context,
             )
-        if their_price <= our_price * reasonable:
-            proposed = (our_price + their_price) / 2
-            if proposed > our_price:
-                proposed = our_price  # never counter above our ceiling
-            return NegotiationDecision(action="counter", price=proposed), context
+        if their_amount <= our_amount * reasonable:
+            proposed = (our_amount + their_amount) / 2
+            if proposed > our_amount:
+                proposed = our_amount  # never counter above our ceiling
+            return (
+                NegotiationDecision(
+                    action="counter",
+                    proposal=_set_proposal_amount(skeleton, proposed),
+                ),
+                context,
+            )
         return NegotiationDecision(action="exit", reason="price_unreasonable"), context
 
     if context.direction == "maximize":
-        if their_price >= our_price * (1 - conv):
+        if their_amount >= our_amount * (1 - conv):
             return (
-                NegotiationDecision(action="accept", price=their_price, reason="convergence"),
+                NegotiationDecision(
+                    action="accept",
+                    proposal=_set_proposal_amount(skeleton, their_amount),
+                    reason="convergence",
+                ),
                 context,
             )
-        if their_price >= our_price / reasonable:
-            proposed = (our_price + their_price) / 2
-            return NegotiationDecision(action="counter", price=proposed), context
+        if their_amount >= our_amount / reasonable:
+            proposed = (our_amount + their_amount) / 2
+            return (
+                NegotiationDecision(
+                    action="counter",
+                    proposal=_set_proposal_amount(skeleton, proposed),
+                ),
+                context,
+            )
         return NegotiationDecision(action="exit", reason="price_unreasonable"), context
 
     return (
@@ -428,30 +544,28 @@ def has_matching_inventory_guard(
     )
 
 
+def _peer_proposal(history: list[NegotiationRound]) -> dict[str, Any] | None:
+    """Latest proposal from the *other* side; falls back to None."""
+    return their_last_proposal(history)
+
+
 @register_negotiation_middleware("escrow_shape_guard")
 def escrow_shape_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
 ) -> NegotiationStep:
     """Veto when the buyer's escrow proposal diverges from the seller's
-    advertised ``accepted_escrows`` entry on any seller-pinned field.
+    advertised ``accepted_escrows`` entry on any seller-pinned literal.
 
     Strict equality: every key the seller set on the matched entry's
-    ``fields`` map must equal the buyer's value. Operators wanting softer
-    matching (allow arbiter upgrade, swap payment token, etc.) drop this
-    guard from ``[negotiation].chain`` and write their own.
+    ``literal_fields`` map must equal the buyer's value. Operators wanting
+    softer matching (allow arbiter upgrade, swap payment token, etc.)
+    drop this guard from ``[negotiation].chain`` and write their own.
 
-    Passes through when:
-      * ``context.escrow_proposal`` is None (legacy buyer client),
-      * listing has no ``accepted_escrows`` advertised,
-      * proposal's ``escrow_address`` is the zero placeholder.
-
-    The structural ``(chain, address)`` lookup against ``accepted_escrows``
-    is protocol-fixed shape resolution and lives in ``sync_negotiation``.
-    This guard only enforces the *seller's* opinion about which fields
-    must match.
+    Reads the buyer's latest proposal from history (rounds carry full
+    EscrowProposal-shaped dicts; "them" = buyer from the seller's POV).
     """
-    proposal = context.escrow_proposal
+    proposal = _peer_proposal(history)
     if not isinstance(proposal, dict):
         return None, context
 
@@ -474,7 +588,7 @@ def escrow_shape_guard(
         return None, context
 
     proposal_chain = proposal.get("chain_name")
-    proposal_fields = proposal.get("fields") or {}
+    proposal_literal = proposal.get("literal_fields") or {}
 
     matched: dict[str, Any] | None = None
     for entry in accepted:
@@ -493,12 +607,12 @@ def escrow_shape_guard(
         # "address advertised but not in set". Don't double-report.
         return None, context
 
-    seller_fields = matched.get("fields") or {}
-    if not isinstance(seller_fields, dict):
+    seller_literal = matched.get("literal_fields") or {}
+    if not isinstance(seller_literal, dict):
         return None, context
 
-    for key, seller_value in seller_fields.items():
-        buyer_value = proposal_fields.get(key) if isinstance(proposal_fields, dict) else None
+    for key, seller_value in seller_literal.items():
+        buyer_value = proposal_literal.get(key) if isinstance(proposal_literal, dict) else None
         if _normalize_escrow_field(buyer_value) != _normalize_escrow_field(seller_value):
             return (
                 NegotiationDecision(
@@ -507,6 +621,91 @@ def escrow_shape_guard(
                         f"escrow_field_mismatch: field {key!r} — buyer "
                         f"proposed {buyer_value!r}, listing requires "
                         f"{seller_value!r}"
+                    ),
+                ),
+                context,
+            )
+    return None, context
+
+
+@register_negotiation_middleware("buyer_escrow_shape_guard")
+def buyer_escrow_shape_guard(
+    history: list[NegotiationRound],
+    context: NegotiationContext,
+) -> NegotiationStep:
+    """Buyer-side mirror of ``escrow_shape_guard``.
+
+    Veto when the seller's latest reply diverges from a field the buyer
+    pinned at round 0. The buyer's pinned proposal lives in
+    ``context.our_escrow_proposal`` (every key set there is a buyer
+    pin); any value the seller sends back for one of those keys must
+    match exactly (case-insensitive for 20-byte hex addresses).
+
+    Pass through when the peer hasn't sent a proposal yet (round 0 on
+    our side). Excludes ``fields["amount"]`` from the comparison —
+    that's what's being negotiated.
+    """
+    their_proposal = _peer_proposal(history)
+    if not isinstance(their_proposal, dict):
+        return None, context
+
+    pinned = context.our_escrow_proposal
+    if not isinstance(pinned, dict):
+        return None, context
+
+    if pinned.get("chain_name") != their_proposal.get("chain_name"):
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=(
+                    f"chain_name_changed:{pinned.get('chain_name')!r}"
+                    f"->{their_proposal.get('chain_name')!r}"
+                ),
+            ),
+            context,
+        )
+    pinned_addr = (pinned.get("escrow_address") or "").lower()
+    their_addr = (their_proposal.get("escrow_address") or "").lower()
+    if pinned_addr and their_addr and pinned_addr != their_addr:
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=(
+                    f"escrow_address_changed:{pinned.get('escrow_address')!r}"
+                    f"->{their_proposal.get('escrow_address')!r}"
+                ),
+            ),
+            context,
+        )
+    if (
+        pinned.get("expiration_unix") is not None
+        and their_proposal.get("expiration_unix") is not None
+        and int(pinned["expiration_unix"]) != int(their_proposal["expiration_unix"])
+    ):
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=(
+                    f"expiration_unix_changed:{pinned['expiration_unix']}"
+                    f"->{their_proposal['expiration_unix']}"
+                ),
+            ),
+            context,
+        )
+
+    pinned_fields = pinned.get("fields") or {}
+    their_fields = their_proposal.get("fields") or {}
+    for key, pinned_value in pinned_fields.items():
+        if key == "amount":
+            continue  # amount is the negotiated scalar — peer is allowed to counter
+        their_value = their_fields.get(key) if isinstance(their_fields, dict) else None
+        if _normalize_escrow_field(pinned_value) != _normalize_escrow_field(their_value):
+            return (
+                NegotiationDecision(
+                    action="reject",
+                    reason=(
+                        f"escrow_field_changed:{key!r}:{pinned_value!r}"
+                        f"->{their_value!r}"
                     ),
                 ),
                 context,

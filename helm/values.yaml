@@ -42,6 +42,46 @@ global:
   # ---------------------------------------------------------------------------
   adminApiKey: "test-api-key"
 
+  # ---------------------------------------------------------------------------
+  # Smoke-test Dynaconf profiles mounted into helm-test pods only. Runtime
+  # Deployments keep their existing config paths.
+  #
+  # config.profileFiles: preferred smoke-test file-driven injection; each key
+  # renders as config-<profile>.yml in the shared test ConfigMap.
+  # config.profile/config.values: generated values-driven profile. The chart
+  # derives service URLs and chain topology, then config.values can override or
+  # extend that generated profile. If profileFiles are present, smoke pods use
+  # those profile names by default; the generated profile remains available for
+  # non-smoke hooks unless profileFiles define the same profile key.
+  #
+  # secret.enabled: false preserves the local selected-agent secret fallback for
+  # storefront smoke tests. Set true to mount a smoke-test secret and append its
+  # profile(s) to ACTIVE_PROFILES. create=false points at a pre-existing Secret
+  # by name; create=true renders either an internal Secret from values/profileFiles
+  # or an ExternalSecret from profileRefs.
+  # ---------------------------------------------------------------------------
+  smokeTests:
+    activeProfiles: ""
+    config:
+      profileFiles: {}
+      profile: helm
+      values: {}
+    secret:
+      enabled: false
+      create: true
+      type: internal
+      name: ""
+      profile: seller-secret
+      internal:
+        profileFiles: {}
+        values: {}
+      external:
+        secretStoreRef:
+          name: gcp-secret-manager
+          kind: ClusterSecretStore
+        refreshInterval: 1h
+        profileRefs: {}
+
 # ---------------------------------------------------------------------------
 # test-env subchart
 # ---------------------------------------------------------------------------
@@ -123,7 +163,10 @@ storefront:
           provisioning:
             mode: "mock"
           negotiation:
-            policyMode: "bisection"
+            policies:
+              - "has_matching_inventory_guard"
+              - "escrow_shape_guard"
+              - "bisection"
           integrations:
             geminiApiKey: ""
         chain:
@@ -167,9 +210,6 @@ provisioning:
     database_url: "sqlite:////app/data/provisioning.db"
     ansible_timeout_seconds: 1800
     default_vm_host: "kvm1"
-    enable_auth: false
-    registry_cache_ttl_seconds: 300
-    registry_cache_max_size: 256
     lease_watchdog_enabled: true
     lease_watchdog_poll_interval_seconds: 60
     lease_watchdog_grace_period_seconds: 300
