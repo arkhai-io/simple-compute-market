@@ -182,6 +182,7 @@ class LeaseService:
 
         lease = VmLease(
             resource_id=data.resource_id,
+            allocation_id=data.allocation_id,
             escrow_uid=data.escrow_uid,
             vm_host=data.vm_host,
             vm_target=data.vm_target,

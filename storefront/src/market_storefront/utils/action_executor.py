@@ -633,7 +633,7 @@ async def _build_provisioning_job_spec(
     if order_dict:
         compute_resource = extract_compute_from_order(order_dict)
         if isinstance(compute_resource, dict):
-            for key in ("resource_id", "region", "gpu_model"):
+            for key in ("resource_id", "region", "gpu_model", "gpu_count"):
                 if compute_resource.get(key) is not None:
                     required_attributes[key] = compute_resource[key]
 
@@ -677,6 +677,7 @@ async def fulfill_compute_obligation(
     """
     fulfillment_uid = None
     connection_details: str | None = None
+    reserved_allocation_id: str | None = None
     reserved_resource_id: str | None = None
     reserved_vm_host: str | None = None
     vm_target = f"tenant-{uuid.uuid4().hex[:4]}"
@@ -704,7 +705,7 @@ async def fulfill_compute_obligation(
         order_id = order_dict.get("listing_id") or order_dict.get("order_id")
         compute_resource = extract_compute_from_order(order_dict)
         if isinstance(compute_resource, dict):
-            for key in ("resource_id", "region", "gpu_model"):
+            for key in ("resource_id", "region", "gpu_model", "gpu_count"):
                 if compute_resource.get(key) is not None:
                     required_attributes[key] = compute_resource.get(key)
         accepted_escrows = order_dict.get("accepted_escrows") or []
@@ -724,10 +725,13 @@ async def fulfill_compute_obligation(
     try:
         sqlite_client = get_sqlite_client()
         reserved = await sqlite_client.reserve_available_compute_vm(
-            required_attributes=required_attributes or None
+            required_attributes=required_attributes or None,
+            listing_id=listing_id or order_id,
+            escrow_uid=escrow_uid,
         )
         if not reserved:
             raise RuntimeError("No available compute VM matched required attributes")
+        reserved_allocation_id = str(reserved.get("allocation_id")) if reserved.get("allocation_id") else None
         reserved_resource_id = str(reserved.get("resource_id"))
         reserved_vm_host = reserved.get("vm_host")
         if not reserved_vm_host:
@@ -738,6 +742,8 @@ async def fulfill_compute_obligation(
             resource_id=reserved_resource_id,
             vm_host=reserved_vm_host,
             required_attributes=required_attributes,
+            allocation_id=reserved_allocation_id,
+            allocated_gpu_count=reserved.get("allocated_gpu_count"),
         )
 
         async def _record_job_id(job_id: str) -> None:
@@ -770,7 +776,19 @@ async def fulfill_compute_obligation(
         else:
             connection_details = provision_result
     except Exception as error:
-        if reserved_resource_id:
+        if reserved_allocation_id:
+            try:
+                await get_sqlite_client().update_compute_allocation_state(
+                    allocation_id=reserved_allocation_id,
+                    state="released",
+                )
+            except Exception as release_err:
+                logger.warning(
+                    "[LOCAL DB] Failed to release compute allocation %s after provisioning failure: %s",
+                    reserved_allocation_id,
+                    release_err,
+                )
+        elif reserved_resource_id:
             try:
                 await get_sqlite_client().apply_resource_set_transition(
                     resource_id=reserved_resource_id,
@@ -802,13 +820,25 @@ async def fulfill_compute_obligation(
 
     if reserved_resource_id:
         try:
-            await get_sqlite_client().apply_resource_set_transition(
-                resource_id=reserved_resource_id,
-                event_type="lease_started_after_provisioning",
-                idempotency_key=f"lease:{escrow_uid}:{reserved_resource_id}",
-                set_state="leased",
-                set_attribute={"$.lease_end_utc": lease_end_utc},
-            )
+            if reserved_allocation_id:
+                await get_sqlite_client().update_compute_allocation_state(
+                    allocation_id=reserved_allocation_id,
+                    state="leased",
+                )
+                await get_sqlite_client().apply_resource_set_transition(
+                    resource_id=reserved_resource_id,
+                    event_type="lease_started_after_provisioning",
+                    idempotency_key=f"lease-attrs:{escrow_uid}:{reserved_resource_id}",
+                    set_attribute={"$.lease_end_utc": lease_end_utc},
+                )
+            else:
+                await get_sqlite_client().apply_resource_set_transition(
+                    resource_id=reserved_resource_id,
+                    event_type="lease_started_after_provisioning",
+                    idempotency_key=f"lease:{escrow_uid}:{reserved_resource_id}",
+                    set_state="leased",
+                    set_attribute={"$.lease_end_utc": lease_end_utc},
+                )
         except Exception as lease_err:
             logger.warning(
                 "[LOCAL DB] Failed to mark resource %s as leased after provisioning: %s",
@@ -864,6 +894,7 @@ async def fulfill_compute_obligation(
             ) as prov_client:
                 await prov_client.register_lease(
                     resource_id=reserved_resource_id,
+                    allocation_id=reserved_allocation_id,
                     escrow_uid=escrow_uid,
                     vm_host=reserved_vm_host,
                     vm_target=vm_target,
@@ -945,6 +976,7 @@ async def fulfill_compute_obligation(
         escrow_uid=escrow_uid,
         fulfillment_uid=fulfillment_uid,
         resource_id=reserved_resource_id,
+        allocation_id=reserved_allocation_id,
         vm_host=reserved_vm_host,
         lease_end_utc=lease_end_utc,
         seller_order_id=seller_order_id,

@@ -81,10 +81,14 @@ def test_init_db_applies_versioned_migrations_to_old_sqlite_schema():
         column["name"] for column in inspector.get_columns("ansible_jobs")
     }
     host_columns = {column["name"] for column in inspector.get_columns("hosts")}
+    lease_columns = {
+        column["name"] for column in inspector.get_columns("vm_leases")
+    }
 
     assert "escrow_uid" in ansible_columns
     assert "public_host" in host_columns
     assert "vm_leases" in inspector.get_table_names()
+    assert "allocation_id" in lease_columns
 
     with Session(engine) as session:
         host = session.query(Host).one()
@@ -102,6 +106,7 @@ def test_init_db_applies_versioned_migrations_to_old_sqlite_schema():
         "20260603_001_ansible_jobs_escrow_uid",
         "20260603_002_hosts_public_host",
         "20260603_003_vm_leases_table",
+        "20260603_004_vm_leases_allocation_id",
     }
 
 
@@ -117,12 +122,16 @@ def test_init_db_migrations_are_idempotent():
         column["name"] for column in inspector.get_columns("ansible_jobs")
     ]
     host_columns = [column["name"] for column in inspector.get_columns("hosts")]
+    lease_columns = [
+        column["name"] for column in inspector.get_columns("vm_leases")
+    ]
 
     assert ansible_columns.count("escrow_uid") == 1
     assert host_columns.count("public_host") == 1
+    assert lease_columns.count("allocation_id") == 1
 
     with engine.begin() as connection:
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 3
+    assert migration_count == 4

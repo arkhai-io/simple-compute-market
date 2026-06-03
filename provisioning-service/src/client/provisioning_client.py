@@ -464,6 +464,7 @@ class ProvisioningClient(_ProvisioningClientBase):
         lease_end_utc,
         lease_start_utc=None,
         create_job_id: Optional[str] = None,
+        allocation_id: Optional[str] = None,
     ) -> dict:
         """POST /api/v1/leases — register a new VM lease."""
         body: dict = {
@@ -473,6 +474,8 @@ class ProvisioningClient(_ProvisioningClientBase):
             "vm_target": vm_target,
             "lease_end_utc": lease_end_utc.isoformat() if hasattr(lease_end_utc, "isoformat") else str(lease_end_utc),
         }
+        if allocation_id is not None:
+            body["allocation_id"] = allocation_id
         if lease_start_utc is not None:
             body["lease_start_utc"] = lease_start_utc.isoformat() if hasattr(lease_start_utc, "isoformat") else str(lease_start_utc)
         if create_job_id is not None:
@@ -771,6 +774,7 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         lease_end_utc,
         lease_start_utc=None,
         create_job_id: Optional[str] = None,
+        allocation_id: Optional[str] = None,
     ) -> dict:
         """POST /api/v1/leases — register a new VM lease."""
         body: dict = {
@@ -780,6 +784,8 @@ class SyncProvisioningClient(_ProvisioningClientBase):
             "vm_target": vm_target,
             "lease_end_utc": lease_end_utc.isoformat() if hasattr(lease_end_utc, "isoformat") else str(lease_end_utc),
         }
+        if allocation_id is not None:
+            body["allocation_id"] = allocation_id
         if lease_start_utc is not None:
             body["lease_start_utc"] = lease_start_utc.isoformat() if hasattr(lease_start_utc, "isoformat") else str(lease_start_utc)
         if create_job_id is not None:

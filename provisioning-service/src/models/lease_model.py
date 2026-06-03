@@ -37,6 +37,13 @@ class LeaseCreate(BaseModel):
             "validate it against any local table."
         )
     )
+    allocation_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Storefront compute allocation identifier when the lease consumes "
+            "part of a larger resource pool. Omitted for legacy whole-resource leases."
+        ),
+    )
     escrow_uid: str = Field(
         description="On-chain escrow UID from the deal. Unique per lease."
     )
@@ -92,6 +99,7 @@ class LeaseResponse(BaseModel):
 
     id: str
     resource_id: str
+    allocation_id: Optional[str] = None
     escrow_uid: str
     vm_host: str
     vm_target: str

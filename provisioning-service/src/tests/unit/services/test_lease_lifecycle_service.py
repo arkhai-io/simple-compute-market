@@ -250,10 +250,11 @@ class TestPatchStorefrontResource:
     (services.lease_lifecycle_service.StorefrontClient).
     """
 
-    def _make_fake_lease(self, resource_id="r1"):
+    def _make_fake_lease(self, resource_id="r1", allocation_id=None):
         lease = VmLease()
         lease.id = "test-lease-id"
         lease.resource_id = resource_id
+        lease.allocation_id = allocation_id
         lease.escrow_uid = "esc-1"
         lease.vm_host = "kvm1"
         lease.vm_target = "t1"
@@ -342,6 +343,25 @@ class TestPatchStorefrontResource:
         assert pr_call.args[0] == "compute-kvm1-001"
         assert pr_call.kwargs.get("state") == "available"
         assert pr_call.kwargs.get("attributes") == {"lease_end_utc": None}
+
+    @pytest.mark.asyncio
+    async def test_includes_allocation_id_when_present(self, lease_svc):
+        svc = _make_check_svc(lease_svc)
+        lease = self._make_fake_lease(
+            resource_id="compute-pool-001",
+            allocation_id="alloc-123",
+        )
+        mock_sf = self._mock_sf_client()
+
+        with patch("storefront_client.StorefrontClient", return_value=mock_sf):
+            await svc._patch_storefront_resource(lease)
+
+        pr_call = mock_sf.patch_resource.call_args
+        assert pr_call.args[0] == "compute-pool-001"
+        assert pr_call.kwargs.get("attributes") == {
+            "lease_end_utc": None,
+            "allocation_id": "alloc-123",
+        }
 
 
 # ---------------------------------------------------------------------------

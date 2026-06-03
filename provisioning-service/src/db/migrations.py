@@ -117,8 +117,20 @@ def _migrate_vm_leases_table(engine: Engine) -> None:
     Base.metadata.tables["vm_leases"].create(bind=engine, checkfirst=True)
 
 
+def _migrate_vm_leases_allocation_id(engine: Engine) -> None:
+    _add_column_if_missing(engine, "vm_leases", "allocation_id", "VARCHAR")
+    if _table_exists(engine, "vm_leases"):
+        _create_index_if_missing(
+            engine,
+            "ix_vm_leases_allocation_id",
+            "CREATE INDEX IF NOT EXISTS ix_vm_leases_allocation_id "
+            "ON vm_leases (allocation_id)",
+        )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
     Migration("20260603_003_vm_leases_table", _migrate_vm_leases_table),
+    Migration("20260603_004_vm_leases_allocation_id", _migrate_vm_leases_allocation_id),
 )
