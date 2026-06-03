@@ -203,6 +203,83 @@ def get_erc20_escrow_obligation_nontierable(
     return str(cfg.erc20_addresses.escrow_obligation_nontierable)
 
 
+def _escrow_obligation_address(
+    chain_name: str,
+    *,
+    config_path: str | None,
+    category: str,
+    field: str,
+) -> str:
+    """Resolve an escrow-obligation address from an Alkahest address category."""
+    selected = get_alkahest_network(chain_name)
+    override = _load_override_config(config_path)
+    if override is not None:
+        return str(override[category][field])
+    if selected == NETWORK_ANVIL:
+        raise ValueError(
+            "chain_name='anvil' requires an explicit alkahest_address_config_path "
+            "with deployed local addresses."
+        )
+    cfg = _sdk_addresses_for_chain(selected)
+    return str(getattr(getattr(cfg, category), field))
+
+
+def get_erc721_escrow_obligation_nontierable(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve ``ERC721EscrowObligation`` (non-tierable variant)."""
+    return _escrow_obligation_address(
+        chain_name,
+        config_path=config_path,
+        category="erc721_addresses",
+        field="escrow_obligation_nontierable",
+    )
+
+
+def get_erc721_escrow_obligation_tierable(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve ``ERC721EscrowObligation`` (tierable variant)."""
+    return _escrow_obligation_address(
+        chain_name,
+        config_path=config_path,
+        category="erc721_addresses",
+        field="escrow_obligation_tierable",
+    )
+
+
+def get_erc1155_escrow_obligation_nontierable(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve ``ERC1155EscrowObligation`` (non-tierable variant)."""
+    return _escrow_obligation_address(
+        chain_name,
+        config_path=config_path,
+        category="erc1155_addresses",
+        field="escrow_obligation_nontierable",
+    )
+
+
+def get_erc1155_escrow_obligation_tierable(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve ``ERC1155EscrowObligation`` (tierable variant)."""
+    return _escrow_obligation_address(
+        chain_name,
+        config_path=config_path,
+        category="erc1155_addresses",
+        field="escrow_obligation_tierable",
+    )
+
+
 _ADDRESS_CATEGORIES: tuple[tuple[str, str], ...] = (
     # (attribute on DefaultExtensionConfig, prefix for slot name).
     # Arbiters' field names are already ``*_arbiter``-suffixed, so the
@@ -630,8 +707,172 @@ class Erc20NonTierableEscrowCodec:
         return await client.erc20.escrow.non_tierable.get_obligation(uid)
 
 
+class _Erc721EscrowCodecBase:
+    """Common ERC721 escrow SDK adapter.
+
+    Solidity ObligationData layout:
+        (address arbiter, bytes demand, address token, uint256 tokenId)
+
+    SDK call shape splits the NFT fields into:
+      - ``price_data = {"address": token, "id": tokenId}``
+      - ``arbiter_data = {"arbiter": arbiter, "demand": <bytes>}``
+      - ``expiration`` as a separate uint64
+    """
+
+    tier_attr: str
+    address_field: str
+    approve_via_sdk: bool = True
+
+    def _price_data(self, obligation_data: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "address": obligation_data["token"],
+            "id": int(obligation_data["tokenId"]),
+        }
+
+    def _arbiter_data(self, obligation_data: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "arbiter": obligation_data["arbiter"],
+            "demand": _normalize_demand_bytes(obligation_data["demand"]),
+        }
+
+    def resolve_address(
+        self, chain_name: str, *, config_path: str | None
+    ) -> str:
+        return _escrow_obligation_address(
+            chain_name,
+            config_path=config_path,
+            category="erc721_addresses",
+            field=self.address_field,
+        )
+
+    async def create_obligation(
+        self,
+        client: Any,
+        obligation_data: dict[str, Any],
+        expiration_unix: int,
+    ) -> str:
+        price_data = self._price_data(obligation_data)
+        arbiter_data = self._arbiter_data(obligation_data)
+        if self.approve_via_sdk:
+            await client.erc721.util.approve(price_data, "escrow")
+        tier_client = getattr(client.erc721.escrow, self.tier_attr)
+        receipt = await tier_client.create(
+            price_data, arbiter_data, expiration_unix,
+        )
+        uid = (receipt or {}).get("log", {}).get("uid")
+        if not uid:
+            raise RuntimeError(
+                f"escrow.create did not return a uid: {receipt!r}"
+            )
+        return uid
+
+    async def get_obligation(self, client: Any, uid: str) -> Any:
+        tier_client = getattr(client.erc721.escrow, self.tier_attr)
+        return await tier_client.get_obligation(uid)
+
+
+class Erc721NonTierableEscrowCodec(_Erc721EscrowCodecBase):
+    """``ERC721EscrowObligation`` (non-tierable variant)."""
+
+    kind = "erc721_escrow_obligation_nontierable"
+    tier_attr = "non_tierable"
+    address_field = "escrow_obligation_nontierable"
+
+
+class Erc721TierableEscrowCodec(_Erc721EscrowCodecBase):
+    """``ERC721EscrowObligation`` (tierable variant)."""
+
+    kind = "erc721_escrow_obligation_tierable"
+    tier_attr = "tierable"
+    address_field = "escrow_obligation_tierable"
+    approve_via_sdk = False
+
+
+class _Erc1155EscrowCodecBase:
+    """Common ERC1155 escrow SDK adapter.
+
+    Solidity ObligationData layout:
+        (address arbiter, bytes demand, address token, uint256 tokenId, uint256 amount)
+
+    SDK call shape splits the token fields into:
+      - ``price_data = {"address": token, "id": tokenId, "value": amount}``
+      - ``arbiter_data = {"arbiter": arbiter, "demand": <bytes>}``
+      - ``expiration`` as a separate uint64
+    """
+
+    tier_attr: str
+    address_field: str
+
+    def _price_data(self, obligation_data: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "address": obligation_data["token"],
+            "id": int(obligation_data["tokenId"]),
+            "value": int(obligation_data["amount"]),
+        }
+
+    def _arbiter_data(self, obligation_data: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "arbiter": obligation_data["arbiter"],
+            "demand": _normalize_demand_bytes(obligation_data["demand"]),
+        }
+
+    def resolve_address(
+        self, chain_name: str, *, config_path: str | None
+    ) -> str:
+        return _escrow_obligation_address(
+            chain_name,
+            config_path=config_path,
+            category="erc1155_addresses",
+            field=self.address_field,
+        )
+
+    async def create_obligation(
+        self,
+        client: Any,
+        obligation_data: dict[str, Any],
+        expiration_unix: int,
+    ) -> str:
+        price_data = self._price_data(obligation_data)
+        arbiter_data = self._arbiter_data(obligation_data)
+        await client.erc1155.util.approve_all(price_data["address"], "escrow")
+        tier_client = getattr(client.erc1155.escrow, self.tier_attr)
+        receipt = await tier_client.create(
+            price_data, arbiter_data, expiration_unix,
+        )
+        uid = (receipt or {}).get("log", {}).get("uid")
+        if not uid:
+            raise RuntimeError(
+                f"escrow.create did not return a uid: {receipt!r}"
+            )
+        return uid
+
+    async def get_obligation(self, client: Any, uid: str) -> Any:
+        tier_client = getattr(client.erc1155.escrow, self.tier_attr)
+        return await tier_client.get_obligation(uid)
+
+
+class Erc1155NonTierableEscrowCodec(_Erc1155EscrowCodecBase):
+    """``ERC1155EscrowObligation`` (non-tierable variant)."""
+
+    kind = "erc1155_escrow_obligation_nontierable"
+    tier_attr = "non_tierable"
+    address_field = "escrow_obligation_nontierable"
+
+
+class Erc1155TierableEscrowCodec(_Erc1155EscrowCodecBase):
+    """``ERC1155EscrowObligation`` (tierable variant)."""
+
+    kind = "erc1155_escrow_obligation_tierable"
+    tier_attr = "tierable"
+    address_field = "escrow_obligation_tierable"
+
+
 _ESCROW_KIND_CODECS: dict[str, EscrowKindCodec] = {
     "erc20_escrow_obligation_nontierable": Erc20NonTierableEscrowCodec(),
+    "erc721_escrow_obligation_nontierable": Erc721NonTierableEscrowCodec(),
+    "erc721_escrow_obligation_tierable": Erc721TierableEscrowCodec(),
+    "erc1155_escrow_obligation_nontierable": Erc1155NonTierableEscrowCodec(),
+    "erc1155_escrow_obligation_tierable": Erc1155TierableEscrowCodec(),
 }
 
 

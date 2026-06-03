@@ -85,11 +85,16 @@ Phase 11 — VM cleanup confirmation and resource release
 from __future__ import annotations
 
 import logging
+import os
 
 import pytest
 
 from src.settings import settings
-from tests.e2e.roles.scenarios.conftest import DealState, require_state
+from tests.e2e.roles.scenarios.conftest import (
+    DealState,
+    delete_mock_rules_if_present,
+    require_state,
+)
 
 log = logging.getLogger(__name__)
 
@@ -554,7 +559,11 @@ class TestStage03b_ResumePublishesToRegistry:
 
 # The integration-tests venv reaches the primary registry directly rather than
 # going through CONFIG.indexer_urls, which lives inside the storefront container.
-_REGISTRY_A = "http://localhost:8080"
+_REGISTRY_A = (
+    "http://registry:8080"
+    if "docker" in {p.strip() for p in os.environ.get("ACTIVE_PROFILES", "").split(",")}
+    else "http://localhost:8080"
+)
 
 class TestStage04a_PrimaryRegistryPublish:
     def test_04a_listing_appears_in_primary_registry(
@@ -799,6 +808,11 @@ class TestStage07_OnChainEscrowAndProvGate:
         log.info("[07] Created on-chain escrow %s for negotiation %s",
                  escrow_uid, deal_state.negotiation_id)
 
+        delete_mock_rules_if_present(
+            provisioning_test_client,
+            "e2e-buy-create",
+            PROV_RULE_ID,
+        )
         provisioning_test_client.add_mock_rule(
             rule_id=PROV_RULE_ID,
             match={"vm_action": "create"},

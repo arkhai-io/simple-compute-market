@@ -137,6 +137,12 @@ services:
       resources:
         limits:
           memory: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
 
   # 3b. Alice's storefront — exercises heterogeneous registry
   # topology in the multi-registry e2e scenario. Alice's config.toml
@@ -176,6 +182,12 @@ services:
       resources:
         limits:
           memory: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
 
   # 4. Redis (job queue for provisioning service)
   redis:

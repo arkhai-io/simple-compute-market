@@ -76,6 +76,7 @@ markers = [
     "e2e_deal_buyer_cli: Full deal driven by the buyer's `market` CLI subprocess against the live storefront (two-machine production interaction)",
     "e2e_buy: One-shot `market buy` (discovery-driven) lifecycle from the buyer machine, against the live storefront",
     "multi_registry: Multi-registry publish + discovery e2e scenario (stops at negotiation start)",
+    "e2e_alkahest_escrow_codecs: Real Alkahest escrow codec create/read scenario",
     "smoke: Quick smoke tests",
     "slow: Tests that may take longer due to RPC latency",
     "mock_provisioning: E2E mock provisioning flow tests",

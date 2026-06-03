@@ -92,7 +92,11 @@ from service.clients.alkahest import (
     resolve_alkahest_address_config,
 )
 from src.settings import settings
-from tests.e2e.roles.scenarios.conftest import DealState, require_state
+from tests.e2e.roles.scenarios.conftest import (
+    DealState,
+    delete_mock_rules_if_present,
+    require_state,
+)
 
 log = logging.getLogger(__name__)
 
@@ -750,6 +754,11 @@ class TestStage07_ArmProvisioningGate:
         require_state(deal_state, "negotiation_terminal_state", "agreed_amount",
                       "_provisioning_mock_mode")
 
+        delete_mock_rules_if_present(
+            provisioning_test_client,
+            "e2e-buy-create",
+            PROV_RULE_ID,
+        )
         provisioning_test_client.add_mock_rule(
             rule_id=PROV_RULE_ID,
             match={"vm_action": "create"},

@@ -36,6 +36,16 @@ The `provisioning-service` wheel stays its own distributable — it's operated b
 
 ---
 
+### Escrow Kind Codec Expansion
+
+**Status:** Planned. Full scope in [`design-escrow-kind-codecs.md`](design-escrow-kind-codecs.md).
+
+**Problem:** The escrow codec registry is architected to dispatch by `(chain, escrow_address)`, but current buyer creation and seller verification only support `erc20_escrow_obligation_nontierable`. Alkahest ships native-token, ERC721, ERC1155, token-bundle, attestation-request, and attestation-UID escrow obligations in both tierable and non-tierable variants. Supporting those is more than registering ABI layouts: buyer proposal construction, listing templates, rate/literal-field semantics, SDK create paths, verifier decoding, and e2e coverage all need to agree.
+
+**Planned fix:** expand codecs in phases: first add registry/ABI/SDK adapters and unit tests for straightforward token escrows, then update listing/proposal semantics and templates, then add representative e2e coverage, with attestation escrows handled after their product semantics are nailed down.
+
+---
+
 ### Storefront DB Pruning
 
 **Status:** Planned. Needs dormant-code verification before any DROP.

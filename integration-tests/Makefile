@@ -12,7 +12,7 @@ MODULE ?= contracts
 # CLI instead; this variable is for local development only.
 DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
 
-.PHONY: build venv test
+.PHONY: build venv test test-e2e
 
 # -----------------------------------------------------------------------
 # Setup
@@ -91,6 +91,8 @@ test-container-module:
 # (<repo-dir>_default). Override if your project name differs.
 NETWORK ?= simple-market-service_default
 BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
+E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
+	or e2e_alkahest_escrow_codecs
 
 test-buyer-machine:
 	docker run --rm \
@@ -120,16 +122,14 @@ test-ci:
 		$(PYTEST_ARGS)
 
 # -----------------------------------------------------------------------
-# E2E mock-provisioning targets retired with the buyer-storefront drop.
-# The legacy targets (e2e-mock-happy / e2e-mock-failure) ran the
-# now-deleted test_mock_provisioning.py against a stack that included a
-# buyer-side storefront. After step 5b the buyer is a pure CLI client;
-# the equivalent flow is exercised via market_buyer / `market buy` — see
-# buyer/tests/test_buy_orchestrator.py for orchestrator coverage and
-# (TODO) a future e2e target that drives `market buy` against a
-# compose-launched seller.
+# Tests — full local e2e stack
 # -----------------------------------------------------------------------
-test-e2e: reinit
-	ACTIVE_PROFILES=$(ACTIVE_PROFILES) \
-	CONFIG_DIRECTORY=$(CONFIG_DIRECTORY) \
-	.venv/bin/pytest -m e2e_deal $(PYTEST_ARGS)
+# Rebuilds the runtime + test images, starts a clean compose stack, then runs
+# the buyer-machine scenarios from inside the compose network. This target is
+# intentionally heavier than test-module: it verifies the deployed images and
+# clears persisted compose state before each run.
+test-e2e:
+	cd .. && docker compose down -v --remove-orphans
+	cd .. && $(MAKE) build-dev
+	cd .. && docker compose up -d --wait
+	$(MAKE) test-buyer-machine BUYER_MODULE="$(E2E_MODULE)"
