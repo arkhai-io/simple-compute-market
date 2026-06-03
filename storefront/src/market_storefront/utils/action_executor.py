@@ -720,15 +720,6 @@ async def fulfill_compute_obligation(
             token_resource=token_resource,
             duration_seconds=duration_seconds,
         )
-        if order_id:
-            try:
-                sqlite_client = get_sqlite_client()
-                await sqlite_client.update_listing(
-                    listing_id=order_id,
-                    status="accepted",
-                )
-            except Exception as exc:
-                logger.warning("[LOCAL DB] Failed to mark order %s accepted at fulfillment start: %s", order_id, exc)
 
     try:
         sqlite_client = get_sqlite_client()

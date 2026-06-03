@@ -197,7 +197,7 @@ async def update_listing(
     body: dict = Body(..., description="Listing updates"),
     db: Session = Depends(get_db),
 ):
-    """Update a listing's lifecycle status (e.g. mark accepted/closed).
+    """Update a listing's lifecycle status (e.g. mark closed/expired).
 
     Owner-scoped: the signature must come from the listing's publisher
     identity, the same gate as delete.

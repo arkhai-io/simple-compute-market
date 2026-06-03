@@ -208,7 +208,7 @@ def test_open_order_resource_ids_ignores_closed_orders(tmp_path):
     _init_db(db)
     _insert_order(db, "o1", "open", "compute-001")
     _insert_order(db, "o2", "closed", "compute-002")
-    _insert_order(db, "o3", "accepted", "compute-003")
+    _insert_order(db, "o3", "expired", "compute-003")
     assert _open_order_resource_ids(db) == {"compute-001"}
 
 
@@ -354,7 +354,7 @@ def test_open_order_ids_returns_only_open(tmp_path):
     _insert_order(db, "o1", "open", "compute-001")
     _insert_order(db, "o2", "closed", "compute-002")
     _insert_order(db, "o3", "open", None)
-    _insert_order(db, "o4", "accepted", "compute-004")
+    _insert_order(db, "o4", "expired", "compute-004")
     assert set(_open_listing_ids(db)) == {"o1", "o3"}
 
 

@@ -2088,7 +2088,7 @@ autouse `reap_buyer_settle_subprocess` teardown is a no-op when
 | 08a / 08c | Settle + provisioning-job dry-runs | `evaluate-settle` (captures `vm_host`/`vm_target`); `POST /test/evaluate-job` (matches gate rule) |
 | 08b | Submit settle + job queued | `POST /api/v1/settle/{uid}`; `wait_for_stage_event(resource_reserved)`; `provisioning_job_id` surfaced |
 | 09a | Gate release + ansible succeeds | `resume_rule`; `wait_for_job` (long-poll) → succeeded |
-| 09b | Ready + credentials + listing closed | `wait_for_settlement` → ready; `GET /api/v1/settle/{uid}/status` → tenant credentials; listing accepted/closed |
+| 09b | Ready + credentials + listing open | `wait_for_settlement` → ready; `GET /api/v1/settle/{uid}/status` → tenant credentials; listing remains open |
 | 09c | Lease registered | `GET /api/v1/leases/by-escrow/{uid}` → active/pending |
 | 10a / 10b | Lease expiry setup + watchdog advances | pause watchdog, patch `lease_end_utc` past, arm check-gate mock; watchdog transitions lease to `releasing` |
 | 11a / 11b | Releasing state stable + resource released | check-gate released; resource patched `available` via `PATCH /api/v1/admin/portfolio/resources/{id}` |

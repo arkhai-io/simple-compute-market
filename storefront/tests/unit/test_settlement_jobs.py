@@ -433,11 +433,9 @@ async def test_background_task_writes_failed_on_exception(client):
 
 
 @pytest.mark.asyncio
-async def test_background_task_reopens_listing_on_failure(client):
-    """A failed deal must return its listing to 'open' so it can be
-    re-negotiated — otherwise it stays 'accepted' and refuses all buyers."""
+async def test_background_task_leaves_listing_open_on_failure(client):
+    """A failed deal updates only per-escrow state; listing state is unchanged."""
     await _seed_seller_order(client, listing_id="seller-ord-1")
-    await client.update_listing(listing_id="seller-ord-1", status="accepted")
     await _seed_escrow_provisioning(client)
     mock_fulfill = AsyncMock(side_effect=RuntimeError("vm host unreachable"))
 

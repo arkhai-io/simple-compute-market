@@ -56,7 +56,6 @@ class PublisherIdentity(Base):
 class OrderStatusEnum(str, enum.Enum):
     open = "open"
     closed = "closed"
-    accepted = "accepted"
     expired = "expired"
 
 

@@ -230,14 +230,17 @@ async def wait_for_job(
     """
     deadline = asyncio.get_event_loop().time() + timeout
     while True:
+        remaining = deadline - asyncio.get_event_loop().time()
         try:
             job = job_service.get_job(job_id)
         except LookupError:
-            raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
+            if remaining <= 0:
+                raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
+            await asyncio.sleep(min(0.25, remaining))
+            continue
         if job.status in TERMINAL_STATUSES:
             return {"job_id": job_id, "status": job.status, "result": job.result,
                     "error": job.error}
-        remaining = deadline - asyncio.get_event_loop().time()
         if remaining <= 0:
             raise HTTPException(
                 status_code=408,

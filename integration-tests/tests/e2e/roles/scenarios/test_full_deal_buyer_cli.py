@@ -61,7 +61,7 @@ Phase 9 — Provisioning completion
          wait_for_event("settle_terminal", predicate=status=="ready")
          body.tenant_credentials present
          Popen.wait → returncode 0
-         GET /api/v1/listings/{id} → status=accepted or closed
+         GET /api/v1/listings/{id} → status=open
          GET .../negotiations/{neg_id} → primary escrow ready + fulfillment_uid
   09c  Lease registered:
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
@@ -975,7 +975,7 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
         credentials to its run-log, then `run_ended`, then exits.
 
         Seller-side cross-checks (HTTP, not in the run-log):
-          - listing → status accepted/closed
+          - listing → status open
           - per-negotiation primary escrow → status=ready,
             fulfillment_uid populated
         """
@@ -1005,9 +1005,7 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
         )
 
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
-        assert listing.status in ("accepted", "closed"), (
-            f"Expected listing status=accepted/closed, got {listing.status!r}"
-        )
+        assert listing.status == "open", f"Expected listing status=open, got {listing.status!r}"
 
         # Canonical per-deal attestation data on the negotiation endpoint
         # (was previously rolled up into the registry's now-removed

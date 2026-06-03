@@ -62,7 +62,7 @@ Phase 9 — Provisioning completion
   09b  Settlement ready + credentials + listing closed:
          wait_for_settlement (server-side long-poll) → ready=True, status=ready
          GET /settle/{uid}/status → status=ready, tenant_credentials present
-         GET /api/v1/listings/{id} → status=accepted or closed
+         GET /api/v1/listings/{id} → status=open
          GET .../negotiations/{neg_id} → primary escrow status=ready,
                                           fulfillment_uid populated
   09c  Lease registered:
@@ -1031,15 +1031,15 @@ class TestStage09a_ProvisioningCompletes:
 
 
 class TestStage09b_SettlementReadyAndCredentials:
-    def test_09b_settlement_ready_credentials_and_listing_closed(
+    def test_09b_settlement_ready_credentials_and_listing_open(
         self, storefront_client, storefront_admin_client, buyer_config, deal_state: DealState
     ):
-        """Settlement status=ready, tenant credentials present, listing accepted/closed.
+        """Settlement status=ready, tenant credentials present, listing still open.
 
         Combined observation of all post-provisioning state:
           1. wait_for_settlement — server-side long-poll until job terminal (no client polling)
           2. GET /settle/{uid}/status → status=ready + tenant_credentials
-          3. GET /api/v1/listings/{id} → status=accepted or closed
+          3. GET /api/v1/listings/{id} → status=open
           4. GET .../negotiations/{neg_id} → primary escrow ready + fulfillment_uid
         """
         require_state(deal_state, "real_escrow_uid", "provisioning_result_injected",
@@ -1070,9 +1070,7 @@ class TestStage09b_SettlementReadyAndCredentials:
         )
 
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
-        assert listing.status in ("accepted", "closed"), (
-            f"Expected listing status=accepted/closed, got {listing.status!r}"
-        )
+        assert listing.status == "open", f"Expected listing status=open, got {listing.status!r}"
 
         # The per-negotiation endpoint is the canonical home for per-deal
         # attestation data (was previously rolled up into the registry's

@@ -23,7 +23,7 @@ B1  Resource seed:    import the buy-specific compute row (distinct gpu_model
 B2  Publish listing:  create paused → resume → confirm present in registry
 B3  Arm provisioning: non-pausing mock create rule that returns tenant creds
 B4  market buy:       discovery-driven one-shot reaches status=ready, exit 0
-B5  Seller + lease:   listing accepted/closed, primary escrow ready with a
+B5  Seller + lease:   listing remains open, primary escrow ready with a
                       fulfillment_uid, provisioning lease registered
 """
 
@@ -325,10 +325,10 @@ class TestStageB5_SellerAndLease:
     def test_b5_seller_state_and_lease_registered(
         self, storefront_admin_client, provisioning_client, deal_state: DealState
     ):
-        """Seller marked the listing accepted/closed; provisioning owns a lease.
+        """Seller kept the listing open; provisioning owns a lease.
 
         Cross-machine confirmation that the buyer's one-shot landed real
-        state on the seller side: the listing left ``open``, the per-deal
+        state on the seller side: the listing remains ``open``, the per-deal
         primary escrow is ``ready`` with a fulfillment_uid, and the
         provisioning service registered a lease for the escrow.
         """
@@ -336,8 +336,8 @@ class TestStageB5_SellerAndLease:
                       "seller_listing_id", "settlement_status")
 
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
-        assert listing.status in ("accepted", "closed"), (
-            f"Expected listing accepted/closed after buy, got {listing.status!r}"
+        assert listing.status == "open", (
+            f"Expected listing to remain open after buy, got {listing.status!r}"
         )
 
         detail = storefront_admin_client.get_negotiation(
