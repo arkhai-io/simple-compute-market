@@ -30,27 +30,18 @@ WORKDIR /app
 RUN chown appuser:appuser /app
 USER appuser
 
-# Copy pre-built internal wheels (built by make dist before docker build).
-# arkhai-storefront-client and other internal packages are resolved from here.
-COPY --chown=appuser:appuser .dist/ /dist/
-
-COPY --chown=appuser:appuser provisioning-service/pyproject.toml ./
-COPY --chown=appuser:appuser provisioning-service/src ./src
-RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
-    uv sync --no-dev --no-install-project --find-links /dist
-
 COPY --chown=appuser:appuser compute-provisioning-iac/ansible/requirements.yml /tmp/requirements.yml
-# Two RUN layers: install first, then invoke ansible-galaxy from the venv
-# directly. The combined form (`uv pip install ... && uv run ansible-galaxy ...`)
-# produces a SIGILL (exit 132) on Podman/crun arm64 *after* the install
-# completes — invoking the venv binary directly skips the `uv run` post-exec
-# teardown path that crashes.
+# Keep Ansible in its own venv so the Galaxy collection layer does not depend
+# on the application venv, local wheels, or provisioning-service source.
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
-    uv pip install 'ansible-core>=2.17,<2.20'
+    uv venv /home/appuser/ansible-venv && \
+    uv pip install --python /home/appuser/ansible-venv/bin/python 'ansible-core>=2.17,<2.20'
 # Galaxy's API endpoint frequently returns truncated responses on the
 # larger community.general tarball (~40MB). ansible-galaxy's downloader
 # has no retry on IncompleteRead, so we pre-fetch each collection with
-# curl --retry --retry-all-errors, then install from local files.
+# curl --retry --retry-all-errors, then install from local files. The timeout
+# and speed guards make zero-throughput connections fail and retry instead of
+# hanging the whole image build.
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
@@ -61,15 +52,27 @@ RUN mkdir -p /tmp/galaxy-tarballs && \
         "community-docker-2.7.2" \
         "community-crypto-2.5.0" \
     ; do \
-        curl --retry 8 --retry-all-errors --retry-delay 5 -fSL \
+        curl --retry 8 --retry-all-errors --retry-delay 5 \
+            --connect-timeout 20 --max-time 180 \
+            --speed-time 30 --speed-limit 1024 \
+            -fSL \
             "https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/artifacts/${col}.tar.gz" \
             -o "/tmp/galaxy-tarballs/${col}.tar.gz" \
             || (echo "Failed to fetch ${col}.tar.gz" && exit 1); \
     done && \
-    /app/.venv/bin/ansible-galaxy collection install \
+    /home/appuser/ansible-venv/bin/ansible-galaxy collection install \
         /tmp/galaxy-tarballs/community-crypto-2.5.0.tar.gz \
         /tmp/galaxy-tarballs/community-docker-2.7.2.tar.gz \
         /tmp/galaxy-tarballs/community-general-4.8.7.tar.gz
+
+# Copy pre-built internal wheels (built by make dist before docker build).
+# arkhai-storefront-client and other internal packages are resolved from here.
+COPY --chown=appuser:appuser .dist/ /dist/
+
+COPY --chown=appuser:appuser provisioning-service/pyproject.toml ./
+COPY --chown=appuser:appuser provisioning-service/src ./src
+RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
+    uv sync --no-dev --no-install-project --find-links /dist
 
 # Stage 2: Runtime
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime
@@ -88,6 +91,7 @@ WORKDIR /app
 RUN chown appuser:appuser /app
 
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
+COPY --from=builder --chown=appuser:appuser /home/appuser/ansible-venv /home/appuser/ansible-venv
 COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
 COPY --from=builder --chown=appuser:appuser /home/appuser/.ansible /home/appuser/.ansible
 
@@ -95,7 +99,7 @@ RUN mkdir -p /app/data
 COPY --chown=appuser:appuser provisioning-service/src ./src
 COPY --chown=appuser:appuser compute-provisioning-iac /opt/compute-provisioning-iac
 
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PATH="/home/appuser/ansible-venv/bin:/app/.venv/bin:$PATH"
 ENV PYTHONPATH=/app/src
 
 # ---------------------------------------------------------------------------
