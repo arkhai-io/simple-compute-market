@@ -259,6 +259,43 @@ on-chain registration step and nothing to register ahead of time. The
 storefront becomes known to a registry the first time it publishes a
 listing (the registry creates its publisher row lazily).
 
+**Compute inventory and dynamic listings:**
+
+For compute resources, the storefront owns the market-facing inventory
+projection and allocation ledger. The provisioning service owns execution
+facts about VMs and leases; it does not decide what should be advertised
+to buyers.
+
+The storefront stores concrete imported resources in `resources`. Those
+rows are grouped into `compute_inventory_pools`, with
+`compute_pool_members` linking each concrete `resource_id` to a pool.
+Existing resources are backfilled into one-member pools. Multiple rows
+can opt into fungible capacity by sharing `attribute.pool_id` in the CSV
+or import payload; listings can then represent capacity across equivalent
+machines without exposing which machine will satisfy the lease.
+
+`derived_compute_listings` records generated listing identity for each
+advertised GPU slice. Single-resource pools keep the legacy
+`resource_id:gpus:N` listing key for compatibility; fungible pools use
+`pool:{pool_id}:gpus:{N}`. Reconciliation closes and reopens derived
+listings from pool/member feasibility, not just aggregate capacity: a
+slice is advertised only when at least one remaining member can satisfy
+that slice after current holds are subtracted.
+
+`compute_allocations` is the storefront-side capacity ledger. It records
+the market correlation (`listing_id`, `order_id`, `negotiation_id`,
+`escrow_uid`), selected capacity (`pool_id`, `member_id`, concrete
+`resource_id`, GPU count), and fulfillment callback metadata. A
+negotiated offer may pin either a concrete `resource_id` or a fungible
+`pool_id`; reservation resolves fungible pool terms to a concrete member
+at allocation time.
+
+Execution lifecycle facts come back through admin-boundary fulfillment
+callbacks: `/api/v1/admin/fulfillment/events/started`,
+`/usage-started`, `/release-started`, `/capacity-released`, and
+`/failed`. Those callbacks advance `compute_allocations`; the reconciler
+then updates dynamic listings from the allocation ledger.
+
 **Key source layout:**
 ```
 storefront/src/market_storefront/
@@ -318,7 +355,9 @@ storefront/src/market_storefront/
 │  ┌──────▼───────────────▼────────────────▼───────────────▼──────┐ │
 │  │                   SQLiteClient                                │ │
 │  │  listings · negotiation_threads · negotiation_messages        │ │
-│  │  stage_events · policy_config · resource_portfolio            │ │
+│  │  stage_events · policy_config · resources                     │ │
+│  │  compute_inventory_pools · compute_pool_members               │ │
+│  │  derived_compute_listings · compute_allocations               │ │
 │  └──────────────────────────────────────────────────────────────┘ │
 │                                                                     │
 │  ┌───────────────────────────────────────────────────────────────┐ │
@@ -349,8 +388,8 @@ storefront/src/market_storefront/
 │  │ negotiation_watchdog│                                           │
 │  └─────────────────────┘                                           │
 │                                                                     │
-│  Resource lifecycle owned by provisioning service LeaseWatchdog,    │
-│  which calls PATCH /api/v1/admin/portfolio/resources/{id} on expiry │
+│  Compute allocation/listing lifecycle owned by storefront pools,    │
+│  allocations, and fulfillment callbacks from provisioning           │
 │                                                                     │
 │  Outbound                                                           │
 │  ┌─────────────────────┐  ┌──────────────────┐                     │
@@ -466,11 +505,15 @@ fallback for rows without a templates cell.
 
 **Procedural request path + two pluggable policy hooks:**
 
-The storefront is a request/response service over its inventory and
-negotiation state. Listing create/close, lease start/end, and resource
-state transitions are direct procedural calls — `ListingService` mutates
-SQLite and (un)publishes to the registry; no policy layer gates them.
-The two places where policy plugs in are:
+The storefront is a request/response service over negotiation state,
+market-facing inventory, and the allocation ledger. Listing
+create/close/refund/claim/reclaim calls are procedural
+`ListingService` operations. Compute lease execution is not stored as a
+listing state; settlement reserves a `compute_allocations` row, the
+provisioning service reports lifecycle facts through fulfillment
+callbacks, and the dynamic listing reconciler opens/closes registry
+listings from the resulting pool availability. No policy layer gates
+those lifecycle transitions. The two places where policy plugs in are:
 
 - **Buyer-side aggregation** (buyer-only) — `aggregate(negotiate, listings)`
   in `buyer/market_buyer/aggregation.py` owns the iteration shape across
@@ -492,9 +535,11 @@ data model is symmetric — `NegotiationRound`, `NegotiationContext`,
 
 **Built-in negotiation middlewares:**
 
-- `has_matching_inventory_guard` — round 0 only; the seller's portfolio
-  must contain a compute resource matching the listing's `offer_resource`
-  attributes. Rejects with `no_matching_inventory` if not.
+- `has_matching_inventory_guard` — round 0 only; the seller's storefront
+  projection must contain matching compute capacity for the listing's
+  `offer_resource` attributes. The offer may pin a concrete
+  `resource_id` or a fungible `pool_id`; otherwise the guard checks the
+  imported portfolio. Rejects with `no_matching_inventory` if not.
 - `escrow_shape_guard` — every key on the matched
   `accepted_escrows[i].literal_fields` must equal the buyer's value in
   `escrow_proposal.literal_fields`. Rejects with `escrow_field_mismatch`
@@ -761,17 +806,32 @@ All negotiation events are written to `stage_events` with `stage="negotiation"` 
 POST  /api/v1/admin/pause    Set globally paused = True — admin key required
 POST  /api/v1/admin/resume   Set globally paused = False — admin key required
 GET   /api/v1/admin/status   Live counts: active_negotiations, open_orders, paused_orders
+POST  /api/v1/admin/portfolio/resources/import
+      Runtime inventory CSV import/upsert — admin key required.
+      Resources that share attribute.pool_id join the same fungible
+      compute_inventory_pools row; otherwise they remain one-member pools.
 PATCH /api/v1/admin/portfolio/resources/{resource_id}
       Partial update of a resource row — admin key required.
       Body: { state?, attributes? } — only non-None fields written.
-      Primary use: lease expiry release by the provisioning LeaseWatchdog:
-        { "state": "available", "attributes": { "lease_end_utc": null } }
-      Also used for operator recovery and test state manipulation.
+      Used for operator recovery, compatibility, and test state manipulation.
       Returns: full updated row + updated=true/false (idempotent flag).
       404 if resource_id does not exist.
+POST  /api/v1/admin/portfolio/reservations
+      Force-reserve compute capacity without buyer negotiation — admin key
+      required. Writes compute_allocations and returns the selected
+      pool_id/member_id/resource_id.
 POST  /api/v1/admin/portfolio/release-reservations
       Bulk-release all held (reserved or leased) resources — admin key required.
-      Sledgehammer; prefer PATCH above for targeted single-row release.
+      Sledgehammer for local/e2e recovery; normal lifecycle release should use
+      fulfillment callbacks.
+POST  /api/v1/admin/fulfillment/events/started
+POST  /api/v1/admin/fulfillment/events/usage-started
+POST  /api/v1/admin/fulfillment/events/release-started
+POST  /api/v1/admin/fulfillment/events/capacity-released
+POST  /api/v1/admin/fulfillment/events/failed
+      Provisioning-service callbacks for execution lifecycle facts. These
+      update compute_allocations and let the derived-listing reconciler
+      republish or close listings from the new market-side capacity state.
 ```
 
 #### Admin API Key
@@ -1026,16 +1086,32 @@ All actions are submitted as `ProvisionRequest` jobs with a `vm_action` field. T
 
 ---
 
-#### Lease Lifecycle — DB-driven watchdog
+#### Lease Lifecycle — execution facts and storefront callbacks
 
-The provisioning service owns lease lifecycle via the `vm_leases` table and the `LeaseWatchdog` background task. When the storefront provisions a VM, it registers a lease with the provisioning service via `POST /api/v1/leases` after the create-VM job succeeds. The host-side `lease_end` `at` job is best-effort and must not block settlement readiness; the `LeaseWatchdog` is the authoritative release path and calls back to the storefront's `PATCH /api/v1/admin/portfolio/resources/{resource_id}` when leases expire.
+The provisioning service owns VM execution lifecycle via the `vm_leases`
+table and the `LeaseWatchdog` background task. The storefront owns
+negotiation, market-facing listings, and compute allocation state. When
+settlement reserves capacity, the storefront records a
+`compute_allocations` row with the selected `pool_id`, `member_id`, and
+concrete `resource_id`; after the VM create job succeeds, provisioning
+registers the execution lease via `POST /api/v1/leases`.
+
+The host-side `lease_end` `at` job is best-effort and must not block
+settlement readiness. The `LeaseWatchdog` is the authoritative
+provisioning release path, but it reports lifecycle facts to the
+storefront through `/api/v1/admin/fulfillment/events/*` callbacks. The
+storefront updates `compute_allocations` from those callbacks and derives
+listing open/closed state from pool availability. The older
+`PATCH /api/v1/admin/portfolio/resources/{resource_id}` path remains an
+operator/compatibility resource-state mutation, not the normal dynamic
+listing release mechanism.
 
 **`vm_leases` table:**
 
 | Column | Type | Description |
 |---|---|---|
 | `id` | UUID PK | Internal lease ID |
-| `resource_id` | TEXT | Storefront-assigned resource identifier (e.g. `compute-kvm1-001`). Application-level FK — unvalidated by the provisioning service. |
+| `resource_id` | TEXT | Storefront-assigned concrete resource identifier selected for this lease (e.g. `compute-kvm1-001`). Application-level FK — unvalidated by the provisioning service. |
 | `escrow_uid` | TEXT UNIQUE | On-chain escrow UID. One deal = one lease. |
 | `vm_host` | TEXT | KVM host alias (Ansible inventory name) |
 | `vm_target` | TEXT | Libvirt domain name of the provisioned VM |
@@ -1052,8 +1128,8 @@ The provisioning service owns lease lifecycle via the `vm_leases` table and the 
 | `pending` | `lease_start_utc` is in the future; VM may not yet be running |
 | `active` | Lease is running; `lease_end_utc` is in the future |
 | `releasing` | `lease_end_utc` passed; watchdog submitted a check job to confirm VM cleanup |
-| `released` | Storefront `PATCH /resources/{id}` called successfully; resource is available again |
-| `forced` | Grace period elapsed; storefront patched without VM confirmation |
+| `released` | Capacity release reported to the storefront successfully |
+| `forced` | Grace period elapsed; release was reported without VM confirmation |
 | `cancelled` | Lease cancelled before expiry |
 
 **Lease flow:**
@@ -1075,12 +1151,12 @@ LeaseWatchdog (every 60s, or on-demand via POST /api/v1/system/check-leases)
   ├── list_releasing()  →  leases with check jobs in flight
   │   ├── Poll check job status
   │   ├── On succeeded / failed+past-grace:
-  │   │   ├── PATCH {settings.storefront_url}/api/v1/admin/portfolio/resources/{resource_id}
-  │   │   │     body: { state: "available", attributes: { lease_end_utc: null } }
+  │   │   ├── POST {settings.storefront_url}/api/v1/admin/fulfillment/events/capacity-released
+  │   │   │     body: { escrow_uid, resource_id, provider_lease_id?, ... }
   │   │   │     headers: X-Admin-Key: {settings.storefront_admin_key}
-  │   │   ├── On 200/404: mark_released()
-  │   │   └── On patch failure within grace: skip (retry next cycle)
-  │   │       On patch failure past grace: mark_forced()
+  │   │   ├── On callback success: mark_released()
+  │   │   └── On callback failure within grace: skip (retry next cycle)
+  │   │       On callback failure past grace: mark_forced()
   │   └── On still-running + within grace: skip (wait next cycle)
 ```
 
@@ -2091,7 +2167,7 @@ autouse `reap_buyer_settle_subprocess` teardown is a no-op when
 | 09b | Ready + credentials + listing open | `wait_for_settlement` → ready; `GET /api/v1/settle/{uid}/status` → tenant credentials; listing remains open |
 | 09c | Lease registered | `GET /api/v1/leases/by-escrow/{uid}` → active/pending |
 | 10a / 10b | Lease expiry setup + watchdog advances | pause watchdog, patch `lease_end_utc` past, arm check-gate mock; watchdog transitions lease to `releasing` |
-| 11a / 11b | Releasing state stable + resource released | check-gate released; resource patched `available` via `PATCH /api/v1/admin/portfolio/resources/{id}` |
+| 11a / 11b | Releasing state stable + capacity released | check-gate released; provisioning reports `/api/v1/admin/fulfillment/events/capacity-released` and the storefront releases the matching allocation |
 
 **Buyer-CLI variant divergence (`test_full_deal_buyer_cli.py`):**
 
