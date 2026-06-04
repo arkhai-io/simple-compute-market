@@ -28,6 +28,7 @@ from market_storefront.cli_publish import (
     _stale_open_listing_ids,
 )
 from service.clients.token import ERC20TokenMetadata
+from tests._settings_overrides import settings_overrides
 
 
 _MOCK_ADDRESS = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
@@ -475,6 +476,89 @@ def test_stale_open_listing_ids_finds_slices_above_available_capacity(tmp_path):
     _insert_allocation(db, "alloc-1", "compute-4x", 2, "leased")
 
     assert _stale_open_listing_ids(db) == ["listing-3x", "listing-4x"]
+
+
+def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch):
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_resource(
+        db, "compute-4x", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
+        gpu_count=4,
+    )
+    _insert_order(db, "listing-3x-old", "closed", "compute-4x")
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "UPDATE listings SET offer_resource = ? WHERE listing_id = ?",
+            (
+                json.dumps({
+                    "resource_id": "compute-4x",
+                    "gpu_model": "RTX 4090",
+                    "gpu_count": 3,
+                    "sla": 95.0,
+                    "region": "NY",
+                }),
+                "listing-3x-old",
+            ),
+        )
+        conn.execute(
+            """
+            CREATE TABLE derived_compute_listings (
+                listing_id TEXT PRIMARY KEY,
+                resource_id TEXT NOT NULL,
+                gpu_count INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                derivation_key TEXT NOT NULL UNIQUE,
+                last_reconciled_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """INSERT INTO derived_compute_listings
+               (listing_id, resource_id, gpu_count, status, derivation_key)
+               VALUES ('listing-3x-old', 'compute-4x', 3, 'closed', 'compute-4x:gpus:3')"""
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    created: list[dict] = []
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_offer",
+        lambda agent_url, offer, accepted_escrows, *a, **k: (
+            created.append(offer)
+            or {"status": "created", "listing_id": f"new-{offer['gpu_count']}x"}
+        ),
+    )
+
+    with settings_overrides(enable_registry_discovery=False):
+        published, failed, skipped = _publish_round(
+            db_path=db,
+            skip_ids={
+                "compute-4x:gpus:1",
+                "compute-4x:gpus:2",
+                "compute-4x:gpus:4",
+            },
+            **_round_kwargs(),
+        )
+
+    assert not failed
+    assert [p["response"]["listing_id"] for p in published] == ["listing-3x-old"]
+    assert created == []
+    assert len(skipped) == 3
+    conn = sqlite3.connect(db)
+    try:
+        status = conn.execute(
+            "SELECT status FROM listings WHERE listing_id = 'listing-3x-old'"
+        ).fetchone()[0]
+        derived_status = conn.execute(
+            "SELECT status FROM derived_compute_listings WHERE derivation_key = 'compute-4x:gpus:3'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert status == "open"
+    assert derived_status == "open"
 
 
 def test_publish_round_normalizes_zero_duration_to_unlimited(tmp_path, monkeypatch):

@@ -38,14 +38,21 @@ from storefront_client import (
     StorefrontClientError,
     SyncStorefrontClient,
 )
+from registry_client import (
+    ListingRequest,
+    SyncRegistryClient,
+    UpdateListingRequest,
+)
 
 from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
 from .services.compute_listing_reconciler import (
     available_compute_slices,
     listing_resource_key,
+    load_derived_listing_for_slice,
     mark_derived_listings_closed,
     open_listing_resource_keys,
     record_derived_listing,
+    reopen_local_derived_listing,
     stale_open_listing_ids,
 )
 
@@ -159,6 +166,123 @@ def _publish_offer(
         "root_agent_response": resp.root_agent_response,
         **resp.extra,
     }
+
+
+def _registry_auth_token(registry_url: str) -> str | None:
+    from .utils.config import settings
+
+    auth = getattr(settings.registry, "auth", None) or {}
+    if isinstance(auth, dict):
+        token = auth.get(registry_url) or auth.get(registry_url.rstrip("/"))
+        return str(token) if token else None
+    try:
+        token = auth.get(registry_url) or auth.get(registry_url.rstrip("/"))
+        return str(token) if token else None
+    except Exception:
+        return None
+
+
+def _publish_existing_listing_to_registries(
+    *,
+    listing_id: str,
+    offer: dict,
+    accepted_escrows: list[dict],
+    demands: list[dict],
+    max_duration_seconds: int | None,
+    storefront_url: str,
+    private_key: Optional[str],
+) -> dict:
+    from .utils.config import settings
+
+    if not settings.enable_registry_discovery:
+        return {"status": "disabled", "listing_id": listing_id}
+    if not private_key:
+        raise RuntimeError("wallet.private_key is required to publish to registry")
+
+    urls = list(settings.registry.urls) if settings.registry.urls else ["http://localhost:8080"]
+    errors: list[str] = []
+    any_ok = False
+    request = ListingRequest(
+        listing_id=listing_id,
+        offer=offer,
+        accepted_escrows=accepted_escrows,
+        demands=demands,
+        max_duration_seconds=max_duration_seconds,
+        storefront_url=storefront_url,
+    )
+    update = UpdateListingRequest(
+        updates={
+            "status": "open",
+            "offer_resource": offer,
+            "accepted_escrows": accepted_escrows,
+            "demands": demands,
+            "max_duration_seconds": max_duration_seconds,
+        },
+        private_key=private_key,
+    )
+    for url in urls:
+        try:
+            with SyncRegistryClient(
+                url,
+                timeout=settings.registry.discovery_timeout,
+                api_key=_registry_auth_token(url),
+            ) as client:
+                client.publish_listing(request, private_key)
+                client.update_listing(listing_id, update)
+            any_ok = True
+        except Exception as exc:
+            errors.append(f"{url}: {exc}")
+    if any_ok:
+        return {"status": "published", "listing_id": listing_id}
+    return {
+        "status": "error",
+        "listing_id": listing_id,
+        "message": "; ".join(errors) or "registry publish failed",
+    }
+
+
+def _reopen_derived_listing_if_present(
+    *,
+    db_path: str,
+    base_url: str,
+    resource: dict,
+    offer: dict,
+    accepted_escrows: list[dict],
+    demands: list[dict],
+    max_duration_seconds: int | None,
+    private_key: Optional[str],
+) -> dict | None:
+    derived = load_derived_listing_for_slice(
+        db_path,
+        resource_id=str(resource["resource_id"]),
+        gpu_count=int(resource["gpu_count"]),
+    )
+    if not derived or not derived.get("listing_id"):
+        return None
+    listing_id = str(derived["listing_id"])
+    if derived.get("listing_status") == "open":
+        return None
+
+    reopen_local_derived_listing(
+        db_path,
+        listing_id=listing_id,
+        resource_id=str(resource["resource_id"]),
+        gpu_count=int(resource["gpu_count"]),
+        offer_resource=offer,
+        accepted_escrows=accepted_escrows,
+        demands=demands,
+        max_duration_seconds=max_duration_seconds,
+        seller=base_url,
+    )
+    return _publish_existing_listing_to_registries(
+        listing_id=listing_id,
+        offer=offer,
+        accepted_escrows=accepted_escrows,
+        demands=demands,
+        max_duration_seconds=max_duration_seconds,
+        storefront_url=base_url,
+        private_key=private_key,
+    )
 
 
 def _open_listing_ids(db_path: str) -> list[str]:
@@ -443,6 +567,31 @@ def _publish_round(
                 "region": res["region"],
             }
             try:
+                reopened = _reopen_derived_listing_if_present(
+                    db_path=db_path,
+                    base_url=base_url,
+                    resource=res,
+                    offer=offer,
+                    accepted_escrows=accepted_escrows,
+                    demands=demands,
+                    max_duration_seconds=max_duration_seconds,
+                    private_key=private_key,
+                )
+            except Exception as exc:
+                failed.append((res, f"reopen derived listing: {exc}"))
+                continue
+            if reopened is not None:
+                if reopened.get("status") in {"published", "disabled"}:
+                    published.append({
+                        "resource": res,
+                        "response": reopened,
+                        "accepted_escrows": accepted_escrows,
+                        "demands": demands,
+                    })
+                else:
+                    failed.append((res, reopened.get("message") or str(reopened)))
+                continue
+            try:
                 resp = _publish_offer(
                     base_url, offer, accepted_escrows, demands, max_duration_seconds,
                     wallet_address, private_key,
@@ -606,6 +755,31 @@ def _publish_round(
             )
         except Exception as exc:
             failed.append((res, f"recipient demands: {exc}"))
+            continue
+        try:
+            reopened = _reopen_derived_listing_if_present(
+                db_path=db_path,
+                base_url=base_url,
+                resource=res,
+                offer=offer,
+                accepted_escrows=accepted_escrows,
+                demands=demands,
+                max_duration_seconds=max_duration_seconds,
+                private_key=private_key,
+            )
+        except Exception as exc:
+            failed.append((res, f"reopen derived listing: {exc}"))
+            continue
+        if reopened is not None:
+            if reopened.get("status") in {"published", "disabled"}:
+                published.append({
+                    "resource": res,
+                    "response": reopened,
+                    "accepted_escrows": accepted_escrows,
+                    "demands": demands,
+                })
+            else:
+                failed.append((res, reopened.get("message") or str(reopened)))
             continue
         try:
             resp = _publish_offer(

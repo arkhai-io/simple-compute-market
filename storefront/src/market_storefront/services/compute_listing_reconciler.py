@@ -220,6 +220,115 @@ def record_derived_listing(
         conn.close()
 
 
+def load_derived_listing_for_slice(
+    db_path: str,
+    *,
+    resource_id: str,
+    gpu_count: int,
+) -> dict[str, Any] | None:
+    derivation_key = listing_resource_key(resource_id, gpu_count)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
+    try:
+        row_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='derived_compute_listings'"
+        ).fetchone()
+        if row_exists is None:
+            return None
+        row = conn.execute(
+            """
+            SELECT d.listing_id, d.resource_id, d.gpu_count, d.status,
+                   d.derivation_key, l.status AS listing_status
+            FROM derived_compute_listings d
+            LEFT JOIN listings l ON l.listing_id = d.listing_id
+            WHERE d.derivation_key = ?
+            LIMIT 1
+            """,
+            (derivation_key,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    keys = [
+        "listing_id",
+        "resource_id",
+        "gpu_count",
+        "status",
+        "derivation_key",
+        "listing_status",
+    ]
+    return dict(zip(keys, row))
+
+
+def reopen_local_derived_listing(
+    db_path: str,
+    *,
+    listing_id: str,
+    resource_id: str,
+    gpu_count: int,
+    offer_resource: dict[str, Any],
+    accepted_escrows: list[dict[str, Any]],
+    demands: list[dict[str, Any]],
+    max_duration_seconds: int | None,
+    seller: str,
+) -> None:
+    now = "STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')"
+    conn = sqlite3.connect(db_path)
+    try:
+        ensure_derived_compute_listings_table(conn)
+        listing_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(listings)").fetchall()
+        }
+        updates = ["status = 'open'"]
+        params: list[Any] = []
+        if "paused" in listing_cols:
+            updates.append("paused = 0")
+        if "updated_at" in listing_cols:
+            updates.append(f"updated_at = {now}")
+        column_values = {
+            "offer_resource": json.dumps(offer_resource),
+            "accepted_escrows": json.dumps(accepted_escrows),
+            "demands": json.dumps(demands),
+            "max_duration_seconds": max_duration_seconds,
+            "seller": seller,
+        }
+        for column, value in column_values.items():
+            if column in listing_cols:
+                updates.append(f"{column} = ?")
+                params.append(value)
+        params.append(listing_id)
+        conn.execute(
+            f"""
+            UPDATE listings
+            SET {", ".join(updates)}
+            WHERE listing_id = ?
+            """,
+            tuple(params),
+        )
+        conn.execute(
+            """
+            INSERT INTO derived_compute_listings(
+              listing_id, resource_id, gpu_count, status, derivation_key, last_reconciled_at
+            )
+            VALUES (?, ?, ?, 'open', ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            ON CONFLICT(derivation_key) DO UPDATE SET
+              listing_id=excluded.listing_id,
+              status='open',
+              last_reconciled_at=excluded.last_reconciled_at
+            """,
+            (
+                listing_id,
+                resource_id,
+                int(gpu_count),
+                listing_resource_key(resource_id, gpu_count),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def mark_derived_listings_closed(db_path: str, listing_ids: list[str]) -> None:
     if not listing_ids:
         return
