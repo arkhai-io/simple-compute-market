@@ -27,6 +27,10 @@ from market_storefront.models.domain_models import (
 )
 from market_storefront.resources import parse_resource_from_dict
 
+from market_storefront.services.compute_listing_reconciler import (
+    mark_derived_listings_closed,
+    stale_open_listing_ids,
+)
 from market_storefront.utils.config import CHAINS, settings, AGENT_ID, BASE_URL_OVERRIDE
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
 from market_storefront.utils.sqlite_client import get_sqlite_client
@@ -147,6 +151,17 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
             "message": f"Registry update failed for order {order_id}: {exc}",
             "listing_id": order_id,
         }
+
+
+async def close_stale_compute_listings_after_capacity_change(db_path: str) -> list[str]:
+    """Close open derived compute listings whose GPU slice no longer fits."""
+    closed_listing_ids: list[str] = []
+    for listing_id in stale_open_listing_ids(db_path):
+        result = await close_order({"listing_id": listing_id})
+        if str(result.get("status", "?")) in ("closed", "skipped", "queued"):
+            closed_listing_ids.append(listing_id)
+    mark_derived_listings_closed(db_path, closed_listing_ids)
+    return closed_listing_ids
 
 
 async def _do_provision(
@@ -713,6 +728,24 @@ async def fulfill_compute_obligation(
             allocation_id=reserved_allocation_id,
             allocated_gpu_count=reserved.get("allocated_gpu_count"),
         )
+        try:
+            closed_listing_ids = await close_stale_compute_listings_after_capacity_change(
+                sqlite_client.db_path,
+            )
+            if closed_listing_ids:
+                stage_event(
+                    "provision", "stale_compute_listings_closed",
+                    listing_id=order_id,
+                    escrow_uid=escrow_uid,
+                    resource_id=reserved_resource_id,
+                    allocation_id=reserved_allocation_id,
+                    closed_listing_ids=closed_listing_ids,
+                )
+        except Exception as close_err:
+            logger.warning(
+                "[LISTINGS] Failed to close stale compute listings after reservation: %s",
+                close_err,
+            )
 
         async def _record_job_id(job_id: str) -> None:
             await get_sqlite_client().update_escrow(
