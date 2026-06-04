@@ -374,7 +374,16 @@ class TestFulfillmentEvents:
 
         response = await c._post(
             "/api/v1/admin/fulfillment/events/usage-started",
-            {"allocation_id": allocation_id, "escrow_uid": "escrow-2x"},
+            {
+                "allocation_id": allocation_id,
+                "escrow_uid": "escrow-2x",
+                "provider_id": "provider-a",
+                "provider_lease_id": "lease-2x",
+                "resource_id": "provider-resource-2x",
+                "vm_host": "kvm1",
+                "vm_target": "tenant-2x",
+                "lease_end_utc": "2026-01-01T00:00:00Z",
+            },
             extra_headers=c._admin_headers(),
         )
 
@@ -393,6 +402,27 @@ class TestFulfillmentEvents:
             3: "closed",
             4: "closed",
         }
+        conn = sqlite3.connect(db.db_path)
+        try:
+            row = conn.execute(
+                """
+                SELECT provider_id, provider_lease_id, provider_resource_id,
+                       vm_host, vm_target, lease_end_utc
+                FROM compute_allocations
+                WHERE allocation_id = ?
+                """,
+                (allocation_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row == (
+            "provider-a",
+            "lease-2x",
+            "provider-resource-2x",
+            "kvm1",
+            "tenant-2x",
+            "2026-01-01T00:00:00Z",
+        )
 
     async def test_capacity_released_marks_allocation_released(self, client):
         c, db = client
@@ -434,6 +464,48 @@ class TestFulfillmentEvents:
             required_attributes={"resource_id": "pool-h200-1", "gpu_count": 4},
         )
         assert selected is not None
+
+    async def test_fulfillment_failed_persists_failure_metadata(self, client):
+        c, db = client
+        allocation_id = await _seed_dynamic_listing_pool(db)
+
+        response = await c._post(
+            "/api/v1/admin/fulfillment/events/failed",
+            {
+                "allocation_id": allocation_id,
+                "provider_id": "provider-a",
+                "provider_job_id": "job-create-1",
+                "resource_id": "provider-resource-2x",
+                "reason": "provisioning_error",
+                "message": "host rejected request",
+                "logs_ref": "s3://logs/job-create-1",
+            },
+            extra_headers=c._admin_headers(),
+        )
+
+        assert response["allocation_id"] == allocation_id
+        assert response["state"] == "released"
+        conn = sqlite3.connect(db.db_path)
+        try:
+            row = conn.execute(
+                """
+                SELECT provider_id, provider_job_id, provider_resource_id,
+                       failure_reason, failure_message, logs_ref
+                FROM compute_allocations
+                WHERE allocation_id = ?
+                """,
+                (allocation_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row == (
+            "provider-a",
+            "job-create-1",
+            "provider-resource-2x",
+            "provisioning_error",
+            "host rejected request",
+            "s3://logs/job-create-1",
+        )
 
     async def test_fulfillment_event_unknown_allocation_returns_404(self, client):
         c, _ = client

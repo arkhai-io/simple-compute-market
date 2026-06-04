@@ -51,6 +51,33 @@ def test_sqlite_schema_includes_derived_compute_listings(client):
     } <= cols
 
 
+def test_sqlite_schema_includes_compute_allocation_correlation_fields(client):
+    conn = sqlite3.connect(client.db_path)
+    try:
+        cols = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(compute_allocations)"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert {
+        "provider_id",
+        "provider_job_id",
+        "provider_lease_id",
+        "provider_resource_id",
+        "vm_host",
+        "vm_target",
+        "lease_end_utc",
+        "failure_reason",
+        "failure_message",
+        "logs_ref",
+        "check_job_id",
+    } <= cols
+
+
 @pytest.mark.asyncio
 async def test_reserve_partial_gpu_capacity_keeps_pool_available(client):
     await _seed_compute_pool(client, gpu_count=4)
@@ -130,6 +157,54 @@ async def test_allocation_lifecycle_updates_resource_aggregate_state(client):
     row = await client.get_resource(resource_id="pool-h200-1")
     assert row is not None
     assert row["state"] == "available"
+
+
+@pytest.mark.asyncio
+async def test_allocation_lifecycle_persists_provider_correlation_fields(client):
+    await _seed_compute_pool(client, gpu_count=1)
+
+    reserved = await client.reserve_available_compute_vm(
+        required_attributes={"gpu_model": "H200", "gpu_count": 1},
+        escrow_uid="escrow-correlation",
+    )
+    assert reserved is not None
+
+    updated = await client.update_compute_allocation_state(
+        allocation_id=reserved["allocation_id"],
+        state="leased",
+        provider_id="provider-a",
+        provider_job_id="job-create-1",
+        provider_lease_id="lease-1",
+        provider_resource_id="provider-resource-1",
+        vm_host="kvm1",
+        vm_target="tenant-abcd",
+        lease_end_utc="2026-01-01T00:00:00Z",
+    )
+    assert updated is not None
+
+    conn = sqlite3.connect(client.db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT provider_id, provider_job_id, provider_lease_id,
+                   provider_resource_id, vm_host, vm_target, lease_end_utc
+            FROM compute_allocations
+            WHERE allocation_id = ?
+            """,
+            (reserved["allocation_id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == (
+        "provider-a",
+        "job-create-1",
+        "lease-1",
+        "provider-resource-1",
+        "kvm1",
+        "tenant-abcd",
+        "2026-01-01T00:00:00Z",
+    )
 
 
 @pytest.mark.asyncio

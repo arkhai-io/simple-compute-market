@@ -687,6 +687,17 @@ class SQLiteClient:
                   escrow_uid TEXT,
                   gpu_count INTEGER NOT NULL,
                   state TEXT NOT NULL,
+                  provider_id TEXT,
+                  provider_job_id TEXT,
+                  provider_lease_id TEXT,
+                  provider_resource_id TEXT,
+                  vm_host TEXT,
+                  vm_target TEXT,
+                  lease_end_utc TEXT,
+                  failure_reason TEXT,
+                  failure_message TEXT,
+                  logs_ref TEXT,
+                  check_job_id TEXT,
                   created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
                   updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
                   released_at TEXT,
@@ -694,6 +705,24 @@ class SQLiteClient:
                 )
                 """
             )
+            compute_allocation_columns = {
+                row[1] for row in cur.execute("PRAGMA table_info(compute_allocations)").fetchall()
+            }
+            for column in (
+                "provider_id",
+                "provider_job_id",
+                "provider_lease_id",
+                "provider_resource_id",
+                "vm_host",
+                "vm_target",
+                "lease_end_utc",
+                "failure_reason",
+                "failure_message",
+                "logs_ref",
+                "check_job_id",
+            ):
+                if column not in compute_allocation_columns:
+                    cur.execute(f"ALTER TABLE compute_allocations ADD COLUMN {column} TEXT")
             cur.execute(
                 """
                 CREATE TRIGGER IF NOT EXISTS trg_compute_allocations_updated_at
@@ -2163,6 +2192,18 @@ class SQLiteClient:
         allocation_id: str | None = None,
         escrow_uid: str | None = None,
         state: str,
+        provider_id: str | None = None,
+        provider_job_id: str | None = None,
+        provider_lease_id: str | None = None,
+        provider_resource_id: str | None = None,
+        vm_host: str | None = None,
+        vm_target: str | None = None,
+        lease_end_utc: str | None = None,
+        failure_reason: str | None = None,
+        failure_message: str | None = None,
+        logs_ref: str | None = None,
+        check_job_id: str | None = None,
+        released_at: str | None = None,
     ) -> dict[str, Any] | None:
         """Patch one compute allocation and refresh the resource aggregate state."""
         if allocation_id is None and escrow_uid is None:
@@ -2188,17 +2229,39 @@ class SQLiteClient:
                 if row is None:
                     return None
                 found_allocation_id, resource_id, gpu_count = row
+                updates = ["state = ?"]
+                values: list[Any] = [state]
+
+                def add(field: str, value: Any) -> None:
+                    if value is None:
+                        return
+                    updates.append(f"{field} = ?")
+                    values.append(value)
+
+                add("provider_id", provider_id)
+                add("provider_job_id", provider_job_id)
+                add("provider_lease_id", provider_lease_id)
+                add("provider_resource_id", provider_resource_id)
+                add("vm_host", vm_host)
+                add("vm_target", vm_target)
+                add("lease_end_utc", lease_end_utc)
+                add("failure_reason", failure_reason)
+                add("failure_message", failure_message)
+                add("logs_ref", logs_ref)
+                add("check_job_id", check_job_id)
+                add(
+                    "released_at",
+                    released_at
+                    if released_at is not None
+                    else (datetime.now().isoformat() if state == "released" else None),
+                )
                 cur.execute(
-                    """
+                    f"""
                     UPDATE compute_allocations
-                    SET state = ?,
-                        released_at = CASE
-                          WHEN ? = 'released' THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
-                          ELSE released_at
-                        END
+                    SET {", ".join(updates)}
                     WHERE allocation_id = ?
                     """,
-                    (state, state, found_allocation_id),
+                    (*values, found_allocation_id),
                 )
                 cur.execute(
                     "SELECT value, attributes FROM resources WHERE resource_id = ?",
@@ -2221,6 +2284,17 @@ class SQLiteClient:
                     "gpu_count": int(gpu_count),
                     "state": state,
                     "resource_state": aggregate_state,
+                    "provider_id": provider_id,
+                    "provider_job_id": provider_job_id,
+                    "provider_lease_id": provider_lease_id,
+                    "provider_resource_id": provider_resource_id,
+                    "vm_host": vm_host,
+                    "vm_target": vm_target,
+                    "lease_end_utc": lease_end_utc,
+                    "failure_reason": failure_reason,
+                    "failure_message": failure_message,
+                    "logs_ref": logs_ref,
+                    "check_job_id": check_job_id,
                 }
             except Exception:
                 conn.rollback()

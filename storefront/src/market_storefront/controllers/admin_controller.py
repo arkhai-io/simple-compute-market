@@ -317,10 +317,34 @@ class AdminController:
         state: str,
         close_oversized: bool = False,
         reopen_available: bool = False,
+        provider_id: str | None = None,
+        provider_job_id: str | None = None,
+        provider_lease_id: str | None = None,
+        provider_resource_id: str | None = None,
+        vm_host: str | None = None,
+        vm_target: str | None = None,
+        lease_end_utc: str | None = None,
+        failure_reason: str | None = None,
+        failure_message: str | None = None,
+        logs_ref: str | None = None,
+        check_job_id: str | None = None,
+        released_at: str | None = None,
     ) -> FulfillmentEventResponse:
         result = await self._db.update_compute_allocation_state(
             allocation_id=allocation_id,
             state=state,
+            provider_id=provider_id,
+            provider_job_id=provider_job_id,
+            provider_lease_id=provider_lease_id,
+            provider_resource_id=provider_resource_id,
+            vm_host=vm_host,
+            vm_target=vm_target,
+            lease_end_utc=lease_end_utc,
+            failure_reason=failure_reason,
+            failure_message=failure_message,
+            logs_ref=logs_ref,
+            check_job_id=check_job_id,
+            released_at=released_at,
         )
         if result is None:
             raise HTTPException(
@@ -394,6 +418,9 @@ class AdminController:
             event_name="started",
             state="provisioning",
             close_oversized=True,
+            provider_id=body.provider_id,
+            provider_job_id=body.provider_job_id,
+            provider_resource_id=body.resource_id,
         )
 
     @router.post(
@@ -409,6 +436,12 @@ class AdminController:
             event_name="usage_started",
             state="leased",
             close_oversized=True,
+            provider_id=body.provider_id,
+            provider_lease_id=body.provider_lease_id,
+            provider_resource_id=body.resource_id,
+            vm_host=body.vm_host,
+            vm_target=body.vm_target,
+            lease_end_utc=body.lease_end_utc,
         )
 
     @router.post(
@@ -424,6 +457,8 @@ class AdminController:
             event_name="release_started",
             state="releasing",
             close_oversized=True,
+            provider_lease_id=body.provider_lease_id,
+            check_job_id=body.check_job_id,
         )
 
     @router.post(
@@ -440,6 +475,9 @@ class AdminController:
             state="released",
             close_oversized=False,
             reopen_available=True,
+            provider_lease_id=body.provider_lease_id,
+            provider_resource_id=body.resource_id,
+            released_at=body.released_at,
         )
 
     @router.post(
@@ -458,6 +496,12 @@ class AdminController:
             state="released",
             close_oversized=False,
             reopen_available=True,
+            provider_id=body.provider_id,
+            provider_job_id=body.provider_job_id,
+            provider_resource_id=body.resource_id,
+            failure_reason=body.reason,
+            failure_message=body.message,
+            logs_ref=body.logs_ref,
         )
 
     @router.post(
