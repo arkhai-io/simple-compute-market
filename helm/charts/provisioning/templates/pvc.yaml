@@ -7,7 +7,7 @@ lease state evaporates on every pod restart.
 helm.sh/resource-policy: keep so `helm uninstall` does not destroy
 the in-flight leases / hosts / provisioning state.
 */}}
-{{- if .Values.persistence.enabled }}
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

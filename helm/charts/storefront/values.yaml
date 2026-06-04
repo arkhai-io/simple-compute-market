@@ -148,6 +148,10 @@ persistence:
   # file under this directory; the chart does not enforce this — it's
   # the operator's responsibility to keep the two aligned.
   mountPath: /var/lib/arkhai
+  # existingClaim: when set, the chart mounts this pre-existing PVC
+  # and does not create one of its own. Leave empty to let the
+  # chart create a PVC (requires persistence.enabled: true).
+  existingClaim: ""
 
 # ---------------------------------------------------------------------------
 # zerotierEnabled: controls whether ZeroTier networking infrastructure is

@@ -166,10 +166,15 @@ spec:
             items:
               - key: storefront.secrets.toml
                 path: storefront.secrets.toml
-        # SQLite agent.db storage. Backed by a per-agent PVC when
-        # persistence.enabled, emptyDir otherwise (pod-lifetime only).
+        # SQLite agent.db storage. Three modes:
+        #   existingClaim set → mount a Terraform-managed PVC by name
+        #   persistence.enabled → chart creates and owns the PVC
+        #   neither           → emptyDir (pod-lifetime, CI/local only)
         - name: arkhai-data
-          {{- if $.Values.persistence.enabled }}
+          {{- if $.Values.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ $.Values.persistence.existingClaim | quote }}
+          {{- else if $.Values.persistence.enabled }}
           persistentVolumeClaim:
             claimName: {{ include "storefront.agentPvcName" (dict "root" $ "agent" $agent) }}
           {{- else }}

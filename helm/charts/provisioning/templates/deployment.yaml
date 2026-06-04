@@ -71,10 +71,15 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
-        # SQLite + lease state. PVC when persistence.enabled, emptyDir
-        # fallback for kind/CI/local-only setups without a StorageClass.
+        # SQLite + lease state. Three modes:
+        #   existingClaim set → mount a Terraform-managed PVC by name
+        #   persistence.enabled → chart creates and owns the PVC
+        #   neither           → emptyDir (pod-lifetime, CI/local only)
         - name: data
-          {{- if .Values.persistence.enabled }}
+          {{- if .Values.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | quote }}
+          {{- else if .Values.persistence.enabled }}
           persistentVolumeClaim:
             claimName: {{ include "provisioning.pvcName" . }}
           {{- else }}
