@@ -40,6 +40,14 @@ from storefront_client import (
 )
 
 from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
+from .services.compute_listing_reconciler import (
+    available_compute_slices,
+    listing_resource_key,
+    mark_derived_listings_closed,
+    open_listing_resource_keys,
+    record_derived_listing,
+    stale_open_listing_ids,
+)
 
 
 def _normalize_max_duration_seconds(value: Any) -> int | None:
@@ -78,66 +86,15 @@ def _import_csv(csv_path: str, db: Optional[str]) -> None:
 
 
 def _available_resources(db_path: str) -> list[dict]:
-    """Read all `state='available'` compute resources from the agent DB.
+    return available_compute_slices(db_path)
 
-    Returns row dicts including per-resource pricing (min_price, token)
-    and any template-materialized ``accepted_escrows`` entries that the
-    CSV importer wrote at import time. NULL pricing means "no per-row
-    override; fall back to config defaults"; a non-empty
-    ``accepted_escrows`` short-circuits the legacy pricing path entirely
-    at publish time.
-    """
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
-    conn.row_factory = sqlite3.Row
-    try:
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(resources)").fetchall()}
-        has_accepted = "accepted_escrows" in cols
-        has_max_duration = "max_duration_seconds" in cols
-        select_extra = ""
-        if has_accepted:
-            select_extra += ", accepted_escrows"
-        if has_max_duration:
-            select_extra += ", max_duration_seconds"
-        rows = conn.execute(
-            f"""SELECT resource_id, resource_subtype, unit, value, state, attributes,
-                      min_price, token{select_extra}
-               FROM resources
-               WHERE resource_type = 'compute.gpu' AND state = 'available'
-               ORDER BY resource_id""",
-        ).fetchall()
-    finally:
-        conn.close()
 
-    out = []
-    for row in rows:
-        try:
-            attrs = json.loads(row["attributes"] or "{}")
-        except json.JSONDecodeError:
-            attrs = {}
-        accepted_escrows: list[dict] | None = None
-        if has_accepted:
-            raw = row["accepted_escrows"]
-            if isinstance(raw, str) and raw.strip():
-                try:
-                    parsed = json.loads(raw)
-                    if isinstance(parsed, list):
-                        accepted_escrows = parsed
-                except json.JSONDecodeError:
-                    accepted_escrows = None
-        out.append({
-            "resource_id": row["resource_id"],
-            "gpu_model": attrs.get("gpu_model"),
-            "gpu_count": int(row["value"]) if row["value"] is not None else 1,
-            "sla": attrs.get("sla", 0.0),
-            "region": attrs.get("region"),
-            "min_price": row["min_price"],
-            "token": row["token"],
-            "accepted_escrows": accepted_escrows,
-            "max_duration_seconds": (
-                row["max_duration_seconds"] if has_max_duration else None
-            ),
-        })
-    return out
+def _open_listing_resource_keys(db_path: str) -> set[str]:
+    return open_listing_resource_keys(db_path)
+
+
+def _stale_open_listing_ids(db_path: str) -> list[str]:
+    return stale_open_listing_ids(db_path)
 
 
 def _open_order_resource_ids(db_path: str) -> set[str]:
@@ -233,6 +190,21 @@ def _close_order(
         "root_agent_response": resp.root_agent_response,
         **resp.extra,
     }
+
+
+def _close_stale_derived_listings(
+    *,
+    db_path: str,
+    base_url: str,
+    private_key: Optional[str],
+) -> list[str]:
+    closed_listing_ids: list[str] = []
+    for listing_id in _stale_open_listing_ids(db_path):
+        resp = _close_order(base_url, listing_id, private_key)
+        if str(resp.get("status", "?")) in ("closed", "skipped", "queued"):
+            closed_listing_ids.append(listing_id)
+    mark_derived_listings_closed(db_path, closed_listing_ids)
+    return closed_listing_ids
 
 
 def _resolve_pricing(
@@ -389,7 +361,7 @@ def _publish_round(
     publish_priceless: bool = False,
     skip_ids: set[str] | None = None,
 ) -> tuple[list[dict], list[tuple[dict, str]], list[dict]]:
-    """Publish one order for every priced & available resource not in `skip_ids`.
+    """Publish one listing for every priced available resource slice.
 
     Pricing is per-row: ``resources.min_price`` / ``resources.token`` win
     over the [seller.pricing] defaults. Tristate publish behaviour:
@@ -417,7 +389,10 @@ def _publish_round(
     skipped: list[dict] = []
 
     for res in resources:
-        if res["resource_id"] in skip_ids:
+        resource_key = res.get("resource_key") or listing_resource_key(
+            res["resource_id"], res.get("gpu_count"),
+        )
+        if resource_key in skip_ids or res["resource_id"] in skip_ids:
             skipped.append(res)
             continue
 
@@ -472,6 +447,13 @@ def _publish_round(
                     base_url, offer, accepted_escrows, demands, max_duration_seconds,
                     wallet_address, private_key,
                 )
+                if resp.get("listing_id"):
+                    record_derived_listing(
+                        db_path,
+                        listing_id=str(resp["listing_id"]),
+                        resource_id=str(res["resource_id"]),
+                        gpu_count=int(res["gpu_count"]),
+                    )
                 published.append({
                     "resource": res,
                     "response": resp,
@@ -630,6 +612,13 @@ def _publish_round(
                 base_url, offer, accepted_escrows, demands, max_duration_seconds,
                 wallet_address, private_key,
             )
+            if resp.get("listing_id"):
+                record_derived_listing(
+                    db_path,
+                    listing_id=str(resp["listing_id"]),
+                    resource_id=str(res["resource_id"]),
+                    gpu_count=int(res["gpu_count"]),
+                )
             published.append({
                 "resource": res,
                 "response": resp,
@@ -678,7 +667,10 @@ def run_watch_loop(
         while True:
             cycle += 1
             try:
-                covered = _open_order_resource_ids(db_path)
+                _close_stale_derived_listings(
+                    db_path=db_path, base_url=base_url, private_key=private_key,
+                )
+                covered = _open_listing_resource_keys(db_path)
                 published, failed, skipped = _publish_round(
                     db_path=db_path, base_url=base_url,
                     wallet_address=wallet_address, private_key=private_key,
@@ -908,6 +900,10 @@ def register(app: typer.Typer) -> None:
         # One-shot path
         # ------------------------------------------------------------------
         if not watch:
+            _close_stale_derived_listings(
+                db_path=db_path, base_url=base_url, private_key=private_key,
+            )
+            covered = _open_listing_resource_keys(db_path)
             published, failed, _skipped = _publish_round(
                 db_path=db_path, base_url=base_url,
                 wallet_address=wallet_address, private_key=private_key,
@@ -916,6 +912,7 @@ def register(app: typer.Typer) -> None:
                 default_max_duration_seconds=default_max_duration_seconds,
                 rpc_url=rpc_url, chain_id=chain_id,
                 publish_priceless=settings.pricing.publish_priceless,
+                skip_ids=covered,
             )
             if not published and not failed:
                 console.print(

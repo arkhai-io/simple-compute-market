@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from market_storefront.utils.sqlite_client import SQLiteClient
@@ -25,6 +27,28 @@ async def _seed_compute_pool(client: SQLiteClient, *, gpu_count: int = 4) -> Non
             "vm_host": "host-1",
         },
     )
+
+
+def test_sqlite_schema_includes_derived_compute_listings(client):
+    conn = sqlite3.connect(client.db_path)
+    try:
+        cols = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(derived_compute_listings)"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert {
+        "listing_id",
+        "resource_id",
+        "gpu_count",
+        "status",
+        "derivation_key",
+        "last_reconciled_at",
+    } <= cols
 
 
 @pytest.mark.asyncio

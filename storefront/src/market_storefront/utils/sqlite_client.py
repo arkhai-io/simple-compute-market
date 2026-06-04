@@ -707,6 +707,26 @@ class SQLiteClient:
                 END
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS derived_compute_listings (
+                  listing_id TEXT PRIMARY KEY,
+                  resource_id TEXT NOT NULL,
+                  gpu_count INTEGER NOT NULL,
+                  status TEXT NOT NULL,
+                  derivation_key TEXT NOT NULL UNIQUE,
+                  last_reconciled_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_resource "
+                "ON derived_compute_listings(resource_id, gpu_count)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_status "
+                "ON derived_compute_listings(status)"
+            )
             # Credentials table (off-chain only, never exposed on-chain)
             cur.execute(
                 """
