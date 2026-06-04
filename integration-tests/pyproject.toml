@@ -75,6 +75,7 @@ markers = [
     "e2e_deal: Full buyer-seller deal lifecycle e2e test (synthetic-buyer + force-accept, follows the dry-run + advance stage pattern)",
     "e2e_deal_buyer_cli: Full deal driven by the buyer's `market` CLI subprocess against the live storefront (two-machine production interaction)",
     "e2e_buy: One-shot `market buy` (discovery-driven) lifecycle from the buyer machine, against the live storefront",
+    "e2e_compute_dynamic_listings: Compute dynamic listing lifecycle from admin reserve through release callbacks",
     "multi_registry: Multi-registry publish + discovery e2e scenario (stops at negotiation start)",
     "e2e_alkahest_escrow_codecs: Real Alkahest escrow codec create/read scenario",
     "smoke: Quick smoke tests",
