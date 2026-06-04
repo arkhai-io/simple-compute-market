@@ -23,7 +23,7 @@ B1  Resource seed:    import the buy-specific compute row (distinct gpu_model
 B2  Publish listing:  create paused → resume → confirm present in registry
 B3  Arm provisioning: non-pausing mock create rule that returns tenant creds
 B4  market buy:       discovery-driven one-shot reaches status=ready, exit 0
-B5  Seller + lease:   listing remains open, primary escrow ready with a
+B5  Seller + lease:   listing closes while capacity is held, primary escrow ready with a
                       fulfillment_uid, provisioning lease registered
 """
 
@@ -36,6 +36,7 @@ import pytest
 
 from service.clients.alkahest import (
     get_alkahest_network,
+    get_recipient_arbiter,
     resolve_alkahest_address_config,
 )
 from src.settings import settings
@@ -83,6 +84,17 @@ ACCEPTED_ESCROWS = [{
     "literal_fields": {"token": DEMAND_TOKEN_ADDRESS},
     "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_AMOUNT)}],
 }]
+
+
+def _recipient_demands(seller_wallet: str) -> list[dict]:
+    return [{
+        "chain_name": "anvil",
+        "arbiter": get_recipient_arbiter(
+            "anvil", config_path=_ALKAHEST_ADDRESSES_PATH,
+        ).lower(),
+        "demand_data": {"recipient": seller_wallet.lower()},
+    }]
+
 
 DURATION_HOURS = 1
 BUYER_INITIAL_PRICE = 7_000     # below the seller floor (10_000) — forces a round-0 counter
@@ -174,6 +186,7 @@ class TestStageB2_PublishListing:
             agent_wallet_address=seller_wallet,
             offer=OFFER_RESOURCE,
             accepted_escrows=ACCEPTED_ESCROWS,
+            demands=_recipient_demands(seller_wallet),
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
         )
@@ -325,10 +338,11 @@ class TestStageB5_SellerAndLease:
     def test_b5_seller_state_and_lease_registered(
         self, storefront_admin_client, provisioning_client, deal_state: DealState
     ):
-        """Seller kept the listing open; provisioning owns a lease.
+        """Seller closes the listing while provisioning owns the lease.
 
         Cross-machine confirmation that the buyer's one-shot landed real
-        state on the seller side: the listing remains ``open``, the per-deal
+        state on the seller side: the listing is ``closed`` while the 1x
+        capacity is held, the per-deal
         primary escrow is ``ready`` with a fulfillment_uid, and the
         provisioning service registered a lease for the escrow.
         """
@@ -336,8 +350,8 @@ class TestStageB5_SellerAndLease:
                       "seller_listing_id", "settlement_status")
 
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
-        assert listing.status == "open", (
-            f"Expected listing to remain open after buy, got {listing.status!r}"
+        assert listing.status == "closed", (
+            f"Expected listing to close while capacity is held, got {listing.status!r}"
         )
 
         detail = storefront_admin_client.get_negotiation(

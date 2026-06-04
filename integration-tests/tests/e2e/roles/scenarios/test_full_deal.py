@@ -62,7 +62,7 @@ Phase 9 — Provisioning completion
   09b  Settlement ready + credentials + listing closed:
          wait_for_settlement (server-side long-poll) → ready=True, status=ready
          GET /settle/{uid}/status → status=ready, tenant_credentials present
-         GET /api/v1/listings/{id} → status=open
+         GET /api/v1/listings/{id} → status=closed
          GET .../negotiations/{neg_id} → primary escrow status=ready,
                                           fulfillment_uid populated
   09c  Lease registered:
@@ -86,9 +86,11 @@ from __future__ import annotations
 
 import logging
 import os
+from importlib import resources
 
 import pytest
 
+from service.clients.alkahest import get_recipient_arbiter
 from src.settings import settings
 from tests.e2e.roles.scenarios.conftest import (
     DealState,
@@ -139,6 +141,22 @@ ACCEPTED_ESCROWS = [{
     "literal_fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
     "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_RESOURCE["amount"])}],
 }]
+
+_ALKAHEST_ADDRESSES_PATH = str(
+    resources.files("market_storefront.data").joinpath("alkahest_anvil_addresses.json")
+)
+
+
+def _recipient_demands(seller_wallet: str) -> list[dict]:
+    return [{
+        "chain_name": "anvil",
+        "arbiter": get_recipient_arbiter(
+            "anvil", config_path=_ALKAHEST_ADDRESSES_PATH,
+        ).lower(),
+        "demand_data": {"recipient": seller_wallet.lower()},
+    }]
+
+
 DURATION_HOURS = 1
 BUYER_INITIAL_PRICE = 7_000    # below seller floor (10_000) — forces counter at round 0
 BUYER_MAX_PRICE = 12_000
@@ -434,6 +452,7 @@ class TestStage02b_CreateListingPaused:
             agent_wallet_address=seller_wallet,
             offer=OFFER_RESOURCE,
             accepted_escrows=ACCEPTED_ESCROWS,
+            demands=_recipient_demands(seller_wallet),
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
         )
@@ -1039,7 +1058,7 @@ class TestStage09b_SettlementReadyAndCredentials:
         Combined observation of all post-provisioning state:
           1. wait_for_settlement — server-side long-poll until job terminal (no client polling)
           2. GET /settle/{uid}/status → status=ready + tenant_credentials
-          3. GET /api/v1/listings/{id} → status=open
+          3. GET /api/v1/listings/{id} → status=closed
           4. GET .../negotiations/{neg_id} → primary escrow ready + fulfillment_uid
         """
         require_state(deal_state, "real_escrow_uid", "provisioning_result_injected",
@@ -1070,7 +1089,9 @@ class TestStage09b_SettlementReadyAndCredentials:
         )
 
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
-        assert listing.status == "open", f"Expected listing status=open, got {listing.status!r}"
+        assert listing.status == "closed", (
+            f"Expected listing status=closed while capacity is held, got {listing.status!r}"
+        )
 
         # The per-negotiation endpoint is the canonical home for per-deal
         # attestation data (was previously rolled up into the registry's
