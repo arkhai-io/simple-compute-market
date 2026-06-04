@@ -78,6 +78,76 @@ def test_sqlite_schema_includes_compute_allocation_correlation_fields(client):
     } <= cols
 
 
+def test_sqlite_migration_backfills_compute_allocation_correlation_fields(tmp_path):
+    db_path = tmp_path / "legacy-agent.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE resources (
+              resource_id TEXT PRIMARY KEY,
+              resource_type TEXT,
+              resource_subtype TEXT,
+              unit TEXT,
+              value NUMERIC,
+              state TEXT,
+              attributes TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE compute_allocations (
+              allocation_id TEXT PRIMARY KEY,
+              resource_id TEXT NOT NULL,
+              listing_id TEXT,
+              escrow_uid TEXT,
+              gpu_count INTEGER NOT NULL,
+              state TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              released_at TEXT
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    SQLiteClient(db_path=str(db_path))
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cols = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(compute_allocations)"
+            ).fetchall()
+        }
+        migration_ids = {
+            row[0]
+            for row in conn.execute("SELECT id FROM schema_migrations").fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert {
+        "provider_id",
+        "provider_job_id",
+        "provider_lease_id",
+        "provider_resource_id",
+        "vm_host",
+        "vm_target",
+        "lease_end_utc",
+        "failure_reason",
+        "failure_message",
+        "logs_ref",
+        "check_job_id",
+    } <= cols
+    assert "20260604_001_compute_allocation_callback_metadata" in migration_ids
+
+
 @pytest.mark.asyncio
 async def test_reserve_partial_gpu_capacity_keeps_pool_available(client):
     await _seed_compute_pool(client, gpu_count=4)

@@ -13,6 +13,7 @@ from typing import Any
 
 from .config import settings
 from .host_csv_importer import upsert_hosts_from_csv
+from .migrations import apply_schema_migrations
 from .resource_csv_importer import upsert_resources_from_csv, upsert_resources_from_csv_content
 
 logger = logging.getLogger(__name__)
@@ -705,24 +706,6 @@ class SQLiteClient:
                 )
                 """
             )
-            compute_allocation_columns = {
-                row[1] for row in cur.execute("PRAGMA table_info(compute_allocations)").fetchall()
-            }
-            for column in (
-                "provider_id",
-                "provider_job_id",
-                "provider_lease_id",
-                "provider_resource_id",
-                "vm_host",
-                "vm_target",
-                "lease_end_utc",
-                "failure_reason",
-                "failure_message",
-                "logs_ref",
-                "check_job_id",
-            ):
-                if column not in compute_allocation_columns:
-                    cur.execute(f"ALTER TABLE compute_allocations ADD COLUMN {column} TEXT")
             cur.execute(
                 """
                 CREATE TRIGGER IF NOT EXISTS trg_compute_allocations_updated_at
@@ -833,6 +816,7 @@ class SQLiteClient:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_compute_allocations_escrow_uid ON compute_allocations(escrow_uid)"
             )
+            apply_schema_migrations(conn)
             # Stage events — structured log of stage-boundary transitions,
             # queryable via CLI. Each row is the functional output of one
             # stage transition (discovery, negotiation, settlement, etc.).
