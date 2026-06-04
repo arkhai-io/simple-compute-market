@@ -254,7 +254,7 @@ class TestAdminImportResources:
         assert result.imported_count >= 1
 
 
-async def _seed_dynamic_listing_pool(db: SQLiteClient) -> str:
+async def _seed_dynamic_listing_pool_rows(db: SQLiteClient) -> None:
     await db.upsert_resource(
         resource_id="pool-h200-1",
         resource_type="compute.gpu",
@@ -299,6 +299,10 @@ async def _seed_dynamic_listing_pool(db: SQLiteClient) -> str:
             resource_id="pool-h200-1",
             gpu_count=gpu_count,
         )
+
+
+async def _seed_dynamic_listing_pool(db: SQLiteClient) -> str:
+    await _seed_dynamic_listing_pool_rows(db)
     reserved = await db.reserve_available_compute_vm(
         required_attributes={"resource_id": "pool-h200-1", "gpu_count": 2},
         listing_id="listing-2x",
@@ -309,6 +313,61 @@ async def _seed_dynamic_listing_pool(db: SQLiteClient) -> str:
 
 
 class TestFulfillmentEvents:
+    async def test_admin_reserve_capacity_closes_oversized_listings(self, client):
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+
+        response = await c._post(
+            "/api/v1/admin/portfolio/reservations",
+            {
+                "required_attributes": {
+                    "resource_id": "pool-h200-1",
+                    "gpu_count": 2,
+                },
+                "listing_id": "listing-2x-manual",
+                "escrow_uid": "manual-escrow-2x",
+            },
+            extra_headers=c._admin_headers(),
+        )
+
+        assert response["allocation_id"]
+        assert response["resource_id"] == "pool-h200-1"
+        assert response["gpu_count"] == 2
+        assert response["resource_state"] == "available"
+        assert sorted(response["closed_listing_ids"]) == ["listing-3x", "listing-4x"]
+        statuses = {
+            gpu_count: (await db.load_listing(listing_id=f"listing-{gpu_count}x"))[
+                "status"
+            ]
+            for gpu_count in range(1, 5)
+        }
+        assert statuses == {
+            1: "open",
+            2: "open",
+            3: "closed",
+            4: "closed",
+        }
+
+    async def test_admin_reserve_capacity_returns_409_when_no_capacity(self, client):
+        c, db = client
+        await _seed_dynamic_listing_pool(db)
+
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c._post(
+                "/api/v1/admin/portfolio/reservations",
+                {
+                    "required_attributes": {
+                        "resource_id": "pool-h200-1",
+                        "gpu_count": 3,
+                    },
+                    "listing_id": "listing-3x-manual",
+                    "escrow_uid": "manual-escrow-3x",
+                },
+                extra_headers=c._admin_headers(),
+            )
+
+        assert "409" in str(exc_info.value)
+
     async def test_usage_started_marks_leased_and_closes_oversized_listings(self, client):
         c, db = client
         allocation_id = await _seed_dynamic_listing_pool(db)

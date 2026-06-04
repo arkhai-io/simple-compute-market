@@ -31,6 +31,24 @@ class ReleaseReservationsResponse(BaseModel):
     resource_ids: list[str]
 
 
+class ReserveCapacityRequest(BaseModel):
+    """Request body for POST /api/v1/admin/portfolio/reservations."""
+
+    required_attributes: dict[str, Any] = Field(default_factory=dict)
+    listing_id: str | None = None
+    escrow_uid: str | None = None
+
+
+class ReserveCapacityResponse(BaseModel):
+    """Response from POST /api/v1/admin/portfolio/reservations."""
+
+    allocation_id: str
+    resource_id: str
+    gpu_count: int
+    resource_state: str | None = None
+    closed_listing_ids: list[str] = Field(default_factory=list)
+
+
 class ImportRowError(BaseModel):
     """One failed CSV row in an /admin/portfolio/resources/import response.
 

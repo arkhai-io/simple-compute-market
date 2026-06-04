@@ -25,6 +25,8 @@ from market_storefront.models.system_models import (
     ImportRowError,
     ReleaseReservationsResponse,
     ReleaseStartedEventRequest,
+    ReserveCapacityRequest,
+    ReserveCapacityResponse,
     ResourcePatchRequest,
     ResourcePatchResponse,
     UsageStartedEventRequest,
@@ -325,32 +327,12 @@ class AdminController:
                 status_code=404,
                 detail=f"Allocation {allocation_id!r} not found",
         )
-        closed_listing_ids: list[str] = []
-        if close_oversized:
-            from market_storefront.services.compute_listing_reconciler import (
-                mark_derived_listings_closed,
-                stale_open_listing_ids,
-            )
-
-            closed_listing_ids = stale_open_listing_ids(
-                self._db.db_path,
-            )
-            for listing_id in closed_listing_ids:
-                await self._db.update_listing(listing_id=listing_id, status="closed")
-            mark_derived_listings_closed(self._db.db_path, closed_listing_ids)
-        reopened_listing_ids: list[str] = []
-        if reopen_available:
-            from market_storefront.services.compute_listing_reconciler import (
-                closed_available_listing_ids,
-                mark_derived_listings_open,
-            )
-
-            reopened_listing_ids = closed_available_listing_ids(
-                self._db.db_path,
-            )
-            for listing_id in reopened_listing_ids:
-                await self._db.update_listing(listing_id=listing_id, status="open")
-            mark_derived_listings_open(self._db.db_path, reopened_listing_ids)
+        closed_listing_ids = (
+            await self._close_oversized_compute_listings() if close_oversized else []
+        )
+        reopened_listing_ids = (
+            await self._reopen_available_compute_listings() if reopen_available else []
+        )
         stage_event(
             "fulfillment",
             event_name,
@@ -370,6 +352,34 @@ class AdminController:
             closed_listing_ids=closed_listing_ids,
             reopened_listing_ids=reopened_listing_ids,
         )
+
+    async def _close_oversized_compute_listings(self) -> list[str]:
+        from market_storefront.services.compute_listing_reconciler import (
+            mark_derived_listings_closed,
+            stale_open_listing_ids,
+        )
+
+        closed_listing_ids = stale_open_listing_ids(
+            self._db.db_path,
+        )
+        for listing_id in closed_listing_ids:
+            await self._db.update_listing(listing_id=listing_id, status="closed")
+        mark_derived_listings_closed(self._db.db_path, closed_listing_ids)
+        return closed_listing_ids
+
+    async def _reopen_available_compute_listings(self) -> list[str]:
+        from market_storefront.services.compute_listing_reconciler import (
+            closed_available_listing_ids,
+            mark_derived_listings_open,
+        )
+
+        reopened_listing_ids = closed_available_listing_ids(
+            self._db.db_path,
+        )
+        for listing_id in reopened_listing_ids:
+            await self._db.update_listing(listing_id=listing_id, status="open")
+        mark_derived_listings_open(self._db.db_path, reopened_listing_ids)
+        return reopened_listing_ids
 
     @router.post(
         "/fulfillment/events/started",
@@ -448,6 +458,51 @@ class AdminController:
             state="released",
             close_oversized=False,
             reopen_available=True,
+        )
+
+    @router.post(
+        "/portfolio/reservations",
+        response_model=ReserveCapacityResponse,
+        summary="Reserve compute capacity without negotiation (admin)",
+    )
+    async def reserve_capacity(
+        self, body: ReserveCapacityRequest,
+    ) -> ReserveCapacityResponse:
+        """Force-reserve compute capacity using the allocation model.
+
+        This is an operator/test hook for manual holds and recovery workflows.
+        It intentionally uses ``compute_allocations`` rather than mutating the
+        legacy aggregate ``resources.state`` directly, so partial GPU capacity
+        accounting and derived listing reconciliation stay consistent.
+        """
+        reserved = await self._db.reserve_available_compute_vm(
+            required_attributes=body.required_attributes or None,
+            listing_id=body.listing_id,
+            escrow_uid=body.escrow_uid,
+        )
+        if not reserved:
+            raise HTTPException(
+                status_code=409,
+                detail="No available compute VM matched required attributes",
+            )
+        closed_listing_ids = await self._close_oversized_compute_listings()
+        stage_event(
+            "portfolio",
+            "capacity_reserved_by_admin",
+            allocation_id=reserved.get("allocation_id"),
+            resource_id=reserved.get("resource_id"),
+            gpu_count=reserved.get("allocated_gpu_count"),
+            resource_state=reserved.get("state"),
+            listing_id=body.listing_id,
+            escrow_uid=body.escrow_uid,
+            closed_listing_ids=closed_listing_ids,
+        )
+        return ReserveCapacityResponse(
+            allocation_id=str(reserved["allocation_id"]),
+            resource_id=str(reserved["resource_id"]),
+            gpu_count=int(reserved.get("allocated_gpu_count") or 1),
+            resource_state=reserved.get("state"),
+            closed_listing_ids=closed_listing_ids,
         )
 
     @router.post(
