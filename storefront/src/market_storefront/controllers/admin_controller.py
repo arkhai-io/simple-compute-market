@@ -314,6 +314,7 @@ class AdminController:
         event_name: str,
         state: str,
         close_oversized: bool = False,
+        reopen_available: bool = False,
     ) -> FulfillmentEventResponse:
         result = await self._db.update_compute_allocation_state(
             allocation_id=allocation_id,
@@ -337,6 +338,19 @@ class AdminController:
             for listing_id in closed_listing_ids:
                 await self._db.update_listing(listing_id=listing_id, status="closed")
             mark_derived_listings_closed(self._db.db_path, closed_listing_ids)
+        reopened_listing_ids: list[str] = []
+        if reopen_available:
+            from market_storefront.services.compute_listing_reconciler import (
+                closed_available_listing_ids,
+                mark_derived_listings_open,
+            )
+
+            reopened_listing_ids = closed_available_listing_ids(
+                self._db.db_path,
+            )
+            for listing_id in reopened_listing_ids:
+                await self._db.update_listing(listing_id=listing_id, status="open")
+            mark_derived_listings_open(self._db.db_path, reopened_listing_ids)
         stage_event(
             "fulfillment",
             event_name,
@@ -345,6 +359,7 @@ class AdminController:
             gpu_count=result.get("gpu_count"),
             resource_state=result.get("resource_state"),
             closed_listing_ids=closed_listing_ids,
+            reopened_listing_ids=reopened_listing_ids,
         )
         return FulfillmentEventResponse(
             allocation_id=allocation_id,
@@ -353,6 +368,7 @@ class AdminController:
             gpu_count=result.get("gpu_count"),
             resource_state=result.get("resource_state"),
             closed_listing_ids=closed_listing_ids,
+            reopened_listing_ids=reopened_listing_ids,
         )
 
     @router.post(
@@ -413,6 +429,7 @@ class AdminController:
             event_name="capacity_released",
             state="released",
             close_oversized=False,
+            reopen_available=True,
         )
 
     @router.post(
@@ -430,6 +447,7 @@ class AdminController:
             event_name="failed",
             state="released",
             close_oversized=False,
+            reopen_available=True,
         )
 
     @router.post(

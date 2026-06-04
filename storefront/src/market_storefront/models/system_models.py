@@ -157,3 +157,4 @@ class FulfillmentEventResponse(BaseModel):
     gpu_count: int | None = None
     resource_state: str | None = None
     closed_listing_ids: list[str] = Field(default_factory=list)
+    reopened_listing_ids: list[str] = Field(default_factory=list)

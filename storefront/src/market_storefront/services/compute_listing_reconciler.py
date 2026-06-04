@@ -188,6 +188,36 @@ def stale_open_listing_ids(db_path: str) -> list[str]:
     return stale
 
 
+def closed_available_listing_ids(db_path: str) -> list[str]:
+    """Closed derived listing IDs whose requested slice fits capacity again."""
+    available_keys = current_available_resource_keys(db_path)
+    if not available_keys:
+        return []
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
+    try:
+        table_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='derived_compute_listings'"
+        ).fetchone()
+        if table_exists is None:
+            return []
+        placeholders = ", ".join("?" for _ in available_keys)
+        rows = conn.execute(
+            f"""
+            SELECT d.listing_id
+            FROM derived_compute_listings d
+            LEFT JOIN listings l ON l.listing_id = d.listing_id
+            WHERE d.derivation_key IN ({placeholders})
+              AND (d.status != 'open' OR l.status != 'open')
+            ORDER BY d.gpu_count
+            """,
+            tuple(sorted(available_keys)),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [str(row[0]) for row in rows]
+
+
 def record_derived_listing(
     db_path: str,
     *,
@@ -340,6 +370,27 @@ def mark_derived_listings_closed(db_path: str, listing_ids: list[str]) -> None:
             f"""
             UPDATE derived_compute_listings
             SET status = 'closed',
+                last_reconciled_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE listing_id IN ({placeholders})
+            """,
+            tuple(listing_ids),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def mark_derived_listings_open(db_path: str, listing_ids: list[str]) -> None:
+    if not listing_ids:
+        return
+    conn = sqlite3.connect(db_path)
+    try:
+        ensure_derived_compute_listings_table(conn)
+        placeholders = ", ".join("?" for _ in listing_ids)
+        conn.execute(
+            f"""
+            UPDATE derived_compute_listings
+            SET status = 'open',
                 last_reconciled_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
             WHERE listing_id IN ({placeholders})
             """,

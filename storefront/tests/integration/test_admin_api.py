@@ -337,6 +337,11 @@ class TestFulfillmentEvents:
     async def test_capacity_released_marks_allocation_released(self, client):
         c, db = client
         allocation_id = await _seed_dynamic_listing_pool(db)
+        await c._post(
+            "/api/v1/admin/fulfillment/events/usage-started",
+            {"allocation_id": allocation_id, "escrow_uid": "escrow-2x"},
+            extra_headers=c._admin_headers(),
+        )
 
         response = await c._post(
             "/api/v1/admin/fulfillment/events/capacity-released",
@@ -346,6 +351,19 @@ class TestFulfillmentEvents:
 
         assert response["allocation_id"] == allocation_id
         assert response["state"] == "released"
+        assert sorted(response["reopened_listing_ids"]) == ["listing-3x", "listing-4x"]
+        statuses = {
+            gpu_count: (await db.load_listing(listing_id=f"listing-{gpu_count}x"))[
+                "status"
+            ]
+            for gpu_count in range(1, 5)
+        }
+        assert statuses == {
+            1: "open",
+            2: "open",
+            3: "open",
+            4: "open",
+        }
         selected = await db.select_available_compute_vm(
             required_attributes={"resource_id": "pool-h200-1", "gpu_count": 4},
         )
