@@ -4,6 +4,80 @@ Pending architectural work and known operational issues for the Arkhai market st
 
 ---
 
+## State Management & Schema Migrations
+
+### Fix registry startup: apply Alembic migrations on boot
+
+**Problem:** `registry-service/src/db/database.py::init_db()` calls `Base.metadata.create_all(bind=engine)` but never runs `alembic upgrade head`. Fresh installs get the correct schema via `create_all`. Existing installs upgrading from an older image version do not have Alembic migrations applied — operators must run `alembic upgrade head` manually, and nothing tells them to. The `alembic_version` table exists and tracks state correctly; the startup path simply does not consult it.
+
+**Planned fix:** Add an `alembic upgrade head` call in the registry lifespan hook (or inside `init_db()`) before the service begins serving traffic. Alembic's upgrade is idempotent — on a fresh DB it applies all migrations in sequence; on a current DB it is a no-op. This should be the only startup migration mechanism once implemented; the `create_all` call becomes redundant and can be removed.
+
+---
+
+### Consolidate storefront inline migrations
+
+**Problem:** `storefront/src/market_storefront/utils/sqlite_client.py` contains `_migrate_escrows_and_listings` and `_migrate_negotiation_amount_columns`, which run inline during table creation outside the `schema_migrations` tracking framework. These are real schema transformations with no version record, making it impossible to determine the precise schema version of a running storefront database from the `schema_migrations` table alone.
+
+**Planned fix:** Move both inline migration functions into `storefront/src/market_storefront/utils/migrations.py` with entries in `_MIGRATIONS` and corresponding version IDs in `schema_migrations`. Both already use `IF NOT EXISTS` and column-presence guards so they can be re-run safely; the only change is registering them. This is a prerequisite for accurate schema drift detection.
+
+---
+
+### Init container migration pattern and schema drift guard
+
+**Problem:** Migration logic runs inside the main service container's startup sequence. A migration failure is indistinguishable from an application crash in Kubernetes pod status (`CrashLoopBackOff` vs `Init:Error`). There is also no runtime guard to catch schema drift when migrations have not been applied — the service can boot silently against a mismatched schema and surface errors only when a query hits a missing column.
+
+**Planned fix:**
+
+For each SQLite service (storefront, provisioning):
+
+1. Add a migration CLI entrypoint to the service — `python -m db.migrate` or a console script — that invokes the same migration logic as a standalone command (same image, different entrypoint). The command should log each migration applied and exit 0 on success.
+2. Update each service's Helm Deployment to add an init container using the same image with the migration entrypoint. `Init:Error` is an unambiguous signal that migration failed.
+3. Add a schema version guard in the main container's startup code: on startup, read the highest applied migration ID from `schema_migrations`; if it does not match the ID of the last entry in `_MIGRATIONS`, exit with an actionable message:
+   ```
+   Database schema is at version <current>, service expects <expected>.
+   Apply migrations before starting the service:
+     docker run <image> python -m db.migrate        (docker / local)
+     kubectl apply -f migrate-job.yaml               (Kubernetes without init container)
+   ```
+   The guard is equally important for non-Kubernetes deployments (local dev, docker-compose) where init containers do not apply.
+
+For the registry (once on Postgres):
+
+4. Implement the Helm pre-upgrade hook Job pattern: a Kubernetes Job runs `alembic upgrade head` as a `helm.sh/hook: pre-upgrade,pre-install` before any Deployment pod sees the new image. If the Job fails, `helm upgrade` errors and the running Deployment is untouched.
+
+**Depends on:** Storefront inline migration consolidation (`schema_migrations` must be complete before the drift guard can be reliable for that service).
+
+---
+
+### Helm charts: `persistence.existingClaim` parameter
+
+**Problem:** All three service Helm subcharts create a PVC when `persistence.enabled: true`. For production GCP deployments where Terraform owns the PVC lifecycle, the chart creating its own PVC conflicts with or duplicates the Terraform-managed resource, and a release-name change would silently provision a new empty volume.
+
+**Planned fix:** Add `persistence.existingClaim: ""` to each subchart's `values.yaml` (storefront, registry, provisioning). When set, the Deployment mounts the named PVC; no PVC resource is rendered by the chart. When empty, existing behaviour is unchanged. The production GCP values overlay in the ops repo sets `existingClaim` to the Terraform-managed PVC name. Document in `values.yaml` that `existingClaim` and `persistence.enabled` are mutually exclusive.
+
+---
+
+### Registry: Postgres migration
+
+**Problem:** The registry runs SQLite in all current environments. SQLite on a ReadWriteOnce PVC cannot support concurrent pod versions, which is required for the gradual rollout pattern that preserves client compatibility during non-additive API changes. This blocks any non-additive registry schema or API change until the Postgres infrastructure is in place.
+
+**Context:** The registry codebase already has the migration seams cut — Alembic is the migration framework, `database.py` has an explicit `is_sqlite` branch, and the Postgres engine path has `pool_size=20`. This is not a redesign.
+
+**Planned fix:**
+
+Application-side (`simple-compute-market`):
+- Connect `registry-service/src/db/database.py` to Cloud SQL when `database_url` contains a Postgres DSN (the branch already exists; wire the URL from the Helm values)
+- Replace the startup `create_all` with `alembic upgrade head` (same fix as above, applied in the correct Postgres context)
+- Implement the Helm pre-upgrade hook Job for `alembic upgrade head`
+
+Infrastructure-side (compute-market-internal-infra):
+- Add Cloud SQL instance and IAM bindings to the ops repo Terraform modules (see OPS-STORAGE-1 in that repo's planned work)
+
+**Blocks:** Any non-additive change to the registry's schema or HTTP API contract. See `ARCHITECTURE.md` § Registry client compatibility constraint.
+
+---
+
+---
 ## Core Stack
 
 ### Market Core Extraction (from-above / from-below packaging)
@@ -157,7 +231,7 @@ Genuine pending fixes — distinct from the operational gotchas in the [Known Is
 
 Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes](#latent-bug-fixes) above (which need code changes) and from [Planned Rework](#core-stack) (which needs design + code). Expand as investigation proceeds.
 
-- **Agent SQLite statefulness:** The agent carries significant local state in SQLite (policy configs, negotiation history, resource portfolio). Behavior around container restarts, state migration, and concurrent access is a known problem area. Details TBD.
+- **Storefront schema_migrations incomplete:** Some storefront schema transformations (`_migrate_escrows_and_listings`, `_migrate_negotiation_amount_columns`) run outside the `schema_migrations` tracking framework, so the `schema_migrations` table does not reflect the full applied schema version. The migrations are idempotent and run correctly regardless; the risk is operational visibility. A schema drift guard (planned in TODO) would give a false-negative until this is resolved. See the consolidation item in State Management & Schema Migrations above.
 
 - **Negotiation orphans:** The existence of `negotiation_watchdog.py` implies negotiations can get stuck. The trigger conditions and recovery behavior need documentation.
 

@@ -2043,6 +2043,90 @@ parts of the Swagger flow and should remain in sync.
 
 **Buyer-facing EIP-191 auth:** Buyer endpoints (`/api/v1/negotiate/*`, `/api/v1/settle/*`) use EIP-191 signatures in `X-Signature` + `X-Timestamp` headers. This is not a standard OpenAPI security scheme; it is documented in each endpoint's OpenAPI `description`. Auth is verified by calling `buyer_auth._verify(request, operation, resource_id, claimed_address)` directly inside the handler — not via `Depends()` — to avoid `fastapi_utils @cbv` + method-level `Depends` interaction issues. Tests bypass auth via `unittest.mock.patch.object(buyer_auth, "_verify", return_value=None)`.
 
+## State Management and Schema Migration Strategy
+
+### Database topology
+
+Each service owns exactly one database. Cross-service database sharing does not occur; the per-service SQLite file-per-service design structurally prevents it. The registry is the exception: it runs SQLite in development but is architecturally designed for Postgres in production.
+
+| Service | Migration framework | Storage | Startup behaviour |
+|---|---|---|---|
+| Registry | Alembic (`alembic_version` table, 14 migrations) | SQLite (dev), Postgres-ready | `create_all` only — Alembic migrations are **not** applied automatically. Fresh installs get the correct schema; upgrades from older images require a manual `alembic upgrade head`. See TODO. |
+| Storefront | Custom `schema_migrations` table, per-migration tracking | SQLite | Applied in lifespan hook via `SQLiteClient` constructor |
+| Provisioning | Custom `schema_migrations` table, per-migration tracking | SQLite | Applied in lifespan hook via `init_db()` |
+
+**Known tracking gap in storefront:** `_migrate_escrows_and_listings` and `_migrate_negotiation_amount_columns` in `sqlite_client.py` execute inline during table creation, outside the `schema_migrations` framework. These are real schema transformations with no version record. Cleanup is tracked in `TODO.md`.
+
+---
+
+### Migration placement — current state and target
+
+**Current state:** All three services apply schema migrations inside the main service container's startup sequence. This conflates migration concerns with service startup and makes migration failures indistinguishable from application crashes in Kubernetes pod status.
+
+**Target for SQLite services (storefront, provisioning):**
+
+A Kubernetes init container in the pod executes migrations before the main container starts. Both containers use the same image but different entrypoints — the init container runs a migration CLI command, the main container runs the service. A `Init:Error` pod status is unambiguously a migration failure; it cannot be confused with an application crash.
+
+The main container adds a **schema version guard** in its startup code: before serving any traffic it reads the current schema version from the tracking table, compares it against the version the running code expects, and if there is drift it exits with a message like:
+
+```
+Database schema is at version 3, service expects version 4.
+Run the migration before starting the service:
+  docker run <image> python -m db.migrate       (docker / local)
+  kubectl apply -f migrate-job.yaml              (Kubernetes, if init container not configured)
+```
+
+This guard matters equally for non-Kubernetes deployments — local dev, docker-compose — where init containers do not apply. The service must never silently boot against a mismatched schema and return errors only when a query hits a missing column.
+
+**Target for the registry (Postgres, future):**
+
+A Helm pre-upgrade hook Job connects directly to Postgres and runs `alembic upgrade head` before the Deployment rollout begins. If the Job fails, `helm upgrade` returns an error and the running Deployment is untouched. No pod lifecycle is involved in the migration path. This pattern is enabled by Postgres not being bound to a ReadWriteOnce volume.
+
+Implementation of the init container pattern and the Helm pre-upgrade Job are tracked in `TODO.md`. Until implemented, startup-time migration remains in place; under the `strategy: Recreate` deployment model, the PVC detaches from the old pod before the new pod can attach it, so the migration and service startup are already serialized.
+
+---
+
+### Schema change policy
+
+**Additive-only by default.** The policy for all schema changes:
+
+- New columns must be nullable or carry a default value
+- New tables and new indexes may be added freely
+- Column renames, type changes, and column drops are not permitted in a single release
+
+**Non-additive changes use expand-contract across releases:**
+
+When a change cannot be expressed as purely additive, it is decomposed into two separately-deployable phases:
+
+- *Expand phase (Release N):* Add new columns or tables alongside old. Application code writes to both old and new. Old columns remain present and readable by already-deployed service versions.
+- *Contract phase (Release N+1):* Drop deprecated columns or tables. Application code reads only from the new schema. Old columns are no longer written.
+
+The deprecation window is **k=1**: deprecated schema is removed in the release after the one that introduced the deprecation. Operators on a version behind the expand phase will receive the schema change without disruption; operators more than one release behind must upgrade sequentially through the expand-phase release before applying the contract-phase release. For specific changes requiring longer lead time, k > 1 may be applied and communicated directly to ecosystem partners.
+
+**Large-table guard.** Migrations that backfill or transform existing rows should check the row count before executing. If the count exceeds a threshold (starting value TBD, the migration should fail fast with instructions on how to proceed.
+
+---
+
+### Registry client compatibility constraint
+
+The registry is shared infrastructure. A schema or API change that breaks compatibility with running storefront or provisioning service versions affects the entire ecosystem of operators simultaneously — not just those who have upgraded. This is categorically different from a brief pod restart outage on a per-operator service.
+
+**Non-additive registry schema or API changes are blocked until the registry runs on Postgres with a gradual rollout pattern.**
+
+Postgres enables running old and new registry versions concurrently against the same database, giving operators a defined compatibility window to upgrade their storefront and provisioning service versions before the old API is retired. SQLite on a ReadWriteOnce PVC fundamentally cannot support concurrent pod versions.
+
+Until this infrastructure is in place, all registry schema and API changes must be backward-compatible with at least the immediately preceding release of `arkhai-registry-client`. The expand-contract policy makes individual releases additive, satisfying this requirement.
+
+---
+
+### State persistence
+
+All three service Helm subcharts default to `persistence.enabled: true`, creating a ReadWriteOnce PVC backed by the cluster's default StorageClass. Each Deployment uses `strategy: Recreate` to enforce single-writer access (RWO volumes cannot attach to multiple pods simultaneously), and `helm.sh/resource-policy: keep` ensures `helm uninstall` does not delete the PVC.
+
+The Helm subcharts will expose a `persistence.existingClaim` parameter (planned — see `TODO.md`): when set, the chart mounts the named PVC without creating one; when empty, existing behaviour is unchanged.
+
+---
+
 ## Testing Strategy
 
 > **Test execution context:** The e2e / system integration test suite runs from a **Helm test pod** inside the cluster. It cannot import or instantiate service code in-process. All assertions are made over HTTP against live services using typed client libraries. This affects every layer of the test design: there is no `ASGITransport`, no monkeypatching of service internals, and no direct DB reads from the test pod. Visibility into service state is provided exclusively through HTTP endpoints — which is why the storefront and provisioning service expose rich read APIs rather than relying on direct DB inspection.
