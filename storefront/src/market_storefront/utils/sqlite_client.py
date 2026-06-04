@@ -503,7 +503,8 @@ class SQLiteClient:
                   seller TEXT NOT NULL,
                   oracle_address TEXT,
                   paused INTEGER NOT NULL DEFAULT 0,
-                  accepted_escrows TEXT
+                  accepted_escrows TEXT,
+                  demands TEXT
                 )
                 """
             )
@@ -512,6 +513,10 @@ class SQLiteClient:
             # the column has already been added by an earlier process.
             try:
                 cur.execute("ALTER TABLE listings ADD COLUMN accepted_escrows TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                cur.execute("ALTER TABLE listings ADD COLUMN demands TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
             # One-shot backfill: synthesize accepted_escrows from the legacy
@@ -2418,6 +2423,7 @@ class SQLiteClient:
         oracle_address: str | None = None,
         paused: bool = False,
         accepted_escrows: Any | None = None,
+        demands: Any | None = None,
     ) -> None:
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
@@ -2436,9 +2442,10 @@ class SQLiteClient:
                       seller,
                       oracle_address,
                       paused,
-                      accepted_escrows
+                      accepted_escrows,
+                      demands
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(listing_id) DO UPDATE SET
                       status=excluded.status,
                       updated_at=excluded.updated_at,
@@ -2448,7 +2455,8 @@ class SQLiteClient:
                       seller=excluded.seller,
                       oracle_address=excluded.oracle_address,
                       paused=excluded.paused,
-                      accepted_escrows=excluded.accepted_escrows
+                      accepted_escrows=excluded.accepted_escrows,
+                      demands=excluded.demands
                     """,
                     (
                         listing_id,
@@ -2462,6 +2470,7 @@ class SQLiteClient:
                         oracle_address,
                         1 if paused else 0,
                         self._serialize_resource(accepted_escrows),
+                        self._serialize_resource(demands),
                     ),
                 )
                 conn.commit()
@@ -2530,7 +2539,8 @@ class SQLiteClient:
                            offer_resource, fulfillment_resource,
                            max_duration_seconds, seller, oracle_address,
                            COALESCE(paused, 0) AS paused,
-                           accepted_escrows
+                           accepted_escrows,
+                           demands
                     FROM listings WHERE listing_id = ?
                     """,
                     (listing_id,),
@@ -2542,12 +2552,15 @@ class SQLiteClient:
                     "listing_id", "status", "created_at", "updated_at",
                     "offer_resource", "fulfillment_resource",
                     "max_duration_seconds", "seller", "oracle_address",
-                    "paused", "accepted_escrows",
+                    "paused", "accepted_escrows", "demands",
                 ]
                 d = dict(zip(keys, row))
                 d["paused"] = bool(d["paused"])
                 d["accepted_escrows"] = self._deserialize_accepted_escrows(
                     d.get("accepted_escrows"),
+                )
+                d["demands"] = self._deserialize_accepted_escrows(
+                    d.get("demands"),
                 )
                 return d
             finally:
@@ -3648,7 +3661,8 @@ class SQLiteClient:
                            offer_resource, fulfillment_resource,
                            max_duration_seconds, seller, oracle_address,
                            COALESCE(paused, 0) AS paused,
-                           accepted_escrows
+                           accepted_escrows,
+                           demands
                     FROM listings {where}
                     ORDER BY created_at DESC
                     LIMIT ? OFFSET ?
@@ -3659,7 +3673,7 @@ class SQLiteClient:
                     "listing_id", "status", "created_at", "updated_at",
                     "offer_resource", "fulfillment_resource",
                     "max_duration_seconds", "seller", "oracle_address",
-                    "paused", "accepted_escrows",
+                    "paused", "accepted_escrows", "demands",
                 ]
                 rows = cur.fetchall()
                 result = []
@@ -3668,6 +3682,9 @@ class SQLiteClient:
                     d["paused"] = bool(d["paused"])
                     d["accepted_escrows"] = self._deserialize_accepted_escrows(
                         d.get("accepted_escrows"),
+                    )
+                    d["demands"] = self._deserialize_accepted_escrows(
+                        d.get("demands"),
                     )
                     result.append(d)
                 return result

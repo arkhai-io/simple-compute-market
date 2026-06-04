@@ -28,6 +28,7 @@ from service.clients.token import ERC20TokenMetadata
 
 
 _MOCK_ADDRESS = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+_WALLET_ADDRESS = "0x1111111111111111111111111111111111111111"
 _USDC_ADDRESS = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
 _TOKEN_DECIMALS = {
     _MOCK_ADDRESS.lower(): ("MOCK", 0),
@@ -68,6 +69,10 @@ def _stub_resolve_token(monkeypatch):
     monkeypatch.setattr(
         alkahest_mod, "get_erc20_escrow_obligation_nontierable",
         lambda chain_name, *, config_path=None: "0x" + "cd" * 20,
+    )
+    monkeypatch.setattr(
+        alkahest_mod, "get_recipient_arbiter",
+        lambda chain_name, *, config_path=None: "0x" + "ab" * 20,
     )
     from service.config_loader import ChainConfig
     from market_storefront.utils import config as agent_config
@@ -172,7 +177,7 @@ def _round_kwargs(**overrides):
     """Common _publish_round kwargs; tests override specific keys."""
     base = dict(
         base_url="http://agent",
-        wallet_address="",
+        wallet_address=_WALLET_ADDRESS,
         private_key=None,
         default_min_price="100",
         default_token_address=_MOCK_ADDRESS,
@@ -242,10 +247,14 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     calls: list[dict] = []
 
     def fake_publish(
-        agent_url, offer, accepted_escrows,
+        agent_url, offer, accepted_escrows, demands,
         max_duration_seconds, wallet_address, private_key,
     ):
-        calls.append({"offer": offer, "accepted_escrows": accepted_escrows})
+        calls.append({
+            "offer": offer,
+            "accepted_escrows": accepted_escrows,
+            "demands": demands,
+        })
         rid = offer["resource_id"]
         return {"status": "created", "listing_id": f"listing-for-{rid}"}
 
@@ -263,6 +272,7 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     assert calls[0]["offer"]["resource_id"] == "compute-002"
     entry = calls[0]["accepted_escrows"][0]
     assert entry["literal_fields"] == {"token": _MOCK_ADDRESS}
+    assert calls[0]["demands"][0]["demand_data"] == {"recipient": _WALLET_ADDRESS}
     assert entry["rates"] == [{"field": "amount", "per": "hour", "value": "100"}]
 
 
@@ -298,7 +308,7 @@ def test_publish_round_normalizes_zero_duration_to_unlimited(tmp_path, monkeypat
     calls: list[int | None] = []
 
     def fake_publish(
-        agent_url, offer, accepted_escrows,
+        agent_url, offer, accepted_escrows, demands,
         max_duration_seconds, wallet_address, private_key,
     ):
         calls.append(max_duration_seconds)
@@ -329,7 +339,7 @@ def test_publish_round_preserves_positive_row_duration(tmp_path, monkeypatch):
 
     calls: list[int | None] = []
 
-    def fake_publish(agent_url, offer, accepted_escrows, max_duration_seconds, wallet_address, private_key):
+    def fake_publish(agent_url, offer, accepted_escrows, demands, max_duration_seconds, wallet_address, private_key):
         calls.append(max_duration_seconds)
         return {"status": "created", "listing_id": "o1"}
 

@@ -403,6 +403,43 @@ def accepted_token_address(accepted_or_proposal: Any) -> str | None:
     return val if isinstance(val, str) and val else None
 
 
+def accepted_recipient_address(accepted_or_proposal: Any) -> str | None:
+    """Return the escrow demand recipient from an accepted/proposed escrow.
+
+    Preferred source is ``demands[].demand_data.recipient`` on the
+    RecipientArbiter demand. ``literal_fields["recipient"]`` remains a
+    legacy fallback for transitional data.
+    """
+    for demand in accepted_demands(accepted_or_proposal):
+        data = demand.get("demand_data")
+        if isinstance(data, dict):
+            val = data.get("recipient")
+            if isinstance(val, str) and val:
+                return val
+    literals = _literal_fields_of(accepted_or_proposal)
+    val = literals.get("recipient") if isinstance(literals, dict) else None
+    return val if isinstance(val, str) and val else None
+
+
+def accepted_demands(accepted_or_proposal: Any) -> list[dict[str, Any]]:
+    """Return arbiter demands advertised/negotiated for this escrow shape."""
+    if isinstance(accepted_or_proposal, dict):
+        raw = accepted_or_proposal.get("demands")
+    else:
+        raw = getattr(accepted_or_proposal, "demands", None)
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, dict):
+            out.append(dict(item))
+        else:
+            dumped = item.model_dump() if hasattr(item, "model_dump") else None
+            if isinstance(dumped, dict):
+                out.append(dumped)
+    return out
+
+
 def _rates_of(entry: Any) -> list[Any]:
     if isinstance(entry, dict):
         out = entry.get("rates")
@@ -417,6 +454,30 @@ def _literal_fields_of(entry: Any) -> dict[str, Any]:
     return dict(getattr(entry, "literal_fields", {}) or {})
 
 
+class EscrowDemand(BaseModel):
+    """One arbiter demand paired with an escrow obligation.
+
+    ``arbiter`` is the deployed arbiter contract address. ``demand_data``
+    is the JSON-shaped input for that arbiter's codec; settlement codecs
+    own encoding it into on-chain demand bytes.
+    """
+
+    chain_name: str | None = Field(
+        default=None,
+        description=(
+            "Optional chain identifier for listings that advertise demands "
+            "across multiple chains."
+        ),
+    )
+    arbiter: str = Field(
+        description="Deployed arbiter contract address for this demand.",
+    )
+    demand_data: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Codec-specific arbiter demand data.",
+    )
+
+
 class AcceptedEscrow(BaseModel):
     """One escrow shape the seller will accept for this listing.
 
@@ -425,10 +486,11 @@ class AcceptedEscrow(BaseModel):
     proposal references one of these entries by
     ``(chain_name, escrow_address)`` and inherits its ``literal_fields``.
 
-    ``literal_fields`` is shape-only: keys present advertise a seller-
+    ``literal_fields`` is escrow-data-only: keys present advertise a seller-
     preferred value; keys absent are open. Never includes a rate-bearing
     field directly — those live in ``rates`` so duration scaling stays
-    explicit.
+    explicit. Arbiter release criteria live in the listing/proposal-level
+    ``demands`` list.
 
     ``rates`` carries every rate-bearing field on the obligation. For
     ERC20 escrows that's a single ``{"field": "amount", "per": "hour",
@@ -456,9 +518,10 @@ class AcceptedEscrow(BaseModel):
         default_factory=dict,
         description=(
             "Literal obligation-data keys the seller has fixed (e.g. "
-            "``token``, ``arbiter``). Keys present = seller-preferred "
+            "``token``). Keys present = seller-preferred "
             "value; keys absent = open. Never includes a rate-bearing "
-            "field — those live in ``rates``."
+            "field — those live in ``rates``. Arbiter demand criteria "
+            "live in ``demands``."
         ),
     )
     rates: list[RateValue] = Field(
@@ -500,7 +563,7 @@ class EscrowProposal(BaseModel):
         default_factory=dict,
         description=(
             "Complete buyer-committable EscrowData fields (arbiter, "
-            "token, …). Excludes ``amount`` and ``demand``, "
+            "token, …). Excludes ``amount`` and arbiter demand bytes, "
             "which are derived at settlement."
         ),
     )
@@ -523,6 +586,13 @@ class EscrowProposal(BaseModel):
             "proposals carry one ``RateValue`` per rate-bearing field."
         ),
     )
+    demands: list[EscrowDemand] | None = Field(
+        default=None,
+        description=(
+            "Arbiter demand criteria inherited from the accepted escrow "
+            "entry and committed during negotiation."
+        ),
+    )
     expiration_unix: int = Field(
         gt=0,
         description=(
@@ -531,5 +601,3 @@ class EscrowProposal(BaseModel):
             "clock-drift tolerance window."
         ),
     )
-
-

@@ -173,6 +173,7 @@ def _publish_offer(
     agent_url: str,
     offer: dict,
     accepted_escrows: list[dict],
+    demands: list[dict],
     max_duration_seconds: int | None,
     wallet_address: str,
     private_key: Optional[str],
@@ -189,6 +190,7 @@ def _publish_offer(
                 agent_wallet_address=wallet_address,
                 offer=offer,
                 accepted_escrows=accepted_escrows,
+                demands=demands,
                 max_duration_seconds=max_duration_seconds,
             )
         except StorefrontClientError as exc:
@@ -349,6 +351,30 @@ def _scale_template_entries(
     return scaled
 
 
+def _recipient_demands_for_chains(
+    chains: dict[str, Any],
+    chain_names: set[str],
+    recipient_address: str,
+) -> list[dict[str, Any]]:
+    from service.clients.alkahest import get_recipient_arbiter
+
+    demands: list[dict[str, Any]] = []
+    for name in sorted(chain_names):
+        chain = chains.get(name)
+        if chain is None:
+            continue
+        arbiter = get_recipient_arbiter(
+            chain.name,
+            config_path=chain.alkahest_address_config_path,
+        )
+        demands.append({
+            "chain_name": chain.name,
+            "arbiter": arbiter.lower(),
+            "demand_data": {"recipient": recipient_address.lower()},
+        })
+    return demands
+
+
 def _publish_round(
     *,
     db_path: str,
@@ -407,9 +433,24 @@ def _publish_round(
                 failed.append((res, "no [chains.<name>] tables configured"))
                 continue
             try:
-                accepted_escrows = _scale_template_entries(template_entries, CHAINS)
+                accepted_escrows = _scale_template_entries(
+                    template_entries,
+                    CHAINS,
+                )
             except ValueError as exc:
                 failed.append((res, str(exc)))
+                continue
+            chain_names = {
+                str(e.get("chain_name"))
+                for e in accepted_escrows
+                if isinstance(e, dict) and e.get("chain_name")
+            }
+            try:
+                demands = _recipient_demands_for_chains(
+                    CHAINS, chain_names, wallet_address,
+                )
+            except Exception as exc:
+                failed.append((res, f"recipient demands: {exc}"))
                 continue
             raw_max_duration_seconds = (
                 res.get("max_duration_seconds")
@@ -428,13 +469,14 @@ def _publish_round(
             }
             try:
                 resp = _publish_offer(
-                    base_url, offer, accepted_escrows, max_duration_seconds,
+                    base_url, offer, accepted_escrows, demands, max_duration_seconds,
                     wallet_address, private_key,
                 )
                 published.append({
                     "resource": res,
                     "response": resp,
                     "accepted_escrows": accepted_escrows,
+                    "demands": demands,
                 })
             except typer.Exit:
                 failed.append((res, "HTTP error (see above)"))
@@ -571,15 +613,28 @@ def _publish_round(
                 f"configured chain: {'; '.join(per_chain_errors)}",
             ))
             continue
+        chain_names = {
+            str(e.get("chain_name"))
+            for e in accepted_escrows
+            if isinstance(e, dict) and e.get("chain_name")
+        }
+        try:
+            demands = _recipient_demands_for_chains(
+                CHAINS, chain_names, wallet_address,
+            )
+        except Exception as exc:
+            failed.append((res, f"recipient demands: {exc}"))
+            continue
         try:
             resp = _publish_offer(
-                base_url, offer, accepted_escrows, max_duration_seconds,
+                base_url, offer, accepted_escrows, demands, max_duration_seconds,
                 wallet_address, private_key,
             )
             published.append({
                 "resource": res,
                 "response": resp,
                 "accepted_escrows": accepted_escrows,
+                "demands": demands,
             })
         except typer.Exit:
             failed.append((res, "HTTP error (see above)"))

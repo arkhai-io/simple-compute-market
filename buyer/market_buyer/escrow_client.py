@@ -7,8 +7,8 @@ either without disturbing the other:
    token, expiration window), returns a builder that produces an
    ``EscrowTerms`` (the canonical negotiated artifact). Today, every
    negotiation outcome materializes as a single buyer-made
-   ``ERC20EscrowObligation`` escrow with ``RecipientArbiter`` + the
-   seller's wallet address as the demand recipient. Future steps
+   ``ERC20EscrowObligation`` escrow with the listing/proposal-level
+   arbiter ``demands`` encoded into the escrow demand bytes. Future steps
    replace the inlined arbiter encoding with an arbiter codec
    lookup; the builder's call signature stays stable.
 
@@ -38,9 +38,9 @@ logger = logging.getLogger(__name__)
 
 
 BuildEscrowTermsFn = Callable[
-    [EscrowProposal, str, int, int], list[EscrowTerms],
+    [EscrowProposal, str | None, int, int], list[EscrowTerms],
 ]
-"""``(proposal, seller_wallet, agreed_amount, duration_seconds) -> list[EscrowTerms]``.
+"""``(proposal, legacy_recipient_fallback, agreed_amount, duration_seconds) -> list[EscrowTerms]``.
 
 Materializes the seller-confirmed proposal (echoed back in the
 negotiation response) into the canonical EscrowTerms list. The list
@@ -65,7 +65,7 @@ def make_buyer_payment_escrow_terms_fn(
     chain_name: str,
     addr_config_path: Optional[str],
 ) -> BuildEscrowTermsFn:
-    """Build a ``(proposal, seller_wallet, agreed_amount, duration_seconds)
+    """Build a ``(proposal, legacy_recipient_fallback, agreed_amount, duration_seconds)
     -> [EscrowTerms]`` closure.
 
     The closure delegates to the canonical
@@ -97,7 +97,11 @@ def make_buyer_payment_escrow_terms_fn(
             build_payment_obligation_data,
             get_escrow_codec_for,
         )
-        from service.schemas import accepted_token_address
+        from service.schemas import (
+            accepted_demands,
+            accepted_recipient_address,
+            accepted_token_address,
+        )
 
         # ERC20-only dispatch gate. Resolve the codec at build time so we
         # fail fast with a clear NotImplementedError when the proposal
@@ -122,6 +126,14 @@ def make_buyer_payment_escrow_terms_fn(
                 "literal_fields['token']; cannot build buyer-side "
                 "obligation_data"
             )
+        demands = accepted_demands(proposal)
+        recipient = accepted_recipient_address(proposal) or seller_wallet_address
+        if not demands and (not isinstance(recipient, str) or not recipient):
+            raise ValueError(
+                "EscrowProposal demands missing and no legacy recipient fallback "
+                "available; cannot build buyer-side "
+                "obligation_data"
+            )
         arbiter_kind = "recipient_arbiter"
         proposal_literal = proposal.literal_fields or {}
         proposal_arbiter = proposal_literal.get("arbiter")
@@ -134,7 +146,8 @@ def make_buyer_payment_escrow_terms_fn(
                 arbiter_kind = arbiter_slot
 
         obligation_data = build_payment_obligation_data(
-            seller_wallet=seller_wallet_address,
+            demands=demands or None,
+            recipient=recipient,
             agreed_amount=int(agreed_amount),
             duration_seconds=duration_seconds,
             token_contract_address=token,

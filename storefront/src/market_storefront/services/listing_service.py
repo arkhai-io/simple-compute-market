@@ -181,7 +181,7 @@ class ListingService:
 
     def _parse_offer_and_escrows(
         self, request: CreateListingRequest
-    ) -> tuple[Any, list[dict[str, Any]]]:
+    ) -> tuple[Any, list[dict[str, Any]], list[dict[str, Any]]]:
         from market_storefront.models.domain_models import ComputeResource
         try:
             offer_resource = parse_resource_from_dict(
@@ -199,7 +199,11 @@ class ListingService:
                 "accepted_escrows must be a non-empty list "
                 "of {chain_name, escrow_address, literal_fields, rates} entries."
             )
-        return offer_resource, list(request.accepted_escrows)
+        demands = [
+            d.model_dump(mode="json") if hasattr(d, "model_dump") else dict(d)
+            for d in (request.demands or [])
+        ]
+        return offer_resource, list(request.accepted_escrows), demands
 
     async def create_listing(
         self, request: CreateListingRequest
@@ -216,13 +220,14 @@ class ListingService:
         from market_storefront.utils.action_executor import publish_order_to_registry
         from market_storefront.utils.config import BASE_URL_OVERRIDE
 
-        offer, accepted_escrows = self._parse_offer_and_escrows(request)
+        offer, accepted_escrows, demands = self._parse_offer_and_escrows(request)
 
         listing = Listing(
             listing_id=str(uuid.uuid4()),
             seller=BASE_URL_OVERRIDE,
             offer_resource=offer,
             accepted_escrows=accepted_escrows,
+            demands=demands,
             max_duration_seconds=request.max_duration_seconds,
             oracle_address=None,
         )
@@ -238,6 +243,7 @@ class ListingService:
                 updated_at=now_iso,
                 offer_resource=listing_dict.get("offer_resource"),
                 accepted_escrows=listing_dict.get("accepted_escrows"),
+                demands=listing_dict.get("demands"),
                 fulfillment_resource=None,
                 max_duration_seconds=listing_dict.get("max_duration_seconds"),
                 seller=listing_dict.get("seller") or BASE_URL_OVERRIDE,

@@ -90,7 +90,7 @@ def register(app: typer.Typer) -> None:
         ),
         buyer_address: Optional[str] = typer.Option(
             None, "--buyer-address",
-            help="Override buyer wallet address (default: wallet.address).",
+            help="Override buyer wallet address (default: derived from wallet.private_key).",
         ),
         buyer_private_key: Optional[str] = typer.Option(
             None, "--buyer-priv-key",
@@ -404,13 +404,22 @@ def register(app: typer.Typer) -> None:
                 duration_seconds=int(duration_seconds),
                 ssh_public_key="",  # negotiate-only flow; settle is a separate command
             )
-            from service.schemas import accepted_token_address
+            from service.schemas import accepted_demands, accepted_token_address
+            literal_fields = dict(picked_entry.get("literal_fields") or {})
             _entry_token = accepted_token_address(picked_entry)
+            if _entry_token:
+                literal_fields["token"] = _entry_token
+            selected_chain = picked_entry.get("chain_name")
+            demands = [
+                d for d in accepted_demands(listing_dict or {})
+                if not d.get("chain_name") or d.get("chain_name") == selected_chain
+            ]
             escrow_proposal = EscrowProposal(
-                chain_name=picked_entry.get("chain_name"),
+                chain_name=selected_chain,
                 escrow_address=picked_entry["escrow_address"],
                 fields={"token": _entry_token},
-                literal_fields={"token": _entry_token},
+                literal_fields=literal_fields,
+                demands=demands,
                 expiration_unix=int(_time.time()) + 3600,
             )
 

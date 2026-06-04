@@ -429,7 +429,7 @@ def encode_recipient_demand(recipient_address: str) -> bytes:
 # the structural check is already covered.
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class AgreementContext:
     """Negotiated values an arbiter codec might read to encode its demand.
 
@@ -437,7 +437,7 @@ class AgreementContext:
     bag of agreed-to fields and uses what it needs. Adding a field for
     a new codec doesn't break existing ones.
 
-    Today only ``seller_wallet`` is read (by RecipientArbiterCodec).
+    Today only ``recipient`` is read (by RecipientArbiterCodec).
     Future codecs that bind more of the agreement into the demand
     (TrustedOracle, AttestationProperty, etc.) read the other fields.
 
@@ -447,9 +447,29 @@ class AgreementContext:
     window the seller commits to.
     """
 
-    seller_wallet: str
+    recipient: str
     agreed_amount: int
     duration_seconds: int
+
+    def __init__(
+        self,
+        recipient: str | None = None,
+        agreed_amount: int = 0,
+        duration_seconds: int = 0,
+        *,
+        seller_wallet: str | None = None,
+    ) -> None:
+        effective_recipient = recipient or seller_wallet
+        if not effective_recipient:
+            raise ValueError("AgreementContext recipient is required")
+        object.__setattr__(self, "recipient", effective_recipient)
+        object.__setattr__(self, "agreed_amount", agreed_amount)
+        object.__setattr__(self, "duration_seconds", duration_seconds)
+
+    @property
+    def seller_wallet(self) -> str:
+        """Legacy alias for older tests/callers; use ``recipient``."""
+        return self.recipient
 
 
 @runtime_checkable
@@ -474,15 +494,17 @@ class ArbiterCodec(Protocol):
 
     def encode_demand(self, agreement: AgreementContext) -> bytes: ...
 
+    def encode_demand_data(self, demand_data: dict[str, Any]) -> bytes: ...
+
 
 class RecipientArbiterCodec:
     """The escrow releases on any fulfillment attestation whose
-    ``recipient`` equals the encoded seller address.
+    ``recipient`` equals the encoded demand recipient.
 
-    Demand bytes: ``abi.encode(["address"], [seller_wallet])``.
+    Demand bytes: ``abi.encode(["address"], [recipient])``.
 
-    Trust-based: the seller can fulfill with any attestation as long
-    as its recipient is their wallet. The on-chain release condition
+    Trust-based: the fulfiller can release with any attestation as long
+    as its recipient is the escrow's negotiated recipient. The on-chain release condition
     binds zero of the negotiated provision details — the seller's
     commitment to actually deliver the agreed compute is honor-system.
     Future codecs that bind more of the agreement (TrustedOracle,
@@ -502,7 +524,13 @@ class RecipientArbiterCodec:
         return get_recipient_arbiter(chain_name, config_path=config_path)
 
     def encode_demand(self, agreement: AgreementContext) -> bytes:
-        return encode_recipient_demand(agreement.seller_wallet)
+        return encode_recipient_demand(agreement.recipient)
+
+    def encode_demand_data(self, demand_data: dict[str, Any]) -> bytes:
+        recipient = demand_data.get("recipient")
+        if not isinstance(recipient, str) or not recipient:
+            raise ValueError("RecipientArbiter demand_data.recipient is required")
+        return encode_recipient_demand(recipient)
 
 
 _ARBITER_CODECS: dict[str, ArbiterCodec] = {
@@ -538,7 +566,9 @@ def known_arbiter_kinds() -> list[str]:
 
 def build_payment_obligation_data(
     *,
-    seller_wallet: str,
+    demands: list[dict[str, Any]] | None = None,
+    recipient: str | None = None,
+    seller_wallet: str | None = None,
     agreed_amount: int,
     duration_seconds: int,
     token_contract_address: str,
@@ -570,14 +600,42 @@ def build_payment_obligation_data(
     The arbiter address and demand bytes are produced by the registered
     ``ArbiterCodec`` matching ``arbiter_kind``.
     """
-    codec = get_arbiter_codec(arbiter_kind)
-    agreement = AgreementContext(
-        seller_wallet=seller_wallet,
-        agreed_amount=int(agreed_amount),
-        duration_seconds=duration_seconds,
-    )
-    arbiter_address = codec.resolve_address(chain_name, config_path=addr_config_path)
-    demand_bytes = codec.encode_demand(agreement)
+    if demands:
+        first = demands[0]
+        if not isinstance(first, dict):
+            raise ValueError("demands entries must be objects")
+        arbiter_address = first.get("arbiter")
+        if not isinstance(arbiter_address, str) or not arbiter_address:
+            raise ValueError("demands[0].arbiter is required")
+        demand_data = first.get("demand_data")
+        if not isinstance(demand_data, dict):
+            raise ValueError("demands[0].demand_data must be an object")
+        resolved_kind = address_to_slot(
+            chain_name,
+            arbiter_address,
+            config_path=addr_config_path,
+        )
+        if not resolved_kind:
+            raise ValueError(
+                f"Cannot resolve arbiter codec for demand arbiter "
+                f"{arbiter_address!r} on chain {chain_name!r}"
+            )
+        codec = get_arbiter_codec(resolved_kind)
+        demand_bytes = codec.encode_demand_data(demand_data)
+    else:
+        effective_recipient = recipient or seller_wallet
+        if not effective_recipient:
+            raise ValueError(
+                "recipient or demands must be supplied to build payment obligation data"
+            )
+        codec = get_arbiter_codec(arbiter_kind)
+        agreement = AgreementContext(
+            recipient=effective_recipient,
+            agreed_amount=int(agreed_amount),
+            duration_seconds=duration_seconds,
+        )
+        arbiter_address = codec.resolve_address(chain_name, config_path=addr_config_path)
+        demand_bytes = codec.encode_demand(agreement)
     return {
         "arbiter": arbiter_address,
         "demand": "0x" + demand_bytes.hex(),

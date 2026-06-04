@@ -20,6 +20,7 @@ _TOKEN = "0x" + "33" * 20
 _TOKEN_LEGACY = "0x" + "44" * 20
 _SELLER = "0x" + "55" * 20
 _ARBITER = "0x" + "66" * 20
+_RECIPIENT = "0x" + "77" * 20
 
 
 @pytest.fixture
@@ -56,12 +57,14 @@ def patched_alkahest(monkeypatch):
         raise ValueError(f"no stub codec for {escrow_address!r}")
 
     def _stub_build_obligation(
-        *, seller_wallet, agreed_amount, duration_seconds,
+        *, demands=None, recipient=None, seller_wallet=None, agreed_amount, duration_seconds,
         token_contract_address, chain_name,
         addr_config_path=None, arbiter_kind="recipient_arbiter",
     ):
+        effective_recipient = recipient or seller_wallet
         captured["build_call"] = dict(
-            seller_wallet=seller_wallet,
+            demands=demands,
+            recipient=effective_recipient,
             agreed_amount=agreed_amount,
             duration_seconds=duration_seconds,
             token=token_contract_address,
@@ -117,6 +120,18 @@ def test_reads_token_from_literal_fields(patched_alkahest):
     assert terms[0].maker == "buyer"
     assert terms[0].obligation_data["token"] == _TOKEN
     assert terms[0].obligation_data["amount"] == 1_000
+
+
+def test_reads_recipient_from_literal_fields(patched_alkahest):
+    build = make_buyer_payment_escrow_terms_fn(
+        chain_name=_CHAIN, addr_config_path=None,
+    )
+    proposal = _make_proposal(
+        literal_fields={"token": _TOKEN, "recipient": _RECIPIENT},
+    )
+    build(proposal, _SELLER, 1_000, 3600)
+
+    assert patched_alkahest["build_call"]["recipient"] == _RECIPIENT
 
 
 def test_ignores_legacy_fields_token(patched_alkahest):

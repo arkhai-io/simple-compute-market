@@ -418,6 +418,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
 
     offer_resource = _ensure_json_obj(order_dict.get("offer_resource"), {})
     accepted_escrows = _ensure_json_obj(order_dict.get("accepted_escrows"), [])
+    demands = _ensure_json_obj(order_dict.get("demands"), [])
 
     try:
         async with _make_registry_client() as registry_client:
@@ -425,6 +426,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
                 listing_id=order_id,
                 offer=offer_resource,
                 accepted_escrows=accepted_escrows,
+                demands=demands,
                 max_duration_seconds=order_dict.get("max_duration_seconds"),
                 storefront_url=order_dict.get("seller") or BASE_URL_OVERRIDE,
             )
@@ -442,6 +444,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
                 agent_url=BASE_URL_OVERRIDE,
                 offer=offer_resource,
                 accepted_escrows=accepted_escrows,
+                demands=demands,
                 max_duration_seconds=order_dict.get("max_duration_seconds"),
             )
             return {"status": "published", "listing_id": order_id}
@@ -947,7 +950,32 @@ async def fulfill_compute_obligation(
             )
             logger.info(f"[ALKAHEST] Arbitration requested: {request_arbitration_result}")
         except Exception as error:
-            logger.error(f"[ALKAHEST] Fulfillment error: {error}")
+            logger.error(
+                "[ALKAHEST] EVENT=settlement_failed_after_provisioning "
+                "escrow_uid=%s listing_id=%s resource_id=%s allocation_id=%s "
+                "vm_host=%s error=%s",
+                escrow_uid,
+                order_id,
+                reserved_resource_id,
+                reserved_allocation_id,
+                reserved_vm_host,
+                error,
+            )
+            stage_event("settlement", "failed_after_provisioning",
+                listing_id=order_id,
+                escrow_uid=escrow_uid,
+                resource_id=reserved_resource_id,
+                allocation_id=reserved_allocation_id,
+                vm_host=reserved_vm_host,
+                error=str(error),
+            )
+            return {
+                "status": "error",
+                "message": f"On-chain fulfillment failed after provisioning: {error}",
+                "escrow_uid": escrow_uid,
+                "connection_details": None,
+                "ssh_public_key": ssh_public_key,
+            }
 
     if order_id:
         try:

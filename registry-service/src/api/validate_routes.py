@@ -87,6 +87,7 @@ async def validate_publish(body: ValidatePublishRequest) -> ValidatePublishRespo
         "storefront_url": body.storefront_url,
         "offer_resource": body.offer_resource,
         "accepted_escrows": body.accepted_escrows,
+        "demands": body.demands,
         "max_duration_seconds": body.max_duration_seconds,
     }
 

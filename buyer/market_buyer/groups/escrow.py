@@ -212,7 +212,7 @@ def create_cmd(
     ),
     buyer_address: Optional[str] = typer.Option(
         None, "--buyer-address",
-        help="Override buyer wallet (default: wallet.address from config.toml).",
+        help="Override buyer wallet address (default: derived from wallet.private_key).",
     ),
 ) -> None:
     """Create the on-chain escrow for a previously negotiated deal.

@@ -157,13 +157,13 @@ wheels = [
 [[package]]
 name = "arkhai-registry-client"
 version = "0.10.0"
-source = { registry = "../.dist" }
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
 dependencies = [
     { name = "eth-account" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_registry_client-0.10.0-py3-none-any.whl" },
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_registry_client-0.10.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -594,6 +594,7 @@ class StorefrontClient(_StorefrontClientBase):
         agent_wallet_address: str,
         offer: dict[str, Any],
         accepted_escrows: list[dict[str, Any]],
+        demands: list[dict[str, Any]] | None = None,
         max_duration_seconds: int | None = None,
         paused: bool = False,
     ) -> StorefrontListingCreateResponse:
@@ -615,6 +616,7 @@ class StorefrontClient(_StorefrontClientBase):
         body = {
             "offer": offer,
             "accepted_escrows": accepted_escrows,
+            "demands": demands or [],
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,
         }
@@ -1337,6 +1339,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         agent_wallet_address: str,
         offer: dict[str, Any],
         accepted_escrows: list[dict[str, Any]],
+        demands: list[dict[str, Any]] | None = None,
         max_duration_seconds: int | None = None,
         paused: bool = False,
     ) -> StorefrontListingCreateResponse:
@@ -1358,6 +1361,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         body = {
             "offer": offer,
             "accepted_escrows": accepted_escrows,
+            "demands": demands or [],
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,
         }

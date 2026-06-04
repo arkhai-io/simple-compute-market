@@ -395,7 +395,7 @@ def register(app: typer.Typer) -> None:
         ),
         buyer_address: Optional[str] = typer.Option(
             None, "--buyer-address",
-            help="Override buyer wallet (default: wallet.address from config.toml).",
+            help="Override buyer wallet address (default: derived from wallet.private_key).",
         ),
         buyer_private_key: Optional[str] = typer.Option(
             None, "--buyer-priv-key",
@@ -652,13 +652,22 @@ def register(app: typer.Typer) -> None:
             )
             if entry is None:
                 return None
-            from service.schemas import accepted_token_address
+            from service.schemas import accepted_demands, accepted_token_address
+            literal_fields = dict(entry.get("literal_fields") or {})
             token = accepted_token_address(entry)
+            if token:
+                literal_fields["token"] = token
+            selected_chain = entry.get("chain_name", selected_chain_name)
+            demands = [
+                d for d in accepted_demands(match)
+                if not d.get("chain_name") or d.get("chain_name") == selected_chain
+            ]
             return EscrowProposal(
-                chain_name=entry.get("chain_name", selected_chain_name),
+                chain_name=selected_chain,
                 escrow_address=entry["escrow_address"],
                 fields={"token": token},
-                literal_fields={"token": token},
+                literal_fields=literal_fields,
+                demands=demands,
                 expiration_unix=int(_time.time()) + int(expiration_seconds),
             )
 

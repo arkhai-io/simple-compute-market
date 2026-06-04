@@ -27,7 +27,12 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from service.schemas import EscrowTerms, EscrowProposal, ProvisionTerms
+from service.schemas import (
+    EscrowTerms,
+    EscrowProposal,
+    ProvisionTerms,
+    accepted_recipient_address,
+)
 
 from .buyer_client import NegotiationOutcome, negotiate_with_seller, _sign
 from .escrow_client import BuildEscrowTermsFn, CreateEscrowFn
@@ -824,23 +829,48 @@ def _settle_one(
     seller_url = match.get("storefront_url") or match.get("seller") or match.get("seller_url") or ""
     listing_id = match.get("listing_id") or match.get("order_id") or ""
 
-    try:
-        seller_wallet = _resolve_seller_wallet(seller_url)
-    except RuntimeError as exc:
-        on_event("escrow_resolve_wallet_failed", {"seller_url": seller_url, "error": str(exc)})
+    # Materialize the negotiated outcome into on-chain-ready EscrowTerms,
+    # then submit. The seller echoed the accepted proposal back in the
+    # negotiation response — using *that* (not the buyer's locally-built
+    # proposal) means any drift between sides surfaces as a runtime
+    # error here rather than silently mismatching on-chain.
+    accepted_proposal = outcome.accepted_escrow_proposal
+    if accepted_proposal is None:
+        on_event(
+            "escrow_create_failed",
+            {"error": "seller did not echo accepted_escrow_proposal"},
+        )
         return BuyResult(
             status="exited",
             negotiation_id=outcome.negotiation_id,
             seller_url=seller_url,
             agreed_amount=outcome.agreed_amount,
-            reason=f"resolve_seller_wallet_failed: {exc}",
+            reason="missing_accepted_escrow_proposal",
             rounds=outcome.rounds,
             attempts=attempts,
         )
 
+    escrow_recipient = accepted_recipient_address(accepted_proposal)
+    if escrow_recipient:
+        recipient_fallback = None
+    else:
+        try:
+            recipient_fallback = _resolve_seller_wallet(seller_url)
+        except RuntimeError as exc:
+            on_event("escrow_resolve_wallet_failed", {"seller_url": seller_url, "error": str(exc)})
+            return BuyResult(
+                status="exited",
+                negotiation_id=outcome.negotiation_id,
+                seller_url=seller_url,
+                agreed_amount=outcome.agreed_amount,
+                reason=f"resolve_seller_wallet_failed: {exc}",
+                rounds=outcome.rounds,
+                attempts=attempts,
+            )
+
     terms = AgreedTerms(
         seller_url=seller_url,
-        seller_wallet_address=seller_wallet,
+        seller_wallet_address=escrow_recipient or recipient_fallback or "",
         negotiation_id=outcome.negotiation_id or "",
         listing_id=listing_id,
         agreed_amount=outcome.agreed_amount or 0,
@@ -873,29 +903,9 @@ def _settle_one(
                 attempts=attempts,
             )
 
-    # Materialize the negotiated outcome into on-chain-ready EscrowTerms,
-    # then submit. The seller echoed the accepted proposal back in the
-    # negotiation response — using *that* (not the buyer's locally-built
-    # proposal) means any drift between sides surfaces as a runtime
-    # error here rather than silently mismatching on-chain.
-    accepted_proposal = outcome.accepted_escrow_proposal
-    if accepted_proposal is None:
-        on_event(
-            "escrow_create_failed",
-            {"error": "seller did not echo accepted_escrow_proposal"},
-        )
-        return BuyResult(
-            status="exited",
-            negotiation_id=outcome.negotiation_id,
-            seller_url=seller_url,
-            agreed_amount=outcome.agreed_amount,
-            reason="missing_accepted_escrow_proposal",
-            rounds=outcome.rounds,
-            attempts=attempts,
-        )
     try:
         escrows = build_escrow_terms(
-            accepted_proposal, seller_wallet,
+            accepted_proposal, recipient_fallback,
             terms.agreed_amount, terms.duration_seconds,
         )
     except Exception as exc:

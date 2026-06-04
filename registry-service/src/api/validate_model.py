@@ -27,6 +27,10 @@ class ValidatePublishRequest(BaseModel):
         default_factory=list,
         description="List of escrow tuples the seller will accept",
     )
+    demands: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Listing-level arbiter demands",
+    )
     max_duration_seconds: int | None = Field(
         default=None, description="Optional lease duration ceiling in seconds"
     )

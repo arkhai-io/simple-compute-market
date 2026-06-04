@@ -96,6 +96,7 @@ async def publish_listing(
         update_fields = {
             "offer_resource": body.get("offer_resource"),
             "accepted_escrows": body.get("accepted_escrows"),
+            "demands": body.get("demands"),
             "max_duration_seconds": body.get("max_duration_seconds"),
             "oracle_address": body.get("oracle_address"),
         }
@@ -112,6 +113,7 @@ async def publish_listing(
             publisher_id=publisher.publisher_id,
             offer_resource=body.get("offer_resource", {}),
             accepted_escrows=body.get("accepted_escrows", []),
+            demands=body.get("demands", []),
             max_duration_seconds=body.get("max_duration_seconds"),
             oracle_address=body.get("oracle_address"),
             status=validate_order_status(body.get("status", "open")),

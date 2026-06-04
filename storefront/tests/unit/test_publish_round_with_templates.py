@@ -23,6 +23,7 @@ from service.config_loader import ChainConfig
 
 _USDC_BASE = "0x036cbd53842c5426634e7929541ec2318f3dcf7e"
 _USDC_OPT = "0x0b2c639c533813f4aa9d7837caf62653d097ff85"
+_WALLET_ADDRESS = "0x1111111111111111111111111111111111111111"
 _TOKEN_DECIMALS = {
     _USDC_BASE: ("USDC", 6),
     _USDC_OPT: ("USDC", 6),
@@ -58,6 +59,12 @@ def _stub_resolve_token(monkeypatch, chains):
         )
 
     monkeypatch.setattr("service.clients.token.resolve_token", fake_resolve)
+    from service.clients import alkahest as alkahest_mod
+    monkeypatch.setattr(
+        alkahest_mod,
+        "get_recipient_arbiter",
+        lambda chain_name, *, config_path=None: "0x" + "ab" * 20,
+    )
     from market_storefront.utils import config as agent_config
     monkeypatch.setattr(agent_config, "CHAINS", chains, raising=False)
 
@@ -128,7 +135,7 @@ def _insert_resource(
 def _round_kwargs(**overrides):
     base = dict(
         base_url="http://agent",
-        wallet_address="",
+        wallet_address=_WALLET_ADDRESS,
         private_key=None,
         default_min_price=None,
         default_token_address=None,
@@ -252,8 +259,12 @@ def test_publish_round_uses_row_templates(tmp_path, monkeypatch):
     calls: list[dict] = []
     monkeypatch.setattr(
         "market_storefront.cli_publish._publish_offer",
-        lambda agent_url, offer, accepted_escrows, *a, **k: (
-            calls.append({"offer": offer, "accepted_escrows": accepted_escrows})
+        lambda agent_url, offer, accepted_escrows, demands, *a, **k: (
+            calls.append({
+                "offer": offer,
+                "accepted_escrows": accepted_escrows,
+                "demands": demands,
+            })
             or {"status": "created", "listing_id": "l1"}
         ),
     )
@@ -276,6 +287,7 @@ def test_publish_round_uses_row_templates(tmp_path, monkeypatch):
     assert entry["escrow_address"] == "0xee" + "0" * 38
     assert entry["rates"][0]["value"] == "2000000"
     assert entry["literal_fields"] == {"token": _USDC_BASE}
+    assert calls[0]["demands"][0]["demand_data"] == {"recipient": _WALLET_ADDRESS}
 
 
 def test_publish_round_template_multi_chain_emits_one_entry_per_chain(

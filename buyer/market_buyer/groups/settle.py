@@ -351,7 +351,7 @@ def register(app: typer.Typer) -> None:
         ),
         buyer_address: Optional[str] = typer.Option(
             None, "--buyer-address",
-            help="Override buyer wallet (default: wallet.address from config.toml).",
+            help="Override buyer wallet address (default: derived from wallet.private_key).",
         ),
         buyer_private_key: Optional[str] = typer.Option(
             None, "--buyer-priv-key",
