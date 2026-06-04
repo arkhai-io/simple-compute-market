@@ -1,8 +1,7 @@
-"""Integration tests for orders and identity endpoints.
+"""Integration tests for listing endpoints.
 
 Covers the endpoints extracted from agent.py into the new controllers:
   - OrdersController  (/listings/create, /listings/close)
-  - IdentityController (/.well-known/*)
 
 Uses a StorefrontService stub and FastAPI ASGITransport.
 
@@ -20,7 +19,6 @@ import pytest_asyncio
 from fastapi import FastAPI
 
 import market_storefront.container as _container
-from market_storefront.controllers.identity_controller import router as identity_router
 from market_storefront.controllers.listings_controller import router as listings_router
 
 _COMPUTE_OFFER = {
@@ -74,16 +72,6 @@ async def orders_client(mock_svc, tmp_path) -> AsyncIterator[httpx.AsyncClient]:
     _container.resolved_listing_service = None
 
 
-@pytest_asyncio.fixture
-async def identity_client() -> AsyncIterator[httpx.AsyncClient]:
-    app = FastAPI()
-    app.include_router(identity_router)
-
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
-
-
 # ---------------------------------------------------------------------------
 # /listings/create
 # ---------------------------------------------------------------------------
@@ -132,17 +120,3 @@ class TestCloseOrderEndpoint:
         # from missing path param or route mismatch.
         resp = await orders_client.post("/api/v1/listings//close", json={})
         assert resp.status_code in (404, 405, 422)
-
-
-# ---------------------------------------------------------------------------
-# /.well-known/agent-wallet.json — scheme-agnostic settlement affordance.
-# Post-Phase-4 the only well-known surviving from the ERC-8004 era.
-# ---------------------------------------------------------------------------
-
-class TestAgentWalletEndpoint:
-    async def test_returns_200_with_address(self, identity_client):
-        resp = await identity_client.get("/.well-known/agent-wallet.json")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "agent_wallet_address" in data
-        assert isinstance(data["agent_wallet_address"], str)

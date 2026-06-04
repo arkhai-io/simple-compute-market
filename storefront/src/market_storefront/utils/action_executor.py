@@ -27,8 +27,6 @@ from market_storefront.models.domain_models import (
 )
 from market_storefront.resources import parse_resource_from_dict
 
-import httpx
-
 from market_storefront.utils.config import CHAINS, settings, AGENT_ID, BASE_URL_OVERRIDE
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
 from market_storefront.utils.sqlite_client import get_sqlite_client
@@ -69,39 +67,6 @@ def _resource_is_compute(resource: Any) -> bool:
     if isinstance(resource, dict):
         return "gpu_model" in resource
     return hasattr(resource, "gpu_model")
-
-
-async def fetch_agent_wallet_address(agent_url: str, *, timeout: float = 5.0) -> str | None:
-    """Fetch an agent's on-chain wallet via its /.well-known/agent-wallet.json.
-
-    Returns the 0x-prefixed wallet or None on any failure. This is what the
-    buyer calls before escrow creation to name the seller as the demanded
-    recipient under RecipientArbiter.
-    """
-    url = agent_url.rstrip("/") + "/.well-known/agent-wallet.json"
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as http:
-            resp = await http.get(url)
-            if resp.status_code != 200:
-                logger.warning(
-                    "[WALLET_LOOKUP] %s returned HTTP %d", url, resp.status_code
-                )
-                return None
-            body = resp.json()
-    except Exception as exc:
-        logger.warning("[WALLET_LOOKUP] Failed to fetch %s: %s", url, exc)
-        return None
-
-    wallet = body.get("agent_wallet_address") if isinstance(body, dict) else None
-    if not wallet or not isinstance(wallet, str):
-        return None
-    wallet = wallet.strip()
-    if not (wallet.startswith("0x") and len(wallet) == 42):
-        logger.warning(
-            "[WALLET_LOOKUP] %s returned malformed wallet %r", url, wallet
-        )
-        return None
-    return wallet
 
 
 def _coerce_agent_reference_to_url(agent_ref: str | None) -> str | None:
