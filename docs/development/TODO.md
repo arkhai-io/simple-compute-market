@@ -50,7 +50,7 @@ The `provisioning-service` wheel stays its own distributable — it's operated b
 
 ### Compute Dynamic Listings from Inventory and Leases
 
-**Status:** Partially implemented. Full scope in [`design-compute-dynamic-listings.md`](design-compute-dynamic-listings.md). The implemented slice treats each compute `resources.resource_id` as a single-resource pool: compute resource rows derive one listing per currently available GPU slice, using `compute_allocations` held states to suppress oversized slices, close stale open listings, reopen listings after capacity release, and persist provisioning callback correlation metadata. The focused e2e scenario is `e2e_compute_dynamic_listings`. The remaining planned work is full fungible pools, where one market-facing pool can be backed by multiple machines or provisioning providers.
+**Status:** Implemented. Compute inventory now has explicit storefront-side pools and pool members. Existing compute resources are backfilled into single-member pools, and resources can opt into fungible capacity by sharing `attribute.pool_id`. Pool-level derived listings use held `compute_allocations` to suppress oversized slices, close stale open listings, reopen listings after capacity release, and persist provisioning callback correlation metadata. The focused e2e scenario is `e2e_compute_dynamic_listings`.
 
 **Problem:** Listings are currently static rows, while GPU VM capacity is partly
 managed through resource state and provisioning leases. This does not support
@@ -58,13 +58,11 @@ partial-capacity offers such as deriving 1x, 2x, 3x, and 4x listings from one
 4x GPU machine, nor does it support closing/reopening oversized listings as
 capacity is reserved, leased, and released.
 
-**Planned fix:** implement a compute-specific storefront subsystem with
-inventory pools, pool members, capacity allocations, deterministic derived
-listings, and provisioning lifecycle callbacks. The storefront owns
-market-facing inventory, listing reconciliation, and seller policy
-refund/dispute/failure decisions; the provisioning service owns execution facts
-and reports lifecycle callbacks. Keep this concrete to GPU VMs first and
-abstract only after a second resource domain proves the generic shape.
+**Implemented fix:** compute-specific storefront inventory pools, pool members,
+capacity allocations, deterministic derived listings, and provisioning lifecycle
+callbacks. The storefront owns market-facing inventory, listing reconciliation,
+and seller policy refund/dispute/failure decisions; the provisioning service
+owns execution facts and reports lifecycle callbacks.
 
 ---
 
