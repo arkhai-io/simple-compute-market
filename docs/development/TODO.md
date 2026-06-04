@@ -50,7 +50,7 @@ The `provisioning-service` wheel stays its own distributable — it's operated b
 
 ### Compute Dynamic Listings from Inventory and Leases
 
-**Status:** In progress. Full scope in [`design-compute-dynamic-listings.md`](design-compute-dynamic-listings.md). First slice landed in the storefront publish/watch path: compute resource rows now derive one listing per currently available GPU slice, using `compute_allocations` held states to suppress oversized slices and close stale open listings.
+**Status:** Implemented. Full scope in [`design-compute-dynamic-listings.md`](design-compute-dynamic-listings.md). Compute resource rows derive one listing per currently available GPU slice, using `compute_allocations` held states to suppress oversized slices, close stale open listings, reopen listings after capacity release, and persist provisioning callback correlation metadata. The focused e2e scenario is `e2e_compute_dynamic_listings`.
 
 **Problem:** Listings are currently static rows, while GPU VM capacity is partly
 managed through resource state and provisioning leases. This does not support
