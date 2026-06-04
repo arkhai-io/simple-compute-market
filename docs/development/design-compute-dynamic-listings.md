@@ -36,6 +36,16 @@ to extract a generic core abstraction yet. The current useful boundary is:
 
 ## Storefront data model
 
+The current implementation uses existing `resources` rows as single-resource
+pools: `compute_allocations.resource_id`, `derived_compute_listings.resource_id`,
+and listing `offer_resource.resource_id` all point to the same concrete resource
+row. This supports partial allocation for one machine and multiple independent
+machines, but it does not yet support one fungible market-facing pool backed by
+multiple concrete machines or provisioning providers.
+
+The planned follow-up is to add the explicit pool/member model below and change
+listing derivation from per-resource to per-pool.
+
 ### `compute_inventory_pools`
 
 Market-facing capacity buckets. A pool is what listings are derived from.
@@ -85,6 +95,7 @@ class ComputeAllocation:
     allocation_id: str
     pool_id: str
     member_id: str | None
+    resource_id: str | None
     listing_id: str | None
     escrow_uid: str | None
     negotiation_id: str | None
@@ -266,6 +277,12 @@ for gpu_count in range(1, pool.total_gpu_count + 1):
     should_be_open = pool.status == "active" and available_gpu_count >= gpu_count
 ```
 
+In the full fungible-pool model, `pool.total_gpu_count` is the sum of active
+member capacity and held capacity is grouped by `compute_allocations.pool_id`.
+The selected concrete member is stored on the allocation for provisioning, but
+derived listings use `pool_id` so duplicate equivalent machines do not create
+duplicate market listings.
+
 The listing offer payload is derived from the pool and the requested slice:
 
 ```python
@@ -425,6 +442,10 @@ Storefront:
 
 ## First implementation sequence
 
+Current status: steps 1, 3, 4, 5, 6, 7, and 8 are implemented for the
+single-resource-as-pool shape. Step 2 remains as the full fungible-pool
+follow-up.
+
 1. Add storefront compute allocation tables and repository methods.
 2. Add compute pool/member tables, or adapt existing `resources` rows into a
    pool/member projection if a smaller first step is needed.
@@ -441,6 +462,38 @@ Storefront:
    - listings: 1x and 2x open, 3x and 4x closed/unpublished
    - release lease
    - listings: 1x, 2x, 3x, 4x open again
+
+## Fungible pool follow-up
+
+To support two equivalent machines as one market-facing capacity pool, implement
+the explicit `compute_inventory_pools` and `compute_pool_members` tables instead
+of treating each `resources.resource_id` as its own pool.
+
+Required changes:
+
+1. Add `compute_inventory_pools` and `compute_pool_members` startup migrations.
+2. Backfill one pool/member pair for each existing compute resource so current
+   installations preserve behavior.
+3. Add `pool_id` and `member_id` columns to `compute_allocations`; keep
+   `resource_id` as the selected concrete resource/member correlation.
+4. Change `derived_compute_listings` from `resource_id`-keyed derivation to
+   `pool_id`-keyed derivation, with deterministic keys such as
+   `pool:{pool_id}:gpus:{gpu_count}`.
+5. Change listing offer payloads to carry `pool_id` for fungible listings and
+   omit concrete `resource_id` unless the seller intentionally publishes a
+   non-fungible resource listing.
+6. Change reservation to resolve listing terms to a pool, then choose a concrete
+   active member inside that pool according to the pool allocation policy.
+7. Reconcile listings from aggregate pool availability, not per-resource
+   availability, while only opening slice sizes that at least one active member
+   can satisfy after its own held capacity is subtracted.
+8. Add e2e coverage for two equivalent machines in one pool:
+   - one set of 1x/2x/3x/4x listings is published for the pool
+   - reserving 2x on one 4x member leaves 3x/4x listings open if another 4x
+     member can satisfy them
+   - reserving enough capacity across members closes only slices no remaining
+     member can satisfy
+   - release reopens affected pool listings
 
 ## Relationship to market core extraction
 
