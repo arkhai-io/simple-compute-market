@@ -12,6 +12,7 @@ directly (same as production).
 """
 from __future__ import annotations
 
+import sqlite3
 from typing import AsyncIterator
 
 import httpx
@@ -337,6 +338,12 @@ class TestFulfillmentEvents:
     async def test_capacity_released_marks_allocation_released(self, client):
         c, db = client
         allocation_id = await _seed_dynamic_listing_pool(db)
+        conn = sqlite3.connect(db.db_path)
+        try:
+            conn.execute("DELETE FROM derived_compute_listings")
+            conn.commit()
+        finally:
+            conn.close()
         await c._post(
             "/api/v1/admin/fulfillment/events/usage-started",
             {"allocation_id": allocation_id, "escrow_uid": "escrow-2x"},

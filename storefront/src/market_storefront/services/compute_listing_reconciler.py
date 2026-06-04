@@ -366,6 +366,46 @@ def mark_derived_listings_closed(db_path: str, listing_ids: list[str]) -> None:
     try:
         ensure_derived_compute_listings_table(conn)
         placeholders = ", ".join("?" for _ in listing_ids)
+        rows = conn.execute(
+            f"""
+            SELECT listing_id, offer_resource
+            FROM listings
+            WHERE listing_id IN ({placeholders})
+            """,
+            tuple(listing_ids),
+        ).fetchall()
+        for listing_id, raw_offer in rows:
+            if not raw_offer:
+                continue
+            try:
+                offer = json.loads(raw_offer)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(offer, dict):
+                continue
+            resource_id = offer.get("resource_id")
+            if not resource_id:
+                continue
+            gpu_count = int(offer.get("gpu_count") or 1)
+            conn.execute(
+                """
+                INSERT INTO derived_compute_listings(
+                  listing_id, resource_id, gpu_count, status, derivation_key,
+                  last_reconciled_at
+                )
+                VALUES (?, ?, ?, 'closed', ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                ON CONFLICT(derivation_key) DO UPDATE SET
+                  listing_id=excluded.listing_id,
+                  resource_id=excluded.resource_id,
+                  gpu_count=excluded.gpu_count
+                """,
+                (
+                    str(listing_id),
+                    str(resource_id),
+                    gpu_count,
+                    listing_resource_key(str(resource_id), gpu_count),
+                ),
+            )
         conn.execute(
             f"""
             UPDATE derived_compute_listings
