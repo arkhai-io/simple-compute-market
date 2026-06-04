@@ -40,6 +40,8 @@ class DealContext:
     seller_wallet_address: Optional[str] = None
     token_contract: Optional[str] = None
     token_decimals: Optional[float] = None
+    accepted_escrow_proposal: Optional[dict[str, Any]] = None
+    accepted_provision_terms: Optional[dict[str, Any]] = None
 
 
 def load_deal_context(run_id: str) -> DealContext:
@@ -67,7 +69,27 @@ def load_deal_context(run_id: str) -> DealContext:
     seller_wallet_address: Optional[str] = None
     token_contract: Optional[str] = None
     token_decimals: Optional[float] = None
+    accepted_escrow_proposal: Optional[dict[str, Any]] = None
+    accepted_provision_terms: Optional[dict[str, Any]] = None
     last_status: Optional[str] = None
+
+    def _capture_accepted_terms(ev: dict[str, Any]) -> None:
+        nonlocal accepted_escrow_proposal, accepted_provision_terms
+        nonlocal seller_wallet_address, token_contract
+        raw_proposal = ev.get("accepted_escrow_proposal")
+        if isinstance(raw_proposal, dict):
+            accepted_escrow_proposal = raw_proposal
+            from service.schemas import accepted_recipient_address, accepted_token_address
+
+            recipient = accepted_recipient_address(raw_proposal)
+            if recipient:
+                seller_wallet_address = recipient
+            token = accepted_token_address(raw_proposal)
+            if token:
+                token_contract = token
+        raw_provision = ev.get("accepted_provision_terms")
+        if isinstance(raw_provision, dict):
+            accepted_provision_terms = raw_provision
 
     for ev in events:
         ev_type = ev.get("event")
@@ -75,6 +97,7 @@ def load_deal_context(run_id: str) -> DealContext:
         # `negotiate` end carries the agreed_amount + negotiation_id.
         if ev_type == "run_ended":
             last_status = ev.get("status")
+            _capture_accepted_terms(ev)
             if ev.get("agreed_amount") is not None:
                 agreed_amount = float(ev["agreed_amount"])
             if ev.get("negotiation_id"):
@@ -82,6 +105,7 @@ def load_deal_context(run_id: str) -> DealContext:
 
         # `market buy`-style log.
         if ev_type == "negotiation_completed" and ev.get("status") == "agreed":
+            _capture_accepted_terms(ev)
             seller_url = ev.get("seller_url") or seller_url
             if ev.get("agreed_amount") is not None:
                 agreed_amount = float(ev["agreed_amount"])
@@ -146,6 +170,8 @@ def load_deal_context(run_id: str) -> DealContext:
         seller_wallet_address=seller_wallet_address,
         token_contract=token_contract,
         token_decimals=token_decimals,
+        accepted_escrow_proposal=accepted_escrow_proposal,
+        accepted_provision_terms=accepted_provision_terms,
     )
 
 

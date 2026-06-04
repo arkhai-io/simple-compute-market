@@ -106,6 +106,30 @@ def _format_accepted_escrows(entries: list) -> str:
     return "\n".join(lines)
 
 
+def _format_demands(demands: list) -> str:
+    if not demands:
+        return "-"
+    if not isinstance(demands, list):
+        return str(demands)
+    lines: list[str] = []
+    for i, demand in enumerate(demands):
+        if not isinstance(demand, dict):
+            lines.append(f"[{i}] {demand}")
+            continue
+        chain = demand.get("chain_name") or "-"
+        arbiter = _short_contract_address(str(demand.get("arbiter") or "-"))
+        data = demand.get("demand_data") or {}
+        if isinstance(data, dict) and data:
+            rendered_data = ",".join(
+                f"{k}={_short_contract_address(str(v)) if isinstance(v, str) and v.startswith('0x') else v}"
+                for k, v in sorted(data.items())
+            )
+        else:
+            rendered_data = "-"
+        lines.append(f"[{i}] chain={chain} arbiter={arbiter} data={rendered_data}")
+    return "\n".join(lines)
+
+
 def _shorten(text: str, width: int = 36) -> str:
     if len(text) <= width:
         return text
@@ -175,6 +199,12 @@ def listing_list(
     static_ip: bool | None = typer.Option(
         None, "--static-ip/--no-static-ip", help="Restrict to hosts with static public IP.",
     ),
+    raw_filters: list[str] | None = typer.Option(
+        None, "--filter", "-f",
+        help="Registry filter-spec parameter as name=value. Repeatable. "
+             "Use this for schema-specific filters that do not have a "
+             "compute convenience flag.",
+    ),
     # Pagination
     limit: int = typer.Option(50, "--limit", "-l", help="Maximum listings to fetch (1-200)."),
     offset: int = typer.Option(0, "--offset", "-o", help="Pagination offset."),
@@ -219,6 +249,8 @@ def listing_list(
         if val is None:
             continue
         query_params[key] = str(val).lower() if isinstance(val, bool) else val
+    from ._cli_helpers import parse_filter_options
+    query_params.update(parse_filter_options(raw_filters))
     params = urllib.parse.urlencode(query_params)
 
     # Fan-in across every configured registry; dedupe by listing_id.
@@ -262,17 +294,20 @@ def listing_list(
     table.add_column("Storefront URL")
     table.add_column("Offer")
     table.add_column("Accepted escrows")
+    table.add_column("Demands")
     table.add_column("Created", justify="right")
 
     for row in items:
         offer_display = _format_resource(row.get("offer_resource", {}))
         accepted_display = _format_accepted_escrows(row.get("accepted_escrows", []))
+        demands_display = _format_demands(row.get("demands", []))
         table.add_row(
             str(row.get("listing_id", "-")),
             str(row.get("publisher_id", "-")),
             _shorten(str(row.get("storefront_url", "-")), 40),
             offer_display if "\n" in offer_display else _shorten(offer_display, 120),
             accepted_display if "\n" in accepted_display else _shorten(accepted_display, 120),
+            demands_display if "\n" in demands_display else _shorten(demands_display, 120),
             _short_ts(row.get("created_at")),
         )
 
@@ -343,5 +378,6 @@ def listing_show(
     table.add_row("Updated", _short_ts(found.get("updated_at")))
     table.add_row("Offer", _format_resource(found.get("offer_resource", {})))
     table.add_row("Accepted escrows", _format_accepted_escrows(found.get("accepted_escrows", [])))
+    table.add_row("Demands", _format_demands(found.get("demands", [])))
 
     console.print(Panel(table, title="Marketplace Listing", border_style="blue"))

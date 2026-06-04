@@ -95,6 +95,11 @@ _ACCEPTED_ECHO = {
         "chain_name": "anvil",
         "escrow_address": _ESCROW_ADDR,
         "fields": {"token": _TOKEN},
+        "demands": [{
+            "chain_name": "anvil",
+            "arbiter": _RECIPIENT_ARBITER,
+            "demand_data": {"recipient": _SELLER_WALLET},
+        }],
         "expiration_unix": 1_800_000_000,
     },
 }
@@ -209,11 +214,9 @@ def test_happy_path_drives_to_ready():
                       "max_duration_seconds": 7200}]},
         # 2. /negotiate/new — seller accepts immediately
         {"negotiation_id": "neg-1", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO},
-        # 3. GET /.well-known/agent-wallet.json on seller
-        {"agent_wallet_address": _SELLER_WALLET},
-        # 4. POST /settle/{uid}
+        # 3. POST /settle/{uid}
         {"escrow_uid": "0xescrow", "status": "provisioning"},
-        # 5. GET /settle/{uid}/status → ready
+        # 4. GET /settle/{uid}/status -> ready
         {"status": "ready",
          "fulfillment_uid": "0xattest",
          "connection_details": "ssh alice@vm1",
@@ -310,8 +313,6 @@ def test_first_match_exits_second_agrees():
          "reason": "price_unreasonable"},
         # /negotiate/new on seller2 — accepts
         {"negotiation_id": "neg-2", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO},
-        # Seller2 wallet
-        {"agent_wallet_address": _SELLER_WALLET},
         # POST /settle/{uid}
         {"escrow_uid": "0xescrow", "status": "provisioning"},
         # GET /settle/{uid}/status → ready
@@ -346,7 +347,6 @@ def test_escrow_hook_failure_returns_exited_with_reason():
     responses = [
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
         {"negotiation_id": "neg-1", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO},
-        {"agent_wallet_address": _SELLER_WALLET},
     ]
 
     def _broken_escrow(escrows):
@@ -378,7 +378,6 @@ def test_provisioning_failed_returns_failed_status():
     responses = [
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
         {"negotiation_id": "neg-1", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO},
-        {"agent_wallet_address": _SELLER_WALLET},
         {"escrow_uid": "0xescrow", "status": "provisioning"},
         {"status": "failed", "reason": "no available VM"},
     ]
@@ -415,7 +414,6 @@ def test_settlement_timeout_returns_timeout_status():
     responses = [
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
         {"negotiation_id": "neg-1", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO},
-        {"agent_wallet_address": _SELLER_WALLET},
         {"escrow_uid": "0xescrow", "status": "provisioning"},
     ] + [{"status": "provisioning"}] * 50  # never terminal
 

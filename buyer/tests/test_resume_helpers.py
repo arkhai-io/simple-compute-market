@@ -26,6 +26,7 @@ import typer
 from market_buyer.run_log import RunLog
 from market_buyer.groups._deal import (
     is_negotiation_complete,
+    load_deal_context,
     load_negotiation_resume_point,
 )
 
@@ -188,3 +189,43 @@ def test_is_negotiation_complete_false_for_missing_log():
     raising — the caller in `buy --from` then triggers the resume
     path which raises with a clearer error."""
     assert is_negotiation_complete("ghost-run") is False
+
+
+# ---------------------------------------------------------------------------
+# load_deal_context
+# ---------------------------------------------------------------------------
+
+
+def test_load_deal_context_recovers_accepted_proposal_and_demands():
+    recipient = "0x" + "ab" * 20
+    token = "0x" + "cd" * 20
+    proposal = {
+        "chain_name": "anvil",
+        "escrow_address": "0x" + "ef" * 20,
+        "fields": {"token": token},
+        "literal_fields": {"token": token},
+        "demands": [{
+            "chain_name": "anvil",
+            "arbiter": "0x" + "12" * 20,
+            "demand_data": {"recipient": recipient},
+        }],
+        "expiration_unix": 1_800_000_000,
+    }
+    provision = {"duration_seconds": 3600, "ssh_public_key": "ssh-ed25519 AAAA"}
+    log = RunLog.start(seller_url="http://s", listing_id="L")
+    log.event(
+        "negotiation_completed",
+        status="agreed",
+        agreed_amount=80,
+        negotiation_id="neg-1",
+        listing_id="L",
+        accepted_escrow_proposal=proposal,
+        accepted_provision_terms=provision,
+    )
+
+    deal = load_deal_context(log.run_id)
+
+    assert deal.accepted_escrow_proposal == proposal
+    assert deal.accepted_provision_terms == provision
+    assert deal.seller_wallet_address == recipient
+    assert deal.token_contract == token

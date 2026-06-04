@@ -140,13 +140,6 @@ class TestNegotiateFrom:
             "market_buyer.buyer_client.urllib.request.urlopen",
             _urlopen_for([{"action": "accept", "proposal": {"fields": {"amount": 70}}}]),
         )
-        # Best-effort wallet fetch in negotiate.py — make it succeed
-        # cheaply so it doesn't perturb the test path.
-        monkeypatch.setattr(
-            "market_buyer.buy_orchestrator._resolve_seller_wallet",
-            lambda *_a, **_kw: "0x" + "ee" * 20,
-        )
-
         result = runner.invoke(app, [
             "negotiate", "--from", run_id,
             "--max-price", "100",
@@ -178,11 +171,6 @@ class TestNegotiateFrom:
             "market_buyer.buyer_client.urllib.request.urlopen",
             _urlopen_for([{"action": "accept", "proposal": {"fields": {"amount": 70}}}]),
         )
-        monkeypatch.setattr(
-            "market_buyer.buy_orchestrator._resolve_seller_wallet",
-            lambda *_a, **_kw: "0x" + "ee" * 20,
-        )
-
         result = runner.invoke(app, [
             "negotiate", "--from", original_run,
             "--max-price", "100",

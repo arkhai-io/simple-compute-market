@@ -214,6 +214,16 @@ def _run_resume_from(
             reason=outcome.reason,
             negotiation_id=outcome.negotiation_id,
             listing_id=resume_point.listing_id,
+            accepted_escrow_proposal=(
+                outcome.accepted_escrow_proposal.model_dump()
+                if outcome.accepted_escrow_proposal is not None
+                else None
+            ),
+            accepted_provision_terms=(
+                outcome.accepted_provision_terms.model_dump()
+                if outcome.accepted_provision_terms is not None
+                else None
+            ),
         )
 
         if outcome.status != "agreed" or outcome.agreed_amount is None:
@@ -323,6 +333,12 @@ def register(app: typer.Typer) -> None:
         ),
         static_ip: Optional[bool] = typer.Option(
             None, "--static-ip/--no-static-ip", help="Restrict to hosts with static public IP.",
+        ),
+        raw_filters: Optional[list[str]] = typer.Option(
+            None, "--filter", "-f",
+            help="Registry filter-spec parameter as name=value. Repeatable. "
+                 "Use this for schema-specific filters that do not have a "
+                 "compute convenience flag.",
         ),
         from_run: Optional[str] = typer.Option(
             None, "--from",
@@ -576,7 +592,9 @@ def register(app: typer.Typer) -> None:
             "datacenter_grade": datacenter_grade,
             "static_ip": static_ip,
         }
+        from ._cli_helpers import parse_filter_options
         active_filters = {k: v for k, v in spec_filters.items() if v is not None}
+        active_filters.update(parse_filter_options(raw_filters))
         try:
             matches = query_registry_for_matches_multi(
                 reg_urls, timeout=deadline,

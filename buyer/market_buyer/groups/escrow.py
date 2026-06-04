@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional
 
 import typer
@@ -192,14 +193,14 @@ def create_cmd(
     ),
     token_contract: Optional[str] = typer.Option(
         None, "--token-contract",
-        help="ERC-20 payment token. Optional override — defaults to the "
-             "token recorded in the deal/run-log.",
+        help="Legacy ERC-20 token override for old run-logs without an "
+             "accepted escrow proposal. Current run-logs create from the "
+             "seller-accepted proposal.",
     ),
     token_decimals: Optional[int] = typer.Option(
         None, "--token-decimals",
-        help="ERC-20 token decimals override. When omitted, reads "
-             "the value recorded in the run-log; if that's also "
-             "missing, falls back to a chain decimals() lookup.",
+        help="Legacy ERC-20 decimals override for old run-logs without an "
+             "accepted escrow proposal.",
     ),
     chain_name_flag: Optional[str] = typer.Option(
         None, "--chain",
@@ -226,9 +227,9 @@ def create_cmd(
     console = Console()
 
     from ._deal import load_deal_context, open_run_log, resolve_chain_settings
-    from ..buy_orchestrator import AgreedTerms, _resolve_seller_wallet
-    from ..escrow_client import make_create_escrow_fn
-    from ..common import select_chain_for_listing
+    from ..buy_orchestrator import AgreedTerms
+    from ..escrow_client import make_buyer_payment_escrow_terms_fn, make_create_escrow_fn
+    from ..common import chain_by_name, select_chain_for_listing
 
     deal = load_deal_context(run_id)
     if deal.escrow_uid:
@@ -247,18 +248,48 @@ def create_cmd(
         if token_decimals is not None
         else (int(deal.token_decimals) if deal.token_decimals is not None else None)
     )
-    chain_cfg = select_chain_for_listing(
-        listing=None, override=chain_name_flag, yes=False,
-    )
-    chain = resolve_chain_settings(
-        buyer_address=buyer_address,
-        buyer_private_key=private_key,
-        ssh_public_key=None,
-        chain=chain_cfg,
-        token_contract=effective_token,
-        token_decimals=effective_token_decimals,
-        require_ssh=False,
-    )
+    proposal_chain = None
+    if isinstance(deal.accepted_escrow_proposal, dict):
+        raw_chain = deal.accepted_escrow_proposal.get("chain_name")
+        if isinstance(raw_chain, str) and raw_chain:
+            proposal_chain = raw_chain
+    if deal.accepted_escrow_proposal is not None:
+        if not (chain_name_flag or proposal_chain):
+            typer.secho(
+                "Accepted escrow proposal in run-log has no chain_name; pass --chain.",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+        chain_cfg = chain_by_name(chain_name_flag or proposal_chain)
+        from ..common import resolve_buyer_wallet
+        _, resolved_private_key = resolve_buyer_wallet(
+            override_addr=buyer_address,
+            override_pk=private_key,
+        )
+        if not resolved_private_key:
+            typer.secho("Missing required config: wallet.private_key", err=True, fg=typer.colors.RED)
+            raise typer.Exit(2)
+        chain = SimpleNamespace(
+            buyer_private_key=resolved_private_key,
+            rpc_url=chain_cfg.rpc_url,
+            chain_name=chain_cfg.name,
+            alkahest_addr_config=chain_cfg.alkahest_address_config_path,
+            token_contract=effective_token or "",
+            token_decimals=effective_token_decimals,
+        )
+    else:
+        chain_cfg = select_chain_for_listing(
+            listing=None, override=chain_name_flag, yes=False,
+        )
+        chain = resolve_chain_settings(
+            buyer_address=buyer_address,
+            buyer_private_key=private_key,
+            ssh_public_key=None,
+            chain=chain_cfg,
+            token_contract=effective_token,
+            token_decimals=effective_token_decimals,
+            require_ssh=False,
+        )
     duration_seconds_override = (
         int(round(duration_hours * 3600)) if duration_hours is not None else None
     )
@@ -271,21 +302,18 @@ def create_cmd(
     log = open_run_log(run_id)
 
     seller_wallet = deal.seller_wallet_address
-    if not seller_wallet:
-        try:
-            seller_wallet = _resolve_seller_wallet(deal.seller_url)
-        except RuntimeError as exc:
-            log.event("escrow_resolve_wallet_failed", error=str(exc))
-            typer.secho(
-                f"Could not resolve seller wallet from "
-                f"{deal.seller_url}/.well-known/agent-wallet.json: {exc}",
-                err=True, fg=typer.colors.RED,
-            )
-            raise typer.Exit(3)
+    if not seller_wallet and deal.accepted_escrow_proposal is None:
+        error = (
+            "Run-log does not contain a seller recipient. Re-run negotiation "
+            "so the accepted escrow proposal is captured."
+        )
+        log.event("escrow_recipient_missing", error=error)
+        typer.secho(error, err=True, fg=typer.colors.RED)
+        raise typer.Exit(3)
 
     terms = AgreedTerms(
         seller_url=deal.seller_url,
-        seller_wallet_address=seller_wallet,
+        seller_wallet_address=seller_wallet or "",
         negotiation_id=deal.negotiation_id,
         listing_id=deal.listing_id,
         agreed_amount=deal.agreed_amount,
@@ -298,23 +326,63 @@ def create_cmd(
     header.add_column()
     header.add_row("Run ID", run_id)
     header.add_row("Seller", deal.seller_url)
-    header.add_row("Seller wallet", seller_wallet)
+    if seller_wallet:
+        header.add_row("Seller wallet", seller_wallet)
     header.add_row("Agreed price", str(deal.agreed_amount))
     header.add_row("Duration (seconds)", str(effective_duration_seconds))
-    header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
+    if chain.token_contract:
+        header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
     console.print(Panel(header, title="market escrow create", border_style="cyan"))
+
+    if deal.accepted_escrow_proposal is not None:
+        from service.schemas import EscrowProposal
+
+        proposal = EscrowProposal(**deal.accepted_escrow_proposal)
+        build_terms = make_buyer_payment_escrow_terms_fn(
+            chain_name=chain.chain_name,
+            addr_config_path=chain.alkahest_addr_config,
+        )
+        escrow_terms_list = build_terms(
+            proposal,
+            seller_wallet or "",
+            float(deal.agreed_amount),
+            int(effective_duration_seconds),
+        )
+    else:
+        from service.schemas import EscrowProposal
+        from service.clients.alkahest import get_erc20_escrow_obligation_nontierable
+        import time as _time
+
+        escrow_address = get_erc20_escrow_obligation_nontierable(
+            chain.chain_name,
+            config_path=chain.alkahest_addr_config or None,
+        )
+        proposal = EscrowProposal(
+            chain_name=chain.chain_name,
+            escrow_address=escrow_address,
+            fields={"token": chain.token_contract},
+            literal_fields={"token": chain.token_contract},
+            expiration_unix=int(_time.time()) + expiration_seconds,
+        )
+        build_terms = make_buyer_payment_escrow_terms_fn(
+            chain_name=chain.chain_name,
+            addr_config_path=chain.alkahest_addr_config,
+        )
+        escrow_terms_list = build_terms(
+            proposal,
+            seller_wallet or "",
+            float(deal.agreed_amount),
+            int(effective_duration_seconds),
+        )
 
     create_escrow = make_create_escrow_fn(
         private_key=chain.buyer_private_key,
         rpc_url=chain.rpc_url,
         chain_name=chain.chain_name,
         addr_config_path=chain.alkahest_addr_config,
-        token_contract_address=chain.token_contract,
-        token_decimals=chain.token_decimals,
-        expiration_seconds=expiration_seconds,
     )
     try:
-        escrow_uid = create_escrow(terms)
+        escrow_uids = create_escrow(escrow_terms_list)
     except Exception as exc:
         log.event("escrow_create_failed", error=str(exc))
         typer.secho(
@@ -322,8 +390,16 @@ def create_cmd(
             err=True, fg=typer.colors.RED,
         )
         raise typer.Exit(4) from exc
+    if not escrow_uids:
+        log.event("escrow_create_failed", error="no uid returned")
+        typer.secho(
+            "escrow.create returned no uid — buyer terms list was empty.",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(4)
+    escrow_uid = escrow_uids[0]
 
-    log.event("escrow_created", escrow_uid=escrow_uid)
+    log.event("escrow_created", escrow_uid=escrow_uid, chain_name=chain.chain_name)
     result = Table.grid(padding=(0, 2))
     result.add_column(style="bold")
     result.add_column()

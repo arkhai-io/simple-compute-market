@@ -512,27 +512,6 @@ class AgreedTerms:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_seller_wallet(seller_url: str, timeout: float = 5.0) -> str:
-    """Fetch seller's wallet from /.well-known/agent-wallet.json.
-
-    Needed to construct the RecipientArbiter demand on the buyer side —
-    we want the escrow to release only on attestations where the
-    seller's address is the recipient.
-    """
-    url = seller_url.rstrip("/") + "/.well-known/agent-wallet.json"
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-    except Exception as exc:
-        raise RuntimeError(f"Could not fetch seller wallet from {url}: {exc}") from exc
-    wallet = body.get("agent_wallet_address")
-    if not isinstance(wallet, str) or not wallet.startswith("0x") or len(wallet) != 42:
-        raise RuntimeError(
-            f"{url} returned malformed agent_wallet_address: {wallet!r}"
-        )
-    return wallet
-
-
 def run_buy(
     *,
     config: BuyConfig,
@@ -754,6 +733,16 @@ def run_buy(
             agreed_amount=outcome.agreed_amount,
             rounds=outcome.rounds,
             reason=outcome.reason,
+            accepted_escrow_proposal=(
+                outcome.accepted_escrow_proposal.model_dump()
+                if outcome.accepted_escrow_proposal is not None
+                else None
+            ),
+            accepted_provision_terms=(
+                outcome.accepted_provision_terms.model_dump()
+                if outcome.accepted_provision_terms is not None
+                else None
+            ),
         )
         attempts.append({
             "seller_url": seller_url,
@@ -851,26 +840,10 @@ def _settle_one(
         )
 
     escrow_recipient = accepted_recipient_address(accepted_proposal)
-    if escrow_recipient:
-        recipient_fallback = None
-    else:
-        try:
-            recipient_fallback = _resolve_seller_wallet(seller_url)
-        except RuntimeError as exc:
-            on_event("escrow_resolve_wallet_failed", {"seller_url": seller_url, "error": str(exc)})
-            return BuyResult(
-                status="exited",
-                negotiation_id=outcome.negotiation_id,
-                seller_url=seller_url,
-                agreed_amount=outcome.agreed_amount,
-                reason=f"resolve_seller_wallet_failed: {exc}",
-                rounds=outcome.rounds,
-                attempts=attempts,
-            )
 
     terms = AgreedTerms(
         seller_url=seller_url,
-        seller_wallet_address=escrow_recipient or recipient_fallback or "",
+        seller_wallet_address=escrow_recipient or "",
         negotiation_id=outcome.negotiation_id or "",
         listing_id=listing_id,
         agreed_amount=outcome.agreed_amount or 0,
@@ -905,7 +878,7 @@ def _settle_one(
 
     try:
         escrows = build_escrow_terms(
-            accepted_proposal, recipient_fallback,
+            accepted_proposal, terms.seller_wallet_address,
             terms.agreed_amount, terms.duration_seconds,
         )
     except Exception as exc:

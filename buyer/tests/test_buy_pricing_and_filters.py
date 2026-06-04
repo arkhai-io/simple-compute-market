@@ -9,6 +9,7 @@ from typing import Any
 from unittest import mock
 
 import pytest
+import typer
 
 from service.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
 
@@ -19,6 +20,7 @@ from market_buyer.buy_orchestrator import (
     query_registry_for_matches,
     run_buy,
 )
+from market_buyer.groups._cli_helpers import parse_filter_options
 
 
 def _escrow_proposal() -> EscrowProposal:
@@ -26,6 +28,11 @@ def _escrow_proposal() -> EscrowProposal:
         chain_name="anvil",
         escrow_address="0x" + "cd" * 20,
         fields={"token": "0x" + "ab" * 20},
+        demands=[{
+            "chain_name": "anvil",
+            "arbiter": "0x" + "cd" * 20,
+            "demand_data": {"recipient": "0x" + "f" * 40},
+        }],
         expiration_unix=1_800_000_000,
     )
 
@@ -135,6 +142,18 @@ class TestQueryRegistryFilters:
         assert result == items
 
 
+def test_parse_filter_options_accepts_repeatable_key_value_pairs():
+    assert parse_filter_options(["gpu_model=H200", "custom_axis=in:[a,b]"]) == {
+        "gpu_model": "H200",
+        "custom_axis": "in:[a,b]",
+    }
+
+
+def test_parse_filter_options_rejects_malformed_value():
+    with pytest.raises(typer.Exit):
+        parse_filter_options(["gpu_model"])
+
+
 # ---------------------------------------------------------------------------
 # run_buy with derive_prices callback
 # ---------------------------------------------------------------------------
@@ -156,10 +175,6 @@ class TestRunBuyDerivePrices:
         monkeypatch.setattr(
             "market_buyer.buy_orchestrator.negotiate_with_seller",
             fake_negotiate,
-        )
-        monkeypatch.setattr(
-            "market_buyer.buy_orchestrator._resolve_seller_wallet",
-            lambda url, timeout=5.0: "0x" + "0" * 40,
         )
 
         constraints = BuyConstraints()  # prices None
@@ -258,10 +273,6 @@ class TestConfirmSettlementGate:
         monkeypatch.setattr(
             "market_buyer.buy_orchestrator.negotiate_with_seller",
             _agree_negotiate_factory(agree_price),
-        )
-        monkeypatch.setattr(
-            "market_buyer.buy_orchestrator._resolve_seller_wallet",
-            lambda url, timeout=5.0: "0x" + "f" * 40,
         )
 
     def _config(self):
