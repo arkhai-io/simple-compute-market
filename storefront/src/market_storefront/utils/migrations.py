@@ -99,7 +99,31 @@ def _migrate_compute_allocation_callback_metadata(conn: sqlite3.Connection) -> N
         _add_column_if_missing(conn, "compute_allocations", column, "TEXT")
 
 
+def _migrate_listing_resource_timestamps(conn: sqlite3.Connection) -> None:
+    for table_name in ("listings", "resources"):
+        _add_column_if_missing(conn, table_name, "created_at", "TEXT")
+        _add_column_if_missing(conn, table_name, "updated_at", "TEXT")
+        if _table_exists(conn, table_name):
+            conn.execute(
+                f"""
+                UPDATE {table_name}
+                SET created_at = COALESCE(
+                      created_at,
+                      STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+                    ),
+                    updated_at = COALESCE(
+                      updated_at,
+                      STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+                    )
+                """
+            )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
+    Migration(
+        "20260604_000_listing_resource_timestamps",
+        _migrate_listing_resource_timestamps,
+    ),
     Migration(
         "20260604_001_compute_allocation_callback_metadata",
         _migrate_compute_allocation_callback_metadata,

@@ -596,16 +596,17 @@ class SQLiteClient:
                 except sqlite3.OperationalError:
                     pass
             # Keep resources.updated_at fresh whenever rows are updated.
+            cur.execute("DROP TRIGGER IF EXISTS trg_resources_updated_at")
             cur.execute(
                 """
-                CREATE TRIGGER IF NOT EXISTS trg_resources_updated_at
+                CREATE TRIGGER trg_resources_updated_at
                 AFTER UPDATE ON resources
                 FOR EACH ROW
                 WHEN NEW.updated_at = OLD.updated_at
                 BEGIN
                   UPDATE resources
                   SET updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
-                  WHERE pk = NEW.pk;
+                  WHERE resource_id = NEW.resource_id;
                 END
                 """
             )
@@ -719,6 +720,7 @@ class SQLiteClient:
                 END
                 """
             )
+            apply_schema_migrations(conn)
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS derived_compute_listings (
@@ -816,7 +818,6 @@ class SQLiteClient:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_compute_allocations_escrow_uid ON compute_allocations(escrow_uid)"
             )
-            apply_schema_migrations(conn)
             # Stage events — structured log of stage-boundary transitions,
             # queryable via CLI. Each row is the functional output of one
             # stage transition (discovery, negotiation, settlement, etc.).
