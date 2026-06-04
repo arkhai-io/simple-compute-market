@@ -103,3 +103,57 @@ class ResourcePatchResponse(BaseModel):
         description="True if any field was actually changed; False if the "
                     "row was already in the requested state (idempotent call)."
     )
+
+
+class FulfillmentStartedEventRequest(BaseModel):
+    allocation_id: str
+    escrow_uid: str | None = None
+    provider_id: str | None = None
+    provider_job_id: str | None = None
+    resource_id: str | None = None
+    gpu_count: int | None = None
+
+
+class FulfillmentFailedEventRequest(BaseModel):
+    allocation_id: str
+    escrow_uid: str | None = None
+    provider_id: str | None = None
+    provider_job_id: str | None = None
+    resource_id: str | None = None
+    reason: str | None = None
+    message: str | None = None
+    logs_ref: str | None = None
+
+
+class UsageStartedEventRequest(BaseModel):
+    allocation_id: str
+    escrow_uid: str | None = None
+    provider_id: str | None = None
+    provider_lease_id: str | None = None
+    resource_id: str | None = None
+    vm_host: str | None = None
+    vm_target: str | None = None
+    gpu_count: int | None = None
+    lease_end_utc: str | None = None
+
+
+class ReleaseStartedEventRequest(BaseModel):
+    allocation_id: str
+    provider_lease_id: str | None = None
+    check_job_id: str | None = None
+
+
+class CapacityReleasedEventRequest(BaseModel):
+    allocation_id: str
+    provider_lease_id: str | None = None
+    resource_id: str | None = None
+    released_at: str | None = None
+
+
+class FulfillmentEventResponse(BaseModel):
+    allocation_id: str
+    state: str
+    resource_id: str | None = None
+    gpu_count: int | None = None
+    resource_state: str | None = None
+    closed_listing_ids: list[str] = Field(default_factory=list)

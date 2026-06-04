@@ -160,6 +160,10 @@ async def close_stale_compute_listings_after_capacity_change(db_path: str) -> li
         result = await close_order({"listing_id": listing_id})
         if str(result.get("status", "?")) in ("closed", "skipped", "queued"):
             closed_listing_ids.append(listing_id)
+            continue
+        row = await get_sqlite_client().load_listing(listing_id=listing_id)
+        if row and row.get("status") == "closed":
+            closed_listing_ids.append(listing_id)
     mark_derived_listings_closed(db_path, closed_listing_ids)
     return closed_listing_ids
 
