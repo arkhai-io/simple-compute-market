@@ -534,6 +534,8 @@ class AdminController:
             "portfolio",
             "capacity_reserved_by_admin",
             allocation_id=reserved.get("allocation_id"),
+            pool_id=reserved.get("pool_id"),
+            member_id=reserved.get("member_id"),
             resource_id=reserved.get("resource_id"),
             gpu_count=reserved.get("allocated_gpu_count"),
             resource_state=reserved.get("state"),
@@ -543,6 +545,8 @@ class AdminController:
         )
         return ReserveCapacityResponse(
             allocation_id=str(reserved["allocation_id"]),
+            pool_id=str(reserved["pool_id"]) if reserved.get("pool_id") else None,
+            member_id=str(reserved["member_id"]) if reserved.get("member_id") else None,
             resource_id=str(reserved["resource_id"]),
             gpu_count=int(reserved.get("allocated_gpu_count") or 1),
             resource_state=reserved.get("state"),

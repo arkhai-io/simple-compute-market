@@ -29,6 +29,12 @@ DYNAMIC_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,
 compute-e2e-dynamic-4x,compute.gpu,h200,count,4,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,H200,99.0,"California, US",kvm1
 """
 
+FUNGIBLE_POOL_ID = "compute-e2e-fungible-pool"
+FUNGIBLE_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.pool_id,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
+compute-e2e-fungible-a,compute.gpu,h200,count,4,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,compute-e2e-fungible-pool,H200,99.0,"California, US",kvm1
+compute-e2e-fungible-b,compute.gpu,h200,count,4,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,compute-e2e-fungible-pool,H200,99.0,"California, US",kvm1
+"""
+
 ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
     "escrow_address": "0x" + "11" * 20,
@@ -46,9 +52,22 @@ class DynamicListingState:
     usage_started: bool = False
 
 
+@dataclass
+class FungiblePoolState:
+    resources_seeded: bool = False
+    listing_ids_by_gpu_count: dict[int, str] = field(default_factory=dict)
+    allocation_2x_id: str | None = None
+    allocation_4x_id: str | None = None
+
+
 @pytest.fixture(scope="module")
 def dynamic_state() -> DynamicListingState:
     return DynamicListingState()
+
+
+@pytest.fixture(scope="module")
+def fungible_state() -> FungiblePoolState:
+    return FungiblePoolState()
 
 
 @pytest.fixture(scope="module")
@@ -62,6 +81,16 @@ def seller_wallet() -> str:
 def _offer(gpu_count: int) -> dict:
     return {
         "resource_id": DYNAMIC_RESOURCE_ID,
+        "gpu_model": "H200",
+        "gpu_count": gpu_count,
+        "sla": 99.0,
+        "region": "California, US",
+    }
+
+
+def _pool_offer(gpu_count: int) -> dict:
+    return {
+        "pool_id": FUNGIBLE_POOL_ID,
         "gpu_model": "H200",
         "gpu_count": gpu_count,
         "sla": 99.0,
@@ -209,3 +238,99 @@ class TestComputeDynamicListings:
             4: "open",
         }
         log.info("[dynamic] released allocation %s; statuses=%s", dynamic_state.allocation_id, statuses)
+
+
+class TestFungibleComputeDynamicListings:
+    def test_00_imports_two_member_pool(
+        self, storefront_admin_client, fungible_state: FungiblePoolState
+    ):
+        result = storefront_admin_client.admin_import_resources(
+            FUNGIBLE_RESOURCE_CSV.encode("utf-8"),
+            filename="e2e-fungible-dynamic-listings.csv",
+        )
+
+        assert result.failed_count == 0, (
+            f"Fungible resource import failed for {result.failed_count} row(s): {result}"
+        )
+        assert result.imported_count >= 2
+        fungible_state.resources_seeded = True
+
+    def test_01_creates_one_pool_listing_set(
+        self,
+        storefront_admin_client,
+        seller_wallet: str,
+        fungible_state: FungiblePoolState,
+    ):
+        require_state(fungible_state, "resources_seeded")
+
+        for gpu_count in range(1, 5):
+            resp = storefront_admin_client.create_listing(
+                agent_wallet_address=seller_wallet,
+                offer=_pool_offer(gpu_count),
+                accepted_escrows=ACCEPTED_ESCROWS,
+                max_duration_seconds=3600,
+            )
+            assert resp.listing_id, f"create_listing returned no id for {gpu_count}x: {resp}"
+            listing = storefront_admin_client.get_listing(resp.listing_id)
+            assert listing.status == "open"
+            fungible_state.listing_ids_by_gpu_count[gpu_count] = resp.listing_id
+
+        assert set(fungible_state.listing_ids_by_gpu_count) == {1, 2, 3, 4}
+
+    def test_02_reserve_2x_keeps_large_slices_open(
+        self, storefront_admin_client, fungible_state: FungiblePoolState
+    ):
+        require_state(fungible_state, "listing_ids_by_gpu_count")
+
+        result = storefront_admin_client.admin_reserve_capacity(
+            required_attributes={
+                "pool_id": FUNGIBLE_POOL_ID,
+                "gpu_count": 2,
+            },
+            listing_id=fungible_state.listing_ids_by_gpu_count[2],
+            escrow_uid="e2e-fungible-reserve-2x",
+        )
+
+        assert result.allocation_id
+        assert result.extra.get("pool_id") == FUNGIBLE_POOL_ID or result.pool_id == FUNGIBLE_POOL_ID
+        assert result.gpu_count == 2
+        assert result.closed_listing_ids == []
+        statuses = _listing_statuses(
+            storefront_admin_client,
+            fungible_state.listing_ids_by_gpu_count,
+        )
+        assert statuses == {1: "open", 2: "open", 3: "open", 4: "open"}
+        fungible_state.allocation_2x_id = result.allocation_id
+
+    def test_03_reserve_4x_closes_oversized_pool_slices(
+        self, storefront_admin_client, fungible_state: FungiblePoolState
+    ):
+        require_state(fungible_state, "allocation_2x_id")
+
+        result = storefront_admin_client.admin_reserve_capacity(
+            required_attributes={
+                "pool_id": FUNGIBLE_POOL_ID,
+                "gpu_count": 4,
+            },
+            listing_id=fungible_state.listing_ids_by_gpu_count[4],
+            escrow_uid="e2e-fungible-reserve-4x",
+        )
+
+        assert result.allocation_id
+        assert result.gpu_count == 4
+        expected_closed = {
+            fungible_state.listing_ids_by_gpu_count[3],
+            fungible_state.listing_ids_by_gpu_count[4],
+        }
+        assert expected_closed.issubset(set(result.closed_listing_ids))
+        statuses = _listing_statuses(
+            storefront_admin_client,
+            fungible_state.listing_ids_by_gpu_count,
+        )
+        assert statuses == {
+            1: "open",
+            2: "open",
+            3: "closed",
+            4: "closed",
+        }
+        fungible_state.allocation_4x_id = result.allocation_id

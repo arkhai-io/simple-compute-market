@@ -43,6 +43,8 @@ class ReserveCapacityResponse(BaseModel):
     """Response from POST /api/v1/admin/portfolio/reservations."""
 
     allocation_id: str
+    pool_id: str | None = None
+    member_id: str | None = None
     resource_id: str
     gpu_count: int
     resource_state: str | None = None

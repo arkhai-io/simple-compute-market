@@ -684,6 +684,8 @@ class SQLiteClient:
                 """
                 CREATE TABLE IF NOT EXISTS compute_allocations (
                   allocation_id TEXT PRIMARY KEY,
+                  pool_id TEXT,
+                  member_id TEXT,
                   resource_id TEXT NOT NULL,
                   listing_id TEXT,
                   escrow_uid TEXT,
@@ -720,11 +722,11 @@ class SQLiteClient:
                 END
                 """
             )
-            apply_schema_migrations(conn)
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS derived_compute_listings (
                   listing_id TEXT PRIMARY KEY,
+                  pool_id TEXT,
                   resource_id TEXT NOT NULL,
                   gpu_count INTEGER NOT NULL,
                   status TEXT NOT NULL,
@@ -733,9 +735,14 @@ class SQLiteClient:
                 )
                 """
             )
+            apply_schema_migrations(conn)
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_resource "
                 "ON derived_compute_listings(resource_id, gpu_count)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_pool "
+                "ON derived_compute_listings(pool_id, gpu_count)"
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_status "
@@ -814,6 +821,12 @@ class SQLiteClient:
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_compute_allocations_resource_state ON compute_allocations(resource_id, state)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_compute_allocations_pool_state ON compute_allocations(pool_id, state)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_compute_allocations_member_state ON compute_allocations(member_id, state)"
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_compute_allocations_escrow_uid ON compute_allocations(escrow_uid)"
@@ -1380,6 +1393,24 @@ class SQLiteClient:
                         now_iso,
                     ),
                 )
+                if resource_type == "compute.gpu":
+                    self._sync_compute_pool_for_resource(
+                        cur,
+                        resource_id=resource_id,
+                        resource_subtype=resource_subtype,
+                        value=value,
+                        state=state,
+                        attributes=attributes,
+                        min_price=min_price,
+                        token=token,
+                        max_duration_seconds=max_duration_seconds,
+                        accepted_escrows_json=(
+                            json.dumps(accepted_escrows)
+                            if accepted_escrows is not None
+                            else None
+                        ),
+                        now_iso=now_iso,
+                    )
                 conn.commit()
             finally:
                 conn.close()
@@ -2063,6 +2094,108 @@ class SQLiteClient:
                 return {}
         return raw if isinstance(raw, dict) else {}
 
+    @classmethod
+    def _sync_compute_pool_for_resource(
+        cls,
+        cur: sqlite3.Cursor,
+        *,
+        resource_id: str,
+        resource_subtype: str | None,
+        value: Any,
+        state: str | None,
+        attributes: dict[str, Any] | None,
+        min_price: str | None,
+        token: str | None,
+        max_duration_seconds: int | None,
+        accepted_escrows_json: str | None,
+        now_iso: str,
+    ) -> str:
+        attrs = attributes or {}
+        pool_id = str(attrs.get("pool_id") or resource_id)
+        try:
+            gpu_count = int(value if value is not None else attrs.get("gpu_count", 1))
+        except (TypeError, ValueError):
+            gpu_count = 0
+        gpu_count = max(gpu_count, 0)
+        member_status = "deleted" if state == "deleted" else "active"
+        cur.execute(
+            """
+            INSERT INTO compute_pool_members(
+              member_id, pool_id, resource_id, provider_id, provider_resource_id,
+              provider_host_id, gpu_count, status, attributes, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(resource_id) DO UPDATE SET
+              pool_id=excluded.pool_id,
+              provider_id=excluded.provider_id,
+              provider_resource_id=excluded.provider_resource_id,
+              provider_host_id=excluded.provider_host_id,
+              gpu_count=excluded.gpu_count,
+              status=excluded.status,
+              attributes=excluded.attributes,
+              updated_at=excluded.updated_at
+            """,
+            (
+                f"resource:{resource_id}",
+                pool_id,
+                resource_id,
+                attrs.get("provider_id"),
+                attrs.get("provider_resource_id") or resource_id,
+                attrs.get("vm_host"),
+                gpu_count,
+                member_status,
+                json.dumps(attrs) if attrs else None,
+                now_iso,
+                now_iso,
+            ),
+        )
+        cur.execute(
+            """
+            SELECT COALESCE(SUM(gpu_count), 0)
+            FROM compute_pool_members
+            WHERE pool_id = ? AND status = 'active'
+            """,
+            (pool_id,),
+        )
+        total_gpu_count = int(cur.fetchone()[0] or 0)
+        pool_status = "active" if total_gpu_count > 0 else "deleted"
+        cur.execute(
+            """
+            INSERT INTO compute_inventory_pools(
+              pool_id, resource_type, gpu_model, region, sla, total_gpu_count,
+              status, allocation_policy, min_price, token, max_duration_seconds,
+              accepted_escrows, created_at, updated_at
+            )
+            VALUES (?, 'compute.gpu', ?, ?, ?, ?, ?, 'first_fit', ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(pool_id) DO UPDATE SET
+              gpu_model=COALESCE(excluded.gpu_model, compute_inventory_pools.gpu_model),
+              region=COALESCE(excluded.region, compute_inventory_pools.region),
+              sla=COALESCE(excluded.sla, compute_inventory_pools.sla),
+              total_gpu_count=excluded.total_gpu_count,
+              status=excluded.status,
+              min_price=COALESCE(excluded.min_price, compute_inventory_pools.min_price),
+              token=COALESCE(excluded.token, compute_inventory_pools.token),
+              max_duration_seconds=COALESCE(excluded.max_duration_seconds, compute_inventory_pools.max_duration_seconds),
+              accepted_escrows=COALESCE(excluded.accepted_escrows, compute_inventory_pools.accepted_escrows),
+              updated_at=excluded.updated_at
+            """,
+            (
+                pool_id,
+                attrs.get("gpu_model") or resource_subtype,
+                attrs.get("region"),
+                attrs.get("sla"),
+                total_gpu_count,
+                pool_status,
+                min_price,
+                token,
+                max_duration_seconds,
+                accepted_escrows_json,
+                now_iso,
+                now_iso,
+            ),
+        )
+        return pool_id
+
     @staticmethod
     def _requested_gpu_count(required_attributes: dict[str, Any] | None) -> int:
         raw = (required_attributes or {}).get("gpu_count")
@@ -2080,6 +2213,7 @@ class SQLiteClient:
     def _compute_resource_matches(
         cls,
         *,
+        pool_id: str | None = None,
         resource_id: str,
         resource_subtype: str | None,
         unit: str | None,
@@ -2092,6 +2226,7 @@ class SQLiteClient:
             return True
         top_level = {
             "resource_id": resource_id,
+            "pool_id": pool_id,
             "resource_type": "compute.gpu",
             "resource_subtype": resource_subtype,
             "unit": unit,
@@ -2129,6 +2264,24 @@ class SQLiteClient:
             (resource_id, *cls._COMPUTE_HELD_ALLOCATION_STATES),
         )
         return int(cur.fetchone()[0] or 0)
+
+    @classmethod
+    def _compute_candidate_rows(cls, cur: sqlite3.Cursor) -> list[tuple[Any, ...]]:
+        cur.execute(
+            """
+            SELECT m.pool_id, m.member_id, r.resource_id, r.resource_subtype,
+                   r.unit, r.state, r.value, r.attributes, m.gpu_count
+            FROM compute_pool_members m
+            JOIN resources r ON r.resource_id = m.resource_id
+            JOIN compute_inventory_pools p ON p.pool_id = m.pool_id
+            WHERE p.resource_type = 'compute.gpu'
+              AND p.status = 'active'
+              AND m.status = 'active'
+              AND (r.state IS NULL OR r.state != 'deleted')
+            ORDER BY r.updated_at ASC
+            """
+        )
+        return cur.fetchall()
 
     @classmethod
     def _sync_compute_resource_state(
@@ -2202,7 +2355,7 @@ class SQLiteClient:
                 ident = allocation_id if allocation_id is not None else escrow_uid
                 cur.execute(
                     f"""
-                    SELECT allocation_id, resource_id, gpu_count
+                    SELECT allocation_id, pool_id, member_id, resource_id, gpu_count
                     FROM compute_allocations
                     WHERE {where}
                     ORDER BY created_at DESC
@@ -2213,7 +2366,7 @@ class SQLiteClient:
                 row = cur.fetchone()
                 if row is None:
                     return None
-                found_allocation_id, resource_id, gpu_count = row
+                found_allocation_id, pool_id, member_id, resource_id, gpu_count = row
                 updates = ["state = ?"]
                 values: list[Any] = [state]
 
@@ -2265,6 +2418,8 @@ class SQLiteClient:
                 conn.commit()
                 return {
                     "allocation_id": found_allocation_id,
+                    "pool_id": pool_id,
+                    "member_id": member_id,
                     "resource_id": resource_id,
                     "gpu_count": int(gpu_count),
                     "state": state,
@@ -2312,19 +2467,21 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute("BEGIN IMMEDIATE")
                 requested_gpu_count = self._requested_gpu_count(required_attributes)
-                cur.execute(
-                    """
-                    SELECT resource_id, resource_subtype, unit, state, value, attributes
-                    FROM resources
-                    WHERE resource_type = 'compute.gpu'
-                      AND (state IS NULL OR state != 'deleted')
-                    ORDER BY updated_at ASC
-                    """
-                )
-                rows = cur.fetchall()
-                for resource_id, resource_subtype, unit, state, value, attributes_raw in rows:
+                rows = self._compute_candidate_rows(cur)
+                for (
+                    pool_id,
+                    member_id,
+                    resource_id,
+                    resource_subtype,
+                    unit,
+                    state,
+                    value,
+                    attributes_raw,
+                    member_gpu_count,
+                ) in rows:
                     attrs = self._compute_attrs_from_raw(attributes_raw)
                     if not self._compute_resource_matches(
+                        pool_id=pool_id,
                         resource_id=resource_id,
                         resource_subtype=resource_subtype,
                         unit=unit,
@@ -2339,7 +2496,11 @@ class SQLiteClient:
                     if not isinstance(vm_host, str) or not vm_host.strip():
                         continue
 
-                    total_gpu_count = self._resource_total_gpu_count(value=value, attrs=attrs)
+                    total_gpu_count = int(
+                        member_gpu_count
+                        if member_gpu_count is not None
+                        else self._resource_total_gpu_count(value=value, attrs=attrs)
+                    )
                     held_gpu_count = self._held_gpu_count(cur, resource_id)
                     if total_gpu_count - held_gpu_count < requested_gpu_count:
                         continue
@@ -2349,13 +2510,15 @@ class SQLiteClient:
                     cur.execute(
                         """
                         INSERT INTO compute_allocations(
-                          allocation_id, resource_id, listing_id, escrow_uid,
+                          allocation_id, pool_id, member_id, resource_id, listing_id, escrow_uid,
                           gpu_count, state, created_at, updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, 'reserved', ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?)
                         """,
                         (
                             allocation_id,
+                            pool_id,
+                            member_id,
                             resource_id,
                             listing_id,
                             escrow_uid,
@@ -2395,6 +2558,8 @@ class SQLiteClient:
                     conn.commit()
                     return {
                         "allocation_id": allocation_id,
+                        "pool_id": pool_id,
+                        "member_id": member_id,
                         "resource_id": resource_id,
                         "vm_host": vm_host,
                         "resource_subtype": resource_subtype,
@@ -2437,19 +2602,21 @@ class SQLiteClient:
             try:
                 cur = conn.cursor()
                 requested_gpu_count = self._requested_gpu_count(required_attributes)
-                cur.execute(
-                    """
-                    SELECT resource_id, resource_subtype, unit, state, value, attributes
-                    FROM resources
-                    WHERE resource_type = 'compute.gpu'
-                      AND (state IS NULL OR state != 'deleted')
-                    ORDER BY updated_at ASC
-                    """
-                )
-                rows = cur.fetchall()
-                for resource_id, resource_subtype, unit, state, value, attributes_raw in rows:
+                rows = self._compute_candidate_rows(cur)
+                for (
+                    pool_id,
+                    member_id,
+                    resource_id,
+                    resource_subtype,
+                    unit,
+                    state,
+                    value,
+                    attributes_raw,
+                    member_gpu_count,
+                ) in rows:
                     attrs = self._compute_attrs_from_raw(attributes_raw)
                     if not self._compute_resource_matches(
+                        pool_id=pool_id,
                         resource_id=resource_id,
                         resource_subtype=resource_subtype,
                         unit=unit,
@@ -2464,7 +2631,11 @@ class SQLiteClient:
                     if not isinstance(vm_host, str) or not vm_host.strip():
                         continue
 
-                    total_gpu_count = self._resource_total_gpu_count(value=value, attrs=attrs)
+                    total_gpu_count = int(
+                        member_gpu_count
+                        if member_gpu_count is not None
+                        else self._resource_total_gpu_count(value=value, attrs=attrs)
+                    )
                     held_gpu_count = self._held_gpu_count(cur, resource_id)
                     available_gpu_count = total_gpu_count - held_gpu_count
                     if available_gpu_count < requested_gpu_count:
@@ -2472,6 +2643,8 @@ class SQLiteClient:
 
                     return {
                         "resource_id": resource_id,
+                        "pool_id": pool_id,
+                        "member_id": member_id,
                         "vm_host": vm_host,
                         "resource_subtype": resource_subtype,
                         "unit": unit,

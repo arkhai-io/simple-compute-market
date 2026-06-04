@@ -261,6 +261,10 @@ class ComputeResource(ComputeDomainResource):
         default=None,
         description="Canonical DB resource identifier for this compute slice",
     )
+    pool_id: str | None = Field(
+        default=None,
+        description="Market-facing fungible compute pool identifier, if any",
+    )
 
     # ---- Slice fields (per-listing; the seller's split of the host) ----
     gpu_model: str = Field(

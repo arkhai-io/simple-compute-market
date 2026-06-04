@@ -620,7 +620,7 @@ async def _build_provisioning_job_spec(
     if order_dict:
         compute_resource = extract_compute_from_order(order_dict)
         if isinstance(compute_resource, dict):
-            for key in ("resource_id", "region", "gpu_model", "gpu_count"):
+            for key in ("pool_id", "resource_id", "region", "gpu_model", "gpu_count"):
                 if compute_resource.get(key) is not None:
                     required_attributes[key] = compute_resource[key]
 
@@ -692,7 +692,7 @@ async def fulfill_compute_obligation(
         order_id = order_dict.get("listing_id") or order_dict.get("order_id")
         compute_resource = extract_compute_from_order(order_dict)
         if isinstance(compute_resource, dict):
-            for key in ("resource_id", "region", "gpu_model", "gpu_count"):
+            for key in ("pool_id", "resource_id", "region", "gpu_model", "gpu_count"):
                 if compute_resource.get(key) is not None:
                     required_attributes[key] = compute_resource.get(key)
         accepted_escrows = order_dict.get("accepted_escrows") or []
@@ -726,6 +726,8 @@ async def fulfill_compute_obligation(
         stage_event("provision", "resource_reserved",
             listing_id=order_id,
             escrow_uid=escrow_uid,
+            pool_id=reserved.get("pool_id"),
+            member_id=reserved.get("member_id"),
             resource_id=reserved_resource_id,
             vm_host=reserved_vm_host,
             required_attributes=required_attributes,

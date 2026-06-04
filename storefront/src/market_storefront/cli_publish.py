@@ -254,7 +254,8 @@ def _reopen_derived_listing_if_present(
 ) -> dict | None:
     derived = load_derived_listing_for_slice(
         db_path,
-        resource_id=str(resource["resource_id"]),
+        pool_id=str(resource["pool_id"]) if resource.get("pool_id") else None,
+        resource_id=str(resource["resource_id"]) if resource.get("resource_id") else None,
         gpu_count=int(resource["gpu_count"]),
     )
     if not derived or not derived.get("listing_id"):
@@ -266,7 +267,8 @@ def _reopen_derived_listing_if_present(
     reopen_local_derived_listing(
         db_path,
         listing_id=listing_id,
-        resource_id=str(resource["resource_id"]),
+        pool_id=str(resource["pool_id"]) if resource.get("pool_id") else None,
+        resource_id=str(resource["resource_id"]) if resource.get("resource_id") else None,
         gpu_count=int(resource["gpu_count"]),
         offer_resource=offer,
         accepted_escrows=accepted_escrows,
@@ -514,9 +516,14 @@ def _publish_round(
 
     for res in resources:
         resource_key = res.get("resource_key") or listing_resource_key(
-            res["resource_id"], res.get("gpu_count"),
+            res.get("resource_id") or res.get("pool_id"), res.get("gpu_count"),
         )
-        if resource_key in skip_ids or res["resource_id"] in skip_ids:
+        if (
+            resource_key in skip_ids
+            or (res.get("legacy_resource_key") in skip_ids)
+            or (res.get("resource_id") in skip_ids)
+            or (res.get("pool_id") in skip_ids)
+        ):
             skipped.append(res)
             continue
 
@@ -560,12 +567,14 @@ def _publish_round(
                 raw_max_duration_seconds
             )
             offer = {
-                "resource_id": res["resource_id"],
+                "pool_id": res.get("pool_id"),
                 "gpu_model": res["gpu_model"],
                 "gpu_count": res["gpu_count"],
                 "sla": res["sla"],
                 "region": res["region"],
             }
+            if res.get("resource_id"):
+                offer["resource_id"] = res["resource_id"]
             try:
                 reopened = _reopen_derived_listing_if_present(
                     db_path=db_path,
@@ -600,7 +609,8 @@ def _publish_round(
                     record_derived_listing(
                         db_path,
                         listing_id=str(resp["listing_id"]),
-                        resource_id=str(res["resource_id"]),
+                        pool_id=str(res["pool_id"]) if res.get("pool_id") else None,
+                        resource_id=str(res["resource_id"]) if res.get("resource_id") else None,
                         gpu_count=int(res["gpu_count"]),
                     )
                 published.append({
@@ -705,16 +715,15 @@ def _publish_round(
         max_duration_seconds = _normalize_max_duration_seconds(
             raw_max_duration_seconds
         )
-        # Explicit resource_id pins this order to a specific DB row, so
-        # multiple identical-spec resources each get a distinct order in
-        # `--watch` mode.
         offer = {
-            "resource_id": res["resource_id"],
+            "pool_id": res.get("pool_id"),
             "gpu_model": res["gpu_model"],
             "gpu_count": res["gpu_count"],
             "sla": res["sla"],
             "region": res["region"],
         }
+        if res.get("resource_id"):
+            offer["resource_id"] = res["resource_id"]
         from service.clients.alkahest import get_erc20_escrow_obligation_nontierable
         accepted_escrows: list[dict] = []
         per_chain_errors: list[str] = []
@@ -790,7 +799,8 @@ def _publish_round(
                 record_derived_listing(
                     db_path,
                     listing_id=str(resp["listing_id"]),
-                    resource_id=str(res["resource_id"]),
+                    pool_id=str(res["pool_id"]) if res.get("pool_id") else None,
+                    resource_id=str(res["resource_id"]) if res.get("resource_id") else None,
                     gpu_count=int(res["gpu_count"]),
                 )
             published.append({
@@ -907,7 +917,7 @@ def _print_publish_table(console: Console, published: list[dict], failed: list[t
         price = primary_rate_value(first_escrow)
         token = accepted_token_address(first_escrow) or "-"
         summary.add_row(
-            res["resource_id"],
+            str(res.get("pool_id") or res.get("resource_id")),
             f"{res['gpu_model']} x{res['gpu_count']}",
             res["region"] or "-",
             f"{price if price is not None else 'hidden'} {token}",
@@ -916,7 +926,7 @@ def _print_publish_table(console: Console, published: list[dict], failed: list[t
         )
     for res, reason in failed:
         summary.add_row(
-            res["resource_id"],
+            str(res.get("pool_id") or res.get("resource_id")),
             f"{res['gpu_model']} x{res['gpu_count']}",
             res["region"] or "-",
             "-",

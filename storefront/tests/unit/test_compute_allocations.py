@@ -4,6 +4,7 @@ import sqlite3
 
 import pytest
 
+from market_storefront.services.compute_listing_reconciler import available_compute_slices
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 
@@ -27,6 +28,28 @@ async def _seed_compute_pool(client: SQLiteClient, *, gpu_count: int = 4) -> Non
             "vm_host": "host-1",
         },
     )
+
+
+async def _seed_fungible_compute_pool(client: SQLiteClient) -> None:
+    for resource_id, host in (
+        ("pool-h200-a", "host-a"),
+        ("pool-h200-b", "host-b"),
+    ):
+        await client.upsert_resource(
+            resource_id=resource_id,
+            resource_type="compute.gpu",
+            resource_subtype="h200",
+            unit="count",
+            value=4,
+            state="available",
+            attributes={
+                "pool_id": "pool-h200-shared",
+                "gpu_model": "H200",
+                "sla": 99.0,
+                "region": "California, US",
+                "vm_host": host,
+            },
+        )
 
 
 def test_sqlite_schema_includes_derived_compute_listings(client):
@@ -376,3 +399,54 @@ async def test_resource_release_with_allocation_id_releases_only_that_slice(clie
     assert await client.select_available_compute_vm(
         required_attributes={"gpu_model": "H200", "gpu_count": 3},
     ) is None
+
+
+@pytest.mark.asyncio
+async def test_fungible_pool_derives_one_listing_set_across_members(client):
+    await _seed_fungible_compute_pool(client)
+
+    rows = available_compute_slices(client.db_path)
+
+    assert [row["gpu_count"] for row in rows] == [1, 2, 3, 4]
+    assert {row["resource_key"] for row in rows} == {
+        "pool:pool-h200-shared:gpus:1",
+        "pool:pool-h200-shared:gpus:2",
+        "pool:pool-h200-shared:gpus:3",
+        "pool:pool-h200-shared:gpus:4",
+    }
+    assert {row["resource_id"] for row in rows} == {None}
+    assert {row["pool_id"] for row in rows} == {"pool-h200-shared"}
+
+
+@pytest.mark.asyncio
+async def test_fungible_pool_reserves_concrete_members_but_reconciles_pool(client):
+    await _seed_fungible_compute_pool(client)
+
+    first = await client.reserve_available_compute_vm(
+        required_attributes={"pool_id": "pool-h200-shared", "gpu_count": 2},
+        escrow_uid="escrow-1",
+    )
+
+    assert first is not None
+    assert first["pool_id"] == "pool-h200-shared"
+    assert first["resource_id"] in {"pool-h200-a", "pool-h200-b"}
+    assert first["member_id"] == f"resource:{first['resource_id']}"
+    assert [row["gpu_count"] for row in available_compute_slices(client.db_path)] == [
+        1,
+        2,
+        3,
+        4,
+    ]
+
+    second = await client.reserve_available_compute_vm(
+        required_attributes={"pool_id": "pool-h200-shared", "gpu_count": 4},
+        escrow_uid="escrow-2",
+    )
+
+    assert second is not None
+    assert second["pool_id"] == "pool-h200-shared"
+    assert second["resource_id"] != first["resource_id"]
+    assert [row["gpu_count"] for row in available_compute_slices(client.db_path)] == [
+        1,
+        2,
+    ]
