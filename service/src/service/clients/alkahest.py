@@ -1189,6 +1189,15 @@ class EscrowKindCodec(Protocol):
 
     async def get_obligation(self, client: Any, uid: str) -> Any: ...
 
+    async def collect(
+        self,
+        client: Any,
+        uid: str,
+        fulfillment_uid: str,
+    ) -> Any: ...
+
+    async def reclaim_expired(self, client: Any, uid: str) -> Any: ...
+
     async def refund_claimed(
         self,
         *,
@@ -1252,6 +1261,12 @@ class Erc20NonTierableEscrowCodec:
     async def get_obligation(self, client: Any, uid: str) -> Any:
         return await client.erc20.escrow.non_tierable.get_obligation(uid)
 
+    async def collect(self, client: Any, uid: str, fulfillment_uid: str) -> Any:
+        return await client.erc20.escrow.non_tierable.collect(uid, fulfillment_uid)
+
+    async def reclaim_expired(self, client: Any, uid: str) -> Any:
+        return await client.erc20.escrow.non_tierable.reclaim_expired(uid)
+
     async def refund_claimed(
         self,
         *,
@@ -1309,6 +1324,12 @@ class Erc20TierableEscrowCodec(Erc20NonTierableEscrowCodec):
     async def get_obligation(self, client: Any, uid: str) -> Any:
         return await client.erc20.escrow.tierable.get_obligation(uid)
 
+    async def collect(self, client: Any, uid: str, fulfillment_uid: str) -> Any:
+        return await client.erc20.escrow.tierable.collect(uid, fulfillment_uid)
+
+    async def reclaim_expired(self, client: Any, uid: str) -> Any:
+        return await client.erc20.escrow.tierable.reclaim_expired(uid)
+
 
 class _NativeTokenEscrowCodecBase:
     """Common native-token escrow SDK adapter.
@@ -1361,6 +1382,14 @@ class _NativeTokenEscrowCodecBase:
     async def get_obligation(self, client: Any, uid: str) -> Any:
         tier_client = getattr(client.native_token.escrow, self.tier_attr)
         return await tier_client.get_obligation(uid)
+
+    async def collect(self, client: Any, uid: str, fulfillment_uid: str) -> Any:
+        tier_client = getattr(client.native_token.escrow, self.tier_attr)
+        return await tier_client.collect(uid, fulfillment_uid)
+
+    async def reclaim_expired(self, client: Any, uid: str) -> Any:
+        tier_client = getattr(client.native_token.escrow, self.tier_attr)
+        return await tier_client.reclaim_expired(uid)
 
     async def refund_claimed(
         self,
@@ -1526,6 +1555,14 @@ class _TokenBundleEscrowCodecBase:
         tier_client = getattr(client.token_bundle.escrow, self.tier_attr)
         return await tier_client.get_obligation(uid)
 
+    async def collect(self, client: Any, uid: str, fulfillment_uid: str) -> Any:
+        tier_client = getattr(client.token_bundle.escrow, self.tier_attr)
+        return await tier_client.collect(uid, fulfillment_uid)
+
+    async def reclaim_expired(self, client: Any, uid: str) -> Any:
+        tier_client = getattr(client.token_bundle.escrow, self.tier_attr)
+        return await tier_client.reclaim_expired(uid)
+
     async def refund_claimed(
         self,
         *,
@@ -1638,6 +1675,16 @@ class _AttestationEscrowCodecBase:
         version_client = getattr(client.attestation.escrow, self.version_attr)
         tier_client = getattr(version_client, self.tier_attr)
         return await tier_client.get_obligation(uid)
+
+    async def collect(self, client: Any, uid: str, fulfillment_uid: str) -> Any:
+        version_client = getattr(client.attestation.escrow, self.version_attr)
+        tier_client = getattr(version_client, self.tier_attr)
+        return await tier_client.collect(uid, fulfillment_uid)
+
+    async def reclaim_expired(self, client: Any, uid: str) -> Any:
+        version_client = getattr(client.attestation.escrow, self.version_attr)
+        tier_client = getattr(version_client, self.tier_attr)
+        return await tier_client.reclaim_expired(uid)
 
     async def refund_claimed(
         self,
@@ -1773,6 +1820,14 @@ class _Erc721EscrowCodecBase:
         tier_client = getattr(client.erc721.escrow, self.tier_attr)
         return await tier_client.get_obligation(uid)
 
+    async def collect(self, client: Any, uid: str, fulfillment_uid: str) -> Any:
+        tier_client = getattr(client.erc721.escrow, self.tier_attr)
+        return await tier_client.collect(uid, fulfillment_uid)
+
+    async def reclaim_expired(self, client: Any, uid: str) -> Any:
+        tier_client = getattr(client.erc721.escrow, self.tier_attr)
+        return await tier_client.reclaim_expired(uid)
+
     async def refund_claimed(
         self,
         *,
@@ -1868,6 +1923,14 @@ class _Erc1155EscrowCodecBase:
     async def get_obligation(self, client: Any, uid: str) -> Any:
         tier_client = getattr(client.erc1155.escrow, self.tier_attr)
         return await tier_client.get_obligation(uid)
+
+    async def collect(self, client: Any, uid: str, fulfillment_uid: str) -> Any:
+        tier_client = getattr(client.erc1155.escrow, self.tier_attr)
+        return await tier_client.collect(uid, fulfillment_uid)
+
+    async def reclaim_expired(self, client: Any, uid: str) -> Any:
+        tier_client = getattr(client.erc1155.escrow, self.tier_attr)
+        return await tier_client.reclaim_expired(uid)
 
     async def refund_claimed(
         self,
@@ -1992,13 +2055,87 @@ def get_escrow_codec_for(
     listing was built against a different chain config than what's
     currently active.
     """
-    slot = address_to_slot(chain_name, escrow_address, config_path=config_path)
+    try:
+        slot = address_to_slot(chain_name, escrow_address, config_path=config_path)
+    except ValueError:
+        slot = None
     if slot is not None:
         codec = _ESCROW_KIND_CODECS.get(slot)
         if codec is not None:
             return codec
     return get_escrow_kind_codec_by_address(
         escrow_address, chain_name, config_path=config_path,
+    )
+
+
+async def get_escrow_obligation_with_codec(
+    client: Any,
+    uid: str,
+    *,
+    chain_name: str,
+    config_path: str | None = None,
+    escrow_address: str | None = None,
+) -> tuple[EscrowKindCodec, Any]:
+    """Read an escrow obligation and return the codec that decoded it.
+
+    When ``escrow_address`` is available, dispatch is exact. For raw UID
+    operator commands that predate storing the address, fall back to trying
+    registered codecs whose address can resolve on the selected chain.
+    """
+    if escrow_address:
+        codec = get_escrow_codec_for(
+            chain_name,
+            escrow_address,
+            config_path=config_path,
+        )
+        return codec, await codec.get_obligation(client, uid)
+
+    errors: list[str] = []
+    for codec in _ESCROW_KIND_CODECS.values():
+        try:
+            codec.resolve_address(chain_name, config_path=config_path)
+        except Exception:
+            continue
+        try:
+            return codec, await codec.get_obligation(client, uid)
+        except Exception as exc:
+            errors.append(f"{codec.kind}: {exc}")
+    raise RuntimeError(
+        f"Could not read escrow {uid!r} with any registered codec on "
+        f"chain={chain_name!r}: {'; '.join(errors) or 'no codecs resolvable'}"
+    )
+
+
+async def reclaim_expired_escrow_with_codec(
+    client: Any,
+    uid: str,
+    *,
+    chain_name: str,
+    config_path: str | None = None,
+    escrow_address: str | None = None,
+) -> tuple[EscrowKindCodec, Any]:
+    """Run ``reclaim_expired`` via the matching escrow codec."""
+    if escrow_address:
+        codec = get_escrow_codec_for(
+            chain_name,
+            escrow_address,
+            config_path=config_path,
+        )
+        return codec, await codec.reclaim_expired(client, uid)
+
+    errors: list[str] = []
+    for codec in _ESCROW_KIND_CODECS.values():
+        try:
+            codec.resolve_address(chain_name, config_path=config_path)
+        except Exception:
+            continue
+        try:
+            return codec, await codec.reclaim_expired(client, uid)
+        except Exception as exc:
+            errors.append(f"{codec.kind}: {exc}")
+    raise RuntimeError(
+        f"Could not reclaim escrow {uid!r} with any registered codec on "
+        f"chain={chain_name!r}: {'; '.join(errors) or 'no codecs resolvable'}"
     )
 
 

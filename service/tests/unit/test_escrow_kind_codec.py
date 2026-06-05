@@ -37,7 +37,9 @@ from service.clients.alkahest import (
     _normalize_demand_bytes,
     get_escrow_kind_codec,
     get_escrow_kind_codec_by_address,
+    get_escrow_obligation_with_codec,
     known_escrow_kinds,
+    reclaim_expired_escrow_with_codec,
     register_escrow_kind_codec,
 )
 from service.schemas import EscrowProposal
@@ -287,6 +289,94 @@ def test_get_escrow_kind_codec_by_address_skips_codecs_that_dont_resolve(restore
     assert get_escrow_kind_codec_by_address(target_address, "any_chain").kind == "working"
 
 
+def test_get_escrow_obligation_with_codec_uses_exact_address(restore_registry):
+    target_address = "0x" + "aa" * 20
+
+    class _Codec:
+        kind = "exact"
+
+        def resolve_address(self, chain_name, *, config_path):
+            return target_address
+
+        async def create_obligation(self, client, obligation_data, expiration_unix):
+            return "0xuid"
+
+        async def get_obligation(self, client, uid):
+            return {"uid": uid}
+
+        async def collect(self, client, uid, fulfillment_uid):
+            return None
+
+        async def reclaim_expired(self, client, uid):
+            return None
+
+        async def refund_claimed(self, **kwargs):
+            return {}
+
+    register_escrow_kind_codec(_Codec())
+
+    codec, decoded = asyncio.run(
+        get_escrow_obligation_with_codec(
+            MagicMock(),
+            "0xescrow",
+            chain_name="anvil",
+            escrow_address=target_address,
+        )
+    )
+
+    assert codec.kind == "exact"
+    assert decoded == {"uid": "0xescrow"}
+
+
+def test_reclaim_expired_with_codec_discovers_working_codec(restore_registry):
+    class _FailingCodec:
+        kind = "failing"
+
+        def resolve_address(self, chain_name, *, config_path):
+            return "0x" + "01" * 20
+
+        async def create_obligation(self, client, obligation_data, expiration_unix):
+            return "0xuid"
+
+        async def get_obligation(self, client, uid):
+            raise RuntimeError("wrong codec")
+
+        async def collect(self, client, uid, fulfillment_uid):
+            return None
+
+        async def reclaim_expired(self, client, uid):
+            raise RuntimeError("wrong codec")
+
+        async def refund_claimed(self, **kwargs):
+            return {}
+
+    class _WorkingCodec(_FailingCodec):
+        kind = "working"
+
+        def resolve_address(self, chain_name, *, config_path):
+            return "0x" + "02" * 20
+
+        async def reclaim_expired(self, client, uid):
+            return {"uid": uid, "status": "reclaimed"}
+
+    from service.clients import alkahest
+
+    alkahest._ESCROW_KIND_CODECS.clear()
+    register_escrow_kind_codec(_FailingCodec())
+    register_escrow_kind_codec(_WorkingCodec())
+
+    codec, receipt = asyncio.run(
+        reclaim_expired_escrow_with_codec(
+            MagicMock(),
+            "0xescrow",
+            chain_name="anvil",
+        )
+    )
+
+    assert codec.kind == "working"
+    assert receipt == {"uid": "0xescrow", "status": "reclaimed"}
+
+
 # ---------------------------------------------------------------------------
 # Erc20NonTierableEscrowCodec functional
 # ---------------------------------------------------------------------------
@@ -380,6 +470,25 @@ def test_erc20_get_obligation_dispatches_to_sdk():
     result = asyncio.run(codec.get_obligation(mock_client, "0xescrow"))
     assert result == {"attestation": "att", "data": "data"}
     mock_client.erc20.escrow.non_tierable.get_obligation.assert_awaited_once_with("0xescrow")
+
+
+def test_erc20_collect_and_reclaim_dispatch_to_sdk():
+    codec = Erc20NonTierableEscrowCodec()
+    mock_client = MagicMock()
+    mock_client.erc20.escrow.non_tierable.collect = AsyncMock(return_value="collected")
+    mock_client.erc20.escrow.non_tierable.reclaim_expired = AsyncMock(return_value="reclaimed")
+
+    collect = asyncio.run(codec.collect(mock_client, "0xescrow", "0xfulfillment"))
+    reclaim = asyncio.run(codec.reclaim_expired(mock_client, "0xescrow"))
+
+    assert collect == "collected"
+    assert reclaim == "reclaimed"
+    mock_client.erc20.escrow.non_tierable.collect.assert_awaited_once_with(
+        "0xescrow", "0xfulfillment",
+    )
+    mock_client.erc20.escrow.non_tierable.reclaim_expired.assert_awaited_once_with(
+        "0xescrow",
+    )
 
 
 def test_erc20_tierable_create_obligation_dispatches_to_sdk():

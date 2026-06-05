@@ -2,9 +2,8 @@
 
 Three verbs:
   create   — stage 3 only: alkahest approve + escrow.create on-chain
-  reclaim  — post-expiration tokens-back via reclaim_expired
-  show     — read-only EVM inspection (calls IEAS.getAttestation,
-             decodes ERC-20 escrow obligation data)
+  reclaim  — post-expiration reclaim_expired via the matching escrow codec
+  show     — read-only EVM inspection via the matching escrow codec
 
 Refunds (post-claim manual return of tokens by the seller) live under
 `market-storefront escrow refund`. The full create+submit+poll
@@ -51,6 +50,89 @@ def _resolve_escrow_uid_from_run(run_id: str) -> Optional[str]:
     return None
 
 
+def _resolve_escrow_context_from_run(
+    run_id: str | None,
+) -> tuple[str | None, str | None, str | None]:
+    """Return ``(escrow_uid, chain_name, escrow_address)`` from a run-log."""
+    if not run_id:
+        return None, None, None
+    try:
+        from ._deal import load_deal_context
+
+        deal = load_deal_context(run_id)
+    except Exception:
+        return _resolve_escrow_uid_from_run(run_id), None, None
+
+    chain_name = None
+    escrow_address = None
+    if isinstance(deal.accepted_escrow_terms, list) and deal.accepted_escrow_terms:
+        terms = next(
+            (
+                item for item in deal.accepted_escrow_terms
+                if isinstance(item, dict) and item.get("maker") == "buyer"
+            ),
+            deal.accepted_escrow_terms[0],
+        )
+        if isinstance(terms, dict):
+            raw_chain = terms.get("chain_name")
+            raw_address = terms.get("escrow_contract")
+            if isinstance(raw_chain, str) and raw_chain:
+                chain_name = raw_chain
+            if isinstance(raw_address, str) and raw_address:
+                escrow_address = raw_address
+    if isinstance(deal.accepted_escrow_proposal, dict):
+        raw_chain = deal.accepted_escrow_proposal.get("chain_name")
+        raw_address = deal.accepted_escrow_proposal.get("escrow_address")
+        if isinstance(raw_chain, str) and raw_chain:
+            chain_name = raw_chain
+        if isinstance(raw_address, str) and raw_address:
+            escrow_address = raw_address
+    return deal.escrow_uid, chain_name, escrow_address
+
+
+def _format_obligation_value(value: object) -> str:
+    if isinstance(value, (bytes, bytearray)):
+        return "0x" + bytes(value).hex()
+    if isinstance(value, list):
+        return "[" + ", ".join(_format_obligation_value(v) for v in value) + "]"
+    return str(value)
+
+
+def _get_obligation_field(obligation: object, field: str) -> object | None:
+    if isinstance(obligation, dict):
+        return obligation.get(field)
+    return getattr(obligation, field, None)
+
+
+def _render_obligation_data(body: Table, obligation: object) -> None:
+    fields = [
+        "arbiter",
+        "demand",
+        "token",
+        "tokenId",
+        "amount",
+        "nativeAmount",
+        "erc20Tokens",
+        "erc20Amounts",
+        "erc721Tokens",
+        "erc721TokenIds",
+        "erc1155Tokens",
+        "erc1155TokenIds",
+        "erc1155Amounts",
+        "attestation",
+        "attestationUid",
+    ]
+    rendered = False
+    for field in fields:
+        value = _get_obligation_field(obligation, field)
+        if value is None:
+            continue
+        body.add_row(field, _format_obligation_value(value))
+        rendered = True
+    if not rendered:
+        body.add_row("Data", str(obligation))
+
+
 async def _do_reclaim(
     *,
     private_key: str,
@@ -58,13 +140,15 @@ async def _do_reclaim(
     chain_name: str,
     addr_config_path: Optional[str],
     escrow_uid: str,
-) -> object:
+    escrow_address: str | None = None,
+) -> tuple[str, object]:
     """Run the on-chain reclaim_expired call and return the receipt."""
     from alkahest_py import AlkahestClient
     from service.clients.alkahest import (
         get_alkahest_network,
         prewarm_alkahest_address_config_cache,
         resolve_alkahest_address_config,
+        reclaim_expired_escrow_with_codec,
     )
 
     prewarm_alkahest_address_config_cache(addr_config_path)
@@ -77,7 +161,14 @@ async def _do_reclaim(
         rpc_url=rpc_url,
         address_config=address_config,
     )
-    return await client.erc20.escrow.non_tierable.reclaim_expired(escrow_uid)
+    codec, receipt = await reclaim_expired_escrow_with_codec(
+        client,
+        escrow_uid,
+        chain_name=chain_name,
+        config_path=addr_config_path,
+        escrow_address=escrow_address,
+    )
+    return codec.kind, receipt
 
 
 @escrow_app.command("reclaim")
@@ -108,6 +199,8 @@ def reclaim_cmd(
     posted. The buyer's wallet must be the original payer.
     """
     console = Console()
+    run_chain_name = None
+    escrow_address = None
 
     if not escrow_uid and not run_id:
         typer.secho(
@@ -116,8 +209,12 @@ def reclaim_cmd(
         )
         raise typer.Exit(2)
 
-    if not escrow_uid and run_id:
-        escrow_uid = _resolve_escrow_uid_from_run(run_id)
+    if run_id:
+        run_uid, run_chain_name, escrow_address = _resolve_escrow_context_from_run(
+            run_id,
+        )
+        if not escrow_uid:
+            escrow_uid = run_uid
         if not escrow_uid:
             typer.secho(
                 f"No escrow_uid found in run {run_id}. Pass --escrow-uid explicitly.",
@@ -135,7 +232,7 @@ def reclaim_cmd(
 
     from ..common import select_chain_for_listing
     chain_cfg = select_chain_for_listing(
-        listing=None, override=chain_name, yes=False,
+        listing=None, override=chain_name or run_chain_name, yes=False,
     )
 
     header = Table.grid(padding=(0, 2))
@@ -143,16 +240,19 @@ def reclaim_cmd(
     header.add_column()
     header.add_row("Escrow UID", escrow_uid)
     header.add_row("Chain", chain_cfg.name)
+    if escrow_address:
+        header.add_row("Escrow contract", escrow_address)
     header.add_row("RPC", chain_cfg.rpc_url)
     console.print(Panel(header, title="market escrow reclaim", border_style="cyan"))
 
     try:
-        receipt = asyncio.run(_do_reclaim(
+        escrow_kind, receipt = asyncio.run(_do_reclaim(
             private_key=pk,
             rpc_url=chain_cfg.rpc_url,
             chain_name=chain_cfg.name,
             addr_config_path=chain_cfg.alkahest_address_config_path,
             escrow_uid=escrow_uid,
+            escrow_address=escrow_address,
         ))
     except Exception as exc:
         typer.secho(
@@ -170,6 +270,7 @@ def reclaim_cmd(
     result.add_column(style="bold")
     result.add_column()
     result.add_row("Status", "reclaimed")
+    result.add_row("Escrow kind", escrow_kind)
     result.add_row("Receipt", str(receipt))
     console.print(Panel(result, title="Reclaim complete", border_style="green"))
 
@@ -438,15 +539,19 @@ def show_cmd(
         help="Which [chains.<name>] entry to read the escrow from. "
              "Required when more than one chain is configured.",
     ),
+    escrow_address_flag: Optional[str] = typer.Option(
+        None, "--escrow-address",
+        help="Escrow obligation contract address. Optional when --run captured "
+             "accepted escrow terms; otherwise the command tries registered codecs.",
+    ),
 ) -> None:
     """Read an escrow attestation from chain state.
 
-    Reads the ERC-20 escrow obligation via alkahest's
-    ``client.erc20.escrow.non_tierable.get_obligation(uid)`` and
-    displays the attestation envelope (recipient, attester, times,
-    revocation status) plus the decoded escrow fields (arbiter,
-    demand, token, amount).
+    Reads the escrow obligation via the matching escrow codec and displays
+    the attestation envelope plus decoded obligation fields.
     """
+    run_chain_name = None
+    run_escrow_address = None
     if not escrow_uid and not run_id:
         typer.secho(
             "Pass --escrow-uid <uid> or --run <run_id>.",
@@ -454,8 +559,12 @@ def show_cmd(
         )
         raise typer.Exit(2)
 
-    if not escrow_uid and run_id:
-        escrow_uid = _resolve_escrow_uid_from_run(run_id)
+    if run_id:
+        run_uid, run_chain_name, run_escrow_address = _resolve_escrow_context_from_run(
+            run_id,
+        )
+        if not escrow_uid:
+            escrow_uid = run_uid
         if not escrow_uid:
             typer.secho(
                 f"No escrow_uid recorded in run {run_id}. "
@@ -466,8 +575,9 @@ def show_cmd(
 
     from ..common import select_chain_for_listing
     chain_cfg = select_chain_for_listing(
-        listing=None, override=chain_name_flag, yes=False,
+        listing=None, override=chain_name_flag or run_chain_name, yes=False,
     )
+    escrow_address = escrow_address_flag or run_escrow_address
     private_key = resolve_config_value(
         override=None, toml_path="wallet.private_key",
     )
@@ -482,6 +592,7 @@ def show_cmd(
     import asyncio
     from service.clients.alkahest import (
         get_alkahest_network,
+        get_escrow_obligation_with_codec,
         prewarm_alkahest_address_config_cache,
         resolve_alkahest_address_config,
     )
@@ -504,8 +615,14 @@ def show_cmd(
     )
 
     try:
-        decoded = asyncio.run(
-            client.erc20.escrow.non_tierable.get_obligation(escrow_uid)
+        codec, decoded = asyncio.run(
+            get_escrow_obligation_with_codec(
+                client,
+                escrow_uid,
+                chain_name=chain_cfg.name,
+                config_path=chain_cfg.alkahest_address_config_path,
+                escrow_address=escrow_address,
+            )
         )
     except Exception as exc:
         typer.secho(
@@ -517,13 +634,13 @@ def show_cmd(
     att = decoded["attestation"]
     obligation = decoded["data"]
     is_revoked = bool(att.revocation_time)
-    demand_bytes = bytes(obligation.demand) if obligation.demand is not None else None
 
     console = Console()
     head = Table.grid(padding=(0, 2))
     head.add_column(style="bold")
     head.add_column()
     head.add_row("Escrow UID", att.uid)
+    head.add_row("Escrow kind", codec.kind)
     head.add_row("Schema", att.schema)
     head.add_row("Attester", att.attester)
     head.add_row("Recipient", att.recipient)
@@ -539,14 +656,5 @@ def show_cmd(
     body = Table.grid(padding=(0, 2))
     body.add_column(style="bold")
     body.add_column()
-    body.add_row("Arbiter", obligation.arbiter or "-")
-    body.add_row("Token", obligation.token or "-")
-    body.add_row(
-        "Amount (raw)",
-        str(int(obligation.amount)) if obligation.amount is not None else "-",
-    )
-    body.add_row(
-        "Demand",
-        ("0x" + demand_bytes.hex()) if demand_bytes else "-",
-    )
-    console.print(Panel(body, title="ERC-20 escrow obligation data", border_style="cyan"))
+    _render_obligation_data(body, obligation)
+    console.print(Panel(body, title="Escrow obligation data", border_style="cyan"))

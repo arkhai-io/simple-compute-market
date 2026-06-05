@@ -110,17 +110,31 @@ class StorefrontListingClaimResponse:
 
     status: str | None = None
     listing_id: str | None = None
+    escrow_uid: str | None = None
+    escrow_kind: str | None = None
     fulfillment_uid: str | None = None
+    collect_result: str | None = None
     claim_tx: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "StorefrontListingClaimResponse":
-        known = {"status", "listing_id", "fulfillment_uid", "claim_tx"}
+        known = {
+            "status",
+            "listing_id",
+            "escrow_uid",
+            "escrow_kind",
+            "fulfillment_uid",
+            "collect_result",
+            "claim_tx",
+        }
         return cls(
             status=d.get("status"),
             listing_id=d.get("listing_id"),
+            escrow_uid=d.get("escrow_uid"),
+            escrow_kind=d.get("escrow_kind"),
             fulfillment_uid=d.get("fulfillment_uid"),
+            collect_result=d.get("collect_result"),
             claim_tx=d.get("claim_tx"),
             extra={k: v for k, v in d.items() if k not in known},
         )

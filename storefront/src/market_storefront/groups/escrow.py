@@ -5,8 +5,7 @@ Three verbs:
   refund — direct ERC-20 transfer from the provider wallet, used when
            a deal can't settle through the normal release path
            (e.g. provisioning failed post-claim, dispute).
-  show   — read-only EVM inspection (calls IEAS.getAttestation,
-           decodes ERC-20 escrow obligation data).
+  show   — read-only EVM inspection via the matching escrow codec.
 
 Counterpart on the buyer side: `market escrow reclaim`, which pulls
 tokens back when an escrow expired *unclaimed*. Reclaim is buyer-only;
@@ -28,6 +27,49 @@ from ..cli_common import resolve_storefront_url
 
 
 escrow_app = typer.Typer(no_args_is_help=True)
+
+
+def _format_obligation_value(value: object) -> str:
+    if isinstance(value, (bytes, bytearray)):
+        return "0x" + bytes(value).hex()
+    if isinstance(value, list):
+        return "[" + ", ".join(_format_obligation_value(v) for v in value) + "]"
+    return str(value)
+
+
+def _get_obligation_field(obligation: object, field: str) -> object | None:
+    if isinstance(obligation, dict):
+        return obligation.get(field)
+    return getattr(obligation, field, None)
+
+
+def _render_obligation_data(body: Table, obligation: object) -> None:
+    fields = [
+        "arbiter",
+        "demand",
+        "token",
+        "tokenId",
+        "amount",
+        "nativeAmount",
+        "erc20Tokens",
+        "erc20Amounts",
+        "erc721Tokens",
+        "erc721TokenIds",
+        "erc1155Tokens",
+        "erc1155TokenIds",
+        "erc1155Amounts",
+        "attestation",
+        "attestationUid",
+    ]
+    rendered = False
+    for field in fields:
+        value = _get_obligation_field(obligation, field)
+        if value is None:
+            continue
+        body.add_row(field, _format_obligation_value(value))
+        rendered = True
+    if not rendered:
+        body.add_row("Data", str(obligation))
 
 
 def _submit_claim(
@@ -132,6 +174,7 @@ def claim_cmd(
     result.add_column()
     result.add_row("Status", "claimed (listing closed)")
     result.add_row("Escrow UID", str(resp.get("escrow_uid", "-")))
+    result.add_row("Escrow kind", str(resp.get("escrow_kind", "-")))
     result.add_row("Fulfillment UID", str(resp.get("fulfillment_uid", "-")))
     result.add_row("Collect result", str(resp.get("collect_result", "-")))
     console.print(Panel(result, title="Claim complete", border_style="green"))
@@ -226,6 +269,11 @@ def show_cmd(
              "more than one chain is configured; defaults to the only chain "
              "otherwise.",
     ),
+    escrow_address: Optional[str] = typer.Option(
+        None, "--escrow-address",
+        help="Escrow obligation contract address. When omitted, the command "
+             "tries registered codecs on the selected chain.",
+    ),
 ) -> None:
     """Read an escrow attestation from chain state.
 
@@ -237,6 +285,7 @@ def show_cmd(
     from ..utils.config import CHAINS, settings
     from service.clients.alkahest import (
         get_alkahest_network,
+        get_escrow_obligation_with_codec,
         prewarm_alkahest_address_config_cache,
         resolve_alkahest_address_config,
     )
@@ -292,8 +341,14 @@ def show_cmd(
     )
 
     try:
-        decoded = asyncio.run(
-            client.erc20.escrow.non_tierable.get_obligation(escrow_uid)
+        codec, decoded = asyncio.run(
+            get_escrow_obligation_with_codec(
+                client,
+                escrow_uid,
+                chain_name=chain.name,
+                config_path=chain.alkahest_address_config_path,
+                escrow_address=escrow_address,
+            )
         )
     except Exception as exc:
         typer.secho(
@@ -305,13 +360,13 @@ def show_cmd(
     att = decoded["attestation"]
     obligation = decoded["data"]
     is_revoked = bool(att.revocation_time)
-    demand_bytes = bytes(obligation.demand) if obligation.demand is not None else None
 
     console = Console()
     head = Table.grid(padding=(0, 2))
     head.add_column(style="bold")
     head.add_column()
     head.add_row("Escrow UID", att.uid)
+    head.add_row("Escrow kind", codec.kind)
     head.add_row("Schema", att.schema)
     head.add_row("Attester", att.attester)
     head.add_row("Recipient", att.recipient)
@@ -326,11 +381,5 @@ def show_cmd(
     body = Table.grid(padding=(0, 2))
     body.add_column(style="bold")
     body.add_column()
-    body.add_row("Arbiter", obligation.arbiter or "-")
-    body.add_row("Token", obligation.token or "-")
-    body.add_row(
-        "Amount (raw)",
-        str(int(obligation.amount)) if obligation.amount is not None else "-",
-    )
-    body.add_row("Demand", ("0x" + demand_bytes.hex()) if demand_bytes else "-")
-    console.print(Panel(body, title="ERC-20 escrow obligation data", border_style="cyan"))
+    _render_obligation_data(body, obligation)
+    console.print(Panel(body, title="Escrow obligation data", border_style="cyan"))

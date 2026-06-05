@@ -28,8 +28,10 @@ Remaining ERC20-shaped or policy-specific surfaces:
   `primary_rate_value`;
 - token bundle final-term materialization still needs field-path assignment
   for array paths such as `erc20Amounts[0]`;
-- claim/reclaim/admin convenience commands still call ERC20 SDK paths in a
-  few places; escrow creation and verification are generic.
+- claim/reclaim/show convenience commands now dispatch through escrow codecs
+  when the escrow address is known, with best-effort codec discovery for raw
+  UID inspection/reclaim; manual refund remains an explicit ERC20-transfer
+  helper separate from codec-backed failure-policy refunds.
 
 ## Contract Coverage
 

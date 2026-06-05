@@ -143,6 +143,7 @@ class ClaimResponse(BaseModel):
     status: str
     listing_id: str
     escrow_uid: str | None = None
+    escrow_kind: str | None = None
     fulfillment_uid: str | None = None
     collect_result: str | None = None
 
@@ -152,6 +153,7 @@ class ReclaimResponse(BaseModel):
     status: str
     listing_id: str
     escrow_uid: str | None = None
+    escrow_kind: str | None = None
     reclaim_result: str | None = None
 
 

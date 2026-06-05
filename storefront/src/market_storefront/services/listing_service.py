@@ -68,6 +68,36 @@ class ListingService:
             return None, None
         return chain_name, self._alkahest_clients.get(chain_name)
 
+    async def _resolve_escrow_context(
+        self, escrow_uid: str,
+    ) -> tuple[dict[str, Any] | None, str | None, Any, Any]:
+        """Return stored escrow row, chain name, client, and matching codec."""
+        row = await self._db.load_escrow(escrow_uid=escrow_uid)
+        if not row:
+            return None, None, None, None
+        chain_name = row.get("chain_name")
+        escrow_address = row.get("escrow_address")
+        if not chain_name or not escrow_address:
+            return row, chain_name, None, None
+        alkahest = self._alkahest_clients.get(chain_name)
+        if alkahest is None:
+            return row, chain_name, None, None
+        from market_storefront.utils.config import CHAINS
+        from service.clients.alkahest import get_escrow_codec_for
+
+        chain_cfg = CHAINS.get(chain_name)
+        config_path = (
+            chain_cfg.alkahest_address_config_path
+            if chain_cfg is not None
+            else None
+        )
+        codec = get_escrow_codec_for(
+            chain_name,
+            escrow_address,
+            config_path=config_path,
+        )
+        return row, chain_name, alkahest, codec
+
     @staticmethod
     def _resolve_chain_for_listing(listing: dict[str, Any]) -> str | None:
         """Pick the primary chain for a listing's payment operations.
@@ -418,18 +448,35 @@ class ListingService:
         if not self._alkahest_available:
             return 503, {"error": "On-chain escrow operations not configured",
                          "detail": "wallet.private_key and at least one [chains.<name>] entry must be set in storefront config."}
-        chain_name, alkahest = await self._resolve_chain_for_escrow(payload.escrow_uid)
-        if alkahest is None:
+        try:
+            row, chain_name, alkahest, codec = await self._resolve_escrow_context(
+                payload.escrow_uid,
+            )
+        except ValueError as exc:
+            return 502, {
+                "error": "Escrow codec resolution failed",
+                "detail": str(exc),
+                "listing_id": listing_id,
+            }
+        if row is None:
+            return 404, {
+                "error": "Escrow not found",
+                "detail": f"Escrow {payload.escrow_uid} is not recorded in the storefront DB.",
+                "listing_id": listing_id,
+            }
+        if alkahest is None or codec is None:
             return 503, {
                 "error": "Chain not configured for this escrow",
                 "detail": (
                     f"Escrow {payload.escrow_uid} is on chain "
-                    f"{chain_name!r}, which is not currently configured."
+                    f"{chain_name!r}, or lacks escrow_address metadata, "
+                    "which is not currently configured."
                 ),
             }
         try:
-            collect_result = await alkahest.erc20.escrow.non_tierable.collect(
-                payload.escrow_uid, payload.fulfillment_uid)
+            collect_result = await codec.collect(
+                alkahest, payload.escrow_uid, payload.fulfillment_uid,
+            )
         except Exception as exc:
             return 502, {"error": "Escrow collect failed on-chain", "detail": str(exc),
                          "listing_id": listing_id}
@@ -439,24 +486,40 @@ class ListingService:
                     listing_id=listing_id, escrow_uid=payload.escrow_uid)
         return 200, {"status": "claimed", "listing_id": listing_id,
                      "escrow_uid": payload.escrow_uid, "fulfillment_uid": payload.fulfillment_uid,
+                     "escrow_kind": codec.kind,
                      "collect_result": str(collect_result)}
 
     async def reclaim(self, listing_id: str, payload: ReclaimRequest) -> tuple[int, dict]:
         if not self._alkahest_available:
             return 503, {"error": "On-chain escrow operations not configured",
                          "detail": "wallet.private_key and at least one [chains.<name>] entry must be set in storefront config."}
-        chain_name, alkahest = await self._resolve_chain_for_escrow(payload.escrow_uid)
-        if alkahest is None:
+        try:
+            row, chain_name, alkahest, codec = await self._resolve_escrow_context(
+                payload.escrow_uid,
+            )
+        except ValueError as exc:
+            return 502, {
+                "error": "Escrow codec resolution failed",
+                "detail": str(exc),
+                "listing_id": listing_id,
+            }
+        if row is None:
+            return 404, {
+                "error": "Escrow not found",
+                "detail": f"Escrow {payload.escrow_uid} is not recorded in the storefront DB.",
+                "listing_id": listing_id,
+            }
+        if alkahest is None or codec is None:
             return 503, {
                 "error": "Chain not configured for this escrow",
                 "detail": (
                     f"Escrow {payload.escrow_uid} is on chain "
-                    f"{chain_name!r}, which is not currently configured."
+                    f"{chain_name!r}, or lacks escrow_address metadata, "
+                    "which is not currently configured."
                 ),
             }
         try:
-            reclaim_result = await alkahest.erc20.escrow.non_tierable.reclaim_expired(
-                payload.escrow_uid)
+            reclaim_result = await codec.reclaim_expired(alkahest, payload.escrow_uid)
         except Exception as exc:
             return 502, {"error": "Escrow reclaim failed on-chain", "detail": str(exc),
                          "listing_id": listing_id}
@@ -465,7 +528,8 @@ class ListingService:
         stage_event("post_settlement", "escrow_reclaimed",
                     listing_id=listing_id, escrow_uid=payload.escrow_uid)
         return 200, {"status": "reclaimed", "listing_id": listing_id,
-                     "escrow_uid": payload.escrow_uid, "reclaim_result": str(reclaim_result)}
+                     "escrow_uid": payload.escrow_uid, "escrow_kind": codec.kind,
+                     "reclaim_result": str(reclaim_result)}
 
     async def arbitrate(self, listing_id: str, payload: ArbitrateRequest) -> tuple[int, dict]:
         if not self._alkahest_available:
