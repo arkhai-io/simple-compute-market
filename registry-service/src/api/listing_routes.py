@@ -96,6 +96,7 @@ async def publish_listing(
         update_fields = {
             "offer_resource": body.get("offer_resource"),
             "accepted_escrows": body.get("accepted_escrows"),
+            "demands": body.get("demands"),
             "max_duration_seconds": body.get("max_duration_seconds"),
             "oracle_address": body.get("oracle_address"),
         }
@@ -112,6 +113,7 @@ async def publish_listing(
             publisher_id=publisher.publisher_id,
             offer_resource=body.get("offer_resource", {}),
             accepted_escrows=body.get("accepted_escrows", []),
+            demands=body.get("demands", []),
             max_duration_seconds=body.get("max_duration_seconds"),
             oracle_address=body.get("oracle_address"),
             status=validate_order_status(body.get("status", "open")),
@@ -197,7 +199,7 @@ async def update_listing(
     body: dict = Body(..., description="Listing updates"),
     db: Session = Depends(get_db),
 ):
-    """Update a listing's lifecycle status (e.g. mark accepted/closed).
+    """Update a listing's lifecycle status (e.g. mark closed/expired).
 
     Owner-scoped: the signature must come from the listing's publisher
     identity, the same gate as delete.

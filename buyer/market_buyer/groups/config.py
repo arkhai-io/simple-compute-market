@@ -106,7 +106,6 @@ _INIT_USER_TEMPLATE = """\
 # the same dir.
 
 [wallet]
-# address = "0x0000000000000000000000000000000000000000"  # auto-derived from private_key when omitted
 # private_key = "0x..."
 # ssh_public_key = "ssh-ed25519 AAAA... user@host"
 

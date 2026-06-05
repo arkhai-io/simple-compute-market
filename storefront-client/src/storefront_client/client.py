@@ -56,6 +56,7 @@ from storefront_client.models import (
     NegotiationActionResponse,
     AdminPauseResponse,
     ReleaseReservationsResponse,
+    ReserveCapacityResponse,
     SettleResponse,
     SettleStatusResponse,
     SettleWaitResponse,
@@ -517,6 +518,26 @@ class StorefrontClient(_StorefrontClientBase):
         self._raise_for_status("POST", url, resp.status_code, resp.text)
         return ImportResourcesResponse.from_dict(resp.json())
 
+    async def admin_reserve_capacity(
+        self,
+        *,
+        required_attributes: dict[str, Any],
+        listing_id: str | None = None,
+        escrow_uid: str | None = None,
+    ) -> ReserveCapacityResponse:
+        """POST /admin/portfolio/reservations  (admin key required)."""
+        return ReserveCapacityResponse.from_dict(
+            await self._post(
+                "/api/v1/admin/portfolio/reservations",
+                {
+                    "required_attributes": required_attributes,
+                    "listing_id": listing_id,
+                    "escrow_uid": escrow_uid,
+                },
+                extra_headers=self._admin_headers(),
+            )
+        )
+
     async def get_resource(self, resource_id: str) -> dict:
         """GET /api/v1/admin/portfolio/resources/{resource_id}  (admin key required).
 
@@ -594,6 +615,7 @@ class StorefrontClient(_StorefrontClientBase):
         agent_wallet_address: str,
         offer: dict[str, Any],
         accepted_escrows: list[dict[str, Any]],
+        demands: list[dict[str, Any]] | None = None,
         max_duration_seconds: int | None = None,
         paused: bool = False,
     ) -> StorefrontListingCreateResponse:
@@ -615,6 +637,7 @@ class StorefrontClient(_StorefrontClientBase):
         body = {
             "offer": offer,
             "accepted_escrows": accepted_escrows,
+            "demands": demands or [],
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,
         }
@@ -1217,6 +1240,26 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self._raise_for_status("POST", url, resp.status_code, resp.text)
         return ImportResourcesResponse.from_dict(resp.json())
 
+    def admin_reserve_capacity(
+        self,
+        *,
+        required_attributes: dict[str, Any],
+        listing_id: str | None = None,
+        escrow_uid: str | None = None,
+    ) -> ReserveCapacityResponse:
+        """POST /admin/portfolio/reservations  (admin key required)."""
+        return ReserveCapacityResponse.from_dict(
+            self._post(
+                "/api/v1/admin/portfolio/reservations",
+                {
+                    "required_attributes": required_attributes,
+                    "listing_id": listing_id,
+                    "escrow_uid": escrow_uid,
+                },
+                extra_headers=self._admin_headers(),
+            )
+        )
+
     def admin_release_reservations(self) -> "ReleaseReservationsResponse":
         """POST /admin/portfolio/release-reservations  (admin key required).
 
@@ -1337,6 +1380,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         agent_wallet_address: str,
         offer: dict[str, Any],
         accepted_escrows: list[dict[str, Any]],
+        demands: list[dict[str, Any]] | None = None,
         max_duration_seconds: int | None = None,
         paused: bool = False,
     ) -> StorefrontListingCreateResponse:
@@ -1358,6 +1402,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         body = {
             "offer": offer,
             "accepted_escrows": accepted_escrows,
+            "demands": demands or [],
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,
         }

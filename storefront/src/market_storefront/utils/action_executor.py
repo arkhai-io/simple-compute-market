@@ -27,8 +27,10 @@ from market_storefront.models.domain_models import (
 )
 from market_storefront.resources import parse_resource_from_dict
 
-import httpx
-
+from market_storefront.services.compute_listing_reconciler import (
+    mark_derived_listings_closed,
+    stale_open_listing_ids,
+)
 from market_storefront.utils.config import CHAINS, settings, AGENT_ID, BASE_URL_OVERRIDE
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
 from market_storefront.utils.sqlite_client import get_sqlite_client
@@ -69,39 +71,6 @@ def _resource_is_compute(resource: Any) -> bool:
     if isinstance(resource, dict):
         return "gpu_model" in resource
     return hasattr(resource, "gpu_model")
-
-
-async def fetch_agent_wallet_address(agent_url: str, *, timeout: float = 5.0) -> str | None:
-    """Fetch an agent's on-chain wallet via its /.well-known/agent-wallet.json.
-
-    Returns the 0x-prefixed wallet or None on any failure. This is what the
-    buyer calls before escrow creation to name the seller as the demanded
-    recipient under RecipientArbiter.
-    """
-    url = agent_url.rstrip("/") + "/.well-known/agent-wallet.json"
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as http:
-            resp = await http.get(url)
-            if resp.status_code != 200:
-                logger.warning(
-                    "[WALLET_LOOKUP] %s returned HTTP %d", url, resp.status_code
-                )
-                return None
-            body = resp.json()
-    except Exception as exc:
-        logger.warning("[WALLET_LOOKUP] Failed to fetch %s: %s", url, exc)
-        return None
-
-    wallet = body.get("agent_wallet_address") if isinstance(body, dict) else None
-    if not wallet or not isinstance(wallet, str):
-        return None
-    wallet = wallet.strip()
-    if not (wallet.startswith("0x") and len(wallet) == 42):
-        logger.warning(
-            "[WALLET_LOOKUP] %s returned malformed wallet %r", url, wallet
-        )
-        return None
-    return wallet
 
 
 def _coerce_agent_reference_to_url(agent_ref: str | None) -> str | None:
@@ -182,6 +151,21 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
             "message": f"Registry update failed for order {order_id}: {exc}",
             "listing_id": order_id,
         }
+
+
+async def close_stale_compute_listings_after_capacity_change(db_path: str) -> list[str]:
+    """Close open derived compute listings whose GPU slice no longer fits."""
+    closed_listing_ids: list[str] = []
+    for listing_id in stale_open_listing_ids(db_path):
+        result = await close_order({"listing_id": listing_id})
+        if str(result.get("status", "?")) in ("closed", "skipped", "queued"):
+            closed_listing_ids.append(listing_id)
+            continue
+        row = await get_sqlite_client().load_listing(listing_id=listing_id)
+        if row and row.get("status") == "closed":
+            closed_listing_ids.append(listing_id)
+    mark_derived_listings_closed(db_path, closed_listing_ids)
+    return closed_listing_ids
 
 
 async def _do_provision(
@@ -418,6 +402,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
 
     offer_resource = _ensure_json_obj(order_dict.get("offer_resource"), {})
     accepted_escrows = _ensure_json_obj(order_dict.get("accepted_escrows"), [])
+    demands = _ensure_json_obj(order_dict.get("demands"), [])
 
     try:
         async with _make_registry_client() as registry_client:
@@ -425,6 +410,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
                 listing_id=order_id,
                 offer=offer_resource,
                 accepted_escrows=accepted_escrows,
+                demands=demands,
                 max_duration_seconds=order_dict.get("max_duration_seconds"),
                 storefront_url=order_dict.get("seller") or BASE_URL_OVERRIDE,
             )
@@ -442,6 +428,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
                 agent_url=BASE_URL_OVERRIDE,
                 offer=offer_resource,
                 accepted_escrows=accepted_escrows,
+                demands=demands,
                 max_duration_seconds=order_dict.get("max_duration_seconds"),
             )
             return {"status": "published", "listing_id": order_id}
@@ -633,7 +620,7 @@ async def _build_provisioning_job_spec(
     if order_dict:
         compute_resource = extract_compute_from_order(order_dict)
         if isinstance(compute_resource, dict):
-            for key in ("resource_id", "region", "gpu_model"):
+            for key in ("pool_id", "resource_id", "region", "gpu_model", "gpu_count"):
                 if compute_resource.get(key) is not None:
                     required_attributes[key] = compute_resource[key]
 
@@ -677,6 +664,7 @@ async def fulfill_compute_obligation(
     """
     fulfillment_uid = None
     connection_details: str | None = None
+    reserved_allocation_id: str | None = None
     reserved_resource_id: str | None = None
     reserved_vm_host: str | None = None
     vm_target = f"tenant-{uuid.uuid4().hex[:4]}"
@@ -704,7 +692,7 @@ async def fulfill_compute_obligation(
         order_id = order_dict.get("listing_id") or order_dict.get("order_id")
         compute_resource = extract_compute_from_order(order_dict)
         if isinstance(compute_resource, dict):
-            for key in ("resource_id", "region", "gpu_model"):
+            for key in ("pool_id", "resource_id", "region", "gpu_model", "gpu_count"):
                 if compute_resource.get(key) is not None:
                     required_attributes[key] = compute_resource.get(key)
         accepted_escrows = order_dict.get("accepted_escrows") or []
@@ -720,23 +708,17 @@ async def fulfill_compute_obligation(
             token_resource=token_resource,
             duration_seconds=duration_seconds,
         )
-        if order_id:
-            try:
-                sqlite_client = get_sqlite_client()
-                await sqlite_client.update_listing(
-                    listing_id=order_id,
-                    status="accepted",
-                )
-            except Exception as exc:
-                logger.warning("[LOCAL DB] Failed to mark order %s accepted at fulfillment start: %s", order_id, exc)
 
     try:
         sqlite_client = get_sqlite_client()
         reserved = await sqlite_client.reserve_available_compute_vm(
-            required_attributes=required_attributes or None
+            required_attributes=required_attributes or None,
+            listing_id=listing_id or order_id,
+            escrow_uid=escrow_uid,
         )
         if not reserved:
             raise RuntimeError("No available compute VM matched required attributes")
+        reserved_allocation_id = str(reserved.get("allocation_id")) if reserved.get("allocation_id") else None
         reserved_resource_id = str(reserved.get("resource_id"))
         reserved_vm_host = reserved.get("vm_host")
         if not reserved_vm_host:
@@ -744,10 +726,32 @@ async def fulfill_compute_obligation(
         stage_event("provision", "resource_reserved",
             listing_id=order_id,
             escrow_uid=escrow_uid,
+            pool_id=reserved.get("pool_id"),
+            member_id=reserved.get("member_id"),
             resource_id=reserved_resource_id,
             vm_host=reserved_vm_host,
             required_attributes=required_attributes,
+            allocation_id=reserved_allocation_id,
+            allocated_gpu_count=reserved.get("allocated_gpu_count"),
         )
+        try:
+            closed_listing_ids = await close_stale_compute_listings_after_capacity_change(
+                sqlite_client.db_path,
+            )
+            if closed_listing_ids:
+                stage_event(
+                    "provision", "stale_compute_listings_closed",
+                    listing_id=order_id,
+                    escrow_uid=escrow_uid,
+                    resource_id=reserved_resource_id,
+                    allocation_id=reserved_allocation_id,
+                    closed_listing_ids=closed_listing_ids,
+                )
+        except Exception as close_err:
+            logger.warning(
+                "[LISTINGS] Failed to close stale compute listings after reservation: %s",
+                close_err,
+            )
 
         async def _record_job_id(job_id: str) -> None:
             await get_sqlite_client().update_escrow(
@@ -779,7 +783,19 @@ async def fulfill_compute_obligation(
         else:
             connection_details = provision_result
     except Exception as error:
-        if reserved_resource_id:
+        if reserved_allocation_id:
+            try:
+                await get_sqlite_client().update_compute_allocation_state(
+                    allocation_id=reserved_allocation_id,
+                    state="released",
+                )
+            except Exception as release_err:
+                logger.warning(
+                    "[LOCAL DB] Failed to release compute allocation %s after provisioning failure: %s",
+                    reserved_allocation_id,
+                    release_err,
+                )
+        elif reserved_resource_id:
             try:
                 await get_sqlite_client().apply_resource_set_transition(
                     resource_id=reserved_resource_id,
@@ -811,13 +827,25 @@ async def fulfill_compute_obligation(
 
     if reserved_resource_id:
         try:
-            await get_sqlite_client().apply_resource_set_transition(
-                resource_id=reserved_resource_id,
-                event_type="lease_started_after_provisioning",
-                idempotency_key=f"lease:{escrow_uid}:{reserved_resource_id}",
-                set_state="leased",
-                set_attribute={"$.lease_end_utc": lease_end_utc},
-            )
+            if reserved_allocation_id:
+                await get_sqlite_client().update_compute_allocation_state(
+                    allocation_id=reserved_allocation_id,
+                    state="leased",
+                )
+                await get_sqlite_client().apply_resource_set_transition(
+                    resource_id=reserved_resource_id,
+                    event_type="lease_started_after_provisioning",
+                    idempotency_key=f"lease-attrs:{escrow_uid}:{reserved_resource_id}",
+                    set_attribute={"$.lease_end_utc": lease_end_utc},
+                )
+            else:
+                await get_sqlite_client().apply_resource_set_transition(
+                    resource_id=reserved_resource_id,
+                    event_type="lease_started_after_provisioning",
+                    idempotency_key=f"lease:{escrow_uid}:{reserved_resource_id}",
+                    set_state="leased",
+                    set_attribute={"$.lease_end_utc": lease_end_utc},
+                )
         except Exception as lease_err:
             logger.warning(
                 "[LOCAL DB] Failed to mark resource %s as leased after provisioning: %s",
@@ -873,6 +901,7 @@ async def fulfill_compute_obligation(
             ) as prov_client:
                 await prov_client.register_lease(
                     resource_id=reserved_resource_id,
+                    allocation_id=reserved_allocation_id,
                     escrow_uid=escrow_uid,
                     vm_host=reserved_vm_host,
                     vm_target=vm_target,
@@ -925,7 +954,32 @@ async def fulfill_compute_obligation(
             )
             logger.info(f"[ALKAHEST] Arbitration requested: {request_arbitration_result}")
         except Exception as error:
-            logger.error(f"[ALKAHEST] Fulfillment error: {error}")
+            logger.error(
+                "[ALKAHEST] EVENT=settlement_failed_after_provisioning "
+                "escrow_uid=%s listing_id=%s resource_id=%s allocation_id=%s "
+                "vm_host=%s error=%s",
+                escrow_uid,
+                order_id,
+                reserved_resource_id,
+                reserved_allocation_id,
+                reserved_vm_host,
+                error,
+            )
+            stage_event("settlement", "failed_after_provisioning",
+                listing_id=order_id,
+                escrow_uid=escrow_uid,
+                resource_id=reserved_resource_id,
+                allocation_id=reserved_allocation_id,
+                vm_host=reserved_vm_host,
+                error=str(error),
+            )
+            return {
+                "status": "error",
+                "message": f"On-chain fulfillment failed after provisioning: {error}",
+                "escrow_uid": escrow_uid,
+                "connection_details": None,
+                "ssh_public_key": ssh_public_key,
+            }
 
     if order_id:
         try:
@@ -954,6 +1008,7 @@ async def fulfill_compute_obligation(
         escrow_uid=escrow_uid,
         fulfillment_uid=fulfillment_uid,
         resource_id=reserved_resource_id,
+        allocation_id=reserved_allocation_id,
         vm_host=reserved_vm_host,
         lease_end_utc=lease_end_utc,
         seller_order_id=seller_order_id,

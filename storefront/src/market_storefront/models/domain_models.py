@@ -6,6 +6,7 @@ import uuid
 
 from service.schemas import (
     AcceptedEscrow,
+    EscrowDemand,
     Resource as CoreResource,
     TokenResource as CoreTokenResource,
 )
@@ -260,6 +261,10 @@ class ComputeResource(ComputeDomainResource):
         default=None,
         description="Canonical DB resource identifier for this compute slice",
     )
+    pool_id: str | None = Field(
+        default=None,
+        description="Market-facing fungible compute pool identifier, if any",
+    )
 
     # ---- Slice fields (per-listing; the seller's split of the host) ----
     gpu_model: str = Field(
@@ -437,6 +442,13 @@ class Listing(BaseModel):
             "escrow_address)."
         ),
     )
+    demands: list[EscrowDemand] | None = Field(
+        default=None,
+        description=(
+            "Per-listing arbiter demand criteria, independent of the accepted "
+            "escrow obligation shapes."
+        ),
+    )
     max_duration_seconds: int | None = Field(
         default=None,
         description=(
@@ -462,5 +474,3 @@ class Listing(BaseModel):
             data["offer_resource"] = ComputeDomainResource.parse_from_dict(data["offer_resource"])
 
         return data
-
-

@@ -22,7 +22,7 @@ def upgrade() -> None:
     dialect_name = bind.dialect.name if bind and bind.dialect else None
 
     if dialect_name == "postgresql":
-        op.execute("CREATE TYPE orderstatusenum AS ENUM ('open', 'closed', 'accepted', 'expired')")
+        op.execute("CREATE TYPE orderstatusenum AS ENUM ('open', 'closed', 'expired')")
     
     # Create market_orders table
     op.create_table(
@@ -36,7 +36,7 @@ def upgrade() -> None:
         sa.Column('duration', sa.Integer(), nullable=False),
         sa.Column('maker_attestation', sa.Text(), nullable=True),
         sa.Column('taker_attestation', sa.Text(), nullable=True),
-        sa.Column('status', sa.Enum('open', 'closed', 'accepted', 'expired', name='orderstatusenum'), nullable=False),
+        sa.Column('status', sa.Enum('open', 'closed', 'expired', name='orderstatusenum'), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(['agent_id'], ['agents.agent_id'], ondelete='CASCADE'),
@@ -58,4 +58,3 @@ def downgrade() -> None:
     dialect_name = bind.dialect.name if bind and bind.dialect else None
     if dialect_name == "postgresql":
         op.execute("DROP TYPE orderstatusenum")
-

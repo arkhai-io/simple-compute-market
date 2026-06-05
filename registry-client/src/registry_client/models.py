@@ -174,6 +174,7 @@ class ListingRequest:
 
     offer: dict[str, Any]
     accepted_escrows: list[dict[str, Any]]
+    demands: list[dict[str, Any]] = field(default_factory=list)
     max_duration_seconds: int | None = None
     listing_id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex)
     storefront_url: str = ""
@@ -183,6 +184,7 @@ class ListingRequest:
             "listing_id": self.listing_id,
             "offer_resource": self.offer,
             "accepted_escrows": self.accepted_escrows,
+            "demands": self.demands,
             "max_duration_seconds": self.max_duration_seconds,
             "storefront_url": self.storefront_url,
         }
@@ -203,6 +205,7 @@ class ListingSummary:
     storefront_url: str | None = None
     offer: dict[str, Any] = field(default_factory=dict)
     accepted_escrows: list[dict[str, Any]] = field(default_factory=list)
+    demands: list[dict[str, Any]] = field(default_factory=list)
     max_duration_seconds: int | None = None
     created_at: str | int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -212,12 +215,13 @@ class ListingSummary:
         known = {
             "listing_id", "publisher_id", "storefront_url",
             "offer_resource", "accepted_escrows", "max_duration_seconds",
-            "created_at", "updated_at", "status",
+            "demands", "created_at", "updated_at", "status",
             "id", "offer", "maxDurationSeconds", "createdAt",
         }
         listing_id = d.get("listing_id") or d.get("id")
         offer = d.get("offer") or d.get("offer_resource") or {}
         accepted_escrows = d.get("accepted_escrows") or []
+        demands = d.get("demands") or []
         return cls(
             id=listing_id,
             status=d.get("status"),
@@ -225,6 +229,7 @@ class ListingSummary:
             storefront_url=d.get("storefront_url"),
             offer=offer,
             accepted_escrows=accepted_escrows,
+            demands=demands,
             max_duration_seconds=d.get("max_duration_seconds") or d.get("maxDurationSeconds"),
             created_at=d.get("created_at") or d.get("createdAt"),
             extra={k: v for k, v in d.items() if k not in known},

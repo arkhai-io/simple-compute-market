@@ -168,6 +168,7 @@ class VmLease(Base):
         String, primary_key=True, default=lambda: str(uuid.uuid4())
     )
     resource_id = Column(String, nullable=False, index=True)
+    allocation_id = Column(String, nullable=True, index=True)
     escrow_uid = Column(String, nullable=False, unique=True, index=True)
     vm_host = Column(String, nullable=False)
     vm_target = Column(String, nullable=False)

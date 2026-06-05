@@ -15,6 +15,29 @@ from rich.table import Table
 from ..buy_orchestrator import extract_seller_min_price
 
 
+def parse_filter_options(raw_filters: list[str] | None) -> dict[str, str]:
+    """Parse repeatable ``--filter name=value`` CLI options."""
+    parsed: dict[str, str] = {}
+    for raw in raw_filters or []:
+        if "=" not in raw:
+            typer.secho(
+                f"Invalid --filter {raw!r}; expected name=value.",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+        name, value = raw.split("=", 1)
+        name = name.strip()
+        value = value.strip()
+        if not name or not value:
+            typer.secho(
+                f"Invalid --filter {raw!r}; name and value must be non-empty.",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+        parsed[name] = value
+    return parsed
+
+
 def resolve_prices_from_matches(
     *,
     matches: list[dict],

@@ -31,6 +31,7 @@ from market_storefront.utils.escrow_verification import (
 SELLER = "0x1111111111111111111111111111111111111111"
 SELLER_LOWER = SELLER.lower()
 BUYER = "0x2222222222222222222222222222222222222222"
+RECIPIENT = "0x3333333333333333333333333333333333333333"
 TOKEN = "0xAAAA000000000000000000000000000000000000"
 TOKEN_LOWER = TOKEN.lower()
 ARBITER = "0xBBBB000000000000000000000000000000000000"
@@ -84,6 +85,10 @@ def _good_obligation(**overrides: Any) -> dict[str, Any]:
     return {"attestation": att, "data": data}
 
 
+async def _async_value(value: Any) -> Any:
+    return value
+
+
 def _canonical_obligation_data(
     *,
     seller_wallet: str = SELLER,
@@ -110,11 +115,12 @@ def _make_seams(decoded: dict[str, Any]) -> dict[str, Any]:
     async def _get_obligation(client, uid):
         return decoded
 
-    def _build(*, seller_wallet, agreed_amount, duration_seconds,
+    def _build(*, demands=None, recipient=None, seller_wallet=None, agreed_amount, duration_seconds,
                token_contract_address, chain_name, addr_config_path=None,
                arbiter_kind="recipient"):
+        effective_recipient = recipient or seller_wallet
         return _canonical_obligation_data(
-            seller_wallet=seller_wallet,
+            seller_wallet=effective_recipient,
             agreed_amount=agreed_amount,
             duration_seconds=duration_seconds,
             token_contract_address=token_contract_address,
@@ -296,7 +302,7 @@ class TestVerifyRejections:
 
     @pytest.mark.asyncio
     async def test_rejects_when_seller_wallet_blank(self):
-        with pytest.raises(EscrowVerificationError, match="Seller wallet"):
+        with pytest.raises(EscrowVerificationError, match="Escrow recipient"):
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
                 seller_wallet="",
@@ -564,13 +570,16 @@ def _build_seams_capturing_token():
     async def _get_obligation(client, uid):
         return _good_obligation()
 
-    def _build(*, seller_wallet, agreed_amount, duration_seconds,
+    def _build(*, demands=None, recipient=None, seller_wallet=None, agreed_amount, duration_seconds,
                token_contract_address, chain_name, addr_config_path=None,
                arbiter_kind="recipient_arbiter"):
+        effective_recipient = recipient or seller_wallet
         captured["token"] = token_contract_address
         captured["arbiter_kind"] = arbiter_kind
+        captured["demands"] = demands
+        captured["recipient"] = effective_recipient
         return _canonical_obligation_data(
-            seller_wallet=seller_wallet,
+            seller_wallet=effective_recipient,
             agreed_amount=agreed_amount,
             duration_seconds=duration_seconds,
             token_contract_address=token_contract_address,
@@ -610,6 +619,31 @@ class TestVerifyProposalDispatch:
             **seams,
         )
         assert captured["token"] == TOKEN
+
+    @pytest.mark.asyncio
+    async def test_reads_recipient_from_literal_fields(self, patched_codec_lookup):
+        seams, captured = _build_seams_capturing_token()
+        seams["get_obligation_fn"] = (
+            lambda client, uid: _async_value(
+                _good_obligation(demand=_encode_recipient(RECIPIENT))
+            )
+        )
+        await verify_escrow_for_settlement(
+            escrow_uid="0xdead",
+            seller_wallet=SELLER,
+            agreed_price=1000,
+            agreed_duration_seconds=3600,
+            listing=_good_listing(),
+            alkahest_client=_DUMMY_CLIENT,
+            chain_name=CHAIN,
+            alkahest_address_config_path=CONFIG_PATH,
+            escrow_proposal=_erc20_proposal(
+                literal_fields={"token": TOKEN, "recipient": RECIPIENT},
+            ),
+            now_unix=1_700_000_000,
+            **seams,
+        )
+        assert captured["recipient"] == RECIPIENT
 
     @pytest.mark.asyncio
     async def test_unpinned_zero_address_falls_back_to_default_kind(self, patched_codec_lookup):

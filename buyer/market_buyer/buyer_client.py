@@ -344,6 +344,10 @@ def negotiate_with_seller(
             "escrow_address": escrow_proposal.escrow_address,
             "fields": pinned_fields,
             "literal_fields": dict(escrow_proposal.literal_fields or escrow_proposal.fields or {}),
+            "demands": [
+                d.model_dump() if hasattr(d, "model_dump") else dict(d)
+                for d in (escrow_proposal.demands or [])
+            ],
             "expiration_unix": escrow_proposal.expiration_unix,
         }
 

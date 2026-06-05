@@ -236,9 +236,15 @@ async def verify_escrow_for_settlement(
     # its literal_fields / fields supply the buyer-committed values.
     # Legacy threads with no proposal fall back to the kwarg defaults
     # + a listing-derived token.
-    from service.schemas import accepted_token_address
+    from service.schemas import (
+        accepted_demands,
+        accepted_recipient_address,
+        accepted_token_address,
+    )
 
     effective_arbiter_kind = "recipient_arbiter"
+    effective_recipient = seller_wallet
+    effective_demands: list[dict[str, Any]] = []
     _codec = None
     if escrow_proposal is not None:
         from service.clients.alkahest import (
@@ -293,6 +299,10 @@ async def verify_escrow_for_settlement(
             )
             if arbiter_slot:
                 effective_arbiter_kind = arbiter_slot
+        proposal_recipient = accepted_recipient_address(escrow_proposal)
+        if proposal_recipient:
+            effective_recipient = proposal_recipient
+        effective_demands = accepted_demands(escrow_proposal)
     else:
         effective_escrow_kind = escrow_kind
         effective_token = _extract_token_contract_from_listing(listing)
@@ -310,16 +320,17 @@ async def verify_escrow_for_settlement(
         async def get_obligation_fn(client, uid):  # type: ignore[no-redef]
             return await _codec.get_obligation(client, uid)
 
-    if not seller_wallet:
+    if not effective_recipient:
         raise EscrowVerificationError(
-            "Seller wallet address is not configured — cannot verify escrow recipient"
+            "Escrow recipient is not configured — cannot verify escrow demand"
         )
 
     # Build the expected obligation_data via the same helper the buyer uses.
     # Any divergence between sides means a misconfigured chain/token/arbiter.
     try:
         expected_obligation_raw = build_obligation_data_fn(
-            seller_wallet=seller_wallet,
+            demands=effective_demands or None,
+            recipient=effective_recipient,
             agreed_amount=int(agreed_price),
             duration_seconds=int(agreed_duration_seconds),
             token_contract_address=effective_token,

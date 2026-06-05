@@ -19,7 +19,6 @@ class HealthResponse(BaseModel):
 
 class OrderStatusCounts(BaseModel):
     open: int = 0
-    accepted: int = 0
     closed: int = 0
     expired: int = 0
 
@@ -30,5 +29,4 @@ class StatsResponse(BaseModel):
     publisher_count: int
     order_count: int
     orders_by_status: OrderStatusCounts
-
 

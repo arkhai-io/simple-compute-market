@@ -9,6 +9,7 @@ ENV UV_LINK_MODE=copy
 WORKDIR /app
 
 COPY src ./src
+COPY alembic ./alembic
 COPY filter-spec.yaml ./
 COPY pyproject.toml uv.lock ./
 
@@ -24,6 +25,7 @@ RUN useradd --create-home --uid 1000 --shell /bin/bash appuser && \
 
 COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
 COPY --from=builder --chown=appuser:appuser /app/src ./src
+COPY --from=builder --chown=appuser:appuser /app/alembic ./alembic
 COPY --from=builder --chown=appuser:appuser /app/filter-spec.yaml ./
 ENV PATH="/app/.venv/bin:$PATH"
 USER appuser

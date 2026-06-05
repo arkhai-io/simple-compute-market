@@ -196,20 +196,6 @@ async def start_settlement_job(
         )
         return existing or {}
 
-    # Mark the seller's listing as accepted. The buyer-attestation/escrow
-    # linkage now lives on the escrows row (joined via negotiation_id), so
-    # only the lifecycle status is patched here.
-    try:
-        await sqlite_client.update_listing(
-            listing_id=our_listing_id,
-            status="accepted",
-        )
-    except Exception as exc:
-        logger.warning(
-            "[SETTLE_JOB] Could not mark order %s as accepted: %s",
-            our_listing_id, exc,
-        )
-
     asyncio.create_task(
         _run_settlement_job_bg(
             escrow_uid=escrow_uid,
@@ -226,27 +212,6 @@ async def start_settlement_job(
         "negotiation_id": negotiation_id,
         "status": "provisioning",
     }
-
-
-async def _reopen_listing_after_failure(sqlite_client: Any, listing_id: str) -> None:
-    """Return a listing to ``open`` after its deal failed to provision.
-
-    The listing is marked ``accepted`` when settlement starts; if provisioning
-    then fails the deal never completes, so without this the listing would stay
-    ``accepted`` and refuse every future negotiation even though the resource
-    was released. Reopening lets it be re-negotiated. The buyer's escrow from
-    the failed deal is reclaimed independently and is unaffected.
-    """
-    try:
-        await sqlite_client.update_listing(listing_id=listing_id, status="open")
-        logger.info(
-            "[SETTLE_JOB] Reopened listing %s after provisioning failure", listing_id
-        )
-    except Exception as exc:
-        logger.warning(
-            "[SETTLE_JOB] Could not reopen listing %s after failure: %s",
-            listing_id, exc,
-        )
 
 
 async def _run_settlement_job_bg(
@@ -281,7 +246,6 @@ async def _run_settlement_job_bg(
             status="failed",
             reason=f"provisioning_error: {exc}",
         )
-        await _reopen_listing_after_failure(sqlite_client, listing_id)
         return
 
     status = (result or {}).get("status")
@@ -302,7 +266,6 @@ async def _run_settlement_job_bg(
             status="failed",
             reason=reason,
         )
-        await _reopen_listing_after_failure(sqlite_client, listing_id)
         logger.warning(
             "[SETTLE_JOB] Escrow %s provisioning did not succeed: %s",
             escrow_uid, reason,

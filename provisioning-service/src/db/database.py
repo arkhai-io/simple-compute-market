@@ -2,6 +2,7 @@ from sqlalchemy import create_engine, Engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
+from db.migrations import apply_schema_migrations
 from db.models import Base
 
 
@@ -22,3 +23,4 @@ def create_session_factory(engine: Engine) -> sessionmaker[Session]:
 def init_db(engine: Engine) -> None:
     """Create all tables. Called once during application startup."""
     Base.metadata.create_all(bind=engine)
+    apply_schema_migrations(engine)

@@ -20,14 +20,19 @@ import sqlite3
 import pytest
 
 from market_storefront.cli_publish import (
+    _available_resources,
     _open_listing_ids,
+    _open_listing_resource_keys,
     _open_order_resource_ids,
     _publish_round,
+    _stale_open_listing_ids,
 )
 from service.clients.token import ERC20TokenMetadata
+from tests._settings_overrides import settings_overrides
 
 
 _MOCK_ADDRESS = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+_WALLET_ADDRESS = "0x1111111111111111111111111111111111111111"
 _USDC_ADDRESS = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
 _TOKEN_DECIMALS = {
     _MOCK_ADDRESS.lower(): ("MOCK", 0),
@@ -68,6 +73,10 @@ def _stub_resolve_token(monkeypatch):
     monkeypatch.setattr(
         alkahest_mod, "get_erc20_escrow_obligation_nontierable",
         lambda chain_name, *, config_path=None: "0x" + "cd" * 20,
+    )
+    monkeypatch.setattr(
+        alkahest_mod, "get_recipient_arbiter",
+        lambda chain_name, *, config_path=None: "0x" + "ab" * 20,
     )
     from service.config_loader import ChainConfig
     from market_storefront.utils import config as agent_config
@@ -115,6 +124,17 @@ def _init_db(path: str) -> None:
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE compute_allocations (
+                allocation_id TEXT PRIMARY KEY,
+                resource_id TEXT NOT NULL,
+                listing_id TEXT,
+                escrow_uid TEXT,
+                gpu_count INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                released_at TEXT
+            );
             """
         )
         conn.commit()
@@ -128,6 +148,7 @@ def _insert_resource(
     state: str,
     attrs: dict,
     *,
+    gpu_count: int = 1,
     min_price: str | None = None,
     token: str | None = None,
     max_duration_seconds: int | None = None,
@@ -138,15 +159,36 @@ def _insert_resource(
             """INSERT INTO resources
                (resource_id, resource_type, resource_subtype, unit, value, state, attributes,
                 min_price, token, max_duration_seconds)
-               VALUES (?, 'compute.gpu', 'rtx4090', 'count', 1, ?, ?, ?, ?, ?)""",
+               VALUES (?, 'compute.gpu', 'rtx4090', 'count', ?, ?, ?, ?, ?, ?)""",
             (
                 resource_id,
+                gpu_count,
                 state,
                 json.dumps(attrs),
                 min_price,
                 token,
                 max_duration_seconds,
             ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _insert_allocation(
+    path: str,
+    allocation_id: str,
+    resource_id: str,
+    gpu_count: int,
+    state: str,
+) -> None:
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """INSERT INTO compute_allocations
+               (allocation_id, resource_id, gpu_count, state)
+               VALUES (?, ?, ?, ?)""",
+            (allocation_id, resource_id, gpu_count, state),
         )
         conn.commit()
     finally:
@@ -172,7 +214,7 @@ def _round_kwargs(**overrides):
     """Common _publish_round kwargs; tests override specific keys."""
     base = dict(
         base_url="http://agent",
-        wallet_address="",
+        wallet_address=_WALLET_ADDRESS,
         private_key=None,
         default_min_price="100",
         default_token_address=_MOCK_ADDRESS,
@@ -208,7 +250,7 @@ def test_open_order_resource_ids_ignores_closed_orders(tmp_path):
     _init_db(db)
     _insert_order(db, "o1", "open", "compute-001")
     _insert_order(db, "o2", "closed", "compute-002")
-    _insert_order(db, "o3", "accepted", "compute-003")
+    _insert_order(db, "o3", "expired", "compute-003")
     assert _open_order_resource_ids(db) == {"compute-001"}
 
 
@@ -218,6 +260,36 @@ def test_open_order_resource_ids_skips_orders_without_resource_id(tmp_path):
     _insert_order(db, "o1", "open", None)
     _insert_order(db, "o2", "open", "compute-002")
     assert _open_order_resource_ids(db) == {"compute-002"}
+
+
+def test_open_listing_resource_keys_include_gpu_slice(tmp_path):
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_order(db, "o1", "open", "compute-001")
+    _insert_order(db, "o2", "open", "compute-002")
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "UPDATE listings SET offer_resource = ? WHERE listing_id = ?",
+            (
+                json.dumps({
+                    "resource_id": "compute-002",
+                    "gpu_model": "RTX 4090",
+                    "gpu_count": 2,
+                    "sla": 95.0,
+                    "region": "New York, US",
+                }),
+                "o2",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert _open_listing_resource_keys(db) == {
+        "compute-001:gpus:1",
+        "compute-002:gpus:2",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -242,10 +314,14 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     calls: list[dict] = []
 
     def fake_publish(
-        agent_url, offer, accepted_escrows,
+        agent_url, offer, accepted_escrows, demands,
         max_duration_seconds, wallet_address, private_key,
     ):
-        calls.append({"offer": offer, "accepted_escrows": accepted_escrows})
+        calls.append({
+            "offer": offer,
+            "accepted_escrows": accepted_escrows,
+            "demands": demands,
+        })
         rid = offer["resource_id"]
         return {"status": "created", "listing_id": f"listing-for-{rid}"}
 
@@ -263,6 +339,7 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     assert calls[0]["offer"]["resource_id"] == "compute-002"
     entry = calls[0]["accepted_escrows"][0]
     assert entry["literal_fields"] == {"token": _MOCK_ADDRESS}
+    assert calls[0]["demands"][0]["demand_data"] == {"recipient": _WALLET_ADDRESS}
     assert entry["rates"] == [{"field": "amount", "per": "hour", "value": "100"}]
 
 
@@ -287,6 +364,203 @@ def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
     assert not skipped
 
 
+def test_available_resources_derives_slices_from_gpu_capacity(tmp_path):
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_resource(
+        db, "compute-4x", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
+        gpu_count=4,
+    )
+
+    rows = _available_resources(db)
+
+    assert [r["gpu_count"] for r in rows] == [1, 2, 3, 4]
+    assert {r["resource_key"] for r in rows} == {
+        "compute-4x:gpus:1",
+        "compute-4x:gpus:2",
+        "compute-4x:gpus:3",
+        "compute-4x:gpus:4",
+    }
+
+
+def test_available_resources_closes_oversized_slices_when_capacity_held(tmp_path):
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_resource(
+        db, "compute-4x", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
+        gpu_count=4,
+    )
+    _insert_allocation(db, "alloc-1", "compute-4x", 2, "leased")
+
+    rows = _available_resources(db)
+
+    assert [r["gpu_count"] for r in rows] == [1, 2]
+
+
+def test_publish_round_publishes_one_listing_per_available_slice(tmp_path, monkeypatch):
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_resource(
+        db, "compute-4x", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
+        gpu_count=4,
+    )
+
+    calls: list[dict] = []
+
+    def fake_publish(agent_url, offer, accepted_escrows, *a, **k):
+        calls.append(offer)
+        return {
+            "status": "created",
+            "listing_id": f"l-{offer['resource_id']}-{offer['gpu_count']}x",
+        }
+
+    monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
+
+    published, failed, skipped = _publish_round(db_path=db, **_round_kwargs())
+
+    assert [c["gpu_count"] for c in calls] == [1, 2, 3, 4]
+    assert len(published) == 4
+    assert not failed
+    assert not skipped
+
+    conn = sqlite3.connect(db)
+    try:
+        rows = conn.execute(
+            """
+            SELECT listing_id, resource_id, gpu_count, status, derivation_key
+            FROM derived_compute_listings
+            ORDER BY gpu_count
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [
+        ("l-compute-4x-1x", "compute-4x", 1, "open", "compute-4x:gpus:1"),
+        ("l-compute-4x-2x", "compute-4x", 2, "open", "compute-4x:gpus:2"),
+        ("l-compute-4x-3x", "compute-4x", 3, "open", "compute-4x:gpus:3"),
+        ("l-compute-4x-4x", "compute-4x", 4, "open", "compute-4x:gpus:4"),
+    ]
+
+
+def test_stale_open_listing_ids_finds_slices_above_available_capacity(tmp_path):
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_resource(
+        db, "compute-4x", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
+        gpu_count=4,
+    )
+    for gpu_count in (1, 2, 3, 4):
+        _insert_order(db, f"listing-{gpu_count}x", "open", "compute-4x")
+        conn = sqlite3.connect(db)
+        try:
+            conn.execute(
+                "UPDATE listings SET offer_resource = ? WHERE listing_id = ?",
+                (
+                    json.dumps({
+                        "resource_id": "compute-4x",
+                        "gpu_model": "RTX 4090",
+                        "gpu_count": gpu_count,
+                        "sla": 95.0,
+                        "region": "NY",
+                    }),
+                    f"listing-{gpu_count}x",
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    _insert_allocation(db, "alloc-1", "compute-4x", 2, "leased")
+
+    assert _stale_open_listing_ids(db) == ["listing-3x", "listing-4x"]
+
+
+def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch):
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_resource(
+        db, "compute-4x", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
+        gpu_count=4,
+    )
+    _insert_order(db, "listing-3x-old", "closed", "compute-4x")
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "UPDATE listings SET offer_resource = ? WHERE listing_id = ?",
+            (
+                json.dumps({
+                    "resource_id": "compute-4x",
+                    "gpu_model": "RTX 4090",
+                    "gpu_count": 3,
+                    "sla": 95.0,
+                    "region": "NY",
+                }),
+                "listing-3x-old",
+            ),
+        )
+        conn.execute(
+            """
+            CREATE TABLE derived_compute_listings (
+                listing_id TEXT PRIMARY KEY,
+                resource_id TEXT NOT NULL,
+                gpu_count INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                derivation_key TEXT NOT NULL UNIQUE,
+                last_reconciled_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """INSERT INTO derived_compute_listings
+               (listing_id, resource_id, gpu_count, status, derivation_key)
+               VALUES ('listing-3x-old', 'compute-4x', 3, 'closed', 'compute-4x:gpus:3')"""
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    created: list[dict] = []
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_offer",
+        lambda agent_url, offer, accepted_escrows, *a, **k: (
+            created.append(offer)
+            or {"status": "created", "listing_id": f"new-{offer['gpu_count']}x"}
+        ),
+    )
+
+    with settings_overrides(enable_registry_discovery=False):
+        published, failed, skipped = _publish_round(
+            db_path=db,
+            skip_ids={
+                "compute-4x:gpus:1",
+                "compute-4x:gpus:2",
+                "compute-4x:gpus:4",
+            },
+            **_round_kwargs(),
+        )
+
+    assert not failed
+    assert [p["response"]["listing_id"] for p in published] == ["listing-3x-old"]
+    assert created == []
+    assert len(skipped) == 3
+    conn = sqlite3.connect(db)
+    try:
+        status = conn.execute(
+            "SELECT status FROM listings WHERE listing_id = 'listing-3x-old'"
+        ).fetchone()[0]
+        derived_status = conn.execute(
+            "SELECT status FROM derived_compute_listings WHERE derivation_key = 'compute-4x:gpus:3'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert status == "open"
+    assert derived_status == "open"
+
+
 def test_publish_round_normalizes_zero_duration_to_unlimited(tmp_path, monkeypatch):
     db = str(tmp_path / "agent.db")
     _init_db(db)
@@ -298,7 +572,7 @@ def test_publish_round_normalizes_zero_duration_to_unlimited(tmp_path, monkeypat
     calls: list[int | None] = []
 
     def fake_publish(
-        agent_url, offer, accepted_escrows,
+        agent_url, offer, accepted_escrows, demands,
         max_duration_seconds, wallet_address, private_key,
     ):
         calls.append(max_duration_seconds)
@@ -329,7 +603,7 @@ def test_publish_round_preserves_positive_row_duration(tmp_path, monkeypatch):
 
     calls: list[int | None] = []
 
-    def fake_publish(agent_url, offer, accepted_escrows, max_duration_seconds, wallet_address, private_key):
+    def fake_publish(agent_url, offer, accepted_escrows, demands, max_duration_seconds, wallet_address, private_key):
         calls.append(max_duration_seconds)
         return {"status": "created", "listing_id": "o1"}
 
@@ -354,7 +628,7 @@ def test_open_order_ids_returns_only_open(tmp_path):
     _insert_order(db, "o1", "open", "compute-001")
     _insert_order(db, "o2", "closed", "compute-002")
     _insert_order(db, "o3", "open", None)
-    _insert_order(db, "o4", "accepted", "compute-004")
+    _insert_order(db, "o4", "expired", "compute-004")
     assert set(_open_listing_ids(db)) == {"o1", "o3"}
 
 

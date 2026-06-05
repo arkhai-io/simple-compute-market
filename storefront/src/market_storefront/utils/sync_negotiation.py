@@ -177,7 +177,7 @@ class OfferUnfulfillableError(Exception):
 
     Currently triggers on:
       * ``listing_not_open`` — the listing is in a terminal/in-flight
-        status (accepted, refunded, closed); accepting a new
+        status (for example closed); accepting a new
         negotiation against it would race with whatever flow already
         owns the listing.
       * ``no_matching_inventory`` — no available compute resource

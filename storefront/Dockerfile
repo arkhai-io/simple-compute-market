@@ -36,9 +36,19 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         export UV_INDEX_ALKAHEST_GAR_PASSWORD="$(echo "${GAR_STG_READER_KEY}" | tr -d '\n' | python3 -c 'import sys,json; print(json.dumps(json.loads(sys.stdin.read())))' 2>/dev/null || echo "${GAR_STG_READER_KEY}")"; \
     fi && \
     if [ "${INSTALL_RL_DEPS}" = "true" ]; then \
-        uv sync --no-dev --no-install-project --extra rl --find-links /.dist; \
+        uv sync --no-dev --no-install-project --extra rl --find-links /.dist \
+            --refresh-package arkhai-registry-client \
+            --refresh-package arkhai-storefront-client \
+            --refresh-package market-service \
+            --refresh-package market-policy \
+            --refresh-package provisioning-service; \
     else \
-        uv sync --no-dev --no-install-project --find-links /.dist; \
+        uv sync --no-dev --no-install-project --find-links /.dist \
+            --refresh-package arkhai-registry-client \
+            --refresh-package arkhai-storefront-client \
+            --refresh-package market-service \
+            --refresh-package market-policy \
+            --refresh-package provisioning-service; \
     fi
 
 # Stage 2: Lean runtime image
@@ -100,7 +110,12 @@ COPY --chown=appuser:appuser storefront-client/ ../storefront-client/
 # .dist/ changes on disk, which is exactly what we want.
 COPY .dist/ /.dist/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --find-links /.dist
+    uv sync --no-dev --find-links /.dist \
+        --refresh-package arkhai-registry-client \
+        --refresh-package arkhai-storefront-client \
+        --refresh-package market-service \
+        --refresh-package market-policy \
+        --refresh-package provisioning-service
 
 ARG PORT=8080
 ENV PORT=${PORT}

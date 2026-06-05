@@ -61,7 +61,7 @@ Phase 9 — Provisioning completion
          wait_for_event("settle_terminal", predicate=status=="ready")
          body.tenant_credentials present
          Popen.wait → returncode 0
-         GET /api/v1/listings/{id} → status=accepted or closed
+         GET /api/v1/listings/{id} → status=closed
          GET .../negotiations/{neg_id} → primary escrow ready + fulfillment_uid
   09c  Lease registered:
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
@@ -89,10 +89,15 @@ import pytest
 
 from service.clients.alkahest import (
     get_alkahest_network,
+    get_recipient_arbiter,
     resolve_alkahest_address_config,
 )
 from src.settings import settings
-from tests.e2e.roles.scenarios.conftest import DealState, require_state
+from tests.e2e.roles.scenarios.conftest import (
+    DealState,
+    delete_mock_rules_if_present,
+    require_state,
+)
 
 log = logging.getLogger(__name__)
 
@@ -144,6 +149,18 @@ ACCEPTED_ESCROWS = [{
     "literal_fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
     "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_RESOURCE["amount"])}],
 }]
+
+
+def _recipient_demands(seller_wallet: str) -> list[dict]:
+    return [{
+        "chain_name": "anvil",
+        "arbiter": get_recipient_arbiter(
+            "anvil", config_path=_ALKAHEST_ADDRESSES_PATH,
+        ).lower(),
+        "demand_data": {"recipient": seller_wallet.lower()},
+    }]
+
+
 DURATION_HOURS = 1
 BUYER_INITIAL_PRICE = 7_000    # below seller floor (10_000) — forces counter at round 0
 BUYER_MAX_PRICE = 12_000
@@ -429,6 +446,7 @@ class TestStage02b_CreateListingPaused:
             agent_wallet_address=seller_wallet,
             offer=OFFER_RESOURCE,
             accepted_escrows=ACCEPTED_ESCROWS,
+            demands=_recipient_demands(seller_wallet),
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
         )
@@ -750,6 +768,11 @@ class TestStage07_ArmProvisioningGate:
         require_state(deal_state, "negotiation_terminal_state", "agreed_amount",
                       "_provisioning_mock_mode")
 
+        delete_mock_rules_if_present(
+            provisioning_test_client,
+            "e2e-buy-create",
+            PROV_RULE_ID,
+        )
         provisioning_test_client.add_mock_rule(
             rule_id=PROV_RULE_ID,
             match={"vm_action": "create"},
@@ -966,7 +989,7 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
         credentials to its run-log, then `run_ended`, then exits.
 
         Seller-side cross-checks (HTTP, not in the run-log):
-          - listing → status accepted/closed
+          - listing → status open
           - per-negotiation primary escrow → status=ready,
             fulfillment_uid populated
         """
@@ -996,8 +1019,8 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
         )
 
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
-        assert listing.status in ("accepted", "closed"), (
-            f"Expected listing status=accepted/closed, got {listing.status!r}"
+        assert listing.status == "closed", (
+            f"Expected listing status=closed while capacity is held, got {listing.status!r}"
         )
 
         # Canonical per-deal attestation data on the negotiation endpoint

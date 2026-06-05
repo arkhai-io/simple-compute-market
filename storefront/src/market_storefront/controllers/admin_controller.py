@@ -17,11 +17,19 @@ import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
 from market_storefront.models.system_models import (
     AdminPauseResponse,
+    CapacityReleasedEventRequest,
+    FulfillmentEventResponse,
+    FulfillmentFailedEventRequest,
+    FulfillmentStartedEventRequest,
     ImportResourcesResponse,
     ImportRowError,
     ReleaseReservationsResponse,
+    ReleaseStartedEventRequest,
+    ReserveCapacityRequest,
+    ReserveCapacityResponse,
     ResourcePatchRequest,
     ResourcePatchResponse,
+    UsageStartedEventRequest,
 )
 from market_storefront.server import _set_globally_paused
 from market_storefront.utils.config import ESCROW_TEMPLATES
@@ -301,6 +309,250 @@ class AdminController:
             updated=True,
         )
 
+    async def _apply_fulfillment_event(
+        self,
+        *,
+        allocation_id: str,
+        event_name: str,
+        state: str,
+        close_oversized: bool = False,
+        reopen_available: bool = False,
+        provider_id: str | None = None,
+        provider_job_id: str | None = None,
+        provider_lease_id: str | None = None,
+        provider_resource_id: str | None = None,
+        vm_host: str | None = None,
+        vm_target: str | None = None,
+        lease_end_utc: str | None = None,
+        failure_reason: str | None = None,
+        failure_message: str | None = None,
+        logs_ref: str | None = None,
+        check_job_id: str | None = None,
+        released_at: str | None = None,
+    ) -> FulfillmentEventResponse:
+        result = await self._db.update_compute_allocation_state(
+            allocation_id=allocation_id,
+            state=state,
+            provider_id=provider_id,
+            provider_job_id=provider_job_id,
+            provider_lease_id=provider_lease_id,
+            provider_resource_id=provider_resource_id,
+            vm_host=vm_host,
+            vm_target=vm_target,
+            lease_end_utc=lease_end_utc,
+            failure_reason=failure_reason,
+            failure_message=failure_message,
+            logs_ref=logs_ref,
+            check_job_id=check_job_id,
+            released_at=released_at,
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Allocation {allocation_id!r} not found",
+        )
+        closed_listing_ids = (
+            await self._close_oversized_compute_listings() if close_oversized else []
+        )
+        reopened_listing_ids = (
+            await self._reopen_available_compute_listings() if reopen_available else []
+        )
+        stage_event(
+            "fulfillment",
+            event_name,
+            allocation_id=allocation_id,
+            resource_id=result.get("resource_id"),
+            gpu_count=result.get("gpu_count"),
+            resource_state=result.get("resource_state"),
+            closed_listing_ids=closed_listing_ids,
+            reopened_listing_ids=reopened_listing_ids,
+        )
+        return FulfillmentEventResponse(
+            allocation_id=allocation_id,
+            state=state,
+            resource_id=result.get("resource_id"),
+            gpu_count=result.get("gpu_count"),
+            resource_state=result.get("resource_state"),
+            closed_listing_ids=closed_listing_ids,
+            reopened_listing_ids=reopened_listing_ids,
+        )
+
+    async def _close_oversized_compute_listings(self) -> list[str]:
+        from market_storefront.services.compute_listing_reconciler import (
+            mark_derived_listings_closed,
+            stale_open_listing_ids,
+        )
+
+        closed_listing_ids = stale_open_listing_ids(
+            self._db.db_path,
+        )
+        for listing_id in closed_listing_ids:
+            await self._db.update_listing(listing_id=listing_id, status="closed")
+        mark_derived_listings_closed(self._db.db_path, closed_listing_ids)
+        return closed_listing_ids
+
+    async def _reopen_available_compute_listings(self) -> list[str]:
+        from market_storefront.services.compute_listing_reconciler import (
+            closed_available_listing_ids,
+            mark_derived_listings_open,
+        )
+
+        reopened_listing_ids = closed_available_listing_ids(
+            self._db.db_path,
+        )
+        for listing_id in reopened_listing_ids:
+            await self._db.update_listing(listing_id=listing_id, status="open")
+        mark_derived_listings_open(self._db.db_path, reopened_listing_ids)
+        return reopened_listing_ids
+
+    @router.post(
+        "/fulfillment/events/started",
+        response_model=FulfillmentEventResponse,
+        summary="Record provisioning fulfillment start (admin)",
+    )
+    async def fulfillment_started(
+        self, body: FulfillmentStartedEventRequest,
+    ) -> FulfillmentEventResponse:
+        return await self._apply_fulfillment_event(
+            allocation_id=body.allocation_id,
+            event_name="started",
+            state="provisioning",
+            close_oversized=True,
+            provider_id=body.provider_id,
+            provider_job_id=body.provider_job_id,
+            provider_resource_id=body.resource_id,
+        )
+
+    @router.post(
+        "/fulfillment/events/usage-started",
+        response_model=FulfillmentEventResponse,
+        summary="Record compute usage start (admin)",
+    )
+    async def usage_started(
+        self, body: UsageStartedEventRequest,
+    ) -> FulfillmentEventResponse:
+        return await self._apply_fulfillment_event(
+            allocation_id=body.allocation_id,
+            event_name="usage_started",
+            state="leased",
+            close_oversized=True,
+            provider_id=body.provider_id,
+            provider_lease_id=body.provider_lease_id,
+            provider_resource_id=body.resource_id,
+            vm_host=body.vm_host,
+            vm_target=body.vm_target,
+            lease_end_utc=body.lease_end_utc,
+        )
+
+    @router.post(
+        "/fulfillment/events/release-started",
+        response_model=FulfillmentEventResponse,
+        summary="Record compute release start (admin)",
+    )
+    async def release_started(
+        self, body: ReleaseStartedEventRequest,
+    ) -> FulfillmentEventResponse:
+        return await self._apply_fulfillment_event(
+            allocation_id=body.allocation_id,
+            event_name="release_started",
+            state="releasing",
+            close_oversized=True,
+            provider_lease_id=body.provider_lease_id,
+            check_job_id=body.check_job_id,
+        )
+
+    @router.post(
+        "/fulfillment/events/capacity-released",
+        response_model=FulfillmentEventResponse,
+        summary="Record compute capacity release (admin)",
+    )
+    async def capacity_released(
+        self, body: CapacityReleasedEventRequest,
+    ) -> FulfillmentEventResponse:
+        return await self._apply_fulfillment_event(
+            allocation_id=body.allocation_id,
+            event_name="capacity_released",
+            state="released",
+            close_oversized=False,
+            reopen_available=True,
+            provider_lease_id=body.provider_lease_id,
+            provider_resource_id=body.resource_id,
+            released_at=body.released_at,
+        )
+
+    @router.post(
+        "/fulfillment/events/failed",
+        response_model=FulfillmentEventResponse,
+        summary="Record provisioning fulfillment failure (admin)",
+    )
+    async def fulfillment_failed(
+        self, body: FulfillmentFailedEventRequest,
+    ) -> FulfillmentEventResponse:
+        # First policy slice: release the held capacity. Richer seller
+        # policy (retry/hold/refund/alert) belongs behind this event later.
+        return await self._apply_fulfillment_event(
+            allocation_id=body.allocation_id,
+            event_name="failed",
+            state="released",
+            close_oversized=False,
+            reopen_available=True,
+            provider_id=body.provider_id,
+            provider_job_id=body.provider_job_id,
+            provider_resource_id=body.resource_id,
+            failure_reason=body.reason,
+            failure_message=body.message,
+            logs_ref=body.logs_ref,
+        )
+
+    @router.post(
+        "/portfolio/reservations",
+        response_model=ReserveCapacityResponse,
+        summary="Reserve compute capacity without negotiation (admin)",
+    )
+    async def reserve_capacity(
+        self, body: ReserveCapacityRequest,
+    ) -> ReserveCapacityResponse:
+        """Force-reserve compute capacity using the allocation model.
+
+        This is an operator/test hook for manual holds and recovery workflows.
+        It intentionally uses ``compute_allocations`` rather than mutating the
+        legacy aggregate ``resources.state`` directly, so partial GPU capacity
+        accounting and derived listing reconciliation stay consistent.
+        """
+        reserved = await self._db.reserve_available_compute_vm(
+            required_attributes=body.required_attributes or None,
+            listing_id=body.listing_id,
+            escrow_uid=body.escrow_uid,
+        )
+        if not reserved:
+            raise HTTPException(
+                status_code=409,
+                detail="No available compute VM matched required attributes",
+            )
+        closed_listing_ids = await self._close_oversized_compute_listings()
+        stage_event(
+            "portfolio",
+            "capacity_reserved_by_admin",
+            allocation_id=reserved.get("allocation_id"),
+            pool_id=reserved.get("pool_id"),
+            member_id=reserved.get("member_id"),
+            resource_id=reserved.get("resource_id"),
+            gpu_count=reserved.get("allocated_gpu_count"),
+            resource_state=reserved.get("state"),
+            listing_id=body.listing_id,
+            escrow_uid=body.escrow_uid,
+            closed_listing_ids=closed_listing_ids,
+        )
+        return ReserveCapacityResponse(
+            allocation_id=str(reserved["allocation_id"]),
+            pool_id=str(reserved["pool_id"]) if reserved.get("pool_id") else None,
+            member_id=str(reserved["member_id"]) if reserved.get("member_id") else None,
+            resource_id=str(reserved["resource_id"]),
+            gpu_count=int(reserved.get("allocated_gpu_count") or 1),
+            resource_state=reserved.get("state"),
+            closed_listing_ids=closed_listing_ids,
+        )
+
     @router.post(
         "/portfolio/release-reservations",
         response_model=ReleaseReservationsResponse,
@@ -353,4 +605,3 @@ class AdminController:
             released_count=len(released),
             resource_ids=released,
         )
-

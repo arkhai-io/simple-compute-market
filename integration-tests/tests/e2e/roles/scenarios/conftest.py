@@ -111,6 +111,22 @@ def require_state(deal_state: DealState, *fields: str) -> None:
             )
 
 
+def delete_mock_rules_if_present(provisioning_test_client, *rule_ids: str) -> None:
+    """Best-effort cleanup for stateful provisioning mock rules.
+
+    The mock-rule service preserves insertion order. When multiple e2e
+    scenarios run in one pytest process against one compose stack, a stale
+    broad ``{"vm_action": "create"}`` rule can match before the rule that the
+    current scenario just armed. Delete known scenario rule ids before arming
+    a new create rule so each scenario controls its own evaluation order.
+    """
+    for rule_id in rule_ids:
+        try:
+            provisioning_test_client.delete_mock_rule(rule_id)
+        except Exception as exc:
+            log.debug("[conftest] Could not delete mock rule %s: %s", rule_id, exc)
+
+
 # ---------------------------------------------------------------------------
 # Settings helpers — use attribute access, consistent with tests/conftest.py
 # ---------------------------------------------------------------------------

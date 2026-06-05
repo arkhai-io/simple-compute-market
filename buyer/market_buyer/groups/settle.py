@@ -12,6 +12,7 @@ Composite by design — for the rare cases where you want only stage 3
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Optional
 
 import typer
@@ -23,7 +24,6 @@ from ..buy_orchestrator import (
     AgreedTerms,
     DEFAULT_SETTLEMENT_POLL_INTERVAL,
     DEFAULT_SETTLEMENT_TIMEOUT,
-    _resolve_seller_wallet,
     submit_settlement,
     wait_for_settlement,
 )
@@ -70,6 +70,15 @@ def _first_listing_chain(deal) -> Optional[str]:
     return None
 
 
+def _accepted_proposal_chain(deal) -> Optional[str]:
+    proposal = getattr(deal, "accepted_escrow_proposal", None)
+    if isinstance(proposal, dict):
+        chain = proposal.get("chain_name")
+        if isinstance(chain, str) and chain:
+            return chain
+    return None
+
+
 def run_settle_from_log(
     *,
     run_id: str,
@@ -112,7 +121,12 @@ def run_settle_from_log(
         else (int(deal.token_decimals) if deal.token_decimals is not None else None)
     )
     from ..common import chain_by_name
-    chain_cfg_name = chain_name or _chain_name_from_run_log(run_id) or _first_listing_chain(deal)
+    chain_cfg_name = (
+        chain_name
+        or _accepted_proposal_chain(deal)
+        or _chain_name_from_run_log(run_id)
+        or _first_listing_chain(deal)
+    )
     if not chain_cfg_name:
         typer.secho(
             "Could not determine the chain from the run-log or deal context. "
@@ -121,14 +135,44 @@ def run_settle_from_log(
         )
         raise typer.Exit(2)
     chain_cfg = chain_by_name(chain_cfg_name)
-    chain = resolve_chain_settings(
-        buyer_address=buyer_address,
-        buyer_private_key=buyer_private_key,
-        ssh_public_key=ssh_public_key,
-        chain=chain_cfg,
-        token_contract=effective_token,
-        token_decimals=effective_token_decimals,
-    )
+    if deal.accepted_escrow_proposal is not None:
+        from ..common import resolve_buyer_wallet, resolve_ssh_public_key
+
+        resolved_buyer_address, resolved_buyer_private_key = resolve_buyer_wallet(
+            override_addr=buyer_address,
+            override_pk=buyer_private_key,
+        )
+        resolved_ssh_public_key = resolve_ssh_public_key(override=ssh_public_key)
+        missing: list[str] = []
+        if not resolved_buyer_private_key:
+            missing.append("wallet.private_key")
+        if not resolved_ssh_public_key:
+            missing.append("wallet.ssh_public_key")
+        if missing:
+            typer.secho(
+                "Missing required config: " + ", ".join(missing),
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+        chain = SimpleNamespace(
+            buyer_address=resolved_buyer_address,
+            buyer_private_key=resolved_buyer_private_key,
+            ssh_public_key=resolved_ssh_public_key,
+            rpc_url=chain_cfg.rpc_url,
+            chain_name=chain_cfg.name,
+            alkahest_addr_config=chain_cfg.alkahest_address_config_path,
+            token_contract=effective_token or "",
+            token_decimals=effective_token_decimals,
+        )
+    else:
+        chain = resolve_chain_settings(
+            buyer_address=buyer_address,
+            buyer_private_key=buyer_private_key,
+            ssh_public_key=ssh_public_key,
+            chain=chain_cfg,
+            token_contract=effective_token,
+            token_decimals=effective_token_decimals,
+        )
 
     log = open_run_log(run_id)
     log.event("settle_resumed", run_id=run_id)
@@ -146,7 +190,8 @@ def run_settle_from_log(
     header.add_row("Negotiation", deal.negotiation_id)
     header.add_row("Agreed price (per hour)", str(deal.agreed_amount))
     header.add_row("Duration (seconds)", str(effective_duration))
-    header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
+    if chain.token_contract:
+        header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
     if resolved_uid:
         header.add_row("Escrow UID", resolved_uid + " (skip create)")
     console.print(Panel(header, title="market settle", border_style="cyan"))
@@ -154,22 +199,19 @@ def run_settle_from_log(
     # --- Stage 3: escrow.create (skip if uid already known) -------
     if not resolved_uid:
         seller_wallet = deal.seller_wallet_address
-        if not seller_wallet:
-            try:
-                seller_wallet = _resolve_seller_wallet(deal.seller_url)
-            except RuntimeError as exc:
-                log.event("escrow_resolve_wallet_failed", error=str(exc))
-                log.end("error", error=f"resolve_seller_wallet: {exc}")
-                typer.secho(
-                    f"Could not resolve seller wallet from "
-                    f"{deal.seller_url}/.well-known/agent-wallet.json: {exc}",
-                    err=True, fg=typer.colors.RED,
-                )
-                raise typer.Exit(3)
+        if not seller_wallet and deal.accepted_escrow_proposal is None:
+            error = (
+                "Run-log does not contain a seller recipient. Re-run negotiation "
+                "so the accepted escrow proposal is captured."
+            )
+            log.event("escrow_recipient_missing", error=error)
+            log.end("error", error=error)
+            typer.secho(error, err=True, fg=typer.colors.RED)
+            raise typer.Exit(3)
 
         terms = AgreedTerms(
             seller_url=deal.seller_url,
-            seller_wallet_address=seller_wallet,
+            seller_wallet_address=seller_wallet or "",
             negotiation_id=deal.negotiation_id,
             listing_id=deal.listing_id,
             agreed_amount=deal.agreed_amount,
@@ -178,11 +220,6 @@ def run_settle_from_log(
         log.event("escrow_create_start", terms=terms.__dict__)
         console.print("[dim]escrow.create[/dim]  approve + create on-chain…")
 
-        # Synthesize the EscrowProposal that `market negotiate` would have
-        # sent (and the seller echoed back). The run-log doesn't currently
-        # carry the seller-confirmed proposal, so we rebuild it from chain
-        # config — matches what the storefront's accepted_escrows uses for
-        # the default ERC20 non-tierable contract.
         import time as _time
         from service.schemas import EscrowProposal
         from service.clients.alkahest import (
@@ -193,17 +230,20 @@ def run_settle_from_log(
             make_create_escrow_fn,
         )
 
-        escrow_address = get_erc20_escrow_obligation_nontierable(
-            chain.chain_name,
-            config_path=chain.alkahest_addr_config or None,
-        )
-        proposal = EscrowProposal(
-            chain_name=chain.chain_name,
-            escrow_address=escrow_address,
-            fields={"token": chain.token_contract},
-            literal_fields={"token": chain.token_contract},
-            expiration_unix=int(_time.time()) + expiration_seconds,
-        )
+        if deal.accepted_escrow_proposal is not None:
+            proposal = EscrowProposal(**deal.accepted_escrow_proposal)
+        else:
+            escrow_address = get_erc20_escrow_obligation_nontierable(
+                chain.chain_name,
+                config_path=chain.alkahest_addr_config or None,
+            )
+            proposal = EscrowProposal(
+                chain_name=chain.chain_name,
+                escrow_address=escrow_address,
+                fields={"token": chain.token_contract},
+                literal_fields={"token": chain.token_contract},
+                expiration_unix=int(_time.time()) + expiration_seconds,
+            )
 
         build_terms = make_buyer_payment_escrow_terms_fn(
             chain_name=chain.chain_name,
@@ -327,14 +367,14 @@ def register(app: typer.Typer) -> None:
         ),
         token_contract: Optional[str] = typer.Option(
             None, "--token-contract",
-            help="ERC-20 payment token. Optional override — defaults to the "
-                 "token recorded in the deal/run-log.",
+            help="Legacy ERC-20 token override for old run-logs without an "
+                 "accepted escrow proposal. Current run-logs settle from the "
+                 "seller-accepted proposal.",
         ),
         token_decimals: Optional[int] = typer.Option(
             None, "--token-decimals",
-            help="ERC-20 token decimals override. When omitted, reads "
-                 "the value recorded in the run-log; if that's also "
-                 "missing, falls back to a chain decimals() lookup.",
+            help="Legacy ERC-20 decimals override for old run-logs without "
+                 "an accepted escrow proposal.",
         ),
         duration_hours: Optional[float] = typer.Option(
             None, "--duration-hours", "-t",
@@ -351,7 +391,7 @@ def register(app: typer.Typer) -> None:
         ),
         buyer_address: Optional[str] = typer.Option(
             None, "--buyer-address",
-            help="Override buyer wallet (default: wallet.address from config.toml).",
+            help="Override buyer wallet address (default: derived from wallet.private_key).",
         ),
         buyer_private_key: Optional[str] = typer.Option(
             None, "--buyer-priv-key",
@@ -360,8 +400,8 @@ def register(app: typer.Typer) -> None:
         chain_name: Optional[str] = typer.Option(
             None, "--chain",
             help="Override which configured [chains.<name>] entry to settle on. "
-                 "When omitted, reads chain_name from the run-log's escrow_created "
-                 "event; falls back to the first listing.accepted_escrows entry.",
+                 "When omitted, reads chain_name from the accepted proposal "
+                 "or escrow_created event.",
         ),
         poll_interval: float = typer.Option(
             DEFAULT_SETTLEMENT_POLL_INTERVAL, "--poll-interval",

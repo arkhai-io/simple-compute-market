@@ -326,7 +326,10 @@ class LeaseLifecycleService:
                 await sf.patch_resource(
                     lease.resource_id,
                     state="available",
-                    attributes={"lease_end_utc": None},
+                    attributes={
+                        "lease_end_utc": None,
+                        "allocation_id": lease.allocation_id,
+                    } if lease.allocation_id else {"lease_end_utc": None},
                 )
             return True
         except StorefrontClientError as exc:

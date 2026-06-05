@@ -211,7 +211,7 @@ class TestNegotiateNew:
         # Flip the listing's status to a non-open state.
         await db.update_listing(
             listing_id="neg-listing-closed",
-            status="accepted",
+            status="closed",
         )
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.negotiate_new(

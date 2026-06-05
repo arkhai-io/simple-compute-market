@@ -31,9 +31,18 @@ Released build (latest):
 curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh | bash
 ```
 
-Installs `market` into `~/.local/bin` (needs Python 3.12+ and `curl`/`wget`;
-on macOS, `brew install python@3.12`). Pin a version with
+Installs `market` into `~/.local/bin`. The installer uses `uv` to provision
+the Python version required by the buyer CLI; a literal `python3.12` system
+command is not required. Pin a version with
 `... | bash -s -- --version market-cli-v0.5.3`.
+
+In noninteractive Linux environments, allow apt dependency installation
+explicitly:
+
+```bash
+curl -fsSL https://github.com/arkhai-io/simple-compute-market/releases/latest/download/install.sh \
+  | MARKET_INSTALL_ASSUME_YES=1 bash
+```
 
 Or from the repo:
 

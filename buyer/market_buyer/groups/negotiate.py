@@ -90,7 +90,7 @@ def register(app: typer.Typer) -> None:
         ),
         buyer_address: Optional[str] = typer.Option(
             None, "--buyer-address",
-            help="Override buyer wallet address (default: wallet.address).",
+            help="Override buyer wallet address (default: derived from wallet.private_key).",
         ),
         buyer_private_key: Optional[str] = typer.Option(
             None, "--buyer-priv-key",
@@ -105,13 +105,13 @@ def register(app: typer.Typer) -> None:
         ),
         token_contract: Optional[str] = typer.Option(
             None, "--token-contract",
-            help="Payment token contract address. Logged for downstream "
-                 "`market settle` / `escrow create`.",
+            help="Optional ERC-20 accepted-escrow filter. Omit to use the "
+                 "token/escrow shape selected from the listing.",
         ),
         token_decimals: Optional[float] = typer.Option(
             None, "--token-decimals",
-            help="Payment token decimals. Logged for downstream "
-                 "`market settle` / `escrow create`.",
+            help="ERC-20 token decimals override for scaling price flags. "
+                 "Only needed when decimals cannot be resolved on chain.",
         ),
         chain_name: Optional[str] = typer.Option(
             None, "--chain",
@@ -318,23 +318,7 @@ def register(app: typer.Typer) -> None:
             if _max_explicit and max_price is not None:
                 max_price = max_price * scale
 
-        # Best-effort: fetch the seller's on-chain wallet from the
-        # /.well-known/agent-wallet.json endpoint and log it. Failure
-        # is non-fatal — the negotiation itself doesn't need this; we
-        # log it only so a follow-up `settle --run <id>` can avoid
-        # re-fetching. A later `_resolve_seller_wallet` call from the
-        # settle path will fall back to a fresh HTTP fetch if absent.
         seller_wallet: Optional[str] = None
-        try:
-            from ..buy_orchestrator import _resolve_seller_wallet
-            seller_wallet = _resolve_seller_wallet(seller_url)
-        except Exception as exc:
-            typer.secho(
-                f"(warn) could not resolve seller wallet from "
-                f"{seller_url}/.well-known/agent-wallet.json: {exc}. "
-                f"Negotiating anyway; settle will retry the lookup.",
-                fg=typer.colors.YELLOW,
-            )
 
         run_log = RunLog.start(
             command="market negotiate",
@@ -404,13 +388,22 @@ def register(app: typer.Typer) -> None:
                 duration_seconds=int(duration_seconds),
                 ssh_public_key="",  # negotiate-only flow; settle is a separate command
             )
-            from service.schemas import accepted_token_address
+            from service.schemas import accepted_demands, accepted_token_address
+            literal_fields = dict(picked_entry.get("literal_fields") or {})
             _entry_token = accepted_token_address(picked_entry)
+            if _entry_token:
+                literal_fields["token"] = _entry_token
+            selected_chain = picked_entry.get("chain_name")
+            demands = [
+                d for d in accepted_demands(listing_dict or {})
+                if not d.get("chain_name") or d.get("chain_name") == selected_chain
+            ]
             escrow_proposal = EscrowProposal(
-                chain_name=picked_entry.get("chain_name"),
+                chain_name=selected_chain,
                 escrow_address=picked_entry["escrow_address"],
                 fields={"token": _entry_token},
-                literal_fields={"token": _entry_token},
+                literal_fields=literal_fields,
+                demands=demands,
                 expiration_unix=int(_time.time()) + 3600,
             )
 
@@ -454,6 +447,16 @@ def register(app: typer.Typer) -> None:
             agreed_amount=outcome.agreed_amount,
             rounds=outcome.rounds,
             reason=outcome.reason,
+            accepted_escrow_proposal=(
+                outcome.accepted_escrow_proposal.model_dump()
+                if outcome.accepted_escrow_proposal is not None
+                else None
+            ),
+            accepted_provision_terms=(
+                outcome.accepted_provision_terms.model_dump()
+                if outcome.accepted_provision_terms is not None
+                else None
+            ),
         )
 
         console.print(round_table)

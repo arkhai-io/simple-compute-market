@@ -136,18 +136,18 @@ class TestUpdateOrderAuth:
     """update_listing is owner-scoped: the signature must come from the
     listing's publisher identity."""
 
-    async def test_owner_signed_update_accepted(self, registry_client, authenticated_open_order):
+    async def test_owner_signed_update_closed(self, registry_client, authenticated_open_order):
         put = await registry_client.update_listing(
             authenticated_open_order.listing_id,
-            UpdateListingRequest(updates={"status": "accepted"}, private_key=MAKER_PRIVATE_KEY),
+            UpdateListingRequest(updates={"status": "closed"}, private_key=MAKER_PRIVATE_KEY),
         )
-        assert put["status"] == "accepted"
+        assert put["status"] == "closed"
 
     async def test_non_owner_signature_rejected(self, registry_client, authenticated_open_order):
         with pytest.raises(RegistryClientError) as exc_info:
             await registry_client.update_listing(
                 authenticated_open_order.listing_id,
-                UpdateListingRequest(updates={"status": "accepted"}, private_key=TAKER_PRIVATE_KEY),
+                UpdateListingRequest(updates={"status": "closed"}, private_key=TAKER_PRIVATE_KEY),
             )
         assert exc_info.value.status_code == 401
 
@@ -155,7 +155,7 @@ class TestUpdateOrderAuth:
         with pytest.raises(RegistryClientError) as exc_info:
             await registry_client.update_listing(
                 authenticated_open_order.listing_id,
-                UpdateListingRequest(updates={"status": "accepted"}),
+                UpdateListingRequest(updates={"status": "closed"}),
             )
         assert exc_info.value.status_code == 401
 
@@ -173,9 +173,9 @@ class TestOrderLifecycle:
 
         put = await registry_client.update_listing(
             order_id,
-            UpdateListingRequest(updates={"status": "accepted"}, private_key=MAKER_PRIVATE_KEY),
+            UpdateListingRequest(updates={"status": "closed"}, private_key=MAKER_PRIVATE_KEY),
         )
-        assert put["status"] == "accepted"
+        assert put["status"] == "closed"
 
         await registry_client.delete_listing(order_id, MAKER_PRIVATE_KEY)
         with pytest.raises(RegistryClientError) as exc_info:

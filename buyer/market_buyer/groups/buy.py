@@ -214,6 +214,16 @@ def _run_resume_from(
             reason=outcome.reason,
             negotiation_id=outcome.negotiation_id,
             listing_id=resume_point.listing_id,
+            accepted_escrow_proposal=(
+                outcome.accepted_escrow_proposal.model_dump()
+                if outcome.accepted_escrow_proposal is not None
+                else None
+            ),
+            accepted_provision_terms=(
+                outcome.accepted_provision_terms.model_dump()
+                if outcome.accepted_provision_terms is not None
+                else None
+            ),
         )
 
         if outcome.status != "agreed" or outcome.agreed_amount is None:
@@ -324,6 +334,12 @@ def register(app: typer.Typer) -> None:
         static_ip: Optional[bool] = typer.Option(
             None, "--static-ip/--no-static-ip", help="Restrict to hosts with static public IP.",
         ),
+        raw_filters: Optional[list[str]] = typer.Option(
+            None, "--filter", "-f",
+            help="Registry filter-spec parameter as name=value. Repeatable. "
+                 "Use this for schema-specific filters that do not have a "
+                 "compute convenience flag.",
+        ),
         from_run: Optional[str] = typer.Option(
             None, "--from",
             help="Resume a partial buy run-id end-to-end. Continues "
@@ -395,7 +411,7 @@ def register(app: typer.Typer) -> None:
         ),
         buyer_address: Optional[str] = typer.Option(
             None, "--buyer-address",
-            help="Override buyer wallet (default: wallet.address from config.toml).",
+            help="Override buyer wallet address (default: derived from wallet.private_key).",
         ),
         buyer_private_key: Optional[str] = typer.Option(
             None, "--buyer-priv-key",
@@ -576,7 +592,9 @@ def register(app: typer.Typer) -> None:
             "datacenter_grade": datacenter_grade,
             "static_ip": static_ip,
         }
+        from ._cli_helpers import parse_filter_options
         active_filters = {k: v for k, v in spec_filters.items() if v is not None}
+        active_filters.update(parse_filter_options(raw_filters))
         try:
             matches = query_registry_for_matches_multi(
                 reg_urls, timeout=deadline,
@@ -652,13 +670,22 @@ def register(app: typer.Typer) -> None:
             )
             if entry is None:
                 return None
-            from service.schemas import accepted_token_address
+            from service.schemas import accepted_demands, accepted_token_address
+            literal_fields = dict(entry.get("literal_fields") or {})
             token = accepted_token_address(entry)
+            if token:
+                literal_fields["token"] = token
+            selected_chain = entry.get("chain_name", selected_chain_name)
+            demands = [
+                d for d in accepted_demands(match)
+                if not d.get("chain_name") or d.get("chain_name") == selected_chain
+            ]
             return EscrowProposal(
-                chain_name=entry.get("chain_name", selected_chain_name),
+                chain_name=selected_chain,
                 escrow_address=entry["escrow_address"],
                 fields={"token": token},
-                literal_fields={"token": token},
+                literal_fields=literal_fields,
+                demands=demands,
                 expiration_unix=int(_time.time()) + int(expiration_seconds),
             )
 

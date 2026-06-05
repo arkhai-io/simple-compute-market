@@ -5,6 +5,7 @@ set -euo pipefail
 INSTALL_DIR="${MARKET_INSTALL_DIR:-$HOME/.market}"
 BIN_DIR="$HOME/.local/bin"
 UV_VERSION="0.8.13"
+ASSUME_YES=false
 
 # ── System dependency mapping ─────────────────────────────────
 # Format: "command:apt-package"
@@ -15,10 +16,8 @@ LINUX_SYSTEM_DEPS=(
     "gcc:build-essential"
     "g++:build-essential"
     "make:build-essential"
-    "python3.12:python3.12"
     "jq:jq"
 )
-LINUX_PYTHON_DEV_PKGS=("python3.12-dev" "software-properties-common")
 
 # ── Color helpers ──────────────────────────────────────────────
 info()  { printf '\033[1;34m[info]\033[0m %s\n' "$*"; }
@@ -32,6 +31,27 @@ ok()    { printf '\033[1;32m[ok]\033[0m %s\n' "$*"; }
 # provisions a managed CPython matching the buyer's requires-python
 # (>=3.12), downloading it if absent. Gating on the system `python3`
 # wrongly rejected macOS, which ships only python3 (3.9).
+
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --yes|-y)
+                ASSUME_YES=true
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+}
+
+assume_yes_enabled() {
+    case "${MARKET_INSTALL_ASSUME_YES:-}" in
+        1|true|TRUE|yes|YES|y|Y) return 0 ;;
+    esac
+    [ "$ASSUME_YES" = true ]
+}
 
 detect_platform() {
     local os arch
@@ -63,7 +83,6 @@ check_and_install_dependencies() {
     local display_items=()        # human-readable list for the prompt
     local missing_apt_cmds=()     # commands to verify after apt install
     local missing_apt_pkgs=()     # deduplicated apt packages
-    local need_python312=false
     local has_apt=false
 
     # -- System packages (Linux only) --
@@ -89,31 +108,14 @@ check_and_install_dependencies() {
                         missing_apt_pkgs+=("$pkg")
                         display_items+=("$pkg (apt)")
                     fi
-                    [ "$cmd" = "python3.12" ] && need_python312=true
                 fi
             done
-
-            if [ "$need_python312" = true ]; then
-                for extra in "${LINUX_PYTHON_DEV_PKGS[@]}"; do
-                    local already=false
-                    for p in "${missing_apt_pkgs[@]+"${missing_apt_pkgs[@]}"}"; do
-                        [ "$p" = "$extra" ] && already=true && break
-                    done
-                    if [ "$already" = false ]; then
-                        missing_apt_pkgs+=("$extra")
-                        display_items+=("$extra (apt)")
-                    fi
-                done
-            fi
         fi
 
     elif [ "$OS" = "macos" ]; then
         local mac_missing=()
         for entry in "${LINUX_SYSTEM_DEPS[@]}"; do
             local cmd="${entry%%:*}"
-            # uv provisions a managed Python 3.12 during `uv sync`, so a
-            # system python3.12 is not required (macOS ships only python3).
-            [ "$cmd" = "python3.12" ] && continue
             if ! command -v "$cmd" &>/dev/null; then
                 mac_missing+=("$cmd")
             fi
@@ -160,29 +162,27 @@ check_and_install_dependencies() {
     done
     echo ""
 
-    printf '\033[1;34m[?]\033[0m Would you like to install them? [Y/n] '
-    read -r answer </dev/tty
-    case "$answer" in
-        [nN]|[nN][oO])
-            error "Cannot proceed without required dependencies."
-            exit 1
-            ;;
-    esac
+    if assume_yes_enabled; then
+        info "Installing missing dependencies because --yes/-y or MARKET_INSTALL_ASSUME_YES is set."
+    elif [ -e /dev/tty ] && [ -r /dev/tty ]; then
+        printf '\033[1;34m[?]\033[0m Would you like to install them? [Y/n] '
+        read -r answer </dev/tty
+        case "$answer" in
+            [nN]|[nN][oO])
+                error "Cannot proceed without required dependencies."
+                exit 1
+                ;;
+        esac
+    else
+        error "Cannot prompt for dependency installation because no TTY is available."
+        error "Install the missing packages above, or rerun with MARKET_INSTALL_ASSUME_YES=1 to allow apt installation."
+        exit 1
+    fi
     echo ""
 
     if [ ${#missing_apt_pkgs[@]} -gt 0 ]; then
         info "Updating package lists..."
         sudo apt-get update -y
-
-        if [ "$need_python312" = true ]; then
-            if ! command -v add-apt-repository &>/dev/null; then
-                info "Installing software-properties-common for PPA support..."
-                sudo apt-get install -y software-properties-common
-            fi
-            info "Adding deadsnakes PPA for Python 3.12..."
-            sudo add-apt-repository -y ppa:deadsnakes/ppa
-            sudo apt-get update -y
-        fi
 
         info "Installing packages: ${missing_apt_pkgs[*]}"
         sudo apt-get install -y "${missing_apt_pkgs[@]}"
@@ -355,6 +355,7 @@ main() {
     echo "  └──────────────────────────────────┘"
     echo ""
 
+    parse_args "$@"
     detect_platform
     check_and_install_dependencies
     install_uv

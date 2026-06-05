@@ -56,7 +56,6 @@ class PublisherIdentity(Base):
 class OrderStatusEnum(str, enum.Enum):
     open = "open"
     closed = "closed"
-    accepted = "accepted"
     expired = "expired"
 
 
@@ -67,6 +66,7 @@ class Listing(Base):
     publisher_id = Column(Integer, ForeignKey("publishers.publisher_id", ondelete="CASCADE"), nullable=False)
     offer_resource = Column(JSON, nullable=False)  # registry-specific shape (e.g. ComputeResource)
     accepted_escrows = Column(JSON, nullable=True)  # settlement-schema blob; opaque to the indexer
+    demands = Column(JSON, nullable=True)  # listing-level arbiter demand blob; opaque to the indexer
     # Optional ceiling on lease duration (seconds). NULL = unlimited.
     # Buyers supply the actual duration at negotiation init.
     max_duration_seconds = Column(Integer, nullable=True)

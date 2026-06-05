@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from service.schemas import EscrowDemand
+
 
 # ---------------------------------------------------------------------------
 # Request models
@@ -22,6 +24,13 @@ class CreateListingRequest(BaseModel):
             "List of escrow shapes the seller will accept for this listing. "
             "Each entry: {chain_name, escrow_address, literal_fields, rates}. "
             "Must be non-empty."
+        ),
+    )
+    demands: list[EscrowDemand] = Field(
+        default_factory=list,
+        description=(
+            "Listing-level arbiter demands, independent of accepted escrow "
+            "obligation type."
         ),
     )
     max_duration_seconds: int | None = None
@@ -80,6 +89,7 @@ class ListingResponse(BaseModel):
     paused: bool = False
     offer_resource: Any = None    # dict or JSON string from SQLite
     accepted_escrows: list[dict[str, Any]] | None = None
+    demands: list[dict[str, Any]] | None = None
     max_duration_seconds: int | None = None
     seller: str | None = None
     model_config = ConfigDict(extra="allow")

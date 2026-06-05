@@ -12,6 +12,7 @@ directly (same as production).
 """
 from __future__ import annotations
 
+import sqlite3
 from typing import AsyncIterator
 
 import httpx
@@ -24,6 +25,7 @@ from market_storefront.middleware.admin_auth import require_admin_key
 import market_storefront.server as _server
 from market_storefront.controllers.admin_controller import router as admin_router
 from market_storefront.controllers.system_controller import router as system_router
+from market_storefront.services.compute_listing_reconciler import record_derived_listing
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.services.system_service import SystemService
 from storefront_client.client import StorefrontClient, StorefrontClientError
@@ -250,6 +252,270 @@ class TestAdminImportResources:
         assert result.total_rows == 2
         # The good row should import even if one fails.
         assert result.imported_count >= 1
+
+
+async def _seed_dynamic_listing_pool_rows(db: SQLiteClient) -> None:
+    await db.upsert_resource(
+        resource_id="pool-h200-1",
+        resource_type="compute.gpu",
+        resource_subtype="h200",
+        unit="count",
+        value=4,
+        state="available",
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "host-1",
+        },
+    )
+    for gpu_count in range(1, 5):
+        listing_id = f"listing-{gpu_count}x"
+        await db.upsert_listing(
+            listing_id=listing_id,
+            status="open",
+            created_at="2026-01-01T00:00:00",
+            updated_at="2026-01-01T00:00:00",
+            offer_resource={
+                "resource_id": "pool-h200-1",
+                "gpu_model": "H200",
+                "gpu_count": gpu_count,
+                "region": "California, US",
+                "sla": 99.0,
+            },
+            accepted_escrows=[{
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "literal_fields": {"token": "0x" + "22" * 20},
+                "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+            }],
+            demands=[],
+            fulfillment_resource=None,
+            max_duration_seconds=3600,
+            seller="http://seller",
+        )
+        record_derived_listing(
+            db.db_path,
+            listing_id=listing_id,
+            resource_id="pool-h200-1",
+            gpu_count=gpu_count,
+        )
+
+
+async def _seed_dynamic_listing_pool(db: SQLiteClient) -> str:
+    await _seed_dynamic_listing_pool_rows(db)
+    reserved = await db.reserve_available_compute_vm(
+        required_attributes={"resource_id": "pool-h200-1", "gpu_count": 2},
+        listing_id="listing-2x",
+        escrow_uid="escrow-2x",
+    )
+    assert reserved is not None
+    return str(reserved["allocation_id"])
+
+
+class TestFulfillmentEvents:
+    async def test_admin_reserve_capacity_closes_oversized_listings(self, client):
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+
+        response = await c._post(
+            "/api/v1/admin/portfolio/reservations",
+            {
+                "required_attributes": {
+                    "resource_id": "pool-h200-1",
+                    "gpu_count": 2,
+                },
+                "listing_id": "listing-2x-manual",
+                "escrow_uid": "manual-escrow-2x",
+            },
+            extra_headers=c._admin_headers(),
+        )
+
+        assert response["allocation_id"]
+        assert response["resource_id"] == "pool-h200-1"
+        assert response["gpu_count"] == 2
+        assert response["resource_state"] == "available"
+        assert sorted(response["closed_listing_ids"]) == ["listing-3x", "listing-4x"]
+        statuses = {
+            gpu_count: (await db.load_listing(listing_id=f"listing-{gpu_count}x"))[
+                "status"
+            ]
+            for gpu_count in range(1, 5)
+        }
+        assert statuses == {
+            1: "open",
+            2: "open",
+            3: "closed",
+            4: "closed",
+        }
+
+    async def test_admin_reserve_capacity_returns_409_when_no_capacity(self, client):
+        c, db = client
+        await _seed_dynamic_listing_pool(db)
+
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c._post(
+                "/api/v1/admin/portfolio/reservations",
+                {
+                    "required_attributes": {
+                        "resource_id": "pool-h200-1",
+                        "gpu_count": 3,
+                    },
+                    "listing_id": "listing-3x-manual",
+                    "escrow_uid": "manual-escrow-3x",
+                },
+                extra_headers=c._admin_headers(),
+            )
+
+        assert "409" in str(exc_info.value)
+
+    async def test_usage_started_marks_leased_and_closes_oversized_listings(self, client):
+        c, db = client
+        allocation_id = await _seed_dynamic_listing_pool(db)
+
+        response = await c._post(
+            "/api/v1/admin/fulfillment/events/usage-started",
+            {
+                "allocation_id": allocation_id,
+                "escrow_uid": "escrow-2x",
+                "provider_id": "provider-a",
+                "provider_lease_id": "lease-2x",
+                "resource_id": "provider-resource-2x",
+                "vm_host": "kvm1",
+                "vm_target": "tenant-2x",
+                "lease_end_utc": "2026-01-01T00:00:00Z",
+            },
+            extra_headers=c._admin_headers(),
+        )
+
+        assert response["allocation_id"] == allocation_id
+        assert response["state"] == "leased"
+        assert sorted(response["closed_listing_ids"]) == ["listing-3x", "listing-4x"]
+        statuses = {
+            gpu_count: (await db.load_listing(listing_id=f"listing-{gpu_count}x"))[
+                "status"
+            ]
+            for gpu_count in range(1, 5)
+        }
+        assert statuses == {
+            1: "open",
+            2: "open",
+            3: "closed",
+            4: "closed",
+        }
+        conn = sqlite3.connect(db.db_path)
+        try:
+            row = conn.execute(
+                """
+                SELECT provider_id, provider_lease_id, provider_resource_id,
+                       vm_host, vm_target, lease_end_utc
+                FROM compute_allocations
+                WHERE allocation_id = ?
+                """,
+                (allocation_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row == (
+            "provider-a",
+            "lease-2x",
+            "provider-resource-2x",
+            "kvm1",
+            "tenant-2x",
+            "2026-01-01T00:00:00Z",
+        )
+
+    async def test_capacity_released_marks_allocation_released(self, client):
+        c, db = client
+        allocation_id = await _seed_dynamic_listing_pool(db)
+        conn = sqlite3.connect(db.db_path)
+        try:
+            conn.execute("DELETE FROM derived_compute_listings")
+            conn.commit()
+        finally:
+            conn.close()
+        await c._post(
+            "/api/v1/admin/fulfillment/events/usage-started",
+            {"allocation_id": allocation_id, "escrow_uid": "escrow-2x"},
+            extra_headers=c._admin_headers(),
+        )
+
+        response = await c._post(
+            "/api/v1/admin/fulfillment/events/capacity-released",
+            {"allocation_id": allocation_id},
+            extra_headers=c._admin_headers(),
+        )
+
+        assert response["allocation_id"] == allocation_id
+        assert response["state"] == "released"
+        assert sorted(response["reopened_listing_ids"]) == ["listing-3x", "listing-4x"]
+        statuses = {
+            gpu_count: (await db.load_listing(listing_id=f"listing-{gpu_count}x"))[
+                "status"
+            ]
+            for gpu_count in range(1, 5)
+        }
+        assert statuses == {
+            1: "open",
+            2: "open",
+            3: "open",
+            4: "open",
+        }
+        selected = await db.select_available_compute_vm(
+            required_attributes={"resource_id": "pool-h200-1", "gpu_count": 4},
+        )
+        assert selected is not None
+
+    async def test_fulfillment_failed_persists_failure_metadata(self, client):
+        c, db = client
+        allocation_id = await _seed_dynamic_listing_pool(db)
+
+        response = await c._post(
+            "/api/v1/admin/fulfillment/events/failed",
+            {
+                "allocation_id": allocation_id,
+                "provider_id": "provider-a",
+                "provider_job_id": "job-create-1",
+                "resource_id": "provider-resource-2x",
+                "reason": "provisioning_error",
+                "message": "host rejected request",
+                "logs_ref": "s3://logs/job-create-1",
+            },
+            extra_headers=c._admin_headers(),
+        )
+
+        assert response["allocation_id"] == allocation_id
+        assert response["state"] == "released"
+        conn = sqlite3.connect(db.db_path)
+        try:
+            row = conn.execute(
+                """
+                SELECT provider_id, provider_job_id, provider_resource_id,
+                       failure_reason, failure_message, logs_ref
+                FROM compute_allocations
+                WHERE allocation_id = ?
+                """,
+                (allocation_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row == (
+            "provider-a",
+            "job-create-1",
+            "provider-resource-2x",
+            "provisioning_error",
+            "host rejected request",
+            "s3://logs/job-create-1",
+        )
+
+    async def test_fulfillment_event_unknown_allocation_returns_404(self, client):
+        c, _ = client
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c._post(
+                "/api/v1/admin/fulfillment/events/usage-started",
+                {"allocation_id": "missing"},
+                extra_headers=c._admin_headers(),
+            )
+        assert "404" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------

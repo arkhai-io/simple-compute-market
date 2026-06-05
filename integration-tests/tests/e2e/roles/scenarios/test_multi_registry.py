@@ -82,6 +82,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -100,13 +101,31 @@ pytestmark = pytest.mark.multi_registry
 
 
 # ---------------------------------------------------------------------------
-# Topology — hardcoded host-network URLs matching docker-compose.yml
+# Topology — host-network URLs for local runs, service DNS names for
+# buyer-machine runs inside the compose network.
 # ---------------------------------------------------------------------------
 
-_REGISTRY_A = "http://localhost:8080"
-_REGISTRY_B = "http://localhost:8082"
+def _registry_urls() -> tuple[str, str, str]:
+    profiles = {
+        profile.strip()
+        for profile in os.environ.get("ACTIVE_PROFILES", "").split(",")
+        if profile.strip()
+    }
+    if "docker" in profiles:
+        return (
+            "http://registry:8080",
+            "http://registry-b:8080",
+            "http://registry:9",
+        )
+    return (
+        "http://localhost:8080",
+        "http://localhost:8082",
+        "http://localhost:9",
+    )
+
+
+_REGISTRY_A, _REGISTRY_B, _REGISTRY_DEAD = _registry_urls()
 _REGISTRY_B_TOKEN = "test-buyer-token"
-_REGISTRY_DEAD = "http://localhost:9"  # reserved discard port; connection refused fast
 
 
 # ---------------------------------------------------------------------------

@@ -85,6 +85,40 @@ def test_address_to_slot_base_sepolia_erc20_escrow():
     assert address_to_slot("base_sepolia", escrow) == "erc20_escrow_obligation_nontierable"
 
 
+def test_address_to_slot_base_sepolia_erc721_escrows():
+    from service.clients.alkahest import (
+        address_to_slot,
+        get_erc721_escrow_obligation_nontierable,
+        get_erc721_escrow_obligation_tierable,
+        _reverse_address_map,
+    )
+    _reverse_address_map.cache_clear()
+    non_tierable = get_erc721_escrow_obligation_nontierable("base_sepolia")
+    tierable = get_erc721_escrow_obligation_tierable("base_sepolia")
+    assert address_to_slot("base_sepolia", non_tierable) == "erc721_escrow_obligation_nontierable"
+    if int(tierable, 16) != 0:
+        assert address_to_slot("base_sepolia", tierable) == "erc721_escrow_obligation_tierable"
+    else:
+        assert address_to_slot("base_sepolia", tierable) is None
+
+
+def test_address_to_slot_base_sepolia_erc1155_escrows():
+    from service.clients.alkahest import (
+        address_to_slot,
+        get_erc1155_escrow_obligation_nontierable,
+        get_erc1155_escrow_obligation_tierable,
+        _reverse_address_map,
+    )
+    _reverse_address_map.cache_clear()
+    non_tierable = get_erc1155_escrow_obligation_nontierable("base_sepolia")
+    tierable = get_erc1155_escrow_obligation_tierable("base_sepolia")
+    assert address_to_slot("base_sepolia", non_tierable) == "erc1155_escrow_obligation_nontierable"
+    if int(tierable, 16) != 0:
+        assert address_to_slot("base_sepolia", tierable) == "erc1155_escrow_obligation_tierable"
+    else:
+        assert address_to_slot("base_sepolia", tierable) is None
+
+
 def test_address_to_slot_unknown_address_returns_none():
     from service.clients.alkahest import address_to_slot, _reverse_address_map
     _reverse_address_map.cache_clear()
@@ -121,8 +155,20 @@ def test_address_to_slot_anvil_override(tmp_path):
         "erc20_addresses": {
             "escrow_obligation_nontierable": escrow_addr,
         },
+        "erc721_addresses": {
+            "escrow_obligation_nontierable": "0x" + "ef" * 20,
+            "escrow_obligation_tierable": "0x" + "34" * 20,
+        },
+        "erc1155_addresses": {
+            "escrow_obligation_nontierable": "0x" + "56" * 20,
+            "escrow_obligation_tierable": "0x" + "78" * 20,
+        },
     }))
     cfg_path = str(override)
     assert address_to_slot("anvil", arbiter_addr, config_path=cfg_path) == "recipient_arbiter"
     assert address_to_slot("anvil", escrow_addr, config_path=cfg_path) == "erc20_escrow_obligation_nontierable"
+    assert address_to_slot("anvil", "0x" + "ef" * 20, config_path=cfg_path) == "erc721_escrow_obligation_nontierable"
+    assert address_to_slot("anvil", "0x" + "34" * 20, config_path=cfg_path) == "erc721_escrow_obligation_tierable"
+    assert address_to_slot("anvil", "0x" + "56" * 20, config_path=cfg_path) == "erc1155_escrow_obligation_nontierable"
+    assert address_to_slot("anvil", "0x" + "78" * 20, config_path=cfg_path) == "erc1155_escrow_obligation_tierable"
     assert address_to_slot("anvil", "0x" + "00" * 20, config_path=cfg_path) is None

@@ -106,6 +106,40 @@ def normalize_anvil_state(state_json: bytes) -> bytes:
 
     if patched:
         print(f"Added missing trace log index fields: {patched}")
+    # The baked e2e chain only needs current accounts/storage. Recent local
+    # Anvil dumps include transaction history shapes that the pinned
+    # ghcr.io/foundry-rs/foundry:v1.5.1 image may reject on --load-state.
+    # Preserve the current block header so best_block_number resolves, but
+    # drop historical transaction bodies.
+    current_number = (state.get("block") or {}).get("number")
+    selected_block = None
+    for block in state.get("blocks") or []:
+        header_number = (block.get("header") or {}).get("number") if isinstance(block, dict) else None
+        if header_number == current_number:
+            selected_block = dict(block)
+            break
+        if isinstance(header_number, int) and isinstance(current_number, str):
+            try:
+                if header_number == int(current_number, 16):
+                    selected_block = dict(block)
+                    break
+            except ValueError:
+                pass
+    if selected_block is None and state.get("blocks"):
+        selected_block = dict(state["blocks"][-1])
+    if selected_block is not None:
+        selected_block["transactions"] = []
+        selected_block["ommers"] = []
+        if "withdrawals" in selected_block:
+            selected_block["withdrawals"] = None
+        state["blocks"] = [selected_block]
+        header_number = (selected_block.get("header") or {}).get("number")
+        if isinstance(header_number, str):
+            state["best_block_number"] = int(header_number, 16)
+        elif isinstance(header_number, int):
+            state["best_block_number"] = header_number
+    state["transactions"] = []
+    state["historical_states"] = None
     return json.dumps(state, separators=(",", ":"), sort_keys=False).encode()
 
 
