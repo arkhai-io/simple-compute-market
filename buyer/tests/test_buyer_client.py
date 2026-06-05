@@ -140,6 +140,7 @@ def test_round_0_request_preserves_literal_fields(mock_urlopen):
             escrow_address="0x" + "cd" * 20,
             fields={},
             literal_fields={"token": token},
+            rates=[{"field": "amount", "per": "hour", "value": "50"}],
             expiration_unix=1_800_000_000,
         ),
     )
@@ -147,6 +148,53 @@ def test_round_0_request_preserves_literal_fields(mock_urlopen):
     proposal = seen_body["proposal"]
     assert proposal["fields"] == {"amount": 50}
     assert proposal["literal_fields"] == {"token": token}
+
+
+@patch("market_buyer.buyer_client.urllib.request.urlopen")
+def test_round_0_request_omits_amount_for_amountless_escrow(mock_urlopen):
+    seen_body = {}
+
+    def _capture(req, timeout=None):
+        seen_body.update(json.loads(req.data.decode("utf-8")))
+        return _MockResponse(
+            status=200,
+            text=json.dumps({
+                "negotiation_id": "neg-1",
+                "action": "accept",
+                "proposal": {
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "cd" * 20,
+                    "fields": {},
+                    "literal_fields": {"attestationUid": "0x" + "aa" * 32},
+                    "rates": [],
+                    "expiration_unix": 1_800_000_000,
+                },
+            }),
+        )
+
+    mock_urlopen.side_effect = _capture
+    negotiate_with_seller(
+        seller_url="http://seller:8001",
+        buyer_address=_BUYER_ADDR,
+        buyer_private_key=_BUYER_PK,
+        listing_id="seller-1",
+        initial_price=0,
+        max_price=0,
+        provision_terms=_provision(3600),
+        escrow_proposal=EscrowProposal(
+            chain_name="anvil",
+            escrow_address="0x" + "cd" * 20,
+            fields={},
+            literal_fields={"attestationUid": "0x" + "aa" * 32},
+            rates=[],
+            expiration_unix=1_800_000_000,
+        ),
+        chain=["accept_exact_listing"],
+    )
+
+    proposal = seen_body["proposal"]
+    assert proposal["fields"] == {}
+    assert proposal["literal_fields"] == {"attestationUid": "0x" + "aa" * 32}
 
 
 @patch("market_buyer.buyer_client.urllib.request.urlopen")

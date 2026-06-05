@@ -245,6 +245,64 @@ class TestAcceptExactListing:
         assert decision.action == "reject"
         assert "exact_listing:demands_mismatch" in (decision.reason or "")
 
+    def test_accepts_amountless_exact_attestation_escrow(self):
+        attestation_uid = "0x" + "aa" * 32
+        listing = {
+            "listing_id": "L1",
+            "accepted_escrows": [
+                {
+                    "chain_name": "anvil",
+                    "escrow_address": _ADDR,
+                    "literal_fields": {"attestationUid": attestation_uid},
+                    "rates": [],
+                }
+            ],
+        }
+        history, ctx = _ctx(
+            listing=listing,
+            escrow_proposal={
+                "chain_name": "anvil",
+                "escrow_address": _ADDR,
+                "fields": {},
+                "literal_fields": {"attestationUid": attestation_uid},
+                "rates": [],
+                "demands": [],
+            },
+        )
+        decision, _ = accept_exact_listing_middleware(history, ctx)
+        assert decision is not None
+        assert decision.action == "accept"
+        assert "amount" not in (decision.proposal["fields"] or {})
+
+    def test_rejects_unexpected_amount_on_amountless_exact_escrow(self):
+        attestation_uid = "0x" + "aa" * 32
+        listing = {
+            "listing_id": "L1",
+            "accepted_escrows": [
+                {
+                    "chain_name": "anvil",
+                    "escrow_address": _ADDR,
+                    "literal_fields": {"attestationUid": attestation_uid},
+                    "rates": [],
+                }
+            ],
+        }
+        history, ctx = _ctx(
+            listing=listing,
+            escrow_proposal={
+                "chain_name": "anvil",
+                "escrow_address": _ADDR,
+                "fields": {"amount": 1000},
+                "literal_fields": {"attestationUid": attestation_uid},
+                "rates": [],
+                "demands": [],
+            },
+        )
+        decision, _ = accept_exact_listing_middleware(history, ctx)
+        assert decision is not None
+        assert decision.action == "reject"
+        assert "exact_listing:field_mismatch" in (decision.reason or "")
+
 
 class TestRejectsWhenFieldDiverges:
     def test_token_mismatch(self):

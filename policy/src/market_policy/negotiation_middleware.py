@@ -712,6 +712,26 @@ def _normalize_rate(value: Any) -> dict[str, Any]:
     }
 
 
+def _proposal_requires_exact_amount(
+    matched: dict[str, Any],
+) -> bool:
+    """Return whether exact-listing should compare ``fields.amount``.
+
+    ERC20/native/ERC1155 scalar-price flows carry an absolute negotiated
+    amount in ``fields.amount``. Amountless exact escrows, such as a pure
+    attestation UID escrow with no rates, should not be forced through that
+    scalar path.
+    """
+    literal_fields = matched.get("literal_fields") or {}
+    if isinstance(literal_fields, dict) and "amount" in literal_fields:
+        return True
+    for rate in matched.get("rates") or []:
+        field = rate.get("field") if isinstance(rate, dict) else getattr(rate, "field", None)
+        if field == "amount":
+            return True
+    return False
+
+
 def _normalize_demands_for_chain(value: Any, chain_name: Any) -> list[Any]:
     raw = _loads_json_list(value)
     out = []
@@ -917,7 +937,8 @@ def accept_exact_listing_middleware(
     - select one advertised ``accepted_escrows`` entry by chain + address;
     - exactly mirror that entry's ``literal_fields`` and ``rates``;
     - exactly mirror listing-level demands for the selected chain;
-    - offer ``fields.amount == context.our_reference_amount``.
+    - for scalar amount escrows, offer
+      ``fields.amount == context.our_reference_amount``.
 
     Any mismatch rejects. No counters are produced.
     """
@@ -960,20 +981,22 @@ def accept_exact_listing_middleware(
             context,
         )
     expected_amount = int(round(context.our_reference_amount))
-    proposed_amount = _amount_from_proposal(proposal)
-    if proposed_amount is None or int(proposed_amount) != expected_amount:
-        return (
-            NegotiationDecision(
-                action="reject",
-                reason=(
-                    f"exact_listing:amount_mismatch:"
-                    f"{proposed_amount!r}!={expected_amount!r}"
+    requires_amount = _proposal_requires_exact_amount(matched)
+    if requires_amount:
+        proposed_amount = _amount_from_proposal(proposal)
+        if proposed_amount is None or int(proposed_amount) != expected_amount:
+            return (
+                NegotiationDecision(
+                    action="reject",
+                    reason=(
+                        f"exact_listing:amount_mismatch:"
+                        f"{proposed_amount!r}!={expected_amount!r}"
+                    ),
                 ),
-            ),
-            context,
-        )
+                context,
+            )
     for key, value in proposal_fields.items():
-        if key == "amount":
+        if key == "amount" and requires_amount:
             continue
         expected = expected_literal.get(key)
         actual = _normalize_exact_value(value)
@@ -1039,7 +1062,10 @@ def accept_exact_listing_middleware(
     return (
         NegotiationDecision(
             action="accept",
-            proposal=_set_proposal_amount(proposal, expected_amount),
+            proposal=(
+                _set_proposal_amount(proposal, expected_amount)
+                if requires_amount else dict(proposal)
+            ),
             reason="exact_listing",
         ),
         context,

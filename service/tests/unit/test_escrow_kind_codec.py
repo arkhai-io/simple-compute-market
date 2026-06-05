@@ -553,6 +553,59 @@ def test_materialize_escrow_terms_uses_final_agreed_amount_over_proposal_amount(
     assert terms.obligation_data["amount"] == 9500
 
 
+def test_materialize_escrow_terms_assigns_indexed_bundle_rate_fields():
+    proposal = EscrowProposal(
+        chain_name="anvil",
+        escrow_address="0x" + "00" * 20,
+        literal_fields={
+            "arbiter": _ARBITER,
+            "demand": _DEMAND_HEX,
+            "erc20Tokens": [_TOKEN, "0x" + "ef" * 20],
+        },
+        rates=[
+            {"field": "erc20Amounts[0]", "per": "hour", "value": 100},
+            {"field": "erc20Amounts[1]", "per": "hour", "value": 200},
+            {"field": "nativeAmount", "per": "hour", "value": 3},
+        ],
+        expiration_unix=1_800_000_000,
+    )
+
+    terms = materialize_escrow_terms_from_proposal(
+        proposal=proposal,
+        seller_wallet_address="0x" + "12" * 20,
+        agreed_amount=999,
+        duration_seconds=7200,
+    )[0]
+
+    assert terms.obligation_data["erc20Amounts"] == [200, 400]
+    assert terms.obligation_data["nativeAmount"] == 6
+    assert "amount" not in terms.obligation_data
+
+
+def test_materialize_escrow_terms_does_not_add_amount_for_amountless_escrow():
+    proposal = EscrowProposal(
+        chain_name="anvil",
+        escrow_address="0x" + "00" * 20,
+        literal_fields={
+            "arbiter": _ARBITER,
+            "demand": _DEMAND_HEX,
+            "attestationUid": "0x" + "12" * 32,
+        },
+        rates=[],
+        expiration_unix=1_800_000_000,
+    )
+
+    terms = materialize_escrow_terms_from_proposal(
+        proposal=proposal,
+        seller_wallet_address="0x" + "12" * 20,
+        agreed_amount=999,
+        duration_seconds=7200,
+    )[0]
+
+    assert terms.obligation_data["attestationUid"] == "0x" + "12" * 32
+    assert "amount" not in terms.obligation_data
+
+
 def test_erc20_refund_claimed_transfers_claimed_token(monkeypatch):
     refund = AsyncMock(return_value={"tx_hash": "0xrefund", "asset_kind": "erc20"})
     monkeypatch.setattr("service.clients.alkahest._refund_erc20_claimed", refund)

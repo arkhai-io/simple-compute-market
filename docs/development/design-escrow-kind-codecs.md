@@ -22,12 +22,12 @@ Remaining ERC20-shaped or policy-specific surfaces:
 - the bundled/default compute policies mostly reason about one scalar
   `amount`; native token, ERC20 tierable, and ERC1155 can reuse that policy
   shape, while ERC721, bundles, and attestation escrows need caller-supplied
-  policy or a simple exact-match guard;
+  policy or the packaged exact-match guard;
 - listing display, pricing, filtering, refund, and some admin helpers still
   use convenience helpers like `accepted_token_address` and
   `primary_rate_value`;
-- token bundle final-term materialization still needs field-path assignment
-  for array paths such as `erc20Amounts[0]`;
+- token bundle final-term materialization supports field-path assignment for
+  array paths such as `erc20Amounts[0]`;
 - claim/reclaim/show convenience commands now dispatch through escrow codecs
   when the escrow address is known, with best-effort codec discovery for raw
   UID inspection/reclaim; manual refund remains an explicit ERC20-transfer
@@ -114,8 +114,8 @@ Generalize the places that currently assume ERC20:
   array/indexed contract field paths through aliases:
   `escrow_templates.<name>.rates.<alias>.field = "erc20Amounts[0]"`, with
   CSV cells using the flat alias (`bundle:usdc=180,credits=10`);
-- final-term materialization must learn to assign those field paths into
-  nested/indexed `obligation_data` for token bundles;
+- final-term materialization assigns those field paths into nested/indexed
+  `obligation_data` for token bundles;
 - buyer proposal construction already carries selected `literal_fields`,
   `rates`, and listing-level `demands`; keep hard-coded `token` handling only
   as a convenience for token-shaped default flows.
@@ -167,9 +167,6 @@ those semantics are settled.
 
 ## Open Questions
 
-- What exact path-assignment helper should turn aliased bundle template fields
-  (`erc20Amounts[0]`, `erc721TokenIds[0]`, etc.) into nested/indexed
-  `obligation_data`?
 - Should registry filters gain first-class non-ERC20 axes such as
   `escrow_kind`, `token`, `tokenId`, or native amount, or should they stay as
   JSONPath filters over `accepted_escrows`?

@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -774,15 +775,76 @@ def build_payment_obligation_data(
 def _set_obligation_field(data: dict[str, Any], field: str, value: Any) -> None:
     """Set a materialized obligation field.
 
-    The current templates use top-level fields (``amount``, ``tokenId``).
-    Indexed bundle paths are left for the token-bundle phase so we fail
-    clearly instead of silently writing the wrong structure.
+    Rate slots may address top-level fields (``amount``, ``nativeAmount``)
+    or nested/indexed token-bundle fields (``erc20Amounts[0]``). Missing
+    lists are created and expanded with ``None`` placeholders.
     """
-    if "." in field or "[" in field or "]" in field:
+    if not field:
+        raise ValueError("escrow rate field must not be empty")
+
+    parts: list[str | int] = []
+    pos = 0
+    pattern = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)|\[(\d+)\]|(\.)")
+    while pos < len(field):
+        match = pattern.match(field, pos)
+        if match is None:
+            raise ValueError(f"invalid escrow rate field path {field!r}")
+        if match.group(1) is not None:
+            parts.append(match.group(1))
+        elif match.group(2) is not None:
+            if not parts:
+                raise ValueError(f"invalid escrow rate field path {field!r}")
+            parts.append(int(match.group(2)))
+        elif match.group(3) is not None:
+            if pos == 0 or pos == len(field) - 1:
+                raise ValueError(f"invalid escrow rate field path {field!r}")
+        pos = match.end()
+
+    current: Any = data
+    for idx, part in enumerate(parts):
+        is_last = idx == len(parts) - 1
+        next_part = None if is_last else parts[idx + 1]
+
+        if isinstance(part, str):
+            if not isinstance(current, dict):
+                raise ValueError(f"cannot set escrow rate field {field!r}")
+            if is_last:
+                current[part] = value
+                return
+            existing = current.get(part)
+            if existing is None:
+                existing = [] if isinstance(next_part, int) else {}
+                current[part] = existing
+            current = existing
+            continue
+
+        if not isinstance(current, list):
+            raise ValueError(f"cannot set escrow rate field {field!r}")
+        while len(current) <= part:
+            current.append(None)
+        if is_last:
+            current[part] = value
+            return
+        existing = current[part]
+        if existing is None:
+            existing = [] if isinstance(next_part, int) else {}
+            current[part] = existing
+        current = existing
+
+    if not parts:
         raise ValueError(
-            f"nested/indexed escrow rate field {field!r} is not supported yet"
+            f"invalid escrow rate field path {field!r}"
         )
-    data[field] = value
+
+
+def _codec_kind_uses_scalar_amount(kind: str | None) -> bool:
+    if not kind:
+        return False
+    return (
+        kind.startswith("erc20_")
+        or kind.startswith("native_token_")
+        or kind.startswith("erc1155_")
+    )
 
 
 def materialize_escrow_terms_from_proposal(
@@ -828,7 +890,27 @@ def materialize_escrow_terms_from_proposal(
         total = compute_rate_total(rate_obj, duration_seconds)
         _set_obligation_field(obligation_data, field, total)
 
-    if agreed_amount is not None:
+    has_amount_rate = any(
+        (
+            rate.get("field") if isinstance(rate, dict) else getattr(rate, "field", None)
+        ) == "amount"
+        for rate in rates
+    )
+    amount_kind = False
+    if agreed_amount is not None and not ("amount" in obligation_data or has_amount_rate):
+        try:
+            amount_kind = _codec_kind_uses_scalar_amount(
+                get_escrow_codec_for(
+                    proposal.chain_name,
+                    proposal.escrow_address,
+                    config_path=addr_config_path,
+                ).kind
+            )
+        except Exception:
+            amount_kind = False
+    if agreed_amount is not None and (
+        "amount" in obligation_data or has_amount_rate or amount_kind
+    ):
         obligation_data["amount"] = int(agreed_amount)
 
     demands = accepted_demands(proposal)

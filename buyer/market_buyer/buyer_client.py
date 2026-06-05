@@ -381,11 +381,26 @@ def negotiate_with_seller(
         initial_amount = int(round(float(initial_price) * scale))
         ceiling_amount = float(max_price) * scale
 
-        # Pin the buyer's first proposal: chain + escrow contract + token
-        # came from the picked accepted_escrows entry; amount is round 0's
-        # absolute opening bid.
+        # Pin the buyer's first proposal. Scalar payment escrows carry the
+        # round-0 absolute opening bid in fields.amount; amountless exact
+        # escrows leave fields unchanged.
         pinned_fields = dict(escrow_proposal.fields or {})
-        pinned_fields["amount"] = initial_amount
+        uses_scalar_amount = (
+            "amount" in pinned_fields
+            or (
+                "token" in pinned_fields
+                and "tokenId" not in pinned_fields
+                and "token_id" not in pinned_fields
+            )
+            or any(
+                (
+                    r.get("field") if isinstance(r, dict) else getattr(r, "field", None)
+                ) == "amount"
+                for r in (escrow_proposal.rates or [])
+            )
+        )
+        if uses_scalar_amount:
+            pinned_fields["amount"] = initial_amount
         pinned_proposal = {
             "chain_name": escrow_proposal.chain_name,
             "escrow_address": escrow_proposal.escrow_address,
