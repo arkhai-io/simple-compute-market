@@ -41,6 +41,7 @@ class DealContext:
     token_contract: Optional[str] = None
     token_decimals: Optional[float] = None
     accepted_escrow_proposal: Optional[dict[str, Any]] = None
+    accepted_escrow_terms: Optional[list[dict[str, Any]]] = None
     accepted_provision_terms: Optional[dict[str, Any]] = None
 
 
@@ -70,12 +71,18 @@ def load_deal_context(run_id: str) -> DealContext:
     token_contract: Optional[str] = None
     token_decimals: Optional[float] = None
     accepted_escrow_proposal: Optional[dict[str, Any]] = None
+    accepted_escrow_terms: Optional[list[dict[str, Any]]] = None
     accepted_provision_terms: Optional[dict[str, Any]] = None
     last_status: Optional[str] = None
 
     def _capture_accepted_terms(ev: dict[str, Any]) -> None:
-        nonlocal accepted_escrow_proposal, accepted_provision_terms
+        nonlocal accepted_escrow_proposal, accepted_escrow_terms, accepted_provision_terms
         nonlocal seller_wallet_address, token_contract
+        raw_terms = ev.get("accepted_escrow_terms")
+        if isinstance(raw_terms, list):
+            accepted_escrow_terms = [
+                item for item in raw_terms if isinstance(item, dict)
+            ]
         raw_proposal = ev.get("accepted_escrow_proposal")
         if isinstance(raw_proposal, dict):
             accepted_escrow_proposal = raw_proposal
@@ -171,6 +178,7 @@ def load_deal_context(run_id: str) -> DealContext:
         token_contract=token_contract,
         token_decimals=token_decimals,
         accepted_escrow_proposal=accepted_escrow_proposal,
+        accepted_escrow_terms=accepted_escrow_terms,
         accepted_provision_terms=accepted_provision_terms,
     )
 

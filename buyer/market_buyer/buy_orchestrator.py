@@ -738,6 +738,11 @@ def run_buy(
                 if outcome.accepted_escrow_proposal is not None
                 else None
             ),
+            accepted_escrow_terms=(
+                [term.model_dump() for term in outcome.accepted_escrow_terms]
+                if outcome.accepted_escrow_terms is not None
+                else None
+            ),
             accepted_provision_terms=(
                 outcome.accepted_provision_terms.model_dump()
                 if outcome.accepted_provision_terms is not None
@@ -876,22 +881,25 @@ def _settle_one(
                 attempts=attempts,
             )
 
-    try:
-        escrows = build_escrow_terms(
-            accepted_proposal, terms.seller_wallet_address,
-            terms.agreed_amount, terms.duration_seconds,
-        )
-    except Exception as exc:
-        on_event("escrow_create_failed", {"error": f"build_escrow_terms: {exc}"})
-        return BuyResult(
-            status="exited",
-            negotiation_id=outcome.negotiation_id,
-            seller_url=seller_url,
-            agreed_amount=outcome.agreed_amount,
-            reason=f"build_escrow_terms_failed: {exc}",
-            rounds=outcome.rounds,
-            attempts=attempts,
-        )
+    if outcome.accepted_escrow_terms is not None:
+        escrows = outcome.accepted_escrow_terms
+    else:
+        try:
+            escrows = build_escrow_terms(
+                accepted_proposal, terms.seller_wallet_address,
+                terms.agreed_amount, terms.duration_seconds,
+            )
+        except Exception as exc:
+            on_event("escrow_create_failed", {"error": f"build_escrow_terms: {exc}"})
+            return BuyResult(
+                status="exited",
+                negotiation_id=outcome.negotiation_id,
+                seller_url=seller_url,
+                agreed_amount=outcome.agreed_amount,
+                reason=f"build_escrow_terms_failed: {exc}",
+                rounds=outcome.rounds,
+                attempts=attempts,
+            )
 
     on_event(
         "escrow_create_start",

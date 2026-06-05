@@ -71,6 +71,13 @@ def _first_listing_chain(deal) -> Optional[str]:
 
 
 def _accepted_proposal_chain(deal) -> Optional[str]:
+    terms = getattr(deal, "accepted_escrow_terms", None)
+    if isinstance(terms, list) and terms:
+        first = terms[0]
+        if isinstance(first, dict):
+            chain = first.get("chain_name")
+            if isinstance(chain, str) and chain:
+                return chain
     proposal = getattr(deal, "accepted_escrow_proposal", None)
     if isinstance(proposal, dict):
         chain = proposal.get("chain_name")
@@ -230,7 +237,14 @@ def run_settle_from_log(
             make_create_escrow_fn,
         )
 
-        if deal.accepted_escrow_proposal is not None:
+        if deal.accepted_escrow_terms is not None:
+            from service.schemas import EscrowTerms
+
+            escrow_terms_list = [
+                EscrowTerms.model_validate(item)
+                for item in deal.accepted_escrow_terms
+            ]
+        elif deal.accepted_escrow_proposal is not None:
             proposal = EscrowProposal(**deal.accepted_escrow_proposal)
         else:
             escrow_address = get_erc20_escrow_obligation_nontierable(
@@ -245,16 +259,17 @@ def run_settle_from_log(
                 expiration_unix=int(_time.time()) + expiration_seconds,
             )
 
-        build_terms = make_buyer_payment_escrow_terms_fn(
-            chain_name=chain.chain_name,
-            addr_config_path=chain.alkahest_addr_config,
-        )
-        escrow_terms_list = build_terms(
-            proposal,
-            seller_wallet,
-            float(deal.agreed_amount),
-            int(effective_duration),
-        )
+        if deal.accepted_escrow_terms is None:
+            build_terms = make_buyer_payment_escrow_terms_fn(
+                chain_name=chain.chain_name,
+                addr_config_path=chain.alkahest_addr_config,
+            )
+            escrow_terms_list = build_terms(
+                proposal,
+                seller_wallet,
+                float(deal.agreed_amount),
+                int(effective_duration),
+            )
 
         create_escrow = make_create_escrow_fn(
             private_key=chain.buyer_private_key,

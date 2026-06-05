@@ -31,7 +31,7 @@ from market_policy.negotiation_middleware import (
     load_negotiation_chain,
     run_negotiation_chain,
 )
-from service.schemas import EscrowProposal, ProvisionTerms
+from service.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
 
 
 DEFAULT_MAX_ROUNDS = 10
@@ -105,6 +105,7 @@ class NegotiationOutcome:
     rounds: int = 0
     accepted_provision_terms: Optional[ProvisionTerms] = None
     accepted_escrow_proposal: Optional[EscrowProposal] = None
+    accepted_escrow_terms: Optional[list[EscrowTerms]] = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"status": self.status, "rounds": self.rounds}
@@ -120,12 +121,20 @@ class NegotiationOutcome:
             d["accepted_provision_terms"] = self.accepted_provision_terms.model_dump()
         if self.accepted_escrow_proposal is not None:
             d["accepted_escrow_proposal"] = self.accepted_escrow_proposal.model_dump()
+        if self.accepted_escrow_terms is not None:
+            d["accepted_escrow_terms"] = [
+                term.model_dump() for term in self.accepted_escrow_terms
+            ]
         return d
 
 
 def _parse_accepted_terms_from_reply(
     reply: dict[str, Any],
-) -> tuple[Optional[ProvisionTerms], Optional[EscrowProposal]]:
+) -> tuple[
+    Optional[ProvisionTerms],
+    Optional[EscrowProposal],
+    Optional[list[EscrowTerms]],
+]:
     """Extract the seller's echoed accepted terms from a negotiate reply.
 
     Returns (None, None) if the seller didn't include them — happens on
@@ -134,9 +143,15 @@ def _parse_accepted_terms_from_reply(
     """
     raw_prov = reply.get("accepted_provision_terms")
     raw_esc = reply.get("accepted_escrow_proposal")
+    raw_terms = reply.get("accepted_escrow_terms")
     prov = ProvisionTerms.model_validate(raw_prov) if isinstance(raw_prov, dict) else None
     esc = EscrowProposal.model_validate(raw_esc) if isinstance(raw_esc, dict) else None
-    return prov, esc
+    terms = (
+        [EscrowTerms.model_validate(item) for item in raw_terms]
+        if isinstance(raw_terms, list)
+        else None
+    )
+    return prov, esc, terms
 
 
 def _sign(message: str, private_key: str) -> tuple[str, int]:
@@ -272,6 +287,7 @@ def negotiate_with_seller(
     # the negotiation thread); subsequent rounds don't re-echo them.
     accepted_prov: Optional[ProvisionTerms] = None
     accepted_esc: Optional[EscrowProposal] = None
+    accepted_terms: Optional[list[EscrowTerms]] = None
     duration_seconds: Optional[float] = None  # populated from provision_terms or resume
     if chain is None:
         chain = _load_buyer_chain()
@@ -368,7 +384,7 @@ def negotiate_with_seller(
 
         neg_id = reply.get("negotiation_id")
         seller_action = reply.get("action")
-        accepted_prov, accepted_esc = _parse_accepted_terms_from_reply(reply)
+        accepted_prov, accepted_esc, accepted_terms = _parse_accepted_terms_from_reply(reply)
 
         if seller_action == "accept":
             return NegotiationOutcome(
@@ -379,6 +395,7 @@ def negotiate_with_seller(
                 rounds=0,
                 accepted_provision_terms=accepted_prov,
                 accepted_escrow_proposal=accepted_esc,
+                accepted_escrow_terms=accepted_terms,
             )
         # On non-agreed paths we still carry forward what the seller
         # validated — used if the negotiation ends up agreed in later
@@ -477,6 +494,7 @@ def negotiate_with_seller(
         if next_move.action == "accept":
             # We told the seller we accept; their reply should echo accept.
             if reply.get("action") == "accept":
+                reply_prov, reply_esc, reply_terms = _parse_accepted_terms_from_reply(reply)
                 return NegotiationOutcome(
                     status="agreed",
                     negotiation_id=neg_id,
@@ -486,8 +504,9 @@ def negotiate_with_seller(
                     ),
                     duration_seconds=duration_seconds,
                     rounds=round_idx,
-                    accepted_provision_terms=accepted_prov,
-                    accepted_escrow_proposal=accepted_esc,
+                    accepted_provision_terms=reply_prov or accepted_prov,
+                    accepted_escrow_proposal=reply_esc or accepted_esc,
+                    accepted_escrow_terms=reply_terms or accepted_terms,
                 )
             # Non-accept reply to our accept is anomalous but treat as terminal.
             return NegotiationOutcome(
@@ -522,6 +541,7 @@ def negotiate_with_seller(
 
         seller_action = reply.get("action")
         if seller_action == "accept":
+            reply_prov, reply_esc, reply_terms = _parse_accepted_terms_from_reply(reply)
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=neg_id,
@@ -531,8 +551,9 @@ def negotiate_with_seller(
                 ),
                 duration_seconds=duration_seconds,
                 rounds=round_idx,
-                accepted_provision_terms=accepted_prov,
-                accepted_escrow_proposal=accepted_esc,
+                accepted_provision_terms=reply_prov or accepted_prov,
+                accepted_escrow_proposal=reply_esc or accepted_esc,
+                accepted_escrow_terms=reply_terms or accepted_terms,
             )
         if seller_action in ("exit", "reject"):
             return NegotiationOutcome(

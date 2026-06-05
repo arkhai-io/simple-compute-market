@@ -4,21 +4,14 @@ Two responsibilities, kept separate so future steps can swap out
 either without disturbing the other:
 
 1. ``make_buyer_payment_escrow_terms_fn`` — given env config (chain,
-   token, expiration window), returns a builder that produces an
-   ``EscrowTerms`` (the canonical negotiated artifact). Today, every
-   negotiation outcome materializes as a single buyer-made
-   ``ERC20EscrowObligation`` escrow with the listing/proposal-level
-   arbiter ``demands`` encoded into the escrow demand bytes. Future steps
-   replace the inlined arbiter encoding with an arbiter codec
-   lookup; the builder's call signature stays stable.
+   token, expiration window), returns a builder that produces concrete
+   ``EscrowTerms`` from the seller-accepted proposal.
 
 2. ``make_create_escrow_fn`` — given chain creds, returns a thin
    submit hook ``Callable[[list[EscrowTerms]], list[str]]``. Each
    entry with ``maker == "buyer"`` is created on-chain in order; the
-   returned uids match input order. Today supports ERC20 escrows
-   only; readers extract the literal fields from
-   ``obligation_data`` so adding new escrow kinds later just means
-   wiring a per-contract SDK dispatcher in this function (step 6).
+   returned uids match input order. Dispatch is by the escrow contract
+   address carried on each ``EscrowTerms``.
 
 Both functions defer alkahest-py imports until they're actually
 called, so importing this module (e.g. from tests that mock the
@@ -92,77 +85,15 @@ def make_buyer_payment_escrow_terms_fn(
     ) -> list[EscrowTerms]:
         # Late imports — alkahest is heavyweight; tests that mock this
         # builder shouldn't pay for it.
-        from service.clients.alkahest import (
-            address_to_slot,
-            build_payment_obligation_data,
-            get_escrow_codec_for,
-        )
-        from service.schemas import (
-            accepted_demands,
-            accepted_recipient_address,
-            accepted_token_address,
-        )
+        from service.clients.alkahest import materialize_escrow_terms_from_proposal
 
-        # ERC20-only dispatch gate. Resolve the codec at build time so we
-        # fail fast with a clear NotImplementedError when the proposal
-        # references a non-ERC20 escrow contract. Phase 5 of the
-        # generic-escrow templates rollout: other obligation kinds land
-        # in later phases.
-        codec = get_escrow_codec_for(
-            proposal.chain_name, proposal.escrow_address,
-            config_path=addr_config_path,
-        )
-        if codec.kind != "erc20_escrow_obligation_nontierable":
-            raise NotImplementedError(
-                f"Buyer dispatch not implemented for escrow kind "
-                f"{codec.kind!r} at address {proposal.escrow_address!r} "
-                f"(chain {proposal.chain_name!r}); ERC20 non-tierable only."
-            )
-
-        token = accepted_token_address(proposal)
-        if not isinstance(token, str) or not token:
-            raise ValueError(
-                "EscrowProposal token missing or non-string — checked "
-                "literal_fields['token']; cannot build buyer-side "
-                "obligation_data"
-            )
-        demands = accepted_demands(proposal)
-        recipient = accepted_recipient_address(proposal) or seller_wallet_address
-        if not demands and (not isinstance(recipient, str) or not recipient):
-            raise ValueError(
-                "EscrowProposal demands missing and no legacy recipient fallback "
-                "available; cannot build buyer-side "
-                "obligation_data"
-            )
-        arbiter_kind = "recipient_arbiter"
-        proposal_literal = proposal.literal_fields or {}
-        proposal_arbiter = proposal_literal.get("arbiter")
-        if isinstance(proposal_arbiter, str) and proposal_arbiter:
-            arbiter_slot = address_to_slot(
-                proposal.chain_name, proposal_arbiter,
-                config_path=addr_config_path,
-            )
-            if arbiter_slot:
-                arbiter_kind = arbiter_slot
-
-        obligation_data = build_payment_obligation_data(
-            demands=demands or None,
-            recipient=recipient,
+        return materialize_escrow_terms_from_proposal(
+            proposal=proposal,
+            seller_wallet_address=seller_wallet_address,
             agreed_amount=int(agreed_amount),
             duration_seconds=duration_seconds,
-            token_contract_address=token,
-            chain_name=chain_name,
             addr_config_path=addr_config_path,
-            arbiter_kind=arbiter_kind,
         )
-
-        terms = EscrowTerms(
-            maker="buyer",
-            escrow_contract=proposal.escrow_address,
-            obligation_data=obligation_data,
-            expiration_unix=proposal.expiration_unix,
-        )
-        return [terms]
 
     return _build
 
@@ -181,9 +112,8 @@ def make_create_escrow_fn(
     ``EscrowTerms`` — the hook reads obligation_data fields by key,
     splits them into the SDK's expected shape, and submits.
 
-    Today only the ERC20 non-tierable escrow contract is implemented;
-    seeing any other ``escrow_contract`` address raises
-    ``NotImplementedError``. Step 6 adds a per-contract dispatcher.
+    The configured ``chain_name`` is a fallback for old ``EscrowTerms``.
+    New negotiated terms carry their chain explicitly.
     """
     def _create(escrows: list[EscrowTerms]) -> list[str]:
         # Late imports for the same reason as the builder.
@@ -215,8 +145,9 @@ def make_create_escrow_fn(
             # Codec lookup is the dispatch gate — an EscrowTerms whose
             # escrow_contract doesn't match a registered codec raises
             # at this point (rather than being silently misrouted).
+            escrow_chain = escrow.chain_name or chain_name
             codec = get_escrow_kind_codec_by_address(
-                escrow.escrow_contract, chain_name, config_path=addr_config_path,
+                escrow.escrow_contract, escrow_chain, config_path=addr_config_path,
             )
             logger.info(
                 "[CLI_ESCROW] Creating escrow kind=%s contract=%s amount=%s exp=%s",

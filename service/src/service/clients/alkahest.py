@@ -644,6 +644,114 @@ def build_payment_obligation_data(
     }
 
 
+def _set_obligation_field(data: dict[str, Any], field: str, value: Any) -> None:
+    """Set a materialized obligation field.
+
+    The current templates use top-level fields (``amount``, ``tokenId``).
+    Indexed bundle paths are left for the token-bundle phase so we fail
+    clearly instead of silently writing the wrong structure.
+    """
+    if "." in field or "[" in field or "]" in field:
+        raise ValueError(
+            f"nested/indexed escrow rate field {field!r} is not supported yet"
+        )
+    data[field] = value
+
+
+def materialize_escrow_terms_from_proposal(
+    *,
+    proposal: Any,
+    seller_wallet_address: str | None,
+    agreed_amount: int | None,
+    duration_seconds: int,
+    addr_config_path: str | None = None,
+) -> list[Any]:
+    """Convert the seller-accepted proposal into concrete ``EscrowTerms``.
+
+    Negotiation messages remain proposal-shaped, but the final agreement is
+    the exact on-chain obligation data. Literal fields and concrete proposal
+    fields are copied first; rate fields are filled only when the negotiation
+    has not already placed a concrete value in ``fields``.
+    """
+    from service.schemas import (
+        EscrowTerms,
+        RateValue,
+        accepted_demands,
+        accepted_recipient_address,
+        compute_rate_total,
+    )
+
+    literal_fields = dict(getattr(proposal, "literal_fields", None) or {})
+    fields = dict(getattr(proposal, "fields", None) or {})
+    obligation_data: dict[str, Any] = dict(literal_fields)
+    for key, value in fields.items():
+        if key not in obligation_data or key == "amount":
+            obligation_data[key] = value
+
+    rates = list(getattr(proposal, "rates", None) or [])
+    for rate in rates:
+        field = rate.get("field") if isinstance(rate, dict) else getattr(rate, "field", None)
+        if not isinstance(field, str) or not field:
+            continue
+        if field in obligation_data:
+            continue
+        rate_obj = RateValue.model_validate(rate) if isinstance(rate, dict) else rate
+        total = compute_rate_total(rate_obj, duration_seconds)
+        _set_obligation_field(obligation_data, field, total)
+
+    if agreed_amount is not None and "amount" not in obligation_data:
+        obligation_data["amount"] = int(agreed_amount)
+
+    demands = accepted_demands(proposal)
+    if demands:
+        first = demands[0]
+        arbiter_address = first.get("arbiter")
+        if not isinstance(arbiter_address, str) or not arbiter_address:
+            raise ValueError("demands[0].arbiter is required")
+        demand_data = first.get("demand_data")
+        if not isinstance(demand_data, dict):
+            raise ValueError("demands[0].demand_data must be an object")
+        resolved_kind = address_to_slot(
+            proposal.chain_name,
+            arbiter_address,
+            config_path=addr_config_path,
+        )
+        if not resolved_kind:
+            raise ValueError(
+                f"Cannot resolve arbiter codec for demand arbiter "
+                f"{arbiter_address!r} on chain {proposal.chain_name!r}"
+            )
+        codec = get_arbiter_codec(resolved_kind)
+        obligation_data["arbiter"] = arbiter_address
+        obligation_data["demand"] = "0x" + codec.encode_demand_data(demand_data).hex()
+    elif "arbiter" not in obligation_data or "demand" not in obligation_data:
+        recipient = accepted_recipient_address(proposal) or seller_wallet_address
+        if not recipient:
+            raise ValueError(
+                "Escrow proposal must carry demands, arbiter+demand literals, "
+                "or a recipient fallback"
+            )
+        codec = get_arbiter_codec("recipient_arbiter")
+        agreement = AgreementContext(
+            recipient=recipient,
+            agreed_amount=int(agreed_amount or obligation_data.get("amount") or 0),
+            duration_seconds=duration_seconds,
+        )
+        obligation_data["arbiter"] = codec.resolve_address(
+            proposal.chain_name,
+            config_path=addr_config_path,
+        )
+        obligation_data["demand"] = "0x" + codec.encode_demand(agreement).hex()
+
+    return [EscrowTerms(
+        maker="buyer",
+        chain_name=proposal.chain_name,
+        escrow_contract=proposal.escrow_address,
+        obligation_data=obligation_data,
+        expiration_unix=proposal.expiration_unix,
+    )]
+
+
 # ---------------------------------------------------------------------------
 # Escrow-kind codecs
 # ---------------------------------------------------------------------------

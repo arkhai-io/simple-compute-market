@@ -717,41 +717,37 @@ class TestVerifyProposalDispatch:
             )
 
     @pytest.mark.asyncio
-    async def test_raises_not_implemented_for_non_erc20(self, patched_codec_lookup):
-        """Phase 6 ships ERC20 only; other kinds raise loudly with chain
-        + address + kind in the message."""
+    async def test_verifies_non_erc20_with_generic_terms(self, patched_codec_lookup):
+        """Non-ERC20 proposal verification uses the generic materialized
+        obligation shape instead of an ERC20-only dispatch gate."""
         seams, _captured = _build_seams_capturing_token()
+        seams.pop("build_obligation_data_fn")
         proposal = EscrowProposal(
             chain_name=CHAIN,
             escrow_address=_NATIVE_ESCROW_ADDR,
             fields={},
             literal_fields={"token": TOKEN},
+            demands=[{"arbiter": ARBITER, "demand_data": {"recipient": SELLER}}],
             expiration_unix=1_800_000_000,
         )
-        with pytest.raises(NotImplementedError) as exc_info:
-            await verify_escrow_for_settlement(
-                escrow_uid="0xdead",
-                seller_wallet=SELLER,
-                agreed_price=1000,
-                agreed_duration_seconds=3600,
-                listing=_good_listing(),
-                alkahest_client=_DUMMY_CLIENT,
-                chain_name=CHAIN,
-                alkahest_address_config_path=CONFIG_PATH,
-                escrow_proposal=proposal,
-                now_unix=1_700_000_000,
-                **seams,
-            )
-        msg = str(exc_info.value)
-        assert "native_token_escrow_obligation_nontierable" in msg
-        assert _NATIVE_ESCROW_ADDR in msg
-        assert CHAIN in msg
+        await verify_escrow_for_settlement(
+            escrow_uid="0xdead",
+            seller_wallet=SELLER,
+            agreed_price=1000,
+            agreed_duration_seconds=3600,
+            listing=_good_listing(),
+            alkahest_client=_DUMMY_CLIENT,
+            chain_name=CHAIN,
+            alkahest_address_config_path=CONFIG_PATH,
+            escrow_proposal=proposal,
+            now_unix=1_700_000_000,
+            **seams,
+        )
 
     @pytest.mark.asyncio
-    async def test_dispatch_gate_runs_before_token_validation(self, patched_codec_lookup):
-        """If the escrow address is non-ERC20, NotImplementedError fires
-        even when the proposal omits the token — codec lookup is the
-        first gate."""
+    async def test_injected_legacy_builder_still_requires_token(self, patched_codec_lookup):
+        """The legacy injected builder seam is still ERC20-shaped and
+        therefore requires a token."""
         seams, _captured = _build_seams_capturing_token()
         proposal = EscrowProposal(
             chain_name=CHAIN,
@@ -759,7 +755,7 @@ class TestVerifyProposalDispatch:
             fields={},
             expiration_unix=1_800_000_000,
         )
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(EscrowVerificationError, match="omitted token"):
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
                 seller_wallet=SELLER,

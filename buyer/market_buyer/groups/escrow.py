@@ -249,11 +249,17 @@ def create_cmd(
         else (int(deal.token_decimals) if deal.token_decimals is not None else None)
     )
     proposal_chain = None
+    if isinstance(deal.accepted_escrow_terms, list) and deal.accepted_escrow_terms:
+        first_terms = deal.accepted_escrow_terms[0]
+        if isinstance(first_terms, dict):
+            raw_chain = first_terms.get("chain_name")
+            if isinstance(raw_chain, str) and raw_chain:
+                proposal_chain = raw_chain
     if isinstance(deal.accepted_escrow_proposal, dict):
         raw_chain = deal.accepted_escrow_proposal.get("chain_name")
         if isinstance(raw_chain, str) and raw_chain:
             proposal_chain = raw_chain
-    if deal.accepted_escrow_proposal is not None:
+    if deal.accepted_escrow_terms is not None or deal.accepted_escrow_proposal is not None:
         if not (chain_name_flag or proposal_chain):
             typer.secho(
                 "Accepted escrow proposal in run-log has no chain_name; pass --chain.",
@@ -334,7 +340,14 @@ def create_cmd(
         header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
     console.print(Panel(header, title="market escrow create", border_style="cyan"))
 
-    if deal.accepted_escrow_proposal is not None:
+    if deal.accepted_escrow_terms is not None:
+        from service.schemas import EscrowTerms
+
+        escrow_terms_list = [
+            EscrowTerms.model_validate(item)
+            for item in deal.accepted_escrow_terms
+        ]
+    elif deal.accepted_escrow_proposal is not None:
         from service.schemas import EscrowProposal
 
         proposal = EscrowProposal(**deal.accepted_escrow_proposal)

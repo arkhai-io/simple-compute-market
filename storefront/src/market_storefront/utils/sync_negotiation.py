@@ -80,8 +80,24 @@ def _validate_escrow_proposal(
     """
     if proposal is None:
         return None
-    _match_accepted_escrow(listing, proposal)
-    return proposal
+    matched = _match_accepted_escrow(listing, proposal)
+    if not matched:
+        return proposal
+
+    literal_fields = dict(matched.get("literal_fields") or {})
+    literal_fields.update(dict(proposal.literal_fields or {}))
+    rates = proposal.rates
+    if rates is None:
+        rates = matched.get("rates") or []
+    return EscrowProposal(
+        chain_name=proposal.chain_name,
+        escrow_address=proposal.escrow_address,
+        fields=dict(proposal.fields or {}),
+        literal_fields=literal_fields,
+        rates=rates,
+        demands=proposal.demands,
+        expiration_unix=proposal.expiration_unix,
+    )
 
 
 _ZERO_ADDRESS = "0x" + "0" * 40
@@ -157,6 +173,31 @@ def _extract_listing_token(listing: dict[str, Any]) -> str | None:
     if isinstance(accepted, list) and accepted:
         return accepted_token_address(accepted[0])
     return None
+
+
+def _materialized_escrow_terms_payload(
+    *,
+    proposal: EscrowProposal | None,
+    seller_wallet_address: str | None,
+    agreed_amount: int,
+    duration_seconds: int,
+) -> list[dict[str, Any]] | None:
+    if proposal is None:
+        return None
+    from service.clients.alkahest import materialize_escrow_terms_from_proposal
+    from market_storefront.utils.config import CHAINS
+
+    chain_config = CHAINS.get(proposal.chain_name)
+    terms = materialize_escrow_terms_from_proposal(
+        proposal=proposal,
+        seller_wallet_address=seller_wallet_address,
+        agreed_amount=agreed_amount,
+        duration_seconds=duration_seconds,
+        addr_config_path=(
+            chain_config.alkahest_address_config_path if chain_config else None
+        ),
+    )
+    return [term.model_dump() for term in terms]
 
 
 class StorefrontPausedError(Exception):
@@ -722,6 +763,16 @@ async def start_sync_negotiation(
         response["accepted_provision_terms"] = provision_terms.model_dump()
     if accepted_proposal is not None:
         response["accepted_escrow_proposal"] = accepted_proposal.model_dump()
+        if decision.action == "accept":
+            try:
+                response["accepted_escrow_terms"] = _materialized_escrow_terms_payload(
+                    proposal=accepted_proposal,
+                    seller_wallet_address=None,
+                    agreed_amount=int(agreed_amount),
+                    duration_seconds=int(agreed_duration_seconds),
+                )
+            except Exception as exc:
+                logger.debug("Could not materialize accepted escrow terms: %s", exc)
     return response
 
 
@@ -809,10 +860,23 @@ async def continue_sync_negotiation(
             agreed_amount=last_seller_amount,
             our_initial_amount=our_amount,
         )
-        return {
+        final_proposal = _proposal_with_amount(buyer_pinned_proposal, last_seller_amount)
+        response = {
             "action": "accept",
-            "proposal": _proposal_with_amount(buyer_pinned_proposal, last_seller_amount),
+            "proposal": final_proposal,
         }
+        try:
+            accepted = EscrowProposal.model_validate(final_proposal)
+            response["accepted_escrow_proposal"] = accepted.model_dump()
+            response["accepted_escrow_terms"] = _materialized_escrow_terms_payload(
+                proposal=accepted,
+                seller_wallet_address=None,
+                agreed_amount=int(last_seller_amount),
+                duration_seconds=int(agreed_duration_seconds),
+            )
+        except Exception as exc:
+            logger.debug("Could not materialize accepted escrow terms: %s", exc)
+        return response
 
     if buyer_action == "exit":
         async with NegotiationThreadTransaction("SYNC_NEGOTIATE_EXIT") as txn:
@@ -901,7 +965,28 @@ async def continue_sync_negotiation(
         decision_amount=int(decision_amount) if decision_amount is not None else None,
         decision_reason=decision.reason,
     )
-    return decision.to_dict()
+    response = decision.to_dict()
+    if decision.action == "accept":
+        final_proposal = _proposal_with_amount(
+            buyer_pinned_proposal,
+            int(decision_amount) if decision_amount is not None else int(our_amount),
+        )
+        try:
+            accepted = EscrowProposal.model_validate(final_proposal)
+            response["accepted_escrow_proposal"] = accepted.model_dump()
+            response["accepted_escrow_terms"] = _materialized_escrow_terms_payload(
+                proposal=accepted,
+                seller_wallet_address=None,
+                agreed_amount=int(decision_amount) if decision_amount is not None else int(our_amount),
+                duration_seconds=int(
+                    requested_duration_seconds
+                    or our_order_dict.get("max_duration_seconds")
+                    or 3600
+                ),
+            )
+        except Exception as exc:
+            logger.debug("Could not materialize accepted escrow terms: %s", exc)
+    return response
 
 
 async def _record_seller_decision(

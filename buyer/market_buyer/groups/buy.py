@@ -219,6 +219,11 @@ def _run_resume_from(
                 if outcome.accepted_escrow_proposal is not None
                 else None
             ),
+            accepted_escrow_terms=(
+                [term.model_dump() for term in outcome.accepted_escrow_terms]
+                if outcome.accepted_escrow_terms is not None
+                else None
+            ),
             accepted_provision_terms=(
                 outcome.accepted_provision_terms.model_dump()
                 if outcome.accepted_provision_terms is not None
@@ -685,6 +690,7 @@ def register(app: typer.Typer) -> None:
                 escrow_address=entry["escrow_address"],
                 fields={"token": token},
                 literal_fields=literal_fields,
+                rates=entry.get("rates") or [],
                 demands=demands,
                 expiration_unix=int(_time.time()) + int(expiration_seconds),
             )

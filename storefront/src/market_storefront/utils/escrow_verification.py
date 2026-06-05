@@ -194,15 +194,11 @@ async def verify_escrow_for_settlement(
         addresses for the chain (a static config lookup, not an RPC call).
     escrow_proposal:
         The buyer's ``EscrowProposal``, persisted on the negotiation
-        thread at /negotiate/new. When present, the verifier resolves
-        the escrow-kind codec from ``(chain_name, escrow_address)`` and
-        refuses to verify anything other than
-        ``erc20_escrow_obligation_nontierable`` with
-        ``NotImplementedError``. Token is read via
-        ``accepted_token_address`` (literal_fields-first, legacy fields
-        fallback). Arbiter override accepts either shape too. None for
-        legacy threads — verifier falls back to the listing-derived
-        token and the ``escrow_kind`` default.
+        thread at /negotiate/new. When present, the verifier materializes
+        the same concrete ``EscrowTerms`` shape the buyer used and compares
+        its ``obligation_data`` with the chain-read obligation. None for
+        legacy threads — verifier falls back to the listing-derived token
+        and the ``escrow_kind`` default.
     escrow_kind:
         Fallback escrow slot name when ``escrow_proposal`` is None.
         Today only ``"erc20_escrow_obligation_nontierable"`` is
@@ -226,31 +222,18 @@ async def verify_escrow_for_settlement(
             "AlkahestClient not configured — cannot verify escrow on chain"
         )
 
-    if build_obligation_data_fn is None:
-        from service.clients.alkahest import (
-            build_payment_obligation_data as build_obligation_data_fn,
-        )
-
     # The proposal (when present) is the source of truth: its
     # (chain_name, escrow_address) identifies the escrow contract and
     # its literal_fields / fields supply the buyer-committed values.
     # Legacy threads with no proposal fall back to the kwarg defaults
     # + a listing-derived token.
-    from service.schemas import (
-        accepted_demands,
-        accepted_recipient_address,
-        accepted_token_address,
-    )
+    from service.schemas import accepted_recipient_address, accepted_token_address
 
-    effective_arbiter_kind = "recipient_arbiter"
     effective_recipient = seller_wallet
-    effective_demands: list[dict[str, Any]] = []
     _codec = None
+    expected_obligation_raw: dict[str, Any] | None = None
     if escrow_proposal is not None:
-        from service.clients.alkahest import (
-            address_to_slot,
-            get_escrow_codec_for,
-        )
+        from service.clients.alkahest import get_escrow_codec_for
         _addr = (escrow_proposal.escrow_address or "").lower()
         # The buyer may leave the escrow contract unpinned — a zero-address
         # placeholder — so negotiation gates on field equality rather than a
@@ -273,36 +256,36 @@ async def verify_escrow_for_settlement(
                     f"(chain={escrow_proposal.chain_name!r}, "
                     f"address={escrow_proposal.escrow_address!r}): {exc}"
                 ) from exc
-            if _codec.kind != "erc20_escrow_obligation_nontierable":
-                raise NotImplementedError(
-                    f"Seller verify not implemented for escrow kind "
-                    f"{_codec.kind!r} at address "
-                    f"{escrow_proposal.escrow_address!r} "
-                    f"(chain {escrow_proposal.chain_name!r}); "
-                    f"ERC20 non-tierable only."
-                )
             effective_escrow_kind = _codec.kind
-        proposal_token = accepted_token_address(escrow_proposal)
-        if not isinstance(proposal_token, str) or not proposal_token:
-            raise EscrowVerificationError(
-                f"escrow proposal for {escrow_uid} omitted token "
-                f"(literal_fields['token'] missing); cannot verify "
-                f"against chain"
-            )
-        effective_token = proposal_token
-        proposal_literal = escrow_proposal.literal_fields or {}
-        proposal_arbiter = proposal_literal.get("arbiter")
-        if isinstance(proposal_arbiter, str) and proposal_arbiter:
-            arbiter_slot = address_to_slot(
-                escrow_proposal.chain_name, proposal_arbiter,
-                config_path=alkahest_address_config_path,
-            )
-            if arbiter_slot:
-                effective_arbiter_kind = arbiter_slot
         proposal_recipient = accepted_recipient_address(escrow_proposal)
         if proposal_recipient:
             effective_recipient = proposal_recipient
-        effective_demands = accepted_demands(escrow_proposal)
+        if build_obligation_data_fn is not None:
+            proposal_token = accepted_token_address(escrow_proposal)
+            if not isinstance(proposal_token, str) or not proposal_token:
+                raise EscrowVerificationError(
+                    f"escrow proposal for {escrow_uid} omitted token "
+                    f"(literal_fields['token'] missing); cannot verify "
+                    f"against chain"
+                )
+            effective_token = proposal_token
+        if build_obligation_data_fn is None:
+            from service.clients.alkahest import materialize_escrow_terms_from_proposal
+
+            try:
+                expected_terms = materialize_escrow_terms_from_proposal(
+                    proposal=escrow_proposal,
+                    seller_wallet_address=effective_recipient,
+                    agreed_amount=int(agreed_price),
+                    duration_seconds=int(agreed_duration_seconds),
+                    addr_config_path=alkahest_address_config_path,
+                )
+            except Exception as exc:
+                raise EscrowVerificationError(
+                    f"Cannot construct expected obligation_data for "
+                    f"chain={chain_name!r}: {exc}"
+                ) from exc
+            expected_obligation_raw = expected_terms[0].obligation_data
     else:
         effective_escrow_kind = escrow_kind
         effective_token = _extract_token_contract_from_listing(listing)
@@ -320,28 +303,32 @@ async def verify_escrow_for_settlement(
         async def get_obligation_fn(client, uid):  # type: ignore[no-redef]
             return await _codec.get_obligation(client, uid)
 
-    if not effective_recipient:
+    if expected_obligation_raw is None and not effective_recipient:
         raise EscrowVerificationError(
             "Escrow recipient is not configured — cannot verify escrow demand"
         )
 
-    # Build the expected obligation_data via the same helper the buyer uses.
-    # Any divergence between sides means a misconfigured chain/token/arbiter.
-    try:
-        expected_obligation_raw = build_obligation_data_fn(
-            demands=effective_demands or None,
-            recipient=effective_recipient,
-            agreed_amount=int(agreed_price),
-            duration_seconds=int(agreed_duration_seconds),
-            token_contract_address=effective_token,
-            chain_name=chain_name,
-            addr_config_path=alkahest_address_config_path,
-            arbiter_kind=effective_arbiter_kind,
-        )
-    except Exception as exc:
-        raise EscrowVerificationError(
-            f"Cannot construct expected obligation_data for chain={chain_name!r}: {exc}"
-        ) from exc
+    if expected_obligation_raw is None:
+        # Legacy thread with no concrete proposal; keep the old ERC20 path.
+        if build_obligation_data_fn is None:
+            from service.clients.alkahest import (
+                build_payment_obligation_data as build_obligation_data_fn,
+            )
+        try:
+            expected_obligation_raw = build_obligation_data_fn(
+                demands=None,
+                recipient=effective_recipient,
+                agreed_amount=int(agreed_price),
+                duration_seconds=int(agreed_duration_seconds),
+                token_contract_address=effective_token,
+                chain_name=chain_name,
+                addr_config_path=alkahest_address_config_path,
+                arbiter_kind="recipient_arbiter",
+            )
+        except Exception as exc:
+            raise EscrowVerificationError(
+                f"Cannot construct expected obligation_data for chain={chain_name!r}: {exc}"
+            ) from exc
     expected = _normalize_obligation_data(expected_obligation_raw)
 
     # Read the on-chain attestation + obligation.

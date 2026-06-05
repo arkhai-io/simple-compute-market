@@ -257,6 +257,14 @@ class EscrowTerms(BaseModel):
             "penalty deposits the seller posts as bond."
         ),
     )
+    chain_name: str | None = Field(
+        default=None,
+        description=(
+            "Alkahest chain identifier for this escrow. New negotiated "
+            "artifacts carry it explicitly; old run logs may omit it and "
+            "fall back to the caller's configured chain."
+        ),
+    )
     escrow_contract: str = Field(
         description=(
             "Address of the on-chain escrow obligation contract — e.g. "

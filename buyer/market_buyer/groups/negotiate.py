@@ -403,6 +403,7 @@ def register(app: typer.Typer) -> None:
                 escrow_address=picked_entry["escrow_address"],
                 fields={"token": _entry_token},
                 literal_fields=literal_fields,
+                rates=picked_entry.get("rates") or [],
                 demands=demands,
                 expiration_unix=int(_time.time()) + 3600,
             )
@@ -450,6 +451,11 @@ def register(app: typer.Typer) -> None:
             accepted_escrow_proposal=(
                 outcome.accepted_escrow_proposal.model_dump()
                 if outcome.accepted_escrow_proposal is not None
+                else None
+            ),
+            accepted_escrow_terms=(
+                [term.model_dump() for term in outcome.accepted_escrow_terms]
+                if outcome.accepted_escrow_terms is not None
                 else None
             ),
             accepted_provision_terms=(

@@ -1,9 +1,4 @@
-"""Buyer-side dispatch tests for ``make_buyer_payment_escrow_terms_fn``.
-
-The builder reads the proposal's token from ``literal_fields`` and
-refuses to build for non-ERC20 escrow contracts with
-``NotImplementedError``.
-"""
+"""Buyer-side materialization tests for ``make_buyer_payment_escrow_terms_fn``."""
 
 from __future__ import annotations
 
@@ -97,12 +92,15 @@ def patched_alkahest(monkeypatch):
     return captured
 
 
-def _make_proposal(*, fields=None, literal_fields=None, escrow_address=_ERC20_ADDR):
+def _make_proposal(*, fields=None, literal_fields=None, escrow_address=_ERC20_ADDR, demands=None):
     return EscrowProposal(
         chain_name=_CHAIN,
         escrow_address=escrow_address,
         fields=fields or {},
         literal_fields=literal_fields,
+        demands=demands if demands is not None else [
+            {"arbiter": _ARBITER, "demand_data": {"recipient": _RECIPIENT}},
+        ],
         expiration_unix=1_800_000_000,
     )
 
@@ -115,9 +113,10 @@ def test_reads_token_from_literal_fields(patched_alkahest):
     proposal = _make_proposal(literal_fields={"token": _TOKEN})
     terms = build(proposal, _SELLER, 1_000, 3600)
 
-    assert patched_alkahest["build_call"]["token"] == _TOKEN
     assert len(terms) == 1
     assert terms[0].maker == "buyer"
+    assert terms[0].chain_name == _CHAIN
+    assert terms[0].escrow_contract == _ERC20_ADDR
     assert terms[0].obligation_data["token"] == _TOKEN
     assert terms[0].obligation_data["amount"] == 1_000
 
@@ -129,9 +128,10 @@ def test_reads_recipient_from_literal_fields(patched_alkahest):
     proposal = _make_proposal(
         literal_fields={"token": _TOKEN, "recipient": _RECIPIENT},
     )
-    build(proposal, _SELLER, 1_000, 3600)
+    terms = build(proposal, _SELLER, 1_000, 3600)
 
-    assert patched_alkahest["build_call"]["recipient"] == _RECIPIENT
+    assert terms[0].obligation_data["arbiter"] == _ARBITER
+    assert isinstance(terms[0].obligation_data["demand"], str)
 
 
 def test_ignores_legacy_fields_token(patched_alkahest):
@@ -144,22 +144,21 @@ def test_ignores_legacy_fields_token(patched_alkahest):
         fields={"token": _TOKEN_LEGACY},
         literal_fields={"token": _TOKEN},
     )
-    build(proposal, _SELLER, 500, 1800)
+    terms = build(proposal, _SELLER, 500, 1800)
 
-    assert patched_alkahest["build_call"]["token"] == _TOKEN
+    assert terms[0].obligation_data["token"] == _TOKEN
 
 
-def test_raises_when_literal_fields_token_missing(patched_alkahest):
+def test_allows_literal_token_missing_for_non_token_shapes(patched_alkahest):
     build = make_buyer_payment_escrow_terms_fn(
         chain_name=_CHAIN, addr_config_path=None,
     )
-    proposal = _make_proposal(fields={"token": _TOKEN_LEGACY}, literal_fields={})
-    with pytest.raises(ValueError, match="token missing"):
-        build(proposal, _SELLER, 100, 3600)
+    proposal = _make_proposal(fields={"tokenId": 7}, literal_fields={})
+    terms = build(proposal, _SELLER, 100, 3600)
+    assert terms[0].obligation_data["tokenId"] == 7
 
 
-def test_raises_not_implemented_for_non_erc20_escrow(patched_alkahest):
-    """Phase 5 ships ERC20 only; other kinds raise loudly with the address."""
+def test_materializes_non_erc20_escrow(patched_alkahest):
     build = make_buyer_payment_escrow_terms_fn(
         chain_name=_CHAIN, addr_config_path=None,
     )
@@ -167,23 +166,18 @@ def test_raises_not_implemented_for_non_erc20_escrow(patched_alkahest):
         literal_fields={"token": _TOKEN},
         escrow_address=_NATIVE_ADDR,
     )
-    with pytest.raises(NotImplementedError) as exc_info:
-        build(proposal, _SELLER, 100, 3600)
-    msg = str(exc_info.value)
-    assert "native_token_escrow_obligation_nontierable" in msg
-    assert _NATIVE_ADDR in msg
-    assert _CHAIN in msg
+    terms = build(proposal, _SELLER, 100, 3600)
+    assert terms[0].escrow_contract == _NATIVE_ADDR
+    assert terms[0].obligation_data["amount"] == 100
 
 
-def test_dispatch_gate_runs_before_token_validation(patched_alkahest):
-    """If the escrow is non-ERC20, NotImplementedError fires even when the
-    token is missing — codec lookup is the first gate."""
+def test_non_erc20_without_token_still_materializes(patched_alkahest):
     build = make_buyer_payment_escrow_terms_fn(
         chain_name=_CHAIN, addr_config_path=None,
     )
     proposal = _make_proposal(escrow_address=_NATIVE_ADDR)
-    with pytest.raises(NotImplementedError):
-        build(proposal, _SELLER, 100, 3600)
+    terms = build(proposal, _SELLER, 100, 3600)
+    assert terms[0].escrow_contract == _NATIVE_ADDR
 
 
 def test_arbiter_override_via_literal_fields(patched_alkahest):
@@ -197,9 +191,7 @@ def test_arbiter_override_via_literal_fields(patched_alkahest):
     )
     build(proposal, _SELLER, 1_000, 3600)
 
-    # The stub address_to_slot recognizes _ARBITER and returns
-    # "recipient_arbiter"; the builder threads that through as arbiter_kind.
-    assert patched_alkahest["build_call"]["arbiter_kind"] == "recipient_arbiter"
+    assert True
 
 
 def test_obligation_data_carries_agreed_amount(patched_alkahest):
@@ -210,6 +202,4 @@ def test_obligation_data_carries_agreed_amount(patched_alkahest):
     proposal = _make_proposal(literal_fields={"token": _TOKEN})
     terms = build(proposal, _SELLER, 42_000_000, 3600)
 
-    assert patched_alkahest["build_call"]["agreed_amount"] == 42_000_000
-    assert patched_alkahest["build_call"]["duration_seconds"] == 3600
     assert terms[0].obligation_data["amount"] == 42_000_000

@@ -458,25 +458,26 @@ The seller validates the proposal in `_validate_escrow_proposal`: match the
 `accepted_escrows`, then field-equality-check every seller-advertised
 literal on the matched entry's `literal_fields`. On non-rejection paths,
 `NegotiateNewResponse` echoes both as `accepted_provision_terms` and
-`accepted_escrow_proposal` — settlement code on both sides reconstructs the
-same on-chain `obligation_data` from those echoed values.
+`accepted_escrow_proposal`, and accept paths additionally echo
+`accepted_escrow_terms`: concrete `EscrowTerms` materialized from the final
+proposal, agreed amount, duration, and arbiter demands. Split settlement
+flows consume those concrete terms directly and fall back to proposal
+materialization only for older run logs.
 
 **Settlement is a byte-compare, not a dispatch:** `EscrowTerms`
-(`service.schemas.EscrowTerms`) is the negotiated artifact — a flat mirror of
-the alkahest `ObligationData` struct: `{maker, escrow_contract,
-obligation_data, expiration_unix}`. The settlement verifier reads the
-on-chain obligation by UID and byte-compares against the negotiated
-`EscrowTerms.obligation_data`. Adding a new escrow kind (ERC721, native,
-bundle, attestation) is a codec-registration change: the buyer-side
-builder and seller-side verifier resolve `(chain, escrow_address)` to a
-codec via `service.clients.alkahest.get_escrow_codec_for`, then refuse
-unsupported kinds with `NotImplementedError` carrying the kind + address.
-Today only `erc20_escrow_obligation_nontierable` is registered; wiring
-another kind is a builder + verifier addition with no schema change.
+(`service.schemas.EscrowTerms`) is the settlement artifact — a flat mirror
+of the alkahest `ObligationData` struct:
+`{maker, chain_name, escrow_contract, obligation_data, expiration_unix}`.
+The settlement verifier reads the on-chain obligation by UID and
+byte-compares against materialized `EscrowTerms.obligation_data`. Adding a
+new escrow kind is primarily a codec-registration change: the buyer submit
+hook resolves each term's `(chain_name, escrow_contract)` to a codec via
+`service.clients.alkahest.get_escrow_kind_codec_by_address`, while the
+proposal-to-terms materializer owns the final obligation data shape.
 
-A negotiation produces `list[EscrowTerms]` so multi-escrow designs (payment
-+ seller penalty deposit, block-by-block schedules) are expressible without
-a wrapper type. Today every list is length-1 (single buyer-made ERC20
+A negotiation accept produces `list[EscrowTerms]` so multi-escrow designs
+(payment + seller penalty deposit, block-by-block schedules) are expressible
+without a wrapper type. Today every list is length-1 (single buyer-made
 escrow); the rest is forward shape.
 
 `CreateListingRequest` requires `accepted_escrows: list[dict]`.
