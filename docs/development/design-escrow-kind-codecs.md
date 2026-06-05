@@ -152,23 +152,28 @@ with non-ERC20 codecs, not to exhaustively test Alkahest itself.
 
 ### Phase 5: Attestation Escrows
 
-Handle attestation-request and attestation-UID escrows after the product
-semantics are explicit:
+Attestation-request and attestation-UID escrow semantics are policy-owned, not
+product-level codec behavior. The codec only carries whatever
+`obligation_data` the negotiated terms require. A policy may require a specific
+attestation about the buyer and encode it in the listing like a fixed token
+price; another policy may negotiate the attestation parameters, especially once
+more freeform negotiation strategies exist.
+
+The codecs are mechanically implemented so user-supplied policies can target
+them. Treating an attestation escrow as a default marketplace flow requires a
+policy that defines:
 
 - who supplies the attestation data or UID;
 - whether it is a literal field, a rate-like field, or negotiated message
   content;
-- how the seller advertises acceptable schemas;
+- how the seller advertises acceptable attestation schemas or predicates;
 - how the buyer proves or selects the attestation before settlement.
-
-The codecs are mechanically implemented so user-supplied policies can target
-them, but they should not be treated as product-complete default flows until
-those semantics are settled.
 
 ## Open Questions
 
-- Should registry filters gain first-class non-ERC20 axes such as
-  `escrow_kind`, `token`, `tokenId`, or native amount, or should they stay as
-  JSONPath filters over `accepted_escrows`?
+- Registry filtering should follow the schema-plugin model in
+  `design-market-core-extraction.md`: filters are packaged with the registry
+  schema and buyer CLI plugin, with generic `--filter name=value` passthrough
+  as the core fallback.
 - What is the minimum useful e2e matrix for release confidence without turning
   the integration suite into an Alkahest contract test suite?
