@@ -33,12 +33,14 @@ from service.clients.alkahest import (
     NativeTokenTierableEscrowCodec,
     TokenBundleNonTierableEscrowCodec,
     TokenBundleTierableEscrowCodec,
+    materialize_escrow_terms_from_proposal,
     _normalize_demand_bytes,
     get_escrow_kind_codec,
     get_escrow_kind_codec_by_address,
     known_escrow_kinds,
     register_escrow_kind_codec,
 )
+from service.schemas import EscrowProposal
 
 
 _ARBITER = "0x" + "ab" * 20
@@ -417,6 +419,29 @@ def test_erc20_tierable_get_obligation_dispatches_to_sdk():
     result = asyncio.run(codec.get_obligation(mock_client, "0xescrow"))
     assert result == {"kind": "erc20_tierable"}
     mock_client.erc20.escrow.tierable.get_obligation.assert_awaited_once_with("0xescrow")
+
+
+def test_materialize_escrow_terms_uses_final_agreed_amount_over_proposal_amount():
+    proposal = EscrowProposal(
+        chain_name="anvil",
+        escrow_address="0x" + "00" * 20,
+        fields={
+            "arbiter": _ARBITER,
+            "demand": _DEMAND_HEX,
+            "token": _TOKEN,
+            "amount": 7000,
+        },
+        expiration_unix=1_800_000_000,
+    )
+
+    terms = materialize_escrow_terms_from_proposal(
+        proposal=proposal,
+        seller_wallet_address="0x" + "12" * 20,
+        agreed_amount=9500,
+        duration_seconds=3600,
+    )[0]
+
+    assert terms.obligation_data["amount"] == 9500
 
 
 def test_erc20_refund_claimed_transfers_claimed_token(monkeypatch):

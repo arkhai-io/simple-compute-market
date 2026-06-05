@@ -798,7 +798,9 @@ def materialize_escrow_terms_from_proposal(
     Negotiation messages remain proposal-shaped, but the final agreement is
     the exact on-chain obligation data. Literal fields and concrete proposal
     fields are copied first; rate fields are filled only when the negotiation
-    has not already placed a concrete value in ``fields``.
+    has not already placed a concrete value in ``fields``. ``agreed_amount``
+    is authoritative for the flat ``amount`` field because proposals can carry
+    stale round amounts while settlement receives the final negotiated total.
     """
     from service.schemas import (
         EscrowTerms,
@@ -826,7 +828,7 @@ def materialize_escrow_terms_from_proposal(
         total = compute_rate_total(rate_obj, duration_seconds)
         _set_obligation_field(obligation_data, field, total)
 
-    if agreed_amount is not None and "amount" not in obligation_data:
+    if agreed_amount is not None:
         obligation_data["amount"] = int(agreed_amount)
 
     demands = accepted_demands(proposal)
