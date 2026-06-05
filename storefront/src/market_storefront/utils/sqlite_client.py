@@ -13,7 +13,7 @@ from typing import Any
 
 from .config import settings
 from .host_csv_importer import upsert_hosts_from_csv
-from .migrations import apply_schema_migrations
+from .migrations import apply_schema_migrations, synthesize_accepted_escrows_from_demand
 from .resource_csv_importer import upsert_resources_from_csv, upsert_resources_from_csv_content
 
 logger = logging.getLogger(__name__)
@@ -69,90 +69,6 @@ def _amount_from_db_text(value: Any) -> int | None:
         return None
     amount = int(integral)
     return amount if amount >= 0 else None
-
-
-def _normalize_to_dict(value: Any) -> dict[str, Any] | None:
-    if value is None:
-        return None
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-            return parsed if isinstance(parsed, dict) else None
-        except Exception:
-            return None
-    return None
-
-
-def synthesize_accepted_escrows_from_demand(
-    demand_resource: Any,
-) -> list[dict[str, Any]] | None:
-    """Build an ``accepted_escrows`` list from a legacy ``demand_resource``
-    payload (``{token: {contract_address, ...}, amount}``), one entry per
-    configured chain.
-
-    Used by:
-      * the one-shot schema-init backfill (pre-cutover rows still carrying
-        ``demand_resource`` in SQLite),
-      * action_executor's MAKE_OFFER entry point (policy layer still emits
-        ``demand``; storefront converts at the boundary before persisting).
-
-    Returns ``None`` when the demand can't be mapped to any chain (no
-    token, missing contract_address, or every chain's alkahest config
-    fails to resolve the erc20 escrow obligation address).
-    """
-    from market_storefront.utils.config import CHAINS
-
-    normalized = _normalize_to_dict(demand_resource)
-    if not normalized:
-        return None
-    token = normalized.get("token")
-    if not isinstance(token, dict):
-        return None
-    contract_address = token.get("contract_address")
-    if not isinstance(contract_address, str) or not contract_address:
-        return None
-
-    amount = normalized.get("amount")
-    # Rate value is uint256-domain (base units) — emit as a decimal-digit
-    # string on the stored/wire JSON to stay safe past JS's 2^53 and SQLite
-    # int64 ceilings. Python callers parse it back with ``int(...)``.
-    if isinstance(amount, bool):
-        rate_value: str | None = None
-    elif isinstance(amount, int):
-        rate_value = str(amount)
-    elif isinstance(amount, str):
-        s = amount.strip()
-        rate_value = s if s.isdigit() else None
-    else:
-        rate_value = None
-
-    from service.clients.alkahest import get_erc20_escrow_obligation_nontierable
-
-    entries: list[dict[str, Any]] = []
-    for name, cc in CHAINS.items():
-        try:
-            escrow_address = get_erc20_escrow_obligation_nontierable(
-                name,
-                config_path=cc.alkahest_address_config_path,
-            )
-        except Exception as exc:
-            logger.debug(
-                "Skipping accepted_escrows synthesis for chain %r: %s", name, exc,
-            )
-            continue
-        entries.append({
-            "chain_name": name,
-            "escrow_address": escrow_address.lower(),
-            "literal_fields": {"token": contract_address},
-            "rates": [{
-                "field": "amount",
-                "per": "hour",
-                "value": rate_value,
-            }] if rate_value is not None else [],
-        })
-    return entries or None
 
 
 def _publication_row_to_dict(row: tuple) -> dict[str, Any]:
@@ -475,7 +391,6 @@ class SQLiteClient:
                 )
                 """
             )
-            self._migrate_negotiation_amount_columns(cur)
             # Migrate listings table: add columns that may be missing from older DBs
             try:
                 cur.execute("ALTER TABLE listings ADD COLUMN oracle_address TEXT")
@@ -490,7 +405,7 @@ class SQLiteClient:
             # advertisement. The legacy ``demand_resource`` and per-deal
             # ``escrow_uid``/``buyer``/``matched_offer_id``/
             # ``seller_attestation``/``buyer_attestation`` columns are
-            # backfilled+dropped by ``_migrate_escrows_and_listings`` above.
+            # backfilled+dropped by the versioned escrow/listing migration.
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS listings (
@@ -520,21 +435,6 @@ class SQLiteClient:
                 cur.execute("ALTER TABLE listings ADD COLUMN demands TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
-            # One-shot backfill: synthesize accepted_escrows from the legacy
-            # demand_resource column for any pre-cutover rows. No-op when the
-            # column has already been dropped. Skips rows the synthesis can't
-            # resolve (e.g. anvil without an override JSON).
-            existing_listing_cols = {
-                r[1] for r in cur.execute("PRAGMA table_info(listings)")
-            }
-            if "demand_resource" in existing_listing_cols:
-                self._backfill_accepted_escrows(cur)
-                # Post-backfill, drop the demand_resource column. Requires
-                # SQLite 3.35+ (Mar 2021); silently skipped on older builds.
-                try:
-                    cur.execute("ALTER TABLE listings DROP COLUMN demand_resource")
-                except sqlite3.OperationalError:
-                    pass
             # Migrate: add paused column if missing (existing databases).
             try:
                 cur.execute("ALTER TABLE listings ADD COLUMN paused INTEGER NOT NULL DEFAULT 0")
@@ -870,10 +770,9 @@ class SQLiteClient:
             # — the matching obligation pair on chain.
             #
             # Evolved from the legacy ``settlement_jobs`` table (one row per
-            # deal, single attestation_uid column). The helper below renames
-            # the old table + widens columns + backfills from the listings
-            # row when present.
-            self._migrate_escrows_and_listings(cur)
+            # deal, single attestation_uid column). The versioned migrations
+            # rename the old table + widen columns + backfill from the
+            # listings row when present.
             # ``escrow_uid`` is the EAS attestation UID of the buyer's escrow
             # obligation — i.e. it IS the buyer's attestation; no separate
             # column needed. ``fulfillment_uid`` is the seller's
@@ -962,325 +861,6 @@ class SQLiteClient:
             except Exception:
                 return None
         return None
-
-    def _migrate_negotiation_amount_columns(self, cur: sqlite3.Cursor) -> None:
-        """Move EVM amount columns off SQLite INTEGER affinity.
-
-        SQLite cannot alter column types in-place. Rebuild only when an
-        existing DB still has INTEGER amount columns, preserving current rows
-        and letting the index creation below recreate any dropped indexes.
-        """
-        def _table_exists(name: str) -> bool:
-            return cur.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (name,),
-            ).fetchone() is not None
-
-        def _column_types(table: str) -> dict[str, str]:
-            return {
-                str(row[1]): str(row[2] or "").upper()
-                for row in cur.execute(f"PRAGMA table_info({table})")
-            }
-
-        def _needs_rebuild(table: str, columns: tuple[str, ...]) -> bool:
-            if not _table_exists(table):
-                return False
-            types = _column_types(table)
-            return any(types.get(column) != "TEXT" for column in columns)
-
-        if _table_exists("negotiation_threads"):
-            for col_ddl in (
-                "ALTER TABLE negotiation_threads ADD COLUMN buyer TEXT",
-                "ALTER TABLE negotiation_threads ADD COLUMN matched_offer_id TEXT",
-            ):
-                try:
-                    cur.execute(col_ddl)
-                except sqlite3.OperationalError:
-                    pass
-
-        if _needs_rebuild("negotiation_threads", ("agreed_price",)):
-            cur.execute("DROP TABLE IF EXISTS negotiation_threads__amount_migration")
-            cur.execute("ALTER TABLE negotiation_threads RENAME TO negotiation_threads__amount_migration")
-            cur.execute(
-                """
-                CREATE TABLE negotiation_threads (
-                  negotiation_id TEXT PRIMARY KEY,
-                  our_listing_id TEXT,
-                  their_listing_id TEXT,
-                  our_agent_id TEXT,
-                  their_agent_id TEXT,
-                  status TEXT DEFAULT 'active',
-                  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-                  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-                  terminal_state TEXT,
-                  requested_duration_seconds INTEGER,
-                  buyer_escrow_proposal TEXT,
-                  agreed_price TEXT,
-                  agreed_duration_seconds INTEGER,
-                  agreed_at TEXT,
-                  buyer TEXT,
-                  matched_offer_id TEXT
-                )
-                """
-            )
-            cur.execute(
-                """
-                INSERT INTO negotiation_threads (
-                    negotiation_id, our_listing_id, their_listing_id,
-                    our_agent_id, their_agent_id, status, created_at,
-                    updated_at, terminal_state, requested_duration_seconds,
-                    buyer_escrow_proposal, agreed_price,
-                    agreed_duration_seconds, agreed_at, buyer, matched_offer_id
-                )
-                SELECT negotiation_id, our_listing_id, their_listing_id,
-                       our_agent_id, their_agent_id, status, created_at,
-                       updated_at, terminal_state, requested_duration_seconds,
-                       buyer_escrow_proposal,
-                       CASE WHEN agreed_price IS NULL THEN NULL ELSE CAST(agreed_price AS TEXT) END,
-                       agreed_duration_seconds, agreed_at, buyer, matched_offer_id
-                FROM negotiation_threads__amount_migration
-                """
-            )
-            cur.execute("DROP TABLE negotiation_threads__amount_migration")
-
-        if _needs_rebuild("negotiation_local_state", ("our_initial_price",)):
-            cur.execute("DROP TABLE IF EXISTS negotiation_local_state__amount_migration")
-            cur.execute("ALTER TABLE negotiation_local_state RENAME TO negotiation_local_state__amount_migration")
-            cur.execute(
-                """
-                CREATE TABLE negotiation_local_state (
-                  negotiation_id TEXT NOT NULL,
-                  owner_id TEXT NOT NULL,
-                  our_initial_price TEXT,
-                  our_strategy TEXT,
-                  PRIMARY KEY(negotiation_id, owner_id),
-                  FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id)
-                )
-                """
-            )
-            cur.execute(
-                """
-                INSERT INTO negotiation_local_state (
-                    negotiation_id, owner_id, our_initial_price, our_strategy
-                )
-                SELECT negotiation_id, owner_id,
-                       CASE WHEN our_initial_price IS NULL THEN NULL ELSE CAST(our_initial_price AS TEXT) END,
-                       our_strategy
-                FROM negotiation_local_state__amount_migration
-                """
-            )
-            cur.execute("DROP TABLE negotiation_local_state__amount_migration")
-
-        if _needs_rebuild(
-            "negotiation_messages",
-            ("our_price", "their_price", "proposed_price"),
-        ):
-            cur.execute("DROP TABLE IF EXISTS negotiation_messages__amount_migration")
-            cur.execute("ALTER TABLE negotiation_messages RENAME TO negotiation_messages__amount_migration")
-            cur.execute(
-                """
-                CREATE TABLE negotiation_messages (
-                  message_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  negotiation_id TEXT NOT NULL,
-                  round INTEGER NOT NULL,
-                  sender TEXT NOT NULL,
-                  our_price TEXT,
-                  their_price TEXT,
-                  proposed_price TEXT,
-                  action_taken TEXT NOT NULL,
-                  message_type TEXT NOT NULL,
-                  timestamp TEXT NOT NULL,
-                  FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id),
-                  UNIQUE(negotiation_id, round)
-                )
-                """
-            )
-            cur.execute(
-                """
-                INSERT INTO negotiation_messages (
-                    message_id, negotiation_id, round, sender,
-                    our_price, their_price, proposed_price,
-                    action_taken, message_type, timestamp
-                )
-                SELECT message_id, negotiation_id, round, sender,
-                       CASE WHEN our_price IS NULL THEN NULL ELSE CAST(our_price AS TEXT) END,
-                       CASE WHEN their_price IS NULL THEN NULL ELSE CAST(their_price AS TEXT) END,
-                       CASE WHEN proposed_price IS NULL THEN NULL ELSE CAST(proposed_price AS TEXT) END,
-                       action_taken, message_type, timestamp
-                FROM negotiation_messages__amount_migration
-                """
-            )
-            cur.execute("DROP TABLE negotiation_messages__amount_migration")
-
-    def _backfill_accepted_escrows(self, cur: sqlite3.Cursor) -> None:
-        """One-shot in-place backfill of ``accepted_escrows`` from the
-        legacy ``demand_resource`` column. Runs during schema init; only
-        touches rows where ``accepted_escrows`` is NULL so it's safe to
-        re-run. Skips rows whose demand_resource can't be mapped (no
-        token, missing chain config, etc.) — those rows lose their
-        pricing advertisement after the column is dropped.
-        """
-        rows = cur.execute(
-            "SELECT listing_id, demand_resource FROM listings "
-            "WHERE accepted_escrows IS NULL AND demand_resource IS NOT NULL"
-        ).fetchall()
-        for listing_id, demand_resource in rows:
-            synthesized = synthesize_accepted_escrows_from_demand(demand_resource)
-            if not synthesized:
-                continue
-            cur.execute(
-                "UPDATE listings SET accepted_escrows=? WHERE listing_id=?",
-                (json.dumps(synthesized), listing_id),
-            )
-
-    def _migrate_escrows_and_listings(self, cur: sqlite3.Cursor) -> None:
-        """One-shot migration: ``settlement_jobs`` → ``escrows`` (multi-escrow
-        per deal), with the per-deal columns moving off ``listings`` to either
-        ``escrows`` (attestation UIDs) or ``negotiation_threads`` (buyer
-        pairing).
-
-        Idempotent: every step is guarded on table/column existence so it's
-        safe to re-run on a partially-migrated DB.
-        """
-        def _table_exists(name: str) -> bool:
-            return cur.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (name,),
-            ).fetchone() is not None
-
-        def _cols(table: str) -> set[str]:
-            return {r[1] for r in cur.execute(f"PRAGMA table_info({table})")}
-
-        # 1. Rename settlement_jobs → escrows if the old name still on disk.
-        if _table_exists("settlement_jobs") and not _table_exists("escrows"):
-            cur.execute("ALTER TABLE settlement_jobs RENAME TO escrows")
-            for old_idx in ("idx_settlement_jobs_status", "idx_settlement_jobs_negotiation"):
-                try:
-                    cur.execute(f"DROP INDEX IF EXISTS {old_idx}")
-                except sqlite3.OperationalError:
-                    pass
-
-        # 2. Add new escrows columns (idempotent). escrow_uid (PK) is the
-        # buyer's escrow attestation UID — no separate buyer-side column.
-        if _table_exists("escrows"):
-            for col_ddl in (
-                "ALTER TABLE escrows ADD COLUMN chain_name TEXT",
-                "ALTER TABLE escrows ADD COLUMN escrow_address TEXT",
-                "ALTER TABLE escrows ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 1",
-                "ALTER TABLE escrows ADD COLUMN fulfillment_uid TEXT",
-            ):
-                try:
-                    cur.execute(col_ddl)
-                except sqlite3.OperationalError:
-                    pass
-
-        # 3. Add buyer + matched_offer_id to negotiation_threads (idempotent).
-        if _table_exists("negotiation_threads"):
-            for col_ddl in (
-                "ALTER TABLE negotiation_threads ADD COLUMN buyer TEXT",
-                "ALTER TABLE negotiation_threads ADD COLUMN matched_offer_id TEXT",
-            ):
-                try:
-                    cur.execute(col_ddl)
-                except sqlite3.OperationalError:
-                    pass
-
-        # 4. Backfill from legacy columns. Only runs when the pre-cutover
-        # columns are still on disk; produces no-ops otherwise.
-        listing_cols = _cols("listings") if _table_exists("listings") else set()
-        escrow_cols = _cols("escrows") if _table_exists("escrows") else set()
-
-        # 4a. escrows.fulfillment_uid ← escrows.attestation_uid
-        # (legacy column stored the seller's fulfillment UID).
-        if "attestation_uid" in escrow_cols:
-            cur.execute(
-                "UPDATE escrows SET fulfillment_uid = attestation_uid "
-                "WHERE fulfillment_uid IS NULL AND attestation_uid IS NOT NULL"
-            )
-
-        # 4b. listings.buyer_attestation was always identical to escrow_uid on
-        # the storefront side (the column was a denormalized duplicate), so no
-        # backfill is needed — the escrow row's PK is the buyer's attestation.
-
-        # 4c. escrows.{chain_name,escrow_address} ← listings.accepted_escrows[0]
-        # (joined via negotiation_threads). JSON parse Python-side.
-        if (
-            "accepted_escrows" in listing_cols
-            and _table_exists("escrows")
-            and _table_exists("negotiation_threads")
-        ):
-            rows = cur.execute(
-                """
-                SELECT escrows.escrow_uid, l.accepted_escrows
-                FROM escrows
-                JOIN negotiation_threads nt
-                  ON nt.negotiation_id = escrows.negotiation_id
-                JOIN listings l
-                  ON l.listing_id = nt.our_listing_id
-                WHERE escrows.chain_name IS NULL OR escrows.escrow_address IS NULL
-                """
-            ).fetchall()
-            for escrow_uid, ae_blob in rows:
-                if not ae_blob:
-                    continue
-                try:
-                    ae_list = json.loads(ae_blob) if isinstance(ae_blob, str) else ae_blob
-                except (ValueError, TypeError):
-                    continue
-                if not isinstance(ae_list, list) or not ae_list:
-                    continue
-                first = ae_list[0]
-                if not isinstance(first, dict):
-                    continue
-                cur.execute(
-                    "UPDATE escrows SET chain_name = ?, escrow_address = ? "
-                    "WHERE escrow_uid = ?",
-                    (first.get("chain_name"), first.get("escrow_address"), escrow_uid),
-                )
-
-        # 4d. negotiation_threads.{buyer,matched_offer_id} ← listings.{buyer,matched_offer_id}
-        if "buyer" in listing_cols and _table_exists("negotiation_threads"):
-            cur.execute(
-                """
-                UPDATE negotiation_threads
-                SET buyer = (
-                    SELECT l.buyer FROM listings l
-                    WHERE l.listing_id = negotiation_threads.our_listing_id
-                    LIMIT 1
-                )
-                WHERE buyer IS NULL
-                """
-            )
-        if "matched_offer_id" in listing_cols and _table_exists("negotiation_threads"):
-            cur.execute(
-                """
-                UPDATE negotiation_threads
-                SET matched_offer_id = (
-                    SELECT l.matched_offer_id FROM listings l
-                    WHERE l.listing_id = negotiation_threads.our_listing_id
-                    LIMIT 1
-                )
-                WHERE matched_offer_id IS NULL
-                """
-            )
-
-        # 5. Drop legacy columns. SQLite 3.35+ supports DROP COLUMN; older
-        # builds silently skip — those DBs carry orphan columns forever
-        # (harmless, just bloat).
-        for table, col in (
-            ("escrows", "attestation_uid"),
-            ("listings", "escrow_uid"),
-            ("listings", "buyer_attestation"),
-            ("listings", "seller_attestation"),
-            ("listings", "buyer"),
-            ("listings", "matched_offer_id"),
-        ):
-            if not _table_exists(table):
-                continue
-            try:
-                cur.execute(f"ALTER TABLE {table} DROP COLUMN {col}")
-            except sqlite3.OperationalError:
-                pass
 
     def _normalize_resource(self, value: Any) -> dict[str, Any] | None:
         if value is None:

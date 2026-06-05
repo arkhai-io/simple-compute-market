@@ -1,19 +1,17 @@
 """Storefront startup hooks.
 
-After the pluggable-identity refactor (Phase 4) the storefront's
-identity is just ``settings.wallet.address`` — there is no per-chain
-on-chain registration step, no agent-card publication, and no
-heartbeat loop. ``_startup_tasks`` is what ``server.py``'s lifespan
-imports.
+After the pluggable-identity refactor (Phase 4) the storefront's identity is
+just ``settings.wallet.address``. There is no per-chain on-chain registration
+step, no agent-card publication, and no heartbeat loop.
 """
 
 import asyncio
 import logging
 
 from market_storefront.utils.config import (
+    BASE_URL_OVERRIDE,
     CHAINS,
     settings,
-    BASE_URL_OVERRIDE,
 )
 from market_storefront.utils.logging_config import setup_file_logging
 
@@ -21,16 +19,9 @@ setup_file_logging(settings.log_file_path or None, settings.log_level)
 
 logger = logging.getLogger(__name__)
 
-ALERTS_USER_ID = "resource-monitor"
-
 
 async def _probe_chain_addresses() -> None:
-    """For each configured chain, eth_getCode-check the alkahest addresses.
-
-    Catches operator typos and wrong-chain configs. Warns rather than
-    fails so other endpoints stay available while the operator fixes
-    the misconfig.
-    """
+    """For each configured chain, eth_getCode-check the alkahest addresses."""
     if not CHAINS:
         return
     from service.clients.alkahest import resolve_alkahest_address_config
@@ -51,10 +42,15 @@ async def _probe_chain_addresses() -> None:
             cfg = None
         if cfg is not None:
             for path, label in (
-                (("arbiters_addresses", "recipient_arbiter"), f"{chain.name}/alkahest.recipient_arbiter"),
+                (
+                    ("arbiters_addresses", "recipient_arbiter"),
+                    f"{chain.name}/alkahest.recipient_arbiter",
+                ),
                 (("arbiters_addresses", "eas"), f"{chain.name}/alkahest.eas"),
-                (("erc20_addresses", "escrow_obligation_nontierable"),
-                 f"{chain.name}/alkahest.erc20_escrow_obligation"),
+                (
+                    ("erc20_addresses", "escrow_obligation_nontierable"),
+                    f"{chain.name}/alkahest.erc20_escrow_obligation",
+                ),
             ):
                 obj: object | None = cfg
                 for attr in path:
@@ -69,21 +65,7 @@ async def _probe_chain_addresses() -> None:
 
 
 async def _preflight_provisioning() -> None:
-    """Block startup until the provisioning service responds, or give up.
-
-    Polls ``provisioning_service_url/health`` until it returns 200 or the
-    configured ``preflight_timeout`` elapses. On timeout:
-      * ``fail_on_unreachable=True`` (default): raise ``RuntimeError``,
-        which propagates out of ``_startup_tasks`` and crashes the
-        process. An orchestrator restart loop surfaces the misconfig
-        immediately rather than letting it hide in logs until the first
-        settle attempt fails.
-      * ``fail_on_unreachable=False``: log loud and return — useful for
-        dev where the service comes up later in the same pod.
-
-    The hint about ``ACTIVE_PROFILES=mock`` is preserved in the error
-    message because that's the most common e2e setup.
-    """
+    """Block startup until the provisioning service responds, or give up."""
     import httpx
 
     url = settings.provisioning.service_url.rstrip("/") + "/health"
@@ -100,7 +82,8 @@ async def _preflight_provisioning() -> None:
             if resp.status_code == 200:
                 logger.info(
                     "[STARTUP] Provisioning service reachable at %s (attempt %d)",
-                    settings.provisioning.service_url, attempt,
+                    settings.provisioning.service_url,
+                    attempt,
                 )
                 return
             last_error = f"HTTP {resp.status_code}"
@@ -128,56 +111,56 @@ async def _preflight_provisioning() -> None:
 
 
 def _maybe_join_zerotier_network() -> None:
-    """If a ZeroTier network is configured, ask the local zerotier-one
-    daemon to join it. The daemon itself is brought up by the deploy
-    layer (compose entrypoint, helm initContainer, or systemd unit) —
-    we don't manage its lifecycle here, just talk to its CLI socket.
-
-    Errors are logged and swallowed: a misconfigured ZeroTier setup
-    should not block the agent from serving on its host network.
-    """
+    """Join the configured ZeroTier network using the local CLI, if any."""
     network = settings.zerotier_network
     if not network:
         return
     import subprocess
+
     try:
         subprocess.run(
             ["sudo", "zerotier-cli", "join", network],
-            check=True, capture_output=True, text=True, timeout=10,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         logger.info("[STARTUP] Joined ZeroTier network %s", network)
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as exc:
+    except (
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+        subprocess.TimeoutExpired,
+    ) as exc:
         logger.warning(
             "[STARTUP] ZeroTier join failed for network=%s: %s. "
-            "The agent will continue serving on its host network.",
-            network, exc,
+            "The storefront will continue serving on its host network.",
+            network,
+            exc,
         )
 
 
-async def _startup_tasks():
+async def _startup_tasks() -> None:
     """Initialize background tasks. Called from server.py lifespan."""
-    from market_storefront.negotiation_watchdog import watchdog_loop as _neg_watchdog_loop
+    from market_storefront.negotiation_watchdog import (
+        watchdog_loop as _neg_watchdog_loop,
+    )
 
     _maybe_join_zerotier_network()
 
-    # Initialize the global NegotiationThreadStore so any subsequent
-    # request handler can call NegotiationThreadTransaction (which
-    # reaches into get_thread_store() with no args). Must run before
-    # any request can hit /api/v1/negotiate/*.
     import market_storefront.container as _container
     from market_policy.identity import Identity
     from market_policy.negotiation_thread import get_thread_store
-    _agent_url = BASE_URL_OVERRIDE or f"http://localhost:{settings.port}"
+
+    storefront_url = BASE_URL_OVERRIDE or f"http://localhost:{settings.port}"
     get_thread_store(
         sqlite_client=_container.resolved_sqlite_client,
-        identity=Identity(agent_url=_agent_url),
+        identity=Identity(agent_url=storefront_url),
     )
-    logger.info("[STARTUP] Negotiation thread store initialized (agent_url=%s)", _agent_url)
+    logger.info(
+        "[STARTUP] Negotiation thread store initialized (storefront_url=%s)",
+        storefront_url,
+    )
 
-    # Seed the resources table on startup if it is empty. Source priority:
-    # inline CSV content (Helm Secret injection) > explicit resources_csv_path
-    # > auto-discovery of /app/resources.csv (compose bind-mount default).
-    # Must run before the resource poller so the poller has rows to query.
     try:
         result = await _container.resolved_system_service.seed_resources_if_empty(
             csv_inline=settings.resources_csv_inline,
@@ -190,20 +173,20 @@ async def _startup_tasks():
                 result["source"],
             )
         elif result["source"] is None:
-            logger.info("[STARTUP] No resource source configured — starting with empty inventory")
+            logger.info(
+                "[STARTUP] No resource source configured - starting with empty inventory"
+            )
         else:
             logger.info(
-                "[STARTUP] Resource seeding skipped — %d resource(s) already present",
+                "[STARTUP] Resource seeding skipped - %d resource(s) already present",
                 result["imported_count"],
             )
     except Exception as exc:
         logger.error("[STARTUP] Resource seeding failed: %s", exc)
         raise
 
-    # Probe each chain's configured alkahest addresses for bytecode.
     await _probe_chain_addresses()
 
-    # Start negotiation watchdog (marks stale threads as abandoned)
     asyncio.create_task(_neg_watchdog_loop())
     logger.info(
         "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)",
@@ -211,8 +194,4 @@ async def _startup_tasks():
         settings.negotiation_timeout_seconds,
     )
 
-    # Preflight: block startup until the provisioning service is reachable.
-    # Crashes the process on timeout if [seller.provisioning].fail_on_unreachable
-    # is true (default), so the misconfig surfaces immediately rather than
-    # going silent until the first settle attempt fails.
     await _preflight_provisioning()

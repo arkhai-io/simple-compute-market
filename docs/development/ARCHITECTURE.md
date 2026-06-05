@@ -302,7 +302,7 @@ storefront/src/market_storefront/
 ├── cli.py                  # `market-storefront` console-script entry
 ├── server.py               # FastAPI app, lifespan, run_serve()
 ├── container.py            # Resolved service singletons (populated in lifespan)
-├── agent.py                # Startup-task helpers:
+├── startup.py              # Startup-task helpers:
 │                           #   _startup_tasks, _preflight_provisioning,
 │                           #   _probe_chain_addresses, _maybe_join_zerotier_network
 ├── controllers/
@@ -349,7 +349,7 @@ storefront/src/market_storefront/
 │  HTTP (FastAPI / controllers/)                                      │
 │  ┌─────────────┐ ┌──────────────┐ ┌──────────────┐ ┌────────────┐ │
 │  │  listings   │ │ negotiations │ │    system    │ │   admin    │ │
-│  │ controller  │ │  controller  │ │  controller  │ │  (agent.py)│ │
+│  │ controller  │ │  controller  │ │  controller  │ │ controller │ │
 │  └──────┬──────┘ └──────┬───────┘ └──────┬───────┘ └─────┬──────┘ │
 │         │               │                │               │        │
 │  ┌──────▼───────────────▼────────────────▼───────────────▼──────┐ │
@@ -862,7 +862,7 @@ when set for a specific listing, `POST /negotiate/new` against that listing retu
 
 Listings can be **created already-paused** by passing `"paused": true` in the
 `POST /orders/create` body. This threads through the policy pipeline:
-`agent.py` reads the flag from the request body → adds it to `OrderCreateEvent.data["paused"]`
+`listings_controller.py` reads the flag from the request body → adds it to `OrderCreateEvent.data["paused"]`
 → `oc_action_make_offer_from_order_create` in `domain/compute/agent/app/policy/store.py`
 propagates it into `action.parameters["paused"]`
 → `action_executor.py` MAKE_OFFER handler writes the listing to SQLite with `paused=1`
@@ -2051,11 +2051,9 @@ Each service owns exactly one database. Cross-service database sharing does not 
 
 | Service | Migration framework | Storage | Startup behaviour |
 |---|---|---|---|
-| Registry | Alembic (`alembic_version` table, 14 migrations) | SQLite (dev), Postgres-ready | `create_all` only — Alembic migrations are **not** applied automatically. Fresh installs get the correct schema; upgrades from older images require a manual `alembic upgrade head`. See TODO. |
+| Registry | Alembic (`alembic_version` table, 14 migrations) | SQLite (dev), Postgres-ready | `create_all` bootstraps missing tables, then startup stamps or upgrades Alembic state depending on whether `alembic_version` exists. |
 | Storefront | Custom `schema_migrations` table, per-migration tracking | SQLite | Applied in lifespan hook via `SQLiteClient` constructor |
 | Provisioning | Custom `schema_migrations` table, per-migration tracking | SQLite | Applied in lifespan hook via `init_db()` |
-
-**Known tracking gap in storefront:** `_migrate_escrows_and_listings` and `_migrate_negotiation_amount_columns` in `sqlite_client.py` execute inline during table creation, outside the `schema_migrations` framework. These are real schema transformations with no version record. Cleanup is tracked in `TODO.md`.
 
 ---
 
@@ -2123,7 +2121,7 @@ Until this infrastructure is in place, all registry schema and API changes must 
 
 All three service Helm subcharts default to `persistence.enabled: true`, creating a ReadWriteOnce PVC backed by the cluster's default StorageClass. Each Deployment uses `strategy: Recreate` to enforce single-writer access (RWO volumes cannot attach to multiple pods simultaneously), and `helm.sh/resource-policy: keep` ensures `helm uninstall` does not delete the PVC.
 
-The Helm subcharts will expose a `persistence.existingClaim` parameter (planned — see `TODO.md`): when set, the chart mounts the named PVC without creating one; when empty, existing behaviour is unchanged.
+The Helm subcharts expose a `persistence.existingClaim` parameter: when set, the chart mounts the named PVC without creating one; when empty, existing behaviour is unchanged.
 
 ---
 
@@ -2504,9 +2502,9 @@ This inverts the conceptual layer (provisioning is infrastructure; storefront is
 
 **`arkhai-storefront-client` versioning policy:**
 
-`arkhai-storefront-client` encodes two contracts with the agent server (`storefront/src/market_storefront/agent.py`) that are not enforced at import time — mismatches produce silent 403s or wrong response shapes at runtime:
+`arkhai-storefront-client` encodes two contracts with the storefront server that are not enforced at import time — mismatches produce silent 403s or wrong response shapes at runtime:
 
-1. **Auth message format** — `_build_auth_headers` must match `_check_agent_request_auth` in `agent.py`:
+1. **Auth message format** — `_build_auth_headers` must match `storefront/src/market_storefront/middleware/seller_auth.py`:
    - `create_listing` → `"create_listing:<agent_wallet_address>:<timestamp>"`
    - `close_listing` → `"close_listing:<listing_id>:<timestamp>"`
 
@@ -2627,14 +2625,6 @@ The wheel ships `EvaluateNegotiateResponse`, `SettleResponse`, and
 `SettleStatusResponse` typed models alongside these methods.
 
 `provisioning-service` bundles its client inside the service wheel (under `src/client/`) because the request/response models (`CreateVmRequest`, `JobStatusResponse`, etc.) are shared between the server and client. Consumers import as `from client.provisioning_client import ProvisioningClient`.
-
-### Re-export shims
-
-**`integration-tests/src/agent_client.py`:** a compatibility adapter wrapping `SyncStorefrontClient` from the wheel. Preserves the `AgentClient` interface expected by the smoke tests (constructor-level `agent_wallet_address`, `get_registration_file()`, single-arg `create_order()`). The docstring in that file lists the steps to remove it once the smoke tests are updated to call `SyncStorefrontClient` directly.
-
-**`integration-tests/src/registry_client.py`:** re-exports `SyncRegistryClient as RegistryClient` from the canonical wheel. Preserved for the smoke test import path `from src.registry_client import RegistryClient`.
-
----
 
 | Term | Meaning |
 |---|---|

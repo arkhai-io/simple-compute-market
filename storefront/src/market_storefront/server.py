@@ -61,11 +61,11 @@ def run_serve(
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    from market_storefront.agent import _startup_tasks
     from market_storefront.services import alkahest_service
     from market_storefront.services.listing_service import ListingService
     from market_storefront.services.negotiation_service import NegotiationService
     from market_storefront.services.system_service import SystemService
+    from market_storefront.startup import _startup_tasks
 
     sqlite_client = get_sqlite_client()
     alkahest_clients = alkahest_service.build_clients()

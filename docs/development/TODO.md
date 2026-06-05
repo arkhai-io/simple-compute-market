@@ -6,22 +6,6 @@ Pending architectural work and known operational issues for the Arkhai market st
 
 ## State Management & Schema Migrations
 
-### Fix registry startup: apply Alembic migrations on boot
-
-**Problem:** `registry-service/src/db/database.py::init_db()` calls `Base.metadata.create_all(bind=engine)` but never runs `alembic upgrade head`. Fresh installs get the correct schema via `create_all`. Existing installs upgrading from an older image version do not have Alembic migrations applied — operators must run `alembic upgrade head` manually, and nothing tells them to. The `alembic_version` table exists and tracks state correctly; the startup path simply does not consult it.
-
-**Planned fix:** Add an `alembic upgrade head` call in the registry lifespan hook (or inside `init_db()`) before the service begins serving traffic. Alembic's upgrade is idempotent — on a fresh DB it applies all migrations in sequence; on a current DB it is a no-op. This should be the only startup migration mechanism once implemented; the `create_all` call becomes redundant and can be removed.
-
----
-
-### Consolidate storefront inline migrations
-
-**Problem:** `storefront/src/market_storefront/utils/sqlite_client.py` contains `_migrate_escrows_and_listings` and `_migrate_negotiation_amount_columns`, which run inline during table creation outside the `schema_migrations` tracking framework. These are real schema transformations with no version record, making it impossible to determine the precise schema version of a running storefront database from the `schema_migrations` table alone.
-
-**Planned fix:** Move both inline migration functions into `storefront/src/market_storefront/utils/migrations.py` with entries in `_MIGRATIONS` and corresponding version IDs in `schema_migrations`. Both already use `IF NOT EXISTS` and column-presence guards so they can be re-run safely; the only change is registering them. This is a prerequisite for accurate schema drift detection.
-
----
-
 ### Init container migration pattern and schema drift guard
 
 **Problem:** Migration logic runs inside the main service container's startup sequence. A migration failure is indistinguishable from an application crash in Kubernetes pod status (`CrashLoopBackOff` vs `Init:Error`). There is also no runtime guard to catch schema drift when migrations have not been applied — the service can boot silently against a mismatched schema and surface errors only when a query hits a missing column.
@@ -45,16 +29,6 @@ For the registry (once on Postgres):
 
 4. Implement the Helm pre-upgrade hook Job pattern: a Kubernetes Job runs `alembic upgrade head` as a `helm.sh/hook: pre-upgrade,pre-install` before any Deployment pod sees the new image. If the Job fails, `helm upgrade` errors and the running Deployment is untouched.
 
-**Depends on:** Storefront inline migration consolidation (`schema_migrations` must be complete before the drift guard can be reliable for that service).
-
----
-
-### Helm charts: `persistence.existingClaim` parameter
-
-**Problem:** All three service Helm subcharts create a PVC when `persistence.enabled: true`. For production GCP deployments where Terraform owns the PVC lifecycle, the chart creating its own PVC conflicts with or duplicates the Terraform-managed resource, and a release-name change would silently provision a new empty volume.
-
-**Planned fix:** Add `persistence.existingClaim: ""` to each subchart's `values.yaml` (storefront, registry, provisioning). When set, the Deployment mounts the named PVC; no PVC resource is rendered by the chart. When empty, existing behaviour is unchanged. The production GCP values overlay in the ops repo sets `existingClaim` to the Terraform-managed PVC name. Document in `values.yaml` that `existingClaim` and `persistence.enabled` are mutually exclusive.
-
 ---
 
 ### Registry: Postgres migration
@@ -67,7 +41,7 @@ For the registry (once on Postgres):
 
 Application-side (`simple-compute-market`):
 - Connect `registry-service/src/db/database.py` to Cloud SQL when `database_url` contains a Postgres DSN (the branch already exists; wire the URL from the Helm values)
-- Replace the startup `create_all` with `alembic upgrade head` (same fix as above, applied in the correct Postgres context)
+- Replace the startup `create_all`/stamp bootstrap with an explicit migration-only path suitable for Postgres rollout
 - Implement the Helm pre-upgrade hook Job for `alembic upgrade head`
 
 Infrastructure-side (compute-market-internal-infra):
@@ -77,7 +51,6 @@ Infrastructure-side (compute-market-internal-infra):
 
 ---
 
----
 ## Core Stack
 
 ### Market Core Extraction (from-above / from-below packaging)
@@ -89,7 +62,6 @@ Infrastructure-side (compute-market-internal-infra):
 **Motivation:** the realistic first driver is heterogeneous listing schemas *within* compute that don't share a registry — not a different asset class. The registry is the schema-centralizing/platform point; per-schema instantiations (filter-spec + typed client + storefront/buyer plugins) become the registry operator's deliverable, depending on the core's from-above skeleton and from-below kit.
 
 **Concrete seams to fix** (each filed against the principle today):
-- **Buyer CLI run-log/proposal repair (independent first slice):** `market buy` can settle from the seller-echoed `EscrowProposal` in memory, but split flows (`market negotiate` → `market settle --from` / `market escrow create --run`) persist only scalar fragments and reconstruct an ERC20-shaped proposal from token/chain config. Persist the accepted `EscrowProposal` + accepted delivery terms on agreement, make split settlement commands consume that canonical handoff, and treat token/chain flags as legacy overrides or remove them. Add generic repeatable `--filter name=value` to `market buy` / `market listing list` while keeping compute flags as convenience aliases; improve listing rendering to show accepted escrow shape and top-level `demands`.
 - **Buyer CLI schema-plugin boundary:** the registry backend is already filter-spec-driven, but the buyer CLI is still a compute-schema instantiation with hardcoded `--gpu-*`, `--ram-*`, `--region`, etc. Long term, core CLI owns orchestration and generic passthrough; schema plugins own named filter flags, listing/resource rendering, price extraction, schema-specific prompts, and accepted-escrow selection UX. Until plugin discovery exists, keep compute behavior embedded but file it as from-below schema behavior.
 - Escrow-shape validation runs as a pre-chain hard gate (`sync_negotiation._validate_escrow_proposal` raises before the chain) → demote to a negotiation middleware that may reject *or* counter-correct, symmetric with `bisection`.
 - **Minimal hook surface:** `run_buy` injects six behavior hooks (`build_escrow_proposal`, `derive_prices`, `build_escrow_terms`, `create_escrow`, `confirm_settlement`, `chain`); the well-typed `terms = negotiate(); receipt = settle(terms)` surface wants two. Collapse consecutive/bundled hooks — `negotiate` absorbs `chain` + `derive_prices` + opening-message construction + commit; `settle` absorbs `build_escrow_terms` + `create_escrow`. Further factoring is the implementation's business, not the core contract.
@@ -120,26 +92,6 @@ The `provisioning-service` wheel stays its own distributable — it's operated b
 
 **Planned fix:** expand codecs in phases: first add registry/ABI/SDK adapters and unit tests for straightforward token escrows, then update listing/proposal semantics and templates, then add representative e2e coverage, with attestation escrows handled after their product semantics are nailed down.
 
----
-
-### Compute Dynamic Listings from Inventory and Leases
-
-**Status:** Implemented. Compute inventory now has explicit storefront-side pools and pool members. Existing compute resources are backfilled into single-member pools, and resources can opt into fungible capacity by sharing `attribute.pool_id`. Pool-level derived listings use held `compute_allocations` to suppress oversized slices, close stale open listings, reopen listings after capacity release, and persist provisioning callback correlation metadata. The focused e2e scenario is `e2e_compute_dynamic_listings`.
-
-**Problem:** Listings are currently static rows, while GPU VM capacity is partly
-managed through resource state and provisioning leases. This does not support
-partial-capacity offers such as deriving 1x, 2x, 3x, and 4x listings from one
-4x GPU machine, nor does it support closing/reopening oversized listings as
-capacity is reserved, leased, and released.
-
-**Implemented fix:** compute-specific storefront inventory pools, pool members,
-capacity allocations, deterministic derived listings, and provisioning lifecycle
-callbacks. The storefront owns market-facing inventory, listing reconciliation,
-and seller policy refund/dispute/failure decisions; the provisioning service
-owns execution facts and reports lifecycle callbacks.
-
----
-
 ### Storefront DB Pruning
 
 **Status:** Planned. Needs dormant-code verification before any DROP.
@@ -153,18 +105,6 @@ owns execution facts and reports lifecycle callbacks.
 **Planned fix:** for each table, grep for readers (not just writers) outside of test code. If a table is only ever written and never read on a production path, delete the table and its writes. Verify the file-policy discovery flow fully replaces `policies` / `policy_composites` before dropping them. `negotiation_threads` itself stays — it's still the seller's record of an in-flight negotiation.
 
 The `orders → listings` rename is already done; the plan's older framing of "drop the orders mirror" is obsolete (`listings` is the seller's primary entity now, not a registry mirror).
-
----
-
-### "Agent" → "Storefront" Internal Naming Mop-Up
-
-**Status:** Planned. The user-facing rename (CLI flags, wire JSON keys, table names, doc surfaces) is done; internal terminology has residue.
-
-**Context:** "agent" in this codebase used to refer to two distinct things — the ERC-8004 protocol concept and historical references to the seller's runtime process from the ADK era. With ERC-8004 deleted in Phase 4 of the pluggable-identity refactor, the term now only ever means "seller's runtime process", which should be `storefront`. The user-facing rename is done; internal residue:
-
-- **`storefront/src/market_storefront/agent.py`** — residual startup-helpers module (docstring: "Storefront startup hooks"). A sibling `server.py` already exists; this file should be folded into `server.py` or renamed to something purpose-named (e.g. `startup.py`). Importers: `server.py` (lifespan).
-
-**Not worth chasing:** the internal `agent_url` parameter name in `cli_publish.py`, `groups/escrow.py`, `action_executor.py`, `sync_negotiation.py`, `negotiation_models.py` (`buyer_agent_url`), etc. It's pervasive, internal-only (no wire surface), and the value plumbed through is consistently a storefront URL. Rename opportunistically; don't sweep.
 
 ---
 
@@ -213,16 +153,6 @@ Until then: the `indexed: bool` field stays as a no-op in the loader so the YAML
 
 ---
 
-### Smoke-Test Client Re-Export Shim Cleanup
-
-**Status:** Planned. Cleanup, low priority.
-
-**Problem:** `integration-tests/src/registry_client.py` re-exports `SyncRegistryClient as RegistryClient` from the canonical wheel, preserved for the smoke-test import path `from src.registry_client import RegistryClient`. A similar `agent_client.py` adapter wraps `SyncStorefrontClient` with a constructor-level `agent_wallet_address` and single-arg `create_order()` to match the older shape the smoke tests expect.
-
-**Planned fix:** update the smoke-test imports to use the canonical clients directly and delete both shims. The `agent_client.py` docstring lists the removal steps.
-
----
-
 ## Latent Bug Fixes
 
 Genuine pending fixes — distinct from the operational gotchas in the [Known Issues](#known-issues--areas-of-concern) section below, which the current code lives with.
@@ -230,8 +160,6 @@ Genuine pending fixes — distinct from the operational gotchas in the [Known Is
 ## Known Issues & Areas of Concern
 
 Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes](#latent-bug-fixes) above (which need code changes) and from [Planned Rework](#core-stack) (which needs design + code). Expand as investigation proceeds.
-
-- **Storefront schema_migrations incomplete:** Some storefront schema transformations (`_migrate_escrows_and_listings`, `_migrate_negotiation_amount_columns`) run outside the `schema_migrations` tracking framework, so the `schema_migrations` table does not reflect the full applied schema version. The migrations are idempotent and run correctly regardless; the risk is operational visibility. A schema drift guard (planned in TODO) would give a false-negative until this is resolved. See the consolidation item in State Management & Schema Migrations above.
 
 - **Negotiation orphans:** The existence of `negotiation_watchdog.py` implies negotiations can get stuck. The trigger conditions and recovery behavior need documentation.
 
