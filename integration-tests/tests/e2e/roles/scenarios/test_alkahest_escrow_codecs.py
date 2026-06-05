@@ -12,14 +12,26 @@ from eth_account.signers.local import LocalAccount
 from web3 import Web3
 
 from service.clients.alkahest import (
+    Attestation2NonTierableEscrowCodec,
+    Attestation2TierableEscrowCodec,
+    AttestationNonTierableEscrowCodec,
+    AttestationTierableEscrowCodec,
     Erc1155NonTierableEscrowCodec,
     Erc1155TierableEscrowCodec,
     Erc721NonTierableEscrowCodec,
     Erc721TierableEscrowCodec,
+    NativeTokenNonTierableEscrowCodec,
+    NativeTokenTierableEscrowCodec,
+    TokenBundleNonTierableEscrowCodec,
+    TokenBundleTierableEscrowCodec,
     encode_recipient_demand,
     get_alkahest_network,
     get_recipient_arbiter,
     resolve_alkahest_address_config,
+)
+from market_storefront.utils.escrow_verification import (
+    _normalize_obligation_data,
+    _read_chain_obligation_data,
 )
 from src.settings import settings
 
@@ -35,6 +47,8 @@ _ALKAHEST_ADDRESSES_PATH = str(
 # these are the sibling mock NFT contracts from the same deterministic deploy.
 _MOCK_ERC721_A = "0x5fc8d32690cc91d4c39d9d3abcbd16989f875707"
 _MOCK_ERC1155_A = "0x0165878a594ca255338adfa4d48449f69242eb8f"
+_MOCK_ERC20_A = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+_ZERO_UID = "0x" + "00" * 32
 
 # Standard Anvil account #0. It has ETH in the baked state and mock mint
 # functions are public, so this keeps mint funding separate from the buyer.
@@ -85,6 +99,18 @@ _ERC721_ABI = [
         "anonymous": False,
     },
 ]
+_ERC20_ABI = [
+    {
+        "type": "function",
+        "name": "approve",
+        "stateMutability": "nonpayable",
+        "inputs": [
+            {"name": "spender", "type": "address"},
+            {"name": "amount", "type": "uint256"},
+        ],
+        "outputs": [{"name": "", "type": "bool"}],
+    },
+]
 _ERC1155_ABI = [
     {
         "type": "function",
@@ -128,6 +154,14 @@ class CodecCase:
 
 
 _CODEC_CASES = [
+    CodecCase("native-token-nontierable", "native", NativeTokenNonTierableEscrowCodec()),
+    CodecCase("native-token-tierable", "native", NativeTokenTierableEscrowCodec()),
+    CodecCase("token-bundle-nontierable", "bundle", TokenBundleNonTierableEscrowCodec()),
+    CodecCase("token-bundle-tierable", "bundle", TokenBundleTierableEscrowCodec()),
+    CodecCase("attestation-v1-nontierable", "attestation_v1", AttestationNonTierableEscrowCodec()),
+    CodecCase("attestation-v1-tierable", "attestation_v1", AttestationTierableEscrowCodec()),
+    CodecCase("attestation-v2-nontierable", "attestation_v2", Attestation2NonTierableEscrowCodec()),
+    CodecCase("attestation-v2-tierable", "attestation_v2", Attestation2TierableEscrowCodec()),
     CodecCase("erc721-nontierable", "erc721", Erc721NonTierableEscrowCodec()),
     CodecCase("erc721-tierable", "erc721", Erc721TierableEscrowCodec()),
     CodecCase("erc1155-nontierable", "erc1155", Erc1155NonTierableEscrowCodec()),
@@ -225,7 +259,70 @@ def _approve_tierable_escrow(
     _send_tx(w3, account, token.functions.setApprovalForAll(spender, True).build_transaction())
 
 
-def _build_obligation_data(case: CodecCase, w3: Web3, case_index: int) -> dict[str, Any]:
+def _approve_tierable_bundle_escrow(
+    case: CodecCase,
+    w3: Web3,
+    bundle_data: dict[str, Any],
+) -> None:
+    if case.asset_kind != "bundle" or getattr(case.codec, "tier_attr", None) != "tierable":
+        return
+
+    account = w3.eth.account.from_key(str(settings.BUYER.PRIVATE_KEY))
+    spender = Web3.to_checksum_address(
+        case.codec.resolve_address(_CHAIN_NAME, config_path=_ALKAHEST_ADDRESSES_PATH)
+    )
+
+    erc20 = w3.eth.contract(
+        address=Web3.to_checksum_address(_MOCK_ERC20_A), abi=_ERC20_ABI
+    )
+    for token_address, amount in zip(
+        bundle_data.get("erc20Tokens", []),
+        bundle_data.get("erc20Amounts", []),
+    ):
+        token = erc20 if _address(token_address) == _address(_MOCK_ERC20_A) else w3.eth.contract(
+            address=Web3.to_checksum_address(token_address), abi=_ERC20_ABI
+        )
+        _send_tx(
+            w3,
+            account,
+            token.functions.approve(spender, int(amount)).build_transaction(
+                {"from": account.address}
+            ),
+        )
+
+    for token_address, token_id in zip(
+        bundle_data.get("erc721Tokens", []),
+        bundle_data.get("erc721TokenIds", []),
+    ):
+        token = w3.eth.contract(
+            address=Web3.to_checksum_address(token_address), abi=_ERC721_ABI
+        )
+        _send_tx(
+            w3,
+            account,
+            token.functions.approve(spender, int(token_id)).build_transaction(
+                {"from": account.address}
+            ),
+        )
+
+    for token_address in bundle_data.get("erc1155Tokens", []):
+        token = w3.eth.contract(
+            address=Web3.to_checksum_address(token_address), abi=_ERC1155_ABI
+        )
+        _send_tx(
+            w3,
+            account,
+            token.functions.setApprovalForAll(spender, True).build_transaction(
+                {"from": account.address}
+            ),
+        )
+
+
+async def _build_obligation_data(
+    case: CodecCase,
+    w3: Web3,
+    case_index: int,
+) -> dict[str, Any]:
     buyer_address = str(settings.BUYER.WALLET_ADDRESS)
     common = {
         "arbiter": get_recipient_arbiter(
@@ -233,6 +330,81 @@ def _build_obligation_data(case: CodecCase, w3: Web3, case_index: int) -> dict[s
         ),
         "demand": encode_recipient_demand(str(settings.SELLER.WALLET_ADDRESS)),
     }
+
+    if case.asset_kind == "native":
+        return {
+            **common,
+            "amount": 10**15 + case_index,
+        }
+
+    if case.asset_kind == "bundle":
+        erc721_token_id = _mint_erc721(w3, buyer_address)
+        erc1155_token_id = 200 + case_index
+        erc1155_amount = 4 + case_index
+        _mint_erc1155(
+            w3, buyer_address, token_id=erc1155_token_id, amount=erc1155_amount
+        )
+        bundle_data = {
+            **common,
+            "nativeAmount": 0,
+            "erc20Tokens": [_MOCK_ERC20_A],
+            "erc20Amounts": [11 + case_index],
+            "erc721Tokens": [_MOCK_ERC721_A],
+            "erc721TokenIds": [erc721_token_id],
+            "erc1155Tokens": [_MOCK_ERC1155_A],
+            "erc1155TokenIds": [erc1155_token_id],
+            "erc1155Amounts": [erc1155_amount],
+        }
+        _approve_tierable_bundle_escrow(case, w3, bundle_data)
+        return bundle_data
+
+    if case.asset_kind == "attestation_v1":
+        return {
+            **common,
+            "attestation": {
+                "schema": _ZERO_UID,
+                "data": {
+                    "recipient": buyer_address,
+                    "expiration_time": 0,
+                    "revocable": False,
+                    "ref_uid": _ZERO_UID,
+                    "data": "0x1234",
+                    "value": 0,
+                },
+            },
+        }
+
+    if case.asset_kind == "attestation_v2":
+        seed_codec = AttestationNonTierableEscrowCodec()
+        seed_data = {
+            **common,
+            "attestation": {
+                "schema": _ZERO_UID,
+                "data": {
+                    "recipient": buyer_address,
+                    "expiration_time": 0,
+                    "revocable": False,
+                    "ref_uid": _ZERO_UID,
+                    "data": "0x5678",
+                    "value": 0,
+                },
+            },
+        }
+        address_config = resolve_alkahest_address_config(
+            get_alkahest_network(_CHAIN_NAME), config_path=_ALKAHEST_ADDRESSES_PATH
+        )
+        client = AlkahestClient(
+            private_key=str(settings.BUYER.PRIVATE_KEY),
+            rpc_url=str(settings.BUYER.CHAIN_RPC_URL),
+            address_config=address_config,
+        )
+        seed_uid = await seed_codec.create_obligation(
+            client, seed_data, expiration_unix=int(time.time()) + 3600
+        )
+        return {
+            **common,
+            "attestationUid": seed_uid,
+        }
 
     if case.asset_kind == "erc721":
         token_id = _mint_erc721(w3, buyer_address)
@@ -258,6 +430,10 @@ def _build_obligation_data(case: CodecCase, w3: Web3, case_index: int) -> dict[s
 def _assert_obligation_matches(case: CodecCase, data: dict[str, Any], obligation: Any) -> None:
     if isinstance(obligation, dict) and "data" in obligation:
         obligation = obligation["data"]
+
+    if case.asset_kind in {"native", "bundle", "attestation_v1", "attestation_v2"}:
+        assert _read_chain_obligation_data(obligation) == _normalize_obligation_data(data)
+        return
 
     assert _address(_field(obligation, "token")) == _address(data["token"])
     assert int(_field(obligation, "token_id", "tokenId")) == int(data["tokenId"])
@@ -286,7 +462,7 @@ async def test_alkahest_escrow_codec_create_read(case_index: int, case: CodecCas
         address_config=address_config,
     )
 
-    obligation_data = _build_obligation_data(case, w3, case_index)
+    obligation_data = await _build_obligation_data(case, w3, case_index)
     uid = await case.codec.create_obligation(
         client, obligation_data, expiration_unix=int(time.time()) + 3600
     )

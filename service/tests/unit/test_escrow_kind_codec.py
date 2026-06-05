@@ -941,8 +941,8 @@ def test_attestation_v1_create_obligation_translates_to_sdk_shape(
 
     assert uid == "0xatt"
     attestation, arbiter_data, expiration = tier_client.create.await_args.args
-    assert attestation["schema"] == _UID
-    assert attestation["data"]["data"] == bytes.fromhex("1234")
+    assert attestation.schema == _UID
+    assert attestation.data.data == bytes.fromhex("1234")
     assert arbiter_data == {"arbiter": _ARBITER, "demand": _DEMAND_BYTES}
     assert expiration == 1_800_000_000
 

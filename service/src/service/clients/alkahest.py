@@ -1783,6 +1783,8 @@ class _AttestationV1EscrowCodecBase(_AttestationEscrowCodecBase):
     version_attr = "v1"
 
     def _attestation_data(self, obligation_data: dict[str, Any]) -> Any:
+        from alkahest_py import AttestationRequest, AttestationRequestData
+
         attestation = obligation_data["attestation"]
         if not isinstance(attestation, dict):
             raise TypeError("attestation must be an object")
@@ -1790,8 +1792,17 @@ class _AttestationV1EscrowCodecBase(_AttestationEscrowCodecBase):
         request_data = dict(out.get("data") or {})
         if "data" in request_data:
             request_data["data"] = _normalize_demand_bytes(request_data["data"])
-        out["data"] = request_data
-        return out
+        return AttestationRequest(
+            schema=out["schema"],
+            data=AttestationRequestData(
+                recipient=request_data["recipient"],
+                expiration_time=int(request_data.get("expiration_time", 0) or 0),
+                revocable=bool(request_data.get("revocable", False)),
+                ref_uid=request_data["ref_uid"],
+                data=request_data.get("data", b""),
+                value=int(request_data.get("value", 0) or 0),
+            ),
+        )
 
 
 class AttestationNonTierableEscrowCodec(_AttestationV1EscrowCodecBase):
