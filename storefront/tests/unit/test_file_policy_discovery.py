@@ -68,6 +68,22 @@ def test_extra_policy_paths_register_each_subdir(tmp_path):
     assert decision.reason == "stub-default"
 
 
+def test_load_storefront_chain_builds_dispatch_for_policy_table():
+    with settings_overrides(**{
+        "negotiation.policies": {
+            "erc20": "erc20_bisection",
+            "native_token": {"policy": "native_token_bisection"},
+        },
+        "negotiation.extra_policy_paths": [],
+    }):
+        chain = sync_negotiation._load_storefront_chain()
+
+    assert len(chain) == 3
+    assert getattr(chain[0], "__name__", "") == "has_matching_inventory_guard"
+    assert getattr(chain[1], "__name__", "") == "escrow_shape_guard"
+    assert getattr(chain[2], "__name__", "") == "escrow_kind_dispatch_middleware"
+
+
 def test_xdg_default_path_is_discovered(tmp_path, monkeypatch):
     policies_root = tmp_path / "arkhai" / "policies"
     _write_policy(policies_root, "myxdg")

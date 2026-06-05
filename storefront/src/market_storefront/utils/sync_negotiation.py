@@ -47,6 +47,8 @@ from market_policy.negotiation_middleware import (
     NegotiationStep,
     _amount_from_proposal,
     load_negotiation_chain,
+    make_escrow_kind_dispatch_middleware,
+    normalize_policies_by_escrow_kind_config,
     register_negotiation_middleware,
     run_negotiation_chain,
 )
@@ -353,6 +355,15 @@ def _maybe_register_rl_middleware() -> None:
 
 _DEFAULT_GUARDS = ["has_matching_inventory_guard", "escrow_shape_guard"]
 _DEFAULT_TERMINAL = "bisection"
+_RL_POLICY_NAMES = {"rl", "erc20_rl", "native_token_rl", "erc1155_rl"}
+
+
+def _policy_names_need_rl(policy_names: list[str]) -> bool:
+    return any(name in _RL_POLICY_NAMES for name in policy_names)
+
+
+def _policy_map_needs_rl(policies_by_kind: dict[str, list[str]]) -> bool:
+    return any(_policy_names_need_rl(names) for names in policies_by_kind.values())
 
 
 def _load_storefront_chain():
@@ -367,12 +378,29 @@ def _load_storefront_chain():
     _discover_file_policies()
 
     negotiation_cfg = getattr(settings, "negotiation", None)
-    policy_names = list(getattr(negotiation_cfg, "policies", []) or [])
+    raw_policies = getattr(negotiation_cfg, "policies", None)
+    policies_by_kind = normalize_policies_by_escrow_kind_config(raw_policies)
+    if policies_by_kind:
+        if _policy_map_needs_rl(policies_by_kind):
+            _maybe_register_rl_middleware()
+        from market_storefront.utils.config import CHAINS
+        chain_config_paths = {
+            name: chain.alkahest_address_config_path
+            for name, chain in CHAINS.items()
+        }
+        return load_negotiation_chain(_DEFAULT_GUARDS) + [
+            make_escrow_kind_dispatch_middleware(
+                policies_by_kind,
+                chain_config_paths=chain_config_paths,
+            )
+        ]
+
+    policy_names = list(raw_policies or [])
     if not policy_names:
         policy_mode = (getattr(negotiation_cfg, "policy_mode", "") or "").strip() or _DEFAULT_TERMINAL
         policy_names = _DEFAULT_GUARDS + [policy_mode]
 
-    if "rl" in policy_names:
+    if _policy_names_need_rl(policy_names):
         _maybe_register_rl_middleware()
 
     return load_negotiation_chain(policy_names)

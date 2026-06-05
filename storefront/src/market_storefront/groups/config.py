@@ -212,6 +212,13 @@ _INIT_USER_TEMPLATE = """\
 #                                              # `erc1155_bisection`, `erc20_rl`, `native_token_rl`,
 #                                              # `erc1155_rl`, or opt-in
 #                                              # `accept_exact_listing` (no counters).
+#                                              # For per-kind dispatch, replace the list with:
+#                                              # [negotiation.policies]
+#                                              # erc20 = "erc20_bisection"
+#                                              # native_token = "native_token_bisection"
+#                                              # erc1155 = "erc1155_bisection"
+#                                              # [negotiation.policies.erc721]
+#                                              # chain = ["accept_exact_listing"]
 # seller_model_path = "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt"
 # buyer_model_path  = "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt"
 

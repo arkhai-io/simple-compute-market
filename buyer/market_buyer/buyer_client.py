@@ -29,6 +29,8 @@ from market_policy.negotiation_middleware import (
     NegotiationMiddleware,
     NegotiationRound,
     load_negotiation_chain,
+    make_escrow_kind_dispatch_middleware,
+    normalize_policies_by_escrow_kind_config,
     run_negotiation_chain,
 )
 from service.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
@@ -36,6 +38,7 @@ from service.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
 
 DEFAULT_MAX_ROUNDS = 10
 DEFAULT_TERMINAL = "bisection"
+_RL_POLICY_NAMES = {"rl", "erc20_rl", "native_token_rl", "erc1155_rl"}
 
 
 def _maybe_register_rl_middleware() -> None:
@@ -53,9 +56,17 @@ def _maybe_register_rl_middleware() -> None:
         pass
 
 
+def _policy_names_need_rl(policy_names: list[str]) -> bool:
+    return any(name in _RL_POLICY_NAMES for name in policy_names)
+
+
+def _policy_map_needs_rl(policies_by_kind: dict[str, list[str]]) -> bool:
+    return any(_policy_names_need_rl(names) for names in policies_by_kind.values())
+
+
 def _load_buyer_chain(
     *,
-    policies: list[str] | None = None,
+    policies: Any = None,
     policy_mode: str | None = None,
 ) -> list[NegotiationMiddleware]:
     """Load the buyer's negotiation chain.
@@ -68,12 +79,32 @@ def _load_buyer_chain(
     contract swap). ``<terminal>`` is `policy_mode` if set, else
     ``DEFAULT_TERMINAL`` (`"bisection"`).
     """
+    policies_by_kind = normalize_policies_by_escrow_kind_config(policies)
+    if policies_by_kind:
+        if _policy_map_needs_rl(policies_by_kind):
+            _maybe_register_rl_middleware()
+        try:
+            from market_buyer.common import buyer_chains
+            chains = buyer_chains()
+        except Exception:
+            chains = {}
+        chain_config_paths = {
+            name: chain.alkahest_address_config_path
+            for name, chain in chains.items()
+        }
+        return load_negotiation_chain(["buyer_escrow_shape_guard"]) + [
+            make_escrow_kind_dispatch_middleware(
+                policies_by_kind,
+                chain_config_paths=chain_config_paths,
+            )
+        ]
+
     if policies:
         names = [str(p).strip() for p in policies if str(p).strip()]
     else:
         terminal = (policy_mode or "").strip() or DEFAULT_TERMINAL
         names = ["buyer_escrow_shape_guard", terminal]
-    if "rl" in names:
+    if _policy_names_need_rl(names):
         _maybe_register_rl_middleware()
     return load_negotiation_chain(names)
 

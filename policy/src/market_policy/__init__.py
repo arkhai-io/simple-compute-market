@@ -27,7 +27,10 @@ from market_policy.negotiation_middleware import (
     escrow_shape_guard,
     has_matching_inventory_guard,
     load_negotiation_chain,
+    make_escrow_kind_dispatch_middleware,
     max_rounds_guard,
+    normalize_policies_by_escrow_kind_config,
+    normalize_policy_chain_config,
     register_negotiation_middleware,
     run_negotiation_chain,
 )
@@ -45,7 +48,10 @@ __all__ = [
     "escrow_shape_guard",
     "has_matching_inventory_guard",
     "load_negotiation_chain",
+    "make_escrow_kind_dispatch_middleware",
     "max_rounds_guard",
+    "normalize_policies_by_escrow_kind_config",
+    "normalize_policy_chain_config",
     "register_negotiation_middleware",
     "run_negotiation_chain",
 ]

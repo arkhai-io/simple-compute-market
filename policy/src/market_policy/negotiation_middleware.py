@@ -175,6 +175,44 @@ def their_last_proposal(history: list[NegotiationRound]) -> Optional[dict[str, A
     return None
 
 
+def proposal_escrow_kind(
+    proposal: dict[str, Any] | None,
+    *,
+    chain_config_paths: dict[str, str | None] | None = None,
+) -> str | None:
+    """Resolve an EscrowProposal-shaped dict to an Alkahest escrow kind.
+
+    The proposal identifies a selected accepted escrow by
+    ``(chain_name, escrow_address)``. This helper resolves that address
+    to the Alkahest slot name, e.g.
+    ``erc20_escrow_obligation_nontierable``. ``chain_config_paths`` lets
+    callers provide per-chain local address books for Anvil deployments.
+    """
+    if not isinstance(proposal, dict):
+        return None
+    chain_name = proposal.get("chain_name")
+    escrow_address = proposal.get("escrow_address")
+    if not isinstance(chain_name, str) or not chain_name:
+        return None
+    if not isinstance(escrow_address, str) or not escrow_address:
+        return None
+    try:
+        from service.clients.alkahest import address_to_slot
+        return address_to_slot(
+            chain_name,
+            escrow_address,
+            config_path=(chain_config_paths or {}).get(chain_name),
+        )
+    except Exception as exc:
+        logger.debug(
+            "Could not resolve escrow kind for chain=%r address=%r: %s",
+            chain_name,
+            escrow_address,
+            exc,
+        )
+        return None
+
+
 def our_previous_counters(history: list[NegotiationRound]) -> list[float]:
     """Absolute amounts we counter-proposed in earlier rounds, oldest first."""
     out: list[float] = []
@@ -331,6 +369,59 @@ def list_negotiation_middlewares() -> list[str]:
     return sorted(_REGISTRY)
 
 
+def _plain_mapping(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return dict(value)
+    if hasattr(value, "items"):
+        try:
+            return {str(k): v for k, v in value.items()}
+        except Exception:
+            return None
+    return None
+
+
+def normalize_policy_chain_config(value: Any) -> list[str]:
+    """Normalize a policy config value into a middleware-name chain.
+
+    Accepted shapes:
+      - ``"bisection"``
+      - ``["buyer_escrow_shape_guard", "bisection"]``
+      - ``{policy = "bisection"}``
+      - ``{chain = ["escrow_shape_guard", "bisection"]}``
+      - ``{policies = ["escrow_shape_guard", "bisection"]}``
+    """
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if isinstance(value, list):
+        return [str(name).strip() for name in value if str(name).strip()]
+    mapping = _plain_mapping(value)
+    if mapping is not None:
+        if "chain" in mapping:
+            return normalize_policy_chain_config(mapping.get("chain"))
+        if "policies" in mapping:
+            return normalize_policy_chain_config(mapping.get("policies"))
+        if "policy" in mapping:
+            return normalize_policy_chain_config(mapping.get("policy"))
+    return []
+
+
+def normalize_policies_by_escrow_kind_config(value: Any) -> dict[str, list[str]] | None:
+    """Normalize ``[negotiation.policies]`` table values for dispatch.
+
+    Returns ``None`` when ``value`` is not a mapping, so callers can keep
+    treating ``[negotiation] policies = [...]`` as the existing global chain.
+    """
+    mapping = _plain_mapping(value)
+    if mapping is None:
+        return None
+    out: dict[str, list[str]] = {}
+    for kind, raw_chain in mapping.items():
+        chain = normalize_policy_chain_config(raw_chain)
+        if chain:
+            out[str(kind).strip()] = chain
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Built-in: bisection — terminal middleware
 # ---------------------------------------------------------------------------
@@ -475,6 +566,89 @@ def amount_bisection_middleware(
     without changing behavior from ``bisection``.
     """
     return bisection_middleware(history, context)
+
+
+def _escrow_kind_lookup_keys(kind: str) -> list[str]:
+    keys = [kind]
+    for prefix in ("erc20", "native_token", "erc1155", "erc721", "token_bundle", "attestation"):
+        if kind.startswith(prefix):
+            keys.append(prefix)
+            break
+    keys.append("default")
+    out: list[str] = []
+    for key in keys:
+        if key not in out:
+            out.append(key)
+    return out
+
+
+def make_escrow_kind_dispatch_middleware(
+    policies_by_kind: dict[str, list[str]],
+    *,
+    chain_config_paths: dict[str, str | None] | None = None,
+) -> NegotiationMiddleware:
+    """Build a terminal middleware that dispatches by selected escrow kind.
+
+    ``policies_by_kind`` maps an exact Alkahest kind
+    (``erc20_escrow_obligation_nontierable``) or family key
+    (``erc20``, ``native_token``, ``erc1155``) to a middleware chain.
+    ``default`` is optional fallback. The selected kind comes from the
+    peer's latest proposal, falling back to our pinned proposal on
+    first-round buyer decisions.
+    """
+    normalized: dict[str, list[str]] = {
+        str(kind).strip(): [str(name).strip() for name in chain if str(name).strip()]
+        for kind, chain in policies_by_kind.items()
+        if str(kind).strip()
+    }
+    chain_cache: dict[str, list[NegotiationMiddleware]] = {}
+
+    def _chain_for(kind: str) -> tuple[str, list[NegotiationMiddleware]] | None:
+        for key in _escrow_kind_lookup_keys(kind):
+            names = normalized.get(key)
+            if not names:
+                continue
+            if any(name == "escrow_kind_dispatch" for name in names):
+                raise RuntimeError("escrow_kind_dispatch cannot dispatch to itself")
+            if key not in chain_cache:
+                chain_cache[key] = load_negotiation_chain(names)
+            return key, chain_cache[key]
+        return None
+
+    def escrow_kind_dispatch_middleware(
+        history: list[NegotiationRound],
+        context: NegotiationContext,
+    ) -> NegotiationStep:
+        proposal = their_last_proposal(history) or context.our_escrow_proposal
+        kind = proposal_escrow_kind(
+            proposal,
+            chain_config_paths=chain_config_paths,
+        )
+        if not kind:
+            return (
+                NegotiationDecision(
+                    action="reject",
+                    reason="escrow_kind_dispatch:unknown_escrow_kind",
+                ),
+                context,
+            )
+        selected = _chain_for(kind)
+        if selected is None:
+            return (
+                NegotiationDecision(
+                    action="reject",
+                    reason=f"escrow_kind_dispatch:no_policy_for:{kind}",
+                ),
+                context,
+            )
+        matched_key, chain = selected
+        context.intermediate["escrow_kind"] = kind
+        context.intermediate["escrow_kind_policy_key"] = matched_key
+        decision = run_negotiation_chain(chain, history, context)
+        return decision, context
+
+    escrow_kind_dispatch_middleware.__name__ = "escrow_kind_dispatch_middleware"
+    return escrow_kind_dispatch_middleware
 
 
 # ---------------------------------------------------------------------------

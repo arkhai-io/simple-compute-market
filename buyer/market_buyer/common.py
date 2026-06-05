@@ -30,17 +30,19 @@ def resolve_config_value(
     return default
 
 
-def resolve_negotiation_config() -> tuple[list[str] | None, str | None]:
+def resolve_negotiation_config() -> tuple[object | None, str | None]:
     """Resolve negotiation policy config without flattening TOML lists."""
     from service.config_loader import get_dotted, load_user_config
 
     cfg = load_user_config()
     raw_policies = get_dotted(cfg, "negotiation.policies")
-    policies: list[str] | None = None
+    policies: object | None = None
     if isinstance(raw_policies, list):
         policies = [str(p).strip() for p in raw_policies if str(p).strip()]
     elif isinstance(raw_policies, str) and raw_policies.strip():
         policies = [p.strip() for p in raw_policies.split(",") if p.strip()]
+    elif hasattr(raw_policies, "items") or isinstance(raw_policies, dict):
+        policies = raw_policies
 
     raw_policy_mode = get_dotted(cfg, "negotiation.policy_mode")
     policy_mode = str(raw_policy_mode).strip() if raw_policy_mode else None

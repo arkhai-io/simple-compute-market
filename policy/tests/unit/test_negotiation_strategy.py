@@ -20,6 +20,8 @@ from market_policy.negotiation_middleware import (
     amount_bisection_middleware,
     bisection_middleware,
     load_negotiation_chain,
+    make_escrow_kind_dispatch_middleware,
+    normalize_policies_by_escrow_kind_config,
     register_negotiation_middleware,
     run_negotiation_chain,
 )
@@ -296,6 +298,80 @@ def test_erc1155_bisection_preserves_token_literals():
         "tokenId": 7,
     }
     assert decision.proposal["fields"]["tokenId"] == 7
+
+
+def test_normalize_policies_by_escrow_kind_config_accepts_string_and_nested_chain():
+    assert normalize_policies_by_escrow_kind_config({
+        "erc20": "erc20_bisection",
+        "erc721": {"chain": ["accept_exact_listing"]},
+        "erc1155": {"policy": "erc1155_bisection"},
+    }) == {
+        "erc20": ["erc20_bisection"],
+        "erc721": ["accept_exact_listing"],
+        "erc1155": ["erc1155_bisection"],
+    }
+
+
+def test_escrow_kind_dispatch_uses_family_policy(monkeypatch):
+    from service.clients import alkahest
+
+    monkeypatch.setattr(
+        alkahest,
+        "address_to_slot",
+        lambda chain_name, address, *, config_path=None: (
+            "native_token_escrow_obligation_nontierable"
+        ),
+    )
+    dispatch = make_escrow_kind_dispatch_middleware({
+        "native_token": ["native_token_bisection"],
+    })
+    history = [
+        NegotiationRound(
+            round_number=0,
+            sender="them",
+            action="counter",
+            proposal=_native_token_proposal_with_amount(80),
+        )
+    ]
+    ctx = NegotiationContext(
+        direction="maximize",
+        our_reference_amount=100,
+        our_escrow_proposal=_native_token_proposal_with_amount(100),
+    )
+    decision = run_negotiation_chain([dispatch], history, ctx)
+    assert decision.action == "counter"
+    assert _decision_amount(decision) == 90
+    assert ctx.intermediate["escrow_kind"] == "native_token_escrow_obligation_nontierable"
+    assert ctx.intermediate["escrow_kind_policy_key"] == "native_token"
+
+
+def test_escrow_kind_dispatch_rejects_unmapped_kind(monkeypatch):
+    from service.clients import alkahest
+
+    monkeypatch.setattr(
+        alkahest,
+        "address_to_slot",
+        lambda chain_name, address, *, config_path=None: (
+            "erc721_escrow_obligation_nontierable"
+        ),
+    )
+    dispatch = make_escrow_kind_dispatch_middleware({
+        "erc20": ["erc20_bisection"],
+    })
+    history = [
+        NegotiationRound(
+            round_number=0,
+            sender="them",
+            action="counter",
+            proposal=_erc1155_proposal_with_amount(100),
+        )
+    ]
+    ctx = NegotiationContext(direction="maximize", our_reference_amount=100)
+    decision = run_negotiation_chain([dispatch], history, ctx)
+    assert decision.action == "reject"
+    assert decision.reason == (
+        "escrow_kind_dispatch:no_policy_for:erc721_escrow_obligation_nontierable"
+    )
 
 
 def test_register_negotiation_middleware_makes_it_loadable():

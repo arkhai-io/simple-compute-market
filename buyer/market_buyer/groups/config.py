@@ -157,6 +157,13 @@ _INIT_USER_TEMPLATE = """\
 #                                              # `erc20_bisection`, `native_token_bisection`, or
 #                                              # `erc1155_bisection`, `erc20_rl`, `native_token_rl`, or
 #                                              # `erc1155_rl`
+#                                              # For per-kind dispatch, replace the list with:
+#                                              # [negotiation.policies]
+#                                              # erc20 = "erc20_bisection"
+#                                              # native_token = "native_token_bisection"
+#                                              # erc1155 = "erc1155_bisection"
+#                                              # [negotiation.policies.erc721]
+#                                              # chain = ["accept_exact_listing"]
 # policy_mode = "bisection"                    # legacy single-terminal key (synthesizes the default chain
 #                                              # when `policies` is absent)
 """
