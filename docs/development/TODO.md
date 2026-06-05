@@ -86,11 +86,11 @@ The `provisioning-service` wheel stays its own distributable — it's operated b
 
 ### Escrow Kind Codec Expansion
 
-**Status:** In progress. Full scope in [`design-escrow-kind-codecs.md`](design-escrow-kind-codecs.md).
+**Status:** Done.
 
-**Current state:** settlement now consumes concrete `EscrowTerms` on accept, and every tierable/non-tierable escrow obligation under `alkahest/contracts/src/obligations/escrow` is registered with codec-boundary tests: ERC20, native-token, ERC721, ERC1155, token-bundle, attestation-request, and attestation-UID. Default compute policies may remain ERC20/scalar-amount oriented; non-ERC20 users can supply their own policies, with a simple exact-match listing guard as the baseline.
+**Current state:** settlement consumes concrete `EscrowTerms` on accept, and every tierable/non-tierable escrow obligation under `alkahest/contracts/src/obligations/escrow` is registered with codec-boundary tests: ERC20, native-token, ERC721, ERC1155, token-bundle, attestation-request, and attestation-UID. Packaged policies include exact-match behavior for non-default formats, and scalar policies cover ERC20, native-token, and ERC1155. Representative compose-backed settlement e2e coverage exists for native-token and ERC1155 escrows.
 
-**Planned fix:** finish the non-codec follow-through. Token-bundle support should use the existing escrow-template alias system (`rates.<alias>.field = "erc20Amounts[0]"`) and add final-term field-path assignment into nested/indexed `obligation_data`. Attestation escrows are exposed for custom policies, but should not be treated as product-complete default flows until their product semantics are nailed down. Add representative e2e coverage once listing/proposal semantics are stable.
+Follow-up work around schema-packaged registry filters and buyer CLI plugins is tracked under Market Core Extraction.
 
 ### Storefront DB Pruning
 
