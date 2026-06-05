@@ -148,6 +148,67 @@ def test_address_to_slot_base_sepolia_native_token_escrows():
         assert address_to_slot("base_sepolia", tierable) is None
 
 
+def test_address_to_slot_base_sepolia_token_bundle_escrows():
+    from service.clients.alkahest import (
+        address_to_slot,
+        get_token_bundle_escrow_obligation_nontierable,
+        get_token_bundle_escrow_obligation_tierable,
+        _reverse_address_map,
+    )
+    _reverse_address_map.cache_clear()
+    non_tierable = get_token_bundle_escrow_obligation_nontierable("base_sepolia")
+    tierable = get_token_bundle_escrow_obligation_tierable("base_sepolia")
+    assert (
+        address_to_slot("base_sepolia", non_tierable)
+        == "token_bundle_escrow_obligation_nontierable"
+    )
+    if int(tierable, 16) != 0:
+        assert (
+            address_to_slot("base_sepolia", tierable)
+            == "token_bundle_escrow_obligation_tierable"
+        )
+    else:
+        assert address_to_slot("base_sepolia", tierable) is None
+
+
+def test_address_to_slot_base_sepolia_attestation_escrows():
+    from service.clients.alkahest import (
+        address_to_slot,
+        get_attestation_escrow_obligation_2_nontierable,
+        get_attestation_escrow_obligation_2_tierable,
+        get_attestation_escrow_obligation_nontierable,
+        get_attestation_escrow_obligation_tierable,
+        _reverse_address_map,
+    )
+    _reverse_address_map.cache_clear()
+    v1_non_tierable = get_attestation_escrow_obligation_nontierable("base_sepolia")
+    v1_tierable = get_attestation_escrow_obligation_tierable("base_sepolia")
+    v2_non_tierable = get_attestation_escrow_obligation_2_nontierable("base_sepolia")
+    v2_tierable = get_attestation_escrow_obligation_2_tierable("base_sepolia")
+    assert (
+        address_to_slot("base_sepolia", v1_non_tierable)
+        == "attestation_escrow_obligation_nontierable"
+    )
+    assert (
+        address_to_slot("base_sepolia", v2_non_tierable)
+        == "attestation_escrow_obligation_2_nontierable"
+    )
+    if int(v1_tierable, 16) != 0:
+        assert (
+            address_to_slot("base_sepolia", v1_tierable)
+            == "attestation_escrow_obligation_tierable"
+        )
+    else:
+        assert address_to_slot("base_sepolia", v1_tierable) is None
+    if int(v2_tierable, 16) != 0:
+        assert (
+            address_to_slot("base_sepolia", v2_tierable)
+            == "attestation_escrow_obligation_2_tierable"
+        )
+    else:
+        assert address_to_slot("base_sepolia", v2_tierable) is None
+
+
 def test_address_to_slot_unknown_address_returns_none():
     from service.clients.alkahest import address_to_slot, _reverse_address_map
     _reverse_address_map.cache_clear()
@@ -197,6 +258,16 @@ def test_address_to_slot_anvil_override(tmp_path):
             "escrow_obligation_nontierable": "0x" + "9a" * 20,
             "escrow_obligation_tierable": "0x" + "bc" * 20,
         },
+        "token_bundle_addresses": {
+            "escrow_obligation_nontierable": "0x" + "de" * 20,
+            "escrow_obligation_tierable": "0x" + "f1" * 20,
+        },
+        "attestation_addresses": {
+            "escrow_obligation_nontierable": "0x" + "13" * 20,
+            "escrow_obligation_tierable": "0x" + "24" * 20,
+            "escrow_obligation_2_nontierable": "0x" + "35" * 20,
+            "escrow_obligation_2_tierable": "0x" + "46" * 20,
+        },
     }))
     cfg_path = str(override)
     assert address_to_slot("anvil", arbiter_addr, config_path=cfg_path) == "recipient_arbiter"
@@ -208,4 +279,10 @@ def test_address_to_slot_anvil_override(tmp_path):
     assert address_to_slot("anvil", "0x" + "78" * 20, config_path=cfg_path) == "erc1155_escrow_obligation_tierable"
     assert address_to_slot("anvil", "0x" + "9a" * 20, config_path=cfg_path) == "native_token_escrow_obligation_nontierable"
     assert address_to_slot("anvil", "0x" + "bc" * 20, config_path=cfg_path) == "native_token_escrow_obligation_tierable"
+    assert address_to_slot("anvil", "0x" + "de" * 20, config_path=cfg_path) == "token_bundle_escrow_obligation_nontierable"
+    assert address_to_slot("anvil", "0x" + "f1" * 20, config_path=cfg_path) == "token_bundle_escrow_obligation_tierable"
+    assert address_to_slot("anvil", "0x" + "13" * 20, config_path=cfg_path) == "attestation_escrow_obligation_nontierable"
+    assert address_to_slot("anvil", "0x" + "24" * 20, config_path=cfg_path) == "attestation_escrow_obligation_tierable"
+    assert address_to_slot("anvil", "0x" + "35" * 20, config_path=cfg_path) == "attestation_escrow_obligation_2_nontierable"
+    assert address_to_slot("anvil", "0x" + "46" * 20, config_path=cfg_path) == "attestation_escrow_obligation_2_tierable"
     assert address_to_slot("anvil", "0x" + "00" * 20, config_path=cfg_path) is None

@@ -322,6 +322,90 @@ def get_native_token_escrow_obligation_tierable(
     )
 
 
+def get_token_bundle_escrow_obligation_nontierable(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve ``TokenBundleEscrowObligation`` (non-tierable variant)."""
+    return _escrow_obligation_address(
+        chain_name,
+        config_path=config_path,
+        category="token_bundle_addresses",
+        field="escrow_obligation_nontierable",
+    )
+
+
+def get_token_bundle_escrow_obligation_tierable(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve ``TokenBundleEscrowObligation`` (tierable variant)."""
+    return _escrow_obligation_address(
+        chain_name,
+        config_path=config_path,
+        category="token_bundle_addresses",
+        field="escrow_obligation_tierable",
+    )
+
+
+def get_attestation_escrow_obligation_nontierable(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve ``AttestationEscrowObligation`` v1 (non-tierable variant)."""
+    return _escrow_obligation_address(
+        chain_name,
+        config_path=config_path,
+        category="attestation_addresses",
+        field="escrow_obligation_nontierable",
+    )
+
+
+def get_attestation_escrow_obligation_tierable(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve ``AttestationEscrowObligation`` v1 (tierable variant)."""
+    return _escrow_obligation_address(
+        chain_name,
+        config_path=config_path,
+        category="attestation_addresses",
+        field="escrow_obligation_tierable",
+    )
+
+
+def get_attestation_escrow_obligation_2_nontierable(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve ``AttestationEscrowObligation2`` (non-tierable variant)."""
+    return _escrow_obligation_address(
+        chain_name,
+        config_path=config_path,
+        category="attestation_addresses",
+        field="escrow_obligation_2_nontierable",
+    )
+
+
+def get_attestation_escrow_obligation_2_tierable(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve ``AttestationEscrowObligation2`` (tierable variant)."""
+    return _escrow_obligation_address(
+        chain_name,
+        config_path=config_path,
+        category="attestation_addresses",
+        field="escrow_obligation_2_tierable",
+    )
+
+
 _ADDRESS_CATEGORIES: tuple[tuple[str, str], ...] = (
     # (attribute on DefaultExtensionConfig, prefix for slot name).
     # Arbiters' field names are already ``*_arbiter``-suffixed, so the
@@ -1025,6 +1109,267 @@ class NativeTokenTierableEscrowCodec(_NativeTokenEscrowCodecBase):
     address_field = "escrow_obligation_tierable"
 
 
+def _as_int_list(values: Any, field: str) -> list[int]:
+    if values is None:
+        return []
+    if not isinstance(values, list):
+        raise TypeError(f"{field} must be a list")
+    return [int(value) for value in values]
+
+
+def _as_str_list(values: Any, field: str) -> list[str]:
+    if values is None:
+        return []
+    if not isinstance(values, list):
+        raise TypeError(f"{field} must be a list")
+    return [str(value) for value in values]
+
+
+def _zip_bundle_fields(
+    *,
+    left: list[Any],
+    right: list[Any],
+    left_name: str,
+    right_name: str,
+) -> list[tuple[Any, Any]]:
+    if len(left) != len(right):
+        raise ValueError(
+            f"token bundle field length mismatch: {left_name} has {len(left)} "
+            f"entries but {right_name} has {len(right)}"
+        )
+    return list(zip(left, right))
+
+
+class _TokenBundleEscrowCodecBase:
+    """Common token-bundle escrow SDK adapter.
+
+    Solidity ObligationData layout:
+        (address arbiter, bytes demand, uint256 nativeAmount,
+         address[] erc20Tokens, uint256[] erc20Amounts,
+         address[] erc721Tokens, uint256[] erc721TokenIds,
+         address[] erc1155Tokens, uint256[] erc1155TokenIds,
+         uint256[] erc1155Amounts)
+    """
+
+    tier_attr: str
+    address_field: str
+
+    def _bundle_data(self, obligation_data: dict[str, Any]) -> dict[str, Any]:
+        erc20_tokens = _as_str_list(obligation_data.get("erc20Tokens"), "erc20Tokens")
+        erc20_amounts = _as_int_list(obligation_data.get("erc20Amounts"), "erc20Amounts")
+        erc721_tokens = _as_str_list(obligation_data.get("erc721Tokens"), "erc721Tokens")
+        erc721_token_ids = _as_int_list(
+            obligation_data.get("erc721TokenIds"), "erc721TokenIds"
+        )
+        erc1155_tokens = _as_str_list(obligation_data.get("erc1155Tokens"), "erc1155Tokens")
+        erc1155_token_ids = _as_int_list(
+            obligation_data.get("erc1155TokenIds"), "erc1155TokenIds"
+        )
+        erc1155_amounts = _as_int_list(
+            obligation_data.get("erc1155Amounts"), "erc1155Amounts"
+        )
+        if len(erc1155_tokens) != len(erc1155_token_ids) or len(erc1155_tokens) != len(erc1155_amounts):
+            raise ValueError(
+                "token bundle field length mismatch: erc1155Tokens, "
+                "erc1155TokenIds, and erc1155Amounts must have equal length"
+            )
+        return {
+            "native_amount": int(obligation_data.get("nativeAmount", 0) or 0),
+            "erc20s": [
+                {"address": token, "value": amount}
+                for token, amount in _zip_bundle_fields(
+                    left=erc20_tokens,
+                    right=erc20_amounts,
+                    left_name="erc20Tokens",
+                    right_name="erc20Amounts",
+                )
+            ],
+            "erc721s": [
+                {"address": token, "id": token_id}
+                for token, token_id in _zip_bundle_fields(
+                    left=erc721_tokens,
+                    right=erc721_token_ids,
+                    left_name="erc721Tokens",
+                    right_name="erc721TokenIds",
+                )
+            ],
+            "erc1155s": [
+                {"address": token, "id": token_id, "value": amount}
+                for token, token_id, amount in zip(
+                    erc1155_tokens, erc1155_token_ids, erc1155_amounts
+                )
+            ],
+        }
+
+    def _arbiter_data(self, obligation_data: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "arbiter": obligation_data["arbiter"],
+            "demand": _normalize_demand_bytes(obligation_data["demand"]),
+        }
+
+    def resolve_address(
+        self, chain_name: str, *, config_path: str | None
+    ) -> str:
+        return _escrow_obligation_address(
+            chain_name,
+            config_path=config_path,
+            category="token_bundle_addresses",
+            field=self.address_field,
+        )
+
+    async def create_obligation(
+        self,
+        client: Any,
+        obligation_data: dict[str, Any],
+        expiration_unix: int,
+    ) -> str:
+        bundle_data = self._bundle_data(obligation_data)
+        arbiter_data = self._arbiter_data(obligation_data)
+        await client.token_bundle.util.approve(bundle_data, "escrow")
+        tier_client = getattr(client.token_bundle.escrow, self.tier_attr)
+        receipt = await tier_client.create(
+            bundle_data, arbiter_data, expiration_unix,
+        )
+        uid = (receipt or {}).get("log", {}).get("uid")
+        if not uid:
+            raise RuntimeError(
+                f"escrow.create did not return a uid: {receipt!r}"
+            )
+        return uid
+
+    async def get_obligation(self, client: Any, uid: str) -> Any:
+        tier_client = getattr(client.token_bundle.escrow, self.tier_attr)
+        return await tier_client.get_obligation(uid)
+
+
+class TokenBundleNonTierableEscrowCodec(_TokenBundleEscrowCodecBase):
+    """``TokenBundleEscrowObligation`` (non-tierable variant)."""
+
+    kind = "token_bundle_escrow_obligation_nontierable"
+    tier_attr = "non_tierable"
+    address_field = "escrow_obligation_nontierable"
+
+
+class TokenBundleTierableEscrowCodec(_TokenBundleEscrowCodecBase):
+    """``TokenBundleEscrowObligation`` (tierable variant)."""
+
+    kind = "token_bundle_escrow_obligation_tierable"
+    tier_attr = "tierable"
+    address_field = "escrow_obligation_tierable"
+
+
+class _AttestationEscrowCodecBase:
+    """Common attestation escrow SDK adapter."""
+
+    version_attr: str
+    tier_attr: str
+    address_field: str
+
+    def _attestation_data(self, obligation_data: dict[str, Any]) -> Any:
+        raise NotImplementedError
+
+    def _arbiter_data(self, obligation_data: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "arbiter": obligation_data["arbiter"],
+            "demand": _normalize_demand_bytes(obligation_data["demand"]),
+        }
+
+    def resolve_address(
+        self, chain_name: str, *, config_path: str | None
+    ) -> str:
+        return _escrow_obligation_address(
+            chain_name,
+            config_path=config_path,
+            category="attestation_addresses",
+            field=self.address_field,
+        )
+
+    async def create_obligation(
+        self,
+        client: Any,
+        obligation_data: dict[str, Any],
+        expiration_unix: int,
+    ) -> str:
+        attestation_data = self._attestation_data(obligation_data)
+        arbiter_data = self._arbiter_data(obligation_data)
+        version_client = getattr(client.attestation.escrow, self.version_attr)
+        tier_client = getattr(version_client, self.tier_attr)
+        receipt = await tier_client.create(
+            attestation_data, arbiter_data, expiration_unix,
+        )
+        uid = (receipt or {}).get("log", {}).get("uid")
+        if not uid:
+            raise RuntimeError(
+                f"escrow.create did not return a uid: {receipt!r}"
+            )
+        return uid
+
+    async def get_obligation(self, client: Any, uid: str) -> Any:
+        version_client = getattr(client.attestation.escrow, self.version_attr)
+        tier_client = getattr(version_client, self.tier_attr)
+        return await tier_client.get_obligation(uid)
+
+
+class _AttestationV1EscrowCodecBase(_AttestationEscrowCodecBase):
+    version_attr = "v1"
+
+    def _attestation_data(self, obligation_data: dict[str, Any]) -> Any:
+        attestation = obligation_data["attestation"]
+        if not isinstance(attestation, dict):
+            raise TypeError("attestation must be an object")
+        out = dict(attestation)
+        request_data = dict(out.get("data") or {})
+        if "data" in request_data:
+            request_data["data"] = _normalize_demand_bytes(request_data["data"])
+        out["data"] = request_data
+        return out
+
+
+class AttestationNonTierableEscrowCodec(_AttestationV1EscrowCodecBase):
+    """``AttestationEscrowObligation`` v1 (non-tierable variant)."""
+
+    kind = "attestation_escrow_obligation_nontierable"
+    tier_attr = "non_tierable"
+    address_field = "escrow_obligation_nontierable"
+
+
+class AttestationTierableEscrowCodec(_AttestationV1EscrowCodecBase):
+    """``AttestationEscrowObligation`` v1 (tierable variant)."""
+
+    kind = "attestation_escrow_obligation_tierable"
+    tier_attr = "tierable"
+    address_field = "escrow_obligation_tierable"
+
+
+class _AttestationV2EscrowCodecBase(_AttestationEscrowCodecBase):
+    version_attr = "v2"
+
+    def _attestation_data(self, obligation_data: dict[str, Any]) -> Any:
+        attestation_uid = (
+            obligation_data.get("attestationUid")
+            or obligation_data.get("attestation_uid")
+        )
+        if not attestation_uid:
+            raise ValueError("attestationUid is required")
+        return str(attestation_uid)
+
+
+class Attestation2NonTierableEscrowCodec(_AttestationV2EscrowCodecBase):
+    """``AttestationEscrowObligation2`` (non-tierable variant)."""
+
+    kind = "attestation_escrow_obligation_2_nontierable"
+    tier_attr = "non_tierable"
+    address_field = "escrow_obligation_2_nontierable"
+
+
+class Attestation2TierableEscrowCodec(_AttestationV2EscrowCodecBase):
+    """``AttestationEscrowObligation2`` (tierable variant)."""
+
+    kind = "attestation_escrow_obligation_2_tierable"
+    tier_attr = "tierable"
+    address_field = "escrow_obligation_2_tierable"
+
+
 class _Erc721EscrowCodecBase:
     """Common ERC721 escrow SDK adapter.
 
@@ -1194,6 +1539,12 @@ _ESCROW_KIND_CODECS: dict[str, EscrowKindCodec] = {
     "erc1155_escrow_obligation_tierable": Erc1155TierableEscrowCodec(),
     "native_token_escrow_obligation_nontierable": NativeTokenNonTierableEscrowCodec(),
     "native_token_escrow_obligation_tierable": NativeTokenTierableEscrowCodec(),
+    "token_bundle_escrow_obligation_nontierable": TokenBundleNonTierableEscrowCodec(),
+    "token_bundle_escrow_obligation_tierable": TokenBundleTierableEscrowCodec(),
+    "attestation_escrow_obligation_nontierable": AttestationNonTierableEscrowCodec(),
+    "attestation_escrow_obligation_tierable": AttestationTierableEscrowCodec(),
+    "attestation_escrow_obligation_2_nontierable": Attestation2NonTierableEscrowCodec(),
+    "attestation_escrow_obligation_2_tierable": Attestation2TierableEscrowCodec(),
 }
 
 

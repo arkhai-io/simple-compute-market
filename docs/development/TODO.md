@@ -88,9 +88,9 @@ The `provisioning-service` wheel stays its own distributable — it's operated b
 
 **Status:** In progress. Full scope in [`design-escrow-kind-codecs.md`](design-escrow-kind-codecs.md).
 
-**Current state:** settlement now consumes concrete `EscrowTerms` on accept, and ERC20, native-token, ERC721, and ERC1155 tierable/non-tierable codecs are registered with codec-boundary tests. The remaining default Alkahest escrow kinds are token-bundle, attestation-request, and attestation-UID variants. Default compute policies may remain ERC20/scalar-amount oriented; non-ERC20 users can supply their own policies, with a simple exact-match listing guard as the baseline.
+**Current state:** settlement now consumes concrete `EscrowTerms` on accept, and every tierable/non-tierable escrow obligation under `alkahest/contracts/src/obligations/escrow` is registered with codec-boundary tests: ERC20, native-token, ERC721, ERC1155, token-bundle, attestation-request, and attestation-UID. Default compute policies may remain ERC20/scalar-amount oriented; non-ERC20 users can supply their own policies, with a simple exact-match listing guard as the baseline.
 
-**Planned fix:** add the remaining codec registry/SDK adapters and tests. Token-bundle support should use the existing escrow-template alias system (`rates.<alias>.field = "erc20Amounts[0]"`) and add final-term field-path assignment into nested/indexed `obligation_data`. Attestation escrows can be mechanically exposed for custom policies, but should not be treated as product-complete default flows until their product semantics are nailed down.
+**Planned fix:** finish the non-codec follow-through. Token-bundle support should use the existing escrow-template alias system (`rates.<alias>.field = "erc20Amounts[0]"`) and add final-term field-path assignment into nested/indexed `obligation_data`. Attestation escrows are exposed for custom policies, but should not be treated as product-complete default flows until their product semantics are nailed down. Add representative e2e coverage once listing/proposal semantics are stable.
 
 ### Storefront DB Pruning
 

@@ -112,43 +112,123 @@ def _extract_token_contract_from_listing(listing: dict[str, Any]) -> str:
     )
 
 
+_ADDRESS_FIELDS = {
+    "arbiter",
+    "token",
+    "recipient",
+}
+_ADDRESS_LIST_FIELDS = {
+    "erc20Tokens",
+    "erc721Tokens",
+    "erc1155Tokens",
+}
+_BYTES_FIELDS = {
+    "demand",
+    "data",
+    "schema",
+    "ref_uid",
+    "refUID",
+    "attestationUid",
+}
+_INT_FIELDS = {
+    "amount",
+    "tokenId",
+    "nativeAmount",
+    "expiration_time",
+    "expirationTime",
+    "value",
+}
+_INT_LIST_FIELDS = {
+    "erc20Amounts",
+    "erc721TokenIds",
+    "erc1155TokenIds",
+    "erc1155Amounts",
+}
+
+
+def _normalize_obligation_value(key: str, val: Any) -> Any:
+    if isinstance(val, dict):
+        return _normalize_obligation_data(val)
+    if key in _ADDRESS_FIELDS:
+        return _normalize_address(val)
+    if key in _ADDRESS_LIST_FIELDS:
+        return [_normalize_address(item) for item in (val or [])]
+    if key in _BYTES_FIELDS:
+        return _normalize_bytes(val)
+    if key in _INT_FIELDS:
+        return int(val) if val is not None else None
+    if key in _INT_LIST_FIELDS:
+        return [int(item) for item in (val or [])]
+    if isinstance(val, list):
+        return [_normalize_obligation_value(key, item) for item in val]
+    return val
+
+
 def _normalize_obligation_data(data: dict[str, Any]) -> dict[str, Any]:
     """Canonical form for dict-compare.
 
-    Addresses → lowercase, demand bytes → "0x"-prefixed hex, amount → int.
-    Keys outside the canonical set pass through unchanged so we can
-    spot-check shape-correctness alongside value-correctness.
+    Addresses → lowercase, bytes-like fields → "0x"-prefixed hex, integer
+    fields → int. Keys outside the canonical set pass through unchanged so
+    shape mismatches are still visible in the final diff.
     """
-    out: dict[str, Any] = {}
-    for key, val in data.items():
-        if key in ("arbiter", "token"):
-            out[key] = _normalize_address(val)
-        elif key == "demand":
-            out[key] = _normalize_bytes(val)
-        elif key == "amount":
-            out[key] = int(val) if val is not None else None
-        else:
-            out[key] = val
-    return out
+    return {key: _normalize_obligation_value(key, val) for key, val in data.items()}
+
+
+def _plain_attestation_request(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    schema = getattr(value, "schema", None)
+    request_data = getattr(value, "data", None)
+    if schema is None and request_data is None:
+        return None
+    if isinstance(request_data, dict):
+        data_dict = request_data
+    else:
+        data_dict = {
+            "recipient": getattr(request_data, "recipient", None),
+            "expiration_time": getattr(request_data, "expiration_time", None),
+            "revocable": getattr(request_data, "revocable", None),
+            "ref_uid": getattr(request_data, "ref_uid", None),
+            "data": getattr(request_data, "data", None),
+            "value": getattr(request_data, "value", None),
+        }
+    return {"schema": schema, "data": data_dict}
 
 
 def _read_chain_obligation_data(obligation: Any) -> dict[str, Any]:
     """Read fields off the alkahest-py decoded ObligationData object.
 
-    The SDK returns a typed struct (not a dict). We pull the four
-    canonical ERC20EscrowObligation fields off it into a normalized
-    dict so dict-compare can run.
+    The SDK returns a typed struct (not a dict). Pull every known escrow
+    ObligationData field into a normalized dict so one comparison covers
+    ERC20, native token, NFT, token bundle, and attestation escrows.
     """
-    return _normalize_obligation_data({
-        "arbiter": getattr(obligation, "arbiter", None),
-        "demand": (
-            bytes(obligation.demand)
-            if getattr(obligation, "demand", None) is not None
-            else None
-        ),
-        "token": getattr(obligation, "token", None),
-        "amount": getattr(obligation, "amount", None),
-    })
+    raw: dict[str, Any] = {}
+    field_aliases = {
+        "arbiter": "arbiter",
+        "demand": "demand",
+        "token": "token",
+        "amount": "amount",
+        "token_id": "tokenId",
+        "native_amount": "nativeAmount",
+        "erc20_tokens": "erc20Tokens",
+        "erc20_amounts": "erc20Amounts",
+        "erc721_tokens": "erc721Tokens",
+        "erc721_token_ids": "erc721TokenIds",
+        "erc1155_tokens": "erc1155Tokens",
+        "erc1155_token_ids": "erc1155TokenIds",
+        "erc1155_amounts": "erc1155Amounts",
+        "attestation_uid": "attestationUid",
+    }
+    for sdk_attr, canonical_key in field_aliases.items():
+        value = getattr(obligation, sdk_attr, None)
+        if value is not None:
+            raw[canonical_key] = bytes(value) if sdk_attr == "demand" else value
+    attestation = _plain_attestation_request(getattr(obligation, "attestation", None))
+    if attestation is not None:
+        raw["attestation"] = attestation
+    return _normalize_obligation_data(raw)
 
 
 async def verify_escrow_for_settlement(
@@ -381,7 +461,6 @@ async def verify_escrow_for_settlement(
         )
 
     logger.info(
-        "[ESCROW_VERIFY] escrow=%s ok: amount=%s token=%s arbiter=%s exp=%s",
-        escrow_uid, actual["amount"], actual["token"], actual["arbiter"],
-        att.expiration_time,
+        "[ESCROW_VERIFY] escrow=%s ok: fields=%s arbiter=%s exp=%s",
+        escrow_uid, sorted(actual), actual.get("arbiter"), att.expiration_time,
     )

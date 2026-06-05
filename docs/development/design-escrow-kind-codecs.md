@@ -10,12 +10,12 @@ The market already treats escrow settlement as a codec dispatch problem:
 `obligation_data`, and the buyer submit hook resolves each
 `(chain_name, escrow_contract)` to an `EscrowKindCodec`.
 
-ERC20, native-token, ERC721, and ERC1155 tierable/non-tierable codecs are
-implemented. Negotiation still uses `EscrowProposal` as the per-round message
-shape, but accept paths now echo `accepted_escrow_terms`: concrete
-`list[EscrowTerms]` materialized from the final accepted proposal. Split
-settlement commands consume those final terms directly and only rebuild from
-`EscrowProposal` for older run logs.
+ERC20, native-token, ERC721, ERC1155, token-bundle, attestation-request, and
+attestation-UID tierable/non-tierable codecs are implemented. Negotiation still
+uses `EscrowProposal` as the per-round message shape, but accept paths now echo
+`accepted_escrow_terms`: concrete `list[EscrowTerms]` materialized from the
+final accepted proposal. Split settlement commands consume those final terms
+directly and only rebuild from `EscrowProposal` for older run logs.
 
 Remaining ERC20-shaped or policy-specific surfaces:
 
@@ -80,17 +80,15 @@ layout, but they still need distinct codec kinds and SDK paths.
 
 ### Phase 1: Codec Registry and Unit Tests
 
-Add codec classes for the straightforward asset escrows.
+Add codec classes for the escrow obligation variants under
+`alkahest/contracts/src/obligations/escrow`.
 
 Implemented:
 
 - ERC20, non-tierable and tierable;
 - native token, non-tierable and tierable;
 - ERC721, non-tierable and tierable;
-- ERC1155, non-tierable and tierable.
-
-Remaining:
-
+- ERC1155, non-tierable and tierable;
 - token bundle, non-tierable and tierable;
 - attestation-request, non-tierable and tierable;
 - attestation-UID, non-tierable and tierable.
@@ -161,14 +159,12 @@ semantics are explicit:
 - how the seller advertises acceptable schemas;
 - how the buyer proves or selects the attestation before settlement.
 
-These codecs can still be mechanically implemented earlier so user-supplied
-policies can target them, but they should not be treated as product-complete
-default flows until those semantics are settled.
+The codecs are mechanically implemented so user-supplied policies can target
+them, but they should not be treated as product-complete default flows until
+those semantics are settled.
 
 ## Open Questions
 
-- Which remaining Alkahest SDK methods exist for token-bundle and attestation
-  paths, and do their return receipts all expose `log.uid` consistently?
 - What exact path-assignment helper should turn aliased bundle template fields
   (`erc20Amounts[0]`, `erc721TokenIds[0]`, etc.) into nested/indexed
   `obligation_data`?

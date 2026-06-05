@@ -18,6 +18,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from service.clients.alkahest import (
+    Attestation2NonTierableEscrowCodec,
+    Attestation2TierableEscrowCodec,
+    AttestationNonTierableEscrowCodec,
+    AttestationTierableEscrowCodec,
     Erc20NonTierableEscrowCodec,
     Erc20TierableEscrowCodec,
     Erc1155NonTierableEscrowCodec,
@@ -27,6 +31,8 @@ from service.clients.alkahest import (
     EscrowKindCodec,
     NativeTokenNonTierableEscrowCodec,
     NativeTokenTierableEscrowCodec,
+    TokenBundleNonTierableEscrowCodec,
+    TokenBundleTierableEscrowCodec,
     _normalize_demand_bytes,
     get_escrow_kind_codec,
     get_escrow_kind_codec_by_address,
@@ -41,6 +47,7 @@ _TOKEN_ID = 42
 _TOKEN_AMOUNT = 7
 _DEMAND_HEX = "0x" + "11" * 32
 _DEMAND_BYTES = bytes.fromhex("11" * 32)
+_UID = "0x" + "22" * 32
 
 
 @pytest.fixture
@@ -91,6 +98,12 @@ def test_erc20_non_tierable_registered_by_default():
     assert "erc1155_escrow_obligation_tierable" in known_escrow_kinds()
     assert "native_token_escrow_obligation_nontierable" in known_escrow_kinds()
     assert "native_token_escrow_obligation_tierable" in known_escrow_kinds()
+    assert "token_bundle_escrow_obligation_nontierable" in known_escrow_kinds()
+    assert "token_bundle_escrow_obligation_tierable" in known_escrow_kinds()
+    assert "attestation_escrow_obligation_nontierable" in known_escrow_kinds()
+    assert "attestation_escrow_obligation_tierable" in known_escrow_kinds()
+    assert "attestation_escrow_obligation_2_nontierable" in known_escrow_kinds()
+    assert "attestation_escrow_obligation_2_tierable" in known_escrow_kinds()
 
 
 def test_get_escrow_kind_codec_returns_erc20_impl():
@@ -121,6 +134,24 @@ def test_get_escrow_kind_codec_returns_native_token_impls():
     tierable = get_escrow_kind_codec("native_token_escrow_obligation_tierable")
     assert isinstance(non_tierable, NativeTokenNonTierableEscrowCodec)
     assert isinstance(tierable, NativeTokenTierableEscrowCodec)
+
+
+def test_get_escrow_kind_codec_returns_token_bundle_impls():
+    non_tierable = get_escrow_kind_codec("token_bundle_escrow_obligation_nontierable")
+    tierable = get_escrow_kind_codec("token_bundle_escrow_obligation_tierable")
+    assert isinstance(non_tierable, TokenBundleNonTierableEscrowCodec)
+    assert isinstance(tierable, TokenBundleTierableEscrowCodec)
+
+
+def test_get_escrow_kind_codec_returns_attestation_impls():
+    v1_non = get_escrow_kind_codec("attestation_escrow_obligation_nontierable")
+    v1_tier = get_escrow_kind_codec("attestation_escrow_obligation_tierable")
+    v2_non = get_escrow_kind_codec("attestation_escrow_obligation_2_nontierable")
+    v2_tier = get_escrow_kind_codec("attestation_escrow_obligation_2_tierable")
+    assert isinstance(v1_non, AttestationNonTierableEscrowCodec)
+    assert isinstance(v1_tier, AttestationTierableEscrowCodec)
+    assert isinstance(v2_non, Attestation2NonTierableEscrowCodec)
+    assert isinstance(v2_tier, Attestation2TierableEscrowCodec)
 
 
 def test_get_escrow_kind_codec_unknown_kind_raises():
@@ -461,6 +492,237 @@ def test_native_token_get_obligation_dispatches_to_sdk(codec, tier_attr):
     mock_client, tier_client = _mock_native_token_client(tier_attr)
     result = asyncio.run(codec.get_obligation(mock_client, "0xescrow"))
     assert result == {"kind": tier_attr}
+    tier_client.get_obligation.assert_awaited_once_with("0xescrow")
+
+
+# ---------------------------------------------------------------------------
+# Token bundle escrow codecs functional
+# ---------------------------------------------------------------------------
+
+
+def test_token_bundle_codecs_satisfy_protocol():
+    assert isinstance(TokenBundleNonTierableEscrowCodec(), EscrowKindCodec)
+    assert isinstance(TokenBundleTierableEscrowCodec(), EscrowKindCodec)
+
+
+def _token_bundle_obligation_data():
+    return {
+        "arbiter": _ARBITER,
+        "demand": _DEMAND_HEX,
+        "nativeAmount": 5,
+        "erc20Tokens": [_TOKEN],
+        "erc20Amounts": [11],
+        "erc721Tokens": [_TOKEN],
+        "erc721TokenIds": [_TOKEN_ID],
+        "erc1155Tokens": [_TOKEN],
+        "erc1155TokenIds": [3],
+        "erc1155Amounts": [_TOKEN_AMOUNT],
+    }
+
+
+def _mock_token_bundle_client(tier_attr: str):
+    mock_client = MagicMock()
+    mock_client.token_bundle.util.approve = AsyncMock(return_value=None)
+    tier_client = getattr(mock_client.token_bundle.escrow, tier_attr)
+    tier_client.create = AsyncMock(return_value={"log": {"uid": "0xbundle"}})
+    tier_client.get_obligation = AsyncMock(return_value={"kind": tier_attr})
+    return mock_client, tier_client
+
+
+@pytest.mark.parametrize(
+    ("codec", "tier_attr"),
+    [
+        (TokenBundleNonTierableEscrowCodec(), "non_tierable"),
+        (TokenBundleTierableEscrowCodec(), "tierable"),
+    ],
+)
+def test_token_bundle_create_obligation_translates_to_sdk_shape(codec, tier_attr):
+    mock_client, tier_client = _mock_token_bundle_client(tier_attr)
+
+    uid = asyncio.run(
+        codec.create_obligation(
+            mock_client,
+            _token_bundle_obligation_data(),
+            expiration_unix=1_800_000_000,
+        )
+    )
+
+    assert uid == "0xbundle"
+    expected_bundle = {
+        "native_amount": 5,
+        "erc20s": [{"address": _TOKEN, "value": 11}],
+        "erc721s": [{"address": _TOKEN, "id": _TOKEN_ID}],
+        "erc1155s": [{"address": _TOKEN, "id": 3, "value": _TOKEN_AMOUNT}],
+    }
+    mock_client.token_bundle.util.approve.assert_awaited_once_with(
+        expected_bundle, "escrow",
+    )
+    tier_client.create.assert_awaited_once()
+    bundle_data, arbiter_data, expiration = tier_client.create.await_args.args
+    assert bundle_data == expected_bundle
+    assert arbiter_data == {"arbiter": _ARBITER, "demand": _DEMAND_BYTES}
+    assert expiration == 1_800_000_000
+
+
+def test_token_bundle_create_obligation_rejects_mismatched_arrays():
+    codec = TokenBundleNonTierableEscrowCodec()
+    mock_client, _tier_client = _mock_token_bundle_client("non_tierable")
+    data = _token_bundle_obligation_data()
+    data["erc20Amounts"] = []
+    with pytest.raises(ValueError, match="length mismatch"):
+        asyncio.run(
+            codec.create_obligation(
+                mock_client, data, expiration_unix=1_800_000_000
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("codec", "tier_attr"),
+    [
+        (TokenBundleNonTierableEscrowCodec(), "non_tierable"),
+        (TokenBundleTierableEscrowCodec(), "tierable"),
+    ],
+)
+def test_token_bundle_get_obligation_dispatches_to_sdk(codec, tier_attr):
+    mock_client, tier_client = _mock_token_bundle_client(tier_attr)
+    result = asyncio.run(codec.get_obligation(mock_client, "0xescrow"))
+    assert result == {"kind": tier_attr}
+    tier_client.get_obligation.assert_awaited_once_with("0xescrow")
+
+
+# ---------------------------------------------------------------------------
+# Attestation escrow codecs functional
+# ---------------------------------------------------------------------------
+
+
+def test_attestation_codecs_satisfy_protocol():
+    assert isinstance(AttestationNonTierableEscrowCodec(), EscrowKindCodec)
+    assert isinstance(AttestationTierableEscrowCodec(), EscrowKindCodec)
+    assert isinstance(Attestation2NonTierableEscrowCodec(), EscrowKindCodec)
+    assert isinstance(Attestation2TierableEscrowCodec(), EscrowKindCodec)
+
+
+def _attestation_request():
+    return {
+        "schema": _UID,
+        "data": {
+            "recipient": _TOKEN,
+            "expiration_time": 0,
+            "revocable": False,
+            "ref_uid": _UID,
+            "data": "0x1234",
+            "value": 0,
+        },
+    }
+
+
+def _attestation_v1_obligation_data():
+    return {
+        "arbiter": _ARBITER,
+        "demand": _DEMAND_HEX,
+        "attestation": _attestation_request(),
+    }
+
+
+def _attestation_v2_obligation_data():
+    return {
+        "arbiter": _ARBITER,
+        "demand": _DEMAND_HEX,
+        "attestationUid": _UID,
+    }
+
+
+def _mock_attestation_client(version_attr: str, tier_attr: str):
+    mock_client = MagicMock()
+    version_client = getattr(mock_client.attestation.escrow, version_attr)
+    tier_client = getattr(version_client, tier_attr)
+    tier_client.create = AsyncMock(return_value={"log": {"uid": "0xatt"}})
+    tier_client.get_obligation = AsyncMock(return_value={"kind": f"{version_attr}:{tier_attr}"})
+    return mock_client, tier_client
+
+
+@pytest.mark.parametrize(
+    ("codec", "version_attr", "tier_attr"),
+    [
+        (AttestationNonTierableEscrowCodec(), "v1", "non_tierable"),
+        (AttestationTierableEscrowCodec(), "v1", "tierable"),
+    ],
+)
+def test_attestation_v1_create_obligation_translates_to_sdk_shape(
+    codec, version_attr, tier_attr,
+):
+    mock_client, tier_client = _mock_attestation_client(version_attr, tier_attr)
+
+    uid = asyncio.run(
+        codec.create_obligation(
+            mock_client,
+            _attestation_v1_obligation_data(),
+            expiration_unix=1_800_000_000,
+        )
+    )
+
+    assert uid == "0xatt"
+    attestation, arbiter_data, expiration = tier_client.create.await_args.args
+    assert attestation["schema"] == _UID
+    assert attestation["data"]["data"] == bytes.fromhex("1234")
+    assert arbiter_data == {"arbiter": _ARBITER, "demand": _DEMAND_BYTES}
+    assert expiration == 1_800_000_000
+
+
+@pytest.mark.parametrize(
+    ("codec", "version_attr", "tier_attr"),
+    [
+        (Attestation2NonTierableEscrowCodec(), "v2", "non_tierable"),
+        (Attestation2TierableEscrowCodec(), "v2", "tierable"),
+    ],
+)
+def test_attestation_v2_create_obligation_translates_to_sdk_shape(
+    codec, version_attr, tier_attr,
+):
+    mock_client, tier_client = _mock_attestation_client(version_attr, tier_attr)
+
+    uid = asyncio.run(
+        codec.create_obligation(
+            mock_client,
+            _attestation_v2_obligation_data(),
+            expiration_unix=1_800_000_000,
+        )
+    )
+
+    assert uid == "0xatt"
+    attestation_uid, arbiter_data, expiration = tier_client.create.await_args.args
+    assert attestation_uid == _UID
+    assert arbiter_data == {"arbiter": _ARBITER, "demand": _DEMAND_BYTES}
+    assert expiration == 1_800_000_000
+
+
+def test_attestation_v2_create_obligation_missing_uid_raises():
+    codec = Attestation2NonTierableEscrowCodec()
+    mock_client, _tier_client = _mock_attestation_client("v2", "non_tierable")
+    data = _attestation_v2_obligation_data()
+    data.pop("attestationUid")
+    with pytest.raises(ValueError, match="attestationUid is required"):
+        asyncio.run(
+            codec.create_obligation(
+                mock_client, data, expiration_unix=1_800_000_000
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("codec", "version_attr", "tier_attr"),
+    [
+        (AttestationNonTierableEscrowCodec(), "v1", "non_tierable"),
+        (AttestationTierableEscrowCodec(), "v1", "tierable"),
+        (Attestation2NonTierableEscrowCodec(), "v2", "non_tierable"),
+        (Attestation2TierableEscrowCodec(), "v2", "tierable"),
+    ],
+)
+def test_attestation_get_obligation_dispatches_to_sdk(codec, version_attr, tier_attr):
+    mock_client, tier_client = _mock_attestation_client(version_attr, tier_attr)
+    result = asyncio.run(codec.get_obligation(mock_client, "0xescrow"))
+    assert result == {"kind": f"{version_attr}:{tier_attr}"}
     tier_client.get_obligation.assert_awaited_once_with("0xescrow")
 
 

@@ -24,6 +24,7 @@ from market_storefront.utils.escrow_verification import (
     _normalize_address,
     _normalize_bytes,
     _normalize_obligation_data,
+    _read_chain_obligation_data,
     verify_escrow_for_settlement,
 )
 
@@ -63,6 +64,51 @@ class _FakeObligationData:
     demand: bytes | None = None
     token: str | None = TOKEN
     amount: int | None = 1_000_000  # default; tests override to the expected 1000
+
+
+@dataclass
+class _FakeTokenBundleObligationData:
+    arbiter: str = ARBITER
+    demand: bytes = b"\x11\x22"
+    native_amount: str = "5"
+    erc20_tokens: list[str] | None = None
+    erc20_amounts: list[str] | None = None
+    erc721_tokens: list[str] | None = None
+    erc721_token_ids: list[str] | None = None
+    erc1155_tokens: list[str] | None = None
+    erc1155_token_ids: list[str] | None = None
+    erc1155_amounts: list[str] | None = None
+
+
+@dataclass
+class _FakeAttestationRequestData:
+    recipient: str = RECIPIENT
+    expiration_time: int = 0
+    revocable: bool = False
+    ref_uid: str = "0x" + "22" * 32
+    data: bytes = b"\x12\x34"
+    value: int = 0
+
+
+@dataclass
+class _FakeAttestationRequest:
+    schema: str = "0x" + "33" * 32
+    data: _FakeAttestationRequestData = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.data is None:
+            self.data = _FakeAttestationRequestData()
+
+
+@dataclass
+class _FakeAttestationV1ObligationData:
+    arbiter: str = ARBITER
+    demand: bytes = b"\x11\x22"
+    attestation: _FakeAttestationRequest = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.attestation is None:
+            self.attestation = _FakeAttestationRequest()
 
 
 def _good_obligation(**overrides: Any) -> dict[str, Any]:
@@ -192,6 +238,48 @@ class TestNormalizeObligationData:
             "demand": "0xabcd",
             "token": "0x1234000000000000000000000000000000000000",
             "amount": 999,
+        }
+
+
+class TestReadChainObligationData:
+    def test_reads_token_bundle_shape(self):
+        obligation = _FakeTokenBundleObligationData(
+            erc20_tokens=[TOKEN],
+            erc20_amounts=["11"],
+            erc721_tokens=[TOKEN],
+            erc721_token_ids=["42"],
+            erc1155_tokens=[TOKEN],
+            erc1155_token_ids=["3"],
+            erc1155_amounts=["7"],
+        )
+        assert _read_chain_obligation_data(obligation) == {
+            "arbiter": ARBITER_LOWER,
+            "demand": "0x1122",
+            "nativeAmount": 5,
+            "erc20Tokens": [TOKEN_LOWER],
+            "erc20Amounts": [11],
+            "erc721Tokens": [TOKEN_LOWER],
+            "erc721TokenIds": [42],
+            "erc1155Tokens": [TOKEN_LOWER],
+            "erc1155TokenIds": [3],
+            "erc1155Amounts": [7],
+        }
+
+    def test_reads_attestation_v1_shape(self):
+        assert _read_chain_obligation_data(_FakeAttestationV1ObligationData()) == {
+            "arbiter": ARBITER_LOWER,
+            "demand": "0x1122",
+            "attestation": {
+                "schema": "0x" + "33" * 32,
+                "data": {
+                    "recipient": RECIPIENT.lower(),
+                    "expiration_time": 0,
+                    "revocable": False,
+                    "ref_uid": "0x" + "22" * 32,
+                    "data": "0x1234",
+                    "value": 0,
+                },
+            },
         }
 
 
