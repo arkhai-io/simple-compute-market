@@ -419,6 +419,29 @@ def test_erc20_tierable_get_obligation_dispatches_to_sdk():
     mock_client.erc20.escrow.tierable.get_obligation.assert_awaited_once_with("0xescrow")
 
 
+def test_erc20_refund_claimed_transfers_claimed_token(monkeypatch):
+    refund = AsyncMock(return_value={"tx_hash": "0xrefund", "asset_kind": "erc20"})
+    monkeypatch.setattr("service.clients.alkahest._refund_erc20_claimed", refund)
+
+    result = asyncio.run(
+        Erc20NonTierableEscrowCodec().refund_claimed(
+            private_key="pk",
+            rpc_url="http://rpc",
+            obligation_data={"token": _TOKEN, "amount": "17"},
+            to_address=_ARBITER,
+        )
+    )
+
+    assert result == {"tx_hash": "0xrefund", "asset_kind": "erc20"}
+    refund.assert_awaited_once_with(
+        private_key="pk",
+        rpc_url="http://rpc",
+        token_address=_TOKEN,
+        to_address=_ARBITER,
+        amount_raw=17,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Native token escrow codecs functional
 # ---------------------------------------------------------------------------
@@ -493,6 +516,28 @@ def test_native_token_get_obligation_dispatches_to_sdk(codec, tier_attr):
     result = asyncio.run(codec.get_obligation(mock_client, "0xescrow"))
     assert result == {"kind": tier_attr}
     tier_client.get_obligation.assert_awaited_once_with("0xescrow")
+
+
+def test_native_token_refund_claimed_transfers_claimed_native_value(monkeypatch):
+    refund = AsyncMock(return_value={"tx_hash": "0xnative", "asset_kind": "native_token"})
+    monkeypatch.setattr("service.clients.alkahest._refund_native_claimed", refund)
+
+    result = asyncio.run(
+        NativeTokenNonTierableEscrowCodec().refund_claimed(
+            private_key="pk",
+            rpc_url="http://rpc",
+            obligation_data={"amount": "23"},
+            to_address=_ARBITER,
+        )
+    )
+
+    assert result == {"tx_hash": "0xnative", "asset_kind": "native_token"}
+    refund.assert_awaited_once_with(
+        private_key="pk",
+        rpc_url="http://rpc",
+        to_address=_ARBITER,
+        amount_raw=23,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -589,6 +634,51 @@ def test_token_bundle_get_obligation_dispatches_to_sdk(codec, tier_attr):
     result = asyncio.run(codec.get_obligation(mock_client, "0xescrow"))
     assert result == {"kind": tier_attr}
     tier_client.get_obligation.assert_awaited_once_with("0xescrow")
+
+
+def test_token_bundle_refund_claimed_fans_out_to_token_transfers(monkeypatch):
+    native = AsyncMock(return_value={"asset_kind": "native_token", "tx_hash": "0xn"})
+    erc20 = AsyncMock(return_value={"asset_kind": "erc20", "tx_hash": "0x20"})
+    erc721 = AsyncMock(return_value={"asset_kind": "erc721", "tx_hash": "0x721"})
+    erc1155 = AsyncMock(return_value={"asset_kind": "erc1155", "tx_hash": "0x1155"})
+    monkeypatch.setattr("service.clients.alkahest._refund_native_claimed", native)
+    monkeypatch.setattr("service.clients.alkahest._refund_erc20_claimed", erc20)
+    monkeypatch.setattr("service.clients.alkahest._refund_erc721_claimed", erc721)
+    monkeypatch.setattr("service.clients.alkahest._refund_erc1155_claimed", erc1155)
+
+    result = asyncio.run(
+        TokenBundleNonTierableEscrowCodec().refund_claimed(
+            private_key="pk",
+            rpc_url="http://rpc",
+            obligation_data=_token_bundle_obligation_data(),
+            to_address=_ARBITER,
+        )
+    )
+
+    assert result == {
+        "asset_kind": "token_bundle",
+        "transfers": [
+            {"asset_kind": "native_token", "tx_hash": "0xn"},
+            {"asset_kind": "erc20", "tx_hash": "0x20"},
+            {"asset_kind": "erc721", "tx_hash": "0x721"},
+            {"asset_kind": "erc1155", "tx_hash": "0x1155"},
+        ],
+    }
+    native.assert_awaited_once_with(
+        private_key="pk", rpc_url="http://rpc", to_address=_ARBITER, amount_raw=5
+    )
+    erc20.assert_awaited_once_with(
+        private_key="pk", rpc_url="http://rpc", token_address=_TOKEN,
+        to_address=_ARBITER, amount_raw=11,
+    )
+    erc721.assert_awaited_once_with(
+        private_key="pk", rpc_url="http://rpc", token_address=_TOKEN,
+        to_address=_ARBITER, token_id=_TOKEN_ID,
+    )
+    erc1155.assert_awaited_once_with(
+        private_key="pk", rpc_url="http://rpc", token_address=_TOKEN,
+        to_address=_ARBITER, token_id=3, amount_raw=_TOKEN_AMOUNT,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -726,6 +816,18 @@ def test_attestation_get_obligation_dispatches_to_sdk(codec, version_attr, tier_
     tier_client.get_obligation.assert_awaited_once_with("0xescrow")
 
 
+def test_attestation_refund_claimed_is_unsupported():
+    with pytest.raises(NotImplementedError, match="do not carry a token refund asset"):
+        asyncio.run(
+            AttestationNonTierableEscrowCodec().refund_claimed(
+                private_key="pk",
+                rpc_url="http://rpc",
+                obligation_data=_attestation_v1_obligation_data(),
+                to_address=_ARBITER,
+            )
+        )
+
+
 # ---------------------------------------------------------------------------
 # ERC721 escrow codecs functional
 # ---------------------------------------------------------------------------
@@ -815,6 +917,29 @@ def test_erc721_get_obligation_dispatches_to_sdk(codec, tier_attr):
     tier_client.get_obligation.assert_awaited_once_with("0xescrow")
 
 
+def test_erc721_refund_claimed_transfers_claimed_nft(monkeypatch):
+    refund = AsyncMock(return_value={"tx_hash": "0x721", "asset_kind": "erc721"})
+    monkeypatch.setattr("service.clients.alkahest._refund_erc721_claimed", refund)
+
+    result = asyncio.run(
+        Erc721NonTierableEscrowCodec().refund_claimed(
+            private_key="pk",
+            rpc_url="http://rpc",
+            obligation_data={"token": _TOKEN, "tokenId": "42"},
+            to_address=_ARBITER,
+        )
+    )
+
+    assert result == {"tx_hash": "0x721", "asset_kind": "erc721"}
+    refund.assert_awaited_once_with(
+        private_key="pk",
+        rpc_url="http://rpc",
+        token_address=_TOKEN,
+        to_address=_ARBITER,
+        token_id=42,
+    )
+
+
 # ---------------------------------------------------------------------------
 # ERC1155 escrow codecs functional
 # ---------------------------------------------------------------------------
@@ -900,3 +1025,27 @@ def test_erc1155_get_obligation_dispatches_to_sdk(codec, tier_attr):
     result = asyncio.run(codec.get_obligation(mock_client, "0xescrow"))
     assert result == {"kind": tier_attr}
     tier_client.get_obligation.assert_awaited_once_with("0xescrow")
+
+
+def test_erc1155_refund_claimed_transfers_claimed_token_amount(monkeypatch):
+    refund = AsyncMock(return_value={"tx_hash": "0x1155", "asset_kind": "erc1155"})
+    monkeypatch.setattr("service.clients.alkahest._refund_erc1155_claimed", refund)
+
+    result = asyncio.run(
+        Erc1155NonTierableEscrowCodec().refund_claimed(
+            private_key="pk",
+            rpc_url="http://rpc",
+            obligation_data={"token": _TOKEN, "tokenId": "42", "amount": "7"},
+            to_address=_ARBITER,
+        )
+    )
+
+    assert result == {"tx_hash": "0x1155", "asset_kind": "erc1155"}
+    refund.assert_awaited_once_with(
+        private_key="pk",
+        rpc_url="http://rpc",
+        token_address=_TOKEN,
+        to_address=_ARBITER,
+        token_id=42,
+        amount_raw=7,
+    )

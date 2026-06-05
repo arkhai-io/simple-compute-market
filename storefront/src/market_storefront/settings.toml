@@ -104,7 +104,8 @@ frp_dashboard_password = ""
 # Actions applied when provisioning/fulfillment fails. `release_capacity`
 # repairs local inventory/listings; `emit_event` writes to stage_events/SSE;
 # `webhook` POSTs the failure payload to webhook_url; `refund` attempts the
-# existing seller refund flow when buyer/listing/escrow context is available.
+# explicit seller refund path through the selected token escrow codec when a
+# stored proposal is available.
 actions         = ["release_capacity", "emit_event"]
 webhook_url     = ""
 webhook_timeout = 5.0

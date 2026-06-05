@@ -532,7 +532,12 @@ policy plugs in are:
   ordered action list behind provisioning failure and
   `/api/v1/admin/fulfillment/events/failed`. Built-ins are
   `release_capacity`, `emit_event`, `webhook`, and `refund`; the default
-  repairs capacity/listings and emits a stage event.
+  repairs capacity/listings and emits a stage event. The `refund` action
+  is the seller-side "send already-claimed assets back" path; token escrows
+  dispatch through the selected escrow codec. Rows without a stored escrow
+  proposal are skipped rather than deriving refund details from listing
+  defaults. Buyer-side `reclaim_expired` is a separate post-expiry escape hatch
+  and is not a seller refund.
 
 The negotiation hooks live in `market-policy` (package: `policy/`, import:
 `market_policy`); the buyer and seller import from the same wheel. The

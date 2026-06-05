@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -68,3 +69,99 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
     )
     assert allocation is not None
     assert allocation["state"] == "released"
+
+
+@pytest.mark.asyncio
+async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch):
+    class FakeDb:
+        def __init__(self):
+            self.listing_updates = []
+            self.escrow_updates = []
+
+        async def load_escrow(self, *, escrow_uid):
+            return {
+                "escrow_uid": escrow_uid,
+                "negotiation_id": "neg-1",
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "aa" * 20,
+            }
+
+        async def load_negotiation_thread_row(self, *, negotiation_id):
+            return {
+                "negotiation_id": negotiation_id,
+                "buyer": "0x" + "bb" * 20,
+                "buyer_escrow_proposal": {
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "aa" * 20,
+                    "fields": {"token": "0x" + "cc" * 20},
+                    "expiration_unix": 1_800_000_000,
+                },
+                "agreed_price": 42,
+                "agreed_duration_seconds": 3600,
+            }
+
+        async def update_listing(self, **kwargs):
+            self.listing_updates.append(kwargs)
+
+        async def update_escrow(self, **kwargs):
+            self.escrow_updates.append(kwargs)
+
+    fake_codec = SimpleNamespace(
+        kind="erc20_escrow_obligation_nontierable",
+        refund_claimed=AsyncMock(return_value={"tx_hash": "0xrefund"}),
+    )
+    fake_terms = SimpleNamespace(
+        obligation_data={"token": "0x" + "cc" * 20, "amount": 42}
+    )
+
+    monkeypatch.setattr(
+        "market_storefront.utils.failure_policy.configured_failure_actions",
+        lambda: ["refund"],
+    )
+    monkeypatch.setattr(
+        "market_storefront.utils.failure_policy.settings",
+        SimpleNamespace(wallet=SimpleNamespace(private_key="seller-pk", address="0xseller")),
+    )
+    monkeypatch.setattr(
+        "market_storefront.utils.failure_policy.stage_event",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "market_storefront.utils.config.CHAINS",
+        {"anvil": SimpleNamespace(rpc_url="http://rpc", alkahest_address_config_path="/addr.json")},
+    )
+    monkeypatch.setattr(
+        "service.clients.alkahest.materialize_escrow_terms_from_proposal",
+        lambda **kwargs: [fake_terms],
+    )
+    monkeypatch.setattr(
+        "service.clients.alkahest.get_escrow_codec_for",
+        lambda *args, **kwargs: fake_codec,
+    )
+
+    db = FakeDb()
+    result = await apply_fulfillment_failure_policy(
+        db,
+        FulfillmentFailureContext(
+            listing_id="listing-1",
+            escrow_uid="escrow-1",
+            reason="provisioning_error",
+        ),
+    )
+
+    assert result.actions == [
+        {
+            "action": "refund",
+            "status": "refunded",
+            "escrow_kind": "erc20_escrow_obligation_nontierable",
+            "body": {"tx_hash": "0xrefund"},
+        }
+    ]
+    fake_codec.refund_claimed.assert_awaited_once_with(
+        private_key="seller-pk",
+        rpc_url="http://rpc",
+        obligation_data={"token": "0x" + "cc" * 20, "amount": 42},
+        to_address="0x" + "bb" * 20,
+    )
+    assert db.listing_updates == [{"listing_id": "listing-1", "status": "refunded"}]
+    assert db.escrow_updates == [{"escrow_uid": "escrow-1", "status": "refunded"}]

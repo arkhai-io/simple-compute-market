@@ -206,9 +206,9 @@ _INIT_USER_TEMPLATE = """\
 
 [fulfillment.failure_policy]
 # actions = ["release_capacity", "emit_event"] # valid actions: release_capacity, emit_event,
-                                                # webhook, refund. `refund` uses the existing
-                                                # seller refund flow when buyer/listing context
-                                                # can be resolved.
+                                                # webhook, refund. `refund` uses the
+                                                # selected token escrow codec when a stored
+                                                # proposal is available.
 # webhook_url = ""
 # webhook_timeout = 5.0
 

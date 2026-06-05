@@ -24,6 +24,7 @@ so we delete the duplicate.
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 from dataclasses import dataclass
@@ -918,6 +919,248 @@ def _normalize_demand_bytes(value: Any) -> bytes:
     )
 
 
+_ERC20_TRANSFER_ABI: list[dict[str, Any]] = [
+    {
+        "inputs": [{"type": "address"}, {"type": "uint256"}],
+        "name": "transfer",
+        "outputs": [{"type": "bool"}],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+]
+
+_ERC721_TRANSFER_ABI: list[dict[str, Any]] = [
+    {
+        "inputs": [
+            {"type": "address"},
+            {"type": "address"},
+            {"type": "uint256"},
+        ],
+        "name": "safeTransferFrom",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+]
+
+_ERC1155_TRANSFER_ABI: list[dict[str, Any]] = [
+    {
+        "inputs": [
+            {"type": "address"},
+            {"type": "address"},
+            {"type": "uint256"},
+            {"type": "uint256"},
+            {"type": "bytes"},
+        ],
+        "name": "safeTransferFrom",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+]
+
+
+def _submit_signed_transaction(
+    *,
+    private_key: str,
+    rpc_url: str,
+    build_tx: Any,
+    gas: int,
+    wait_timeout: int = 120,
+) -> dict[str, Any]:
+    from web3 import Web3
+    from web3.providers import HTTPProvider
+
+    w3 = Web3(HTTPProvider(rpc_url, request_kwargs={"timeout": 30}))
+    if not w3.is_connected():
+        raise RuntimeError(f"RPC not reachable at {rpc_url}")
+
+    account = w3.eth.account.from_key(private_key)
+    tx = build_tx(w3, account.address).build_transaction({
+        "from": account.address,
+        "nonce": w3.eth.get_transaction_count(account.address),
+        "gas": gas,
+        "gasPrice": w3.eth.gas_price,
+        "chainId": w3.eth.chain_id,
+    })
+    signed = account.sign_transaction(tx)
+    tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+    tx_hash_hex = tx_hash.hex() if hasattr(tx_hash, "hex") else str(tx_hash)
+    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=wait_timeout)
+    if receipt.status != 1:
+        raise RuntimeError(f"Refund transfer tx reverted: {tx_hash_hex}")
+    return {
+        "tx_hash": tx_hash_hex if tx_hash_hex.startswith("0x") else f"0x{tx_hash_hex}",
+        "from_address": account.address,
+        "block_number": int(receipt.blockNumber),
+    }
+
+
+def _refund_erc20_claimed_sync(
+    *,
+    private_key: str,
+    rpc_url: str,
+    token_address: str,
+    to_address: str,
+    amount_raw: int,
+) -> dict[str, Any]:
+    from web3 import Web3
+
+    def build_tx(w3: Any, _sender: str) -> Any:
+        token = w3.eth.contract(
+            address=Web3.to_checksum_address(token_address),
+            abi=_ERC20_TRANSFER_ABI,
+        )
+        return token.functions.transfer(Web3.to_checksum_address(to_address), int(amount_raw))
+
+    result = _submit_signed_transaction(
+        private_key=private_key,
+        rpc_url=rpc_url,
+        build_tx=build_tx,
+        gas=120_000,
+    )
+    result.update({
+        "asset_kind": "erc20",
+        "to_address": Web3.to_checksum_address(to_address),
+        "token_address": Web3.to_checksum_address(token_address),
+        "amount_raw": int(amount_raw),
+    })
+    return result
+
+
+def _refund_native_claimed_sync(
+    *,
+    private_key: str,
+    rpc_url: str,
+    to_address: str,
+    amount_raw: int,
+) -> dict[str, Any]:
+    from web3 import Web3
+    from web3.providers import HTTPProvider
+
+    w3 = Web3(HTTPProvider(rpc_url, request_kwargs={"timeout": 30}))
+    if not w3.is_connected():
+        raise RuntimeError(f"RPC not reachable at {rpc_url}")
+
+    account = w3.eth.account.from_key(private_key)
+    recipient = Web3.to_checksum_address(to_address)
+    tx = {
+        "from": account.address,
+        "to": recipient,
+        "value": int(amount_raw),
+        "nonce": w3.eth.get_transaction_count(account.address),
+        "gas": 21_000,
+        "gasPrice": w3.eth.gas_price,
+        "chainId": w3.eth.chain_id,
+    }
+    signed = account.sign_transaction(tx)
+    tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+    tx_hash_hex = tx_hash.hex() if hasattr(tx_hash, "hex") else str(tx_hash)
+    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+    if receipt.status != 1:
+        raise RuntimeError(f"Refund transfer tx reverted: {tx_hash_hex}")
+    return {
+        "asset_kind": "native_token",
+        "tx_hash": tx_hash_hex if tx_hash_hex.startswith("0x") else f"0x{tx_hash_hex}",
+        "from_address": account.address,
+        "to_address": recipient,
+        "amount_raw": int(amount_raw),
+        "block_number": int(receipt.blockNumber),
+    }
+
+
+def _refund_erc721_claimed_sync(
+    *,
+    private_key: str,
+    rpc_url: str,
+    token_address: str,
+    to_address: str,
+    token_id: int,
+) -> dict[str, Any]:
+    from web3 import Web3
+
+    def build_tx(w3: Any, sender: str) -> Any:
+        token = w3.eth.contract(
+            address=Web3.to_checksum_address(token_address),
+            abi=_ERC721_TRANSFER_ABI,
+        )
+        return token.functions.safeTransferFrom(
+            Web3.to_checksum_address(sender),
+            Web3.to_checksum_address(to_address),
+            int(token_id),
+        )
+
+    result = _submit_signed_transaction(
+        private_key=private_key,
+        rpc_url=rpc_url,
+        build_tx=build_tx,
+        gas=180_000,
+    )
+    result.update({
+        "asset_kind": "erc721",
+        "to_address": Web3.to_checksum_address(to_address),
+        "token_address": Web3.to_checksum_address(token_address),
+        "token_id": int(token_id),
+    })
+    return result
+
+
+def _refund_erc1155_claimed_sync(
+    *,
+    private_key: str,
+    rpc_url: str,
+    token_address: str,
+    to_address: str,
+    token_id: int,
+    amount_raw: int,
+) -> dict[str, Any]:
+    from web3 import Web3
+
+    def build_tx(w3: Any, sender: str) -> Any:
+        token = w3.eth.contract(
+            address=Web3.to_checksum_address(token_address),
+            abi=_ERC1155_TRANSFER_ABI,
+        )
+        return token.functions.safeTransferFrom(
+            Web3.to_checksum_address(sender),
+            Web3.to_checksum_address(to_address),
+            int(token_id),
+            int(amount_raw),
+            b"",
+        )
+
+    result = _submit_signed_transaction(
+        private_key=private_key,
+        rpc_url=rpc_url,
+        build_tx=build_tx,
+        gas=220_000,
+    )
+    result.update({
+        "asset_kind": "erc1155",
+        "to_address": Web3.to_checksum_address(to_address),
+        "token_address": Web3.to_checksum_address(token_address),
+        "token_id": int(token_id),
+        "amount_raw": int(amount_raw),
+    })
+    return result
+
+
+async def _refund_erc20_claimed(**kwargs: Any) -> dict[str, Any]:
+    return await asyncio.to_thread(_refund_erc20_claimed_sync, **kwargs)
+
+
+async def _refund_native_claimed(**kwargs: Any) -> dict[str, Any]:
+    return await asyncio.to_thread(_refund_native_claimed_sync, **kwargs)
+
+
+async def _refund_erc721_claimed(**kwargs: Any) -> dict[str, Any]:
+    return await asyncio.to_thread(_refund_erc721_claimed_sync, **kwargs)
+
+
+async def _refund_erc1155_claimed(**kwargs: Any) -> dict[str, Any]:
+    return await asyncio.to_thread(_refund_erc1155_claimed_sync, **kwargs)
+
+
 @runtime_checkable
 class EscrowKindCodec(Protocol):
     """Per-escrow-contract SDK adapter.
@@ -943,6 +1186,15 @@ class EscrowKindCodec(Protocol):
     ) -> str: ...
 
     async def get_obligation(self, client: Any, uid: str) -> Any: ...
+
+    async def refund_claimed(
+        self,
+        *,
+        private_key: str,
+        rpc_url: str,
+        obligation_data: dict[str, Any],
+        to_address: str,
+    ) -> dict[str, Any]: ...
 
 
 class Erc20NonTierableEscrowCodec:
@@ -997,6 +1249,22 @@ class Erc20NonTierableEscrowCodec:
 
     async def get_obligation(self, client: Any, uid: str) -> Any:
         return await client.erc20.escrow.non_tierable.get_obligation(uid)
+
+    async def refund_claimed(
+        self,
+        *,
+        private_key: str,
+        rpc_url: str,
+        obligation_data: dict[str, Any],
+        to_address: str,
+    ) -> dict[str, Any]:
+        return await _refund_erc20_claimed(
+            private_key=private_key,
+            rpc_url=rpc_url,
+            token_address=obligation_data["token"],
+            to_address=to_address,
+            amount_raw=int(obligation_data["amount"]),
+        )
 
 
 class Erc20TierableEscrowCodec(Erc20NonTierableEscrowCodec):
@@ -1091,6 +1359,21 @@ class _NativeTokenEscrowCodecBase:
     async def get_obligation(self, client: Any, uid: str) -> Any:
         tier_client = getattr(client.native_token.escrow, self.tier_attr)
         return await tier_client.get_obligation(uid)
+
+    async def refund_claimed(
+        self,
+        *,
+        private_key: str,
+        rpc_url: str,
+        obligation_data: dict[str, Any],
+        to_address: str,
+    ) -> dict[str, Any]:
+        return await _refund_native_claimed(
+            private_key=private_key,
+            rpc_url=rpc_url,
+            to_address=to_address,
+            amount_raw=int(obligation_data["amount"]),
+        )
 
 
 class NativeTokenNonTierableEscrowCodec(_NativeTokenEscrowCodecBase):
@@ -1241,6 +1524,51 @@ class _TokenBundleEscrowCodecBase:
         tier_client = getattr(client.token_bundle.escrow, self.tier_attr)
         return await tier_client.get_obligation(uid)
 
+    async def refund_claimed(
+        self,
+        *,
+        private_key: str,
+        rpc_url: str,
+        obligation_data: dict[str, Any],
+        to_address: str,
+    ) -> dict[str, Any]:
+        bundle_data = self._bundle_data(obligation_data)
+        transfers: list[dict[str, Any]] = []
+
+        if bundle_data["native_amount"] > 0:
+            transfers.append(await _refund_native_claimed(
+                private_key=private_key,
+                rpc_url=rpc_url,
+                to_address=to_address,
+                amount_raw=int(bundle_data["native_amount"]),
+            ))
+        for item in bundle_data["erc20s"]:
+            transfers.append(await _refund_erc20_claimed(
+                private_key=private_key,
+                rpc_url=rpc_url,
+                token_address=item["address"],
+                to_address=to_address,
+                amount_raw=int(item["value"]),
+            ))
+        for item in bundle_data["erc721s"]:
+            transfers.append(await _refund_erc721_claimed(
+                private_key=private_key,
+                rpc_url=rpc_url,
+                token_address=item["address"],
+                to_address=to_address,
+                token_id=int(item["id"]),
+            ))
+        for item in bundle_data["erc1155s"]:
+            transfers.append(await _refund_erc1155_claimed(
+                private_key=private_key,
+                rpc_url=rpc_url,
+                token_address=item["address"],
+                to_address=to_address,
+                token_id=int(item["id"]),
+                amount_raw=int(item["value"]),
+            ))
+        return {"asset_kind": "token_bundle", "transfers": transfers}
+
 
 class TokenBundleNonTierableEscrowCodec(_TokenBundleEscrowCodecBase):
     """``TokenBundleEscrowObligation`` (non-tierable variant)."""
@@ -1308,6 +1636,16 @@ class _AttestationEscrowCodecBase:
         version_client = getattr(client.attestation.escrow, self.version_attr)
         tier_client = getattr(version_client, self.tier_attr)
         return await tier_client.get_obligation(uid)
+
+    async def refund_claimed(
+        self,
+        *,
+        private_key: str,
+        rpc_url: str,
+        obligation_data: dict[str, Any],
+        to_address: str,
+    ) -> dict[str, Any]:
+        raise NotImplementedError("attestation escrows do not carry a token refund asset")
 
 
 class _AttestationV1EscrowCodecBase(_AttestationEscrowCodecBase):
@@ -1433,6 +1771,22 @@ class _Erc721EscrowCodecBase:
         tier_client = getattr(client.erc721.escrow, self.tier_attr)
         return await tier_client.get_obligation(uid)
 
+    async def refund_claimed(
+        self,
+        *,
+        private_key: str,
+        rpc_url: str,
+        obligation_data: dict[str, Any],
+        to_address: str,
+    ) -> dict[str, Any]:
+        return await _refund_erc721_claimed(
+            private_key=private_key,
+            rpc_url=rpc_url,
+            token_address=obligation_data["token"],
+            to_address=to_address,
+            token_id=int(obligation_data["tokenId"]),
+        )
+
 
 class Erc721NonTierableEscrowCodec(_Erc721EscrowCodecBase):
     """``ERC721EscrowObligation`` (non-tierable variant)."""
@@ -1512,6 +1866,23 @@ class _Erc1155EscrowCodecBase:
     async def get_obligation(self, client: Any, uid: str) -> Any:
         tier_client = getattr(client.erc1155.escrow, self.tier_attr)
         return await tier_client.get_obligation(uid)
+
+    async def refund_claimed(
+        self,
+        *,
+        private_key: str,
+        rpc_url: str,
+        obligation_data: dict[str, Any],
+        to_address: str,
+    ) -> dict[str, Any]:
+        return await _refund_erc1155_claimed(
+            private_key=private_key,
+            rpc_url=rpc_url,
+            token_address=obligation_data["token"],
+            to_address=to_address,
+            token_id=int(obligation_data["tokenId"]),
+            amount_raw=int(obligation_data["amount"]),
+        )
 
 
 class Erc1155NonTierableEscrowCodec(_Erc1155EscrowCodecBase):

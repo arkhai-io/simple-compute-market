@@ -4,7 +4,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from market_storefront.models.listing_models import RefundRequest
 from market_storefront.services.compute_listing_reconciler import (
     closed_available_listing_ids,
     mark_derived_listings_open,
@@ -118,6 +117,140 @@ async def _load_thread_for_escrow(db: Any, escrow_uid: str | None) -> dict[str, 
     return await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
 
 
+def _thread_duration_seconds(thread: dict[str, Any]) -> int:
+    for key in ("agreed_duration_seconds", "requested_duration_seconds"):
+        raw = thread.get(key)
+        if raw is None:
+            continue
+        try:
+            duration = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if duration > 0:
+            return duration
+    return 3600
+
+
+async def _refund_from_escrow_proposal(
+    db: Any,
+    *,
+    ctx: FulfillmentFailureContext,
+    listing_id: str,
+    buyer: str,
+    thread: dict[str, Any],
+) -> dict[str, Any] | None:
+    proposal_raw = thread.get("buyer_escrow_proposal")
+    if not isinstance(proposal_raw, dict):
+        return None
+    if not ctx.escrow_uid or not hasattr(db, "load_escrow"):
+        return {"action": "refund", "status": "skipped", "reason": "escrow_uid_unknown"}
+
+    escrow = await db.load_escrow(escrow_uid=ctx.escrow_uid)
+    chain_name = (escrow or {}).get("chain_name") or proposal_raw.get("chain_name")
+    escrow_address = (escrow or {}).get("escrow_address") or proposal_raw.get("escrow_address")
+    if not chain_name or not escrow_address:
+        return {"action": "refund", "status": "failed", "reason": "escrow_chain_unknown"}
+
+    from market_storefront.utils.config import CHAINS
+    from service.clients.alkahest import (
+        get_escrow_codec_for,
+        materialize_escrow_terms_from_proposal,
+    )
+    from service.schemas import EscrowProposal
+
+    chain_cfg = CHAINS.get(chain_name)
+    if chain_cfg is None:
+        return {
+            "action": "refund",
+            "status": "failed",
+            "reason": "chain_not_configured",
+            "chain_name": chain_name,
+        }
+
+    private_key = str(settings.wallet.private_key or "").strip()
+    if not private_key:
+        return {"action": "refund", "status": "skipped", "reason": "wallet_private_key_empty"}
+
+    try:
+        proposal = EscrowProposal.model_validate(proposal_raw)
+        terms = materialize_escrow_terms_from_proposal(
+            proposal=proposal,
+            seller_wallet_address=settings.wallet.address or None,
+            agreed_amount=(
+                int(thread["agreed_price"])
+                if thread.get("agreed_price") is not None
+                else None
+            ),
+            duration_seconds=_thread_duration_seconds(thread),
+            addr_config_path=chain_cfg.alkahest_address_config_path,
+        )[0]
+        codec = get_escrow_codec_for(
+            chain_name,
+            escrow_address,
+            config_path=chain_cfg.alkahest_address_config_path,
+        )
+    except Exception as exc:
+        return {
+            "action": "refund",
+            "status": "failed",
+            "reason": "escrow_refund_context_invalid",
+            "detail": str(exc),
+        }
+
+    try:
+        result = await codec.refund_claimed(
+            private_key=private_key,
+            rpc_url=chain_cfg.rpc_url,
+            obligation_data=terms.obligation_data,
+            to_address=buyer,
+        )
+    except NotImplementedError as exc:
+        return {
+            "action": "refund",
+            "status": "skipped",
+            "reason": "refund_not_supported",
+            "escrow_kind": codec.kind,
+            "detail": str(exc),
+        }
+    except RuntimeError as exc:
+        return {
+            "action": "refund",
+            "status": "failed",
+            "reason": "token_transfer_failed",
+            "escrow_kind": codec.kind,
+            "detail": str(exc),
+        }
+
+    if hasattr(db, "update_listing"):
+        await db.update_listing(listing_id=listing_id, status="refunded")
+    if hasattr(db, "update_escrow") and ctx.escrow_uid:
+        await db.update_escrow(escrow_uid=ctx.escrow_uid, status="refunded")
+    stage_event(
+        "post_settlement",
+        "refund_transferred",
+        listing_id=listing_id,
+        escrow_uid=ctx.escrow_uid,
+        escrow_kind=codec.kind,
+        tx_hash=(
+            result.get("tx_hash")
+            or next(
+                (
+                    transfer.get("tx_hash")
+                    for transfer in result.get("transfers", [])
+                    if isinstance(transfer, dict)
+                ),
+                None,
+            )
+        ),
+    )
+    return {
+        "action": "refund",
+        "status": "refunded",
+        "escrow_kind": codec.kind,
+        "body": result,
+    }
+
+
 async def _release_capacity(
     db: Any,
     ctx: FulfillmentFailureContext,
@@ -214,19 +347,16 @@ async def _refund(
     if not buyer:
         return {"action": "refund", "status": "skipped", "reason": "buyer_unknown"}
 
-    from market_storefront.services.listing_service import ListingService
-
-    status_code, body = await ListingService(db).refund(
-        listing_id,
-        RefundRequest(buyer_address=buyer),
+    result = await _refund_from_escrow_proposal(
+        db,
+        ctx=ctx,
+        listing_id=listing_id,
+        buyer=buyer,
+        thread=thread or {},
     )
-    status = "refunded" if 200 <= status_code < 300 else "failed"
-    return {
-        "action": "refund",
-        "status": status,
-        "status_code": status_code,
-        "body": body,
-    }
+    if result is None:
+        return {"action": "refund", "status": "skipped", "reason": "proposal_unknown"}
+    return result
 
 
 async def apply_fulfillment_failure_policy(

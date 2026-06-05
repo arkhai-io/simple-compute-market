@@ -113,7 +113,7 @@ Supported actions:
 | `release_capacity` | Mark the held compute allocation released, refresh aggregate resource availability, and reopen any derived listings that are now publishable. |
 | `emit_event` | Write a `stage_events` row with `stage="fulfillment"` and `event="failed"`; this is visible through `/api/v1/system/events` and its SSE stream. |
 | `webhook` | POST the failure payload to `webhook_url`. Failures are logged and do not block the rest of the policy chain. |
-| `refund` | Attempt the existing seller refund flow when the listing, buyer, token, and amount can be derived from the escrow/negotiation context. |
+| `refund` | Attempt the explicit seller refund path: send already-claimed assets back to the buyer. Token escrows dispatch through the selected escrow codec, covering native token, ERC-20, ERC-721, ERC-1155, and token-bundle escrows. Rows without a stored escrow proposal are skipped rather than deriving refund details from listing defaults. |
 
 Actions run in order. For example, an operator that wants local repair,
 alerting, and automatic refund can configure:
