@@ -431,10 +431,10 @@ rate and duration. Empty `rates` = hidden reserve (the seller publishes
 no advertised rate; negotiation establishes one via the strategy's
 `default_min_price`).
 
-Readers use the `primary_rate_value` / `accepted_token_address` helpers
-in `service.schemas` rather than touching the dict keys directly; both
-helpers work against either a `AcceptedEscrow` model or a raw JSON dict
-(the shape coming off SQLite or the wire).
+Readers use `primary_rate_value` for the generic headline rate.
+Token-shaped flows may additionally use `accepted_token_address`, but
+that helper is not universal: native-token, attestation, and some bundle
+escrows have no top-level `literal_fields.token`.
 
 **Round-0 wire shape:** `POST /api/v1/negotiate/new` carries two structured
 fields:
@@ -470,10 +470,15 @@ of the alkahest `ObligationData` struct:
 `{maker, chain_name, escrow_contract, obligation_data, expiration_unix}`.
 The settlement verifier reads the on-chain obligation by UID and
 byte-compares against materialized `EscrowTerms.obligation_data`. Adding a
-new escrow kind is primarily a codec-registration change: the buyer submit
+new escrow kind is primarily a codec-registration change: all tierable
+and non-tierable Alkahest escrow obligation variants under
+`contracts/src/obligations/escrow` are registered, and the buyer submit
 hook resolves each term's `(chain_name, escrow_contract)` to a codec via
-`service.clients.alkahest.get_escrow_kind_codec_by_address`, while the
+`service.clients.alkahest.get_escrow_kind_codec_by_address`. The
 proposal-to-terms materializer owns the final obligation data shape.
+Codec-boundary tests cover every registered kind; compose-backed
+settlement e2e coverage currently exercises native-token and ERC1155
+escrows through buyer, storefront, and provisioning.
 
 A negotiation accept produces `list[EscrowTerms]` so multi-escrow designs
 (payment + seller penalty deposit, block-by-block schedules) are expressible
@@ -498,7 +503,8 @@ references templates by name with per-slot rate values
 (`"usdc_anvil:amount=150; eth_pool:eth=0.001"`, or the single-slot sugar
 `"usdc_anvil=150"`). The importer materializes one `accepted_escrows`
 entry per template at import time; `cli_publish._publish_round` scales
-rate values by the token's decimals before publishing. The legacy
+token-backed rate values by the token's decimals before publishing.
+Non-token templates use their declared base units directly. The legacy
 "broadcast min_price across every CHAINS entry" path remains as the
 fallback for rows without a templates cell.
 
@@ -749,7 +755,8 @@ Buyer                    Storefront (/negotiate/new)         SQLite
   │                              │                              │
   │── POST /negotiate/new ───────►│                              │
   │   {listing_id, buyer_address, │                              │
-  │    initial_price, duration,   │                              │
+  │    initial_amount, duration,  │                              │
+  │    proposal,                  │                              │
   │    signature, timestamp}      │                              │
   │                              │── verify EIP-191 sig ────────►│
   │                              │◄─ ok ────────────────────────│
@@ -797,7 +804,7 @@ All negotiation events are written to `stage_events` with `stage="negotiation"` 
 
 | Event | Trigger | Key data fields |
 |---|---|---|
-| `negotiation_started` | `/negotiate/new` accepted (sig valid, not paused) | `listing_id`, `buyer_address`, `initial_price` |
+| `negotiation_started` | `/negotiate/new` accepted (sig valid, not paused) | `listing_id`, `buyer_address`, opening amount/proposal |
 | `round_decided` | Seller strategy returns a decision (every round) | `round`, `our_price`, `their_price`, `decision` (`accept`/`counter`/`exit`), `decision_price`, `decision_reason` |
 | `negotiation_accepted` | Decision is `accept` or admin `force-accept` | `agreed_price`, `neg_id` |
 | `negotiation_exited` | Decision is `exit` | `decision_reason` (e.g. `price_unreasonable`, `torch_unavailable`) |
@@ -2014,7 +2021,13 @@ def stage_05a_evaluate_negotiate():
 
 def stage_05b_negotiate_new():
     # advance: actually start the negotiation
-    resp = await client.negotiate_new(listing_id=..., initial_price=..., ...)
+    resp = await client.negotiate_new(
+        listing_id=...,
+        initial_amount=...,
+        proposal_fields=...,
+        literal_fields=...,
+        ...
+    )
     assert resp.action in ("counter", "accept")
     # audit: confirm the round_decided event appears in stage_event stream
     event = wait_for_stage_event(stage="negotiation", event="round_decided")
@@ -2304,7 +2317,27 @@ selection.
 
 `POST /test/evaluate-job` on the provisioning service's test controller. Accepts `{host, vm_target, ssh_pubkey, vm_action}`, returns `{params_valid, host_exists, rule_matched, would_pause, errors}`. Checks host existence in inventory and which mock rule (if any) would match the job params. No job is created. Used by e2e stage 9a.
 
-**`/api/v1/negotiate/new` signing and escrow terms:** `StorefrontClient.negotiate_new()` and `SyncStorefrontClient.negotiate_new()` add EIP-191 `X-Signature` and `X-Timestamp` headers automatically. They accept `listing_id`, `buyer_address`, `initial_price`, `duration_seconds`, `buyer_agent_url`, `ssh_public_key`, `token`, and `escrow_expiration_unix`, then build the structured `provision_terms` and `escrow_terms_proposal` body required by the server. The buyer proposal's `literal_fields["token"]` must match one of the listing's `accepted_escrows[i].literal_fields.token` advertisements; omitting it makes the helper send the zero address, which is only valid for listings without a typed payment token. If an e2e test raises `TypeError: SyncStorefrontClient.negotiate_new() got an unexpected keyword argument 'token'`, the runtime is importing a stale `arkhai-storefront-client` install. Rebuild the wheel and reinstall consumers with `make reinit` so `uv.lock` is re-resolved against the current `.dist/` wheel.
+**`/api/v1/negotiate/new` signing and escrow terms:**
+`StorefrontClient.negotiate_new()` and
+`SyncStorefrontClient.negotiate_new()` add EIP-191 `X-Signature` and
+`X-Timestamp` headers automatically. They accept `listing_id`,
+`buyer_address`, `initial_amount`, `duration_seconds`, `buyer_agent_url`,
+`ssh_public_key`, `chain_name`, `escrow_address`,
+`escrow_expiration_unix`, `proposal_fields`, `literal_fields`, `rates`,
+and `demands`, plus `token` as a convenience for token-shaped scalar
+flows. The helper builds the structured `provision_terms` and
+`escrow_proposal` body required by the server. If `literal_fields` is
+omitted, the legacy helper default injects `literal_fields.token =
+0x000...000`; if callers pass an explicit empty dict, it remains empty,
+which is required for native-token escrows. For token-shaped flows, the
+buyer proposal's token literal must match the selected listing
+`accepted_escrows[i].literal_fields.token`; non-token escrows are matched
+by their own `(chain_name, escrow_address, literal_fields, rates)` shape
+and by the configured negotiation policy. If an e2e test raises
+`TypeError: SyncStorefrontClient.negotiate_new() got an unexpected keyword
+argument`, the runtime is importing a stale `arkhai-storefront-client`
+install. Rebuild the wheel and reinstall consumers with `make reinit` so
+`uv.lock` is re-resolved against the current `.dist/` wheel.
 
 **Current full-deal details:** publishing is lazy — the publisher row is
 created on the first signed publish (stage 03b), so there is no
