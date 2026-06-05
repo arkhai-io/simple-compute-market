@@ -459,6 +459,24 @@ def bisection_middleware(
     )
 
 
+@register_negotiation_middleware("erc20_bisection")
+@register_negotiation_middleware("native_token_bisection")
+@register_negotiation_middleware("erc1155_bisection")
+def amount_bisection_middleware(
+    history: list[NegotiationRound],
+    context: NegotiationContext,
+) -> NegotiationStep:
+    """Escrow-kind named alias for the scalar ``amount`` bisection policy.
+
+    ERC20, native-token, and ERC1155 escrow obligations all use
+    ``obligation_data["amount"]`` as their rate-bearing scalar, so they
+    share the same negotiation strategy. These names are packaged for
+    operators who want configs to state the escrow family explicitly
+    without changing behavior from ``bisection``.
+    """
+    return bisection_middleware(history, context)
+
+
 # ---------------------------------------------------------------------------
 # Built-in guards
 # ---------------------------------------------------------------------------

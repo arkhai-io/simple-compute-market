@@ -17,6 +17,7 @@ from market_policy.negotiation_middleware import (
     NegotiationDecision,
     NegotiationRound,
     accept_exact_listing_middleware,
+    amount_bisection_middleware,
     bisection_middleware,
     load_negotiation_chain,
     register_negotiation_middleware,
@@ -37,6 +38,32 @@ def _proposal_with_amount(amount: int | float) -> dict:
     return {
         **_SKELETON,
         "fields": {**_SKELETON["fields"], "amount": int(round(amount))},
+    }
+
+
+def _native_token_proposal_with_amount(amount: int | float) -> dict:
+    return {
+        "chain_name": "anvil",
+        "escrow_address": "0x" + "11" * 20,
+        "fields": {"amount": int(round(amount))},
+        "literal_fields": {},
+        "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+        "expiration_unix": 1_800_000_000,
+    }
+
+
+def _erc1155_proposal_with_amount(amount: int | float) -> dict:
+    return {
+        "chain_name": "anvil",
+        "escrow_address": "0x" + "55" * 20,
+        "fields": {
+            "token": "0x" + "ab" * 20,
+            "tokenId": 7,
+            "amount": int(round(amount)),
+        },
+        "literal_fields": {"token": "0x" + "ab" * 20, "tokenId": 7},
+        "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+        "expiration_unix": 1_800_000_000,
     }
 
 
@@ -214,6 +241,61 @@ def test_load_negotiation_chain_resolves_accept_exact_listing():
     chain = load_negotiation_chain(["accept_exact_listing"])
     assert len(chain) == 1
     assert chain[0] is accept_exact_listing_middleware
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["erc20_bisection", "native_token_bisection", "erc1155_bisection"],
+)
+def test_load_negotiation_chain_resolves_amount_bisection_aliases(name):
+    chain = load_negotiation_chain([name])
+    assert len(chain) == 1
+    assert chain[0] is amount_bisection_middleware
+
+
+def test_native_token_bisection_uses_amount_field():
+    history = [
+        NegotiationRound(
+            round_number=0,
+            sender="them",
+            action="counter",
+            proposal=_native_token_proposal_with_amount(80),
+        )
+    ]
+    ctx = NegotiationContext(
+        direction="maximize",
+        our_reference_amount=100,
+        our_escrow_proposal=_native_token_proposal_with_amount(100),
+    )
+    decision = run_negotiation_chain([amount_bisection_middleware], history, ctx)
+    assert decision.action == "counter"
+    assert _decision_amount(decision) == 90
+    assert decision.proposal["literal_fields"] == {}
+    assert decision.proposal["rates"] == [{"field": "amount", "per": "hour", "value": "100"}]
+
+
+def test_erc1155_bisection_preserves_token_literals():
+    history = [
+        NegotiationRound(
+            round_number=0,
+            sender="them",
+            action="counter",
+            proposal=_erc1155_proposal_with_amount(110),
+        )
+    ]
+    ctx = NegotiationContext(
+        direction="minimize",
+        our_reference_amount=100,
+        our_escrow_proposal=_erc1155_proposal_with_amount(100),
+    )
+    decision = run_negotiation_chain([amount_bisection_middleware], history, ctx)
+    assert decision.action == "counter"
+    assert _decision_amount(decision) == 100
+    assert decision.proposal["literal_fields"] == {
+        "token": "0x" + "ab" * 20,
+        "tokenId": 7,
+    }
+    assert decision.proposal["fields"]["tokenId"] == 7
 
 
 def test_register_negotiation_middleware_makes_it_loadable():

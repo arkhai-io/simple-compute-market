@@ -208,7 +208,9 @@ _INIT_USER_TEMPLATE = """\
 # policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 #                                              # ordered list of policies; terminal policy is
 #                                              # `bisection` (default; no ML deps), `rl` (torch + checkpoint),
-#                                              # or opt-in `accept_exact_listing` (no counters).
+#                                              # `erc20_bisection`, `native_token_bisection`,
+#                                              # `erc1155_bisection`, or opt-in
+#                                              # `accept_exact_listing` (no counters).
 # seller_model_path = "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt"
 # buyer_model_path  = "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt"
 

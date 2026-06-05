@@ -153,7 +153,9 @@ _INIT_USER_TEMPLATE = """\
 [negotiation]
 # policies = ["buyer_escrow_shape_guard", "bisection"]
 #                                              # ordered policy chain; terminal policy is
-#                                              # `bisection` (default; no ML deps) or `rl` (torch + checkpoint)
+#                                              # `bisection` (default; no ML deps), `rl` (torch + checkpoint),
+#                                              # `erc20_bisection`, `native_token_bisection`, or
+#                                              # `erc1155_bisection`
 # policy_mode = "bisection"                    # legacy single-terminal key (synthesizes the default chain
 #                                              # when `policies` is absent)
 """
