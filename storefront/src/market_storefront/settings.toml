@@ -100,6 +100,15 @@ frp_server_addr        = ""
 frp_domain             = ""
 frp_dashboard_password = ""
 
+[fulfillment.failure_policy]
+# Actions applied when provisioning/fulfillment fails. `release_capacity`
+# repairs local inventory/listings; `emit_event` writes to stage_events/SSE;
+# `webhook` POSTs the failure payload to webhook_url; `refund` attempts the
+# existing seller refund flow when buyer/listing/escrow context is available.
+actions         = ["release_capacity", "emit_event"]
+webhook_url     = ""
+webhook_timeout = 5.0
+
 [negotiation]
 # Ordered policies run per round. Guards short-circuit (`reject`/`exit`)
 # when their preconditions fail; the terminal policy (typically

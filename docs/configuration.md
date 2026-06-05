@@ -1,6 +1,6 @@
 # Configuration reference
 
-Three pluggable hooks in the marketplace:
+Four pluggable hooks in the marketplace:
 
 1. **Seller negotiation policies** (`storefront.toml` →
    `[negotiation] policies`) — what the seller does each round.
@@ -9,8 +9,11 @@ Three pluggable hooks in the marketplace:
    middleware shape as the seller; different bundled defaults.
 3. **Buyer aggregation policy** (`buyer.toml` → `[aggregation] policy`) —
    how the buyer iterates across candidate listings.
+4. **Storefront fulfillment failure policy** (`storefront.toml` →
+   `[fulfillment.failure_policy] actions`) — what the seller does when
+   provisioning/fulfillment fails.
 
-Everything else is procedural. This page documents all three config
+Everything else is procedural. This page documents these config
 surfaces, the bundled options that ship with the wheels, and how to
 write your own.
 
@@ -89,6 +92,37 @@ or `policy = "..."` is used when one escrow kind needs its own sequence.
 of the list unless torch is installed and the model file exists; the
 `/api/v1/system/status` `negotiation_strategy` check will catch a
 broken `rl` setup at startup.
+
+## Storefront: fulfillment failure policy
+
+Provisioning failure and external fulfillment failure callbacks run the
+same storefront-side failure policy. The default repairs inventory and
+emits a stage event:
+
+```toml
+[fulfillment.failure_policy]
+actions = ["release_capacity", "emit_event"]
+webhook_url = ""
+webhook_timeout = 5.0
+```
+
+Supported actions:
+
+| Action | Behavior |
+|---|---|
+| `release_capacity` | Mark the held compute allocation released, refresh aggregate resource availability, and reopen any derived listings that are now publishable. |
+| `emit_event` | Write a `stage_events` row with `stage="fulfillment"` and `event="failed"`; this is visible through `/api/v1/system/events` and its SSE stream. |
+| `webhook` | POST the failure payload to `webhook_url`. Failures are logged and do not block the rest of the policy chain. |
+| `refund` | Attempt the existing seller refund flow when the listing, buyer, token, and amount can be derived from the escrow/negotiation context. |
+
+Actions run in order. For example, an operator that wants local repair,
+alerting, and automatic refund can configure:
+
+```toml
+[fulfillment.failure_policy]
+actions = ["release_capacity", "emit_event", "webhook", "refund"]
+webhook_url = "https://alerts.example/internal/arkhai/fulfillment-failed"
+```
 
 ### The middleware contract
 

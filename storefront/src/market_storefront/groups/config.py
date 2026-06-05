@@ -204,6 +204,14 @@ _INIT_USER_TEMPLATE = """\
 # frp_domain = ""
 # frp_dashboard_password = ""
 
+[fulfillment.failure_policy]
+# actions = ["release_capacity", "emit_event"] # valid actions: release_capacity, emit_event,
+                                                # webhook, refund. `refund` uses the existing
+                                                # seller refund flow when buyer/listing context
+                                                # can be resolved.
+# webhook_url = ""
+# webhook_timeout = 5.0
+
 [negotiation]
 # policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 #                                              # ordered list of policies; terminal policy is

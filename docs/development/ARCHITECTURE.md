@@ -504,7 +504,7 @@ fallback for rows without a templates cell.
 
 ---
 
-**Procedural request path + two pluggable policy hooks:**
+**Procedural request path + three pluggable policy hooks:**
 
 The storefront is a request/response service over negotiation state,
 market-facing inventory, and the allocation ledger. Listing
@@ -513,8 +513,8 @@ create/close/refund/claim/reclaim calls are procedural
 listing state; settlement reserves a `compute_allocations` row, the
 provisioning service reports lifecycle facts through fulfillment
 callbacks, and the dynamic listing reconciler opens/closes registry
-listings from the resulting pool availability. No policy layer gates
-those lifecycle transitions. The two places where policy plugs in are:
+listings from the resulting pool availability. The three places where
+policy plugs in are:
 
 - **Buyer-side aggregation** (buyer-only) — `aggregate(negotiate, listings)`
   in `buyer/market_buyer/aggregation.py` owns the iteration shape across
@@ -528,11 +528,19 @@ those lifecycle transitions. The two places where policy plugs in are:
   terminal policy (`bisection` or `rl`) always returns
   `counter`/`accept`/`exit`. Configured per-storefront in
   `[negotiation] policies = [...]` in `storefront.toml`.
+- **Storefront fulfillment failure policy** (seller-only) — a configured
+  ordered action list behind provisioning failure and
+  `/api/v1/admin/fulfillment/events/failed`. Built-ins are
+  `release_capacity`, `emit_event`, `webhook`, and `refund`; the default
+  repairs capacity/listings and emits a stage event.
 
-Both hooks live in `market-policy` (package: `policy/`, import:
+The negotiation hooks live in `market-policy` (package: `policy/`, import:
 `market_policy`); the buyer and seller import from the same wheel. The
-data model is symmetric — `NegotiationRound`, `NegotiationContext`,
-`NegotiationDecision` are shared. Each side instantiates its own chain.
+negotiation data model is symmetric — `NegotiationRound`,
+`NegotiationContext`, `NegotiationDecision` are shared. Each side
+instantiates its own chain. The fulfillment failure policy lives in the
+storefront because it operates on seller inventory, settlement records,
+refunds, and operator alerting.
 
 **Built-in negotiation middlewares:**
 

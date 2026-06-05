@@ -31,6 +31,11 @@ from market_storefront.models.system_models import (
     ResourcePatchResponse,
     UsageStartedEventRequest,
 )
+from market_storefront.utils.failure_policy import (
+    FulfillmentFailureContext,
+    apply_fulfillment_failure_policy,
+    configured_failure_actions,
+)
 from market_storefront.server import _set_globally_paused
 from market_storefront.utils.config import ESCROW_TEMPLATES
 from market_storefront.utils.stage_log import stage_event
@@ -488,20 +493,34 @@ class AdminController:
     async def fulfillment_failed(
         self, body: FulfillmentFailedEventRequest,
     ) -> FulfillmentEventResponse:
-        # First policy slice: release the held capacity. Richer seller
-        # policy (retry/hold/refund/alert) belongs behind this event later.
-        return await self._apply_fulfillment_event(
-            allocation_id=body.allocation_id,
-            event_name="failed",
-            state="released",
-            close_oversized=False,
-            reopen_available=True,
-            provider_id=body.provider_id,
-            provider_job_id=body.provider_job_id,
-            provider_resource_id=body.resource_id,
-            failure_reason=body.reason,
-            failure_message=body.message,
-            logs_ref=body.logs_ref,
+        result = await apply_fulfillment_failure_policy(
+            self._db,
+            FulfillmentFailureContext(
+                allocation_id=body.allocation_id,
+                escrow_uid=body.escrow_uid,
+                provider_id=body.provider_id,
+                provider_job_id=body.provider_job_id,
+                provider_resource_id=body.resource_id,
+                resource_id=body.resource_id,
+                reason=body.reason,
+                message=body.message,
+                logs_ref=body.logs_ref,
+                source="admin_event",
+            ),
+        )
+        if "release_capacity" in configured_failure_actions() and result.state is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Allocation {body.allocation_id!r} not found",
+            )
+        return FulfillmentEventResponse(
+            allocation_id=result.allocation_id or body.allocation_id,
+            state=result.state or "unchanged",
+            resource_id=result.resource_id,
+            gpu_count=result.gpu_count,
+            resource_state=result.resource_state,
+            closed_listing_ids=[],
+            reopened_listing_ids=result.reopened_listing_ids,
         )
 
     @router.post(

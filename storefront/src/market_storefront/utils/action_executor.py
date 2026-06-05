@@ -783,32 +783,31 @@ async def fulfill_compute_obligation(
         else:
             connection_details = provision_result
     except Exception as error:
-        if reserved_allocation_id:
-            try:
-                await get_sqlite_client().update_compute_allocation_state(
+        try:
+            from market_storefront.utils.failure_policy import (
+                FulfillmentFailureContext,
+                apply_fulfillment_failure_policy,
+            )
+
+            await apply_fulfillment_failure_policy(
+                get_sqlite_client(),
+                FulfillmentFailureContext(
                     allocation_id=reserved_allocation_id,
-                    state="released",
-                )
-            except Exception as release_err:
-                logger.warning(
-                    "[LOCAL DB] Failed to release compute allocation %s after provisioning failure: %s",
-                    reserved_allocation_id,
-                    release_err,
-                )
-        elif reserved_resource_id:
-            try:
-                await get_sqlite_client().apply_resource_set_transition(
+                    escrow_uid=escrow_uid,
+                    listing_id=listing_id or order_id,
                     resource_id=reserved_resource_id,
-                    event_type="reservation_released_after_provisioning_failure",
-                    idempotency_key=f"release:{escrow_uid}:{reserved_resource_id}",
-                    set_state="available",
-                )
-            except Exception as release_err:
-                logger.warning(
-                    "[LOCAL DB] Failed to release reserved resource %s after provisioning failure: %s",
-                    reserved_resource_id,
-                    release_err,
-                )
+                    reason="provisioning_failed",
+                    message=str(error),
+                    source="settlement_provisioning",
+                ),
+            )
+        except Exception as policy_err:
+            logger.warning(
+                "[FULFILLMENT_POLICY] Failed to apply provisioning failure policy "
+                "for escrow %s: %s",
+                escrow_uid,
+                policy_err,
+            )
         logger.error("[ALKAHEST] Provisioning failed, skipping obligation fulfillment: %s", error)
         stage_event("provision", "failed",
             escrow_uid=escrow_uid,
