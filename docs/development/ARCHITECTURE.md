@@ -571,11 +571,14 @@ price the buyer will pay). The buyer's CLI runs in `"minimize"` from the
 other side.
 
 **Policy loader:** `_load_storefront_chain()` in `sync_negotiation.py`
-reads `[negotiation] policies` from `storefront.toml` and resolves the
-names via `load_negotiation_chain()`. Back-compat: if `policies` is
-absent and the legacy `policy_mode` is set, synthesize
-`["has_matching_inventory_guard", "escrow_shape_guard", policy_mode]`.
-Custom middlewares are picked up by file discovery via
+reads `[negotiation] policies` from `storefront.toml`. If it is a list,
+the names are resolved via `load_negotiation_chain()`. If it is a
+`[negotiation.policies]` table, the storefront keeps the default seller
+guards and adds an escrow-kind dispatcher that maps the selected
+proposal's Alkahest escrow kind to a configured terminal/chain. Back-
+compat: if `policies` is absent and the legacy `policy_mode` is set,
+synthesize `["has_matching_inventory_guard", "escrow_shape_guard",
+policy_mode]`. Custom middlewares are picked up by file discovery via
 `[negotiation] extra_policy_paths = [...]`. See
 [docs/configuration.md](../configuration.md) for the full reference
 including built-in policies, the buyer's aggregation policy, and how
@@ -945,7 +948,7 @@ reads the agreed terms from the run-log JSONL, creates the on-chain escrow
 under the buyer's wallet via `make_create_escrow_fn`, then POSTs
 `/api/v1/settle/{uid}` and polls for fulfillment. Both buyer and seller
 configure the negotiation chain via `[negotiation].policies` (ordered
-list) in their respective TOMLs; the buyer's default
+list, or per-kind table) in their respective TOMLs; the buyer's default
 (`["buyer_escrow_shape_guard", "bisection"]`) and the seller's
 (`["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]`)
 differ in the appropriate guards. Both honour the legacy
@@ -964,7 +967,11 @@ Shared negotiation machinery + the RL training/eval tool. Two surfaces:
   `load_negotiation_chain`, `run_negotiation_chain`) is the public
   surface; built-in middlewares (`bisection_middleware`,
   `has_matching_inventory_guard`, `escrow_shape_guard`,
-  `max_rounds_guard`, `buyer_escrow_shape_guard`) ship registered.
+  `max_rounds_guard`, `buyer_escrow_shape_guard`,
+  `accept_exact_listing`, and amount-policy aliases for ERC20,
+  native-token, and ERC1155) ship registered. The shared
+  escrow-kind dispatcher is constructed from config rather than
+  registered as a plain global middleware.
 - **CLI**: `market-policy train / eval / export` — invoked by policy
   authors to produce RL checkpoints that the `rl` terminal middleware
   loads at inference time.

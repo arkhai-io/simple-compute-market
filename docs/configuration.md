@@ -43,11 +43,33 @@ policies = [
 # policy_mode = "bisection"
 ```
 
-`policies` is an ordered list — the storefront runs them in sequence at
-every `/negotiate/new` and `/negotiate/{id}` call. The **first**
-non-`None` decision returned terminates the chain. The **last** policy
-must always return a decision (it's the terminal); guards may return
-`None` to defer.
+`policies` may be either an ordered list or a per-escrow-kind table.
+
+As an ordered list, the storefront runs entries in sequence at every
+`/negotiate/new` and `/negotiate/{id}` call. The **first** non-`None`
+decision returned terminates the chain. The **last** policy must always
+return a decision (it's the terminal); guards may return `None` to defer.
+
+As a table, the storefront keeps the default seller guards
+(`has_matching_inventory_guard`, `escrow_shape_guard`) and dispatches
+the terminal policy by the selected proposal's Alkahest escrow kind:
+
+```toml
+[negotiation.policies]
+erc20 = "erc20_bisection"
+native_token = "native_token_bisection"
+erc1155 = "erc1155_bisection"
+default = "accept_exact_listing"
+
+[negotiation.policies.erc721]
+chain = ["accept_exact_listing"]
+```
+
+Keys may be exact Alkahest kinds such as
+`erc20_escrow_obligation_nontierable`, family keys such as `erc20`,
+`native_token`, or `erc1155`, or `default`. A string value is a single
+terminal policy. A nested table with `chain = [...]`, `policies = [...]`,
+or `policy = "..."` is used when one escrow kind needs its own sequence.
 
 ### Bundled policies
 
@@ -58,6 +80,9 @@ must always return a decision (it's the terminal); guards may return
 | `max_rounds_guard` | Guard | every | Exits with `max_rounds_reached` once `len(history) >= [negotiation].max_rounds` (default 5). |
 | `bisection` | Terminal | every | Bisects between the seller's floor (`accepted_escrows[0]` primary rate × duration) and the peer's latest offer; accepts within ~1% convergence, counters at midpoint, exits with `price_unreasonable` when the peer's offer is below `floor / 1.5`. No ML dependencies. |
 | `rl` | Terminal | every | Loads the trained pufferlib checkpoint at `domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt` and produces the next move. Requires the `[rl]` extra (torch + pufferlib). Exits with `torch_unavailable` if torch isn't installed; exits with `model_missing` if the checkpoint isn't at the configured path. |
+| `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Terminal | every | Escrow-family names for the same scalar-`amount` bisection policy. Useful in `[negotiation.policies]` dispatch tables. |
+| `erc20_rl`, `native_token_rl`, `erc1155_rl` | Terminal | every | Escrow-family names for the same scalar-`amount` RL policy. Requires the same torch/checkpoint setup as `rl`. |
+| `accept_exact_listing` | Terminal | every | Accepts only when the buyer proposal exactly matches the selected listing escrow entry, listing-level demands, and concrete amount; rejects all mismatches and never counters. |
 | `buyer_escrow_shape_guard` | Guard | every | Buyer-side mirror of `escrow_shape_guard`: rejects when the seller's counter changes a field the buyer pinned at round 0 (excludes `amount`, which is what's being negotiated). |
 
 `bisection` is the safe default terminal. `rl` is opt-in — keep it out
@@ -145,6 +170,18 @@ policies = ["buyer_escrow_shape_guard", "bisection"]
 both are unset, `negotiate_with_seller` falls through to its default
 chain (the same default the synthesis produces).
 
+The buyer also supports the per-kind table form. It keeps
+`buyer_escrow_shape_guard` first and dispatches the terminal by the
+proposal's selected escrow kind:
+
+```toml
+[negotiation.policies]
+erc20 = "erc20_bisection"
+native_token = "native_token_bisection"
+erc1155 = "erc1155_bisection"
+default = "accept_exact_listing"
+```
+
 ### Bundled policies usable on the buyer side
 
 The same registry serves both sides — every middleware listed in the
@@ -157,6 +194,9 @@ ones that make sense buyer-side:
 | `max_rounds_guard` | Same as seller — exits after `[negotiation].max_rounds`. |
 | `bisection` *(default terminal)* | Symmetric — bisects from the buyer's side (`minimize` direction). |
 | `rl` | Symmetric — loads the buyer's trained checkpoint at `domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt`. |
+| `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Symmetric aliases for the scalar-`amount` bisection terminal. |
+| `erc20_rl`, `native_token_rl`, `erc1155_rl` | Symmetric aliases for the scalar-`amount` RL terminal. |
+| `accept_exact_listing` | Useful for non-negotiated exact-match escrow kinds. |
 
 The seller-only guards (`has_matching_inventory_guard`,
 `escrow_shape_guard`) reference seller-side context that doesn't exist

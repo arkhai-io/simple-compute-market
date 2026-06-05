@@ -82,6 +82,8 @@ urls = ["http://<INDEXER_HOST>:8080"]
 # `buyer_escrow_shape_guard` (vetoes if the seller mutates a buyer-
 # pinned field) with the `bisection` terminal. Switch the terminal to
 # `"rl"` for the trained pufferlib checkpoint (~1GB torch download).
+# For per-escrow-kind dispatch, replace this list with a
+# [negotiation.policies] table; see docs/configuration.md.
 # See docs/configuration.md for the full reference.
 policies = ["buyer_escrow_shape_guard", "bisection"]
 ```
