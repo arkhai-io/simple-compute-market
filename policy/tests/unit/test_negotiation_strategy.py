@@ -16,6 +16,7 @@ from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationDecision,
     NegotiationRound,
+    accept_exact_listing_middleware,
     bisection_middleware,
     load_negotiation_chain,
     register_negotiation_middleware,
@@ -207,6 +208,12 @@ def test_load_negotiation_chain_resolves_bisection():
     chain = load_negotiation_chain(["bisection"])
     assert len(chain) == 1
     assert chain[0] is bisection_middleware
+
+
+def test_load_negotiation_chain_resolves_accept_exact_listing():
+    chain = load_negotiation_chain(["accept_exact_listing"])
+    assert len(chain) == 1
+    assert chain[0] is accept_exact_listing_middleware
 
 
 def test_register_negotiation_middleware_makes_it_loadable():

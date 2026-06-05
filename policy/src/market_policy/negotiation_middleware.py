@@ -488,6 +488,89 @@ def _normalize_escrow_field(value: Any) -> Any:
     return value
 
 
+def _normalize_exact_value(value: Any) -> Any:
+    """Canonicalize JSON-like escrow policy values for exact comparison."""
+    if isinstance(value, dict):
+        return {str(k): _normalize_exact_value(v) for k, v in sorted(value.items())}
+    if isinstance(value, list):
+        return [_normalize_exact_value(v) for v in value]
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith("0x"):
+            return stripped.lower()
+        if stripped.isdigit():
+            return int(stripped)
+        return value
+    return value
+
+
+def _normalize_rate(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        value = {
+            "field": getattr(value, "field", None),
+            "per": getattr(value, "per", None),
+            "value": getattr(value, "value", None),
+        }
+    if value.get("field") is None or value.get("value") is None:
+        raise ValueError("rate requires field and value")
+    return {
+        "field": value.get("field"),
+        "per": value.get("per", "hour"),
+        "value": int(value.get("value")),
+    }
+
+
+def _normalize_demands_for_chain(value: Any, chain_name: Any) -> list[Any]:
+    raw = _loads_json_list(value)
+    out = []
+    for demand in raw:
+        if not isinstance(demand, dict):
+            continue
+        demand_chain = demand.get("chain_name")
+        if demand_chain and demand_chain != chain_name:
+            continue
+        out.append(_normalize_exact_value(demand))
+    return out
+
+
+def _loads_json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip():
+        import json
+        try:
+            parsed = json.loads(value)
+        except (ValueError, TypeError):
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
+
+
+def _accepted_escrow_for_proposal(
+    listing: dict[str, Any],
+    proposal: dict[str, Any],
+) -> dict[str, Any] | None:
+    accepted = _loads_json_list(listing.get("accepted_escrows"))
+    proposal_addr_raw = proposal.get("escrow_address")
+    if not isinstance(proposal_addr_raw, str) or not proposal_addr_raw:
+        return None
+    proposal_addr = proposal_addr_raw.lower()
+    if proposal_addr == _ZERO_ADDRESS:
+        return None
+    proposal_chain = proposal.get("chain_name")
+    for entry in accepted:
+        if not isinstance(entry, dict):
+            continue
+        entry_addr = entry.get("escrow_address")
+        if (
+            entry.get("chain_name") == proposal_chain
+            and isinstance(entry_addr, str)
+            and entry_addr.lower() == proposal_addr
+        ):
+            return entry
+    return None
+
+
 @register_negotiation_middleware("has_matching_inventory_guard")
 def has_matching_inventory_guard(
     history: list[NegotiationRound],
@@ -626,6 +709,149 @@ def escrow_shape_guard(
                 context,
             )
     return None, context
+
+
+@register_negotiation_middleware("accept_exact_listing")
+def accept_exact_listing_middleware(
+    history: list[NegotiationRound],
+    context: NegotiationContext,
+) -> NegotiationStep:
+    """Terminal policy: accept only the exact advertised listing escrow.
+
+    This is the packaged no-negotiation fallback for escrow kinds that do
+    not have a domain-specific pricing policy. It requires the buyer's
+    latest proposal to:
+
+    - select one advertised ``accepted_escrows`` entry by chain + address;
+    - exactly mirror that entry's ``literal_fields`` and ``rates``;
+    - exactly mirror listing-level demands for the selected chain;
+    - offer ``fields.amount == context.our_reference_amount``.
+
+    Any mismatch rejects. No counters are produced.
+    """
+    proposal = _peer_proposal(history)
+    if not isinstance(proposal, dict):
+        return (
+            NegotiationDecision(action="reject", reason="exact_listing:no_proposal"),
+            context,
+        )
+
+    listing = context.listing or {}
+    matched = _accepted_escrow_for_proposal(listing, proposal)
+    if matched is None:
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason="exact_listing:escrow_not_in_accepted_set",
+            ),
+            context,
+        )
+
+    expected_literal = _normalize_exact_value(matched.get("literal_fields") or {})
+    proposal_literal = _normalize_exact_value(proposal.get("literal_fields") or {})
+    if proposal_literal != expected_literal:
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=(
+                    f"exact_listing:literal_fields_mismatch:"
+                    f"{proposal_literal!r}!={expected_literal!r}"
+                ),
+            ),
+            context,
+        )
+
+    proposal_fields = proposal.get("fields") or {}
+    if not isinstance(proposal_fields, dict):
+        return (
+            NegotiationDecision(action="reject", reason="exact_listing:fields_not_object"),
+            context,
+        )
+    expected_amount = int(round(context.our_reference_amount))
+    proposed_amount = _amount_from_proposal(proposal)
+    if proposed_amount is None or int(proposed_amount) != expected_amount:
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=(
+                    f"exact_listing:amount_mismatch:"
+                    f"{proposed_amount!r}!={expected_amount!r}"
+                ),
+            ),
+            context,
+        )
+    for key, value in proposal_fields.items():
+        if key == "amount":
+            continue
+        expected = expected_literal.get(key)
+        actual = _normalize_exact_value(value)
+        if actual != expected:
+            return (
+                NegotiationDecision(
+                    action="reject",
+                    reason=(
+                        f"exact_listing:field_mismatch:{key!r}:"
+                        f"{actual!r}!={expected!r}"
+                    ),
+                ),
+                context,
+            )
+
+    try:
+        expected_rates = [
+            _normalize_rate(rate) for rate in (matched.get("rates") or [])
+        ]
+        proposal_rates = [
+            _normalize_rate(rate) for rate in (proposal.get("rates") or [])
+        ]
+    except (TypeError, ValueError) as exc:
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=f"exact_listing:invalid_rates:{exc}",
+            ),
+            context,
+        )
+    if proposal_rates != expected_rates:
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=(
+                    f"exact_listing:rates_mismatch:"
+                    f"{proposal_rates!r}!={expected_rates!r}"
+                ),
+            ),
+            context,
+        )
+
+    expected_demands = _normalize_demands_for_chain(
+        listing.get("demands"),
+        proposal.get("chain_name"),
+    )
+    proposal_demands = _normalize_demands_for_chain(
+        proposal.get("demands"),
+        proposal.get("chain_name"),
+    )
+    if proposal_demands != expected_demands:
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=(
+                    f"exact_listing:demands_mismatch:"
+                    f"{proposal_demands!r}!={expected_demands!r}"
+                ),
+            ),
+            context,
+        )
+
+    return (
+        NegotiationDecision(
+            action="accept",
+            proposal=_set_proposal_amount(proposal, expected_amount),
+            reason="exact_listing",
+        ),
+        context,
+    )
 
 
 @register_negotiation_middleware("buyer_escrow_shape_guard")

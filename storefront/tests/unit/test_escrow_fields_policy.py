@@ -13,6 +13,7 @@ from __future__ import annotations
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationRound,
+    accept_exact_listing_middleware,
     escrow_shape_guard,
 )
 
@@ -49,6 +50,8 @@ def _ctx(
 _ADDR = "0x" + "11" * 20
 _TOKEN = "0x" + "22" * 20
 _OTHER_TOKEN = "0x" + "33" * 20
+_ARBITER = "0x" + "44" * 20
+_RECIPIENT = "0x" + "55" * 20
 
 
 def _listing_with_one_escrow(**field_overrides) -> dict:
@@ -113,6 +116,134 @@ class TestPassesWhenAllFieldsMatch:
         )
         decision, _ = escrow_shape_guard(history, ctx)
         assert decision is None
+
+
+class TestAcceptExactListing:
+    def _proposal(self, **overrides) -> dict:
+        proposal = {
+            "chain_name": "anvil",
+            "escrow_address": _ADDR,
+            "fields": {"token": _TOKEN, "amount": 1000},
+            "literal_fields": {"token": _TOKEN},
+            "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
+            "demands": [],
+        }
+        proposal.update(overrides)
+        return proposal
+
+    def test_accepts_exact_listing_escrow(self):
+        history, ctx = _ctx(
+            listing=_listing_with_one_escrow(),
+            escrow_proposal=self._proposal(),
+        )
+        decision, _ = accept_exact_listing_middleware(history, ctx)
+        assert decision is not None
+        assert decision.action == "accept"
+        assert decision.reason == "exact_listing"
+        assert decision.proposal["fields"]["amount"] == 1000
+
+    def test_accepted_escrows_can_be_serialized_json(self):
+        import json
+        listing = _listing_with_one_escrow()
+        listing["accepted_escrows"] = json.dumps(listing["accepted_escrows"])
+        history, ctx = _ctx(
+            listing=listing,
+            escrow_proposal=self._proposal(),
+        )
+        decision, _ = accept_exact_listing_middleware(history, ctx)
+        assert decision is not None
+        assert decision.action == "accept"
+
+    def test_rejects_when_escrow_not_advertised(self):
+        history, ctx = _ctx(
+            listing=_listing_with_one_escrow(),
+            escrow_proposal=self._proposal(escrow_address="0x" + "99" * 20),
+        )
+        decision, _ = accept_exact_listing_middleware(history, ctx)
+        assert decision is not None
+        assert decision.action == "reject"
+        assert "exact_listing:escrow_not_in_accepted_set" in (decision.reason or "")
+
+    def test_rejects_amount_mismatch(self):
+        history, ctx = _ctx(
+            listing=_listing_with_one_escrow(),
+            escrow_proposal=self._proposal(fields={"token": _TOKEN, "amount": 999}),
+        )
+        decision, _ = accept_exact_listing_middleware(history, ctx)
+        assert decision is not None
+        assert decision.action == "reject"
+        assert "exact_listing:amount_mismatch" in (decision.reason or "")
+
+    def test_rejects_literal_mismatch(self):
+        history, ctx = _ctx(
+            listing=_listing_with_one_escrow(),
+            escrow_proposal=self._proposal(
+                fields={"token": _OTHER_TOKEN, "amount": 1000},
+                literal_fields={"token": _OTHER_TOKEN},
+            ),
+        )
+        decision, _ = accept_exact_listing_middleware(history, ctx)
+        assert decision is not None
+        assert decision.action == "reject"
+        assert "exact_listing:literal_fields_mismatch" in (decision.reason or "")
+
+    def test_rejects_extra_field_not_in_listing_literals(self):
+        history, ctx = _ctx(
+            listing=_listing_with_one_escrow(),
+            escrow_proposal=self._proposal(
+                fields={"token": _TOKEN, "arbiter": _ARBITER, "amount": 1000},
+            ),
+        )
+        decision, _ = accept_exact_listing_middleware(history, ctx)
+        assert decision is not None
+        assert decision.action == "reject"
+        assert "exact_listing:field_mismatch" in (decision.reason or "")
+
+    def test_rejects_rate_mismatch(self):
+        history, ctx = _ctx(
+            listing=_listing_with_one_escrow(),
+            escrow_proposal=self._proposal(
+                rates=[{"field": "amount", "per": "hour", "value": "999"}],
+            ),
+        )
+        decision, _ = accept_exact_listing_middleware(history, ctx)
+        assert decision is not None
+        assert decision.action == "reject"
+        assert "exact_listing:rates_mismatch" in (decision.reason or "")
+
+    def test_accepts_matching_demands(self):
+        demand = {
+            "chain_name": "anvil",
+            "arbiter": _ARBITER,
+            "demand_data": {"recipient": _RECIPIENT},
+        }
+        listing = _listing_with_one_escrow()
+        listing["demands"] = [demand]
+        history, ctx = _ctx(
+            listing=listing,
+            escrow_proposal=self._proposal(demands=[demand]),
+        )
+        decision, _ = accept_exact_listing_middleware(history, ctx)
+        assert decision is not None
+        assert decision.action == "accept"
+
+    def test_rejects_missing_demands(self):
+        listing = _listing_with_one_escrow()
+        listing["demands"] = [
+            {
+                "chain_name": "anvil",
+                "arbiter": _ARBITER,
+                "demand_data": {"recipient": _RECIPIENT},
+            }
+        ]
+        history, ctx = _ctx(
+            listing=listing,
+            escrow_proposal=self._proposal(),
+        )
+        decision, _ = accept_exact_listing_middleware(history, ctx)
+        assert decision is not None
+        assert decision.action == "reject"
+        assert "exact_listing:demands_mismatch" in (decision.reason or "")
 
 
 class TestRejectsWhenFieldDiverges:
