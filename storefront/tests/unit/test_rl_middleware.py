@@ -122,6 +122,12 @@ class TestMiddlewareRegistration:
         assert len(chain) == 1
         assert getattr(chain[0], "__name__", "") == "rl_middleware"
 
+    @pytest.mark.parametrize("name", ["erc20_rl", "native_token_rl", "erc1155_rl"])
+    def test_rl_middleware_registers_escrow_family_aliases(self, name):
+        chain = load_negotiation_chain([name])
+        assert len(chain) == 1
+        assert chain[0] is strat_mod.rl_middleware
+
 
 # ---------------------------------------------------------------------------
 # ArkhaiInferencePolicy state-dict round-trip

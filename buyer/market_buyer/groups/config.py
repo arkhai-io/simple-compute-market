@@ -155,7 +155,8 @@ _INIT_USER_TEMPLATE = """\
 #                                              # ordered policy chain; terminal policy is
 #                                              # `bisection` (default; no ML deps), `rl` (torch + checkpoint),
 #                                              # `erc20_bisection`, `native_token_bisection`, or
-#                                              # `erc1155_bisection`
+#                                              # `erc1155_bisection`, `erc20_rl`, `native_token_rl`, or
+#                                              # `erc1155_rl`
 # policy_mode = "bisection"                    # legacy single-terminal key (synthesizes the default chain
 #                                              # when `policies` is absent)
 """

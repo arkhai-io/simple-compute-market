@@ -305,6 +305,9 @@ def _get_singleton() -> TorchArkhaiStrategy:
 
 
 @register_negotiation_middleware("rl")
+@register_negotiation_middleware("erc20_rl")
+@register_negotiation_middleware("native_token_rl")
+@register_negotiation_middleware("erc1155_rl")
 def rl_middleware(
     history: list[NegotiationRound],
     context: NegotiationContext,

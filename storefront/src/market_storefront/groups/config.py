@@ -209,7 +209,8 @@ _INIT_USER_TEMPLATE = """\
 #                                              # ordered list of policies; terminal policy is
 #                                              # `bisection` (default; no ML deps), `rl` (torch + checkpoint),
 #                                              # `erc20_bisection`, `native_token_bisection`,
-#                                              # `erc1155_bisection`, or opt-in
+#                                              # `erc1155_bisection`, `erc20_rl`, `native_token_rl`,
+#                                              # `erc1155_rl`, or opt-in
 #                                              # `accept_exact_listing` (no counters).
 # seller_model_path = "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt"
 # buyer_model_path  = "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt"
