@@ -502,23 +502,50 @@ def _token_resource_from_accepted_escrow(
 ) -> TokenResource | None:
     """Build a ``TokenResource`` from an ``accepted_escrows[i]`` entry.
 
-    Looks up ERC20 metadata by the entry's ``literal_fields.token``
+    Looks up ERC20/ERC1155 metadata by the entry's ``literal_fields.token``
     address in the chain-resolved cache, falling back to address-only
-    metadata when the cache doesn't yet know it. Returns ``None`` when
-    the entry lacks a token. The token amount is the entry's primary
-    rate value (per-hour rate in base units); ``None`` becomes 0.
+    metadata when the cache doesn't yet know it. Native-token escrow entries
+    have no token literal, so they become a synthetic native payment resource.
+    Returns ``None`` when the entry is neither token-backed nor native-token.
+    The token amount is the entry's primary rate value (per-hour rate in base
+    units); ``None`` becomes 0.
     """
-    from service.schemas import accepted_token_address
+    from service.schemas import accepted_token_address, primary_rate_value
 
     if not isinstance(accepted_escrow, dict):
         return None
+    amount = primary_rate_value(accepted_escrow) or 0
     token = accepted_token_address(accepted_escrow)
-    if not isinstance(token, str) or not token:
-        return None
     try:
         from service.clients.token import resolve_token_cached, ERC20TokenMetadata
     except Exception:
         return None
+
+    if not isinstance(token, str) or not token:
+        try:
+            from service.clients.alkahest import get_escrow_codec_for
+
+            codec = get_escrow_codec_for(
+                accepted_escrow.get("chain_name", ""),
+                accepted_escrow.get("escrow_address", ""),
+                config_path=getattr(
+                    CHAINS.get(accepted_escrow.get("chain_name", "")),
+                    "alkahest_address_config_path",
+                    None,
+                ),
+            )
+        except Exception:
+            codec = None
+        if codec is None or not str(codec.kind).startswith("native_token_"):
+            return None
+        meta = ERC20TokenMetadata(
+            symbol="NATIVE",
+            name="Native token",
+            contract_address="native",
+            decimals=18,
+        )
+        return TokenResource(token=meta, amount=amount)
+
     meta = resolve_token_cached(token)
     if meta is None:
         # Fall back to a minimal metadata object so the encoder has
@@ -529,9 +556,6 @@ def _token_resource_from_accepted_escrow(
             contract_address=token,
             decimals=0,
         )
-    from service.schemas import primary_rate_value
-
-    amount = primary_rate_value(accepted_escrow) or 0
     return TokenResource(token=meta, amount=amount)
 
 
@@ -700,8 +724,8 @@ async def fulfill_compute_obligation(
         token_resource = _token_resource_from_accepted_escrow(first_escrow)
         if token_resource is None:
             raise ValueError(
-                f"Cannot encode compute lease for listing "
-                f"{order_id!r}: no usable accepted_escrows[0].token"
+                f"Cannot encode compute lease for listing {order_id!r}: "
+                "accepted_escrows[0] is neither token-backed nor native-token"
             )
         order_bytes = encode_compute_lease(
             compute_resource=compute_resource,

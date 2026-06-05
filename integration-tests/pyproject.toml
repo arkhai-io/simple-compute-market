@@ -78,6 +78,7 @@ markers = [
     "e2e_compute_dynamic_listings: Compute dynamic listing lifecycle from admin reserve through release callbacks",
     "multi_registry: Multi-registry publish + discovery e2e scenario (stops at negotiation start)",
     "e2e_alkahest_escrow_codecs: Real Alkahest escrow codec create/read scenario",
+    "e2e_non_erc20_settlement: Full settlement path for scalar non-ERC20 Alkahest escrow variants",
     "smoke: Quick smoke tests",
     "slow: Tests that may take longer due to RPC latency",
     "mock_provisioning: E2E mock provisioning flow tests",

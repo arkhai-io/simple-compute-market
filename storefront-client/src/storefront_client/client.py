@@ -745,7 +745,7 @@ class StorefrontClient(_StorefrontClientBase):
         if initial_amount is not None:
             fields.setdefault("amount", int(initial_amount))
         literals = dict(literal_fields or {})
-        if token or not literal_fields:
+        if token or literal_fields is None:
             literals.setdefault("token", token or ("0x" + "0" * 40))
         proposal = {
             "chain_name": chain_name or "anvil",
@@ -1516,7 +1516,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         if initial_amount is not None:
             fields.setdefault("amount", int(initial_amount))
         literals = dict(literal_fields or {})
-        if token or not literal_fields:
+        if token or literal_fields is None:
             literals.setdefault("token", token or ("0x" + "0" * 40))
         proposal = {
             "chain_name": chain_name or "anvil",

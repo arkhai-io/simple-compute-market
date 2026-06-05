@@ -26,7 +26,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-storefront-client"
-version = "0.13.0"
+version = "0.15.0"
 source = { editable = "." }
 dependencies = [
     { name = "eth-account" },
