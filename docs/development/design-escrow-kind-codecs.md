@@ -6,21 +6,30 @@ Scope and sequencing for supporting every escrow obligation shape under
 ## Current State
 
 The market already treats escrow settlement as a codec dispatch problem:
-`EscrowTerms` carries `escrow_contract` plus the concrete
-`obligation_data`, and `service.clients.alkahest.get_escrow_codec_for`
-resolves `(chain_name, escrow_address)` to an `EscrowKindCodec`.
+`EscrowTerms` carries `chain_name`, `escrow_contract`, and the concrete
+`obligation_data`, and the buyer submit hook resolves each
+`(chain_name, escrow_contract)` to an `EscrowKindCodec`.
 
-Only `erc20_escrow_obligation_nontierable` is implemented today. Several
-callers are still ERC20-shaped even though the wire model is more general:
+ERC20, native-token, ERC721, and ERC1155 tierable/non-tierable codecs are
+implemented. Negotiation still uses `EscrowProposal` as the per-round message
+shape, but accept paths now echo `accepted_escrow_terms`: concrete
+`list[EscrowTerms]` materialized from the final accepted proposal. Split
+settlement commands consume those final terms directly and only rebuild from
+`EscrowProposal` for older run logs.
 
-- buyer proposal construction and escrow selection mostly reason about
-  `token` and `amount`;
-- listing display, pricing, and filtering use helpers like
-  `accepted_token_address` and `primary_rate_value`;
-- CSV escrow templates are easiest to express for one token plus one rate
-  slot;
-- buyer-side chain creation and seller-side settlement verification reject
-  unknown codecs.
+Remaining ERC20-shaped or policy-specific surfaces:
+
+- the bundled/default compute policies mostly reason about one scalar
+  `amount`; native token, ERC20 tierable, and ERC1155 can reuse that policy
+  shape, while ERC721, bundles, and attestation escrows need caller-supplied
+  policy or a simple exact-match guard;
+- listing display, pricing, filtering, refund, and some admin helpers still
+  use convenience helpers like `accepted_token_address` and
+  `primary_rate_value`;
+- token bundle final-term materialization still needs field-path assignment
+  for array paths such as `erc20Amounts[0]`;
+- claim/reclaim/admin convenience commands still call ERC20 SDK paths in a
+  few places; escrow creation and verification are generic.
 
 ## Contract Coverage
 
@@ -48,6 +57,9 @@ layout, but they still need distinct codec kinds and SDK paths.
 - Make unsupported escrow kinds fail explicitly with kind/address context.
 - Keep listing-side `accepted_escrows` as the seller's advertised shape:
   `(chain_name, escrow_address, literal_fields, rates)`.
+- Do not require the project to ship default negotiation policies for every
+  escrow kind before the codecs exist. The default policy surface may remain
+  compute/ERC20-oriented; users can supply policies for other escrow formats.
 - Add tests at the codec boundary first, then representative end-to-end tests
   once listing/proposal semantics are stable.
 
@@ -56,6 +68,9 @@ layout, but they still need distinct codec kinds and SDK paths.
 - Do not implement every possible marketplace policy for every asset class in
   the codec layer. Codecs encode/decode and call the SDK; negotiation policy
   decides what is acceptable.
+- Do not package default policies for every non-ERC20 format. A generic
+  "accept only if the proposed escrow terms exactly match the listing
+  template; reject otherwise" guard is enough baseline behavior.
 - Do not force non-token escrows into ERC20 helpers such as
   `accepted_token_address`.
 - Do not require a full e2e scenario for every tierable/non-tierable variant
@@ -65,13 +80,20 @@ layout, but they still need distinct codec kinds and SDK paths.
 
 ### Phase 1: Codec Registry and Unit Tests
 
-Add codec classes for the straightforward asset escrows:
+Add codec classes for the straightforward asset escrows.
 
+Implemented:
+
+- ERC20, non-tierable and tierable;
 - native token, non-tierable and tierable;
 - ERC721, non-tierable and tierable;
-- ERC1155, non-tierable and tierable;
-- ERC20 tierable, if the SDK path is available and matches the existing
-  non-tierable behavior.
+- ERC1155, non-tierable and tierable.
+
+Remaining:
+
+- token bundle, non-tierable and tierable;
+- attestation-request, non-tierable and tierable;
+- attestation-UID, non-tierable and tierable.
 
 Each codec should have unit tests for:
 
@@ -84,23 +106,29 @@ Each codec should have unit tests for:
 
 Generalize the places that currently assume ERC20:
 
-- escrow selection should match by `(chain_name, escrow_address)` and policy,
-  not just token address;
+- escrow selection already matches by `(chain_name, escrow_address)`, but
+  optional filters and UI still expose token-oriented conveniences;
 - displayed price/rate helpers should expose a generic primary rate and only
   expose token-specific helpers for token escrows;
-- CSV escrow templates should support multiple rate slots and array-valued
-  literal fields where needed;
-- buyer proposal construction should derive `literal_fields` and rate-bearing
-  `fields` from the selected accepted escrow, not hard-code `token`/`amount`.
+- CSV escrow templates already support multiple named rate slots and
+  array/indexed contract field paths through aliases:
+  `escrow_templates.<name>.rates.<alias>.field = "erc20Amounts[0]"`, with
+  CSV cells using the flat alias (`bundle:usdc=180,credits=10`);
+- final-term materialization must learn to assign those field paths into
+  nested/indexed `obligation_data` for token bundles;
+- buyer proposal construction already carries selected `literal_fields`,
+  `rates`, and listing-level `demands`; keep hard-coded `token` handling only
+  as a convenience for token-shaped default flows.
 
 This phase should preserve current ERC20 behavior and error messages for the
 existing compute buyer flow.
 
 ### Phase 3: Seller Verification
 
-Extend settlement verification so the decoded on-chain obligation can be
-compared against `EscrowTerms.obligation_data` for all registered codecs.
-The verifier should remain a byte/field compare, not a policy dispatcher.
+Settlement verification now materializes the final proposal into
+`EscrowTerms` and compares decoded chain obligation data against
+`EscrowTerms.obligation_data`. Keep the verifier a byte/field compare, not a
+policy dispatcher.
 
 Tests should cover:
 
@@ -133,15 +161,17 @@ semantics are explicit:
 - how the seller advertises acceptable schemas;
 - how the buyer proves or selects the attestation before settlement.
 
-These codecs can still be mechanically implemented earlier, but they should
-not be treated as product-complete until those semantics are settled.
+These codecs can still be mechanically implemented earlier so user-supplied
+policies can target them, but they should not be treated as product-complete
+default flows until those semantics are settled.
 
 ## Open Questions
 
-- Which Alkahest SDK methods exist for each tierable path, and do their return
-  receipts all expose `log.uid` consistently?
-- Should `accepted_escrows.rates[*].field` support nested paths for bundle
-  arrays, or should bundles require a richer typed template shape?
+- Which remaining Alkahest SDK methods exist for token-bundle and attestation
+  paths, and do their return receipts all expose `log.uid` consistently?
+- What exact path-assignment helper should turn aliased bundle template fields
+  (`erc20Amounts[0]`, `erc721TokenIds[0]`, etc.) into nested/indexed
+  `obligation_data`?
 - Should registry filters gain first-class non-ERC20 axes such as
   `escrow_kind`, `token`, `tokenId`, or native amount, or should they stay as
   JSONPath filters over `accepted_escrows`?

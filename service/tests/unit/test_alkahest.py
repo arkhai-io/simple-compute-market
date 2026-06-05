@@ -78,11 +78,17 @@ def test_address_to_slot_base_sepolia_erc20_escrow():
     from service.clients.alkahest import (
         address_to_slot,
         get_erc20_escrow_obligation_nontierable,
+        get_erc20_escrow_obligation_tierable,
         _reverse_address_map,
     )
     _reverse_address_map.cache_clear()
-    escrow = get_erc20_escrow_obligation_nontierable("base_sepolia")
-    assert address_to_slot("base_sepolia", escrow) == "erc20_escrow_obligation_nontierable"
+    non_tierable = get_erc20_escrow_obligation_nontierable("base_sepolia")
+    tierable = get_erc20_escrow_obligation_tierable("base_sepolia")
+    assert address_to_slot("base_sepolia", non_tierable) == "erc20_escrow_obligation_nontierable"
+    if int(tierable, 16) != 0:
+        assert address_to_slot("base_sepolia", tierable) == "erc20_escrow_obligation_tierable"
+    else:
+        assert address_to_slot("base_sepolia", tierable) is None
 
 
 def test_address_to_slot_base_sepolia_erc721_escrows():
@@ -115,6 +121,29 @@ def test_address_to_slot_base_sepolia_erc1155_escrows():
     assert address_to_slot("base_sepolia", non_tierable) == "erc1155_escrow_obligation_nontierable"
     if int(tierable, 16) != 0:
         assert address_to_slot("base_sepolia", tierable) == "erc1155_escrow_obligation_tierable"
+    else:
+        assert address_to_slot("base_sepolia", tierable) is None
+
+
+def test_address_to_slot_base_sepolia_native_token_escrows():
+    from service.clients.alkahest import (
+        address_to_slot,
+        get_native_token_escrow_obligation_nontierable,
+        get_native_token_escrow_obligation_tierable,
+        _reverse_address_map,
+    )
+    _reverse_address_map.cache_clear()
+    non_tierable = get_native_token_escrow_obligation_nontierable("base_sepolia")
+    tierable = get_native_token_escrow_obligation_tierable("base_sepolia")
+    assert (
+        address_to_slot("base_sepolia", non_tierable)
+        == "native_token_escrow_obligation_nontierable"
+    )
+    if int(tierable, 16) != 0:
+        assert (
+            address_to_slot("base_sepolia", tierable)
+            == "native_token_escrow_obligation_tierable"
+        )
     else:
         assert address_to_slot("base_sepolia", tierable) is None
 
@@ -154,6 +183,7 @@ def test_address_to_slot_anvil_override(tmp_path):
         },
         "erc20_addresses": {
             "escrow_obligation_nontierable": escrow_addr,
+            "escrow_obligation_tierable": "0x" + "98" * 20,
         },
         "erc721_addresses": {
             "escrow_obligation_nontierable": "0x" + "ef" * 20,
@@ -163,12 +193,19 @@ def test_address_to_slot_anvil_override(tmp_path):
             "escrow_obligation_nontierable": "0x" + "56" * 20,
             "escrow_obligation_tierable": "0x" + "78" * 20,
         },
+        "native_token_addresses": {
+            "escrow_obligation_nontierable": "0x" + "9a" * 20,
+            "escrow_obligation_tierable": "0x" + "bc" * 20,
+        },
     }))
     cfg_path = str(override)
     assert address_to_slot("anvil", arbiter_addr, config_path=cfg_path) == "recipient_arbiter"
     assert address_to_slot("anvil", escrow_addr, config_path=cfg_path) == "erc20_escrow_obligation_nontierable"
+    assert address_to_slot("anvil", "0x" + "98" * 20, config_path=cfg_path) == "erc20_escrow_obligation_tierable"
     assert address_to_slot("anvil", "0x" + "ef" * 20, config_path=cfg_path) == "erc721_escrow_obligation_nontierable"
     assert address_to_slot("anvil", "0x" + "34" * 20, config_path=cfg_path) == "erc721_escrow_obligation_tierable"
     assert address_to_slot("anvil", "0x" + "56" * 20, config_path=cfg_path) == "erc1155_escrow_obligation_nontierable"
     assert address_to_slot("anvil", "0x" + "78" * 20, config_path=cfg_path) == "erc1155_escrow_obligation_tierable"
+    assert address_to_slot("anvil", "0x" + "9a" * 20, config_path=cfg_path) == "native_token_escrow_obligation_nontierable"
+    assert address_to_slot("anvil", "0x" + "bc" * 20, config_path=cfg_path) == "native_token_escrow_obligation_tierable"
     assert address_to_slot("anvil", "0x" + "00" * 20, config_path=cfg_path) is None

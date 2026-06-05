@@ -86,11 +86,11 @@ The `provisioning-service` wheel stays its own distributable — it's operated b
 
 ### Escrow Kind Codec Expansion
 
-**Status:** Planned. Full scope in [`design-escrow-kind-codecs.md`](design-escrow-kind-codecs.md).
+**Status:** In progress. Full scope in [`design-escrow-kind-codecs.md`](design-escrow-kind-codecs.md).
 
-**Problem:** The escrow codec registry is architected to dispatch by `(chain, escrow_address)`, but current buyer creation and seller verification only support `erc20_escrow_obligation_nontierable`. Alkahest ships native-token, ERC721, ERC1155, token-bundle, attestation-request, and attestation-UID escrow obligations in both tierable and non-tierable variants. Supporting those is more than registering ABI layouts: buyer proposal construction, listing templates, rate/literal-field semantics, SDK create paths, verifier decoding, and e2e coverage all need to agree.
+**Current state:** settlement now consumes concrete `EscrowTerms` on accept, and ERC20, native-token, ERC721, and ERC1155 tierable/non-tierable codecs are registered with codec-boundary tests. The remaining default Alkahest escrow kinds are token-bundle, attestation-request, and attestation-UID variants. Default compute policies may remain ERC20/scalar-amount oriented; non-ERC20 users can supply their own policies, with a simple exact-match listing guard as the baseline.
 
-**Planned fix:** expand codecs in phases: first add registry/ABI/SDK adapters and unit tests for straightforward token escrows, then update listing/proposal semantics and templates, then add representative e2e coverage, with attestation escrows handled after their product semantics are nailed down.
+**Planned fix:** add the remaining codec registry/SDK adapters and tests. Token-bundle support should use the existing escrow-template alias system (`rates.<alias>.field = "erc20Amounts[0]"`) and add final-term field-path assignment into nested/indexed `obligation_data`. Attestation escrows can be mechanically exposed for custom policies, but should not be treated as product-complete default flows until their product semantics are nailed down.
 
 ### Storefront DB Pruning
 

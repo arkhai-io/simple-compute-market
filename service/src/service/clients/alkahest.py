@@ -203,6 +203,20 @@ def get_erc20_escrow_obligation_nontierable(
     return str(cfg.erc20_addresses.escrow_obligation_nontierable)
 
 
+def get_erc20_escrow_obligation_tierable(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve ``ERC20EscrowObligation`` (tierable variant)."""
+    return _escrow_obligation_address(
+        chain_name,
+        config_path=config_path,
+        category="erc20_addresses",
+        field="escrow_obligation_tierable",
+    )
+
+
 def _escrow_obligation_address(
     chain_name: str,
     *,
@@ -276,6 +290,34 @@ def get_erc1155_escrow_obligation_tierable(
         chain_name,
         config_path=config_path,
         category="erc1155_addresses",
+        field="escrow_obligation_tierable",
+    )
+
+
+def get_native_token_escrow_obligation_nontierable(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve ``NativeTokenEscrowObligation`` (non-tierable variant)."""
+    return _escrow_obligation_address(
+        chain_name,
+        config_path=config_path,
+        category="native_token_addresses",
+        field="escrow_obligation_nontierable",
+    )
+
+
+def get_native_token_escrow_obligation_tierable(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve ``NativeTokenEscrowObligation`` (tierable variant)."""
+    return _escrow_obligation_address(
+        chain_name,
+        config_path=config_path,
+        category="native_token_addresses",
         field="escrow_obligation_tierable",
     )
 
@@ -873,6 +915,116 @@ class Erc20NonTierableEscrowCodec:
         return await client.erc20.escrow.non_tierable.get_obligation(uid)
 
 
+class Erc20TierableEscrowCodec(Erc20NonTierableEscrowCodec):
+    """``ERC20EscrowObligation`` (tierable variant)."""
+
+    kind = "erc20_escrow_obligation_tierable"
+
+    def resolve_address(
+        self, chain_name: str, *, config_path: str | None
+    ) -> str:
+        return get_erc20_escrow_obligation_tierable(
+            chain_name, config_path=config_path,
+        )
+
+    async def create_obligation(
+        self,
+        client: Any,
+        obligation_data: dict[str, Any],
+        expiration_unix: int,
+    ) -> str:
+        price_data = {
+            "address": obligation_data["token"],
+            "value": int(obligation_data["amount"]),
+        }
+        arbiter_data = {
+            "arbiter": obligation_data["arbiter"],
+            "demand": _normalize_demand_bytes(obligation_data["demand"]),
+        }
+        await client.erc20.util.approve(price_data, "escrow")
+        receipt = await client.erc20.escrow.tierable.create(
+            price_data, arbiter_data, expiration_unix,
+        )
+        uid = (receipt or {}).get("log", {}).get("uid")
+        if not uid:
+            raise RuntimeError(
+                f"escrow.create did not return a uid: {receipt!r}"
+            )
+        return uid
+
+    async def get_obligation(self, client: Any, uid: str) -> Any:
+        return await client.erc20.escrow.tierable.get_obligation(uid)
+
+
+class _NativeTokenEscrowCodecBase:
+    """Common native-token escrow SDK adapter.
+
+    Solidity ObligationData layout:
+        (address arbiter, bytes demand, uint256 amount)
+    """
+
+    tier_attr: str
+    address_field: str
+
+    def _price_data(self, obligation_data: dict[str, Any]) -> dict[str, Any]:
+        return {"value": int(obligation_data["amount"])}
+
+    def _arbiter_data(self, obligation_data: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "arbiter": obligation_data["arbiter"],
+            "demand": _normalize_demand_bytes(obligation_data["demand"]),
+        }
+
+    def resolve_address(
+        self, chain_name: str, *, config_path: str | None
+    ) -> str:
+        return _escrow_obligation_address(
+            chain_name,
+            config_path=config_path,
+            category="native_token_addresses",
+            field=self.address_field,
+        )
+
+    async def create_obligation(
+        self,
+        client: Any,
+        obligation_data: dict[str, Any],
+        expiration_unix: int,
+    ) -> str:
+        price_data = self._price_data(obligation_data)
+        arbiter_data = self._arbiter_data(obligation_data)
+        tier_client = getattr(client.native_token.escrow, self.tier_attr)
+        receipt = await tier_client.create(
+            price_data, arbiter_data, expiration_unix,
+        )
+        uid = (receipt or {}).get("log", {}).get("uid")
+        if not uid:
+            raise RuntimeError(
+                f"escrow.create did not return a uid: {receipt!r}"
+            )
+        return uid
+
+    async def get_obligation(self, client: Any, uid: str) -> Any:
+        tier_client = getattr(client.native_token.escrow, self.tier_attr)
+        return await tier_client.get_obligation(uid)
+
+
+class NativeTokenNonTierableEscrowCodec(_NativeTokenEscrowCodecBase):
+    """``NativeTokenEscrowObligation`` (non-tierable variant)."""
+
+    kind = "native_token_escrow_obligation_nontierable"
+    tier_attr = "non_tierable"
+    address_field = "escrow_obligation_nontierable"
+
+
+class NativeTokenTierableEscrowCodec(_NativeTokenEscrowCodecBase):
+    """``NativeTokenEscrowObligation`` (tierable variant)."""
+
+    kind = "native_token_escrow_obligation_tierable"
+    tier_attr = "tierable"
+    address_field = "escrow_obligation_tierable"
+
+
 class _Erc721EscrowCodecBase:
     """Common ERC721 escrow SDK adapter.
 
@@ -1035,10 +1187,13 @@ class Erc1155TierableEscrowCodec(_Erc1155EscrowCodecBase):
 
 _ESCROW_KIND_CODECS: dict[str, EscrowKindCodec] = {
     "erc20_escrow_obligation_nontierable": Erc20NonTierableEscrowCodec(),
+    "erc20_escrow_obligation_tierable": Erc20TierableEscrowCodec(),
     "erc721_escrow_obligation_nontierable": Erc721NonTierableEscrowCodec(),
     "erc721_escrow_obligation_tierable": Erc721TierableEscrowCodec(),
     "erc1155_escrow_obligation_nontierable": Erc1155NonTierableEscrowCodec(),
     "erc1155_escrow_obligation_tierable": Erc1155TierableEscrowCodec(),
+    "native_token_escrow_obligation_nontierable": NativeTokenNonTierableEscrowCodec(),
+    "native_token_escrow_obligation_tierable": NativeTokenTierableEscrowCodec(),
 }
 
 
