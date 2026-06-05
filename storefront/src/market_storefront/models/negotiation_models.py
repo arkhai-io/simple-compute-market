@@ -13,10 +13,10 @@ class NegotiateNewRequest(BaseModel):
 
     The buyer publishes two structured artifacts: ``provision_terms``
     (what they want delivered) and ``proposal`` (the on-chain escrow
-    tuple, picked from the listing's ``accepted_escrows``, with
-    ``fields["amount"]`` carrying the buyer's absolute opening bid in
-    base units of the payment token). Both are validated against the
-    listing's acceptance set on the seller side.
+    tuple, picked from the listing's ``accepted_escrows``). Scalar payment
+    escrows carry the buyer's absolute opening bid in ``fields["amount"]``;
+    amountless exact escrows may omit it. Both artifacts are validated
+    against the listing's acceptance set on the seller side.
     """
 
     listing_id: str
@@ -42,6 +42,7 @@ class NegotiateNewResponse(BaseModel):
     reason: str | None = None
     accepted_provision_terms: ProvisionTerms | None = None
     accepted_escrow_proposal: EscrowProposal | None = None
+    accepted_escrow_terms: list[dict[str, Any]] | None = None
 
 
 class NegotiateContinueRequest(BaseModel):
@@ -55,6 +56,8 @@ class NegotiateContinueResponse(BaseModel):
     action: str
     proposal: dict[str, Any] | None = None
     reason: str | None = None
+    accepted_escrow_proposal: EscrowProposal | None = None
+    accepted_escrow_terms: list[dict[str, Any]] | None = None
 
 
 class NegotiationSummary(BaseModel):

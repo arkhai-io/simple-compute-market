@@ -16,11 +16,11 @@ Shape:
 
 `action` in the request is what the buyer is proposing *in this round*.
 `action` in the response is the seller's resulting decision. Every
-round carries a full EscrowProposal dict; the negotiated scalar (the
-absolute payment amount in base units of the escrow's payment token)
-lives in ``proposal.fields["amount"]``. Per-hour rates are a broadcast-
-only concept on listings; once a negotiation starts, the duration is
-fixed and amounts are absolute.
+round carries a full EscrowProposal dict. Scalar payment escrows negotiate
+an absolute payment amount in ``proposal.fields["amount"]``. Amountless exact
+escrows, such as some attestation escrow policies, may omit that field.
+Per-hour rates are a broadcast-only concept on listings; once a negotiation
+starts, the duration is fixed and amounts are absolute.
 
 Per-round decisions go through ``market_policy.negotiation_middleware``:
 the configured chain runs at round 0 (including pre-flight guards like
@@ -153,6 +153,38 @@ def _match_accepted_escrow(
         f"accepted_escrows",
         listing_id=listing.get("listing_id"),
     )
+
+
+def _accepted_entry_uses_scalar_amount(entry: dict[str, Any] | None) -> bool:
+    if not isinstance(entry, dict):
+        return True
+    literal_fields = entry.get("literal_fields") or {}
+    if isinstance(literal_fields, dict) and "amount" in literal_fields:
+        return True
+    for rate in entry.get("rates") or []:
+        field = rate.get("field") if isinstance(rate, dict) else getattr(rate, "field", None)
+        if field == "amount":
+            return True
+    return False
+
+
+def _proposal_uses_scalar_amount(
+    *,
+    listing: dict[str, Any],
+    proposal: EscrowProposal | dict[str, Any] | None,
+) -> bool:
+    if proposal is None:
+        return True
+    proposal_model = (
+        proposal
+        if isinstance(proposal, EscrowProposal)
+        else EscrowProposal.model_validate(proposal)
+    )
+    fields = dict(proposal_model.fields or {})
+    if "amount" in fields:
+        return True
+    matched = _match_accepted_escrow(listing, proposal_model)
+    return _accepted_entry_uses_scalar_amount(matched)
 
 
 def _extract_listing_token(listing: dict[str, Any]) -> str | None:
@@ -578,9 +610,16 @@ async def _compute_round_zero_decision(
     # mutates the input dict in place (replaces offer_resource with a
     # ComputeDomainResource object). Mutating the listing_dict here
     # would break downstream guards that expect plain dicts.
-    our_amount = _seller_reference_amount(listing, requested_duration_seconds)
     listing_dict = (
         listing.model_dump(mode="json") if isinstance(listing, Listing) else listing
+    )
+    uses_scalar_amount = _proposal_uses_scalar_amount(
+        listing=listing_dict if isinstance(listing_dict, dict) else {},
+        proposal=their_proposal,
+    )
+    our_amount = (
+        _seller_reference_amount(listing, requested_duration_seconds)
+        if uses_scalar_amount else 0
     )
     direction = _direction_from_strategy_label(strategy_label)
 
@@ -633,11 +672,11 @@ async def start_sync_negotiation(
     eventually compute spec. ``proposal`` is the buyer's full
     EscrowProposal — picks a ``(chain_name, escrow_address)`` entry from
     the listing's ``accepted_escrows``, supplies the buyer-committable
-    fields, and carries the absolute opening amount in
-    ``fields["amount"]`` (base units of the payment token). Both are
-    validated against the listing's acceptance set; the seller-confirmed
-    values are persisted on the negotiation thread and echoed back so
-    settlement-time escrow construction can use them.
+    fields, and for scalar payment escrows carries the absolute opening
+    amount in ``fields["amount"]``. Both artifacts are validated against
+    the listing's acceptance set; the seller-confirmed values are persisted
+    on the negotiation thread and echoed back so settlement-time escrow
+    construction can use them.
 
     Raises ``ValueError`` if ``our_listing_id`` isn't in the local DB
     (seller must have published; no ad-hoc negotiations without a
@@ -698,12 +737,18 @@ async def start_sync_negotiation(
         if proposal is not None and hasattr(proposal, "model_dump")
         else proposal
     )
+    uses_scalar_amount = _proposal_uses_scalar_amount(
+        listing=our_order_dict,
+        proposal=accepted_proposal,
+    )
     their_amount = _amount_from_proposal(proposal_dict)
     if their_amount is None:
-        raise OfferUnfulfillableError(
-            "missing_amount: buyer's escrow proposal has no fields.amount",
-            listing_id=our_listing_id,
-        )
+        if uses_scalar_amount:
+            raise OfferUnfulfillableError(
+                "missing_amount: buyer's escrow proposal has no fields.amount",
+                listing_id=our_listing_id,
+            )
+        their_amount = 0
     their_amount = int(their_amount)
 
     our_order = Listing.model_validate(our_order_dict)
@@ -817,7 +862,7 @@ async def continue_sync_negotiation(
 
     `buyer_action` is the action the buyer is proposing this round:
       - "counter" with `buyer_proposal`: the buyer's new full EscrowProposal,
-        with the absolute amount in ``fields["amount"]``.
+        with ``fields["amount"]`` for scalar payment escrows.
       - "accept": the buyer accepts the seller's last counter; we
         commit agreed_terms and return action=accept in response.
       - "exit": the buyer is walking away; we mark the thread terminal.
@@ -843,8 +888,15 @@ async def continue_sync_negotiation(
     our_order = Listing.model_validate(our_order_dict)
     strategy = determine_strategy_from_order(our_order)
     requested_duration_seconds = thread.get("requested_duration_seconds")
-    our_amount = _seller_reference_amount(our_order_dict, requested_duration_seconds)
     buyer_pinned_proposal = _coerce_pinned_proposal(thread.get("buyer_escrow_proposal"))
+    uses_scalar_amount = _proposal_uses_scalar_amount(
+        listing=our_order_dict,
+        proposal=buyer_pinned_proposal,
+    )
+    our_amount = (
+        _seller_reference_amount(our_order_dict, requested_duration_seconds)
+        if uses_scalar_amount else 0
+    )
 
     messages = await sqlite_client.load_negotiation_thread(negotiation_id=neg_id)
     our_previous_counters = [
@@ -888,7 +940,10 @@ async def continue_sync_negotiation(
             agreed_amount=last_seller_amount,
             our_initial_amount=our_amount,
         )
-        final_proposal = _proposal_with_amount(buyer_pinned_proposal, last_seller_amount)
+        final_proposal = _proposal_with_amount(
+            buyer_pinned_proposal,
+            last_seller_amount if uses_scalar_amount else None,
+        )
         response = {
             "action": "accept",
             "proposal": final_proposal,
@@ -929,8 +984,11 @@ async def continue_sync_negotiation(
         raise ValueError(f"Unsupported buyer action {buyer_action!r}")
     raw_amount = _amount_from_proposal(buyer_proposal)
     if raw_amount is None:
-        raise ValueError("counter requires 'proposal' with fields.amount")
-    buyer_amount = int(raw_amount)
+        if uses_scalar_amount:
+            raise ValueError("counter requires 'proposal' with fields.amount")
+        buyer_amount = 0
+    else:
+        buyer_amount = int(raw_amount)
 
     async with NegotiationThreadTransaction("SYNC_NEGOTIATE_BUYER_COUNTER") as txn:
         await txn.add_message(
@@ -954,7 +1012,10 @@ async def continue_sync_negotiation(
         round_number=len(history),
         sender="them",
         action="counter",
-        proposal=_proposal_with_amount(buyer_pinned_proposal, buyer_amount),
+        proposal=(
+            _proposal_with_amount(buyer_pinned_proposal, buyer_amount)
+            if uses_scalar_amount else (buyer_proposal or buyer_pinned_proposal)
+        ),
     ))
     chain = _load_storefront_chain()
     resources = await sqlite_client.list_resources()
@@ -997,7 +1058,9 @@ async def continue_sync_negotiation(
     if decision.action == "accept":
         final_proposal = _proposal_with_amount(
             buyer_pinned_proposal,
-            int(decision_amount) if decision_amount is not None else int(our_amount),
+            (
+                int(decision_amount) if decision_amount is not None else int(our_amount)
+            ) if uses_scalar_amount else None,
         )
         try:
             accepted = EscrowProposal.model_validate(final_proposal)

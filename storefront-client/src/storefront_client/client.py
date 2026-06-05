@@ -592,10 +592,11 @@ class StorefrontClient(_StorefrontClientBase):
 
         Runs the configured negotiation strategy against a synthetic buyer
         proposal without creating a negotiation thread or writing to the
-        database. ``proposal`` is the full EscrowProposal-shaped dict (with
-        ``fields["amount"]`` carrying the absolute opening amount in base
-        units). Returns ``EvaluateNegotiateResponse.would_negotiate=False``
-        when the strategy would exit immediately.
+        database. ``proposal`` is the full EscrowProposal-shaped dict;
+        scalar payment escrows carry the absolute opening amount in
+        ``fields["amount"]``. Returns
+        ``EvaluateNegotiateResponse.would_negotiate=False`` when the
+        strategy would exit immediately.
         """
         body: dict[str, Any] = {"proposal": proposal, "buyer_address": buyer_address}
         if requested_duration_seconds is not None:
@@ -710,7 +711,7 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         listing_id: str,
         buyer_address: str,
-        initial_amount: int,
+        initial_amount: int | None,
         duration_seconds: int,
         buyer_agent_url: str = "",
         ssh_public_key: str = "",
@@ -718,21 +719,21 @@ class StorefrontClient(_StorefrontClientBase):
         chain_name: str = "",
         escrow_address: str = "",
         escrow_expiration_unix: int | None = None,
+        proposal_fields: dict[str, Any] | None = None,
+        literal_fields: dict[str, Any] | None = None,
+        rates: list[dict[str, Any]] | None = None,
+        demands: list[dict[str, Any]] | None = None,
     ) -> dict:
         """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically.
 
         ``provision_terms`` and ``proposal`` are required by the wire
-        protocol; this helper builds canonical defaults from the scalar
-        args so smoke / integration tests can keep their current call
-        shape. ``initial_amount`` is the absolute opening amount in base
-        units of the payment token (already multiplied out from any
-        per-hour rate). ``chain_name`` + ``escrow_address`` pick the
-        listing's accepted_escrows entry to propose against. ``fields``
-        carries the negotiated ``amount`` (the per-round value); ``token``
-        is a literal escrow value and goes in ``literal_fields["token"]``,
-        where the seller's settlement verifier reads it. Empty values
-        produce zero-address / placeholder strings — legal where the
-        seller's listing has no typed payment token.
+        protocol; this helper builds canonical defaults from scalar args
+        while allowing callers to pass generic proposal fields. For scalar
+        payment escrows, ``initial_amount`` is the absolute opening amount
+        in base units and is written to ``fields["amount"]``. Amountless
+        exact escrows can pass ``initial_amount=None`` with explicit
+        ``literal_fields`` / ``rates``. ``chain_name`` + ``escrow_address``
+        pick the listing's accepted_escrows entry to propose against.
         """
         headers = _signed_request_headers(
             self._private_key,
@@ -740,6 +741,23 @@ class StorefrontClient(_StorefrontClientBase):
             identity_identifier=buyer_address,
         )
         exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
+        fields = dict(proposal_fields or {})
+        if initial_amount is not None:
+            fields.setdefault("amount", int(initial_amount))
+        literals = dict(literal_fields or {})
+        if token or not literal_fields:
+            literals.setdefault("token", token or ("0x" + "0" * 40))
+        proposal = {
+            "chain_name": chain_name or "anvil",
+            "escrow_address": escrow_address or ("0x" + "0" * 40),
+            "fields": fields,
+            "literal_fields": literals,
+            "expiration_unix": exp_unix,
+        }
+        if rates is not None:
+            proposal["rates"] = rates
+        if demands is not None:
+            proposal["demands"] = demands
         body = {
             "listing_id": listing_id,
             "buyer_address": buyer_address,
@@ -748,13 +766,7 @@ class StorefrontClient(_StorefrontClientBase):
                 "ssh_public_key": ssh_public_key,
                 "compute_resource": None,
             },
-            "proposal": {
-                "chain_name": chain_name or "anvil",
-                "escrow_address": escrow_address or ("0x" + "0" * 40),
-                "fields": {"amount": int(initial_amount)},
-                "literal_fields": {"token": token or ("0x" + "0" * 40)},
-                "expiration_unix": exp_unix,
-            },
+            "proposal": proposal,
             "buyer_agent_url": buyer_agent_url,
         }
         return await self._post(
@@ -1357,10 +1369,11 @@ class SyncStorefrontClient(_StorefrontClientBase):
 
         Runs the configured negotiation strategy against a synthetic buyer
         proposal without creating a negotiation thread or writing to the
-        database. ``proposal`` is the full EscrowProposal-shaped dict (with
-        ``fields["amount"]`` carrying the absolute opening amount in base
-        units). Returns ``EvaluateNegotiateResponse.would_negotiate=False``
-        when the strategy would exit immediately.
+        database. ``proposal`` is the full EscrowProposal-shaped dict;
+        scalar payment escrows carry the absolute opening amount in
+        ``fields["amount"]``. Returns
+        ``EvaluateNegotiateResponse.would_negotiate=False`` when the
+        strategy would exit immediately.
         """
         body: dict[str, Any] = {"proposal": proposal, "buyer_address": buyer_address}
         if requested_duration_seconds is not None:
@@ -1474,7 +1487,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         listing_id: str,
         buyer_address: str,
-        initial_amount: int,
+        initial_amount: int | None,
         duration_seconds: int,
         buyer_agent_url: str = "",
         ssh_public_key: str = "",
@@ -1482,13 +1495,16 @@ class SyncStorefrontClient(_StorefrontClientBase):
         chain_name: str = "",
         escrow_address: str = "",
         escrow_expiration_unix: int | None = None,
+        proposal_fields: dict[str, Any] | None = None,
+        literal_fields: dict[str, Any] | None = None,
+        rates: list[dict[str, Any]] | None = None,
+        demands: list[dict[str, Any]] | None = None,
     ) -> dict:
         """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically.
 
         ``provision_terms`` and ``proposal`` are required by the wire
-        protocol; this helper builds canonical defaults from the scalar
-        args. ``initial_amount`` is the absolute opening amount in base
-        units of the payment token.
+        protocol; this helper builds canonical defaults from scalar args
+        while allowing callers to pass generic proposal fields.
         """
         headers = _signed_request_headers(
             self._private_key,
@@ -1496,6 +1512,23 @@ class SyncStorefrontClient(_StorefrontClientBase):
             identity_identifier=buyer_address,
         )
         exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
+        fields = dict(proposal_fields or {})
+        if initial_amount is not None:
+            fields.setdefault("amount", int(initial_amount))
+        literals = dict(literal_fields or {})
+        if token or not literal_fields:
+            literals.setdefault("token", token or ("0x" + "0" * 40))
+        proposal = {
+            "chain_name": chain_name or "anvil",
+            "escrow_address": escrow_address or ("0x" + "0" * 40),
+            "fields": fields,
+            "literal_fields": literals,
+            "expiration_unix": exp_unix,
+        }
+        if rates is not None:
+            proposal["rates"] = rates
+        if demands is not None:
+            proposal["demands"] = demands
         body = {
             "listing_id": listing_id,
             "buyer_address": buyer_address,
@@ -1504,13 +1537,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
                 "ssh_public_key": ssh_public_key,
                 "compute_resource": None,
             },
-            "proposal": {
-                "chain_name": chain_name or "anvil",
-                "escrow_address": escrow_address or ("0x" + "0" * 40),
-                "fields": {"amount": int(initial_amount)},
-                "literal_fields": {"token": token or ("0x" + "0" * 40)},
-                "expiration_unix": exp_unix,
-            },
+            "proposal": proposal,
             "buyer_agent_url": buyer_agent_url,
         }
         return self._post(

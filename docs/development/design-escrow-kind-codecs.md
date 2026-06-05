@@ -154,10 +154,11 @@ with non-ERC20 codecs, not to exhaustively test Alkahest itself.
 
 Attestation-request and attestation-UID escrow semantics are policy-owned, not
 product-level codec behavior. The codec only carries whatever
-`obligation_data` the negotiated terms require. A policy may require a specific
-attestation about the buyer and encode it in the listing like a fixed token
-price; another policy may negotiate the attestation parameters, especially once
-more freeform negotiation strategies exist.
+`obligation_data` the negotiated terms require. A seller policy may require a
+specific attestation and encode it in the listing like a fixed token price,
+because the buyer creates the attestation escrow as payment; another policy may
+negotiate the attestation parameters, especially once more freeform negotiation
+strategies exist.
 
 The codecs are mechanically implemented so user-supplied policies can target
 them. Treating an attestation escrow as a default marketplace flow requires a

@@ -21,6 +21,7 @@ from fastapi import FastAPI
 import market_storefront.container as _container
 from market_storefront.controllers.negotiate_controller import router as negotiate_router
 from market_storefront.middleware import buyer_auth
+from tests._settings_overrides import settings_overrides
 from storefront_client import StorefrontClient, StorefrontClientError
 
 _BUYER = "0xBuyer00000000000000000000000000000000AB"  # 42 chars
@@ -306,6 +307,77 @@ class TestNegotiateNew:
         msg = str(exc_info.value)
         assert "409" in msg
         assert "no_floor_price" in msg
+
+    async def test_amountless_exact_escrow_can_start_and_accept(self, client, db):
+        c, db = client
+        attestation_uid = "0x" + "aa" * 32
+        arbiter = "0x" + "55" * 20
+        demand = "0x" + "66" * 32
+        literals = {
+            "attestationUid": attestation_uid,
+            "arbiter": arbiter,
+            "demand": demand,
+        }
+        escrow_address = "0x" + "44" * 20
+        await db.upsert_listing(
+            listing_id="neg-listing-attestation",
+            status="open",
+            created_at=datetime.now().isoformat(),
+            updated_at=datetime.now().isoformat(),
+            offer_resource={
+                "gpu_model": "H200", "gpu_count": 1, "sla": 99.9,
+                "region": "California, US",
+            },
+            accepted_escrows=[{
+                "chain_name": "anvil",
+                "escrow_address": escrow_address,
+                "literal_fields": literals,
+                "rates": [],
+            }],
+            fulfillment_resource=None,
+            max_duration_seconds=7200,
+            seller="http://seller:8001",
+        )
+        await db.upsert_resource(
+            resource_id="res-attestation",
+            resource_type="compute.gpu",
+            resource_subtype=None,
+            unit="vm",
+            value=1,
+            state="available",
+            attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "kvm1"},
+        )
+
+        with settings_overrides(**{
+            "negotiation.policies": [
+                "has_matching_inventory_guard",
+                "escrow_shape_guard",
+                "accept_exact_listing",
+            ],
+        }):
+            result = await c._post("/api/v1/negotiate/new", {
+                "listing_id": "neg-listing-attestation",
+                "buyer_address": _BUYER,
+                "provision_terms": {
+                    "duration_seconds": 3600,
+                    "ssh_public_key": "",
+                    "compute_resource": None,
+                },
+                "proposal": {
+                    "chain_name": "anvil",
+                    "escrow_address": escrow_address,
+                    "fields": {},
+                    "literal_fields": literals,
+                    "rates": [],
+                    "expiration_unix": 1_800_000_000,
+                },
+                "buyer_agent_url": "",
+            })
+
+        assert result["action"] == "accept"
+        assert "amount" not in result["proposal"]["fields"]
+        assert result["accepted_escrow_proposal"]["literal_fields"] == literals
+        assert "amount" not in result["accepted_escrow_terms"][0]["obligation_data"]
 
     async def test_inventory_with_wrong_attributes_is_refused(self, client, db):
         """An available resource with the wrong gpu_model doesn't satisfy
