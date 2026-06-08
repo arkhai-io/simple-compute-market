@@ -7,6 +7,7 @@ dependencies = [
     "aiohttp>=3.12.15",
     "web3>=7.14.0",
     "eth-account",
+    "market-core",
     "market-identity",
     "pydantic>=2",
 ]
@@ -24,6 +25,7 @@ asyncio_mode = "auto"
 testpaths = ["tests/unit", "tests/integration"]
 
 [tool.uv.sources]
+market-core = { path = "../core", editable = true }
 market-identity = { path = "../identity", editable = true }
 
 [dependency-groups]

@@ -17,17 +17,9 @@ from pathlib import Path
 from threading import RLock
 from typing import Optional
 
-from pydantic import BaseModel
+from market_core.schemas import ERC20TokenMetadata
 
 logger = logging.getLogger(__name__)
-
-
-class ERC20TokenMetadata(BaseModel):
-    symbol: str
-    name: Optional[str] = None
-    contract_address: str
-    decimals: int
-    chain_id: Optional[int] = None
 
 
 class TokenResolutionError(RuntimeError):
