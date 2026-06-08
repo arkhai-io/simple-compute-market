@@ -5,7 +5,8 @@ The repo publishes five internal Python packages to PyPI via
 
 | Package | Path | Initial version | Internal deps |
 |---|---|---|---|
-| `market-service` | `service/` | 0.1.0 | none |
+| `market-identity` | `identity/` | 0.1.0 | none |
+| `market-service` | `service/` | 0.1.0 | `market-identity` |
 | `market-policy` | `policy/` | 0.1.0 | `market-service` |
 | `provisioning-service` | `provisioning-service/` | 0.1.2 | none |
 | `arkhai-storefront-client` | `storefront-client/` | 0.4.0 | none |

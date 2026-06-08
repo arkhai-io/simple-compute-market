@@ -9,6 +9,7 @@ requires-python = ">=3.12"
 dependencies = [
 	"arkhai-registry-client>=0.7.0",
     "arkhai-storefront-client>=0.15.0",
+    "market-identity",
     "market-service",
     "market-policy",
     "provisioning-service>=0.4.0",
@@ -76,6 +77,7 @@ environments = [
 ]
 
 [tool.uv.sources]
+market-identity = { path = "../identity", editable = true }
 market-policy = { path = "../policy", editable = true }
 torch = [
     { index = "pytorch-cpu" },

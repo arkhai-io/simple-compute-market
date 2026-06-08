@@ -101,7 +101,7 @@ def test_verify_with_unknown_scheme_returns_false(eth_account, encode_defunct):
 
 
 def test_identity_lowercases_eip191_identifier():
-    """The inline registry Identity matches service.schemas.Identity normalization."""
+    """The registry Identity matches shared market_identity normalization."""
     from src.api.utils import Identity
 
     ident = Identity(scheme="eip191", identifier="0xABCDEF0000000000000000000000000000000001")

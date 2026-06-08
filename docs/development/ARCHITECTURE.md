@@ -21,7 +21,7 @@ The README frames this as a market for "anything"; the structural test that make
 > **A behavior belongs in the market core (composed "from above") if and only if it is invariant across every possible listing schema. If it varies by schema, it is a utility composed "from below" that the core invokes through an injected hook** — and "requiring the hook" is the from-above part; "implementing it" is from-below.
 
 - **From above** — the role contracts (buyer, seller, indexer) and the three market processes (discovery, negotiation/aggregation, settlement), expressed purely in terms of injected dependencies and schema-opaque primitives. `buy_orchestrator.run_buy(...)` is already this shape: a linear discover→negotiate→settle flow with high-level `negotiate` and `settle` hooks. The current compute instantiation still adapts legacy finer-grained hooks (`build_escrow_proposal`, `build_escrow_terms`, `create_escrow`, …) into that surface.
-- **From below** — concrete, mutually-independent utilities: negotiation middlewares (`market-policy`), identity schemes (`service.identity`), generic schemas (`EscrowTerms`/`EscrowProposal`/`RateValue`), infra clients (alkahest, chain, registry-client). The defining property is "depended on, never depending up into the skeleton" — not "packaged as one wheel."
+- **From below** — concrete, mutually-independent utilities: negotiation middlewares (`market-policy`), identity schemes (`market-identity`), generic schemas (`EscrowTerms`/`EscrowProposal`/`RateValue`), infra clients (alkahest, chain, registry-client). The defining property is "depended on, never depending up into the skeleton" — not "packaged as one wheel."
 - **A market instantiation** for a given asset class / listing schema wires from-below implementations into the from-above hooks, and *uses* the from-below utilities inside those implementations.
 
 Negotiation is an exchange of **messages** — opaque, schema-defined units passed between participants. The invariant the core rests on is that settlement composes with negotiation:
@@ -91,7 +91,7 @@ Parts of the code predate the principle and diverge from it. These seams are tra
 | Concern | Technology |
 |---|---|
 | On-chain settlement / escrow | [Alkahest](https://github.com/arkhai-io/alkahest) contracts |
-| Seller identity | Pluggable scheme registry (EIP-191 wallet by default; see `service.identity`) |
+| Seller identity | Pluggable scheme registry (EIP-191 wallet by default; see `market-identity`) |
 | Buyer ↔ seller protocol | Plain HTTP request/response, EIP-191-signed bodies |
 | Seller server framework | FastAPI / Starlette + uvicorn |
 | Buyer | Pure HTTP client — `market` CLI, no server |
@@ -240,7 +240,7 @@ the lowercase 0x hex wallet address. A publisher may hold more than one
 identity (the seam for cross-chain/cross-scheme linking); today it holds
 one. Listings are published via signed `POST /listings` and the registry
 creates the publisher + identity rows lazily on first publication. Custom
-schemes register via `service.identity.register_identity_scheme(verifier)`.
+schemes register via `market_identity.register_identity_scheme(verifier)`.
 
 **Source layout:**
 ```

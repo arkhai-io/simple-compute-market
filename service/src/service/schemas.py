@@ -18,57 +18,8 @@ from pydantic import (
     model_validator,
 )
 
+from market_identity import Identity  # noqa: F401
 from service.clients.token import ERC20TokenMetadata  # noqa: F401
-
-
-# ---------------------------------------------------------------------------
-# Identity: scheme-tagged seller / signer identity
-# ---------------------------------------------------------------------------
-# Replaces the prior "wallet address everywhere" convention. The protocol
-# layer treats every signed-request signer and every listings-registry
-# agent as a (scheme, identifier) pair. ``eip191`` is the default and the
-# only built-in scheme; the registry pattern (service.identity) lets other
-# schemes register their own verifier so the wire shape remains pluggable.
-
-
-class Identity(BaseModel):
-    """A scheme-tagged identity.
-
-    ``scheme`` names a verifier registered in :mod:`service.identity.registry`
-    (e.g. ``"eip191"``). ``identifier`` is the scheme-specific principal —
-    for ``eip191`` that's the lowercase 0x hex wallet address; other
-    schemes may carry DIDs, OIDC ``sub`` claims, etc.
-
-    Equality and hashing are case-sensitive on both fields. Callers that
-    want EIP-191-style case-insensitive matching should lowercase
-    ``identifier`` themselves before constructing the model — for the
-    ``eip191`` scheme this happens automatically via the field validator
-    here.
-    """
-
-    scheme: str = Field(
-        description=(
-            "Name of the identity scheme. Must match a verifier registered "
-            "via :func:`service.identity.registry.register_identity_scheme`."
-        ),
-    )
-    identifier: str = Field(
-        description=(
-            "Scheme-specific principal. For ``eip191`` this is the lowercase "
-            "0x-prefixed hex wallet address; for other schemes the value is "
-            "scheme-defined (DID URI, OIDC sub claim, ...)."
-        ),
-    )
-
-    @field_validator("identifier", mode="after")
-    @classmethod
-    def _normalize_identifier(cls, v: str, info: Any) -> str:
-        # Per-scheme normalization: for EIP-191, lowercase the hex address
-        # so identities are comparable byte-wise. Other schemes pass through.
-        scheme = info.data.get("scheme") if hasattr(info, "data") else None
-        if scheme == "eip191":
-            return v.lower()
-        return v
 
 
 # ---------------------------------------------------------------------------

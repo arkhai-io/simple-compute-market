@@ -7,12 +7,11 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
+from market_identity import Identity, get_identity_verifier
 from src.db.models import Publisher, PublisherIdentity, Listing, OrderStatusEnum
 
-# Import for signature verification
 try:
-    from eth_account import Account
-    from eth_account.messages import encode_defunct
+    import eth_account  # noqa: F401
     HAS_ETH_ACCOUNT = True
 except ImportError:
     HAS_ETH_ACCOUNT = False
@@ -20,56 +19,11 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Identity-scheme dispatch
-# ---------------------------------------------------------------------------
-# The registry runs on EIP-191 identities: a request is authenticated by
-# recovering the signer's wallet address from an EIP-191 signature. Verifier
-# calls go through this dispatcher so the call boundary accepts a
-# scheme-tagged Identity; adding a scheme is one dict entry.
-
-
-class Identity:
-    """Scheme-tagged identity, mirroring ``service.schemas.Identity``.
-
-    Kept self-contained inside the registry to avoid a build-time dependency
-    on the shared ``service`` package.
-    """
-
-    __slots__ = ("scheme", "identifier")
-
-    def __init__(self, scheme: str, identifier: str) -> None:
-        self.scheme = scheme
-        # Normalize EIP-191 identifiers to lowercase for byte-wise comparability.
-        self.identifier = identifier.lower() if scheme == "eip191" else identifier
-
-
-def _verify_eip191(identity: Identity, message: bytes, proof: bytes) -> bool:
-    if not HAS_ETH_ACCOUNT:
-        return False
-    try:
-        text = message.decode("utf-8")
-    except UnicodeDecodeError:
-        return False
-    try:
-        envelope = encode_defunct(text=text)
-        recovered = Account.recover_message(envelope, signature=proof)
-        return recovered.lower() == identity.identifier.lower()
-    except Exception as exc:  # noqa: BLE001 — eth_account raises many shapes
-        logger.error(f"[VERIFY] EIP-191 recovery failed: {exc}")
-        return False
-
-
-# Scheme name → verifier callable. Adding a scheme is a single dict entry.
-_VERIFIERS: dict[str, "callable[[Identity, bytes, bytes], bool]"] = {
-    "eip191": _verify_eip191,
-}
-
-
 def _verify_identity_signature(identity: Identity, message: str, signature: str) -> bool:
     """Dispatch signature verification by identity scheme."""
-    verifier = _VERIFIERS.get(identity.scheme)
-    if verifier is None:
+    try:
+        verifier = get_identity_verifier(identity.scheme)
+    except KeyError:
         logger.warning(f"[VERIFY] unknown identity scheme {identity.scheme!r}")
         return False
     try:
@@ -77,7 +31,7 @@ def _verify_identity_signature(identity: Identity, message: str, signature: str)
     except ValueError:
         logger.error("[VERIFY] malformed signature hex")
         return False
-    return verifier(identity, message.encode("utf-8"), proof)
+    return verifier.verify_signature(identity, message.encode("utf-8"), proof)
 
 
 def verify_order_signature(

@@ -86,4 +86,4 @@ resolve via a back-compat lookup on the deprecated `agents.agent_id`
 column for rows that pre-date the migration.
 
 Custom schemes can register via
-`service.identity.register_identity_scheme(verifier)` in a fork.
+`market_identity.register_identity_scheme(verifier)` in a fork.

@@ -18,7 +18,11 @@ dependencies = [
     "pyyaml>=6.0",
     "jsonschema>=4.20",
     "jsonpath-ng>=1.6",
+    "market-identity",
 ]
+
+[tool.uv.sources]
+market-identity = { path = "../identity", editable = true }
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -44,4 +48,3 @@ dev = [
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = ["--tb=short", "-v"]
-

@@ -24,8 +24,7 @@ import time
 
 from fastapi import HTTPException, Request
 
-from service.identity import get_identity_verifier
-from service.schemas import Identity
+from market_identity import Identity, get_identity_verifier
 
 logger = logging.getLogger(__name__)
 
