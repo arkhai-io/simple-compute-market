@@ -21,7 +21,7 @@ The README frames this as a market for "anything"; the structural test that make
 > **A behavior belongs in the market core (composed "from above") if and only if it is invariant across every possible listing schema. If it varies by schema, it is a utility composed "from below" that the core invokes through an injected hook** — and "requiring the hook" is the from-above part; "implementing it" is from-below.
 
 - **From above** — the role contracts (buyer, seller, indexer) and the three market processes (discovery, negotiation/aggregation, settlement), expressed purely in terms of injected dependencies and schema-opaque primitives. `buy_orchestrator.run_buy(...)` is already this shape: a linear discover→negotiate→settle flow with high-level `negotiate` and `settle` hooks. The current compute instantiation still adapts legacy finer-grained hooks (`build_escrow_proposal`, `build_escrow_terms`, `create_escrow`, …) into that surface.
-- **From below** — concrete, mutually-independent utilities: negotiation middlewares (`market-policy`), identity schemes (`market-identity`), generic schemas (`market-core`), infra clients (alkahest, chain, registry-client). The defining property is "depended on, never depending up into the skeleton" — not "packaged as one wheel."
+- **From below** — concrete, mutually-independent utilities: negotiation middlewares (`market-policy`), identity schemes (`market-identity`), generic schemas (`market-core`), settlement kits (`market-alkahest`), infra clients (chain, registry-client). The defining property is "depended on, never depending up into the skeleton" — not "packaged as one wheel."
 - **A market instantiation** for a given asset class / listing schema wires from-below implementations into the from-above hooks, and *uses* the from-below utilities inside those implementations.
 
 Negotiation is an exchange of **messages** — opaque, schema-defined units passed between participants. The invariant the core rests on is that settlement composes with negotiation:
@@ -488,7 +488,7 @@ demands. Split settlement flows consume those concrete terms directly and
 fall back to proposal materialization only for older run logs.
 
 **Settlement is a byte-compare, not a dispatch:** `EscrowTerms`
-(`service.schemas.EscrowTerms`) is the settlement artifact — a flat mirror
+(`market_core.schemas.EscrowTerms`) is the settlement artifact — a flat mirror
 of the alkahest `ObligationData` struct:
 `{maker, chain_name, escrow_contract, obligation_data, expiration_unix}`.
 The settlement verifier reads the on-chain obligation by UID and
@@ -497,7 +497,7 @@ new escrow kind is primarily a codec-registration change: all tierable
 and non-tierable Alkahest escrow obligation variants under
 `contracts/src/obligations/escrow` are registered, and the buyer submit
 hook resolves each term's `(chain_name, escrow_contract)` to a codec via
-`service.clients.alkahest.get_escrow_kind_codec_by_address`. The
+`market_alkahest.alkahest.get_escrow_kind_codec_by_address`. The
 proposal-to-terms materializer owns the final obligation data shape.
 Codec-boundary tests cover every registered kind; compose-backed
 settlement e2e coverage currently exercises native-token and ERC1155
@@ -1901,6 +1901,9 @@ make dist
   ├── dist-provisioning       → .dist/provisioning_service-*.whl
   ├── dist-storefront         → .dist/market_storefront-*.whl      (Docker builds only)
   ├── dist-policy             → .dist/market_policy-*.whl          (Docker builds only)
+  ├── dist-identity           → .dist/market_identity-*.whl        (Docker builds only)
+  ├── dist-core               → .dist/market_core-*.whl            (Docker builds only)
+  ├── dist-alkahest           → .dist/market_alkahest-*.whl        (Docker builds only)
   └── dist-service            → .dist/market_service-*.whl         (Docker builds only)
 ```
 
@@ -2553,17 +2556,20 @@ make build         →  docker build (COPY .dist/ /dist/, uv sync --find-links /
 
 Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockfile and breaks the other context. Setting it via `UV_FIND_LINKS` on the command line means the path stays out of version-controlled files entirely.
 
-**Rule:** `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for `market-service`, `provisioning-service`, `arkhai-storefront-client`, or `arkhai-registry-client`. These packages are resolved exclusively from wheels in `.dist/`.
+**Rule:** downstream `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for wheel-consumed internal packages (`market-identity`, `market-core`, `market-alkahest`, `market-service`, `provisioning-service`, `arkhai-storefront-client`, or `arkhai-registry-client`). These packages are resolved exclusively from wheels in `.dist/` outside their owning package's local dev environment.
 
 **Why not `uv.sources` editable installs:** Editable path references (`{ path = "../service", editable = true }`) are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker that relative path does not exist, causing resolution failures. The wheel approach makes both the path and the mechanism context-specific (CLI flag, not lockfile entry).
 
 ### Internal wheel packages
 
-Three pure-Python internal packages are distributed as wheels:
+Seven pure-Python internal packages are distributed as wheels:
 
 | Package | Wheel name | Source | Primary consumers |
 |---------|-----------|--------|-------------------|
-| `market-service` | `market_service-*.whl` | `service/` | `core`, `integration-tests` |
+| `market-identity` | `market_identity-*.whl` | `identity/` | `market-core`, `registry-service`, `storefront`, `market-service` |
+| `market-core` | `market_core-*.whl` | `core/` | `market-alkahest`, `market-service` |
+| `market-alkahest` | `market_alkahest-*.whl` | `alkahest/` | `market-service` |
+| `market-service` | `market_service-*.whl` | `service/` | `integration-tests` |
 | `provisioning-service` | `provisioning_service-*.whl` | `provisioning-service/` | `integration-tests`, `service` |
 | `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `storefront-client/` | `storefront`, `integration-tests`, `provisioning-service` |
 | `arkhai-registry-client` | `arkhai_registry_client-*.whl` | `registry-client/` | `integration-tests` |

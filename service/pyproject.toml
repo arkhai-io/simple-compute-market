@@ -5,6 +5,7 @@ description = "External service clients for the agent marketplace"
 requires-python = ">=3.10,<3.14"
 dependencies = [
     "aiohttp>=3.12.15",
+    "market-alkahest",
     "web3>=7.14.0",
     "eth-account",
     "market-core",
@@ -25,6 +26,7 @@ asyncio_mode = "auto"
 testpaths = ["tests/unit", "tests/integration"]
 
 [tool.uv.sources]
+market-alkahest = { path = "../alkahest", editable = true }
 market-core = { path = "../core", editable = true }
 market-identity = { path = "../identity", editable = true }
 

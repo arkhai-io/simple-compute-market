@@ -393,7 +393,7 @@ def derive_wallet_address(private_key: Optional[str]) -> Optional[str]:
 # Canonical chain_id ↔ chain_name table. Used to derive ``chain.name``
 # from a configured ``chain.rpc_url`` via a one-shot ``eth_chainId``
 # call, so operators who set the RPC don't also have to set the name.
-# The set mirrors ``service.clients.alkahest.SUPPORTED_NETWORKS``;
+# The set mirrors ``market_alkahest.alkahest.SUPPORTED_NETWORKS``;
 # ``genlayer_bradbury`` is omitted because its mainnet chain ID isn't
 # pinned in the codebase yet — users on that chain must set chain.name
 # explicitly.
@@ -573,7 +573,7 @@ class EscrowTemplate:
 
 # Maps the ``auto:<obligation-kind>`` suffix to ``(category_attr, field)``
 # on the alkahest address config tree. Keep in sync with
-# ``service.clients.alkahest._ADDRESS_CATEGORIES``. Tierable/nontierable
+# ``market_alkahest.alkahest._ADDRESS_CATEGORIES``. Tierable/nontierable
 # split mirrors the contract names; attestation v2 lives in the same
 # ``attestation_addresses`` category as v1.
 _AUTO_ESCROW_LOOKUP: dict[str, tuple[str, str]] = {
@@ -608,7 +608,7 @@ def _resolve_auto_escrow(
             f"unknown auto: escrow kind {auto_key!r}; expected one of: {valid}"
         )
     category, field = _AUTO_ESCROW_LOOKUP[auto_key]
-    from service.clients.alkahest import (
+    from market_alkahest.alkahest import (
         _load_override_config,
         _sdk_addresses_for_chain,
         get_alkahest_network,

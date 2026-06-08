@@ -505,7 +505,7 @@ class AcceptedEscrow(BaseModel):
         description=(
             "Alkahest chain identifier (e.g. ``base_sepolia``, ``anvil``). "
             "Combined with ``escrow_address`` to look up the SDK codec via "
-            "``service.clients.alkahest.get_escrow_codec_for``."
+            "``market_alkahest.alkahest.get_escrow_codec_for``."
         ),
     )
     escrow_address: str = Field(
