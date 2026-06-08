@@ -40,7 +40,7 @@ from market_storefront.models.domain_models import (
 )
 from market_storefront.resources import parse_resource_from_dict
 
-from market_storefront.services.compute_listing_reconciler import (
+from domains.vms.listings.reconciler import (
     mark_derived_listings_closed,
     stale_open_listing_ids,
 )
