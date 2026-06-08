@@ -18,7 +18,7 @@ from market_policy.negotiation_middleware import (
     _REGISTRY,
     load_negotiation_chain,
 )
-from market_storefront.utils import sync_negotiation
+from domains.vms.negotiation import storefront_round
 from tests._settings_overrides import settings_overrides
 
 
@@ -40,7 +40,7 @@ def _write_policy(root: Path, name: str, body: str = _STUB_POLICY) -> Path:
 
 
 def _force_rediscover():
-    sync_negotiation._FILE_POLICIES_DISCOVERED = False
+    storefront_round._FILE_POLICIES_DISCOVERED = False
 
 
 def _ctx() -> NegotiationContext:
@@ -56,7 +56,7 @@ def test_extra_policy_paths_register_each_subdir(tmp_path):
     _REGISTRY.pop("myslow", None)
 
     with settings_overrides(**{"negotiation.extra_policy_paths": [str(tmp_path)]}):
-        sync_negotiation._discover_file_policies()
+        storefront_round._discover_file_policies()
 
     assert "myfast" in _REGISTRY
     assert "myslow" in _REGISTRY
@@ -76,7 +76,7 @@ def test_load_storefront_chain_builds_dispatch_for_policy_table():
         },
         "negotiation.extra_policy_paths": [],
     }):
-        chain = sync_negotiation._load_storefront_chain()
+        chain = storefront_round._load_storefront_chain()
 
     assert len(chain) == 3
     assert getattr(chain[0], "__name__", "") == "has_matching_inventory_guard"
@@ -93,7 +93,7 @@ def test_xdg_default_path_is_discovered(tmp_path, monkeypatch):
     _REGISTRY.pop("myxdg", None)
 
     with settings_overrides(**{"negotiation.extra_policy_paths": []}):
-        sync_negotiation._discover_file_policies()
+        storefront_round._discover_file_policies()
 
     assert "myxdg" in _REGISTRY
 
@@ -108,7 +108,7 @@ def test_file_policy_overrides_builtin(tmp_path):
     try:
         _force_rediscover()
         with settings_overrides(**{"negotiation.extra_policy_paths": [str(tmp_path)]}):
-            sync_negotiation._discover_file_policies()
+            storefront_round._discover_file_policies()
 
         chain = load_negotiation_chain(["bisection"])
         decision, _ = chain[0]([], _ctx())
@@ -133,7 +133,7 @@ def test_broken_policy_does_not_block_siblings(tmp_path):
     _REGISTRY.pop("bad", None)
 
     with settings_overrides(**{"negotiation.extra_policy_paths": [str(tmp_path)]}):
-        sync_negotiation._discover_file_policies()
+        storefront_round._discover_file_policies()
 
     assert "good" in _REGISTRY
     assert "bad" not in _REGISTRY
@@ -146,16 +146,16 @@ def test_discovery_runs_once_per_process(tmp_path):
     _REGISTRY.pop("once", None)
 
     with settings_overrides(**{"negotiation.extra_policy_paths": [str(tmp_path)]}):
-        sync_negotiation._discover_file_policies()
+        storefront_round._discover_file_policies()
     assert "once" in _REGISTRY
 
     # Drop the registration; a second call should NOT re-register (cached).
     _REGISTRY.pop("once", None)
     with settings_overrides(**{"negotiation.extra_policy_paths": [str(tmp_path)]}):
-        sync_negotiation._discover_file_policies()
+        storefront_round._discover_file_policies()
     assert "once" not in _REGISTRY
 
     # …unless we force.
     with settings_overrides(**{"negotiation.extra_policy_paths": [str(tmp_path)]}):
-        sync_negotiation._discover_file_policies(force=True)
+        storefront_round._discover_file_policies(force=True)
     assert "once" in _REGISTRY

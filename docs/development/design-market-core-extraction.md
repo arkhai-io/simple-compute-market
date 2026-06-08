@@ -382,7 +382,7 @@ Recommended order:
    `buyer/` remains a temporary compatibility package that calls domain
    functions. Later, core receives only reusable orchestration helpers, not
    a concrete buyer executable.
-3. **Extract storefront hooks before moving files.** The generic
+3. **In progress: extract storefront hooks before moving files.** The generic
    storefront belongs in `core/storefront`: auth, route shells, negotiation
    thread/history persistence, event/stage logging, and invocation of
    injected listing/negotiation/settlement hooks. VM code should be filed
@@ -392,9 +392,12 @@ Recommended order:
    `domains/vms/negotiation/` for message validators and runtime policies
    including RL checkpoints; `domains/vms/settlement/` for settlement
    verification/materialization; and `domains/vms/provisioning/` for VM
-   fulfillment and lease/listing lifecycle hooks. The hard files are still
-   `sync_negotiation.py` and `action_executor.py`; make them thin wrappers
-   over injected VM hooks before relocating them.
+   fulfillment and lease/listing lifecycle hooks. Done so far:
+   `domains/vms/negotiation/storefront_round.py` owns the default VM
+   seller-round hook, file policy discovery, and storefront chain loading;
+   `sync_negotiation.py` remains the compatibility/stateful HTTP wrapper.
+   The remaining hard file is `action_executor.py`; make it a thin wrapper
+   over VM fulfillment/settlement hooks before relocating it.
 4. **Move provisioning as VM fulfillment.** `provisioning-service` is not
    core; it is the VM fulfillment backend. Move it to
    `domains/vms/provisioning/` only after updating Docker build contexts,

@@ -344,7 +344,7 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-1")
         with patch(
-            "market_storefront.utils.sync_negotiation._load_storefront_chain",
+            "domains.vms.negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate("neg-eval-1", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
@@ -355,7 +355,7 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-2")
         with patch(
-            "market_storefront.utils.sync_negotiation._load_storefront_chain",
+            "domains.vms.negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate("neg-eval-2", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
@@ -369,7 +369,7 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-floor")  # default price_per_hour=9000
         with patch(
-            "market_storefront.utils.sync_negotiation._load_storefront_chain",
+            "domains.vms.negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate(
@@ -393,7 +393,7 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-no-thread")
         with patch(
-            "market_storefront.utils.sync_negotiation._load_storefront_chain",
+            "domains.vms.negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
             await c.evaluate_negotiate("neg-eval-no-thread", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
