@@ -26,6 +26,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from domains.vms.listings import build_vm_filter_params
 from service.schemas import EscrowProposal, ProvisionTerms
 
 from ..buy_orchestrator import (
@@ -585,23 +586,22 @@ def register(app: typer.Typer) -> None:
         # Filter-aware discovery: pre-fetch matches with spec filters applied
         # so we can (a) show them to the user in interactive mode, (b) anchor
         # auto-price derivation on each listing's seller-advertised min_price.
-        spec_filters = {
-            "gpu_model": gpu_model,
-            "gpu_count_min": gpu_count_min,
-            "vcpu_count_min": vcpu_count_min,
-            "ram_gb_min": ram_gb_min,
-            "disk_gb_min": disk_gb_min,
-            "region": region,
-            "virtualization_type": virtualization_type,
-            "cpu_type": cpu_type,
-            "host_cpu_cores_min": host_cpu_cores_min,
-            "host_ram_gb_min": host_ram_gb_min,
-            "gpu_interconnect": gpu_interconnect,
-            "datacenter_grade": datacenter_grade,
-            "static_ip": static_ip,
-        }
         from ._cli_helpers import parse_filter_options
-        active_filters = {k: v for k, v in spec_filters.items() if v is not None}
+        active_filters = build_vm_filter_params(
+            gpu_model=gpu_model,
+            gpu_count_min=gpu_count_min,
+            vcpu_count_min=vcpu_count_min,
+            ram_gb_min=ram_gb_min,
+            disk_gb_min=disk_gb_min,
+            region=region,
+            virtualization_type=virtualization_type,
+            cpu_type=cpu_type,
+            host_cpu_cores_min=host_cpu_cores_min,
+            host_ram_gb_min=host_ram_gb_min,
+            gpu_interconnect=gpu_interconnect,
+            datacenter_grade=datacenter_grade,
+            static_ip=static_ip,
+        )
         active_filters.update(parse_filter_options(raw_filters))
         try:
             matches = query_registry_for_matches_multi(

@@ -113,8 +113,8 @@ The eventual top-level repo shape is:
 
 ```
 core/
-  buyer/              # executable buyer CLI shell over injected dependencies
-  storefront/         # executable storefront HTTP shell over injected hooks
+  buyer/              # buyer orchestration contracts/helpers, no concrete CLI
+  storefront/         # storefront server factory/contracts, no concrete VM app
   registry/           # schema-agnostic listing index service
   registry-client/    # registry protocol client
   storefront-client/  # storefront protocol client
@@ -131,24 +131,27 @@ domains/
     negotiation/      # VM negotiation message schema, validators, policies, RL runtime
     settlement/       # VM settlement selection + Alkahest materialization
     provisioning/     # VM fulfillment backend
+    buyer/            # concrete VM buyer executable package
+    storefront/       # concrete VM storefront executable package
     wiring/           # thin adapters that bind VM hooks into core roles
     training/         # offline training code/artifacts for VM policies
 ```
 
 Tests and users should depend on packages under `domains/` for concrete
-markets. `core/` should define executable roles only in terms of injected
-dependencies. `kit/` provides reusable from-below implementations of those
-dependencies, but does not depend upward into `core/` or sideways into a
-domain package.
+markets. `core/` should not ship a default concrete market or runnable
+fallback; it should define role contracts, protocol helpers, and
+orchestration pieces only in terms of injected dependencies. `kit/`
+provides reusable from-below implementations of those dependencies, but
+does not depend upward into `core/` or sideways into a domain package.
 
 | Package / subtree                 | Role                                                                                                                                                                                                        | Depends on              |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `core/`                           | from-above: role contracts (buyer/seller/indexer) + discovery/negotiation/aggregation/settlement skeletons, defined over injected callables + generic primitives. No alkahest, no compute, no provisioning. | from-below kit only     |
+| `core/`                           | from-above: role contracts (buyer/seller/indexer) + discovery/negotiation/aggregation/settlement skeletons, defined over injected callables + generic primitives. No default market, no alkahest, no compute, no provisioning. | from-below kit only     |
 | `kit/identity`                    | domain-agnostic identity models + verifiers.                                                                                                                                                                | no core/domain deps     |
 | `kit/alkahest`                    | settlement codecs + token/chain helpers.                                                                                                                                                                    | no core/domain deps     |
 | `kit/config`                      | shared config loading + registry URL helpers.                                                                                                                                                               | no domain deps          |
 | `kit/policy`                      | middleware-chain mechanics and other schema-invariant policy utilities only. VM inventory guards, scalar amount extraction, and Alkahest dispatch do not belong here.                                       | no domain deps          |
-| `domains/vms`                     | the VM market actualization, organized by VM market concepts: listing schema/filtering, negotiation messages/policies, settlement wiring, and provisioning. Thin role adapters bind those concepts into core. | core + kit              |
+| `domains/vms`                     | the concrete VM market product surface: runnable buyer/storefront packages plus VM listing schema/filtering, negotiation messages/policies, settlement wiring, and provisioning. Thin role adapters bind those concepts into core. | core + kit              |
 | compatibility packages            | existing names such as `market-service`, `market-buyer`, `market-storefront`, `registry-service`, and client packages may temporarily re-export or wrap the new locations during migration.                 | target package only     |
 
 The kit does **not** need to be one wheel — "from below" means "depended on,
@@ -161,8 +164,8 @@ storefronts, and registries for filtering/publishing/validation;
 negotiation messages and validators are shared by both participants;
 settlement is the VM market's chosen payment/escrow materialization; and
 provisioning is the VM fulfillment backend. Role-specific files under
-`domains/vms/wiring/` should be thin adapters, not the main home for domain
-logic.
+`domains/vms/buyer`, `domains/vms/storefront`, or `domains/vms/wiring/`
+should be thin adapters, not the main home for domain logic.
 
 The old "agent" name is obsolete. Current files under
 `domains/vms/agent/app/policy` are runtime VM negotiation policy code and
@@ -177,35 +180,35 @@ filter-spec plus its typed client counterpart, versioned together) and the
 storefront/buyer plugins. The first realistic driver is two compute
 registries with incompatible listing shapes.
 
-### Buyer CLI and schema plugins
+### Buyer executable and schema packages
 
 The buyer CLI is part of the schema instantiation, not the invariant core.
-The core command surface should own orchestration only: discover listings,
-call a schema-provided filter builder, call schema-provided listing
-rendering, run negotiation, and hand the resulting `Terms` to settlement.
-It should not know compute flags such as `--gpu-model`, `--ram-gb-min`, or
-`--virt`, nor should it assume ERC20-oriented selectors such as
-`--token-contract` are meaningful for every accepted escrow.
+The concrete `market` executable should eventually come from
+`domains/vms/buyer`, not from `core`. Core can expose reusable buyer
+orchestration helpers — discover listings, call a domain-provided filter
+builder, run negotiation, and hand the resulting `Terms` to settlement —
+but it should not own a default CLI, default schema plugin, or generic
+runtime fallback. It should not know compute flags such as `--gpu-model`,
+`--ram-gb-min`, or `--virt`, nor should it assume ERC20-oriented selectors
+such as `--token-contract` are meaningful for every accepted escrow.
 
 Target split:
 
 | Layer | Owns |
 | ----- | ---- |
-| Core CLI shell | command lifecycle, config loading, registry fan-in, generic `--filter key=value` passthrough, run-log plumbing, calling `discover → negotiate → settle` |
-| Schema plugin | named filter flags, conversion from CLI args to registry filter params, listing/resource rendering, price-floor extraction, schema-specific prompts and validation |
-| Escrow/settlement plugin or codec | accepted-escrow selection UX, proposal materialization, demand encoding, chain submission/verification |
+| Core buyer helpers | callable contracts, registry fan-in helper, run-log carrier, `discover → negotiate → settle` orchestration over injected functions |
+| Domain buyer package | executable CLI, named filter flags, conversion from CLI args to registry filter params, listing/resource rendering, price-floor extraction, schema-specific prompts and validation |
+| Domain settlement package | accepted-escrow selection UX, proposal materialization, demand encoding, chain submission/verification |
 
 The registry already advertises its schema through `filter-spec.yaml`; the
-missing packaging piece is a stable schema identity/version that lets the
-buyer select the right schema plugin for a registry. Schema plugins are a
-real target, not just documentation: registry/schema maintainers should be
-able to distribute buyer-side packages that declare named filter flags,
-render listings, and build the schema-specific registry query. Until that
-mechanism exists, the current buyer CLI should be treated as the compute
-schema plugin embedded in the `buyer/` package. Repeatable
-`--filter name=value` is only the generic fallback: it aligns with the
-registry's filter-spec and keeps unknown schemas usable, but it is not a
-substitute for schema-maintainer plugins with first-class CLI vocabulary.
+missing packaging piece is a stable schema identity/version that lets a
+domain buyer package prove it is compatible with a registry. Schema
+packages are a real target, not just documentation: registry/schema
+maintainers should distribute buyer-side packages that declare named
+filter flags, render listings, and build the schema-specific registry
+query. Repeatable `--filter name=value` can stay as a lower-level escape
+hatch in concrete domain CLIs, but it is not a core-provided default
+market and should not accrete schema behavior.
 
 ## Concrete seams (the actual work)
 
@@ -238,30 +241,27 @@ escrows and listing-level arbiter demands.
   CLI honest about the new listing/proposal model so later extraction is a
   move, not another behavior change.
 
-### 0b. Buyer CLI schema plugin acceptance
+### 0b. Buyer executable schema package boundary
 
 This is the remaining buyer-side schema boundary. It is related to seam 0,
-but it is not the same thing: seam 0 made the embedded compute CLI honest;
-this seam lets registries/schema maintainers distribute their own buyer
-vocabulary.
+but it is not the same thing: seam 0 made the current VM buyer CLI honest;
+this seam moves that concrete executable behavior toward `domains/vms`
+instead of treating core as having an embedded default market.
 
 - **Now:** the registry backend is filter-spec-driven, and the CLI has a
-  generic `--filter name=value` fallback, but named flags and presentation
-  remain embedded compute behavior (`--gpu-model`, `--ram-gb-min`,
+  generic `--filter name=value` escape hatch, but named flags and presentation
+  remain embedded VM behavior (`--gpu-model`, `--ram-gb-min`,
   `--virt`, token-oriented selection shortcuts, compute listing tables).
-- **Target:** a registry advertises a stable schema identity/version, and
-  the buyer CLI can resolve a compatible installed plugin for that schema.
-  The plugin owns named filter options, conversion to registry query
-  params, listing/resource rendering, price-floor extraction,
-  schema-specific prompts/validation, and accepted-escrow selection UX.
-- **Fallback contract:** when no plugin is installed, the core CLI can
-  still query a registry through `--filter name=value` and display a
-  generic listing shape. That fallback is intentionally lower-level and
-  should not accrete compute-specific behavior.
-- **Boundary:** this can be sketched before extraction, but it becomes most
-  useful after the `market-core` package exists. Until there is a second
-  schema package, keep the current compute plugin embedded and make its
-  plugin-shaped functions explicit enough to move later.
+- **Target:** the VM domain package owns the concrete buyer executable. It
+  owns named filter options, conversion to registry query params,
+  listing/resource rendering, price-floor extraction, schema-specific
+  prompts/validation, and accepted-escrow selection UX.
+- **No core default:** if no domain package is installed, core should not
+  produce a concrete `market buy` experience. Core helpers may be used by
+  a domain package, but users/tests depend on the domain package.
+- **Boundary:** until the physical move is complete, the current `buyer/`
+  package can act as a compatibility wrapper around VM-domain functions.
+  That wrapper is migration scaffolding, not the final default.
 
 ### 1. Escrow-shape validation: pre-chain gate → middleware — done
 
@@ -373,16 +373,15 @@ Recommended order:
    inventory/resource guards. The core can require "run this policy chain"
    without knowing those meanings. The physical `policy/` → `kit/policy`
    move remains part of package migration.
-2. **Cut the buyer plugin boundary.** Move the generic buyer shell toward
-   `core/buyer`: command lifecycle, registry fan-in, generic
-   `--filter key=value`, run-log plumbing, and
-   `discover → negotiate → settle` orchestration. Move VM vocabulary to
-   the concept modules: `domains/vms/listings/` owns `--gpu-*`,
-   `--ram-*`, filter construction, listing/resource rendering, and
-   publication validation; `domains/vms/settlement/` owns
-   accepted-escrow selection UX and Alkahest settlement wiring; and
-   `domains/vms/provisioning/` owns VM provision terms. Add the
-   schema-plugin interface before removing the top-level `buyer/` package.
+2. **In progress: cut the buyer domain boundary.**
+   `domains/vms/listings/` now owns VM filter construction and listing
+   rendering used by the compatibility `buyer/` package. Remaining VM
+   buyer behavior to move: publication validation, accepted-escrow
+   selection UX and Alkahest settlement wiring
+   (`domains/vms/settlement/`), and VM provision terms
+   (`domains/vms/provisioning/`). `buyer/` remains a temporary
+   compatibility package that calls domain functions. Later, core receives
+   only reusable orchestration helpers, not a concrete buyer executable.
 3. **Extract storefront hooks before moving files.** The generic
    storefront belongs in `core/storefront`: auth, route shells, negotiation
    thread/history persistence, event/stage logging, and invocation of
@@ -431,10 +430,9 @@ Recommended order:
    compute adapter into its own package belongs to seam 4.
 4. **Seam 4**: extract `market-core` package; split `buyer`/`storefront`
    into skeleton-consumers; verify the kit has no upward imports.
-5. **Seam 0b**: add schema plugin acceptance/discovery for the buyer CLI.
-   The compute schema can remain the embedded first plugin until a second
-   schema exists, but plugin loading, schema identity/version matching, and
-   fallback `--filter` behavior should be explicit.
+5. **Seam 0b**: extract the concrete VM buyer behavior into the VM domain
+   package. The existing `buyer/` package is a compatibility wrapper until
+   docs, tests, and scripts depend directly on the VM domain executable.
 6. **Package migration**: once the code boundaries are explicit, move the
    remaining top-level packages into `core/`, `kit/`, and `domains/vms/`
    with temporary compatibility wrappers and deployment-path updates.

@@ -25,6 +25,15 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from domains.vms.listings import (
+    build_vm_filter_params,
+    format_accepted_escrows,
+    format_demands,
+    format_resource,
+    short_ts,
+    shorten,
+)
+
 from ..common import resolve_config_value
 
 
@@ -38,108 +47,6 @@ listing_app = typer.Typer(no_args_is_help=True)
 
 def _normalize_registry_url(raw_url: str) -> str:
     return raw_url.rstrip("/")
-
-
-def _short_contract_address(value: str) -> str:
-    if not value:
-        return "-"
-    if len(value) <= 12:
-        return value
-    return f"{value[:6]}…{value[-4:]}"
-
-
-def _format_resource(resource: dict) -> str:
-    if not resource:
-        return "-"
-    if not isinstance(resource, dict):
-        return str(resource)
-    is_compute = resource.get("type") == "compute" or "gpu_model" in resource
-    if is_compute:
-        ordered_keys = (
-            "type", "gpu_model", "gpu_count", "sla", "region",
-            "vcpu_count", "ram_gb", "disk_gb", "virtualization_type",
-            "cpu_type", "host_cpu_cores", "host_ram_gb", "gpu_interconnect",
-        )
-        lines = [f"{key}={resource[key]}" for key in ordered_keys if key in resource]
-        extra_keys = sorted(k for k in resource.keys() if k not in ordered_keys)
-        lines.extend(f"{key}={resource[key]}" for key in extra_keys)
-        return "\n".join(lines) if lines else "-"
-    if "token" in resource:
-        token = resource.get("token", {})
-        amount = resource.get("amount")
-        lines = []
-        if isinstance(token, dict):
-            symbol = token.get("symbol")
-            contract = token.get("contract_address")
-            if symbol:
-                lines.append(f"symbol={symbol}")
-            if contract:
-                lines.append(f"contract_address={_short_contract_address(str(contract))}")
-        if amount is not None:
-            lines.append(f"amount={amount}")
-        return "\n".join(lines) if lines else "-"
-    return json.dumps(resource, separators=(",", ":"), sort_keys=True)
-
-
-def _format_accepted_escrows(entries: list) -> str:
-    if not entries:
-        return "-"
-    if not isinstance(entries, list):
-        return str(entries)
-    lines: list[str] = []
-    for i, entry in enumerate(entries):
-        if not isinstance(entry, dict):
-            lines.append(f"[{i}] {entry}")
-            continue
-        from service.schemas import primary_rate_value, accepted_token_address
-
-        chain = entry.get("chain_name") or "-"
-        addr = _short_contract_address(str(entry.get("escrow_address") or "-"))
-        price = primary_rate_value(entry)
-        token = accepted_token_address(entry)
-        parts = [f"chain={chain}", f"escrow={addr}"]
-        if token:
-            parts.append(f"token={_short_contract_address(str(token))}")
-        if price is not None:
-            parts.append(f"price/hr={price}")
-        lines.append(" ".join(parts))
-    return "\n".join(lines)
-
-
-def _format_demands(demands: list) -> str:
-    if not demands:
-        return "-"
-    if not isinstance(demands, list):
-        return str(demands)
-    lines: list[str] = []
-    for i, demand in enumerate(demands):
-        if not isinstance(demand, dict):
-            lines.append(f"[{i}] {demand}")
-            continue
-        chain = demand.get("chain_name") or "-"
-        arbiter = _short_contract_address(str(demand.get("arbiter") or "-"))
-        data = demand.get("demand_data") or {}
-        if isinstance(data, dict) and data:
-            rendered_data = ",".join(
-                f"{k}={_short_contract_address(str(v)) if isinstance(v, str) and v.startswith('0x') else v}"
-                for k, v in sorted(data.items())
-            )
-        else:
-            rendered_data = "-"
-        lines.append(f"[{i}] chain={chain} arbiter={arbiter} data={rendered_data}")
-    return "\n".join(lines)
-
-
-def _shorten(text: str, width: int = 36) -> str:
-    if len(text) <= width:
-        return text
-    return text[: width - 1] + "…"
-
-
-def _short_ts(value: str | None) -> str:
-    if not value:
-        return "-"
-    return value.split(".")[0].replace("T", " ")
 
 
 def _fetch_json(url: str) -> dict:
@@ -230,25 +137,21 @@ def listing_list(
     if listing_id:
         query_params["listing_id"] = listing_id
 
-    spec_filters: dict[str, object] = {
-        "gpu_model": gpu_model,
-        "gpu_count_min": gpu_count_min,
-        "vcpu_count_min": vcpu_count_min,
-        "ram_gb_min": ram_gb_min,
-        "disk_gb_min": disk_gb_min,
-        "region": region,
-        "virtualization_type": virtualization_type,
-        "cpu_type": cpu_type,
-        "host_cpu_cores_min": host_cpu_cores_min,
-        "host_ram_gb_min": host_ram_gb_min,
-        "gpu_interconnect": gpu_interconnect,
-        "datacenter_grade": datacenter_grade,
-        "static_ip": static_ip,
-    }
-    for key, val in spec_filters.items():
-        if val is None:
-            continue
-        query_params[key] = str(val).lower() if isinstance(val, bool) else val
+    query_params.update(build_vm_filter_params(
+        gpu_model=gpu_model,
+        gpu_count_min=gpu_count_min,
+        vcpu_count_min=vcpu_count_min,
+        ram_gb_min=ram_gb_min,
+        disk_gb_min=disk_gb_min,
+        region=region,
+        virtualization_type=virtualization_type,
+        cpu_type=cpu_type,
+        host_cpu_cores_min=host_cpu_cores_min,
+        host_ram_gb_min=host_ram_gb_min,
+        gpu_interconnect=gpu_interconnect,
+        datacenter_grade=datacenter_grade,
+        static_ip=static_ip,
+    ))
     from ._cli_helpers import parse_filter_options
     query_params.update(parse_filter_options(raw_filters))
     params = urllib.parse.urlencode(query_params)
@@ -298,17 +201,17 @@ def listing_list(
     table.add_column("Created", justify="right")
 
     for row in items:
-        offer_display = _format_resource(row.get("offer_resource", {}))
-        accepted_display = _format_accepted_escrows(row.get("accepted_escrows", []))
-        demands_display = _format_demands(row.get("demands", []))
+        offer_display = format_resource(row.get("offer_resource", {}))
+        accepted_display = format_accepted_escrows(row.get("accepted_escrows", []))
+        demands_display = format_demands(row.get("demands", []))
         table.add_row(
             str(row.get("listing_id", "-")),
             str(row.get("publisher_id", "-")),
-            _shorten(str(row.get("storefront_url", "-")), 40),
-            offer_display if "\n" in offer_display else _shorten(offer_display, 120),
-            accepted_display if "\n" in accepted_display else _shorten(accepted_display, 120),
-            demands_display if "\n" in demands_display else _shorten(demands_display, 120),
-            _short_ts(row.get("created_at")),
+            shorten(str(row.get("storefront_url", "-")), 40),
+            offer_display if "\n" in offer_display else shorten(offer_display, 120),
+            accepted_display if "\n" in accepted_display else shorten(accepted_display, 120),
+            demands_display if "\n" in demands_display else shorten(demands_display, 120),
+            short_ts(row.get("created_at")),
         )
 
     if not items:
@@ -374,10 +277,10 @@ def listing_show(
         "Max duration (s)",
         str(max_secs) if max_secs else "unlimited",
     )
-    table.add_row("Created", _short_ts(found.get("created_at")))
-    table.add_row("Updated", _short_ts(found.get("updated_at")))
-    table.add_row("Offer", _format_resource(found.get("offer_resource", {})))
-    table.add_row("Accepted escrows", _format_accepted_escrows(found.get("accepted_escrows", [])))
-    table.add_row("Demands", _format_demands(found.get("demands", [])))
+    table.add_row("Created", short_ts(found.get("created_at")))
+    table.add_row("Updated", short_ts(found.get("updated_at")))
+    table.add_row("Offer", format_resource(found.get("offer_resource", {})))
+    table.add_row("Accepted escrows", format_accepted_escrows(found.get("accepted_escrows", [])))
+    table.add_row("Demands", format_demands(found.get("demands", [])))
 
     console.print(Panel(table, title="Marketplace Listing", border_style="blue"))
