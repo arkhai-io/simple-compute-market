@@ -25,8 +25,10 @@ from domains.vms.listings import (
     resource_is_compute as _vm_resource_is_compute,
 )
 from domains.vms.provisioning import (
+    build_provisioning_job_spec as _vm_build_provisioning_job_spec,
     provision_vm_and_wait,
     register_vm_lease,
+    required_compute_attributes,
     schedule_vm_expiry_and_wait,
 )
 from domains.vms.settlement import (
@@ -432,49 +434,13 @@ async def _build_provisioning_job_spec(
     duration_seconds: int,
     sqlite_client: Any | None = None,
 ) -> dict | None:
-    """Pure compute: select a host from inventory and build the provisioning job spec.
-
-    Performs a **read-only** inventory lookup (``select_available_compute_vm``
-    — no state change, no reservation). Use this for dry-run / evaluate paths.
-    The real flow (``fulfill_compute_obligation``) continues to call
-    ``reserve_available_compute_vm`` directly so it can atomically reserve.
-
-    Returns a dict with keys:
-        resource_id, vm_host, vm_target, required_attributes, ssh_public_key,
-        duration_seconds
-
-    Returns None if no resource matches required_attributes.
-
-    This function is the ``doWork`` seam for the settlement pipeline:
-        POST /api/v1/settle/{uid}
-          ├── getRecordFromChain  (verify_escrow_for_settlement)
-          ├── doWork              (_build_provisioning_job_spec)  ← this function
-          └── submitJob           (_do_provision → asyncio.create_task)
-    """
-    required_attributes: dict[str, Any] = {}
-    if order_dict:
-        compute_resource = extract_compute_from_order(order_dict)
-        if isinstance(compute_resource, dict):
-            for key in ("pool_id", "resource_id", "region", "gpu_model", "gpu_count"):
-                if compute_resource.get(key) is not None:
-                    required_attributes[key] = compute_resource[key]
-
     db = sqlite_client or get_sqlite_client()
-    selected = await db.select_available_compute_vm(
-        required_attributes=required_attributes or None,
+    return await _vm_build_provisioning_job_spec(
+        order_dict=order_dict,
+        ssh_public_key=ssh_public_key,
+        duration_seconds=duration_seconds,
+        sqlite_client=db,
     )
-    if not selected:
-        return None
-
-    vm_target = f"tenant-{uuid.uuid4().hex[:4]}"
-    return {
-        "resource_id": str(selected["resource_id"]),
-        "vm_host": selected["vm_host"],
-        "vm_target": vm_target,
-        "required_attributes": required_attributes,
-        "ssh_public_key": ssh_public_key,
-        "duration_seconds": duration_seconds,
-    }
 
 
 async def fulfill_compute_obligation(
@@ -526,10 +492,7 @@ async def fulfill_compute_obligation(
         # of the system (sqlite, stage events, registry) keys off of.
         order_id = order_dict.get("listing_id") or order_dict.get("order_id")
         compute_resource = extract_compute_from_order(order_dict)
-        if isinstance(compute_resource, dict):
-            for key in ("pool_id", "resource_id", "region", "gpu_model", "gpu_count"):
-                if compute_resource.get(key) is not None:
-                    required_attributes[key] = compute_resource.get(key)
+        required_attributes = required_compute_attributes(order_dict)
         accepted_escrows = order_dict.get("accepted_escrows") or []
         first_escrow = accepted_escrows[0] if accepted_escrows else None
         token_resource = _token_resource_from_accepted_escrow(first_escrow)
