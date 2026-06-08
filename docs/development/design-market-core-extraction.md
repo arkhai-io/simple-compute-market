@@ -383,9 +383,10 @@ Recommended order:
    proposal materialization, compute lease encoding, token materialization,
    Alkahest escrow terms/create helpers, and post-provisioning fulfillment
    submission.
-   `domains/vms/provisioning/` now owns VM provision-term construction,
-   fulfillment-plan construction, provisioning job-spec construction, and
-   provisioning-service client helpers.
+   `domains/vms/provisioning/` now owns VM capacity checks,
+   provision-term construction, fulfillment-plan construction,
+   provisioning job-spec construction, and provisioning-service client
+   helpers.
    `buyer/` remains a temporary compatibility package that calls domain
    functions. Later, core receives only reusable orchestration helpers, not
    a concrete buyer executable.
@@ -406,8 +407,7 @@ Recommended order:
    orchestration behind explicit storefront callbacks. `sync_negotiation.py`
    and `action_executor.py` remain compatibility/stateful HTTP wrappers.
    The remaining storefront extraction work is to file registry publication
-   and capacity checks into their target packages before relocating package
-   roots.
+   into its target package before relocating package roots.
 4. **Move provisioning as VM fulfillment.** `provisioning-service` is not
    core; it is the VM fulfillment backend. Move it to
    `domains/vms/provisioning/` only after updating Docker build contexts,

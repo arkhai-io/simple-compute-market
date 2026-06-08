@@ -920,7 +920,7 @@ class SQLiteClient:
         """
         # Capacity gate — only for active compute.gpu slices.
         if resource_type == "compute.gpu" and (state is None or state != "deleted"):
-            from .capacity import check_slice_fits_host
+            from domains.vms.provisioning.capacity import check_slice_fits_host
             attrs = attributes or {}
             await check_slice_fits_host(
                 sqlite_client=self,

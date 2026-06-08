@@ -5,6 +5,11 @@ from domains.vms.provisioning.client import (
     register_vm_lease,
     schedule_vm_expiry_and_wait,
 )
+from domains.vms.provisioning.capacity import (
+    CapacityExceededError,
+    CapacityViolation,
+    check_slice_fits_host,
+)
 from domains.vms.provisioning.fulfillment_plan import (
     VmFulfillmentPlan,
     build_vm_fulfillment_plan,
@@ -20,6 +25,9 @@ __all__ = [
     "VmFulfillmentPlan",
     "build_provisioning_job_spec",
     "build_vm_fulfillment_plan",
+    "CapacityExceededError",
+    "CapacityViolation",
+    "check_slice_fits_host",
     "fulfill_vm_obligation",
     "make_vm_provision_terms",
     "provision_vm_and_wait",
