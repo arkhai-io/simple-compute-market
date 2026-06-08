@@ -109,16 +109,66 @@ mix-and-match reuse.
 
 ## Target packaging
 
-| Package                                | Role                                                                                                                                                                                                        | Depends on              |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `market-core` (new)                    | from-above: role contracts (buyer/seller/indexer) + discovery/negotiation/aggregation/settlement skeletons, defined over injected callables + generic primitives. No alkahest, no compute, no provisioning. | from-below kit only     |
-| from-below kit (existing, stays split) | `market-policy` (middlewares), `market-identity` (identity models + verifiers), `market-core` (generic schemas + orchestration-neutral helpers), `market-alkahest` (settlement codecs + token/chain helpers), `market-config` (shared config + registry URL helpers), `market-service` (compatibility exports), `registry-client` / `storefront-client`. Mutually independent utilities.                            | nothing in the skeleton |
-| `market-compute` (eventual)            | the schema instantiation: ERC20 escrow construction, compute resource schema, GPU filter-spec, provisioning hooks, the buyer CLI + storefront server as thin shells wiring kit impls into core hooks.       | core + kit              |
-| `registry-service` (unchanged)         | already schema-agnostic; only coupling is the shipped `filter-spec.yaml` (config, not code).                                                                                                                | —                       |
+The eventual top-level repo shape is:
+
+```
+core/
+  buyer/              # executable buyer CLI shell over injected dependencies
+  storefront/         # executable storefront HTTP shell over injected hooks
+  registry/           # schema-agnostic listing index service
+  registry-client/    # registry protocol client
+  storefront-client/  # storefront protocol client
+
+kit/
+  identity/           # domain-agnostic identity models/verifiers
+  alkahest/           # settlement codecs + token/chain helpers
+  config/             # shared config loading and registry URL helpers
+  policy/             # only the schema-agnostic policy-chain machinery
+
+domains/
+  vms/
+    listings/         # VM listing schema, filter vocabulary, rendering, validation
+    negotiation/      # VM negotiation message schema, validators, policies, RL runtime
+    settlement/       # VM settlement selection + Alkahest materialization
+    provisioning/     # VM fulfillment backend
+    wiring/           # thin adapters that bind VM hooks into core roles
+    training/         # offline training code/artifacts for VM policies
+```
+
+Tests and users should depend on packages under `domains/` for concrete
+markets. `core/` should define executable roles only in terms of injected
+dependencies. `kit/` provides reusable from-below implementations of those
+dependencies, but does not depend upward into `core/` or sideways into a
+domain package.
+
+| Package / subtree                 | Role                                                                                                                                                                                                        | Depends on              |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `core/`                           | from-above: role contracts (buyer/seller/indexer) + discovery/negotiation/aggregation/settlement skeletons, defined over injected callables + generic primitives. No alkahest, no compute, no provisioning. | from-below kit only     |
+| `kit/identity`                    | domain-agnostic identity models + verifiers.                                                                                                                                                                | no core/domain deps     |
+| `kit/alkahest`                    | settlement codecs + token/chain helpers.                                                                                                                                                                    | no core/domain deps     |
+| `kit/config`                      | shared config loading + registry URL helpers.                                                                                                                                                               | no domain deps          |
+| `kit/policy`                      | middleware-chain mechanics and other schema-invariant policy utilities only. VM inventory guards, scalar amount extraction, and Alkahest dispatch do not belong here.                                       | no domain deps          |
+| `domains/vms`                     | the VM market actualization, organized by VM market concepts: listing schema/filtering, negotiation messages/policies, settlement wiring, and provisioning. Thin role adapters bind those concepts into core. | core + kit              |
+| compatibility packages            | existing names such as `market-service`, `market-buyer`, `market-storefront`, `registry-service`, and client packages may temporarily re-export or wrap the new locations during migration.                 | target package only     |
 
 The kit does **not** need to be one wheel — "from below" means "depended on,
 never depending up." The only kit cleanup the principle implies: ensure
 nothing in the kit imports up into the skeleton once the core is extracted.
+
+`domains/vms` should not mirror `core/`'s executable roles. The domain
+owns the concepts shared by those roles: listings are used by buyers,
+storefronts, and registries for filtering/publishing/validation;
+negotiation messages and validators are shared by both participants;
+settlement is the VM market's chosen payment/escrow materialization; and
+provisioning is the VM fulfillment backend. Role-specific files under
+`domains/vms/wiring/` should be thin adapters, not the main home for domain
+logic.
+
+The old "agent" name is obsolete. Current files under
+`domains/vms/agent/app/policy` are runtime VM negotiation policy code and
+checkpoints; their target home is under `domains/vms/negotiation/`
+(`policies/rl/` or equivalent), with offline training code kept under
+`domains/vms/training/`.
 
 Distribution model (the why): a registry centralizes a schema; the
 per-schema instantiation is the _registry operator's_ deliverable. The core
@@ -301,6 +351,67 @@ Receipt`; "materialize then submit" is internal factoring.
   compute-flavored steps. The function-signature joints are clean; the
   file-level separation is not.
 
+### 5. Package migration prerequisites
+
+The physical move from top-level packages (`policy/`,
+`provisioning-service/`, `registry-client/`, `registry-service/`,
+`storefront-client/`, `buyer/`, `storefront/`) to `core/`, `kit/`, and
+`domains/vms/` should happen after the code boundaries express the target
+graph. Otherwise the move becomes a rename plus a behavior refactor plus a
+deployment refactor in one step.
+
+Recommended order:
+
+1. **Split `policy/` first.** Keep only schema-invariant machinery in
+   `kit/policy`: `NegotiationRound`, `NegotiationDecision`, the context
+   carrier, middleware-chain execution, and policy discovery. Move
+   VM/Alkahest-specific behavior to concept homes under
+   `domains/vms/negotiation/` and `domains/vms/settlement/`: scalar amount
+   extraction from `proposal.fields["amount"]`, bisection over token
+   amounts, escrow-kind dispatch, schema validation, and
+   inventory/resource guards. The core can require "run this policy chain"
+   without knowing those meanings.
+2. **Cut the buyer plugin boundary.** Move the generic buyer shell toward
+   `core/buyer`: command lifecycle, registry fan-in, generic
+   `--filter key=value`, run-log plumbing, and
+   `discover → negotiate → settle` orchestration. Move VM vocabulary to
+   the concept modules: `domains/vms/listings/` owns `--gpu-*`,
+   `--ram-*`, filter construction, listing/resource rendering, and
+   publication validation; `domains/vms/settlement/` owns
+   accepted-escrow selection UX and Alkahest settlement wiring; and
+   `domains/vms/provisioning/` owns VM provision terms. Add the
+   schema-plugin interface before removing the top-level `buyer/` package.
+3. **Extract storefront hooks before moving files.** The generic
+   storefront belongs in `core/storefront`: auth, route shells, negotiation
+   thread/history persistence, event/stage logging, and invocation of
+   injected listing/negotiation/settlement hooks. VM code should be filed
+   by concept: `domains/vms/listings/` for `domain_models.py`,
+   `resources.py`, resource CSV importers, capacity checks, compute
+   listing reconciliation, and compute config defaults;
+   `domains/vms/negotiation/` for message validators and runtime policies
+   including RL checkpoints; `domains/vms/settlement/` for settlement
+   verification/materialization; and `domains/vms/provisioning/` for VM
+   fulfillment and lease/listing lifecycle hooks. The hard files are still
+   `sync_negotiation.py` and `action_executor.py`; make them thin wrappers
+   over injected VM hooks before relocating them.
+4. **Move provisioning as VM fulfillment.** `provisioning-service` is not
+   core; it is the VM fulfillment backend. Move it to
+   `domains/vms/provisioning/` only after updating Docker build contexts,
+   compose service paths, Helm chart paths, e2e image/build references,
+   storefront dependency references, and any Python import/package names.
+5. **Move registry/client packages once schema config is clearly injected.**
+   The registry service is already mostly schema-agnostic, so it can move
+   to `core/registry` earlier than the storefront. Before removing the
+   top-level package, confirm compute filter behavior lives in
+   `filter-spec.yaml` / configured schema data, not in service code.
+   `registry-client` and `storefront-client` are protocol clients and can
+   move under `core/` with compatibility wrappers.
+6. **Use compatibility wrappers, then delete them.** For each package,
+   move implementation to the target subtree, leave old top-level modules
+   as thin re-exports or console-script wrappers, update internal imports
+   and deployment paths, run unit/e2e, then remove wrappers in a separate
+   cleanup once consumers are on the new import paths.
+
 ## Phases
 
 1. **Seam 1** (done): escrow guard → chain middleware. Default behavior
@@ -322,6 +433,9 @@ Receipt`; "materialize then submit" is internal factoring.
    The compute schema can remain the embedded first plugin until a second
    schema exists, but plugin loading, schema identity/version matching, and
    fallback `--filter` behavior should be explicit.
+6. **Package migration**: once the code boundaries are explicit, move the
+   remaining top-level packages into `core/`, `kit/`, and `domains/vms/`
+   with temporary compatibility wrappers and deployment-path updates.
 
 Each phase keeps the branch green and the e2e suite passing. Seam 3 is the
 current target: the wire shape now carries opaque provision terms, and the
@@ -359,7 +473,10 @@ storefront/.../utils/action_executor.py       seam 4 — interleaved generic/com
 policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escrow guard
 service/src/service/schemas.py                seam 3 — ProvisionTerms
 service/src/service/clients/                  kit — must not import up into core
-registry-service/                             unchanged (already schema-agnostic)
+policy/                                       package migration — split generic chain machinery from VM negotiation/settlement policies
+provisioning-service/                         package migration — move to domains/vms/provisioning after Docker/Helm/e2e path updates
+registry-service/                             package migration — move to core/registry once schema config is injected
+registry-client/, storefront-client/          package migration — move to core protocol clients with temporary wrappers
 ```
 
 ## References
