@@ -400,10 +400,14 @@ Recommended order:
    verification/materialization; and `domains/vms/provisioning/` for VM
    fulfillment and lease/listing lifecycle hooks. Done so far:
    `domains/vms/negotiation/storefront_round.py` owns the default VM
-   seller-round hook, file policy discovery, and storefront chain loading;
-   `sync_negotiation.py` remains the compatibility/stateful HTTP wrapper.
-   The remaining hard file is `action_executor.py`; make it a thin wrapper
-   over VM fulfillment orchestration hooks before relocating it.
+   seller-round hook, file policy discovery, and storefront chain loading.
+   `domains/vms/provisioning/fulfillment.py` owns VM fulfillment
+   orchestration behind explicit storefront callbacks. `sync_negotiation.py`
+   and `action_executor.py` remain compatibility/stateful HTTP wrappers.
+   The remaining storefront extraction work is to file registry publication,
+   listing/resource models, resource CSV import, capacity checks, and
+   compute listing reconciliation into their target packages before
+   relocating package roots.
 4. **Move provisioning as VM fulfillment.** `provisioning-service` is not
    core; it is the VM fulfillment backend. Move it to
    `domains/vms/provisioning/` only after updating Docker build contexts,
