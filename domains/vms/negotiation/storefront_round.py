@@ -284,7 +284,7 @@ async def _run_default_seller_round_policy(
     policy_inputs: dict[str, Any] | None = None,
 ) -> SellerRoundResult:
     """Run the default VM seller per-round policy hook."""
-    from market_storefront.models.domain_models import Listing
+    from domains.vms.listings.models import Listing
 
     if not strategy_label:
         strategy_label = determine_strategy_from_order(listing)

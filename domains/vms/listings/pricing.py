@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from market_storefront.models.domain_models import Listing
+from domains.vms.listings.models import Listing
 
 
 def resource_is_compute(resource: Any) -> bool:

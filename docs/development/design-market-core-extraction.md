@@ -374,10 +374,10 @@ Recommended order:
    without knowing those meanings. The physical `policy/` → `kit/policy`
    move remains part of package migration.
 2. **In progress: cut the buyer domain boundary.**
-   `domains/vms/listings/` now owns VM filter construction, listing
-   rendering, price-floor extraction, compute-resource extraction, and
-   strategy selection used by the compatibility `buyer/` and `storefront/`
-   packages.
+   `domains/vms/listings/` now owns VM models, resource adapters, filter
+   construction, listing rendering, price-floor extraction, compute-resource
+   extraction, and strategy selection used by the compatibility `buyer/` and
+   `storefront/` packages.
    `domains/vms/settlement/` now owns accepted-escrow selection,
    proposal materialization, compute lease encoding, token materialization,
    Alkahest escrow terms/create helpers, and post-provisioning fulfillment
@@ -405,9 +405,8 @@ Recommended order:
    orchestration behind explicit storefront callbacks. `sync_negotiation.py`
    and `action_executor.py` remain compatibility/stateful HTTP wrappers.
    The remaining storefront extraction work is to file registry publication,
-   listing/resource models, resource CSV import, capacity checks, and
-   compute listing reconciliation into their target packages before
-   relocating package roots.
+   resource CSV import, capacity checks, and compute listing reconciliation
+   into their target packages before relocating package roots.
 4. **Move provisioning as VM fulfillment.** `provisioning-service` is not
    core; it is the VM fulfillment backend. Move it to
    `domains/vms/provisioning/` only after updating Docker build contexts,

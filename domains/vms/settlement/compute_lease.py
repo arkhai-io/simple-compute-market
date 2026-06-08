@@ -7,7 +7,7 @@ import logging
 from decimal import Decimal
 from typing import Any
 
-from market_storefront.models.domain_models import (
+from domains.vms.listings.models import (
     ComputeResource,
     TokenResource,
 )

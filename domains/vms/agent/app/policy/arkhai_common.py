@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-from market_storefront.models.domain_models import GPUModel
+from domains.vms.listings.models import GPUModel
 
 try:  # Torch is optional at runtime; fail gracefully if unavailable.
     torch: Any = importlib.import_module("torch")
@@ -320,5 +320,4 @@ def extract_actions_from_logits(output: Any) -> tuple[int, int]:
     except Exception as exc:
         logger.error("[ARKHAI COMMON] Failed parsing actions: %s", exc)
         return 4, 0
-
 
