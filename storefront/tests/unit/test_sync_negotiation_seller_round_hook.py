@@ -72,7 +72,7 @@ async def test_start_sync_negotiation_uses_injected_seller_round_hook(db):
 
     async def hook(**kwargs):
         seen["history"] = kwargs["history"]
-        seen["policy_inputs"] = kwargs["policy_inputs"]
+        seen["has_policy_inputs"] = "policy_inputs" in kwargs
         seen["has_sqlite_client"] = "sqlite_client" in kwargs
         return SellerRoundResult(
             our_amount=123,
@@ -99,7 +99,7 @@ async def test_start_sync_negotiation_uses_injected_seller_round_hook(db):
     assert response["action"] == "counter"
     assert response["proposal"]["fields"]["amount"] == 123
     assert seen["history"][0].proposal["fields"]["amount"] == 50
-    assert seen["policy_inputs"] == {"available_resources": {"resources": []}}
+    assert seen["has_policy_inputs"] is False
     assert seen["has_sqlite_client"] is False
 
 
@@ -132,7 +132,7 @@ async def test_continue_sync_negotiation_uses_injected_seller_round_hook(db):
 
     async def continue_hook(**kwargs):
         seen["history"] = kwargs["history"]
-        seen["policy_inputs"] = kwargs["policy_inputs"]
+        seen["has_policy_inputs"] = "policy_inputs" in kwargs
         seen["has_sqlite_client"] = "sqlite_client" in kwargs
         return SellerRoundResult(
             our_amount=100,
@@ -160,5 +160,5 @@ async def test_continue_sync_negotiation_uses_injected_seller_round_hook(db):
     assert response["accepted_escrow_proposal"]["fields"]["amount"] == 100
     assert seen["history"][-1].sender == "them"
     assert seen["history"][-1].proposal["fields"]["amount"] == 100
-    assert seen["policy_inputs"] == {"available_resources": {"resources": []}}
+    assert seen["has_policy_inputs"] is False
     assert seen["has_sqlite_client"] is False

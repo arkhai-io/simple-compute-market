@@ -244,12 +244,12 @@ vocabulary.
   instantiation: strategy lookup, seller reference amount, configured
   middleware chain, and the resulting `NegotiationDecision`.
   `start_sync_negotiation` and `continue_sync_negotiation` own
-  persistence/events and pass an opaque policy-input bundle into the hook.
-  The current default bundle includes an available-inventory snapshot for
-  the compute inventory guard, but that key is part of this compute policy
-  instantiation rather than a core contract. Policy implementations may be
-  internally stateful, but policy-private decision state lives behind the
-  callable rather than in generic negotiation tables.
+  persistence/events and pass only protocol-visible inputs to the hook. The
+  default compute hook captures the storefront DB adapter behind the
+  callable and collects an available-inventory snapshot internally for the
+  compute inventory guard. Policy implementations may be internally
+  stateful, but policy-private decision state lives behind the callable
+  rather than in generic negotiation tables.
 - **Target** (collapse toward the two-hook surface above):
   - `derive_prices` → fold into negotiation-policy setup (bisection's
     bounds are policy input; a non-bisection policy supplies its own).

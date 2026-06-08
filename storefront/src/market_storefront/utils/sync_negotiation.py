@@ -76,7 +76,6 @@ class SellerRoundHook(Protocol):
         history: list[NegotiationRound],
         requested_duration_seconds: int | None = None,
         strategy_label: str | None = None,
-        policy_inputs: dict[str, Any] | None = None,
     ) -> SellerRoundResult:
         ...
 
@@ -596,7 +595,7 @@ def _history_from_messages(
 # ---------------------------------------------------------------------------
 
 
-async def _default_seller_round_hook(
+async def _run_default_seller_round_policy(
     *,
     listing: Any,
     history: list[NegotiationRound],
@@ -675,6 +674,32 @@ async def _default_seller_round_hook(
     )
 
 
+@dataclass
+class _DefaultSellerRoundHook:
+    sqlite_client: Any
+
+    async def __call__(
+        self,
+        *,
+        listing: Any,
+        history: list[NegotiationRound],
+        requested_duration_seconds: int | None = None,
+        strategy_label: str | None = None,
+    ) -> SellerRoundResult:
+        policy_inputs = await _default_seller_policy_inputs(self.sqlite_client)
+        return await _run_default_seller_round_policy(
+            listing=listing,
+            history=history,
+            requested_duration_seconds=requested_duration_seconds,
+            strategy_label=strategy_label,
+            policy_inputs=policy_inputs,
+        )
+
+
+def _default_seller_round_hook(sqlite_client: Any) -> SellerRoundHook:
+    return _DefaultSellerRoundHook(sqlite_client=sqlite_client)
+
+
 async def _compute_round_zero_decision(
     *,
     sqlite_client: Any,
@@ -705,11 +730,10 @@ async def _compute_round_zero_decision(
         action="initial",
         proposal=their_proposal,
     )]
-    result = await _default_seller_round_hook(
+    result = await _default_seller_round_hook(sqlite_client)(
         listing=listing,
         history=history,
         requested_duration_seconds=requested_duration_seconds,
-        policy_inputs=await _default_seller_policy_inputs(sqlite_client),
     )
     return (
         result.our_amount,
@@ -835,11 +859,11 @@ async def start_sync_negotiation(
         proposal=proposal_dict,
     )]
     try:
-        round_result = await (seller_round_hook or _default_seller_round_hook)(
+        round_hook = seller_round_hook or _default_seller_round_hook(sqlite_client)
+        round_result = await round_hook(
             listing=our_order,
             history=history,
             requested_duration_seconds=requested_duration_seconds,
-            policy_inputs=await _default_seller_policy_inputs(sqlite_client),
         )
         our_amount = round_result.our_amount
         strategy = round_result.strategy_label
@@ -1102,12 +1126,12 @@ async def continue_sync_negotiation(
             if uses_scalar_amount else (buyer_proposal or buyer_pinned_proposal)
         ),
     ))
-    round_result = await (seller_round_hook or _default_seller_round_hook)(
+    round_hook = seller_round_hook or _default_seller_round_hook(sqlite_client)
+    round_result = await round_hook(
         listing=our_order,
         history=history,
         requested_duration_seconds=requested_duration_seconds,
         strategy_label=strategy,
-        policy_inputs=await _default_seller_policy_inputs(sqlite_client),
     )
     our_amount = round_result.our_amount
     decision = round_result.decision

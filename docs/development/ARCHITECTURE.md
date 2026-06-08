@@ -55,14 +55,14 @@ fine-grained compute hooks:
 
 On the seller side, `start_sync_negotiation` and
 `continue_sync_negotiation` own the signed HTTP protocol, thread
-persistence, stage events, and an opaque policy-input bundle. They delegate
-each policy decision to an injectable seller round hook. The default hook is
-the current compute instantiation: strategy lookup, seller reference amount,
-configured middleware chain, and `NegotiationDecision` output. Its current
-policy-input bundle includes an available-inventory snapshot for the compute
-inventory guard, but that key is not a core contract. A policy implementation
-may be internally stateful, but policy-private decision state lives behind
-that callable; the generic negotiation tables store only the protocol
+persistence, and stage events. They delegate each policy decision to an
+injectable seller round hook. The hook contract carries only protocol-visible
+inputs (`listing`, message `history`, requested duration, and optional
+strategy label); the implementation decides what extra side inputs or private
+state it needs. The default compute hook captures the storefront DB adapter
+behind the callable, takes an available-inventory snapshot for the compute
+inventory guard, then runs the configured middleware chain to produce a
+`NegotiationDecision`. The generic negotiation tables store only the protocol
 transcript, terminal state, and agreed terms.
 
 Two hooks merge when the core does nothing between them: `build_escrow_terms → create_escrow` is a pure sequence. They stay separate when a core-enforced boundary sits in the gap — the determinism contract between `negotiate` and `settle` is such a boundary, so those remain two phases with `Terms` as the typed handoff. Hooks need not be interchangeable across schemas to warrant separation; a schema's `negotiate` and `settle` are co-designed and don't cross-compose. The core's leverage is the structure it provides around the hooks, not the count of hooks.
