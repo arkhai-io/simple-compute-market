@@ -24,6 +24,11 @@ from domains.vms.listings import (
     extract_initial_price_from_order as _vm_extract_initial_price_from_order,
     resource_is_compute as _vm_resource_is_compute,
 )
+from domains.vms.provisioning import (
+    provision_vm_and_wait,
+    register_vm_lease,
+    schedule_vm_expiry_and_wait,
+)
 from domains.vms.settlement import (
     encode_compute_lease as _vm_encode_compute_lease,
     token_resource_from_accepted_escrow as _vm_token_resource_from_accepted_escrow,
@@ -42,8 +47,6 @@ from market_storefront.services.compute_listing_reconciler import (
 from market_storefront.utils.config import CHAINS, settings, AGENT_ID, BASE_URL_OVERRIDE
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
 from market_storefront.utils.sqlite_client import get_sqlite_client
-from client.provisioning_client import ProvisioningClient, ProvisioningError
-from models.vm_request_model import CreateVmRequest, ScheduleVmExpiryRequest
 from registry_client import RegistryClient, ListingRequest, UpdateListingRequest
 from market_policy.negotiation_thread import get_thread_store
 
@@ -178,72 +181,32 @@ async def _do_provision(
     in the settlement_jobs row so the buyer's GET /settle/{uid}/status can
     surface it while the job is still queued/running.
     """
-    client = ProvisioningClient(
-        settings.provisioning.service_url,
+    return await provision_vm_and_wait(
+        service_url=settings.provisioning.service_url,
         admin_key=settings.admin_api_key,
         timeout=float(settings.provisioning.timeout),
+        poll_interval=float(settings.provisioning.poll_interval),
+        ssh_public_key=ssh_public_key,
+        vm_host=vm_host,
+        vm_target=vm_target,
+        frp_server_addr=settings.provisioning.frp_server_addr,
+        frp_domain=settings.provisioning.frp_domain,
+        frp_dashboard_password=settings.provisioning.frp_dashboard_password,
+        on_job_submitted=on_job_submitted,
     )
-    async with client:
-        params: dict = {"vm_target": vm_target, "ssh_pubkey": ssh_public_key}
-        if settings.provisioning.frp_server_addr:
-            params["frp_server_addr"] = settings.provisioning.frp_server_addr
-        if settings.provisioning.frp_domain:
-            params["frp_domain"] = settings.provisioning.frp_domain
-        if settings.provisioning.frp_dashboard_password:
-            params["frp_dashboard_password"] = settings.provisioning.frp_dashboard_password
-        submit = await client.create_vm(vm_host, CreateVmRequest(**params))
-        if on_job_submitted is not None:
-            try:
-                await on_job_submitted(submit.job_id)
-            except Exception as exc:
-                logger.warning(
-                    "[PROVISIONING] on_job_submitted callback failed for job %s: %s",
-                    submit.job_id, exc,
-                )
-        job = await client.poll_until_complete(
-            submit.job_id,
-            timeout=float(settings.provisioning.timeout),
-            poll_interval=float(settings.provisioning.poll_interval),
-        )
-        result = job.result or {}
-        try:
-            creds_resp = await client.get_job_credentials(submit.job_id)
-            auth: dict = {}
-            for c in creds_resp.credentials:
-                if c.role:
-                    auth[c.role] = {
-                        "password": c.password,
-                        "ssh_commands": c.ssh_commands,
-                        "ssh_key_path_host": c.ssh_key_path_host,
-                        "key_type": c.key_type,
-                    }
-            if auth:
-                result["authentication"] = auth
-        except Exception as exc:
-            logger.warning(
-                "[PROVISIONING] Failed to fetch credentials for job %s: %s",
-                submit.job_id, exc,
-            )
-    return result
 
 
 async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
     """Schedule VM expiry via the provisioning service."""
-    client = ProvisioningClient(
-        settings.provisioning.service_url,
+    return await schedule_vm_expiry_and_wait(
+        service_url=settings.provisioning.service_url,
         admin_key=settings.admin_api_key,
         timeout=float(settings.provisioning.timeout),
+        poll_interval=float(settings.provisioning.poll_interval),
+        lease_end_utc=lease_end_utc,
+        vm_host=vm_host,
+        vm_target=vm_target,
     )
-    async with client:
-        submit = await client.schedule_expiry(
-            vm_host, vm_target, ScheduleVmExpiryRequest(vm_expiry_at=lease_end_utc)
-        )
-        job = await client.poll_until_complete(
-            submit.job_id,
-            timeout=float(settings.provisioning.timeout),
-            poll_interval=float(settings.provisioning.poll_interval),
-        )
-    return job.result or {}
 
 
 def _canonical_agent_id(chain_name: str | None = None) -> str | None:
@@ -760,24 +723,21 @@ async def fulfill_compute_obligation(
     # Non-fatal: a failure here is logged but does not abort settlement.
     if reserved_resource_id and reserved_vm_host and vm_target and escrow_uid:
         try:
-            from client.provisioning_client import ProvisioningClient
             from datetime import datetime as _dt
             lease_end_dt = _dt.strptime(lease_end_utc, "%Y-%m-%d %H:%M").replace(
                 tzinfo=timezone.utc
             )
-            async with ProvisioningClient(
-                settings.provisioning.service_url,
+            await register_vm_lease(
+                service_url=settings.provisioning.service_url,
                 admin_key=settings.admin_api_key,
                 timeout=10,
-            ) as prov_client:
-                await prov_client.register_lease(
-                    resource_id=reserved_resource_id,
-                    allocation_id=reserved_allocation_id,
-                    escrow_uid=escrow_uid,
-                    vm_host=reserved_vm_host,
-                    vm_target=vm_target,
-                    lease_end_utc=lease_end_dt,
-                )
+                resource_id=reserved_resource_id,
+                allocation_id=reserved_allocation_id,
+                escrow_uid=escrow_uid,
+                vm_host=reserved_vm_host,
+                vm_target=vm_target,
+                lease_end_utc=lease_end_dt,
+            )
             logger.info(
                 "[LEASE] Registered lease with provisioning service "
                 "(resource=%s escrow=%s expires=%s)",
