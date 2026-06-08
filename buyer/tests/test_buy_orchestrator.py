@@ -32,6 +32,8 @@ from market_buyer.buy_orchestrator import (
     BuyConstraints,
     NegotiationResult,
     BuyResult,
+    make_legacy_negotiate_hook,
+    make_legacy_settle_hook,
     run_buy,
     submit_settlement,
 )
@@ -126,6 +128,60 @@ def _build_escrow_terms_ok(proposal, seller_wallet, agreed_amount, duration_seco
     return [_stub_escrow_terms(seller_wallet, agreed_amount, duration_seconds)]
 
 
+def _run_buy_with_legacy_hooks(
+    *,
+    config,
+    constraints,
+    provision,
+    build_escrow_proposal=None,
+    build_escrow_terms=None,
+    create_escrow=None,
+    negotiate=None,
+    settle=None,
+    matches=None,
+    max_matches_to_try=5,
+    max_negotiation_rounds=10,
+    settlement_poll_interval=0,
+    settlement_total_timeout=600,
+    on_event=None,
+    sleep=lambda _s: None,
+    derive_prices=None,
+    confirm_settlement=None,
+    chain=None,
+):
+    if negotiate is None:
+        negotiate = make_legacy_negotiate_hook(
+            config=config,
+            constraints=constraints,
+            provision=provision,
+            build_escrow_proposal=build_escrow_proposal,
+            max_negotiation_rounds=max_negotiation_rounds,
+            derive_prices=derive_prices,
+            chain=chain,
+        )
+    if settle is None:
+        settle = make_legacy_settle_hook(
+            config=config,
+            provision=provision,
+            build_escrow_terms=build_escrow_terms,
+            create_escrow=create_escrow,
+            confirm_settlement=confirm_settlement,
+            settlement_poll_interval=settlement_poll_interval,
+            settlement_total_timeout=settlement_total_timeout,
+            sleep=sleep,
+        )
+    return run_buy(
+        config=config,
+        constraints=constraints,
+        provision=provision,
+        negotiate=negotiate,
+        settle=settle,
+        matches=matches,
+        max_matches_to_try=max_matches_to_try,
+        on_event=on_event,
+    )
+
+
 @dataclass
 class _FakeResp:
     text: str
@@ -168,7 +224,7 @@ def test_no_matches_returns_no_matches_status():
         "market_buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_urlopen_sequence([{"items": []}]),
     ):
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
@@ -190,7 +246,7 @@ def test_matches_can_be_preseeded_skipping_registry_query():
              "reason": "no_matching_order"},
         ]),
     ):
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
@@ -239,7 +295,7 @@ def test_run_buy_composes_high_level_negotiate_and_settle_hooks():
         )
 
     events: list[tuple[str, dict]] = []
-    result = run_buy(
+    result = _run_buy_with_legacy_hooks(
         config=_config(),
         constraints=_constraints(),
         provision=_provision(),
@@ -300,7 +356,7 @@ def test_happy_path_drives_to_ready():
         "market_buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_urlopen_sequence(responses),
     ):
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
@@ -382,7 +438,7 @@ def test_first_match_exits_second_agrees():
         "market_buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_urlopen_sequence(responses),
     ):
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=config,
             constraints=_constraints(),
             provision=_provision(),
@@ -416,7 +472,7 @@ def test_escrow_hook_failure_returns_exited_with_reason():
         "market_buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_urlopen_sequence(responses),
     ):
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
@@ -445,7 +501,7 @@ def test_provisioning_failed_returns_failed_status():
         "market_buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_urlopen_sequence(responses),
     ):
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
@@ -481,7 +537,7 @@ def test_settlement_timeout_returns_timeout_status():
         "market_buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_urlopen_sequence(responses),
     ):
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),

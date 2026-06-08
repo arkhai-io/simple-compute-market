@@ -17,6 +17,8 @@ from market_buyer.buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
     extract_seller_min_price,
+    make_legacy_negotiate_hook,
+    make_legacy_settle_hook,
     query_registry_for_matches,
     run_buy,
 )
@@ -57,6 +59,56 @@ def _stub_build_escrow_terms(proposal, seller_wallet, agreed_amount, duration_se
 
 def _fail_build_escrow_terms(*_a, **_kw):
     pytest.fail("build_escrow_terms shouldn't run")
+
+
+def _run_buy_with_legacy_hooks(
+    *,
+    config,
+    constraints,
+    provision,
+    build_escrow_proposal,
+    build_escrow_terms,
+    create_escrow,
+    matches=None,
+    max_matches_to_try=5,
+    max_negotiation_rounds=10,
+    settlement_poll_interval=0,
+    settlement_total_timeout=600,
+    on_event=None,
+    sleep=lambda _s: None,
+    derive_prices=None,
+    confirm_settlement=None,
+    chain=None,
+):
+    negotiate = make_legacy_negotiate_hook(
+        config=config,
+        constraints=constraints,
+        provision=provision,
+        build_escrow_proposal=build_escrow_proposal,
+        max_negotiation_rounds=max_negotiation_rounds,
+        derive_prices=derive_prices,
+        chain=chain,
+    )
+    settle = make_legacy_settle_hook(
+        config=config,
+        provision=provision,
+        build_escrow_terms=build_escrow_terms,
+        create_escrow=create_escrow,
+        confirm_settlement=confirm_settlement,
+        settlement_poll_interval=settlement_poll_interval,
+        settlement_total_timeout=settlement_total_timeout,
+        sleep=sleep,
+    )
+    return run_buy(
+        config=config,
+        constraints=constraints,
+        provision=provision,
+        negotiate=negotiate,
+        settle=settle,
+        matches=matches,
+        max_matches_to_try=max_matches_to_try,
+        on_event=on_event,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +249,7 @@ class TestRunBuyDerivePrices:
             base = extract_seller_min_price(match)
             return base, base * 2
 
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=config, constraints=constraints, provision=provision,
             build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_fail_build_escrow_terms,
@@ -230,7 +282,7 @@ class TestRunBuyDerivePrices:
             buyer_private_key="0x" + "2" * 64,
         )
         matches = [{"listing_id": "L1", "seller": "http://s1"}]
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=config, constraints=constraints, provision=provision,
             build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_fail_build_escrow_terms,
@@ -294,7 +346,7 @@ class TestConfirmSettlementGate:
         events: list[tuple[str, dict]] = []
         matches = [{"listing_id": "L1", "seller": "http://s1"}]
 
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=self._config(),
             constraints=self._constraints(),
             provision=self._provision(),
@@ -334,7 +386,7 @@ class TestConfirmSettlementGate:
         )
 
         matches = [{"listing_id": "L1", "seller": "http://s1"}]
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=self._config(),
             constraints=self._constraints(),
             provision=self._provision(),
@@ -367,7 +419,7 @@ class TestConfirmSettlementGate:
             return ["uid"]
 
         matches = [{"listing_id": "L1", "seller": "http://s1"}]
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=self._config(),
             constraints=self._constraints(),
             provision=self._provision(),
@@ -387,7 +439,7 @@ class TestConfirmSettlementGate:
         def boom(terms, listing):
             raise RuntimeError("user pressed ctrl-c")
 
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=self._config(),
             constraints=self._constraints(),
             provision=self._provision(),

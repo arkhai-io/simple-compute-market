@@ -69,18 +69,18 @@ Infrastructure-side (compute-market-internal-infra):
   `_validate_escrow_proposal` only canonicalizes matched proposal
   fields/rates. This seam is done; later work can add custom correction
   middlewares.
-- **Minimal hook surface:** `run_buy` now accepts high-level `negotiate`
+- **Minimal hook surface:** `run_buy` now requires high-level `negotiate`
   and `settle` hooks and composes only discover → negotiate → settle at
   the top level. The current compute buyer still adapts the legacy hooks
   (`build_escrow_proposal`, `derive_prices`, `build_escrow_terms`,
-  `create_escrow`, `confirm_settlement`, `chain`) into that surface, and
-  `market buy` now constructs explicit hooks through those adapters.
+  `create_escrow`, `confirm_settlement`, `chain`) into that surface
+  through adapter factories, and `market buy` constructs explicit hooks
+  through those adapters.
   The seller synchronous negotiation wrappers now call an injectable seller
   round hook whose default implementation owns strategy lookup, reference
   amount, internal side-input collection, and middleware-chain execution.
-  Remaining
-  work is retiring direct legacy callers where practical and moving the
-  hook-bearing skeleton during package extraction.
+  Remaining work is moving the hook-bearing skeleton during package
+  extraction.
 - `ProvisionTerms` is compute-flavored (`ssh_public_key`/`duration_seconds`/`compute_resource`) → make the core carry delivery terms as an opaque schema blob (as the registry already does with `offer_resource`).
 - The market skeleton lives inside `buyer/` + `storefront/` tangled with compute code → extract `market-core` so the package graph expresses the joint the `run_buy(...)` signature already implies.
 

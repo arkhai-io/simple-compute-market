@@ -541,61 +541,32 @@ def run_buy(
     config: BuyConfig,
     constraints: BuyConstraints,
     provision: ProvisionTerms,
-    build_escrow_proposal: BuildEscrowProposalFn | None = None,
-    build_escrow_terms: BuildEscrowTermsFn | None = None,
-    create_escrow: CreateEscrowFn | None = None,
-    negotiate: NegotiateFn | None = None,
-    settle: SettleFn | None = None,
+    negotiate: NegotiateFn,
+    settle: SettleFn,
     matches: Optional[list[dict[str, Any]]] = None,
     max_matches_to_try: int = 5,
-    max_negotiation_rounds: int = 10,
-    settlement_poll_interval: float = DEFAULT_SETTLEMENT_POLL_INTERVAL,
-    settlement_total_timeout: float = DEFAULT_SETTLEMENT_TIMEOUT,
     on_event: Optional[Callable[[str, dict], None]] = None,
-    sleep: Callable[[float], None] = time.sleep,
-    derive_prices: Optional[Callable[[dict[str, Any]], tuple[int, int]]] = None,
-    confirm_settlement: Optional[Callable[["AgreedTerms", dict[str, Any]], bool]] = None,
-    chain: Optional[list[Any]] = None,
 ) -> BuyResult:
     """Run one buy attempt end-to-end. Sequential; every dependency is explicit.
 
     Parameters
     ----------
-    config, constraints, provision, build_escrow_proposal
-        Buyer identity + price bounds + what to provision + a factory
-        that yields the on-chain escrow shape *per candidate listing*.
-        Immutable for this call. ``provision.duration_seconds`` is the
-        lease window; ``provision.ssh_public_key`` is sent in the settle
-        request. ``build_escrow_proposal(match) -> EscrowProposal | None``
-        picks one entry from ``match.accepted_escrows`` (token / escrow
-        contract / chain come from the listing); ``None`` skips the
-        candidate when no entry is compatible with the buyer's chain
-        and token filters.
-    build_escrow_terms
-        Materializes the agreed negotiation into the canonical
-        ``list[EscrowTerms]`` (the escrow specs that will be submitted
-        on-chain). Today returns a single-element list; later steps
-        may return multiple (e.g. payment + seller penalty deposit).
-    create_escrow
-        Thin submit hook: takes the EscrowTerms list, returns the
-        uids of the buyer-made escrows in input order. Injected so
-        the orchestrator itself is testable without alkahest-py.
+    config, constraints, provision
+        Buyer identity plus the current compute-instantiated constraint
+        objects. ``run_buy`` itself only uses ``config`` for discovery;
+        ``constraints`` and ``provision`` remain in the signature while the
+        surrounding CLI/test adapters are split from the core package.
+    negotiate
+        Hook that receives capped discovery matches and returns the chosen
+        negotiated outcome plus its attempt log.
+    settle
+        Hook that consumes the selected negotiation and returns the final
+        buyer result.
     matches
         Pre-computed match list. If None, queries the registry directly.
     on_event
         Optional observer: called as `on_event(stage_name, payload)` at
         each stage transition. Good for CLI progress UI.
-    derive_prices
-        Optional ``(match) -> (initial_price, max_price)`` callback for
-        per-listing pricing. When set, overrides the constants on
-        ``constraints`` for each candidate. Useful for auto-pricing flows
-        that anchor on the seller's advertised min_price.
-    confirm_settlement
-        Optional ``(agreed_terms, listing) -> bool`` gate invoked between
-        successful negotiation and on-chain escrow creation. Returning
-        ``False`` aborts settlement for this match — the orchestrator
-        records ``status="exited"`` with reason ``user_declined`` and
-        never touches the chain or the seller's /settle endpoint.
 
     Returns
     -------
@@ -624,43 +595,6 @@ def run_buy(
         return BuyResult(status="no_matches")
 
     # --- 1b/2. Negotiate + aggregate -----------------------------------
-    negotiator = negotiate
-    if negotiator is None:
-        if build_escrow_proposal is None:
-            raise ValueError(
-                "run_buy requires either negotiate=... or "
-                "build_escrow_proposal=..."
-            )
-
-        negotiator = make_legacy_negotiate_hook(
-            config=config,
-            constraints=constraints,
-            provision=provision,
-            build_escrow_proposal=build_escrow_proposal,
-            max_negotiation_rounds=max_negotiation_rounds,
-            derive_prices=derive_prices,
-            chain=chain,
-        )
-
-    settler = settle
-    if settler is None:
-        if build_escrow_terms is None or create_escrow is None:
-            raise ValueError(
-                "run_buy requires either settle=... or both "
-                "build_escrow_terms=... and create_escrow=..."
-            )
-
-        settler = make_legacy_settle_hook(
-            config=config,
-            provision=provision,
-            build_escrow_terms=build_escrow_terms,
-            create_escrow=create_escrow,
-            confirm_settlement=confirm_settlement,
-            settlement_poll_interval=settlement_poll_interval,
-            settlement_total_timeout=settlement_total_timeout,
-            sleep=sleep,
-        )
-
     capped = matches[:max_matches_to_try]
     _event("aggregated", {
         "policy": config.aggregation_policy or "best_price",
@@ -668,7 +602,7 @@ def run_buy(
     })
 
     try:
-        negotiation = negotiator(capped, _event)
+        negotiation = negotiate(capped, _event)
     except RuntimeError as exc:
         # A policy that didn't catch a per-candidate negotiation error.
         return BuyResult(
@@ -684,7 +618,7 @@ def run_buy(
             attempts=negotiation.attempts,
         )
 
-    return settler(negotiation, _event)
+    return settle(negotiation, _event)
 
 
 def make_legacy_negotiate_hook(

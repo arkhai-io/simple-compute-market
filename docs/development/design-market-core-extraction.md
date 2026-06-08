@@ -62,8 +62,9 @@ Schemas supply the hooks; any further factoring inside a hook (helpers,
 shared logic) is the implementation's business, not the core contract.
 
 The composition wants **two** behavior hooks. `run_buy` now exposes
-`negotiate` and `settle` directly, while the current compute
-instantiation still adapts the previous fine-grained hooks
+only `negotiate` and `settle`, while the current compute instantiation
+still adapts the previous fine-grained hooks outside the core
+orchestration call
 (`build_escrow_proposal`, `derive_prices`, `build_escrow_terms`,
 `create_escrow`, `confirm_settlement`, `chain`) into that surface:
 
@@ -229,16 +230,16 @@ vocabulary.
 
 ### 2. Collapse the six behavior hooks to `negotiate` + `settle` — in progress
 
-- **Done:** `buy_orchestrator.run_buy(...)` accepts high-level
+- **Done:** `buy_orchestrator.run_buy(...)` requires high-level
   `negotiate` and `settle` hooks and composes only
   discover → negotiate → settle at the top level. Tests can inject doubles
   at that two-hook granularity.
-- **Still present:** the current compute buyer keeps compatibility
-  adapters for `build_escrow_proposal`, `derive_prices`,
+- **Done:** the current compute buyer keeps compatibility adapter
+  factories for `build_escrow_proposal`, `derive_prices`,
   `build_escrow_terms`, `create_escrow`, `confirm_settlement`, and
-  `chain`. The `market buy` call site now constructs explicit
-  `negotiate` / `settle` hooks through those adapters; direct legacy
-  callers and tests can still use the fine-grained parameters.
+  `chain`. The `market buy` call site and legacy-behavior tests construct
+  explicit `negotiate` / `settle` hooks through those adapters; `run_buy`
+  itself no longer accepts the fine-grained parameters.
 - **Done:** the seller-side synchronous HTTP wrappers now call an
   injectable seller round hook. The default hook owns the current compute
   instantiation: strategy lookup, seller reference amount, configured
@@ -259,9 +260,8 @@ vocabulary.
     step, not a separate gate; into `negotiate`.
   - `build_escrow_terms` + `create_escrow` → one `settle: Terms →
 Receipt`; "materialize then submit" is internal factoring.
-  - once direct legacy callers are retired, `run_buy`'s from-above
-    signature can drop the legacy prices/escrow construction parameters
-    entirely.
+  - done: `run_buy`'s from-above signature dropped the legacy
+    prices/escrow construction parameters entirely.
 - **Watch:** the DI points exist partly for test isolation (run the
   orchestrator without alkahest-py). Preserve that by letting the
   _instantiation_ inject test doubles for `negotiate`/`settle`, rather
@@ -300,11 +300,11 @@ Receipt`; "materialize then submit" is internal factoring.
    can be swapped for correction or softer matching.
 2. **Seam 2** (in progress): reduce the six behavior injections to
    `negotiate` + `settle`. The buyer orchestrator now has the two-hook
-   surface, compatibility adapters, and the `market buy` call site uses
-   explicit hooks. The seller synchronous negotiation wrappers now call an
-   injectable seller round hook. Remaining work is retiring direct legacy
-   callers where practical and then moving the hook-bearing skeleton during
-   package extraction. No packaging change yet — still inside
+   surface, adapter factories for the legacy compute behavior, and the
+   `market buy` call site uses explicit hooks. The seller synchronous
+   negotiation wrappers now call an injectable seller round hook. Remaining
+   work is moving the hook-bearing skeleton during package extraction. No
+   packaging change yet — still inside
    `buyer/` + `storefront/`.
 3. **Seam 3**: `ProvisionTerms` opaque in core, concrete in compute;
    negotiate wire change + client wheel bumps + e2e migration.

@@ -32,6 +32,8 @@ from market_buyer.buy_orchestrator import (
     AgreedTerms,
     BuyConfig,
     BuyConstraints,
+    make_legacy_negotiate_hook,
+    make_legacy_settle_hook,
     run_buy,
 )
 from market_buyer.buyer_client import NegotiationOutcome
@@ -87,6 +89,56 @@ def _build_escrow_terms_stub(proposal, seller_wallet, agreed_amount, duration_se
         },
         expiration_unix=proposal.expiration_unix,
     )]
+
+
+def _run_buy_with_legacy_hooks(
+    *,
+    config,
+    constraints,
+    provision,
+    build_escrow_proposal,
+    build_escrow_terms,
+    create_escrow,
+    matches=None,
+    max_matches_to_try=5,
+    max_negotiation_rounds=10,
+    settlement_poll_interval=0,
+    settlement_total_timeout=600,
+    on_event=None,
+    sleep=lambda _s: None,
+    derive_prices=None,
+    confirm_settlement=None,
+    chain=None,
+):
+    negotiate = make_legacy_negotiate_hook(
+        config=config,
+        constraints=constraints,
+        provision=provision,
+        build_escrow_proposal=build_escrow_proposal,
+        max_negotiation_rounds=max_negotiation_rounds,
+        derive_prices=derive_prices,
+        chain=chain,
+    )
+    settle = make_legacy_settle_hook(
+        config=config,
+        provision=provision,
+        build_escrow_terms=build_escrow_terms,
+        create_escrow=create_escrow,
+        confirm_settlement=confirm_settlement,
+        settlement_poll_interval=settlement_poll_interval,
+        settlement_total_timeout=settlement_total_timeout,
+        sleep=sleep,
+    )
+    return run_buy(
+        config=config,
+        constraints=constraints,
+        provision=provision,
+        negotiate=negotiate,
+        settle=settle,
+        matches=matches,
+        max_matches_to_try=max_matches_to_try,
+        on_event=on_event,
+    )
 
 
 # Echo for /negotiate/new mock replies so _settle_one can read the
@@ -179,7 +231,7 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
         "market_buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_route_by_url(routes),
     ):
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=_config(aggregation_policy="best_price"),
             constraints=_constraints(),
             provision=_provision(),
@@ -235,7 +287,7 @@ def test_cheapest_first_preserves_first_agreed_semantics():
         "market_buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_route_by_url(routes),
     ):
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=_config(aggregation_policy="cheapest_first"),
             constraints=_constraints(),
             provision=_provision(),
@@ -295,7 +347,7 @@ def test_custom_policy_can_short_circuit():
         "market_buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_route_by_url(routes),
     ):
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=_config(aggregation_policy="pick_second_no_negotiate"),
             constraints=_constraints(),
             provision=_provision(),
@@ -323,7 +375,7 @@ def test_policy_returning_none_yields_exited():
             ],
         }),
     ):
-        result = run_buy(
+        result = _run_buy_with_legacy_hooks(
             config=_config(aggregation_policy="always_none"),
             constraints=_constraints(),
             provision=_provision(),

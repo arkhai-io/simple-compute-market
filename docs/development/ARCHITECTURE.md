@@ -46,9 +46,9 @@ Settlement verification requires both sides to derive the same `Terms`. That hol
 
 The core owns the *structure* of the exchange: the round loop, the signed request/response transport, history persistence, the middleware-chain execution semantics (a middleware that returns a value terminates the chain; returning none passes context to the next), and the determinism contract above. Schemas supply a small number of hooks within that structure.
 
-The composition wants two behavior hooks. `run_buy` now exposes that
-surface directly, while keeping compatibility adapters for the previous
-fine-grained compute hooks:
+The composition wants two behavior hooks. `run_buy` now exposes only that
+surface. The previous fine-grained compute hooks are kept as adapter
+factories outside the core orchestration call:
 
 - **`negotiate`** — a per-turn message policy, `respond(history) → message | terms`, run by the core's negotiation engine. Today's `chain`, `derive_prices`, opening-message construction (`build_escrow_proposal`), and the buyer's commit (`confirm_settlement`) all belong here: each is a decision a participant makes during its turn.
 - **`settle`** — `Terms → Receipt`. Today's `build_escrow_terms` + `create_escrow` are one hook — "materialize the on-chain shape, then submit it" is internal factoring.
@@ -77,7 +77,7 @@ The indexer registry plays the platform role of existing compute markets: it is 
 
 Parts of the code predate the principle and diverge from it. These seams are tracked in [`TODO.md`](TODO.md) / [`design-market-core-extraction.md`](design-market-core-extraction.md):
 
-- **`derive_prices` remains in the legacy compute adapter.** It exists only because `bisection` needs `(initial, max)` bounds; a different negotiation policy has different inputs. The high-level `negotiate` hook now gives a schema instantiation a place to own that setup, but the CLI still passes the legacy callback until the compute buyer is split into plugin-shaped functions.
+- **`derive_prices` remains in the legacy compute adapter.** It exists only because `bisection` needs `(initial, max)` bounds; a different negotiation policy has different inputs. The high-level `negotiate` hook now gives a schema instantiation a place to own that setup, and `run_buy` no longer accepts the callback directly.
 - **`ProvisionTerms` is compute-flavored.** It carries `ssh_public_key` / `duration_seconds` / `compute_resource`; the core should treat delivery terms as an opaque, schema-defined blob — exactly as the registry already treats `offer_resource`.
 - **The market skeleton is packaged inside `buyer/` + `storefront/`** alongside compute-specific code, so the package graph does not yet express the from-above/from-below joint that the function signatures already imply.
 
