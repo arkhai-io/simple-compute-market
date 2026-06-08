@@ -35,9 +35,10 @@ import importlib.util
 import logging
 import os
 import uuid
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from market_policy.negotiation_middleware import (
     NegotiationContext,
@@ -56,6 +57,18 @@ from market_policy.negotiation_middleware import (
 from service.schemas import EscrowProposal
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SellerRoundResult:
+    our_amount: int
+    strategy_label: str
+    direction: str
+    chain_label: str
+    decision: NegotiationDecision
+
+
+SellerRoundHook = Callable[..., Awaitable[SellerRoundResult]]
 
 
 def _validate_escrow_proposal(
@@ -565,6 +578,82 @@ def _history_from_messages(
 # ---------------------------------------------------------------------------
 
 
+async def _default_seller_round_hook(
+    *,
+    sqlite_client: Any,
+    listing: Any,
+    history: list[NegotiationRound],
+    requested_duration_seconds: int | None = None,
+    strategy_label: str | None = None,
+) -> SellerRoundResult:
+    """Run the default seller per-round policy hook.
+
+    This is the current compute storefront instantiation: determine the
+    listing strategy, derive the seller reference amount, load the configured
+    middleware chain, attach a portfolio snapshot, and return the chain's
+    decision. The stateful HTTP wrappers own persistence/events around this
+    hook; the hook owns only the policy decision.
+    """
+    from market_storefront.models.domain_models import Listing
+    from market_storefront.utils.action_executor import determine_strategy_from_order
+
+    if not strategy_label:
+        strategy_label = determine_strategy_from_order(listing)
+    if not strategy_label:
+        raise ValueError(
+            f"Listing {getattr(listing, 'listing_id', repr(listing))} "
+            "has no usable strategy for negotiation"
+        )
+
+    # Compute the seller reference from the Listing model (or original
+    # dict) BEFORE dumping. The model_dump'd dict is consumed by the
+    # chain's context and shouldn't be passed back through
+    # ``_extract_initial_price_from_order`` — that helper re-validates
+    # dicts as Listings, and the ``parse_resources`` model_validator
+    # mutates the input dict in place (replaces offer_resource with a
+    # ComputeDomainResource object). Mutating the listing_dict here
+    # would break downstream guards that expect plain dicts.
+    listing_dict = (
+        listing.model_dump(mode="json") if isinstance(listing, Listing) else listing
+    )
+    their_proposal = None
+    for item in reversed(history):
+        if item.sender == "them":
+            their_proposal = item.proposal
+            break
+    uses_scalar_amount = _proposal_uses_scalar_amount(
+        listing=listing_dict if isinstance(listing_dict, dict) else {},
+        proposal=their_proposal,
+    )
+    our_amount = (
+        _seller_reference_amount(listing, requested_duration_seconds)
+        if uses_scalar_amount else 0
+    )
+    direction = _direction_from_strategy_label(strategy_label)
+
+    chain = _load_storefront_chain()
+    resources = await sqlite_client.list_resources()
+    context = NegotiationContext(
+        direction=direction,
+        our_reference_amount=float(our_amount),
+        listing=listing_dict if isinstance(listing_dict, dict) else {},
+        our_escrow_proposal=their_proposal,
+        available_resources={"resources": resources or []},
+    )
+    decision = run_negotiation_chain(chain, history, context)
+    chain_label = ",".join(
+        type(mw).__name__ if not hasattr(mw, "__name__") else mw.__name__
+        for mw in chain
+    )
+    return SellerRoundResult(
+        our_amount=int(our_amount),
+        strategy_label=strategy_label,
+        direction=direction,
+        chain_label=chain_label,
+        decision=decision,
+    )
+
+
 async def _compute_round_zero_decision(
     *,
     sqlite_client: Any,
@@ -589,57 +678,25 @@ async def _compute_round_zero_decision(
     Raises ``ValueError`` if the listing has no usable negotiation strategy
     (e.g. the offer/demand resources don't declare one).
     """
-    from market_storefront.models.domain_models import Listing
-    from market_storefront.utils.action_executor import determine_strategy_from_order
-
-    strategy_label = determine_strategy_from_order(listing)
-    if not strategy_label:
-        raise ValueError(
-            f"Listing {getattr(listing, 'listing_id', repr(listing))} "
-            "has no usable strategy for negotiation"
-        )
-    # Compute the seller reference from the Listing model (or original
-    # dict) BEFORE dumping. The model_dump'd dict is consumed by the
-    # chain's context and shouldn't be passed back through
-    # ``_extract_initial_price_from_order`` — that helper re-validates
-    # dicts as Listings, and the ``parse_resources`` model_validator
-    # mutates the input dict in place (replaces offer_resource with a
-    # ComputeDomainResource object). Mutating the listing_dict here
-    # would break downstream guards that expect plain dicts.
-    listing_dict = (
-        listing.model_dump(mode="json") if isinstance(listing, Listing) else listing
-    )
-    uses_scalar_amount = _proposal_uses_scalar_amount(
-        listing=listing_dict if isinstance(listing_dict, dict) else {},
-        proposal=their_proposal,
-    )
-    our_amount = (
-        _seller_reference_amount(listing, requested_duration_seconds)
-        if uses_scalar_amount else 0
-    )
-    direction = _direction_from_strategy_label(strategy_label)
-
-    chain = _load_storefront_chain()
-    resources = await sqlite_client.list_resources()
-    context = NegotiationContext(
-        direction=direction,
-        our_reference_amount=float(our_amount),
-        listing=listing_dict if isinstance(listing_dict, dict) else {},
-        our_escrow_proposal=their_proposal,
-        available_resources={"resources": resources or []},
-    )
     history = [NegotiationRound(
         round_number=0,
         sender="them",
         action="initial",
         proposal=their_proposal,
     )]
-    decision = run_negotiation_chain(chain, history, context)
-    chain_label = ",".join(
-        type(mw).__name__ if not hasattr(mw, "__name__") else mw.__name__
-        for mw in chain
+    result = await _default_seller_round_hook(
+        sqlite_client=sqlite_client,
+        listing=listing,
+        history=history,
+        requested_duration_seconds=requested_duration_seconds,
     )
-    return our_amount, strategy_label, direction, chain_label, decision
+    return (
+        result.our_amount,
+        result.strategy_label,
+        result.direction,
+        result.chain_label,
+        result.decision,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -656,6 +713,7 @@ async def start_sync_negotiation(
     provision_terms: Any = None,
     our_base_url: str,
     their_agent_url: str,
+    seller_round_hook: SellerRoundHook | None = None,
 ) -> dict[str, Any]:
     """Create a new negotiation thread and return the seller's first response.
 
@@ -749,13 +807,22 @@ async def start_sync_negotiation(
 
     our_order = Listing.model_validate(our_order_dict)
 
+    history = [NegotiationRound(
+        round_number=0,
+        sender="them",
+        action="initial",
+        proposal=proposal_dict,
+    )]
     try:
-        our_amount, strategy, direction, _chain_label, decision = await _compute_round_zero_decision(
+        round_result = await (seller_round_hook or _default_seller_round_hook)(
             sqlite_client=sqlite_client,
             listing=our_order,
-            their_proposal=proposal_dict,
+            history=history,
             requested_duration_seconds=requested_duration_seconds,
         )
+        our_amount = round_result.our_amount
+        strategy = round_result.strategy_label
+        decision = round_result.decision
     except ValueError as exc:
         if "price-less" in str(exc) or "default_min_price" in str(exc):
             raise OfferUnfulfillableError(
@@ -853,6 +920,7 @@ async def continue_sync_negotiation(
     buyer_proposal: dict[str, Any] | None,
     buyer_reason: str | None,
     buyer_address: str,
+    seller_round_hook: SellerRoundHook | None = None,
 ) -> dict[str, Any]:
     """Drive one further round against an existing thread.
 
@@ -1013,16 +1081,15 @@ async def continue_sync_negotiation(
             if uses_scalar_amount else (buyer_proposal or buyer_pinned_proposal)
         ),
     ))
-    chain = _load_storefront_chain()
-    resources = await sqlite_client.list_resources()
-    context = NegotiationContext(
-        direction=_direction_from_strategy_label(strategy),
-        our_reference_amount=float(our_amount),
-        listing=our_order_dict,
-        our_escrow_proposal=buyer_pinned_proposal,
-        available_resources={"resources": resources or []},
+    round_result = await (seller_round_hook or _default_seller_round_hook)(
+        sqlite_client=sqlite_client,
+        listing=our_order,
+        history=history,
+        requested_duration_seconds=requested_duration_seconds,
+        strategy_label=strategy,
     )
-    decision = run_negotiation_chain(chain, history, context)
+    our_amount = round_result.our_amount
+    decision = round_result.decision
     await _record_seller_decision(
         neg_id=neg_id, our_amount=our_amount,
         their_amount=buyer_amount, decision=decision,

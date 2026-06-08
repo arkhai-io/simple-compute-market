@@ -239,6 +239,12 @@ vocabulary.
   `chain`. The `market buy` call site now constructs explicit
   `negotiate` / `settle` hooks through those adapters; direct legacy
   callers and tests can still use the fine-grained parameters.
+- **Done:** the seller-side synchronous HTTP wrappers now call an
+  injectable seller round hook. The default hook owns the current compute
+  instantiation: strategy lookup, seller reference amount, portfolio
+  snapshot, configured middleware chain, and the resulting
+  `NegotiationDecision`. `start_sync_negotiation` and
+  `continue_sync_negotiation` own persistence/events around that hook.
 - **Target** (collapse toward the two-hook surface above):
   - `derive_prices` → fold into negotiation-policy setup (bisection's
     bounds are policy input; a non-bisection policy supplies its own).
@@ -290,9 +296,11 @@ Receipt`; "materialize then submit" is internal factoring.
 2. **Seam 2** (in progress): reduce the six behavior injections to
    `negotiate` + `settle`. The buyer orchestrator now has the two-hook
    surface, compatibility adapters, and the `market buy` call site uses
-   explicit hooks. Remaining work is retiring direct legacy callers where
-   practical, then applying the same boundary to the seller per-round path.
-   No packaging change yet — still inside `buyer/` + `storefront/`.
+   explicit hooks. The seller synchronous negotiation wrappers now call an
+   injectable seller round hook. Remaining work is retiring direct legacy
+   callers where practical and then moving the hook-bearing skeleton during
+   package extraction. No packaging change yet — still inside
+   `buyer/` + `storefront/`.
 3. **Seam 3**: `ProvisionTerms` opaque in core, concrete in compute;
    negotiate wire change + client wheel bumps + e2e migration.
 4. **Seam 4**: extract `market-core` package; split `buyer`/`storefront`

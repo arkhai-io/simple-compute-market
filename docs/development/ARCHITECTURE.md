@@ -53,6 +53,13 @@ fine-grained compute hooks:
 - **`negotiate`** — a per-turn message policy, `respond(history) → message | terms`, run by the core's negotiation engine. Today's `chain`, `derive_prices`, opening-message construction (`build_escrow_proposal`), and the buyer's commit (`confirm_settlement`) all belong here: each is a decision a participant makes during its turn.
 - **`settle`** — `Terms → Receipt`. Today's `build_escrow_terms` + `create_escrow` are one hook — "materialize the on-chain shape, then submit it" is internal factoring.
 
+On the seller side, `start_sync_negotiation` and
+`continue_sync_negotiation` own the signed HTTP protocol, thread
+persistence, and stage events. They delegate each policy decision to an
+injectable seller round hook. The default hook is the current compute
+instantiation: strategy lookup, seller reference amount, portfolio snapshot,
+configured middleware chain, and `NegotiationDecision` output.
+
 Two hooks merge when the core does nothing between them: `build_escrow_terms → create_escrow` is a pure sequence. They stay separate when a core-enforced boundary sits in the gap — the determinism contract between `negotiate` and `settle` is such a boundary, so those remain two phases with `Terms` as the typed handoff. Hooks need not be interchangeable across schemas to warrant separation; a schema's `negotiate` and `settle` are co-designed and don't cross-compose. The core's leverage is the structure it provides around the hooks, not the count of hooks.
 
 The structure baked into the core is the structure shared by every market shape currently in view — request/response rounds driven by a middleware chain. A negotiation of a different shape (a sealed-bid auction, a continuous order book, an oracle-priced take-it-or-leave-it) would motivate factoring the round engine into a swappable protocol layer beneath the `settle ∘ negotiate` composition; until such a market is concrete, the round/chain model is part of the core.
