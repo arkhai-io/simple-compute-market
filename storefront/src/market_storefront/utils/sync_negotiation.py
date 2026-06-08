@@ -63,22 +63,23 @@ def _validate_escrow_proposal(
     proposal: EscrowProposal | None,
     listing: dict[str, Any],
 ) -> EscrowProposal | None:
-    """Structural validation of the buyer's escrow proposal.
+    """Normalize the buyer's escrow proposal against the listing.
 
-    Confirms the proposal's ``(chain_name, escrow_address)`` resolves to
-    an entry in the listing's ``accepted_escrows``. Listings without an
-    advertised set pass through unchecked (publish-time synthesis
-    couldn't resolve a chain; the buyer's strategy is on its own).
+    When the proposal's ``(chain_name, escrow_address)`` resolves to an
+    entry in the listing's ``accepted_escrows``, merge the listing's
+    advertised literal fields and rates into the proposal the seller will
+    echo and persist. Listings without an advertised set pass through
+    unchecked (publish-time synthesis couldn't resolve a chain; the
+    buyer's strategy is on its own).
 
-    Field-by-field equality against the matched entry's ``fields`` map
-    is *seller policy*, not protocol — it lives in the
-    ``negotiate.guard.escrow_fields_strict_match`` policy callable so
-    operators can swap it for softer matching without code changes.
+    Accepted-set membership and field-by-field equality are *seller
+    policy*, not protocol — they live in the ``escrow_shape_guard``
+    middleware so operators can swap reject behavior for correction or
+    softer matching without code changes.
 
-    Returns the validated proposal unchanged so the caller can echo it
-    back. Returns ``None`` when the buyer didn't include a proposal
-    (legacy clients) — in that case the seller assumes the canonical
-    shape.
+    Returns the normalized proposal so the caller can echo it back.
+    Returns ``None`` when the buyer didn't include a proposal (legacy
+    clients) — in that case the seller assumes the canonical shape.
     """
     if proposal is None:
         return None
@@ -113,10 +114,10 @@ def _match_accepted_escrow(
 
     Returns the entry dict on hit. Returns ``None`` to skip the strict
     match when the listing has no ``accepted_escrows`` advertised (the
-    seller couldn't synthesise one at publish time) or when the buyer
-    sent the placeholder zero address (legacy clients). Raises
-    ``OfferUnfulfillableError`` when both sides advertised real
-    addresses and they don't match.
+    seller couldn't synthesise one at publish time), when the buyer sent
+    the placeholder zero address (legacy clients), or when no advertised
+    entry matches. The out-of-set decision is seller policy and is handled
+    by ``escrow_shape_guard`` in the negotiation chain.
     """
     import json as _json
 
@@ -147,12 +148,7 @@ def _match_accepted_escrow(
             and entry_addr.lower() == proposal_addr
         ):
             return entry
-    raise OfferUnfulfillableError(
-        f"escrow_not_in_accepted_set: (chain={proposal_chain!r}, "
-        f"address={proposal.escrow_address!r}) not in listing's "
-        f"accepted_escrows",
-        listing_id=listing.get("listing_id"),
-    )
+    return None
 
 
 def _accepted_entry_uses_scalar_amount(entry: dict[str, Any] | None) -> bool:

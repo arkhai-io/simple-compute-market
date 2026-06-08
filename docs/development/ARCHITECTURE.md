@@ -63,7 +63,6 @@ The indexer registry plays the platform role of existing compute markets: it is 
 
 Parts of the code predate the principle and diverge from it. These seams are tracked in [`TODO.md`](TODO.md) / [`design-market-core-extraction.md`](design-market-core-extraction.md):
 
-- **Escrow-shape validation runs as a pre-chain hard gate.** `sync_negotiation._validate_escrow_proposal` raises `OfferUnfulfillableError` *before* `_compute_round_zero_decision`, baking "proposal out of `accepted_escrows` ⇒ reject" into the infrastructure. It belongs in the negotiation chain as a middleware — a guard that may reject or counter with a corrected shape (a `counter` already carries a `proposal`) — handled like any other message dimension. Field-equality is already a swappable policy callable; the `(chain, escrow_address)` membership check is the same kind of check, currently sitting at the protocol layer instead.
 - **`derive_prices` is an orchestrator-level injection.** It exists only because `bisection` needs `(initial, max)` bounds; a different negotiation policy has different inputs. It belongs folded into negotiation-policy setup (from below), not as a peer of the escrow hooks in `run_buy`'s signature.
 - **`ProvisionTerms` is compute-flavored.** It carries `ssh_public_key` / `duration_seconds` / `compute_resource`; the core should treat delivery terms as an opaque, schema-defined blob — exactly as the registry already treats `offer_resource`.
 - **The market skeleton is packaged inside `buyer/` + `storefront/`** alongside compute-specific code, so the package graph does not yet express the from-above/from-below joint that the function signatures already imply.
@@ -453,16 +452,19 @@ fields:
   intentionally **not** on the listing-side advertisement: it's derived at
   settlement from `primary_rate × duration / 3600`.
 
-The seller validates the proposal in `_validate_escrow_proposal`: match the
-`(chain_name, escrow_address)` against an entry in the listing's
-`accepted_escrows`, then field-equality-check every seller-advertised
-literal on the matched entry's `literal_fields`. On non-rejection paths,
-`NegotiateNewResponse` echoes both as `accepted_provision_terms` and
-`accepted_escrow_proposal`, and accept paths additionally echo
-`accepted_escrow_terms`: concrete `EscrowTerms` materialized from the final
-proposal, agreed amount, duration, and arbiter demands. Split settlement
-flows consume those concrete terms directly and fall back to proposal
-materialization only for older run logs.
+The default seller policy validates escrow shape inside the negotiation
+chain. `escrow_shape_guard` matches the buyer's
+`(chain_name, escrow_address)` against the listing's `accepted_escrows` and
+rejects both out-of-set proposals and literal-field mismatches. The protocol
+layer's `_validate_escrow_proposal` only canonicalizes non-rejected
+proposals by merging matched listing `literal_fields` and `rates`; it does
+not decide whether an out-of-set proposal is rejected, corrected, or
+allowed. On non-rejection paths, `NegotiateNewResponse` echoes both as
+`accepted_provision_terms` and `accepted_escrow_proposal`, and accept paths
+additionally echo `accepted_escrow_terms`: concrete `EscrowTerms`
+materialized from the final proposal, agreed amount, duration, and arbiter
+demands. Split settlement flows consume those concrete terms directly and
+fall back to proposal materialization only for older run logs.
 
 **Settlement is a byte-compare, not a dispatch:** `EscrowTerms`
 (`service.schemas.EscrowTerms`) is the settlement artifact — a flat mirror
@@ -560,10 +562,11 @@ refunds, and operator alerting.
   `offer_resource` attributes. The offer may pin a concrete
   `resource_id` or a fungible `pool_id`; otherwise the guard checks the
   imported portfolio. Rejects with `no_matching_inventory` if not.
-- `escrow_shape_guard` — every key on the matched
-  `accepted_escrows[i].literal_fields` must equal the buyer's value in
-  `escrow_proposal.literal_fields`. Rejects with `escrow_field_mismatch`
-  otherwise.
+- `escrow_shape_guard` — the buyer's real `(chain_name, escrow_address)`
+  must select one listing `accepted_escrows` entry, and every key on that
+  entry's `literal_fields` must equal the buyer's value in
+  `escrow_proposal.literal_fields`. Rejects with
+  `escrow_not_in_accepted_set` or `escrow_field_mismatch` otherwise.
 - `max_rounds_guard` — exits with `max_rounds_reached` once
   `len(history) >= [negotiation].max_rounds` (default 5).
 - `bisection_middleware` — terminal. Bisects between `our_price` (the

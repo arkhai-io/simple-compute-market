@@ -368,8 +368,7 @@ class TestPassesThroughWithoutVetoing:
 
     def test_zero_address_passes(self):
         """Legacy buyer client sends the zero placeholder for
-        escrow_address; structural match in sync_negotiation skips it,
-        and so do we."""
+        escrow_address; the default guard skips it too."""
         history, ctx = _ctx(
             listing=_listing_with_one_escrow(),
             escrow_proposal={
@@ -381,11 +380,11 @@ class TestPassesThroughWithoutVetoing:
         decision, _ = escrow_shape_guard(history, ctx)
         assert decision is None
 
-    def test_address_advertised_but_not_in_set_passes(self):
-        """The structural "address not in accepted set" rejection lives
-        in sync_negotiation._match_accepted_escrow. The middleware
-        declines to double-report — that would surface confusing
-        error messages."""
+
+class TestRejectsWhenEscrowNotAdvertised:
+    def test_address_advertised_but_not_in_set_rejects(self):
+        """The structural accepted-set membership check is policy, so the
+        default guard rejects a real proposal outside the listing set."""
         history, ctx = _ctx(
             listing=_listing_with_one_escrow(),
             escrow_proposal={
@@ -395,4 +394,20 @@ class TestPassesThroughWithoutVetoing:
             },
         )
         decision, _ = escrow_shape_guard(history, ctx)
-        assert decision is None
+        assert decision is not None
+        assert decision.action == "reject"
+        assert "escrow_not_in_accepted_set" in (decision.reason or "")
+
+    def test_chain_advertised_but_not_in_set_rejects(self):
+        history, ctx = _ctx(
+            listing=_listing_with_one_escrow(),
+            escrow_proposal={
+                "chain_name": "other-chain",
+                "escrow_address": _ADDR,
+                "literal_fields": {"token": _TOKEN},
+            },
+        )
+        decision, _ = escrow_shape_guard(history, ctx)
+        assert decision is not None
+        assert decision.action == "reject"
+        assert "escrow_not_in_accepted_set" in (decision.reason or "")

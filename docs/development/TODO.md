@@ -63,7 +63,12 @@ Infrastructure-side (compute-market-internal-infra):
 
 **Concrete seams to fix** (each filed against the principle today):
 - **Buyer CLI schema-plugin boundary:** the registry backend is already filter-spec-driven, and the CLI has generic `--filter name=value` fallback, but the buyer CLI is still a compute-schema instantiation with hardcoded `--gpu-*`, `--ram-*`, `--region`, etc. Long term, core CLI owns orchestration and generic passthrough; registry/schema-maintainer plugins own named filter flags, listing/resource rendering, price extraction, schema-specific prompts, and accepted-escrow selection UX. The fallback keeps unknown schemas usable, but it is not a substitute for plugin-distributed schema vocabularies.
-- Escrow-shape validation runs as a pre-chain hard gate (`sync_negotiation._validate_escrow_proposal` raises before the chain) → demote to a negotiation middleware that may reject *or* counter-correct, symmetric with `bisection`.
+- Escrow-shape validation now runs in the seller policy chain: the default
+  `escrow_shape_guard` rejects proposals outside the listing's
+  `accepted_escrows` and literal-field mismatches, while
+  `_validate_escrow_proposal` only canonicalizes matched proposal
+  fields/rates. This seam is done; later work can add custom correction
+  middlewares.
 - **Minimal hook surface:** `run_buy` injects six behavior hooks (`build_escrow_proposal`, `derive_prices`, `build_escrow_terms`, `create_escrow`, `confirm_settlement`, `chain`); the well-typed `terms = negotiate(); receipt = settle(terms)` surface wants two. Collapse consecutive/bundled hooks — `negotiate` absorbs `chain` + `derive_prices` + opening-message construction + commit; `settle` absorbs `build_escrow_terms` + `create_escrow`. Further factoring is the implementation's business, not the core contract.
 - `ProvisionTerms` is compute-flavored (`ssh_public_key`/`duration_seconds`/`compute_resource`) → make the core carry delivery terms as an opaque schema blob (as the registry already does with `offer_resource`).
 - The market skeleton lives inside `buyer/` + `storefront/` tangled with compute code → extract `market-core` so the package graph expresses the joint the `run_buy(...)` signature already implies.

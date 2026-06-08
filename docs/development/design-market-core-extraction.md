@@ -210,24 +210,20 @@ vocabulary.
   schema package, keep the current compute plugin embedded and make its
   plugin-shaped functions explicit enough to move later.
 
-### 1. Escrow-shape validation: pre-chain gate → middleware
+### 1. Escrow-shape validation: pre-chain gate → middleware — done
 
-- **Now:** `storefront/.../utils/sync_negotiation.py::_validate_escrow_proposal`
-  - `_match_accepted_escrow` raise `OfferUnfulfillableError` _before_
-    `_compute_round_zero_decision` runs. The infra decides "out-of-set ⇒
-    reject."
-- **Target:** the `(chain, escrow_address)` membership check becomes a
-  negotiation middleware (a from-below utility) that returns
-  `Some(reject)` or `Some(counter-with-corrected-proposal)` or `None`
-  (pass). It runs _inside_ the chain, symmetric with `bisection`. A
-  seller can then swap reject for correct, or drop it.
-- **Watch:** `Decision`'s `counter` already carries a `proposal`, so
-  correction is expressible without a new action type. Keep the default
-  seller chain shipping a reject-guard first for ergonomic early errors —
-  that's a _default_, not a core invariant.
-- **Already-policy precedent:** field-equality lives in
-  `escrow_fields_strict_match`; this just files the membership check the
-  same way.
+- **Done:** `storefront/.../utils/sync_negotiation.py::_validate_escrow_proposal`
+  no longer raises on proposals outside the listing's `accepted_escrows`.
+  It only canonicalizes matched proposals by merging listing
+  `literal_fields` and `rates`.
+- **Done:** the default seller `escrow_shape_guard` middleware now owns the
+  `(chain, escrow_address)` membership check and literal-field equality.
+  It returns `Some(reject)` for proposals outside the accepted set, or
+  `None` when there is no advertised set / no real proposal / legacy zero
+  address.
+- **Remaining extension:** `Decision`'s `counter` already carries a
+  `proposal`, so a custom seller middleware can replace the default guard
+  with counter-correction behavior without a new action type.
 
 ### 2. Collapse the six behavior hooks to `negotiate` + `settle`
 
@@ -279,10 +275,10 @@ Receipt`; "materialize then submit" is internal factoring.
 
 ## Phases
 
-1. **Seam 1** (cheap, independent, no signature change): escrow guard →
-   chain middleware. Lands behind existing negotiation tests; immediately
-   unlocks counter-correction and operator-swappable matching.
-2. **Seam 2** (hook collapse): reduce the six behavior injections to
+1. **Seam 1** (done): escrow guard → chain middleware. Default behavior
+   still rejects invalid shapes, but the decision now lives in policy and
+   can be swapped for correction or softer matching.
+2. **Seam 2** (next): reduce the six behavior injections to
    `negotiate` + `settle`. Touches `run_buy`'s signature and the seller
    per-round path; preserve test isolation by injecting doubles at the
    two-hook granularity. No packaging change yet — still inside
@@ -296,11 +292,11 @@ Receipt`; "materialize then submit" is internal factoring.
    schema exists, but plugin loading, schema identity/version matching, and
    fallback `--filter` behavior should be explicit.
 
-Each phase keeps the branch green and the e2e suite passing. Seam 1 is the
-isolated cheap win and the next coding target. Seam 2 is the one that most
-directly files the most-touched code (negotiation) against the principle
-and is worth doing even if 3–4 are deferred — once the surface is
-`negotiate` + `settle`, the later packaging extraction is mostly a move.
+Each phase keeps the branch green and the e2e suite passing. Seam 2 is the
+next target and the one that most directly files the most-touched code
+(negotiation) against the principle. It is worth doing even if 3–4 are
+deferred — once the surface is `negotiate` + `settle`, the later packaging
+extraction is mostly a move.
 
 ## What's deferred / non-goals
 
@@ -328,7 +324,7 @@ buyer/market_buyer/groups/settle.py           seam 0 legacy — consume accepted
 buyer/market_buyer/groups/escrow.py           seam 0 legacy — consume accepted proposal/terms or retire split create
 buyer/market_buyer/groups/listing.py          seam 0b — plugin-shaped rendering + generic fallback
 buyer/market_buyer/schema_plugins/ (new)      seam 0b — eventual plugin registry/loading boundary
-storefront/.../utils/sync_negotiation.py      seam 1, 4 — pre-chain gate + per-round protocol
+storefront/.../utils/sync_negotiation.py      seam 4 — per-round protocol; seam 1 normalization only
 storefront/.../utils/action_executor.py       seam 4 — interleaved generic/compute logic
 policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escrow guard
 service/src/service/schemas.py                seam 3 — ProvisionTerms

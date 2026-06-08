@@ -850,12 +850,18 @@ def escrow_shape_guard(
     context: NegotiationContext,
 ) -> NegotiationStep:
     """Veto when the buyer's escrow proposal diverges from the seller's
-    advertised ``accepted_escrows`` entry on any seller-pinned literal.
+    advertised ``accepted_escrows`` shape.
 
-    Strict equality: every key the seller set on the matched entry's
-    ``literal_fields`` map must equal the buyer's value. Operators wanting
-    softer matching (allow arbiter upgrade, swap payment token, etc.)
-    drop this guard from ``[negotiation].chain`` and write their own.
+    The default policy is strict:
+
+    - a real ``(chain_name, escrow_address)`` must select one advertised
+      ``accepted_escrows`` entry when the listing advertises entries;
+    - every key the seller set on the matched entry's ``literal_fields``
+      map must equal the buyer's value.
+
+    Operators wanting softer matching (allow arbiter upgrade, swap payment
+    token, counter with a corrected escrow, etc.) drop this guard from
+    ``[negotiation].chain`` and write their own.
 
     Reads the buyer's latest proposal from history (rounds carry full
     EscrowProposal-shaped dicts; "them" = buyer from the seller's POV).
@@ -865,14 +871,8 @@ def escrow_shape_guard(
         return None, context
 
     listing = context.listing or {}
-    accepted = listing.get("accepted_escrows")
-    if isinstance(accepted, str):
-        import json
-        try:
-            accepted = json.loads(accepted)
-        except (ValueError, TypeError):
-            return None, context
-    if not isinstance(accepted, list) or not accepted:
+    accepted = _loads_json_list(listing.get("accepted_escrows"))
+    if not accepted:
         return None, context
 
     proposal_addr_raw = proposal.get("escrow_address")
@@ -882,25 +882,22 @@ def escrow_shape_guard(
     if proposal_addr == _ZERO_ADDRESS:
         return None, context
 
-    proposal_chain = proposal.get("chain_name")
     proposal_literal = proposal.get("literal_fields") or {}
 
-    matched: dict[str, Any] | None = None
-    for entry in accepted:
-        if not isinstance(entry, dict):
-            continue
-        entry_addr = entry.get("escrow_address")
-        if (
-            entry.get("chain_name") == proposal_chain
-            and isinstance(entry_addr, str)
-            and entry_addr.lower() == proposal_addr
-        ):
-            matched = entry
-            break
+    matched = _accepted_escrow_for_proposal(listing, proposal)
     if matched is None:
-        # No structural match — protocol layer in sync_negotiation handles
-        # "address advertised but not in set". Don't double-report.
-        return None, context
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=(
+                    f"escrow_not_in_accepted_set: "
+                    f"(chain={proposal.get('chain_name')!r}, "
+                    f"address={proposal.get('escrow_address')!r}) not in "
+                    "listing's accepted_escrows"
+                ),
+            ),
+            context,
+        )
 
     seller_literal = matched.get("literal_fields") or {}
     if not isinstance(seller_literal, dict):
