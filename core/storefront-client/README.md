@@ -84,6 +84,6 @@ corresponding method in `client.py`.
 ### Version bump checklist
 
 1. Update `client.py` and `models.py` to match the new server behaviour.
-2. Bump `version` in `storefront-client/pyproject.toml`.
+2. Bump `version` in `core/storefront-client/pyproject.toml`.
 3. Run `make dist-storefront-client` to rebuild the wheel.
 4. Run `make reinit` in each consuming project to pick up the new wheel.

@@ -21,7 +21,7 @@ dist: dist-storefront-client dist-identity dist-core dist-alkahest dist-config d
 
 dist-storefront-client: ## Build arkhai-storefront-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd storefront-client && uv build --wheel --out-dir $(DIST_DIR)
+	cd core/storefront-client && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_storefront_client-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-storefront-client produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
@@ -45,7 +45,7 @@ dist-provisioning: ## Build provisioning-service wheel into .dist/
 
 dist-registry: ## Build arkhai-registry-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd registry-client && uv build --wheel --out-dir $(DIST_DIR)
+	cd core/registry-client && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_registry_client-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-registry-client produced a platform-specific wheel — must build inside Docker" && exit 1)
 
@@ -249,8 +249,8 @@ DOCKER_REGISTRY := $(AR_LOCATION)-docker.pkg.dev/$(AR_PROJECT)/$(AR_PREFIX)-dock
 HELM_REGISTRY   := oci://$(AR_LOCATION)-docker.pkg.dev/$(AR_PROJECT)/$(AR_PREFIX)-helm
 PYTHON_REGISTRY := https://$(AR_LOCATION)-python.pkg.dev/$(AR_PROJECT)/$(AR_PREFIX)-python/
 
-STOREFRONT_CLIENT_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' storefront-client/pyproject.toml | head -1)
-REGISTRY_CLIENT_VERSION   := $(shell sed -n 's/^version = "\(.*\)"/\1/p' registry-client/pyproject.toml | head -1)
+STOREFRONT_CLIENT_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' core/storefront-client/pyproject.toml | head -1)
+REGISTRY_CLIENT_VERSION   := $(shell sed -n 's/^version = "\(.*\)"/\1/p' core/registry-client/pyproject.toml | head -1)
 PROVISIONING_VERSION      := $(shell sed -n 's/^version = "\(.*\)"/\1/p' provisioning-service/pyproject.toml | head -1)
 # ---------------------------------------------------------------------------
 # Push — publish built artifacts to Artifact Registry.

@@ -190,10 +190,10 @@ cd ..
 Storefront client package:
 
 ```bash
-cd storefront-client
+cd core/storefront-client
 uv sync --dev
 uv run pytest tests/ -v
-cd ..
+cd ../..
 ```
 
 Compute provisioning IAC contract tests:
@@ -215,7 +215,7 @@ cd ..
 
 Current note:
 
-- `registry-client/` currently has a `tests/` package but no `test_*.py`
+- `core/registry-client/` currently has a `tests/` package but no `test_*.py`
   files, so there is no runnable registry-client test command at the moment.
 - `infra/` currently has pytest dev dependencies but no `test_*.py` files, so
   there is no runnable infra package test command at the moment.
@@ -256,7 +256,7 @@ tests are added back.
 
 These are not covered by the standard local run above:
 
-- `registry-client`: has a `tests/` package but currently no `test_*.py`
+- `core/registry-client`: has a `tests/` package but currently no `test_*.py`
   files, so there is no runnable test suite to execute.
 - `infra`: has pytest dev dependencies but currently no `test_*.py` files, so
   there is no runnable test suite to execute.

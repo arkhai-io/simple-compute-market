@@ -3,7 +3,7 @@
 These dataclasses represent the response shapes returned by the
 storefront's HTTP endpoints. They live in ``storefront-client``
 because they are part of the API contract — the same contract
-documented in the versioning policy in ``storefront-client/README.md``.
+documented in the versioning policy in ``core/storefront-client/README.md``.
 
 Request builders (``StorefrontListingCreateRequest``, etc.) remain in
 the consuming test project until the full client migration is

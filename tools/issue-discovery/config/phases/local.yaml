@@ -150,11 +150,11 @@ phases:
     commands:
       - id: storefront_client_sync
         run: uv sync --dev
-        workdir: storefront-client
+        workdir: core/storefront-client
         timeout_seconds: 600
       - id: storefront_client_pytest
         run: uv run pytest tests/ -v
-        workdir: storefront-client
+        workdir: core/storefront-client
         timeout_seconds: 600
 
   - id: iac_contract_tests

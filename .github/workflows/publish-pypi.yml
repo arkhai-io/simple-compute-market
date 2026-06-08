@@ -7,8 +7,8 @@ on:
       - 'service/**'
       - 'policy/**'
       - 'provisioning-service/**'
-      - 'storefront-client/**'
-      - 'registry-client/**'
+      - 'core/storefront-client/**'
+      - 'core/registry-client/**'
       - '.github/workflows/publish-pypi.yml'
   workflow_dispatch:
 
@@ -64,9 +64,9 @@ jobs:
             provisioning-service:
               - 'provisioning-service/**'
             storefront-client:
-              - 'storefront-client/**'
+              - 'core/storefront-client/**'
             registry-client:
-              - 'registry-client/**'
+              - 'core/registry-client/**'
 
   publish-service:
     needs: detect-changes
@@ -199,7 +199,7 @@ jobs:
       - name: Check version not yet on PyPI
         id: check
         env:
-          PKG_DIR: storefront-client
+          PKG_DIR: core/storefront-client
         run: |
           set -euo pipefail
           version=$(awk -F'"' '/^version *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
@@ -214,13 +214,13 @@ jobs:
           fi
       - name: Build wheel + sdist
         if: steps.check.outputs.skip == 'false'
-        working-directory: storefront-client
+        working-directory: core/storefront-client
         run: uv build --no-sources
       - name: Publish to PyPI
         if: steps.check.outputs.skip == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: storefront-client/dist
+          packages-dir: core/storefront-client/dist
 
   publish-registry-client:
     needs: detect-changes
@@ -237,7 +237,7 @@ jobs:
       - name: Check version not yet on PyPI
         id: check
         env:
-          PKG_DIR: registry-client
+          PKG_DIR: core/registry-client
         run: |
           set -euo pipefail
           version=$(awk -F'"' '/^version *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
@@ -252,10 +252,10 @@ jobs:
           fi
       - name: Build wheel + sdist
         if: steps.check.outputs.skip == 'false'
-        working-directory: registry-client
+        working-directory: core/registry-client
         run: uv build --no-sources
       - name: Publish to PyPI
         if: steps.check.outputs.skip == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: registry-client/dist
+          packages-dir: core/registry-client/dist

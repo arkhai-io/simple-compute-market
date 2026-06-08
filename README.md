@@ -16,7 +16,8 @@ Simple Compute Market is inspired by [Compositional Game Theory (CGT)](https://g
 - `service/` — Shared infra clients (chain, alkahest, registry indexer) used by both buyer and storefront
 - `policy/` — Shared negotiation middleware machinery
 - `registry-service/` — Listings registry / indexer API (FastAPI)
-- `registry-client/` — Async + sync Python client for the registry HTTP API
+- `core/registry-client/` — Async + sync Python client for the registry HTTP API
+- `core/storefront-client/` — Async + sync Python client for the storefront HTTP API
 - `compose/` — Docker Compose stacks for the seller side
 - `helm/` — Kubernetes/Helm charts for production seller + registry deployments
 - `scripts/zerotier/` — ZeroTier controller scripts

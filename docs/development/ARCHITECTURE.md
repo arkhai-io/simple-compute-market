@@ -2573,10 +2573,10 @@ Eight pure-Python internal packages are distributed as wheels:
 | `market-config` | `market_config-*.whl` | `kit/config/` | `market-service`, `buyer`, `storefront` |
 | `market-service` | `market_service-*.whl` | `service/` | `integration-tests` |
 | `provisioning-service` | `provisioning_service-*.whl` | `provisioning-service/` | `integration-tests`, `service` |
-| `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `storefront-client/` | `storefront`, `integration-tests`, `provisioning-service` |
-| `arkhai-registry-client` | `arkhai_registry_client-*.whl` | `registry-client/` | `integration-tests` |
+| `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `core/storefront-client/` | `storefront`, `integration-tests`, `provisioning-service` |
+| `arkhai-registry-client` | `arkhai_registry_client-*.whl` | `core/registry-client/` | `integration-tests` |
 
-`arkhai-storefront-client` exists as a separate lightweight package to avoid pulling `market-storefront`'s heavyweight dependencies (`pufferlib`, `torch`, native RL wheels under the `[rl]` extra) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `storefront-client/src/storefront_client/client.py` and exposes `StorefrontClient` (async) and `SyncStorefrontClient` (sync).
+`arkhai-storefront-client` exists as a separate lightweight package to avoid pulling `market-storefront`'s heavyweight dependencies (`pufferlib`, `torch`, native RL wheels under the `[rl]` extra) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `core/storefront-client/src/storefront_client/client.py` and exposes `StorefrontClient` (async) and `SyncStorefrontClient` (sync).
 
 **Dependency direction note — provisioning-service → arkhai-storefront-client:**
 
@@ -2598,7 +2598,7 @@ This inverts the conceptual layer (provisioning is infrastructure; storefront is
    `/api/v1/listings/{listing_id}/close`, and `/alerts/resource`
    request/response shapes.
 
-When either contract changes: bump `version` in `storefront-client/pyproject.toml`, update the minimum version constraint in all consuming `pyproject.toml` files, rebuild the wheel with `make dist-storefront-client`, and run `make init` in each consumer. Keep all changes in one commit so the version boundary is auditable in git history. See `storefront-client/README.md` for the full checklist.
+When either contract changes: bump `version` in `core/storefront-client/pyproject.toml`, update the minimum version constraint in all consuming `pyproject.toml` files, rebuild the wheel with `make dist-storefront-client`, and run `make init` in each consumer. Keep all changes in one commit so the version boundary is auditable in git history. See `core/storefront-client/README.md` for the full checklist.
 
 ### Distribution path
 
@@ -2693,7 +2693,7 @@ cd registry-service && make reinit && make test-integration
 | Package | Wheel | Async client | Sync client | Consumers |
 |---|---|---|---|---|
 | `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `StorefrontClient` | `SyncStorefrontClient` | `storefront`, `integration-tests` |
-| `registry-client/` | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `integration-tests`, `registry-service` tests |
+| `core/registry-client/` | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `integration-tests`, `registry-service` tests |
 | `provisioning-service/src/client/` | `provisioning_service-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `integration-tests`, `service` shim |
 
 `arkhai-storefront-client` exposes EIP-191-signed methods on both

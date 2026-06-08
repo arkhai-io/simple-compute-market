@@ -19,9 +19,6 @@
 !policy/
 !domains/
 
-# ── storefront-client (workspace path source, editable in uv.lock) ────
-!storefront-client/
-
 # ── Global excludes ──────────────────────────────────────────────────
 **/.git
 **/.venv
