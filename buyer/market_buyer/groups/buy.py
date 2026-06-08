@@ -27,7 +27,9 @@ from rich.panel import Panel
 from rich.table import Table
 
 from domains.vms.listings import build_vm_filter_params
-from service.schemas import EscrowProposal, ProvisionTerms
+from domains.vms.provisioning import make_vm_provision_terms
+from domains.vms.settlement import escrow_proposal_from_accepted_entry
+from service.schemas import EscrowProposal
 
 from ..buy_orchestrator import (
     BuyConfig,
@@ -566,7 +568,7 @@ def register(app: typer.Typer) -> None:
         # (today: one buyer-made ERC20 escrow); the hook submits each
         # buyer-made entry on-chain. Both are env-config-closed at this
         # layer so the orchestrator doesn't see chain creds.
-        from ..escrow_client import (
+        from domains.vms.settlement import (
             make_buyer_payment_escrow_terms_fn,
             make_create_escrow_fn,
         )
@@ -652,7 +654,7 @@ def register(app: typer.Typer) -> None:
             max_price=max_price,
             initial_price=initial_price,
         )
-        provision = ProvisionTerms(
+        provision = make_vm_provision_terms(
             duration_seconds=duration_seconds,
             ssh_public_key=ssh,
         )
@@ -663,7 +665,7 @@ def register(app: typer.Typer) -> None:
         # prompt the user (interactive) or auto-pick by ERC20 balance
         # (--yes). Returning None skips the candidate when no entry is
         # on the buyer's chain or matches --token-contract.
-        from ..escrow_selection import select_escrow_entry
+        from domains.vms.settlement import select_escrow_entry
 
         def build_escrow_proposal_for_match(match: dict) -> EscrowProposal | None:
             entry = select_escrow_entry(
@@ -677,23 +679,9 @@ def register(app: typer.Typer) -> None:
             )
             if entry is None:
                 return None
-            from service.schemas import accepted_demands, accepted_token_address
-            literal_fields = dict(entry.get("literal_fields") or {})
-            token = accepted_token_address(entry)
-            if token:
-                literal_fields["token"] = token
-            selected_chain = entry.get("chain_name", selected_chain_name)
-            demands = [
-                d for d in accepted_demands(match)
-                if not d.get("chain_name") or d.get("chain_name") == selected_chain
-            ]
-            return EscrowProposal(
-                chain_name=selected_chain,
-                escrow_address=entry["escrow_address"],
-                fields={"token": token},
-                literal_fields=literal_fields,
-                rates=entry.get("rates") or [],
-                demands=demands,
+            return escrow_proposal_from_accepted_entry(
+                listing=match,
+                entry=entry,
                 expiration_unix=int(time.time()) + int(expiration_seconds),
             )
 

@@ -32,9 +32,9 @@ from service.schemas import (
     ProvisionTerms,
     accepted_recipient_address,
 )
+from domains.vms.settlement import BuildEscrowTermsFn, CreateEscrowFn
 
 from .buyer_client import NegotiationOutcome, negotiate_with_seller, _sign
-from .escrow_client import BuildEscrowTermsFn, CreateEscrowFn
 
 
 DEFAULT_HTTP_TIMEOUT = 30.0

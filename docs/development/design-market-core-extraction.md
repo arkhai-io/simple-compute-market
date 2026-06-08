@@ -375,13 +375,13 @@ Recommended order:
    move remains part of package migration.
 2. **In progress: cut the buyer domain boundary.**
    `domains/vms/listings/` now owns VM filter construction and listing
-   rendering used by the compatibility `buyer/` package. Remaining VM
-   buyer behavior to move: publication validation, accepted-escrow
-   selection UX and Alkahest settlement wiring
-   (`domains/vms/settlement/`), and VM provision terms
-   (`domains/vms/provisioning/`). `buyer/` remains a temporary
-   compatibility package that calls domain functions. Later, core receives
-   only reusable orchestration helpers, not a concrete buyer executable.
+   rendering used by the compatibility `buyer/` package.
+   `domains/vms/settlement/` now owns accepted-escrow selection,
+   proposal materialization, and Alkahest escrow terms/create helpers.
+   `domains/vms/provisioning/` now owns VM provision-term construction.
+   `buyer/` remains a temporary compatibility package that calls domain
+   functions. Later, core receives only reusable orchestration helpers, not
+   a concrete buyer executable.
 3. **Extract storefront hooks before moving files.** The generic
    storefront belongs in `core/storefront`: auth, route shells, negotiation
    thread/history persistence, event/stage logging, and invocation of

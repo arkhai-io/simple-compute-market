@@ -249,7 +249,7 @@ def register(app: typer.Typer) -> None:
         # Pick one accepted_escrows entry — token, escrow contract, and
         # chain all come from the listing. ``--token-contract`` (when
         # set) filters entries to one ERC-20.
-        from ..escrow_selection import select_escrow_entry
+        from domains.vms.settlement import select_escrow_entry
         from ..common import select_chain_for_listing
         picked_entry: Optional[dict] = None
         chain_cfg = None
@@ -378,33 +378,21 @@ def register(app: typer.Typer) -> None:
         # (the seller still validates it). Resume mode skips the
         # round-0 send and these fields are ignored.
         from service.schemas import EscrowProposal, ProvisionTerms
+        from domains.vms.provisioning import make_vm_provision_terms
+        from domains.vms.settlement import escrow_proposal_from_accepted_entry
         import time as _time
         provision_terms: Optional[ProvisionTerms] = None
         escrow_proposal: Optional[EscrowProposal] = None
         if resume_state is None:
             assert duration_seconds is not None  # gated above
             assert picked_entry is not None  # listing fetched + entry picked above
-            provision_terms = ProvisionTerms(
+            provision_terms = make_vm_provision_terms(
                 duration_seconds=int(duration_seconds),
                 ssh_public_key="",  # negotiate-only flow; settle is a separate command
             )
-            from service.schemas import accepted_demands, accepted_token_address
-            literal_fields = dict(picked_entry.get("literal_fields") or {})
-            _entry_token = accepted_token_address(picked_entry)
-            if _entry_token:
-                literal_fields["token"] = _entry_token
-            selected_chain = picked_entry.get("chain_name")
-            demands = [
-                d for d in accepted_demands(listing_dict or {})
-                if not d.get("chain_name") or d.get("chain_name") == selected_chain
-            ]
-            escrow_proposal = EscrowProposal(
-                chain_name=selected_chain,
-                escrow_address=picked_entry["escrow_address"],
-                fields={"token": _entry_token},
-                literal_fields=literal_fields,
-                rates=picked_entry.get("rates") or [],
-                demands=demands,
+            escrow_proposal = escrow_proposal_from_accepted_entry(
+                listing=listing_dict or {},
+                entry=picked_entry,
                 expiration_unix=int(_time.time()) + 3600,
             )
 
