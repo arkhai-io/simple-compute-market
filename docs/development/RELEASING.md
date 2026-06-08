@@ -8,7 +8,8 @@ The repo publishes five internal Python packages to PyPI via
 | `market-identity` | `identity/` | 0.1.0 | none |
 | `market-core` | `core/` | 0.1.0 | `market-identity` |
 | `market-alkahest` | `alkahest/` | 0.1.0 | `market-core` |
-| `market-service` | `service/` | 0.1.0 | `market-alkahest`, `market-core`, `market-identity` |
+| `market-config` | `config/` | 0.1.0 | `market-alkahest` |
+| `market-service` | `service/` | 0.1.0 | `market-alkahest`, `market-config`, `market-core`, `market-identity` |
 | `market-policy` | `policy/` | 0.1.0 | `market-service` |
 | `provisioning-service` | `provisioning-service/` | 0.1.2 | none |
 | `arkhai-storefront-client` | `storefront-client/` | 0.4.0 | none |

@@ -2,7 +2,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-dev build-seller dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-identity dist-core dist-alkahest dist-service dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-registry-service push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: build build-dev build-seller dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-identity dist-core dist-alkahest dist-config dist-service dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-registry-service push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -17,7 +17,7 @@ DIST_DIR := ${CURDIR}/.dist
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-storefront-client dist-identity dist-core dist-alkahest dist-service dist-storefront dist-policy dist-provisioning dist-registry dist-buyer
+dist: dist-storefront-client dist-identity dist-core dist-alkahest dist-config dist-service dist-storefront dist-policy dist-provisioning dist-registry dist-buyer
 
 dist-storefront-client: ## Build arkhai-storefront-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -67,6 +67,12 @@ dist-alkahest: ## Build market-alkahest wheel into .dist/
 	@ls $(DIST_DIR)/market_alkahest-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: market-alkahest produced a platform-specific wheel — must build inside Docker" && exit 1)
 
+dist-config: ## Build market-config wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd config && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/market_config-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: market-config produced a platform-specific wheel — must build inside Docker" && exit 1)
+
 dist-service: ## Build market-service wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd service && uv build --wheel --out-dir $(DIST_DIR)
@@ -109,7 +115,7 @@ build-dev: build build-test-env build-test-image
 # (`arkhai:storefront`, `arkhai:provisioning`) and just the wheels they
 # consume via --find-links. Skips `build-registry` (sellers point at
 # someone else's registry).
-build-seller: init-prerequisites dist-storefront-client dist-identity dist-core dist-alkahest dist-service dist-storefront dist-policy dist-provisioning dist-registry ## Build only what a seller needs: storefront + provisioning images.
+build-seller: init-prerequisites dist-storefront-client dist-identity dist-core dist-alkahest dist-config dist-service dist-storefront dist-policy dist-provisioning dist-registry ## Build only what a seller needs: storefront + provisioning images.
 	$(MAKE) -j2 build-storefront build-provisioning
 
 # Same as build-seller, but the provisioning image's in-container appuser
