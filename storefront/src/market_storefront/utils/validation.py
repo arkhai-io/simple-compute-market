@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from domains.vms.listings import (
+    determine_strategy_from_order as _vm_determine_strategy_from_order,
+    determine_strategy_from_resources as _vm_determine_strategy_from_resources,
+)
 from market_storefront.models.domain_models import (
     Listing,
     ComputeResource,
@@ -43,22 +47,10 @@ def extract_token_resource(resource: ComputeDomainResource) -> TokenResource | N
 def determine_strategy_from_resources(
     offer_resource: ComputeDomainResource | None,
 ) -> str | None:
-    """Determine negotiation strategy from the listing's offer side.
-
-    Listings only carry an ``offer_resource`` since the demand_resource
-    cutover. Seller offering compute → "maximize" (the seller wants the
-    highest price the buyer will pay).
-    """
-    if not offer_resource:
-        return None
-    if isinstance(offer_resource, ComputeResource):
-        return "maximize"
-    return None
+    """Compatibility wrapper for VM-domain strategy selection."""
+    return _vm_determine_strategy_from_resources(offer_resource)
 
 
 def determine_strategy_from_order(order: Listing | None) -> str | None:
-    """Determine negotiation strategy from a Listing."""
-    if not order:
-        return None
-
-    return determine_strategy_from_resources(order.offer_resource)
+    """Compatibility wrapper for VM-domain strategy selection."""
+    return _vm_determine_strategy_from_order(order)

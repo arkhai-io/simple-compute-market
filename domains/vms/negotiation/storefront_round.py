@@ -10,6 +10,10 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Protocol
 
+from domains.vms.listings import (
+    determine_strategy_from_order,
+    extract_initial_price_from_order,
+)
 from domains.vms.negotiation.policies import make_escrow_kind_dispatch_middleware
 from market_policy.negotiation_middleware import (
     NegotiationContext,
@@ -259,9 +263,14 @@ def _seller_reference_amount(
     listing: Any, duration_seconds: int | None,
 ) -> int:
     """Compute the seller's absolute reference amount in base units."""
-    from market_storefront.utils.action_executor import _extract_initial_price_from_order
+    from market_storefront.utils.config import settings
 
-    per_hour = Decimal(str(_extract_initial_price_from_order(listing)))
+    per_hour = Decimal(str(
+        extract_initial_price_from_order(
+            listing,
+            default_min_price=settings.pricing.default_min_price,
+        )
+    ))
     seconds = int(duration_seconds) if duration_seconds is not None else 3600
     return int(per_hour * seconds // Decimal(3600))
 
@@ -276,7 +285,6 @@ async def _run_default_seller_round_policy(
 ) -> SellerRoundResult:
     """Run the default VM seller per-round policy hook."""
     from market_storefront.models.domain_models import Listing
-    from market_storefront.utils.action_executor import determine_strategy_from_order
 
     if not strategy_label:
         strategy_label = determine_strategy_from_order(listing)

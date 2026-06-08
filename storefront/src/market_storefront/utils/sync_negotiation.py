@@ -552,8 +552,8 @@ async def continue_sync_negotiation(
       - "exit": the buyer is walking away; we mark the thread terminal.
     """
     from market_policy.negotiation_thread import NegotiationThreadTransaction
+    from domains.vms.listings import determine_strategy_from_order
     from market_storefront.models.domain_models import Listing
-    from market_storefront.utils.action_executor import determine_strategy_from_order
     from market_storefront.utils.stage_log import stage_event
 
     thread = await sqlite_client.load_negotiation_thread_row(negotiation_id=neg_id)

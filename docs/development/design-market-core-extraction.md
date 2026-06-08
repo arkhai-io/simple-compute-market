@@ -374,8 +374,10 @@ Recommended order:
    without knowing those meanings. The physical `policy/` → `kit/policy`
    move remains part of package migration.
 2. **In progress: cut the buyer domain boundary.**
-   `domains/vms/listings/` now owns VM filter construction and listing
-   rendering used by the compatibility `buyer/` package.
+   `domains/vms/listings/` now owns VM filter construction, listing
+   rendering, price-floor extraction, compute-resource extraction, and
+   strategy selection used by the compatibility `buyer/` and `storefront/`
+   packages.
    `domains/vms/settlement/` now owns accepted-escrow selection,
    proposal materialization, and Alkahest escrow terms/create helpers.
    `domains/vms/provisioning/` now owns VM provision-term construction.

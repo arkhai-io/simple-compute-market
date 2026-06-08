@@ -20,6 +20,11 @@ from market_storefront.utils.stage_log import stage_event
 from alkahest_py import AlkahestClient
 import json
 
+from domains.vms.listings import (
+    extract_compute_from_order as _vm_extract_compute_from_order,
+    extract_initial_price_from_order as _vm_extract_initial_price_from_order,
+    resource_is_compute as _vm_resource_is_compute,
+)
 from market_storefront.models.domain_models import (
     ComputeResource,
     Listing,
@@ -38,7 +43,6 @@ from client.provisioning_client import ProvisioningClient, ProvisioningError
 from models.vm_request_model import CreateVmRequest, ScheduleVmExpiryRequest
 from registry_client import RegistryClient, ListingRequest, UpdateListingRequest
 from market_policy.negotiation_thread import get_thread_store
-from .validation import determine_strategy_from_order
 
 BASE_URL_OVERRIDE = BASE_URL_OVERRIDE
 PORT = settings.port
@@ -58,19 +62,8 @@ def _is_http_url(value: str | None) -> bool:
 
 
 def _resource_is_compute(resource: Any) -> bool:
-    """True when the resource represents compute (has gpu_model), not tokens.
-
-    Works with both Pydantic model instances and serialized dicts. ComputeResource
-    serializes with a 'gpu_model' key; TokenResource serializes with 'token'/'amount'.
-    """
-    if isinstance(resource, str):
-        try:
-            resource = json.loads(resource)
-        except Exception:
-            return False
-    if isinstance(resource, dict):
-        return "gpu_model" in resource
-    return hasattr(resource, "gpu_model")
+    """Compatibility wrapper for VM-domain compute resource detection."""
+    return _vm_resource_is_compute(resource)
 
 
 def _coerce_agent_reference_to_url(agent_ref: str | None) -> str | None:
@@ -294,69 +287,15 @@ def _sender_id() -> str:
 
 
 def extract_compute_from_order(order: dict) -> dict:
-    """Return the compute dict from an order's ``offer_resource``.
-
-    Listings only carry compute as the offered resource since the
-    demand_resource cutover; the buyer-side token info comes from
-    ``accepted_escrows[0]`` (see ``_listing_token`` in
-    ``sync_negotiation``).
-    """
-    offer_resource = order.get("offer_resource", {})
-    if isinstance(offer_resource, str):
-        offer_resource = json.loads(offer_resource)
-    if not _resource_is_compute(offer_resource):
-        raise ValueError(
-            f"Order offer_resource is not compute: "
-            f"listing_id={order.get('listing_id')}"
-        )
-    return offer_resource
+    """Compatibility wrapper for VM-domain compute extraction."""
+    return _vm_extract_compute_from_order(order)
 
 
 def _extract_initial_price_from_order(order: Listing | dict) -> int | float:
-    """Extract the initial negotiation floor from a listing's primary rate.
-
-    Tristate semantics on the advertised price:
-      * ``> 0`` — public price; returned directly.
-      * ``0``  — free / public-test offering; returned as 0. The seller's
-        strategy accepts any non-negative offer.
-      * ``None`` or missing entry — hidden reserve; falls back to
-        ``[seller.pricing].default_min_price`` so the strategy has a real
-        floor. If that's also unset, raises ``ValueError`` — the caller
-        (sync_negotiation) translates that to a 409 refusal.
-    """
-    from service.schemas import primary_rate_value
-
-    if isinstance(order, dict):
-        order = Listing.model_validate(order)
-
-    advertised: int | None = None
-    if order.accepted_escrows:
-        advertised = primary_rate_value(order.accepted_escrows[0])
-
-    # 0 is a meaningful value (free); only None falls through to the fallback.
-    if advertised is not None:
-        return advertised
-
-    # Hidden reserve: fall back to the seller's config default.
-    from market_storefront.utils.config import settings, AGENT_ID, BASE_URL_OVERRIDE
-    fallback = settings.pricing.default_min_price
-    if fallback is not None and str(fallback).strip():
-        try:
-            parsed = float(fallback)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"[seller.pricing].default_min_price={fallback!r} is not a "
-                f"valid number; hidden-reserve listing {order.listing_id} has "
-                "no usable floor."
-            ) from exc
-        if parsed > 0:
-            return parsed
-
-    raise ValueError(
-        f"Listing {order.listing_id} has hidden reserve "
-        "(accepted_escrows[0].rates is empty) and "
-        "[seller.pricing].default_min_price is not configured. The seller "
-        "has no floor to negotiate against; refusing the negotiation."
+    """Compatibility wrapper for VM-domain price-floor extraction."""
+    return _vm_extract_initial_price_from_order(
+        order,
+        default_min_price=settings.pricing.default_min_price,
     )
 
 
