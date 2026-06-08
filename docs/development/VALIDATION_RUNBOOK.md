@@ -156,7 +156,7 @@ make test
 This runs unit + integration tests for:
 
 - `provisioning-service`
-- `registry-service`
+- `core/registry`
 - `storefront`
 
 Shared service package:

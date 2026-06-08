@@ -354,12 +354,14 @@ Receipt`; "materialize then submit" is internal factoring.
 ### 5. Package migration prerequisites
 
 The physical move from top-level packages (`policy/`,
-`provisioning-service/`, `registry-service/`, `buyer/`, `storefront/`) to
+`provisioning-service/`, `buyer/`, `storefront/`) to
 `core/`, `kit/`, and `domains/vms/` should happen after the code boundaries
 express the target graph. Otherwise the move becomes a rename plus a
 behavior refactor plus a deployment refactor in one step. The protocol
 client packages (`registry-client`, `storefront-client`) have already moved
-under `core/` while preserving their wheel/import names.
+under `core/` while preserving their wheel/import names; the registry
+service has moved to `core/registry` while preserving its wheel/import
+names.
 
 Recommended order:
 
@@ -416,11 +418,11 @@ Recommended order:
    `domains/vms/provisioning/` only after updating Docker build contexts,
    compose service paths, Helm chart paths, e2e image/build references,
    storefront dependency references, and any Python import/package names.
-5. **Move registry service once schema config is clearly injected.**
-   The registry service is already mostly schema-agnostic, so it can move
-   to `core/registry` earlier than the storefront. Before removing the
-   top-level package, confirm compute filter behavior lives in
-   `filter-spec.yaml` / configured schema data, not in service code.
+5. **Done: move registry service once schema config is clearly injected.**
+   The registry service is already mostly schema-agnostic, so it moved to
+   `core/registry` earlier than the storefront. Compute filter behavior
+   lives in `filter-spec.yaml` / configured schema data, not in service
+   code.
    **Done:** `registry-client` and `storefront-client` have moved under
    `core/` as protocol clients while preserving their Python import names
    (`registry_client`, `storefront_client`) and wheel names.
@@ -496,7 +498,7 @@ service/src/service/schemas.py                seam 3 — ProvisionTerms
 service/src/service/clients/                  kit — must not import up into core
 policy/                                       package migration — split generic chain machinery from VM negotiation/settlement policies
 provisioning-service/                         package migration — move to domains/vms/provisioning after Docker/Helm/e2e path updates
-registry-service/                             package migration — move to core/registry once schema config is injected
+core/registry/                                package migration — core registry service; wheel/import names unchanged
 core/registry-client/, core/storefront-client/  package migration — core protocol clients; Python import names unchanged
 ```
 

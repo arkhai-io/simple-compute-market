@@ -208,7 +208,7 @@ What the spec carries:
   the registry is the single enforcement point so sellers can list any
   hardware string but discovery is gated centrally.
 
-Filter evaluation lives in `registry-service/src/api/filter_eval.py`:
+Filter evaluation lives in `core/registry/src/api/filter_eval.py`:
 `build_criteria(spec, params)` compiles the spec + request params into
 parsed JSONPath criteria; `evaluate_all(criteria, listing)` returns the
 matching listings. Array-projection paths (`accepted_escrows[*]...`) are
@@ -227,7 +227,7 @@ Failed** rather than silently honouring a query built against a stale spec.
 `If-Match` is optional — clients that don't care about spec drift can omit
 it.
 
-**Where the YAML lives and how it ships:** `registry-service/filter-spec.yaml`
+**Where the YAML lives and how it ships:** `core/registry/filter-spec.yaml`
 in source, copied into both build stages of the registry Docker image.
 Loaded once at import via `lru_cache`; path overridable via
 `REGISTRY_FILTER_SPEC_PATH` env var. To rotate the spec without rebuilding
@@ -244,7 +244,7 @@ schemes register via `market_identity.register_identity_scheme(verifier)`.
 
 **Source layout:**
 ```
-registry-service/src/
+core/registry/src/
 ├── api/             # FastAPI routes (publisher_routes, listing_routes, system_routes)
 ├── db/              # SQLAlchemy models (publishers, identities, listings, api_keys) + Alembic migrations
 ├── types/
@@ -2438,7 +2438,7 @@ provisioning-service/src/tests/
 
 **registry-service**:
 ```
-registry-service/tests/
+core/registry/tests/
 ├── conftest.py                  # db_session fixture (in-memory SQLite), sign_order_auth helper
 ├── unit/
 │   ├── test_order_auth_utils.py # EIP-191 signature verification helpers (exhaustive)
@@ -2683,7 +2683,7 @@ health = client.get_health()
 
 ```
 make dist-registry          # rebuild wheel
-cd registry-service && make reinit && make test-integration
+cd core/registry && make reinit && make test-integration
 ```
 
 `reinit` runs `uv sync --upgrade-package <pkg> --reinstall-package <pkg>`. The `--upgrade-package` flag is essential: without it, `uv` re-installs whatever version is **pinned in the local `uv.lock`** rather than resolving the latest available wheel from `.dist/`. If `uv.lock` was generated when an older wheel was the only option, subsequent `make dist` runs that produce a higher version are silently ignored by `--reinstall-package` alone. `--upgrade-package` forces uv to re-resolve the constraint against the current contents of `.dist/` and update `uv.lock` to the new version.

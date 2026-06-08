@@ -1,11 +1,11 @@
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 PYTHON_VERSION := 3.13
 
-# Path to the monorepo .dist/ wheel directory, relative to registry-service/.
+# Path to the monorepo .dist/ wheel directory, relative to core/registry/.
 # Used by uv when resolving pure-Python internal packages distributed as wheels
 # (arkhai-registry-client).  The Dockerfile passes --find-links /dist on the
 # uv sync CLI instead; this variable is for local development only.
-DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
+DIST_DIR ?= $(abspath $(CURDIR)/../../.dist)
 
 # ==============================================================================
 # Installation & Setup
@@ -27,7 +27,7 @@ build-images:
 	docker tag arkhai:registry arkhai:registry-$(GIT_SUFFIX)
 
 deploy:
-	docker run --rm -d --network market --name registry --env-file ./.env.docker-compose --env-file ../shared-env/.env -p 8080:8080 arkhai:registry
+	docker run --rm -d --network market --name registry --env-file ./.env.docker-compose --env-file ../../shared-env/.env -p 8080:8080 arkhai:registry
 
 smoke:
 	curl localhost:8080/health

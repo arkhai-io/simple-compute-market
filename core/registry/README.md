@@ -36,7 +36,7 @@ curl 'http://localhost:8080/listings?limit=10'
 ## Running standalone
 
 ```bash
-cd registry-service
+cd core/registry
 uv sync
 DATABASE_URL=sqlite:///./indexer.db uv run uvicorn src.main:app --port 8080
 ```

@@ -97,7 +97,7 @@ test-provisioning:
 	cd provisioning-service && make reinit && make test
 
 test-registry:
-	cd registry-service && make reinit && make test
+	cd core/registry && make reinit && make test
 
 test-storefront:
 	cd storefront && make reinit && make test
@@ -140,7 +140,7 @@ build-test-env: build-anvil-state
 	cd test-env && make build
 
 build-registry:
-	cd registry-service && make build
+	cd core/registry && make build
 
 build-storefront:
 	cd storefront && make build
@@ -176,7 +176,7 @@ init-storefront: dist-service dist-policy dist-provisioning dist-storefront-clie
 	cd storefront && make init
 
 init-registry-service: dist-registry
-	cd registry-service && make init
+	cd core/registry && make init
 
 deploy-compose:
 	docker compose up
@@ -207,7 +207,7 @@ deploy-test-env:
 	cd test-env && make deploy
 
 deploy-registry:
-	cd registry-service && make deploy
+	cd core/registry && make deploy
 
 deploy-storefront:
 	cd storefront && make deploy

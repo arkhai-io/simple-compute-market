@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-market-identity = { path = "../kit/identity", editable = true }
+market-identity = { path = "../../kit/identity", editable = true }
 
 [tool.setuptools]
 package-dir = {"" = "src"}

@@ -163,7 +163,7 @@ class TestListListings:
 
     # Discovery filters (gpu_model, gpu_count_min, etc.) were dropped in
     # milestone (a1b) — buyers query registries for that, not the
-    # storefront.  See registry-service/tests/integration/test_listings
+    # storefront.  See core/registry/tests/integration/test_listings
     # _filtering.py for the spec-driven equivalent.
 
 

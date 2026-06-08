@@ -25,7 +25,7 @@ services:
     ports:
       - "8080:8080"
     env_file:
-      - ./registry-service/.env.docker-compose
+      - ./core/registry/.env.docker-compose
     volumes:
       - ./shared-env:/app/shared-env
     restart: unless-stopped
@@ -56,7 +56,7 @@ services:
     ports:
       - "8082:8080"
     env_file:
-      - ./registry-service/.env.docker-compose
+      - ./core/registry/.env.docker-compose
     environment:
       # Private-registry config: read and write gate independently, both
       # on here, so every non-admin request must carry
