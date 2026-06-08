@@ -6,7 +6,7 @@ on:
     paths:
       - 'service/**'
       - 'policy/**'
-      - 'provisioning-service/**'
+      - 'domains/vms/provisioning/service/**'
       - 'core/storefront-client/**'
       - 'core/registry-client/**'
       - '.github/workflows/publish-pypi.yml'
@@ -62,7 +62,7 @@ jobs:
             policy:
               - 'policy/**'
             provisioning-service:
-              - 'provisioning-service/**'
+              - 'domains/vms/provisioning/service/**'
             storefront-client:
               - 'core/storefront-client/**'
             registry-client:
@@ -161,7 +161,7 @@ jobs:
       - name: Check version not yet on PyPI
         id: check
         env:
-          PKG_DIR: provisioning-service
+          PKG_DIR: domains/vms/provisioning/service
         run: |
           set -euo pipefail
           version=$(awk -F'"' '/^version *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
@@ -176,13 +176,13 @@ jobs:
           fi
       - name: Build wheel + sdist
         if: steps.check.outputs.skip == 'false'
-        working-directory: provisioning-service
+        working-directory: domains/vms/provisioning/service
         run: uv build --no-sources
       - name: Publish to PyPI
         if: steps.check.outputs.skip == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: provisioning-service/dist
+          packages-dir: domains/vms/provisioning/service/dist
 
   publish-storefront-client:
     needs: detect-changes

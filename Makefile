@@ -39,7 +39,7 @@ dist-policy: ## Build market-policy wheel into .dist/
 
 dist-provisioning: ## Build provisioning-service wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd provisioning-service && uv build --wheel --out-dir $(DIST_DIR)
+	cd domains/vms/provisioning/service && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/provisioning_service-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: provisioning-service produced a platform-specific wheel — must build inside Docker" && exit 1)
 
@@ -94,7 +94,7 @@ dist-clean: ## Remove .dist/ directory
 test: test-provisioning test-registry test-storefront
 
 test-provisioning:
-	cd provisioning-service && make reinit && make test
+	cd domains/vms/provisioning/service && make reinit && make test
 
 test-registry:
 	cd core/registry && make reinit && make test
@@ -146,7 +146,7 @@ build-storefront:
 	cd storefront && make build
 
 build-provisioning:
-	cd provisioning-service && make build
+	cd domains/vms/provisioning/service && make build
 
 build-test-image:
 	cd integration-tests && make build
@@ -213,7 +213,7 @@ deploy-storefront:
 	cd storefront && make deploy
 
 deploy-provisioning:
-	cd provisioning-service && make deploy
+	cd domains/vms/provisioning/service && make deploy
 
 test-deployment:
 	cd integration-tests && make test
@@ -251,7 +251,7 @@ PYTHON_REGISTRY := https://$(AR_LOCATION)-python.pkg.dev/$(AR_PROJECT)/$(AR_PREF
 
 STOREFRONT_CLIENT_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' core/storefront-client/pyproject.toml | head -1)
 REGISTRY_CLIENT_VERSION   := $(shell sed -n 's/^version = "\(.*\)"/\1/p' core/registry-client/pyproject.toml | head -1)
-PROVISIONING_VERSION      := $(shell sed -n 's/^version = "\(.*\)"/\1/p' provisioning-service/pyproject.toml | head -1)
+PROVISIONING_VERSION      := $(shell sed -n 's/^version = "\(.*\)"/\1/p' domains/vms/provisioning/service/pyproject.toml | head -1)
 # ---------------------------------------------------------------------------
 # Push — publish built artifacts to Artifact Registry.
 #

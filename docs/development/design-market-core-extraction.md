@@ -353,15 +353,16 @@ Receipt`; "materialize then submit" is internal factoring.
 
 ### 5. Package migration prerequisites
 
-The physical move from top-level packages (`policy/`,
-`provisioning-service/`, `buyer/`, `storefront/`) to
+The remaining physical moves from top-level packages (`policy/`, `buyer/`,
+`storefront/`) to
 `core/`, `kit/`, and `domains/vms/` should happen after the code boundaries
 express the target graph. Otherwise the move becomes a rename plus a
 behavior refactor plus a deployment refactor in one step. The protocol
 client packages (`registry-client`, `storefront-client`) have already moved
 under `core/` while preserving their wheel/import names; the registry
-service has moved to `core/registry` while preserving its wheel/import
-names.
+service has moved to `core/registry`, and the provisioning service has
+moved to `domains/vms/provisioning/service/`, while preserving their
+wheel/import names.
 
 Recommended order:
 
@@ -413,11 +414,12 @@ Recommended order:
    publish/close fan-out through injected registry clients and request
    factories; the storefront wrapper keeps settings, SQLite publication
    persistence, and stage-event logging.
-4. **Move provisioning as VM fulfillment.** `provisioning-service` is not
-   core; it is the VM fulfillment backend. Move it to
-   `domains/vms/provisioning/` only after updating Docker build contexts,
-   compose service paths, Helm chart paths, e2e image/build references,
-   storefront dependency references, and any Python import/package names.
+4. **Done: move provisioning as VM fulfillment.** `provisioning-service` is
+   not core; it is the VM fulfillment backend. It moved to
+   `domains/vms/provisioning/service/` after updating Docker build contexts,
+   compose service paths, e2e image/build references, storefront dependency
+   references, and path-sensitive docs while preserving its wheel/import
+   names.
 5. **Done: move registry service once schema config is clearly injected.**
    The registry service is already mostly schema-agnostic, so it moved to
    `core/registry` earlier than the storefront. Compute filter behavior
@@ -497,7 +499,7 @@ policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escr
 service/src/service/schemas.py                seam 3 — ProvisionTerms
 service/src/service/clients/                  kit — must not import up into core
 policy/                                       package migration — split generic chain machinery from VM negotiation/settlement policies
-provisioning-service/                         package migration — move to domains/vms/provisioning after Docker/Helm/e2e path updates
+domains/vms/provisioning/service/             package migration — VM provisioning service; wheel/import names unchanged
 core/registry/                                package migration — core registry service; wheel/import names unchanged
 core/registry-client/, core/storefront-client/  package migration — core protocol clients; Python import names unchanged
 ```

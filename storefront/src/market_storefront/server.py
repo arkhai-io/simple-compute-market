@@ -1,6 +1,6 @@
 """Storefront FastAPI application.
 
-Mirrors provisioning-service/src/main.py:
+Mirrors domains/vms/provisioning/service/src/main.py:
 
 * ``FastAPI(lifespan=lifespan)`` — resolves singletons, starts background tasks.
 * ``app.include_router()`` for every controller router.

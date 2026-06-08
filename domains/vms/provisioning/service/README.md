@@ -35,7 +35,7 @@ git submodule update --init compute-provisioning-iac
 make build
 ```
 
-This runs from the repo root so both `provisioning-service/` and `compute-provisioning-iac/` are in the build context.
+This runs from the repo root so both `domains/vms/provisioning/service/` and `compute-provisioning-iac/` are in the build context.
 
 ### Run
 

@@ -4,9 +4,9 @@
 *
 
 # ── provisioning-service ───────────────────────────────────────
-!provisioning-service/pyproject.toml
-!provisioning-service/uv.lock
-!provisioning-service/src/
+!domains/vms/provisioning/service/pyproject.toml
+!domains/vms/provisioning/service/uv.lock
+!domains/vms/provisioning/service/src/
 
 # ── Internal package wheels (built by make dist before docker build) ────────
 !.dist/

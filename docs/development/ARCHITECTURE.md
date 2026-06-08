@@ -1358,7 +1358,7 @@ Rules are evaluated in insertion order. The first rule whose `match` dict is a s
 
 **Key source layout:**
 ```
-provisioning-service/src/
+domains/vms/provisioning/service/src/
 ├── controllers/                # Handles Http Routing concerns.
 ├── services/                   # For internal business logic
 ├── models/                     # Request and Response objects for controllers
@@ -2427,7 +2427,7 @@ Each level has a defined jurisdiction. Duplicating coverage across levels create
 
 **provisioning-service** (reference layout):
 ```
-provisioning-service/src/tests/
+domains/vms/provisioning/service/src/tests/
 ├── unit/
 │   ├── conftest.py              # mock_settings fixture
 │   └── services/
@@ -2572,7 +2572,7 @@ Eight pure-Python internal packages are distributed as wheels:
 | `market-alkahest` | `market_alkahest-*.whl` | `kit/alkahest/` | `market-service` |
 | `market-config` | `market_config-*.whl` | `kit/config/` | `market-service`, `buyer`, `storefront` |
 | `market-service` | `market_service-*.whl` | `service/` | `integration-tests` |
-| `provisioning-service` | `provisioning_service-*.whl` | `provisioning-service/` | `integration-tests`, `service` |
+| `provisioning-service` | `provisioning_service-*.whl` | `domains/vms/provisioning/service/` | `integration-tests`, `service` |
 | `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `core/storefront-client/` | `storefront`, `integration-tests`, `provisioning-service` |
 | `arkhai-registry-client` | `arkhai_registry_client-*.whl` | `core/registry-client/` | `integration-tests` |
 
@@ -2694,7 +2694,7 @@ cd core/registry && make reinit && make test-integration
 |---|---|---|---|---|
 | `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `StorefrontClient` | `SyncStorefrontClient` | `storefront`, `integration-tests` |
 | `core/registry-client/` | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `integration-tests`, `registry-service` tests |
-| `provisioning-service/src/client/` | `provisioning_service-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `integration-tests`, `service` shim |
+| `domains/vms/provisioning/service/src/client/` | `provisioning_service-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `integration-tests`, `service` shim |
 
 `arkhai-storefront-client` exposes EIP-191-signed methods on both
 `StorefrontClient` (async) and `SyncStorefrontClient` (sync):

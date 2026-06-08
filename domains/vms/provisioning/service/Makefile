@@ -5,7 +5,7 @@
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
+DIST_DIR ?= $(abspath $(CURDIR)/../../../../.dist)
 
 install: ## Install dependencies using uv
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Install from https://docs.astral.sh/uv/"; exit 1; }
@@ -19,7 +19,7 @@ reinit: ## Force-reinstall internal wheels after make dist. Use when bumping int
 # ── Paths ─────────────────────────────────────────────────────────────────────
 # Absolute path to compute-provisioning-iac, resolved from this Makefile's
 # directory regardless of where make is invoked from.
-IAC_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../compute-provisioning-iac)
+IAC_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../../../compute-provisioning-iac)
 
 # ── Local dev ─────────────────────────────────────────────────────────────────
 
@@ -67,7 +67,7 @@ build-image: ## Build a single unified image
 		--build-arg APPUSER_UID=$(APPUSER_UID) \
 		--build-arg APPUSER_GID=$(APPUSER_GID) \
 		-t $(IMAGE_NAME):$(IMAGE_TAG) \
-		-f Dockerfile ..
+		-f Dockerfile ../../../..
 	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
 
 deploy: deploy-provisioning ## Deploy the provisioning service container

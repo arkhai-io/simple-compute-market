@@ -201,7 +201,7 @@ services:
       retries: 3
 
   # 5. Provisioning service.
-  # Configuration is bundled in the image (provisioning-service/src/settings.toml,
+  # Configuration is bundled in the image (domains/vms/provisioning/service/src/settings.toml,
   # plus dynaconf profile loading via ACTIVE_PROFILES). Compose-time
   # overrides go in `environment:` below.
   provisioning:
