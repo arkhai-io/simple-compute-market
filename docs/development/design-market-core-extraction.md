@@ -236,8 +236,9 @@ vocabulary.
 - **Still present:** the current compute buyer keeps compatibility
   adapters for `build_escrow_proposal`, `derive_prices`,
   `build_escrow_terms`, `create_escrow`, `confirm_settlement`, and
-  `chain`. Several are consecutive or bundled steps the core has no
-  reason to separate, but call sites still use them.
+  `chain`. The `market buy` call site now constructs explicit
+  `negotiate` / `settle` hooks through those adapters; direct legacy
+  callers and tests can still use the fine-grained parameters.
 - **Target** (collapse toward the two-hook surface above):
   - `derive_prices` → fold into negotiation-policy setup (bisection's
     bounds are policy input; a non-bisection policy supplies its own).
@@ -247,9 +248,9 @@ vocabulary.
     step, not a separate gate; into `negotiate`.
   - `build_escrow_terms` + `create_escrow` → one `settle: Terms →
 Receipt`; "materialize then submit" is internal factoring.
-  - once call sites move to instantiation-owned hooks, `run_buy`'s
-    from-above signature can drop the legacy prices/escrow construction
-    parameters entirely.
+  - once direct legacy callers are retired, `run_buy`'s from-above
+    signature can drop the legacy prices/escrow construction parameters
+    entirely.
 - **Watch:** the DI points exist partly for test isolation (run the
   orchestrator without alkahest-py). Preserve that by letting the
   _instantiation_ inject test doubles for `negotiate`/`settle`, rather
@@ -288,10 +289,10 @@ Receipt`; "materialize then submit" is internal factoring.
    can be swapped for correction or softer matching.
 2. **Seam 2** (in progress): reduce the six behavior injections to
    `negotiate` + `settle`. The buyer orchestrator now has the two-hook
-   surface and compatibility adapters; remaining work is moving the compute
-   call sites onto those hooks, then applying the same boundary to the
-   seller per-round path. No packaging change yet — still inside
-   `buyer/` + `storefront/`.
+   surface, compatibility adapters, and the `market buy` call site uses
+   explicit hooks. Remaining work is retiring direct legacy callers where
+   practical, then applying the same boundary to the seller per-round path.
+   No packaging change yet — still inside `buyer/` + `storefront/`.
 3. **Seam 3**: `ProvisionTerms` opaque in core, concrete in compute;
    negotiate wire change + client wheel bumps + e2e migration.
 4. **Seam 4**: extract `market-core` package; split `buyer`/`storefront`
@@ -304,8 +305,8 @@ Receipt`; "materialize then submit" is internal factoring.
 Each phase keeps the branch green and the e2e suite passing. Seam 2 is the
 current target and the one that most directly files the most-touched code
 (negotiation) against the principle. It is worth doing even if 3–4 are
-deferred — once call sites use `negotiate` + `settle` directly, the later
-packaging extraction is mostly a move.
+deferred — once production paths use `negotiate` + `settle` directly, the
+later packaging extraction is mostly a move.
 
 ## What's deferred / non-goals
 

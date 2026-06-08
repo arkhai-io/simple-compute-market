@@ -73,10 +73,10 @@ Infrastructure-side (compute-market-internal-infra):
   and `settle` hooks and composes only discover → negotiate → settle at
   the top level. The current compute buyer still adapts the legacy hooks
   (`build_escrow_proposal`, `derive_prices`, `build_escrow_terms`,
-  `create_escrow`, `confirm_settlement`, `chain`) into that surface.
-  Remaining work is moving call sites onto instantiation-owned
-  `negotiate`/`settle` hooks and then applying the same boundary to the
-  seller path.
+  `create_escrow`, `confirm_settlement`, `chain`) into that surface, and
+  `market buy` now constructs explicit hooks through those adapters.
+  Remaining work is retiring direct legacy callers where practical and then
+  applying the same boundary to the seller path.
 - `ProvisionTerms` is compute-flavored (`ssh_public_key`/`duration_seconds`/`compute_resource`) → make the core carry delivery terms as an opaque schema blob (as the registry already does with `offer_resource`).
 - The market skeleton lives inside `buyer/` + `storefront/` tangled with compute code → extract `market-core` so the package graph expresses the joint the `run_buy(...)` signature already implies.
 

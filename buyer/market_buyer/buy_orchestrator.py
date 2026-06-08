@@ -632,22 +632,15 @@ def run_buy(
                 "build_escrow_proposal=..."
             )
 
-        def _legacy_negotiator(
-            candidate_matches: list[dict[str, Any]],
-            emit: Callable[[str, dict], None],
-        ) -> NegotiationResult:
-            return _legacy_negotiate_matches(
-                matches=candidate_matches,
-                config=config,
-                constraints=constraints,
-                provision=provision,
-                build_escrow_proposal=build_escrow_proposal,
-                max_negotiation_rounds=max_negotiation_rounds,
-                derive_prices=derive_prices,
-                chain=chain,
-                on_event=emit,
-            )
-        negotiator = _legacy_negotiator
+        negotiator = make_legacy_negotiate_hook(
+            config=config,
+            constraints=constraints,
+            provision=provision,
+            build_escrow_proposal=build_escrow_proposal,
+            max_negotiation_rounds=max_negotiation_rounds,
+            derive_prices=derive_prices,
+            chain=chain,
+        )
 
     settler = settle
     if settler is None:
@@ -657,27 +650,16 @@ def run_buy(
                 "build_escrow_terms=... and create_escrow=..."
             )
 
-        def _legacy_settler(
-            negotiation: NegotiationResult,
-            emit: Callable[[str, dict], None],
-        ) -> BuyResult:
-            if negotiation.match is None or negotiation.outcome is None:
-                raise ValueError("settle hook received no selected negotiation")
-            return _settle_one(
-                match=negotiation.match,
-                outcome=negotiation.outcome,
-                config=config,
-                provision=provision,
-                build_escrow_terms=build_escrow_terms,
-                create_escrow=create_escrow,
-                confirm_settlement=confirm_settlement,
-                settlement_poll_interval=settlement_poll_interval,
-                settlement_total_timeout=settlement_total_timeout,
-                sleep=sleep,
-                on_event=emit,
-                attempts=negotiation.attempts,
-            )
-        settler = _legacy_settler
+        settler = make_legacy_settle_hook(
+            config=config,
+            provision=provision,
+            build_escrow_terms=build_escrow_terms,
+            create_escrow=create_escrow,
+            confirm_settlement=confirm_settlement,
+            settlement_poll_interval=settlement_poll_interval,
+            settlement_total_timeout=settlement_total_timeout,
+            sleep=sleep,
+        )
 
     capped = matches[:max_matches_to_try]
     _event("aggregated", {
@@ -705,6 +687,42 @@ def run_buy(
     return settler(negotiation, _event)
 
 
+def make_legacy_negotiate_hook(
+    *,
+    config: BuyConfig,
+    constraints: BuyConstraints,
+    provision: ProvisionTerms,
+    build_escrow_proposal: BuildEscrowProposalFn,
+    max_negotiation_rounds: int,
+    derive_prices: Optional[Callable[[dict[str, Any]], tuple[int, int]]],
+    chain: Optional[list[Any]],
+) -> NegotiateFn:
+    """Build the current compute-instantiated negotiate hook.
+
+    The returned hook absorbs the old fine-grained negotiation injections:
+    accepted-escrow proposal construction, per-listing price derivation,
+    buyer policy chain, and aggregation policy execution.
+    """
+
+    def _hook(
+        matches: list[dict[str, Any]],
+        on_event: Callable[[str, dict], None],
+    ) -> NegotiationResult:
+        return _legacy_negotiate_matches(
+            matches=matches,
+            config=config,
+            constraints=constraints,
+            provision=provision,
+            build_escrow_proposal=build_escrow_proposal,
+            max_negotiation_rounds=max_negotiation_rounds,
+            derive_prices=derive_prices,
+            chain=chain,
+            on_event=on_event,
+        )
+
+    return _hook
+
+
 def _legacy_negotiate_matches(
     *,
     matches: list[dict[str, Any]],
@@ -717,13 +735,6 @@ def _legacy_negotiate_matches(
     chain: Optional[list[Any]],
     on_event: Callable[[str, dict], None],
 ) -> NegotiationResult:
-    """Current compute-instantiated negotiate hook.
-
-    This adapter absorbs the old fine-grained negotiation injections:
-    accepted-escrow proposal construction, per-listing price derivation,
-    buyer policy chain, and aggregation policy execution.
-    """
-
     attempts: list[dict[str, Any]] = []
 
     async def _negotiate(match: dict[str, Any]) -> NegotiationOutcome:
@@ -892,6 +903,43 @@ def _legacy_negotiate_matches(
 
     match, outcome = selected
     return NegotiationResult(match=match, outcome=outcome, attempts=attempts)
+
+
+def make_legacy_settle_hook(
+    *,
+    config: "BuyConfig",
+    provision: ProvisionTerms,
+    build_escrow_terms: BuildEscrowTermsFn,
+    create_escrow: CreateEscrowFn,
+    confirm_settlement: Optional[Callable[["AgreedTerms", dict[str, Any]], bool]],
+    settlement_poll_interval: float,
+    settlement_total_timeout: float,
+    sleep: Callable[[float], None],
+) -> SettleFn:
+    """Build the current compute-instantiated settlement hook."""
+
+    def _hook(
+        negotiation: NegotiationResult,
+        on_event: Callable[[str, dict], None],
+    ) -> BuyResult:
+        if negotiation.match is None or negotiation.outcome is None:
+            raise ValueError("settle hook received no selected negotiation")
+        return _settle_one(
+            match=negotiation.match,
+            outcome=negotiation.outcome,
+            config=config,
+            provision=provision,
+            build_escrow_terms=build_escrow_terms,
+            create_escrow=create_escrow,
+            confirm_settlement=confirm_settlement,
+            settlement_poll_interval=settlement_poll_interval,
+            settlement_total_timeout=settlement_total_timeout,
+            sleep=sleep,
+            on_event=on_event,
+            attempts=negotiation.attempts,
+        )
+
+    return _hook
 
 
 def _settle_one(

@@ -381,9 +381,24 @@ class TestBuyFrom:
             lambda **kw: lambda escrows: [],
         )
 
+        def fake_make_negotiate_hook(**kwargs):
+            captured["proposal"] = kwargs["build_escrow_proposal"](listing)
+
+            def _hook(*_a, **_kw):
+                raise AssertionError("fake run_buy should not call negotiate hook")
+
+            return _hook
+
+        monkeypatch.setattr(
+            "market_buyer.groups.buy.make_legacy_negotiate_hook",
+            fake_make_negotiate_hook,
+        )
+
         def fake_run_buy(**kwargs):
             captured["config"] = kwargs["config"]
-            captured["proposal"] = kwargs["build_escrow_proposal"](listing)
+            assert "negotiate" in kwargs
+            assert "settle" in kwargs
+            assert "build_escrow_proposal" not in kwargs
             return BuyResult(status="ready", negotiation_id="neg-1", rounds=1)
 
         monkeypatch.setattr("market_buyer.groups.buy.run_buy", fake_run_buy)

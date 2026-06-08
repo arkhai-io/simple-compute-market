@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Optional
 
 import typer
@@ -31,6 +32,8 @@ from ..buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
     extract_seller_min_price,
+    make_legacy_negotiate_hook,
+    make_legacy_settle_hook,
     query_registry_for_matches_multi,
     run_buy,
 )
@@ -660,7 +663,6 @@ def register(app: typer.Typer) -> None:
         # prompt the user (interactive) or auto-pick by ERC20 balance
         # (--yes). Returning None skips the candidate when no entry is
         # on the buyer's chain or matches --token-contract.
-        import time as _time
         from ..escrow_selection import select_escrow_entry
 
         def build_escrow_proposal_for_match(match: dict) -> EscrowProposal | None:
@@ -692,7 +694,7 @@ def register(app: typer.Typer) -> None:
                 literal_fields=literal_fields,
                 rates=entry.get("rates") or [],
                 demands=demands,
-                expiration_unix=int(_time.time()) + int(expiration_seconds),
+                expiration_unix=int(time.time()) + int(expiration_seconds),
             )
 
         run_log = RunLog.start(
@@ -786,22 +788,36 @@ def register(app: typer.Typer) -> None:
             from market_buyer.buyer_client import _load_buyer_chain
             negotiation_chain = _load_buyer_chain(policies=policies, policy_mode=policy_mode)
 
+        negotiate_hook = make_legacy_negotiate_hook(
+            config=config,
+            constraints=constraints,
+            provision=provision,
+            build_escrow_proposal=build_escrow_proposal_for_match,
+            max_negotiation_rounds=max_rounds,
+            derive_prices=None,
+            chain=negotiation_chain,
+        )
+        settle_hook = make_legacy_settle_hook(
+            config=config,
+            provision=provision,
+            build_escrow_terms=build_escrow_terms,
+            create_escrow=create_escrow,
+            confirm_settlement=confirm_settlement_cb,
+            settlement_poll_interval=poll_interval,
+            settlement_total_timeout=settlement_timeout,
+            sleep=time.sleep,
+        )
+
         try:
             result = run_buy(
                 config=config,
                 constraints=constraints,
                 provision=provision,
-                build_escrow_proposal=build_escrow_proposal_for_match,
-                build_escrow_terms=build_escrow_terms,
-                create_escrow=create_escrow,
+                negotiate=negotiate_hook,
+                settle=settle_hook,
                 matches=matches,
                 max_matches_to_try=max_matches,
-                max_negotiation_rounds=max_rounds,
-                settlement_poll_interval=poll_interval,
-                settlement_total_timeout=settlement_timeout,
                 on_event=_observe,
-                confirm_settlement=confirm_settlement_cb,
-                chain=negotiation_chain,
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))
