@@ -7,7 +7,7 @@ Mocks the HTTP transport and verifies that the negotiation loop:
 - signs every request with a timestamp + EIP-191 signature
 
 The pure decision logic lives in ``bisection_middleware`` / ``rl_middleware``
-and is exercised in policy/tests/unit/test_negotiation_strategy.py —
+and is exercised in kit/policy/tests/unit/test_negotiation_strategy.py —
 this file just covers the HTTP loop wrapping the chain.
 """
 

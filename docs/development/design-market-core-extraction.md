@@ -353,11 +353,10 @@ Receipt`; "materialize then submit" is internal factoring.
 
 ### 5. Package migration prerequisites
 
-The remaining physical moves from top-level packages (`policy/`, `buyer/`,
-`storefront/`) to
-`core/`, `kit/`, and `domains/vms/` should happen after the code boundaries
-express the target graph. Otherwise the move becomes a rename plus a
-behavior refactor plus a deployment refactor in one step. The protocol
+The remaining physical moves from top-level packages (`buyer/`,
+`storefront/`) to `core/`, `kit/`, and `domains/vms/` should happen after
+the code boundaries express the target graph. Otherwise the move becomes a
+rename plus a behavior refactor plus a deployment refactor in one step. The protocol
 client packages (`registry-client`, `storefront-client`) have already moved
 under `core/` while preserving their wheel/import names; the registry
 service has moved to `core/registry`, and the provisioning service has
@@ -366,8 +365,8 @@ wheel/import names.
 
 Recommended order:
 
-1. **Done: split `policy/` first.** `policy/` now keeps only the
-   schema-invariant middleware machinery on the path to `kit/policy`:
+1. **Done: split and move `kit/policy/`.** `kit/policy/` now keeps only the
+   schema-invariant middleware machinery:
    `NegotiationRound`, `NegotiationDecision`, the context carrier,
    middleware-chain execution, and policy discovery. VM/Alkahest-specific
    behavior moved to concept homes under
@@ -375,8 +374,7 @@ Recommended order:
    extraction from `proposal.fields["amount"]`, bisection over token
    amounts, escrow-kind dispatch, schema validation, and
    inventory/resource guards. The core can require "run this policy chain"
-   without knowing those meanings. The physical `policy/` → `kit/policy`
-   move remains part of package migration.
+   without knowing those meanings.
 2. **In progress: cut the buyer domain boundary.**
    `domains/vms/listings/` now owns VM models, resource adapters, resource
    CSV import, compute listing reconciliation, filter construction, listing
@@ -495,10 +493,10 @@ buyer/market_buyer/groups/listing.py          seam 0b — plugin-shaped renderin
 buyer/market_buyer/schema_plugins/ (new)      seam 0b — eventual plugin registry/loading boundary
 storefront/.../utils/sync_negotiation.py      seam 4 — per-round protocol; seam 1 normalization only
 storefront/.../utils/action_executor.py       seam 4 — stateful storefront wrapper; registry publication now delegates to market_core
-policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escrow guard
+kit/policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escrow guard
 service/src/service/schemas.py                seam 3 — ProvisionTerms
 service/src/service/clients/                  kit — must not import up into core
-policy/                                       package migration — split generic chain machinery from VM negotiation/settlement policies
+kit/policy/                                   package migration — generic policy-chain machinery; wheel/import names unchanged
 domains/vms/provisioning/service/             package migration — VM provisioning service; wheel/import names unchanged
 core/registry/                                package migration — core registry service; wheel/import names unchanged
 core/registry-client/, core/storefront-client/  package migration — core protocol clients; Python import names unchanged

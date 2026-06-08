@@ -116,7 +116,7 @@ def policy_train(
       arkhai_negotiator_buyer.pt
 
     Requires the training extras installed (pufferlib, torch). Install
-    with ``uv pip install -e ".[training]"`` from the ``policy/``
+    with ``uv pip install -e ".[training]"`` from the ``kit/policy/``
     directory (or ``market-policy[training]`` from a sibling). The
     storefront / buyer ``[rl]`` extras are inference-only and don't
     include pufferlib.

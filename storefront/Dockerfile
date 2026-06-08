@@ -18,7 +18,7 @@ COPY .dist/ /.dist/
 
 COPY storefront/pyproject.toml storefront/uv.lock storefront/entrypoint.sh ./
 COPY service/ ../service/
-COPY policy/ ../policy/
+COPY kit/policy/ ../policy/
 
 # Pass the GCP service account JSON key from GitHub Actions secrets to authenticate
 # against GCP Artifact Registry for the alkahest-py private Python package.
@@ -89,7 +89,7 @@ COPY --chown=appuser:appuser storefront/src ./src
 COPY --chown=appuser:appuser storefront/scripts ./scripts
 COPY --chown=appuser:appuser domains/ ./domains/
 COPY --chown=appuser:appuser service/ ../service/
-COPY --chown=appuser:appuser policy/ ../policy/
+COPY --chown=appuser:appuser kit/policy/ ../policy/
 
 # Complete the two-phase uv install: deps were installed with
 # --no-install-project in the builder stage (for layer caching);

@@ -42,7 +42,7 @@ market = "market_buyer.cli:app"
 # storefront so both sides drive negotiation through one engine.
 [tool.uv.sources]
 market-service = { path = "../service", editable = true }
-market-policy = { path = "../policy", editable = true }
+market-policy = { path = "../kit/policy", editable = true }
 torch = [
   { index = "pytorch-cpu" },
 ]

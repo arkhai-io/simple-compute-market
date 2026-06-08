@@ -10,7 +10,7 @@ The repo publishes five internal Python packages to PyPI via
 | `market-alkahest` | `kit/alkahest/` | 0.1.0 | `market-core` |
 | `market-config` | `kit/config/` | 0.1.0 | `market-alkahest` |
 | `market-service` | `service/` | 0.1.0 | `market-alkahest`, `market-config`, `market-core`, `market-identity` |
-| `market-policy` | `policy/` | 0.1.0 | `market-service` |
+| `market-policy` | `kit/policy/` | 0.1.0 | `market-service` |
 | `provisioning-service` | `domains/vms/provisioning/service/` | 0.1.2 | none |
 | `arkhai-storefront-client` | `core/storefront-client/` | 0.4.0 | none |
 | `arkhai-registry-client` | `core/registry-client/` | 0.2.0 | none |

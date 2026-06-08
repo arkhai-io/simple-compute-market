@@ -568,7 +568,7 @@ policy plugs in are:
   defaults. Buyer-side `reclaim_expired` is a separate post-expiry escape hatch
   and is not a seller refund.
 
-The negotiation hooks live in `market-policy` (package: `policy/`, import:
+The negotiation hooks live in `market-policy` (package: `kit/policy/`, import:
 `market_policy`); the buyer and seller import from the same wheel. The
 negotiation data model is symmetric — `NegotiationRound`,
 `NegotiationContext`, `NegotiationDecision` are shared. Each side
@@ -602,7 +602,7 @@ refunds, and operator alerting.
   installed.
 
 **Chain runner:** `run_negotiation_chain(chain, history, context)` in
-`policy/.../negotiation_middleware.py`. Loops middlewares in order;
+`kit/policy/src/market_policy/negotiation_middleware.py`. Loops middlewares in order;
 returns the first `Some<Response>`; raises if the chain exhausts (the
 terminal middleware must always return `Some`).
 
@@ -1648,7 +1648,7 @@ storefront server (override either with `--config <path>`).
 |---|---|---|---|
 | `market` | `buyer/` | Buyer runtime (pure HTTP client) | `buy`, `negotiate`, `order`, `escrow reclaim`, `network join/get-peers`, `config`, `logs` |
 | `market-storefront` | `storefront/` | Seller runtime | `register`, `serve`, `provide`, `escrow claim/refund`, `portfolio import-csv`, `network join/get-peers`, `config`, `logs` |
-| `market-policy` | `policy/` | Policy authoring tool | `train`, `eval`, `export` |
+| `market-policy` | `kit/policy/` | Policy authoring tool | `train`, `eval`, `export` |
 
 The two runtimes (`market`, `market-storefront`) share `network join`
 and `get-peers` because each participant manages their own ZeroTier

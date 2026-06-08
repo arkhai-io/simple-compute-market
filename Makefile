@@ -33,7 +33,7 @@ dist-storefront: ## Build market-storefront wheel into .dist/
 
 dist-policy: ## Build market-policy wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd policy && uv build --wheel --out-dir $(DIST_DIR)
+	cd kit/policy && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/market_policy-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: market-policy produced a platform-specific wheel -- must build inside Docker" && exit 1)
 

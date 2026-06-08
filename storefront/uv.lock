@@ -1681,7 +1681,7 @@ dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 [[package]]
 name = "market-policy"
 version = "0.1.0"
-source = { editable = "../policy" }
+source = { editable = "../kit/policy" }
 dependencies = [
     { name = "market-service", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -1806,7 +1806,7 @@ requires-dist = [
     { name = "jupyter", marker = "extra == 'jupyter'", specifier = ">=1.0.0,<2.0.0" },
     { name = "market-core", editable = "../core" },
     { name = "market-identity", editable = "../kit/identity" },
-    { name = "market-policy", editable = "../policy" },
+    { name = "market-policy", editable = "../kit/policy" },
     { name = "market-service" },
     { name = "mypy", marker = "extra == 'lint'", specifier = ">=1.15.0,<2.0.0" },
     { name = "opentelemetry-exporter-gcp-trace", specifier = ">=1.9.0,<2.0.0" },

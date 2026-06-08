@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - 'service/**'
-      - 'policy/**'
+      - 'kit/policy/**'
       - 'domains/vms/provisioning/service/**'
       - 'core/storefront-client/**'
       - 'core/registry-client/**'
@@ -36,7 +36,7 @@ permissions:
 #                         -> no internal deps
 #
 # When market-service's version bumps, market-policy can pick it up on a
-# subsequent push that touches policy/. There is no sequencing inside one
+# subsequent push that touches kit/policy/. There is no sequencing inside one
 # run -- both publish in parallel against the *previous* market-service
 # version on PyPI. That is fine because pyproject.toml uses `>=` constraints,
 # not exact pins.
@@ -60,7 +60,7 @@ jobs:
             service:
               - 'service/**'
             policy:
-              - 'policy/**'
+              - 'kit/policy/**'
             provisioning-service:
               - 'domains/vms/provisioning/service/**'
             storefront-client:
@@ -121,7 +121,7 @@ jobs:
       - name: Check version not yet on PyPI
         id: check
         env:
-          PKG_DIR: policy
+          PKG_DIR: kit/policy
         run: |
           set -euo pipefail
           version=$(awk -F'"' '/^version *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
@@ -136,7 +136,7 @@ jobs:
           fi
       - name: Build wheel + sdist
         if: steps.check.outputs.skip == 'false'
-        working-directory: policy
+        working-directory: kit/policy
         # --no-sources strips tool.uv.sources overrides so the wheel records
         # the plain `market-service` dep instead of a workspace path.
         run: uv build --no-sources
@@ -144,7 +144,7 @@ jobs:
         if: steps.check.outputs.skip == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: policy/dist
+          packages-dir: kit/policy/dist
 
   publish-provisioning-service:
     needs: detect-changes

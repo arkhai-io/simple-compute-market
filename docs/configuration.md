@@ -347,5 +347,5 @@ registry would conflict if a folder name overlapped.)
 - Seller settings schema: `storefront/src/market_storefront/settings.toml`.
 - Buyer settings example: `buyer/market_buyer/groups/config.py` (the
   `init-user` template comment).
-- Middleware module: `policy/src/market_policy/negotiation_middleware.py`.
+- Middleware module: `kit/policy/src/market_policy/negotiation_middleware.py`.
 - Aggregation module: `buyer/market_buyer/aggregation.py`.

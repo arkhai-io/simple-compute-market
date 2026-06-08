@@ -16,7 +16,7 @@
 
 # ── service / policy / domains (imported by storefront at runtime) ────
 !service/
-!policy/
+!kit/policy/
 !domains/
 
 # ── Global excludes ──────────────────────────────────────────────────

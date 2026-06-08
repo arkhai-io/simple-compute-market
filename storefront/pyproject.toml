@@ -80,7 +80,7 @@ environments = [
 [tool.uv.sources]
 market-core = { path = "../core", editable = true }
 market-identity = { path = "../kit/identity", editable = true }
-market-policy = { path = "../policy", editable = true }
+market-policy = { path = "../kit/policy", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]
@@ -139,7 +139,7 @@ build-backend = "hatchling.build"
 
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "..", "../policy/src", "../service/src"]
+pythonpath = ["src", "..", "../kit/policy/src", "../service/src"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 

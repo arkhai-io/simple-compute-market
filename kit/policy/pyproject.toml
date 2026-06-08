@@ -53,7 +53,7 @@ allow-direct-references = true
 packages = ["src/market_policy"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "..", "../service/src", "../kit/alkahest/src"]
+pythonpath = ["src", "../..", "../../service/src", "../alkahest/src"]
 asyncio_mode = "auto"
 
 [tool.uv]
@@ -68,7 +68,7 @@ no-build-isolation-package = ["pufferlib"]
 pufferlib = ["setuptools", "Cython", "numpy<2"]
 
 [tool.uv.sources]
-market-service = { path = "../service", editable = true }
+market-service = { path = "../../service", editable = true }
 # Pin torch to the CPU index so installs don't hit the multi-GB CUDA
 # wheels on hosts that don't have an NVIDIA GPU. Trainers with a GPU
 # can override this in their own venv.

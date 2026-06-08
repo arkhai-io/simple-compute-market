@@ -171,7 +171,7 @@ cd ..
 Policy package:
 
 ```bash
-cd policy
+cd kit/policy
 uv sync --dev
 uv run pytest tests/unit/ -v
 cd ..
