@@ -21,6 +21,11 @@ from domains.vms.listings.models import (
     TokenResource,
     VirtualizationType,
 )
+from domains.vms.listings.host_csv_importer import (
+    HostImportReport,
+    HostImportRowResult,
+    upsert_hosts_from_csv,
+)
 from domains.vms.listings.pricing import (
     extract_compute_from_order,
     extract_initial_price_from_order,
@@ -56,6 +61,13 @@ from domains.vms.listings.resources import (
     parse_resource_from_dict,
     register_resource_adapter,
 )
+from domains.vms.listings.resource_csv_importer import (
+    ImportReport,
+    ImportRowResult,
+    parse_accepted_escrows_cell,
+    upsert_resources_from_csv,
+    upsert_resources_from_csv_content,
+)
 from domains.vms.listings.strategy import (
     determine_strategy_from_order,
     determine_strategy_from_resources,
@@ -90,6 +102,10 @@ __all__ = [
     "held_gpu_counts",
     "held_gpu_counts_by_resource",
     "Host",
+    "HostImportReport",
+    "HostImportRowResult",
+    "ImportReport",
+    "ImportRowResult",
     "Listing",
     "listing_pool_key",
     "listing_resource_key",
@@ -97,6 +113,7 @@ __all__ = [
     "mark_derived_listings_closed",
     "mark_derived_listings_open",
     "parse_resource_from_dict",
+    "parse_accepted_escrows_cell",
     "Region",
     "register_resource_adapter",
     "ResourceAdapter",
@@ -108,5 +125,8 @@ __all__ = [
     "stale_open_listing_ids",
     "TokenErc20ResourceAdapter",
     "TokenResource",
+    "upsert_hosts_from_csv",
+    "upsert_resources_from_csv",
+    "upsert_resources_from_csv_content",
     "VirtualizationType",
 ]
