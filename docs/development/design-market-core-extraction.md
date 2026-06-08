@@ -144,44 +144,71 @@ Target split:
 
 The registry already advertises its schema through `filter-spec.yaml`; the
 missing packaging piece is a stable schema identity/version that lets the
-buyer select the right schema plugin for a registry. Until that mechanism
-exists, the current buyer CLI should be treated as the compute schema
-plugin embedded in the `buyer/` package. A generic fallback such as
-repeatable `--filter name=value` can land early because it aligns with the
-registry's filter-spec without requiring plugin discovery.
+buyer select the right schema plugin for a registry. Schema plugins are a
+real target, not just documentation: registry/schema maintainers should be
+able to distribute buyer-side packages that declare named filter flags,
+render listings, and build the schema-specific registry query. Until that
+mechanism exists, the current buyer CLI should be treated as the compute
+schema plugin embedded in the `buyer/` package. Repeatable
+`--filter name=value` is only the generic fallback: it aligns with the
+registry's filter-spec and keeps unknown schemas usable, but it is not a
+substitute for schema-maintainer plugins with first-class CLI vocabulary.
 
 ## Concrete seams (the actual work)
 
-Ordered cheap → structural. The first two are independent, land-anytime
-wins; the last two are the packaging payoff.
+Ordered by remaining implementation value. The completed buyer CLI repair
+is kept here as a historical seam because later plugin work builds on it.
+The next executable change is the escrow guard middleware.
 
-### 0. Buyer CLI settlement/run-log repair
+### 0. Buyer CLI settlement/run-log repair — mostly done
 
 This is a correctness slice that can land independently of the core
 extraction. It fixes the current CLI drift caused by generic listing
 escrows and listing-level arbiter demands.
 
-- **Now:** `market buy` has the seller-echoed `EscrowProposal` in memory
-  and can settle from it, but split flows (`market negotiate` followed by
-  `market settle --from` or `market escrow create --run`) persist only
-  scalar fragments in the run log: seller URL, listing ID, agreed amount,
-  duration, token/chain hints, and legacy recipient fields. The follow-up
-  commands then reconstruct an ERC20-shaped proposal from config. That is
-  wrong for non-ERC20 escrows and wrong for demands-as-listing-data.
-- **Target:** on agreement, persist the accepted `EscrowProposal` and
-  accepted delivery/provision terms as the canonical run-log handoff.
-  `market settle --from` and `market escrow create --run` must replay that
-  accepted proposal into the settlement hook. Token/chain flags become
-  legacy overrides only for old logs or are removed from these commands.
-- **Also:** add generic repeatable `--filter name=value` to `market buy`
-  and `market listing list` while keeping compute-specific flags as
-  convenience aliases. Improve listing rendering to show accepted escrow
-  kind/shape and top-level `demands`, not just ERC20-ish token/price
-  columns.
+- **Done:** on agreement, run logs persist the accepted
+  `EscrowProposal`, accepted `EscrowTerms`, and accepted delivery/provision
+  terms as the canonical handoff. `market settle --from` and
+  `market escrow create --run` replay the accepted proposal/terms instead
+  of reconstructing an ERC20-shaped proposal from token/chain fragments.
+  Token/chain flags are legacy helpers for old logs and explicit override
+  cases, not the generic settlement path.
+- **Done:** `market buy` and `market listing list` accept repeatable
+  `--filter name=value` passthrough while keeping compute-specific flags as
+  convenience aliases. Listing rendering now shows accepted escrow
+  kind/shape instead of relying on ERC20-ish token/price columns.
+- **Verify/cleanup:** ensure top-level listing `demands` render wherever
+  listing detail output should expose payment constraints, and keep old-log
+  compatibility code clearly marked as legacy rather than schema core.
 - **Boundary:** this does not require plugin discovery, `market-core`, or a
   `ProvisionTerms` wire change. It makes the current compute-instantiated
   CLI honest about the new listing/proposal model so later extraction is a
   move, not another behavior change.
+
+### 0b. Buyer CLI schema plugin acceptance
+
+This is the remaining buyer-side schema boundary. It is related to seam 0,
+but it is not the same thing: seam 0 made the embedded compute CLI honest;
+this seam lets registries/schema maintainers distribute their own buyer
+vocabulary.
+
+- **Now:** the registry backend is filter-spec-driven, and the CLI has a
+  generic `--filter name=value` fallback, but named flags and presentation
+  remain embedded compute behavior (`--gpu-model`, `--ram-gb-min`,
+  `--virt`, token-oriented selection shortcuts, compute listing tables).
+- **Target:** a registry advertises a stable schema identity/version, and
+  the buyer CLI can resolve a compatible installed plugin for that schema.
+  The plugin owns named filter options, conversion to registry query
+  params, listing/resource rendering, price-floor extraction,
+  schema-specific prompts/validation, and accepted-escrow selection UX.
+- **Fallback contract:** when no plugin is installed, the core CLI can
+  still query a registry through `--filter name=value` and display a
+  generic listing shape. That fallback is intentionally lower-level and
+  should not accrete compute-specific behavior.
+- **Boundary:** this can be sketched before extraction, but it becomes most
+  useful after the `market-core` package exists. Until there is a second
+  schema package, keep the current compute plugin embedded and make its
+  plugin-shaped functions explicit enough to move later.
 
 ### 1. Escrow-shape validation: pre-chain gate → middleware
 
@@ -255,26 +282,25 @@ Receipt`; "materialize then submit" is internal factoring.
 1. **Seam 1** (cheap, independent, no signature change): escrow guard →
    chain middleware. Lands behind existing negotiation tests; immediately
    unlocks counter-correction and operator-swappable matching.
-2. **Seam 0** (buyer CLI repair, independent correctness slice): persist
-   accepted terms/proposals in run logs; make split settlement commands
-   consume them; add generic filter passthrough + better listing rendering.
-   This can land before any extraction and should be done while the buyer
-   CLI is visibly out of sync.
-3. **Seam 2** (hook collapse): reduce the six behavior injections to
+2. **Seam 2** (hook collapse): reduce the six behavior injections to
    `negotiate` + `settle`. Touches `run_buy`'s signature and the seller
    per-round path; preserve test isolation by injecting doubles at the
    two-hook granularity. No packaging change yet — still inside
    `buyer/` + `storefront/`.
-4. **Seam 3**: `ProvisionTerms` opaque in core, concrete in compute;
+3. **Seam 3**: `ProvisionTerms` opaque in core, concrete in compute;
    negotiate wire change + client wheel bumps + e2e migration.
-5. **Seam 4**: extract `market-core` package; split `buyer`/`storefront`
+4. **Seam 4**: extract `market-core` package; split `buyer`/`storefront`
    into skeleton-consumers; verify the kit has no upward imports.
+5. **Seam 0b**: add schema plugin acceptance/discovery for the buyer CLI.
+   The compute schema can remain the embedded first plugin until a second
+   schema exists, but plugin loading, schema identity/version matching, and
+   fallback `--filter` behavior should be explicit.
 
 Each phase keeps the branch green and the e2e suite passing. Seam 1 is the
-isolated cheap win; seam 2 is the one that most directly files the
-most-touched code (negotiation) against the principle and is worth doing
-even if 3–4 are deferred — once the surface is `negotiate` + `settle`, the
-later packaging extraction is mostly a move.
+isolated cheap win and the next coding target. Seam 2 is the one that most
+directly files the most-touched code (negotiation) against the principle
+and is worth doing even if 3–4 are deferred — once the surface is
+`negotiate` + `settle`, the later packaging extraction is mostly a move.
 
 ## What's deferred / non-goals
 
@@ -285,23 +311,23 @@ later packaging extraction is mostly a move.
   later — composing orthogonally with the listing and negotiation schema, so
   swapping settlement is a from-below substitution available within any
   domain.
-- A formal plugin-discovery mechanism for schema packages. Until a second
-  schema exists, `market-compute` can just be the current buyer+storefront
-  depending on the extracted core. The buyer CLI should still be shaped so
-  compute-specific filter flags and listing rendering are clearly
-  schema-plugin behavior, with generic `--filter` passthrough as the
-  interim bridge.
+- Shipping multiple schema plugins in this repo. The mechanism for loading
+  registry/schema-maintainer plugins is in scope, but until a second schema
+  exists, `market-compute` can just be the current buyer+storefront
+  depending on the extracted core. Generic `--filter` passthrough remains
+  the fallback for registries whose plugin is not installed.
 - Generic aggregation beyond the current buyer aggregation policy.
 
 ## File map
 
 ```
 buyer/market_buyer/buy_orchestrator.py        seam 2, 4 — skeleton + derive_prices peer
-buyer/market_buyer/groups/buy.py              seam 0, 2 — run-log handoff, filters, derive_prices wiring
-buyer/market_buyer/groups/negotiate.py        seam 0 — persist accepted proposal/terms
-buyer/market_buyer/groups/settle.py           seam 0 — consume accepted proposal/terms
-buyer/market_buyer/groups/escrow.py           seam 0 — consume accepted proposal/terms or retire split create
-buyer/market_buyer/groups/listing.py          seam 0 — generic filters + schema-aware rendering
+buyer/market_buyer/groups/buy.py              seam 0b, 2 — plugin-shaped filters, derive_prices wiring
+buyer/market_buyer/groups/negotiate.py        seam 0 legacy — accepted proposal/terms run-log handoff
+buyer/market_buyer/groups/settle.py           seam 0 legacy — consume accepted proposal/terms
+buyer/market_buyer/groups/escrow.py           seam 0 legacy — consume accepted proposal/terms or retire split create
+buyer/market_buyer/groups/listing.py          seam 0b — plugin-shaped rendering + generic fallback
+buyer/market_buyer/schema_plugins/ (new)      seam 0b — eventual plugin registry/loading boundary
 storefront/.../utils/sync_negotiation.py      seam 1, 4 — pre-chain gate + per-round protocol
 storefront/.../utils/action_executor.py       seam 4 — interleaved generic/compute logic
 policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escrow guard
