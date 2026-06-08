@@ -57,6 +57,16 @@ class NegotiateController:
 
         buyer_auth._verify(request, "negotiate_new", body.listing_id, body.buyer_address)
 
+        duration_seconds = body.provision_terms.duration_seconds
+        if duration_seconds is None or int(duration_seconds) <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "compute provision_terms.payload.duration_seconds "
+                    "must be > 0"
+                ),
+            )
+
         base_url = BASE_URL_OVERRIDE or ""
         try:
             result = await start_sync_negotiation(

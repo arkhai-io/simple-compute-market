@@ -785,6 +785,13 @@ async def start_sync_negotiation(
     requested_duration_seconds = (
         provision_terms.duration_seconds if provision_terms is not None else None
     )
+    if (
+        requested_duration_seconds is not None
+        and int(requested_duration_seconds) <= 0
+    ):
+        raise ValueError(
+            "compute provision_terms.payload.duration_seconds must be > 0"
+        )
     # Imports deferred so unit tests can patch the registry / thread store
     # without paying for the whole import graph.
     from market_policy.negotiation_thread import NegotiationThreadTransaction

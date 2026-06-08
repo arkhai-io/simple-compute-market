@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from service.schemas import COMPUTE_PROVISION_KIND, ProvisionTerms
 
 
@@ -47,9 +45,18 @@ def test_compute_provision_terms_parse_legacy_flat_shape():
     }
 
 
-def test_compute_provision_terms_reject_non_positive_duration():
-    with pytest.raises(ValueError, match="duration_seconds must be > 0"):
-        ProvisionTerms(duration_seconds=0, ssh_public_key="")
+def test_provision_terms_do_not_enforce_compute_duration_policy():
+    terms = ProvisionTerms(duration_seconds=0, ssh_public_key="")
+
+    assert terms.kind == "compute.v1"
+    assert terms.duration_seconds == 0
+    assert terms.model_dump() == {
+        "kind": "compute.v1",
+        "payload": {
+            "duration_seconds": 0,
+            "ssh_public_key": "",
+        },
+    }
 
 
 def test_non_compute_provision_terms_are_opaque():

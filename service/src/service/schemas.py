@@ -224,36 +224,16 @@ class ProvisionTerms(BaseModel):
             payload: dict[str, Any] = {}
             for key in legacy_keys:
                 if key in data:
-                    payload[key] = data.pop(key)
+                    raw = data.pop(key)
+                    if key == "duration_seconds" and raw is not None:
+                        try:
+                            raw = int(raw)
+                        except (TypeError, ValueError):
+                            pass
+                    payload[key] = raw
             data["kind"] = data.get("kind") or COMPUTE_PROVISION_KIND
             data["payload"] = payload
         return data
-
-    @model_validator(mode="after")
-    def _validate_compute_payload(self) -> "ProvisionTerms":
-        if self.kind != COMPUTE_PROVISION_KIND:
-            return self
-
-        raw_duration = self.payload.get("duration_seconds")
-        try:
-            duration = int(raw_duration)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "compute provision payload requires integer duration_seconds"
-            ) from exc
-        if duration <= 0:
-            raise ValueError(
-                "compute provision payload duration_seconds must be > 0"
-            )
-        self.payload["duration_seconds"] = duration
-
-        raw_key = self.payload.get("ssh_public_key", "")
-        if raw_key is None:
-            raw_key = ""
-        if not isinstance(raw_key, str):
-            raise ValueError("compute provision payload ssh_public_key must be a string")
-        self.payload["ssh_public_key"] = raw_key
-        return self
 
     @property
     def duration_seconds(self) -> int | None:
