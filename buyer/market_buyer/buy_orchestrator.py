@@ -1,19 +1,18 @@
 """Sequential buyer orchestrator — the "buyer is a pure client" realization.
 
-    result = run_buy(config, constraints, create_escrow=...)
+    result = run_buy(config, constraints, negotiate=..., settle=...)
 
-composes five closed-function stages in order:
+composes three closed-function stages in order:
 
     1. discover         — registry query for matching seller orders
-    2. negotiate        — buyer_client.negotiate_with_seller per match
-    3. create_escrow    — on-chain escrow creation (injected; see escrow_client)
-    4. submit_settlement — POST seller's /settle/{escrow_uid}
-    5. poll_settlement  — GET seller's /settle/{escrow_uid}/status until terminal
+    2. negotiate        — aggregation + per-match negotiation hook
+    3. settle           — create escrow, submit settlement, poll terminal state
 
 Nothing here runs a server or handles inbound HTTP. The buyer is a
 client that drives the deal end to end. Every HTTP call to the seller
-is signed by the buyer's wallet; `create_escrow` is injected so the
-orchestrator itself can be unit-tested without alkahest-py.
+is signed by the buyer's wallet. The current compute buyer still adapts
+legacy hooks such as `build_escrow_proposal`, `derive_prices`, and
+`create_escrow` into the top-level `negotiate` / `settle` surface.
 """
 
 from __future__ import annotations
@@ -507,6 +506,31 @@ class AgreedTerms:
     duration_seconds: int           # buyer's lease ask (negotiation init)
 
 
+@dataclass
+class NegotiationResult:
+    """Result of the buyer-side negotiate phase.
+
+    ``match`` and ``outcome`` are populated only when aggregation selected a
+    seller that agreed to terms. ``attempts`` carries per-candidate state for
+    run logs and failure reporting regardless of whether a winner exists.
+    """
+
+    match: Optional[dict[str, Any]] = None
+    outcome: Optional[NegotiationOutcome] = None
+    attempts: list[dict[str, Any]] = field(default_factory=list)
+    reason: str = "no_match_agreed_to_terms"
+
+
+NegotiateFn = Callable[
+    [list[dict[str, Any]], Callable[[str, dict], None]],
+    NegotiationResult,
+]
+SettleFn = Callable[
+    [NegotiationResult, Callable[[str, dict], None]],
+    BuyResult,
+]
+
+
 # ---------------------------------------------------------------------------
 # The orchestrator
 # ---------------------------------------------------------------------------
@@ -517,9 +541,11 @@ def run_buy(
     config: BuyConfig,
     constraints: BuyConstraints,
     provision: ProvisionTerms,
-    build_escrow_proposal: BuildEscrowProposalFn,
-    build_escrow_terms: BuildEscrowTermsFn,
-    create_escrow: CreateEscrowFn,
+    build_escrow_proposal: BuildEscrowProposalFn | None = None,
+    build_escrow_terms: BuildEscrowTermsFn | None = None,
+    create_escrow: CreateEscrowFn | None = None,
+    negotiate: NegotiateFn | None = None,
+    settle: SettleFn | None = None,
     matches: Optional[list[dict[str, Any]]] = None,
     max_matches_to_try: int = 5,
     max_negotiation_rounds: int = 10,
@@ -597,13 +623,107 @@ def run_buy(
     if not matches:
         return BuyResult(status="no_matches")
 
-    # --- 1b. Build the per-candidate negotiate callback ----------------
-    # The aggregation policy receives this curried callback and decides
-    # how to apply it: sequential first-agreed (the default), parallel
-    # comparison shopping, custom scoring, etc. Each call emits its own
-    # event stream tagged by listing_id (and negotiation_id once round 0
-    # returns) — consumers group on those keys to separate concurrent
-    # negotiations in the run log.
+    # --- 1b/2. Negotiate + aggregate -----------------------------------
+    negotiator = negotiate
+    if negotiator is None:
+        if build_escrow_proposal is None:
+            raise ValueError(
+                "run_buy requires either negotiate=... or "
+                "build_escrow_proposal=..."
+            )
+
+        def _legacy_negotiator(
+            candidate_matches: list[dict[str, Any]],
+            emit: Callable[[str, dict], None],
+        ) -> NegotiationResult:
+            return _legacy_negotiate_matches(
+                matches=candidate_matches,
+                config=config,
+                constraints=constraints,
+                provision=provision,
+                build_escrow_proposal=build_escrow_proposal,
+                max_negotiation_rounds=max_negotiation_rounds,
+                derive_prices=derive_prices,
+                chain=chain,
+                on_event=emit,
+            )
+        negotiator = _legacy_negotiator
+
+    settler = settle
+    if settler is None:
+        if build_escrow_terms is None or create_escrow is None:
+            raise ValueError(
+                "run_buy requires either settle=... or both "
+                "build_escrow_terms=... and create_escrow=..."
+            )
+
+        def _legacy_settler(
+            negotiation: NegotiationResult,
+            emit: Callable[[str, dict], None],
+        ) -> BuyResult:
+            if negotiation.match is None or negotiation.outcome is None:
+                raise ValueError("settle hook received no selected negotiation")
+            return _settle_one(
+                match=negotiation.match,
+                outcome=negotiation.outcome,
+                config=config,
+                provision=provision,
+                build_escrow_terms=build_escrow_terms,
+                create_escrow=create_escrow,
+                confirm_settlement=confirm_settlement,
+                settlement_poll_interval=settlement_poll_interval,
+                settlement_total_timeout=settlement_total_timeout,
+                sleep=sleep,
+                on_event=emit,
+                attempts=negotiation.attempts,
+            )
+        settler = _legacy_settler
+
+    capped = matches[:max_matches_to_try]
+    _event("aggregated", {
+        "policy": config.aggregation_policy or "best_price",
+        "match_count_after_cap": len(capped),
+    })
+
+    try:
+        negotiation = negotiator(capped, _event)
+    except RuntimeError as exc:
+        # A policy that didn't catch a per-candidate negotiation error.
+        return BuyResult(
+            status="exited",
+            reason=f"policy_error: {exc}",
+            attempts=[],
+        )
+
+    if negotiation.match is None or negotiation.outcome is None:
+        return BuyResult(
+            status="exited",
+            reason=negotiation.reason,
+            attempts=negotiation.attempts,
+        )
+
+    return settler(negotiation, _event)
+
+
+def _legacy_negotiate_matches(
+    *,
+    matches: list[dict[str, Any]],
+    config: BuyConfig,
+    constraints: BuyConstraints,
+    provision: ProvisionTerms,
+    build_escrow_proposal: BuildEscrowProposalFn,
+    max_negotiation_rounds: int,
+    derive_prices: Optional[Callable[[dict[str, Any]], tuple[int, int]]],
+    chain: Optional[list[Any]],
+    on_event: Callable[[str, dict], None],
+) -> NegotiationResult:
+    """Current compute-instantiated negotiate hook.
+
+    This adapter absorbs the old fine-grained negotiation injections:
+    accepted-escrow proposal construction, per-listing price derivation,
+    buyer policy chain, and aggregation policy execution.
+    """
+
     attempts: list[dict[str, Any]] = []
 
     async def _negotiate(match: dict[str, Any]) -> NegotiationOutcome:
@@ -638,7 +758,7 @@ def run_buy(
         neg_ctx: dict[str, Any] = {"listing_id": listing_id}
 
         def _emit_neg(stage: str, **fields: Any) -> None:
-            _event(stage, {**neg_ctx, **fields})
+            on_event(stage, {**neg_ctx, **fields})
 
         _emit_neg("negotiation_started", seller_url=seller_url)
 
@@ -756,47 +876,22 @@ def run_buy(
         })
         return outcome
 
-    # --- 2. Run the aggregation policy ---------------------------------
     from .aggregation import load_aggregation_policy
     policy = load_aggregation_policy(config.aggregation_policy)
-    capped = matches[:max_matches_to_try]
-    _event("aggregated", {
-        "policy": config.aggregation_policy or "best_price",
-        "match_count_after_cap": len(capped),
-    })
 
     try:
-        selected = asyncio.run(policy(capped, _negotiate))
+        selected = asyncio.run(policy(matches, _negotiate))
     except RuntimeError as exc:
-        # A policy that didn't catch a per-candidate negotiation error.
-        return BuyResult(
-            status="exited",
-            reason=f"policy_error: {exc}",
+        return NegotiationResult(
             attempts=attempts,
+            reason=f"policy_error: {exc}",
         )
 
     if selected is None:
-        return BuyResult(
-            status="exited",
-            reason="no_match_agreed_to_terms",
-            attempts=attempts,
-        )
+        return NegotiationResult(attempts=attempts)
 
     match, outcome = selected
-    return _settle_one(
-        match=match,
-        outcome=outcome,
-        config=config,
-        provision=provision,
-        build_escrow_terms=build_escrow_terms,
-        create_escrow=create_escrow,
-        confirm_settlement=confirm_settlement,
-        settlement_poll_interval=settlement_poll_interval,
-        settlement_total_timeout=settlement_total_timeout,
-        sleep=sleep,
-        on_event=_event,
-        attempts=attempts,
-    )
+    return NegotiationResult(match=match, outcome=outcome, attempts=attempts)
 
 
 def _settle_one(

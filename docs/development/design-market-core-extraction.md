@@ -61,9 +61,11 @@ returning none passes context to the next), and the determinism contract.
 Schemas supply the hooks; any further factoring inside a hook (helpers,
 shared logic) is the implementation's business, not the core contract.
 
-The composition wants **two** behavior hooks; `run_buy` injects **six**
-today (`build_escrow_proposal`, `derive_prices`, `build_escrow_terms`,
-`create_escrow`, `confirm_settlement`, `chain`):
+The composition wants **two** behavior hooks. `run_buy` now exposes
+`negotiate` and `settle` directly, while the current compute
+instantiation still adapts the previous fine-grained hooks
+(`build_escrow_proposal`, `derive_prices`, `build_escrow_terms`,
+`create_escrow`, `confirm_settlement`, `chain`) into that surface:
 
 | Core hook   | Type                                                                                                  | Absorbs (today)                                                                                                                                                          |
 | ----------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -225,12 +227,17 @@ vocabulary.
   `proposal`, so a custom seller middleware can replace the default guard
   with counter-correction behavior without a new action type.
 
-### 2. Collapse the six behavior hooks to `negotiate` + `settle`
+### 2. Collapse the six behavior hooks to `negotiate` + `settle` — in progress
 
-- **Now:** `buy_orchestrator.run_buy(...)` injects six behavior hooks —
-  `build_escrow_proposal`, `derive_prices`, `build_escrow_terms`,
-  `create_escrow`, `confirm_settlement`, `chain`. Several are consecutive
-  or bundled steps the core has no reason to separate.
+- **Done:** `buy_orchestrator.run_buy(...)` accepts high-level
+  `negotiate` and `settle` hooks and composes only
+  discover → negotiate → settle at the top level. Tests can inject doubles
+  at that two-hook granularity.
+- **Still present:** the current compute buyer keeps compatibility
+  adapters for `build_escrow_proposal`, `derive_prices`,
+  `build_escrow_terms`, `create_escrow`, `confirm_settlement`, and
+  `chain`. Several are consecutive or bundled steps the core has no
+  reason to separate, but call sites still use them.
 - **Target** (collapse toward the two-hook surface above):
   - `derive_prices` → fold into negotiation-policy setup (bisection's
     bounds are policy input; a non-bisection policy supplies its own).
@@ -240,8 +247,9 @@ vocabulary.
     step, not a separate gate; into `negotiate`.
   - `build_escrow_terms` + `create_escrow` → one `settle: Terms →
 Receipt`; "materialize then submit" is internal factoring.
-  - `run_buy`'s from-above signature should mention neither prices nor
-    escrow construction — only `negotiate` and `settle`.
+  - once call sites move to instantiation-owned hooks, `run_buy`'s
+    from-above signature can drop the legacy prices/escrow construction
+    parameters entirely.
 - **Watch:** the DI points exist partly for test isolation (run the
   orchestrator without alkahest-py). Preserve that by letting the
   _instantiation_ inject test doubles for `negotiate`/`settle`, rather
@@ -278,10 +286,11 @@ Receipt`; "materialize then submit" is internal factoring.
 1. **Seam 1** (done): escrow guard → chain middleware. Default behavior
    still rejects invalid shapes, but the decision now lives in policy and
    can be swapped for correction or softer matching.
-2. **Seam 2** (next): reduce the six behavior injections to
-   `negotiate` + `settle`. Touches `run_buy`'s signature and the seller
-   per-round path; preserve test isolation by injecting doubles at the
-   two-hook granularity. No packaging change yet — still inside
+2. **Seam 2** (in progress): reduce the six behavior injections to
+   `negotiate` + `settle`. The buyer orchestrator now has the two-hook
+   surface and compatibility adapters; remaining work is moving the compute
+   call sites onto those hooks, then applying the same boundary to the
+   seller per-round path. No packaging change yet — still inside
    `buyer/` + `storefront/`.
 3. **Seam 3**: `ProvisionTerms` opaque in core, concrete in compute;
    negotiate wire change + client wheel bumps + e2e migration.
@@ -293,10 +302,10 @@ Receipt`; "materialize then submit" is internal factoring.
    fallback `--filter` behavior should be explicit.
 
 Each phase keeps the branch green and the e2e suite passing. Seam 2 is the
-next target and the one that most directly files the most-touched code
+current target and the one that most directly files the most-touched code
 (negotiation) against the principle. It is worth doing even if 3–4 are
-deferred — once the surface is `negotiate` + `settle`, the later packaging
-extraction is mostly a move.
+deferred — once call sites use `negotiate` + `settle` directly, the later
+packaging extraction is mostly a move.
 
 ## What's deferred / non-goals
 
@@ -317,7 +326,7 @@ extraction is mostly a move.
 ## File map
 
 ```
-buyer/market_buyer/buy_orchestrator.py        seam 2, 4 — skeleton + derive_prices peer
+buyer/market_buyer/buy_orchestrator.py        seam 2, 4 — two-hook skeleton + legacy adapters
 buyer/market_buyer/groups/buy.py              seam 0b, 2 — plugin-shaped filters, derive_prices wiring
 buyer/market_buyer/groups/negotiate.py        seam 0 legacy — accepted proposal/terms run-log handoff
 buyer/market_buyer/groups/settle.py           seam 0 legacy — consume accepted proposal/terms

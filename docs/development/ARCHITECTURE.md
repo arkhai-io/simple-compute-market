@@ -20,7 +20,7 @@ The README frames this as a market for "anything"; the structural test that make
 
 > **A behavior belongs in the market core (composed "from above") if and only if it is invariant across every possible listing schema. If it varies by schema, it is a utility composed "from below" that the core invokes through an injected hook** — and "requiring the hook" is the from-above part; "implementing it" is from-below.
 
-- **From above** — the role contracts (buyer, seller, indexer) and the three market processes (discovery, negotiation/aggregation, settlement), expressed purely in terms of injected dependencies and schema-opaque primitives. `buy_orchestrator.run_buy(...)` is already this shape: a linear discover→negotiate→settle flow with every domain decision injected (`build_escrow_proposal`, `build_escrow_terms`, `create_escrow`, …).
+- **From above** — the role contracts (buyer, seller, indexer) and the three market processes (discovery, negotiation/aggregation, settlement), expressed purely in terms of injected dependencies and schema-opaque primitives. `buy_orchestrator.run_buy(...)` is already this shape: a linear discover→negotiate→settle flow with high-level `negotiate` and `settle` hooks. The current compute instantiation still adapts legacy finer-grained hooks (`build_escrow_proposal`, `build_escrow_terms`, `create_escrow`, …) into that surface.
 - **From below** — concrete, mutually-independent utilities: negotiation middlewares (`market-policy`), identity schemes (`service.identity`), generic schemas (`EscrowTerms`/`EscrowProposal`/`RateValue`), infra clients (alkahest, chain, registry-client). The defining property is "depended on, never depending up into the skeleton" — not "packaged as one wheel."
 - **A market instantiation** for a given asset class / listing schema wires from-below implementations into the from-above hooks, and *uses* the from-below utilities inside those implementations.
 
@@ -46,7 +46,9 @@ Settlement verification requires both sides to derive the same `Terms`. That hol
 
 The core owns the *structure* of the exchange: the round loop, the signed request/response transport, history persistence, the middleware-chain execution semantics (a middleware that returns a value terminates the chain; returning none passes context to the next), and the determinism contract above. Schemas supply a small number of hooks within that structure.
 
-The composition wants two behavior hooks; `run_buy` injects six today:
+The composition wants two behavior hooks. `run_buy` now exposes that
+surface directly, while keeping compatibility adapters for the previous
+fine-grained compute hooks:
 
 - **`negotiate`** — a per-turn message policy, `respond(history) → message | terms`, run by the core's negotiation engine. Today's `chain`, `derive_prices`, opening-message construction (`build_escrow_proposal`), and the buyer's commit (`confirm_settlement`) all belong here: each is a decision a participant makes during its turn.
 - **`settle`** — `Terms → Receipt`. Today's `build_escrow_terms` + `create_escrow` are one hook — "materialize the on-chain shape, then submit it" is internal factoring.
@@ -63,7 +65,7 @@ The indexer registry plays the platform role of existing compute markets: it is 
 
 Parts of the code predate the principle and diverge from it. These seams are tracked in [`TODO.md`](TODO.md) / [`design-market-core-extraction.md`](design-market-core-extraction.md):
 
-- **`derive_prices` is an orchestrator-level injection.** It exists only because `bisection` needs `(initial, max)` bounds; a different negotiation policy has different inputs. It belongs folded into negotiation-policy setup (from below), not as a peer of the escrow hooks in `run_buy`'s signature.
+- **`derive_prices` remains in the legacy compute adapter.** It exists only because `bisection` needs `(initial, max)` bounds; a different negotiation policy has different inputs. The high-level `negotiate` hook now gives a schema instantiation a place to own that setup, but the CLI still passes the legacy callback until the compute buyer is split into plugin-shaped functions.
 - **`ProvisionTerms` is compute-flavored.** It carries `ssh_public_key` / `duration_seconds` / `compute_resource`; the core should treat delivery terms as an opaque, schema-defined blob — exactly as the registry already treats `offer_resource`.
 - **The market skeleton is packaged inside `buyer/` + `storefront/`** alongside compute-specific code, so the package graph does not yet express the from-above/from-below joint that the function signatures already imply.
 

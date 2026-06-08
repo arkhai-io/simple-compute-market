@@ -1,9 +1,9 @@
 """Unit tests for the buyer orchestrator.
 
-The orchestrator's job is to compose discover → negotiate → create
-escrow → submit settle → poll status, sequentially. Because
-create_escrow is injected as a hook and all HTTP goes through
-urllib.request, everything is mockable.
+The orchestrator's job is to compose discover → negotiate → settle.
+The current compute instantiation still adapts create_escrow into the
+settle hook, and all HTTP goes through urllib.request, so everything is
+mockable.
 
 What the tests verify:
 - Empty registry → no_matches, no further work.
@@ -30,10 +30,12 @@ from market_buyer.buy_orchestrator import (
     AgreedTerms,
     BuyConfig,
     BuyConstraints,
+    NegotiationResult,
     BuyResult,
     run_buy,
     submit_settlement,
 )
+from market_buyer.buyer_client import NegotiationOutcome
 
 
 _BUYER_PK = "0x" + "11" * 32
@@ -199,6 +201,64 @@ def test_matches_can_be_preseeded_skipping_registry_query():
         )
     assert result.status == "exited"
     assert result.attempts and result.attempts[0]["outcome"]["status"] == "exited"
+
+
+def test_run_buy_composes_high_level_negotiate_and_settle_hooks():
+    """The core surface can be driven with only negotiate + settle hooks."""
+    matches = [
+        {"listing_id": "seller-1", "seller": _SELLER_URL},
+        {"listing_id": "seller-2", "seller": "http://other-seller:8001"},
+    ]
+    calls: list[tuple[str, object]] = []
+
+    def _negotiate(candidate_matches, emit):
+        calls.append(("negotiate_matches", candidate_matches))
+        emit("custom_negotiate", {"count": len(candidate_matches)})
+        return NegotiationResult(
+            match=candidate_matches[0],
+            outcome=NegotiationOutcome(
+                status="agreed",
+                negotiation_id="neg-custom",
+                agreed_amount=77,
+                rounds=1,
+            ),
+            attempts=[{"listing_id": "seller-1", "outcome": {"status": "agreed"}}],
+        )
+
+    def _settle(negotiation, emit):
+        calls.append(("settle", negotiation.match))
+        emit("custom_settle", {"negotiation_id": negotiation.outcome.negotiation_id})
+        return BuyResult(
+            status="ready",
+            negotiation_id=negotiation.outcome.negotiation_id,
+            seller_url=negotiation.match["seller"],
+            agreed_amount=negotiation.outcome.agreed_amount,
+            escrow_uid="0xcustom",
+            rounds=negotiation.outcome.rounds,
+            attempts=negotiation.attempts,
+        )
+
+    events: list[tuple[str, dict]] = []
+    result = run_buy(
+        config=_config(),
+        constraints=_constraints(),
+        provision=_provision(),
+        matches=matches,
+        max_matches_to_try=1,
+        negotiate=_negotiate,
+        settle=_settle,
+        on_event=lambda name, body: events.append((name, body)),
+    )
+
+    assert result.status == "ready"
+    assert result.negotiation_id == "neg-custom"
+    assert result.escrow_uid == "0xcustom"
+    assert calls == [
+        ("negotiate_matches", [matches[0]]),
+        ("settle", matches[0]),
+    ]
+    assert ("custom_negotiate", {"count": 1}) in events
+    assert ("custom_settle", {"negotiation_id": "neg-custom"}) in events
 
 
 # ---------------------------------------------------------------------------
