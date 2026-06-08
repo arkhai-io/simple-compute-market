@@ -15,6 +15,7 @@ from pydantic import (
     SerializeAsAny,
     field_serializer,
     field_validator,
+    model_validator,
 )
 
 from service.clients.token import ERC20TokenMetadata  # noqa: F401
@@ -177,46 +178,97 @@ class TokenResource(Resource):
         return _serialize_uint256_str(v)
 
 
+COMPUTE_PROVISION_KIND = "compute.v1"
+
+
 class ProvisionTerms(BaseModel):
-    """What the seller commits to provision off-chain.
+    """Opaque off-chain delivery terms negotiated alongside escrow terms.
 
-    Distinct from on-chain escrow terms (payment + arbiter): those gate
-    payment release; these describe the actual resource the seller
-    delivers. The two are independent — an escrow's arbiter may enforce
-    none, some, or all of the provision fields depending on its design
-    (a ``RecipientArbiter`` enforces none; a ``TrustedOracleArbiter``
-    could attest delivery against a hash of these terms).
+    The core protocol treats provision terms as a schema-tagged payload:
+    ``kind`` identifies the market/schema-specific interpreter and
+    ``payload`` carries that interpreter's data. The current compute
+    instantiation uses ``kind="compute.v1"`` and a payload with
+    ``duration_seconds``, ``ssh_public_key``, and optional
+    ``compute_resource``.
 
-    Materialized at negotiation agreement and read by the seller's
-    settlement / provisioning pipeline as the single source of truth
-    for what to deliver. The compute_resource field is opaque at this
-    layer (carried as a dict) because the typed marketplace model
-    (``ComputeResource``) lives in the storefront package; the seller
-    parses it back into typed form when needed.
+    Compatibility: callers may still construct or parse the legacy flat
+    compute shape (``duration_seconds=...``, ``ssh_public_key=...``). It
+    is normalized into ``payload`` at model-validation time. Compute
+    adapters should use the convenience accessors below; core code should
+    treat ``payload`` as opaque.
     """
 
-    duration_seconds: int = Field(
-        gt=0,
-        description=(
-            "Buyer's lease window. The seller commits to provisioning "
-            "for at least this long once escrow is verified on-chain."
-        ),
+    kind: str = Field(
+        default=COMPUTE_PROVISION_KIND,
+        description="Schema/interpreter for this provision payload.",
     )
-    ssh_public_key: str = Field(
-        description=(
-            "Public key to inject into the provisioned VM/container "
-            "for buyer access. Empty string allowed for non-VM modes."
-        ),
+    payload: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Schema-specific provision terms. Opaque to market core.",
     )
-    compute_resource: dict[str, Any] | None = Field(
-        default=None,
-        description=(
-            "Snapshot of the listing's offer_resource at agreement "
-            "time. None on the buyer's side before a specific match "
-            "is selected; populated by the seller (or buyer post-match) "
-            "and persisted on the negotiation thread."
-        ),
-    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_compute_shape(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+
+        data = dict(value)
+        if "schema" in data and "kind" not in data:
+            data["kind"] = data.pop("schema")
+        if "terms" in data and "payload" not in data:
+            data["payload"] = data.pop("terms")
+
+        legacy_keys = {"duration_seconds", "ssh_public_key", "compute_resource"}
+        if "payload" not in data and legacy_keys.intersection(data):
+            payload: dict[str, Any] = {}
+            for key in legacy_keys:
+                if key in data:
+                    payload[key] = data.pop(key)
+            data["kind"] = data.get("kind") or COMPUTE_PROVISION_KIND
+            data["payload"] = payload
+        return data
+
+    @model_validator(mode="after")
+    def _validate_compute_payload(self) -> "ProvisionTerms":
+        if self.kind != COMPUTE_PROVISION_KIND:
+            return self
+
+        raw_duration = self.payload.get("duration_seconds")
+        try:
+            duration = int(raw_duration)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "compute provision payload requires integer duration_seconds"
+            ) from exc
+        if duration <= 0:
+            raise ValueError(
+                "compute provision payload duration_seconds must be > 0"
+            )
+        self.payload["duration_seconds"] = duration
+
+        raw_key = self.payload.get("ssh_public_key", "")
+        if raw_key is None:
+            raw_key = ""
+        if not isinstance(raw_key, str):
+            raise ValueError("compute provision payload ssh_public_key must be a string")
+        self.payload["ssh_public_key"] = raw_key
+        return self
+
+    @property
+    def duration_seconds(self) -> int | None:
+        raw = self.payload.get("duration_seconds")
+        return int(raw) if raw is not None else None
+
+    @property
+    def ssh_public_key(self) -> str:
+        raw = self.payload.get("ssh_public_key")
+        return raw if isinstance(raw, str) else ""
+
+    @property
+    def compute_resource(self) -> dict[str, Any] | None:
+        raw = self.payload.get("compute_resource")
+        return raw if isinstance(raw, dict) else None
 
 
 class EscrowTerms(BaseModel):

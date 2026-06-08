@@ -144,11 +144,7 @@ def _run_buy_with_legacy_hooks(
 # Echo for /negotiate/new mock replies so _settle_one can read the
 # accepted proposal off the outcome.
 _ACCEPTED_ECHO_AGG = {
-    "accepted_provision_terms": {
-        "duration_seconds": 3600,
-        "ssh_public_key": "ssh-rsa AAAA...",
-        "compute_resource": None,
-    },
+    "accepted_provision_terms": _provision().model_dump(),
     "accepted_escrow_proposal": {
         "chain_name": "anvil",
         "escrow_address": _ESCROW_ADDR_AGG,

@@ -78,7 +78,12 @@ The indexer registry plays the platform role of existing compute markets: it is 
 Parts of the code predate the principle and diverge from it. These seams are tracked in [`TODO.md`](TODO.md) / [`design-market-core-extraction.md`](design-market-core-extraction.md):
 
 - **`derive_prices` remains in the legacy compute adapter.** It exists only because `bisection` needs `(initial, max)` bounds; a different negotiation policy has different inputs. The high-level `negotiate` hook now gives a schema instantiation a place to own that setup, and `run_buy` no longer accepts the callback directly.
-- **`ProvisionTerms` is compute-flavored.** It carries `ssh_public_key` / `duration_seconds` / `compute_resource`; the core should treat delivery terms as an opaque, schema-defined blob — exactly as the registry already treats `offer_resource`.
+- **`ProvisionTerms` is now an opaque carrier.** On the wire it carries
+  `kind` plus schema-specific `payload`; the current compute adapter uses
+  `kind="compute.v1"` with `payload.duration_seconds`,
+  `payload.ssh_public_key`, and optional `payload.compute_resource`. The
+  remaining split is packaging: the compute adapter still lives in
+  `buyer/` + `storefront/` rather than a separate market-compute package.
 - **The market skeleton is packaged inside `buyer/` + `storefront/`** alongside compute-specific code, so the package graph does not yet express the from-above/from-below joint that the function signatures already imply.
 
 ### Technology Anchors
@@ -452,10 +457,12 @@ escrows have no top-level `literal_fields.token`.
 **Round-0 wire shape:** `POST /api/v1/negotiate/new` carries two structured
 fields:
 
-- `provision_terms: ProvisionTerms` — `{duration_seconds, ssh_public_key,
-  compute_resource}`. What the seller will deliver off-chain. Read by the
-  seller's settlement/provisioning pipeline as the single source of truth for
-  what to provision.
+- `provision_terms: ProvisionTerms` — `{kind, payload}`. What the seller
+  will deliver off-chain. The core treats `payload` as opaque; the current
+  compute adapter interprets `kind="compute.v1"` as
+  `{duration_seconds, ssh_public_key, compute_resource?}` and the seller's
+  settlement/provisioning pipeline reads those compute fields as the single
+  source of truth for what to provision.
 - `escrow_proposal: EscrowProposal` — `{chain_name, escrow_address, fields,
   literal_fields, rates, expiration_unix}`. The buyer picks one of the
   listing's `accepted_escrows` by `(chain_name, escrow_address)` and supplies

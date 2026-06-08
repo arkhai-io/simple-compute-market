@@ -269,14 +269,18 @@ Receipt`; "materialize then submit" is internal factoring.
 
 ### 3. `ProvisionTerms` genericization
 
-- **Now:** `service/schemas.py::ProvisionTerms` carries `ssh_public_key`,
-  `duration_seconds`, `compute_resource` — compute-specific. The negotiate
-  wire protocol names these explicitly.
-- **Target:** the core carries delivery terms as an opaque schema blob (as
-  the registry already carries `offer_resource`); `market-compute` defines
-  the concrete `ProvisionTerms`. Structural validation of delivery terms
-  (within what the listing offers) is core; semantic validation is an
-  injected compute validator — same protocol-vs-policy split as escrow.
+- **Done:** `service/schemas.py::ProvisionTerms` carries delivery terms as
+  `{kind, payload}`. The old flat compute shape
+  `{duration_seconds, ssh_public_key, compute_resource}` is accepted for
+  compatibility and normalized into `payload`.
+- **Still present:** the current compute adapter interprets
+  `kind="compute.v1"` through convenience accessors
+  (`duration_seconds`, `ssh_public_key`, `compute_resource`). That
+  adapter still lives in `buyer/` + `storefront/`.
+- **Target:** `market-compute` defines and validates the concrete compute
+  payload. Structural validation of delivery terms (within what the
+  listing offers) is core; semantic validation is an injected compute
+  validator — same protocol-vs-policy split as escrow.
 - **Cost:** wire-compat change on `/negotiate/*`; bump client wheels.
 
 ### 4. Extract `market-core`
@@ -305,8 +309,9 @@ Receipt`; "materialize then submit" is internal factoring.
    negotiation wrappers now call an injectable seller round hook. The later
    package move happens in seam 4. No packaging change yet — still inside
    `buyer/` + `storefront/`.
-3. **Seam 3**: `ProvisionTerms` opaque in core, concrete in compute;
-   negotiate wire change + client wheel bumps + e2e migration.
+3. **Seam 3** (in progress): `ProvisionTerms` is opaque on the wire;
+   remaining work is moving concrete compute validation/interpretation out
+   of shared/core code and migrating e2e expectations if needed.
 4. **Seam 4**: extract `market-core` package; split `buyer`/`storefront`
    into skeleton-consumers; verify the kit has no upward imports.
 5. **Seam 0b**: add schema plugin acceptance/discovery for the buyer CLI.
@@ -314,11 +319,10 @@ Receipt`; "materialize then submit" is internal factoring.
    schema exists, but plugin loading, schema identity/version matching, and
    fallback `--filter` behavior should be explicit.
 
-Each phase keeps the branch green and the e2e suite passing. Seam 2 is the
-current target and the one that most directly files the most-touched code
-(negotiation) against the principle. It is worth doing even if 3–4 are
-deferred — once production paths use `negotiate` + `settle` directly, the
-later packaging extraction is mostly a move.
+Each phase keeps the branch green and the e2e suite passing. Seam 3 is the
+current target: the wire shape now carries opaque provision terms, and the
+remaining work is to move concrete compute interpretation out of shared
+core-shaped code. Seam 4 is the later packaging extraction.
 
 ## What's deferred / non-goals
 

@@ -90,11 +90,7 @@ def _build_escrow_proposal():
 # replies so _settle_one can read outcome.accepted_escrow_proposal
 # and dispatch escrow construction off it.
 _ACCEPTED_ECHO = {
-    "accepted_provision_terms": {
-        "duration_seconds": 7200,
-        "ssh_public_key": "ssh-rsa AAAA...",
-        "compute_resource": None,
-    },
+    "accepted_provision_terms": _provision().model_dump(),
     "accepted_escrow_proposal": {
         "chain_name": "anvil",
         "escrow_address": _ESCROW_ADDR,
