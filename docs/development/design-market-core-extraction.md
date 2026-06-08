@@ -228,7 +228,7 @@ vocabulary.
   `proposal`, so a custom seller middleware can replace the default guard
   with counter-correction behavior without a new action type.
 
-### 2. Collapse the six behavior hooks to `negotiate` + `settle` — in progress
+### 2. Collapse the six behavior hooks to `negotiate` + `settle` — done
 
 - **Done:** `buy_orchestrator.run_buy(...)` requires high-level
   `negotiate` and `settle` hooks and composes only
@@ -251,7 +251,7 @@ vocabulary.
   compute inventory guard. Policy implementations may be internally
   stateful, but policy-private decision state lives behind the callable
   rather than in generic negotiation tables.
-- **Target** (collapse toward the two-hook surface above):
+- **Mapped into the two-hook surface:**
   - `derive_prices` → fold into negotiation-policy setup (bisection's
     bounds are policy input; a non-bisection policy supplies its own).
   - `build_escrow_proposal` → the opening-message construction is the
@@ -298,13 +298,12 @@ Receipt`; "materialize then submit" is internal factoring.
 1. **Seam 1** (done): escrow guard → chain middleware. Default behavior
    still rejects invalid shapes, but the decision now lives in policy and
    can be swapped for correction or softer matching.
-2. **Seam 2** (in progress): reduce the six behavior injections to
+2. **Seam 2** (done): reduce the six behavior injections to
    `negotiate` + `settle`. The buyer orchestrator now has the two-hook
    surface, adapter factories for the legacy compute behavior, and the
    `market buy` call site uses explicit hooks. The seller synchronous
-   negotiation wrappers now call an injectable seller round hook. Remaining
-   work is moving the hook-bearing skeleton during package extraction. No
-   packaging change yet — still inside
+   negotiation wrappers now call an injectable seller round hook. The later
+   package move happens in seam 4. No packaging change yet — still inside
    `buyer/` + `storefront/`.
 3. **Seam 3**: `ProvisionTerms` opaque in core, concrete in compute;
    negotiate wire change + client wheel bumps + e2e migration.
