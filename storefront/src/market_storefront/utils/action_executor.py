@@ -33,6 +33,7 @@ from domains.vms.provisioning import (
 )
 from domains.vms.settlement import (
     encode_compute_lease as _vm_encode_compute_lease,
+    submit_compute_fulfillment,
     token_resource_from_accepted_escrow as _vm_token_resource_from_accepted_escrow,
 )
 from market_storefront.models.domain_models import (
@@ -703,51 +704,41 @@ async def fulfill_compute_obligation(
 
     asyncio.create_task(_schedule_shutdown_best_effort())
 
-    if not client or not oracle_address:
-        # Demo fallback: skip on-chain, return simulated fulfillment uid
-        fulfillment_uid = f"fulfill_{uuid.uuid4()}"
-        logger.info("[ALKAHEST] (Simulated) Fulfilled compute obligation without on-chain client.")
-    else:
-        try:
-            fulfillment_uid = await client.string_obligation.do_obligation(
-                connection_details,
-                escrow_uid
-            )
-            logger.info("[ALKAHEST] Fulfilled compute obligation with on-chain client; machine provisioned.")
-            demand_bytes = order_bytes
-            request_arbitration_result = await client.oracle.request_arbitration(
-                fulfillment_uid,
-                oracle_address,
-                demand_bytes,
-            )
-            logger.info(f"[ALKAHEST] Arbitration requested: {request_arbitration_result}")
-        except Exception as error:
-            logger.error(
-                "[ALKAHEST] EVENT=settlement_failed_after_provisioning "
-                "escrow_uid=%s listing_id=%s resource_id=%s allocation_id=%s "
-                "vm_host=%s error=%s",
-                escrow_uid,
-                order_id,
-                reserved_resource_id,
-                reserved_allocation_id,
-                reserved_vm_host,
-                error,
-            )
-            stage_event("settlement", "failed_after_provisioning",
-                listing_id=order_id,
-                escrow_uid=escrow_uid,
-                resource_id=reserved_resource_id,
-                allocation_id=reserved_allocation_id,
-                vm_host=reserved_vm_host,
-                error=str(error),
-            )
-            return {
-                "status": "error",
-                "message": f"On-chain fulfillment failed after provisioning: {error}",
-                "escrow_uid": escrow_uid,
-                "connection_details": None,
-                "ssh_public_key": ssh_public_key,
-            }
+    try:
+        fulfillment_uid = await submit_compute_fulfillment(
+            client=client,
+            escrow_uid=escrow_uid,
+            connection_details=connection_details,
+            oracle_address=oracle_address,
+            demand_bytes=order_bytes,
+        )
+    except Exception as error:
+        logger.error(
+            "[ALKAHEST] EVENT=settlement_failed_after_provisioning "
+            "escrow_uid=%s listing_id=%s resource_id=%s allocation_id=%s "
+            "vm_host=%s error=%s",
+            escrow_uid,
+            order_id,
+            reserved_resource_id,
+            reserved_allocation_id,
+            reserved_vm_host,
+            error,
+        )
+        stage_event("settlement", "failed_after_provisioning",
+            listing_id=order_id,
+            escrow_uid=escrow_uid,
+            resource_id=reserved_resource_id,
+            allocation_id=reserved_allocation_id,
+            vm_host=reserved_vm_host,
+            error=str(error),
+        )
+        return {
+            "status": "error",
+            "message": f"On-chain fulfillment failed after provisioning: {error}",
+            "escrow_uid": escrow_uid,
+            "connection_details": None,
+            "ssh_public_key": ssh_public_key,
+        }
 
     if order_id:
         try:

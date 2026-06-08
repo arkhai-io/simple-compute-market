@@ -380,7 +380,8 @@ Recommended order:
    packages.
    `domains/vms/settlement/` now owns accepted-escrow selection,
    proposal materialization, compute lease encoding, token materialization,
-   and Alkahest escrow terms/create helpers.
+   Alkahest escrow terms/create helpers, and post-provisioning fulfillment
+   submission.
    `domains/vms/provisioning/` now owns VM provision-term construction,
    fulfillment-plan construction, provisioning job-spec construction, and
    provisioning-service client helpers.

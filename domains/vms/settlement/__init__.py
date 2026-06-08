@@ -6,6 +6,7 @@ from domains.vms.settlement.escrow_client import (
     make_buyer_payment_escrow_terms_fn,
     make_create_escrow_fn,
 )
+from domains.vms.settlement.fulfillment import submit_compute_fulfillment
 from domains.vms.settlement.compute_lease import (
     encode_compute_lease,
     token_resource_from_accepted_escrow,
@@ -21,5 +22,6 @@ __all__ = [
     "make_buyer_payment_escrow_terms_fn",
     "make_create_escrow_fn",
     "select_escrow_entry",
+    "submit_compute_fulfillment",
     "token_resource_from_accepted_escrow",
 ]
