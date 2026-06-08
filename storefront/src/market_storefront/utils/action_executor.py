@@ -25,10 +25,10 @@ from domains.vms.listings import (
     resource_is_compute as _vm_resource_is_compute,
 )
 from domains.vms.provisioning import (
+    build_vm_fulfillment_plan,
     build_provisioning_job_spec as _vm_build_provisioning_job_spec,
     provision_vm_and_wait,
     register_vm_lease,
-    required_compute_attributes,
     schedule_vm_expiry_and_wait,
 )
 from domains.vms.settlement import (
@@ -471,41 +471,15 @@ async def fulfill_compute_obligation(
     vm_target = f"tenant-{uuid.uuid4().hex[:4]}"
 
     logger.info(f"[ALKAHEST] Order for fulfillment: {order}")
-    order_dict = None
-    order_id = None
-    order_bytes = b""
-    required_attributes: dict[str, Any] = {}
-
-    if order:
-        if isinstance(order, str):
-            try:
-                order_dict = json.loads(order)
-            except json.JSONDecodeError:
-                order_dict = None
-            order_bytes = order.encode("utf-8")
-        elif isinstance(order, dict):
-            order_dict = order
-
-    if order_dict:
-        # Storefront listings are keyed by listing_id; legacy callers may
-        # still pass order_id. Prefer listing_id since that's what the rest
-        # of the system (sqlite, stage events, registry) keys off of.
-        order_id = order_dict.get("listing_id") or order_dict.get("order_id")
-        compute_resource = extract_compute_from_order(order_dict)
-        required_attributes = required_compute_attributes(order_dict)
-        accepted_escrows = order_dict.get("accepted_escrows") or []
-        first_escrow = accepted_escrows[0] if accepted_escrows else None
-        token_resource = _token_resource_from_accepted_escrow(first_escrow)
-        if token_resource is None:
-            raise ValueError(
-                f"Cannot encode compute lease for listing {order_id!r}: "
-                "accepted_escrows[0] is neither token-backed nor native-token"
-            )
-        order_bytes = encode_compute_lease(
-            compute_resource=compute_resource,
-            token_resource=token_resource,
-            duration_seconds=duration_seconds,
-        )
+    plan = build_vm_fulfillment_plan(
+        order=order,
+        duration_seconds=duration_seconds,
+        chain_configs=CHAINS,
+    )
+    order_dict = plan.order_dict
+    order_id = plan.order_id
+    order_bytes = plan.order_bytes
+    required_attributes = plan.required_attributes
 
     try:
         sqlite_client = get_sqlite_client()

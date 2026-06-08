@@ -382,8 +382,8 @@ Recommended order:
    proposal materialization, compute lease encoding, token materialization,
    and Alkahest escrow terms/create helpers.
    `domains/vms/provisioning/` now owns VM provision-term construction,
-   provisioning job-spec construction, and provisioning-service client
-   helpers.
+   fulfillment-plan construction, provisioning job-spec construction, and
+   provisioning-service client helpers.
    `buyer/` remains a temporary compatibility package that calls domain
    functions. Later, core receives only reusable orchestration helpers, not
    a concrete buyer executable.
