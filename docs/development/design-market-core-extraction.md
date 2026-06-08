@@ -406,8 +406,10 @@ Recommended order:
    `domains/vms/provisioning/fulfillment.py` owns VM fulfillment
    orchestration behind explicit storefront callbacks. `sync_negotiation.py`
    and `action_executor.py` remain compatibility/stateful HTTP wrappers.
-   The remaining storefront extraction work is to file registry publication
-   into its target package before relocating package roots.
+   `market_core.registry_publication` owns schema-agnostic registry
+   publish/close fan-out through injected registry clients and request
+   factories; the storefront wrapper keeps settings, SQLite publication
+   persistence, and stage-event logging.
 4. **Move provisioning as VM fulfillment.** `provisioning-service` is not
    core; it is the VM fulfillment backend. Move it to
    `domains/vms/provisioning/` only after updating Docker build contexts,
@@ -486,7 +488,7 @@ buyer/market_buyer/groups/escrow.py           seam 0 legacy — consume accepted
 buyer/market_buyer/groups/listing.py          seam 0b — plugin-shaped rendering + generic fallback
 buyer/market_buyer/schema_plugins/ (new)      seam 0b — eventual plugin registry/loading boundary
 storefront/.../utils/sync_negotiation.py      seam 4 — per-round protocol; seam 1 normalization only
-storefront/.../utils/action_executor.py       seam 4 — interleaved generic/compute logic
+storefront/.../utils/action_executor.py       seam 4 — stateful storefront wrapper; registry publication now delegates to market_core
 policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escrow guard
 service/src/service/schemas.py                seam 3 — ProvisionTerms
 service/src/service/clients/                  kit — must not import up into core

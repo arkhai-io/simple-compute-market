@@ -15,7 +15,11 @@ from urllib.parse import urlparse
 from market_storefront.utils.stage_log import stage_event
 
 from alkahest_py import AlkahestClient
-import json
+from market_core.registry_publication import (
+    close_listing_in_registries,
+    ensure_json_obj as _ensure_json_obj,  # noqa: F401 - compatibility export
+    publish_listing_to_registries,
+)
 
 from domains.vms.listings import (
     extract_compute_from_order as _vm_extract_compute_from_order,
@@ -47,7 +51,7 @@ from domains.vms.listings.reconciler import (
 from market_storefront.utils.config import CHAINS, settings, AGENT_ID, BASE_URL_OVERRIDE
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
 from market_storefront.utils.sqlite_client import get_sqlite_client
-from registry_client import RegistryClient, ListingRequest, UpdateListingRequest
+from registry_client import ListingRequest, UpdateListingRequest
 from market_policy.negotiation_thread import get_thread_store
 
 BASE_URL_OVERRIDE = BASE_URL_OVERRIDE
@@ -108,48 +112,15 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
     except Exception as exc:
         logger.warning("[LOCAL DB] Failed to update order %s as closed: %s", order_id, exc)
 
-    if not settings.enable_registry_discovery:
-        return {
-            "status": "skipped",
-            "message": "Registry discovery is disabled; order not updated in registry",
-            "listing_id": order_id,
-        }
-
-    try:
-        async with _make_registry_client() as registry_client:
-            target_urls = await _registries_to_target(order_id, registry_client.urls)
-            update_request = UpdateListingRequest(
-                updates={"status": "closed"},
-                private_key=settings.wallet.private_key,
-            )
-            payloads = {url: update_request for url in target_urls}
-            results = await registry_client.update_listing_per_registry(
-                order_id, payloads,
-            )
-        await _record_publications(order_id, results)
-        first_ok = next(
-            (r["response"] for r in results if r["success"] and r["response"]),
-            None,
-        )
-        if first_ok:
-            return {
-                "status": "closed",
-                "message": f"Order {order_id} marked closed in registry",
-                "listing_id": order_id,
-                "registry_result": first_ok,
-            }
-        return {
-            "status": "error",
-            "message": f"Failed to update order {order_id} in registry",
-            "listing_id": order_id,
-        }
-    except Exception as exc:
-        logger.warning("[REGISTRY] Failed to close order %s in registry: %s", order_id, exc)
-        return {
-            "status": "error",
-            "message": f"Registry update failed for order {order_id}: {exc}",
-            "listing_id": order_id,
-        }
+    return await close_listing_in_registries(
+        order_id,
+        enabled=settings.enable_registry_discovery,
+        registry_client_factory=_make_registry_client,
+        update_listing_request_factory=UpdateListingRequest,
+        private_key=settings.wallet.private_key,
+        select_target_registries=_registries_to_target,
+        record_publications=_record_publications,
+    )
 
 
 async def close_stale_compute_listings_after_capacity_change(db_path: str) -> list[str]:
@@ -266,24 +237,6 @@ def _extract_initial_price_from_order(order: Listing | dict) -> int | float:
 
 
 
-def _ensure_json_obj(value: Any, default: Any) -> Any:
-    """Coerce a maybe-stringified JSON blob into a Python object.
-
-    offer_resource / accepted_escrows live in SQLite TEXT columns; some
-    load paths hand them back already parsed, others as the raw JSON
-    string. The registry stores them in JSON columns and runs JSONPath
-    discovery filters over them, so forwarding a string round-trips
-    double-encoded and silently breaks every offer_resource.* / token
-    filter — a buyer's ``market buy --gpu-model`` then matches nothing.
-    """
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except (ValueError, TypeError):
-            return default
-    return default if value is None else value
-
-
 async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
     """Publish a new order to the registry so discoverers can find it.
 
@@ -295,55 +248,35 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
     registry errors; logs them. Callers interpret `status` to decide
     whether to bubble up.
     """
-    if isinstance(order, Listing):
-        order_dict = order.model_dump(mode="json")
-        order_id = order.listing_id
-    else:
-        order_dict = order
-        order_id = order_dict.get("listing_id", "unknown")
+    return await publish_listing_to_registries(
+        order,
+        enabled=settings.enable_registry_discovery,
+        registry_client_factory=_make_registry_client,
+        listing_request_factory=ListingRequest,
+        private_key=settings.wallet.private_key,
+        storefront_url=BASE_URL_OVERRIDE,
+        record_publications=_record_publications,
+        on_published=_record_listing_published_stage_event,
+    )
 
-    if not settings.enable_registry_discovery:
-        return {"status": "disabled", "listing_id": order_id}
 
-    offer_resource = _ensure_json_obj(order_dict.get("offer_resource"), {})
-    accepted_escrows = _ensure_json_obj(order_dict.get("accepted_escrows"), [])
-    demands = _ensure_json_obj(order_dict.get("demands"), [])
-
-    try:
-        async with _make_registry_client() as registry_client:
-            order_request = ListingRequest(
-                listing_id=order_id,
-                offer=offer_resource,
-                accepted_escrows=accepted_escrows,
-                demands=demands,
-                max_duration_seconds=order_dict.get("max_duration_seconds"),
-                storefront_url=order_dict.get("seller") or BASE_URL_OVERRIDE,
-            )
-            payloads = {url: order_request for url in registry_client.urls}
-            results = await registry_client.publish_listing_per_registry(
-                payloads, private_key=settings.wallet.private_key,
-            )
-        await _record_publications(order_id, results)
-        any_ok = any(r["success"] for r in results)
-        if any_ok:
-            logger.info("[REGISTRY] Published order %s", order_id)
-            stage_event(
-                "discovery", "order_published",
-                order_id=order_id,
-                agent_url=BASE_URL_OVERRIDE,
-                offer=offer_resource,
-                accepted_escrows=accepted_escrows,
-                demands=demands,
-                max_duration_seconds=order_dict.get("max_duration_seconds"),
-            )
-            return {"status": "published", "listing_id": order_id}
-        # No registry accepted the publish — surface the first error.
-        first_err = next((r["error"] for r in results if r["error"]), "unknown")
-        logger.warning("[REGISTRY] Failed to publish order %s: %s", order_id, first_err)
-        return {"status": "error", "listing_id": order_id, "message": first_err}
-    except Exception as exc:
-        logger.warning("[REGISTRY] Failed to publish order %s: %s", order_id, exc)
-        return {"status": "error", "listing_id": order_id, "message": str(exc)}
+def _record_listing_published_stage_event(
+    *,
+    listing_id: str,
+    offer_resource: dict[str, Any],
+    accepted_escrows: list[dict[str, Any]],
+    demands: list[dict[str, Any]],
+    max_duration_seconds: int | None,
+) -> None:
+    stage_event(
+        "discovery", "order_published",
+        order_id=listing_id,
+        agent_url=BASE_URL_OVERRIDE,
+        offer=offer_resource,
+        accepted_escrows=accepted_escrows,
+        demands=demands,
+        max_duration_seconds=max_duration_seconds,
+    )
 
 
 async def _registries_to_target(
