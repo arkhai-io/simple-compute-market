@@ -597,7 +597,7 @@ refunds, and operator alerting.
   (maximize) or symmetrically (minimize).
 - `rl_middleware` — terminal (optional). Lazy-imports torch + the
   pufferlib checkpoint at
-  `domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt`
+  `domains/vms/agent/app/policy/models/arkhai_negotiator_seller.pt`
   (or `_buyer.pt`). Exits with `torch_unavailable` if torch isn't
   installed.
 
@@ -654,13 +654,13 @@ to `get_status()` whose success value is not `"ok"`, either: (a) return
 `"ok"` on success and put the diagnostic name in a separate top-level
 fact field, or (b) add a key-specific rule to `_check_is_healthy`.
 
-**`domain/` tree — not installed, on sys.path:** holds the RL training
+**`domains/` tree — not installed, on sys.path:** holds the RL training
 + inference code that's outside the procedural runtime — specifically
-`domain/compute/agent/app/policy/torch_arkhai_strategy.py` (loads the
+`domains/vms/agent/app/policy/torch_arkhai_strategy.py` (loads the
 pufferlib checkpoint at inference time, called by `rl_middleware`) and
-`domain/compute/training/` (the standalone train + eval CLIs). The tree
+`domains/vms/training/` (the standalone train + eval CLIs). The tree
 is not a pip-installable package — it's copied into the Docker image at
-`/app/domain/` and requires `/app` on `sys.path` (Dockerfile sets
+`/app/domains/` and requires `/app` on `sys.path` (Dockerfile sets
 `ENV PYTHONPATH="/app"`). `arkhai_common` requires `gymnasium`;
 importing it without the ML extra installed fails — that's expected and
 the `rl_middleware` exit-on-probe path surfaces it cleanly.
@@ -911,7 +911,7 @@ when set for a specific listing, `POST /negotiate/new` against that listing retu
 Listings can be **created already-paused** by passing `"paused": true` in the
 `POST /orders/create` body. This threads through the policy pipeline:
 `listings_controller.py` reads the flag from the request body → adds it to `OrderCreateEvent.data["paused"]`
-→ `oc_action_make_offer_from_order_create` in `domain/compute/agent/app/policy/store.py`
+→ `oc_action_make_offer_from_order_create` in `domains/vms/agent/app/policy/store.py`
 propagates it into `action.parameters["paused"]`
 → `action_executor.py` MAKE_OFFER handler writes the listing to SQLite with `paused=1`
 and **skips** `publish_order_to_registry`.
@@ -2567,10 +2567,10 @@ Eight pure-Python internal packages are distributed as wheels:
 
 | Package | Wheel name | Source | Primary consumers |
 |---------|-----------|--------|-------------------|
-| `market-identity` | `market_identity-*.whl` | `identity/` | `market-core`, `registry-service`, `storefront`, `market-service` |
+| `market-identity` | `market_identity-*.whl` | `kit/identity/` | `market-core`, `registry-service`, `storefront`, `market-service` |
 | `market-core` | `market_core-*.whl` | `core/` | `market-alkahest`, `market-service` |
-| `market-alkahest` | `market_alkahest-*.whl` | `alkahest/` | `market-service` |
-| `market-config` | `market_config-*.whl` | `config/` | `market-service`, `buyer`, `storefront` |
+| `market-alkahest` | `market_alkahest-*.whl` | `kit/alkahest/` | `market-service` |
+| `market-config` | `market_config-*.whl` | `kit/config/` | `market-service`, `buyer`, `storefront` |
 | `market-service` | `market_service-*.whl` | `service/` | `integration-tests` |
 | `provisioning-service` | `provisioning_service-*.whl` | `provisioning-service/` | `integration-tests`, `service` |
 | `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `storefront-client/` | `storefront`, `integration-tests`, `provisioning-service` |

@@ -10,7 +10,7 @@ set -euo pipefail
 
 REPO="arkhai-io/simple-compute-market"
 VERSION="${1:-latest}"
-DEST_DIR="${2:-../../domain/compute/agent/app/policy/models}"
+DEST_DIR="${2:-../../domains/vms/agent/app/policy/models}"
 
 mkdir -p "$DEST_DIR"
 

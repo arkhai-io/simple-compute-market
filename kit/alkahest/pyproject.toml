@@ -22,7 +22,7 @@ asyncio_mode = "auto"
 testpaths = ["tests/unit"]
 
 [tool.uv.sources]
-market-core = { path = "../core", editable = true }
+market-core = { path = "../../core", editable = true }
 
 [dependency-groups]
 dev = [

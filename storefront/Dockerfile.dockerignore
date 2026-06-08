@@ -14,10 +14,10 @@
 !storefront/packages/
 !storefront/entrypoint.sh
 
-# ── service / policy / domain (imported by storefront at runtime) ─────
+# ── service / policy / domains (imported by storefront at runtime) ────
 !service/
 !policy/
-!domain/
+!domains/
 
 # ── storefront-client (workspace path source, editable in uv.lock) ────
 !storefront-client/

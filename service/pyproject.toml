@@ -27,10 +27,10 @@ asyncio_mode = "auto"
 testpaths = ["tests/unit", "tests/integration"]
 
 [tool.uv.sources]
-market-alkahest = { path = "../alkahest", editable = true }
-market-config = { path = "../config", editable = true }
+market-alkahest = { path = "../kit/alkahest", editable = true }
+market-config = { path = "../kit/config", editable = true }
 market-core = { path = "../core", editable = true }
-market-identity = { path = "../identity", editable = true }
+market-identity = { path = "../kit/identity", editable = true }
 
 [dependency-groups]
 dev = [

@@ -15,7 +15,7 @@ Model files are optional via env vars:
     ARKHAI_NEGOTIATOR_BUYER_MODEL_PATH
 
 Falls back to checkpoints shipped under
-``domain/compute/agent/app/policy/models/``.
+``domains/vms/agent/app/policy/models/``.
 """
 
 from __future__ import annotations
@@ -112,7 +112,7 @@ class TorchArkhaiStrategy:
         if direction in self._models:
             return self._models[direction]
 
-        from domain.compute.agent.app.policy.arkhai_common import (
+        from domains.vms.agent.app.policy.arkhai_common import (
             get_model,
             obs_dim,
             parse_node_types,
@@ -153,7 +153,7 @@ class TorchArkhaiStrategy:
             return None
         import time as _time
 
-        from domain.compute.agent.app.policy.arkhai_common import obs_dim, MAX_GPU
+        from domains.vms.agent.app.policy.arkhai_common import obs_dim, MAX_GPU
 
         obs = torch.zeros((1, obs_dim(node_types)), dtype=torch.float32)
 
@@ -205,7 +205,7 @@ class TorchArkhaiStrategy:
 
         try:
             import torch
-            from domain.compute.agent.app.policy.arkhai_common import (
+            from domains.vms.agent.app.policy.arkhai_common import (
                 extract_actions_from_logits,
                 parse_node_types,
             )

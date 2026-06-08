@@ -8,7 +8,7 @@ copies the final checkpoint to:
   agent/app/policy/models/arkhai_negotiator_seller.pt
   agent/app/policy/models/arkhai_negotiator_buyer.pt
 
-Usage (from domain/compute/):
+Usage (from domains/vms/):
     # Short smoke-test (CPU / MPS):
     uv run python training/train_arkhai.py --total-timesteps 50000
 

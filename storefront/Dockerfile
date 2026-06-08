@@ -78,7 +78,7 @@ EXPOSE 9993/udp
 
 COPY --chown=appuser:appuser --from=builder /app/.venv ./.venv
 ENV PATH="/app/.venv/bin:$PATH"
-# /app is the WORKDIR; domain/ is copied here. Console-script entry points
+# /app is the WORKDIR; domains/ is copied here. Console-script entry points
 # don't inherit CWD on sys.path, so we set PYTHONPATH explicitly.
 ENV PYTHONPATH="/app"
 # Dynaconf-driven config layering looks for the storefront TOML under
@@ -88,11 +88,11 @@ ENV XDG_CONFIG_HOME="/etc"
 
 # Copy application code. The market_storefront package is shipped at
 # /app/src/market_storefront so it's importable via the venv-installed
-# package; the domain/ tree is copied in for compute-domain policy
+# package; the domains/ tree is copied in for compute-domain policy
 # callables that the storefront's PolicyManager discovers at startup.
 COPY --chown=appuser:appuser storefront/src ./src
 COPY --chown=appuser:appuser storefront/scripts ./scripts
-COPY --chown=appuser:appuser domain/ ./domain/
+COPY --chown=appuser:appuser domains/ ./domains/
 COPY --chown=appuser:appuser service/ ../service/
 COPY --chown=appuser:appuser policy/ ../policy/
 

@@ -8,8 +8,8 @@ Model loading matches production inference: loads into pufferlib.models.Default
 evaluates the base network — the same weights the runtime callable uses.
 
 Usage (from core/):
-    uv run python ../domain/compute/training/eval_arkhai.py \\
-        --checkpoint ../domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt \\
+    uv run python ../domains/vms/training/eval_arkhai.py \\
+        --checkpoint ../domains/vms/agent/app/policy/models/arkhai_negotiator_seller.pt \\
         --episodes 20
 
 Or via CLI:

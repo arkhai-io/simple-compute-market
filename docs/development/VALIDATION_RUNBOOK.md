@@ -248,7 +248,7 @@ cd ..
 ```
 
 Policy training/RL dependencies are not part of the standard local validation.
-The old `domain/compute/tests` integration suite was removed in the latest pull;
+The old `domains/vms/tests` integration suite was removed in the latest pull;
 future training or RL validation should be documented separately when runnable
 tests are added back.
 

@@ -11,7 +11,7 @@ in the non-Dict, MultiDiscrete branch — that architecture is a few
 ``ArkhaiInferencePolicy`` below). Outputs are bit-identical to the
 pufferlib version on the existing ``.pt`` files.
 
-Training still uses pufferlib's C env + trainer (``domain/compute/training/``);
+Training still uses pufferlib's C env + trainer (``domains/vms/training/``);
 runtime callers (storefront, buyer) only need torch.
 """
 from __future__ import annotations

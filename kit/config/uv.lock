@@ -717,7 +717,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "market-core", editable = "../core" },
+    { name = "market-core", editable = "../../core" },
     { name = "pydantic", specifier = ">=2" },
     { name = "web3", specifier = ">=7.14.0" },
 ]
@@ -755,7 +755,7 @@ dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 [[package]]
 name = "market-core"
 version = "0.1.0"
-source = { editable = "../core" }
+source = { editable = "../../core" }
 dependencies = [
     { name = "market-identity" },
     { name = "pydantic" },

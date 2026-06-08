@@ -51,7 +51,7 @@ dist-registry: ## Build arkhai-registry-client wheel into .dist/
 
 dist-identity: ## Build market-identity wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd identity && uv build --wheel --out-dir $(DIST_DIR)
+	cd kit/identity && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/market_identity-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: market-identity produced a platform-specific wheel — must build inside Docker" && exit 1)
 
@@ -63,13 +63,13 @@ dist-core: ## Build market-core wheel into .dist/
 
 dist-alkahest: ## Build market-alkahest wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd alkahest && uv build --wheel --out-dir $(DIST_DIR)
+	cd kit/alkahest && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/market_alkahest-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: market-alkahest produced a platform-specific wheel — must build inside Docker" && exit 1)
 
 dist-config: ## Build market-config wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd config && uv build --wheel --out-dir $(DIST_DIR)
+	cd kit/config && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/market_config-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: market-config produced a platform-specific wheel — must build inside Docker" && exit 1)
 

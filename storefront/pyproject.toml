@@ -44,11 +44,11 @@ dev = [
 [project.optional-dependencies]
 
 # Inference-only — just enough to load and run the trained .pt checkpoints
-# in domain/compute/agent/app/policy/models/. The architecture is
+# in domains/vms/agent/app/policy/models/. The architecture is
 # reproduced inline in arkhai_common.ArkhaiInferencePolicy (state-dict
 # compatible with checkpoints trained against pufferlib.models.Default,
 # verified bit-identical). Training (which still uses pufferlib's C env)
-# lives in domain/compute/training and is not exposed as an extra here.
+# lives in domains/vms/training and is not exposed as an extra here.
 rl = [
     "torch>=2.7.0",
 ]
@@ -77,7 +77,7 @@ environments = [
 ]
 
 [tool.uv.sources]
-market-identity = { path = "../identity", editable = true }
+market-identity = { path = "../kit/identity", editable = true }
 market-policy = { path = "../policy", editable = true }
 torch = [
     { index = "pytorch-cpu" },

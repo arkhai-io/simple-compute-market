@@ -406,7 +406,7 @@ def _maybe_register_rl_middleware() -> None:
     KeyError so callers get a clear "install with [rl] extras" message.
     """
     try:
-        import domain.compute.agent.app.policy.torch_arkhai_strategy  # noqa: F401
+        import domains.vms.agent.app.policy.torch_arkhai_strategy  # noqa: F401
     except Exception as exc:
         logger.debug("[NEGOTIATION] torch_arkhai_strategy not available: %s", exc)
 

@@ -7,9 +7,9 @@ Core-generic policy authoring and evaluation guidance:
 
 | File | Role |
 |------|------|
-| `domain/compute/agent/app/policy/store.py` | All active compute callables (`ri.*`, `mo.*`, `negotiation.*`, fulfillment/arbitration transitions) |
-| `domain/compute/agent/app/policy/arkhai_common.py` | Shared RL utils: obs builder, model loader, action extraction |
-| `domain/compute/agent/app/policy/torch_arkhai_negotiator.py` | Active negotiation callable — puffer bilateral model inference |
+| `domains/vms/agent/app/policy/store.py` | All active compute callables (`ri.*`, `mo.*`, `negotiation.*`, fulfillment/arbitration transitions) |
+| `domains/vms/agent/app/policy/arkhai_common.py` | Shared RL utils: obs builder, model loader, action extraction |
+| `domains/vms/agent/app/policy/torch_arkhai_negotiator.py` | Active negotiation callable — puffer bilateral model inference |
 | `core/agent/app/policy/seeding.py` | Compute default policy seeding by trigger type |
 | `core/agent/app/schema/pydantic_models.py` | Compute event/resource enums and models |
 | `core/agent/app/utils/action_executor.py` | Compute-domain action execution |
@@ -36,8 +36,8 @@ negotiation.action.safe_default_reject
 ```
 
 Model paths (configurable via env vars):
-- `ARKHAI_NEGOTIATOR_SELLER_MODEL_PATH` → `domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt`
-- `ARKHAI_NEGOTIATOR_BUYER_MODEL_PATH` → `domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt`
+- `ARKHAI_NEGOTIATOR_SELLER_MODEL_PATH` → `domains/vms/agent/app/policy/models/arkhai_negotiator_seller.pt`
+- `ARKHAI_NEGOTIATOR_BUYER_MODEL_PATH` → `domains/vms/agent/app/policy/models/arkhai_negotiator_buyer.pt`
 
 Train new models: `market policy train --total-timesteps 10000000 --wandb`
 Eval models: `market policy eval --episodes 20`
@@ -57,4 +57,4 @@ Eval models: `market policy eval --episodes 20`
 3. Return `None` to pass through to the next callable in the chain.
 4. Keep action payloads serializable (`model_dump(mode="json")`).
 5. Seed in `seeding.py` via `save_policy_composite(components=[...])`.
-6. Add/update tests in `domain/compute/tests/`.
+6. Add/update tests in `domains/vms/tests/`.

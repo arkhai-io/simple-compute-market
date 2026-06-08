@@ -6,7 +6,7 @@ and eval are tooling concerns separate from either runtime, so they
 live here as their own console script. Run `market-policy --help`.
 
 Implementation note: train/eval delegate to the legacy training
-scripts under `domain/compute/training/`. The cwd is the repo root so
+scripts under `domains/vms/training/`. The cwd is the repo root so
 puffer's `experiments/` checkpoint dir lands at a stable path
 regardless of which package the user is in.
 """

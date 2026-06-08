@@ -21,7 +21,7 @@ asyncio_mode = "auto"
 testpaths = ["tests/unit"]
 
 [tool.uv.sources]
-market-identity = { path = "../identity", editable = true }
+market-identity = { path = "../kit/identity", editable = true }
 
 [dependency-groups]
 dev = [
