@@ -81,7 +81,7 @@ Infrastructure-side (compute-market-internal-infra):
   amount, internal side-input collection, and middleware-chain execution.
   The later hook-bearing skeleton move is part of the `market-core`
   package extraction.
-- `ProvisionTerms` now carries opaque `{kind, payload}` delivery terms on the wire; finish seam 3 by moving concrete `compute.v1` validation/interpretation out of shared/core code and into the compute adapter package during extraction.
+- `ProvisionTerms` now carries opaque `{kind, payload}` delivery terms on the wire; concrete `compute.v1` duration validation is at the storefront compute boundary. Moving the compute adapter into its own package belongs to the later `market-core` extraction.
 - The market skeleton lives inside `buyer/` + `storefront/` tangled with compute code → extract `market-core` so the package graph expresses the joint the `run_buy(...)` signature already implies.
 
 **Not an immediate target** — this is the filing principle for *where new behavior goes*, captured so the next non-trivial change to negotiation/settlement is filed correctly rather than by precedent. The packaging extraction is the eventual payoff; the cheap wins (escrow guard → middleware, `derive_prices` placement) can land independently.
