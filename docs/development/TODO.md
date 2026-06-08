@@ -77,7 +77,8 @@ Infrastructure-side (compute-market-internal-infra):
   `market buy` now constructs explicit hooks through those adapters.
   The seller synchronous negotiation wrappers now call an injectable seller
   round hook whose default implementation owns strategy lookup, reference
-  amount, portfolio snapshot, and middleware-chain execution. Remaining
+  amount, and middleware-chain execution over an opaque policy-input bundle
+  captured by the wrapper. Remaining
   work is retiring direct legacy callers where practical and moving the
   hook-bearing skeleton during package extraction.
 - `ProvisionTerms` is compute-flavored (`ssh_public_key`/`duration_seconds`/`compute_resource`) → make the core carry delivery terms as an opaque schema blob (as the registry already does with `offer_resource`).

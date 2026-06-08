@@ -38,7 +38,7 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Protocol
 
 from market_policy.negotiation_middleware import (
     NegotiationContext,
@@ -68,7 +68,25 @@ class SellerRoundResult:
     decision: NegotiationDecision
 
 
-SellerRoundHook = Callable[..., Awaitable[SellerRoundResult]]
+class SellerRoundHook(Protocol):
+    async def __call__(
+        self,
+        *,
+        listing: Any,
+        history: list[NegotiationRound],
+        requested_duration_seconds: int | None = None,
+        strategy_label: str | None = None,
+        policy_inputs: dict[str, Any] | None = None,
+    ) -> SellerRoundResult:
+        ...
+
+
+async def _default_seller_policy_inputs(sqlite_client: Any) -> dict[str, Any]:
+    return {
+        "available_resources": {
+            "resources": await sqlite_client.list_resources() or [],
+        },
+    }
 
 
 def _validate_escrow_proposal(
@@ -580,19 +598,20 @@ def _history_from_messages(
 
 async def _default_seller_round_hook(
     *,
-    sqlite_client: Any,
     listing: Any,
     history: list[NegotiationRound],
     requested_duration_seconds: int | None = None,
     strategy_label: str | None = None,
+    policy_inputs: dict[str, Any] | None = None,
 ) -> SellerRoundResult:
     """Run the default seller per-round policy hook.
 
     This is the current compute storefront instantiation: determine the
     listing strategy, derive the seller reference amount, load the configured
-    middleware chain, attach a portfolio snapshot, and return the chain's
-    decision. The stateful HTTP wrappers own persistence/events around this
-    hook; the hook owns only the policy decision.
+    middleware chain, interpret the explicit policy input bundle supplied by
+    the caller, and return the chain's decision. The stateful HTTP wrappers
+    own protocol persistence/events around this hook; policy implementations
+    own any private decision state they need behind their callable.
     """
     from market_storefront.models.domain_models import Listing
     from market_storefront.utils.action_executor import determine_strategy_from_order
@@ -632,13 +651,15 @@ async def _default_seller_round_hook(
     direction = _direction_from_strategy_label(strategy_label)
 
     chain = _load_storefront_chain()
-    resources = await sqlite_client.list_resources()
     context = NegotiationContext(
         direction=direction,
         our_reference_amount=float(our_amount),
         listing=listing_dict if isinstance(listing_dict, dict) else {},
         our_escrow_proposal=their_proposal,
-        available_resources={"resources": resources or []},
+        available_resources=(
+            (policy_inputs or {}).get("available_resources")
+            or {"resources": []}
+        ),
     )
     decision = run_negotiation_chain(chain, history, context)
     chain_label = ",".join(
@@ -685,10 +706,10 @@ async def _compute_round_zero_decision(
         proposal=their_proposal,
     )]
     result = await _default_seller_round_hook(
-        sqlite_client=sqlite_client,
         listing=listing,
         history=history,
         requested_duration_seconds=requested_duration_seconds,
+        policy_inputs=await _default_seller_policy_inputs(sqlite_client),
     )
     return (
         result.our_amount,
@@ -815,10 +836,10 @@ async def start_sync_negotiation(
     )]
     try:
         round_result = await (seller_round_hook or _default_seller_round_hook)(
-            sqlite_client=sqlite_client,
             listing=our_order,
             history=history,
             requested_duration_seconds=requested_duration_seconds,
+            policy_inputs=await _default_seller_policy_inputs(sqlite_client),
         )
         our_amount = round_result.our_amount
         strategy = round_result.strategy_label
@@ -1082,11 +1103,11 @@ async def continue_sync_negotiation(
         ),
     ))
     round_result = await (seller_round_hook or _default_seller_round_hook)(
-        sqlite_client=sqlite_client,
         listing=our_order,
         history=history,
         requested_duration_seconds=requested_duration_seconds,
         strategy_label=strategy,
+        policy_inputs=await _default_seller_policy_inputs(sqlite_client),
     )
     our_amount = round_result.our_amount
     decision = round_result.decision

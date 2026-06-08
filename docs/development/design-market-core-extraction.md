@@ -241,10 +241,15 @@ vocabulary.
   callers and tests can still use the fine-grained parameters.
 - **Done:** the seller-side synchronous HTTP wrappers now call an
   injectable seller round hook. The default hook owns the current compute
-  instantiation: strategy lookup, seller reference amount, portfolio
-  snapshot, configured middleware chain, and the resulting
-  `NegotiationDecision`. `start_sync_negotiation` and
-  `continue_sync_negotiation` own persistence/events around that hook.
+  instantiation: strategy lookup, seller reference amount, configured
+  middleware chain, and the resulting `NegotiationDecision`.
+  `start_sync_negotiation` and `continue_sync_negotiation` own
+  persistence/events and pass an opaque policy-input bundle into the hook.
+  The current default bundle includes an available-inventory snapshot for
+  the compute inventory guard, but that key is part of this compute policy
+  instantiation rather than a core contract. Policy implementations may be
+  internally stateful, but policy-private decision state lives behind the
+  callable rather than in generic negotiation tables.
 - **Target** (collapse toward the two-hook surface above):
   - `derive_prices` → fold into negotiation-policy setup (bisection's
     bounds are policy input; a non-bisection policy supplies its own).
