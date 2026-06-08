@@ -379,7 +379,8 @@ Recommended order:
    strategy selection used by the compatibility `buyer/` and `storefront/`
    packages.
    `domains/vms/settlement/` now owns accepted-escrow selection,
-   proposal materialization, and Alkahest escrow terms/create helpers.
+   proposal materialization, compute lease encoding, token materialization,
+   and Alkahest escrow terms/create helpers.
    `domains/vms/provisioning/` now owns VM provision-term construction.
    `buyer/` remains a temporary compatibility package that calls domain
    functions. Later, core receives only reusable orchestration helpers, not

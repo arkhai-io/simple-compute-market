@@ -10,7 +10,6 @@ import asyncio
 import functools
 import uuid
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 import logging
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
@@ -24,6 +23,10 @@ from domains.vms.listings import (
     extract_compute_from_order as _vm_extract_compute_from_order,
     extract_initial_price_from_order as _vm_extract_initial_price_from_order,
     resource_is_compute as _vm_resource_is_compute,
+)
+from domains.vms.settlement import (
+    encode_compute_lease as _vm_encode_compute_lease,
+    token_resource_from_accepted_escrow as _vm_token_resource_from_accepted_escrow,
 )
 from market_storefront.models.domain_models import (
     ComputeResource,
@@ -439,63 +442,11 @@ async def _record_publications(
 def _token_resource_from_accepted_escrow(
     accepted_escrow: dict[str, Any] | Any,
 ) -> TokenResource | None:
-    """Build a ``TokenResource`` from an ``accepted_escrows[i]`` entry.
-
-    Looks up ERC20/ERC1155 metadata by the entry's ``literal_fields.token``
-    address in the chain-resolved cache, falling back to address-only
-    metadata when the cache doesn't yet know it. Native-token escrow entries
-    have no token literal, so they become a synthetic native payment resource.
-    Returns ``None`` when the entry is neither token-backed nor native-token.
-    The token amount is the entry's primary rate value (per-hour rate in base
-    units); ``None`` becomes 0.
-    """
-    from service.schemas import accepted_token_address, primary_rate_value
-
-    if not isinstance(accepted_escrow, dict):
-        return None
-    amount = primary_rate_value(accepted_escrow) or 0
-    token = accepted_token_address(accepted_escrow)
-    try:
-        from service.clients.token import resolve_token_cached, ERC20TokenMetadata
-    except Exception:
-        return None
-
-    if not isinstance(token, str) or not token:
-        try:
-            from service.clients.alkahest import get_escrow_codec_for
-
-            codec = get_escrow_codec_for(
-                accepted_escrow.get("chain_name", ""),
-                accepted_escrow.get("escrow_address", ""),
-                config_path=getattr(
-                    CHAINS.get(accepted_escrow.get("chain_name", "")),
-                    "alkahest_address_config_path",
-                    None,
-                ),
-            )
-        except Exception:
-            codec = None
-        if codec is None or not str(codec.kind).startswith("native_token_"):
-            return None
-        meta = ERC20TokenMetadata(
-            symbol="NATIVE",
-            name="Native token",
-            contract_address="native",
-            decimals=18,
-        )
-        return TokenResource(token=meta, amount=amount)
-
-    meta = resolve_token_cached(token)
-    if meta is None:
-        # Fall back to a minimal metadata object so the encoder has
-        # something to serialise. Decimals=0 means amounts are rendered
-        # as integers; better than failing the lease entirely.
-        meta = ERC20TokenMetadata(
-            symbol="UNKNOWN",
-            contract_address=token,
-            decimals=0,
-        )
-    return TokenResource(token=meta, amount=amount)
+    """Compatibility wrapper for VM-domain token materialization."""
+    return _vm_token_resource_from_accepted_escrow(
+        accepted_escrow,
+        chain_configs=CHAINS,
+    )
 
 
 def encode_compute_lease(
@@ -503,54 +454,12 @@ def encode_compute_lease(
     token_resource: TokenResource | dict[str, Any],
     duration_seconds: int,
 ) -> bytes:
-    """Encode a compute-for-token trade as JSON bytes for use as Alkahest demand payload.
-
-    Args:
-        compute_resource: ComputeResource (or dict payload) describing the offered compute.
-        token_resource: TokenResource (or dict) describing the payment token and amount (base units) for the per-hour rate.
-        duration_seconds: Lease duration in seconds (must be > 0).
-    """
-    compute = compute_resource
-    if isinstance(compute_resource, dict):
-        compute = ComputeResource.model_validate(compute_resource)
-    if not isinstance(compute, ComputeResource):
-        raise ValueError("encode_compute_lease expects a ComputeResource")
-
-    hourly_rate = token_resource
-    if isinstance(token_resource, dict):
-        hourly_rate = TokenResource.model_validate(token_resource)
-    if not isinstance(hourly_rate, TokenResource):
-        raise ValueError("encode_compute_lease expects a TokenResource")
-
-    if duration_seconds < 1:
-        raise ValueError("duration_seconds must be >= 1")
-
-    token_meta = hourly_rate.token
-    # Total payment = per-hour rate × seconds / 3600. Integer division keeps
-    # the result in whole base units; fractional sub-units are not representable.
-    total_price = hourly_rate.amount * duration_seconds // 3600
-    total_payment_resource = TokenResource(token=token_meta, amount=total_price)
-
-    # Human-readable prices
-    human_total_payment = Decimal(total_payment_resource.amount) / Decimal(10**token_meta.decimals)
-    human_price_per_hour = Decimal(hourly_rate.amount) / (10**token_meta.decimals)
-
-    lease_terms = {
-        "gpu_model": compute.gpu_model.value if hasattr(compute.gpu_model, "value") else str(compute.gpu_model),
-        "region": compute.region.value if hasattr(compute.region, "value") else str(compute.region),
-        "gpu_count": compute.gpu_count,
-        "sla": compute.sla,
-        "duration_seconds": duration_seconds,
-        "token_symbol": token_meta.symbol,
-        "token_address": token_meta.contract_address,
-        "price_per_hour_decimal": float(human_price_per_hour),
-        "total_price_decimal": float(human_total_payment),
-        "total_price_int": total_payment_resource.amount,
-    }
-
-    logger.info("[ALKAHEST] Encoding compute lease terms: %s", lease_terms)
-
-    return json.dumps(lease_terms).encode("utf-8")
+    """Compatibility wrapper for VM-domain compute lease encoding."""
+    return _vm_encode_compute_lease(
+        compute_resource=compute_resource,
+        token_resource=token_resource,
+        duration_seconds=duration_seconds,
+    )
 
 
 async def _build_provisioning_job_spec(
