@@ -415,7 +415,7 @@ def _bisection_chain():
     Skips the guards so the test's seeded listings don't need to match
     an inventory-portfolio entry. Avoids the torch/rl dependency.
     """
-    from market_policy.negotiation_middleware import bisection_middleware
+    from domains.vms.negotiation.policies import bisection_middleware
     return [bisection_middleware]
 
 

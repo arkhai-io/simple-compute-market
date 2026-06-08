@@ -362,15 +362,17 @@ deployment refactor in one step.
 
 Recommended order:
 
-1. **Split `policy/` first.** Keep only schema-invariant machinery in
-   `kit/policy`: `NegotiationRound`, `NegotiationDecision`, the context
-   carrier, middleware-chain execution, and policy discovery. Move
-   VM/Alkahest-specific behavior to concept homes under
+1. **Done: split `policy/` first.** `policy/` now keeps only the
+   schema-invariant middleware machinery on the path to `kit/policy`:
+   `NegotiationRound`, `NegotiationDecision`, the context carrier,
+   middleware-chain execution, and policy discovery. VM/Alkahest-specific
+   behavior moved to concept homes under
    `domains/vms/negotiation/` and `domains/vms/settlement/`: scalar amount
    extraction from `proposal.fields["amount"]`, bisection over token
    amounts, escrow-kind dispatch, schema validation, and
    inventory/resource guards. The core can require "run this policy chain"
-   without knowing those meanings.
+   without knowing those meanings. The physical `policy/` → `kit/policy`
+   move remains part of package migration.
 2. **Cut the buyer plugin boundary.** Move the generic buyer shell toward
    `core/buyer`: command lifecycle, registry fan-in, generic
    `--filter key=value`, run-log plumbing, and
@@ -436,6 +438,10 @@ Recommended order:
 6. **Package migration**: once the code boundaries are explicit, move the
    remaining top-level packages into `core/`, `kit/`, and `domains/vms/`
    with temporary compatibility wrappers and deployment-path updates.
+7. **Policy split cleanup**: the implementation now lives in the right
+   direction, but old imports are still compatibility-exported from
+   `market_policy.negotiation_middleware`. Remove those shims after buyer
+   and storefront code import only the domain policy module.
 
 Each phase keeps the branch green and the e2e suite passing. Seam 3 is the
 current target: the wire shape now carries opaque provision terms, and the

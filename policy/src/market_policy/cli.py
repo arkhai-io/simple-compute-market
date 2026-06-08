@@ -27,12 +27,12 @@ import typer
 # parents[3]: market_policy → src → policy → repo root
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-_TRAINING_DIR = REPO_ROOT / "domain" / "compute" / "training"
+_TRAINING_DIR = REPO_ROOT / "domains" / "vms" / "training"
 _TRAIN_SCRIPT = _TRAINING_DIR / "train_arkhai.py"
 _EVAL_SCRIPT = _TRAINING_DIR / "eval_arkhai.py"
 _CONFIG_DIR = _TRAINING_DIR / "config"
 _DEFAULT_MODELS_DIR = (
-    REPO_ROOT / "domain" / "compute" / "agent" / "app" / "policy" / "models"
+    REPO_ROOT / "domains" / "vms" / "agent" / "app" / "policy" / "models"
 )
 
 _ROLE_CONFIG = {

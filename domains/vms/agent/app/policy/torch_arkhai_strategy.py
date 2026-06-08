@@ -30,10 +30,12 @@ from market_policy.negotiation_middleware import (
     NegotiationDecision,
     NegotiationRound,
     NegotiationStep,
-    _amount_from_proposal,
-    our_previous_counters,
     register_negotiation_middleware,
     their_last_proposal,
+)
+from domains.vms.negotiation.policies import (
+    _amount_from_proposal,
+    our_previous_counters,
     their_proposed_amount,
 )
 

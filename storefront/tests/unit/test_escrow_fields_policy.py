@@ -13,6 +13,8 @@ from __future__ import annotations
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationRound,
+)
+from domains.vms.negotiation.policies import (
     accept_exact_listing_middleware,
     escrow_shape_guard,
 )

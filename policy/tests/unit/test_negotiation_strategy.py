@@ -16,14 +16,16 @@ from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationDecision,
     NegotiationRound,
-    accept_exact_listing_middleware,
-    amount_bisection_middleware,
-    bisection_middleware,
     load_negotiation_chain,
-    make_escrow_kind_dispatch_middleware,
     normalize_policies_by_escrow_kind_config,
     register_negotiation_middleware,
     run_negotiation_chain,
+)
+from domains.vms.negotiation.policies import (
+    accept_exact_listing_middleware,
+    amount_bisection_middleware,
+    bisection_middleware,
+    make_escrow_kind_dispatch_middleware,
 )
 
 

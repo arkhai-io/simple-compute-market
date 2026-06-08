@@ -61,3 +61,6 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["market_buyer"]
+
+[tool.pytest.ini_options]
+pythonpath = ["..", "."]

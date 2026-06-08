@@ -9,9 +9,7 @@ without dragging torch into pytest.
 
 from __future__ import annotations
 
-from market_policy.negotiation_middleware import (
-    bisection_middleware,
-    register_negotiation_middleware,
-)
+from market_policy.negotiation_middleware import register_negotiation_middleware
+from domains.vms.negotiation.policies import bisection_middleware
 
 register_negotiation_middleware("rl")(bisection_middleware)

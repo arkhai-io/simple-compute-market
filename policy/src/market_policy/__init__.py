@@ -1,18 +1,4 @@
-"""Shared negotiation machinery for buyer + seller.
-
-Provides:
-- A negotiation middleware chain (`NegotiationMiddleware`,
-  `run_negotiation_chain`, `register_negotiation_middleware`,
-  `load_negotiation_chain`) with built-in bisection terminal + guards
-  (inventory match, escrow shape, max rounds).
-- A negotiation thread store keyed off an injected `Identity`.
-
-Both buyer and seller drive per-round negotiation through the same
-chain abstraction. Data model is symmetric; nothing here depends on a
-specific server runtime or protocol. The seller's chain is configured
-in `[negotiation] chain = [...]`; the buyer's CLI builds its chain
-internally per `[negotiation] policy_mode`.
-"""
+"""Shared negotiation machinery for buyer + seller."""
 
 from market_policy.negotiation_middleware import (
     NegotiationContext,
@@ -20,14 +6,7 @@ from market_policy.negotiation_middleware import (
     NegotiationMiddleware,
     NegotiationRound,
     NegotiationStep,
-    accept_exact_listing_middleware,
-    amount_bisection_middleware,
-    bisection_middleware,
-    buyer_escrow_shape_guard,
-    escrow_shape_guard,
-    has_matching_inventory_guard,
     load_negotiation_chain,
-    make_escrow_kind_dispatch_middleware,
     max_rounds_guard,
     normalize_policies_by_escrow_kind_config,
     normalize_policy_chain_config,
@@ -41,17 +20,35 @@ __all__ = [
     "NegotiationMiddleware",
     "NegotiationRound",
     "NegotiationStep",
-    "accept_exact_listing_middleware",
-    "amount_bisection_middleware",
-    "bisection_middleware",
-    "buyer_escrow_shape_guard",
-    "escrow_shape_guard",
-    "has_matching_inventory_guard",
     "load_negotiation_chain",
-    "make_escrow_kind_dispatch_middleware",
     "max_rounds_guard",
     "normalize_policies_by_escrow_kind_config",
     "normalize_policy_chain_config",
     "register_negotiation_middleware",
     "run_negotiation_chain",
 ]
+
+try:
+    from market_policy.negotiation_middleware import (
+        accept_exact_listing_middleware,
+        amount_bisection_middleware,
+        bisection_middleware,
+        buyer_escrow_shape_guard,
+        escrow_shape_guard,
+        has_matching_inventory_guard,
+        make_escrow_kind_dispatch_middleware,
+    )
+except ImportError:
+    pass
+else:
+    __all__.extend(
+        [
+            "accept_exact_listing_middleware",
+            "amount_bisection_middleware",
+            "bisection_middleware",
+            "buyer_escrow_shape_guard",
+            "escrow_shape_guard",
+            "has_matching_inventory_guard",
+            "make_escrow_kind_dispatch_middleware",
+        ]
+    )

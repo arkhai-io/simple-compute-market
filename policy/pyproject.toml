@@ -53,7 +53,7 @@ allow-direct-references = true
 packages = ["src/market_policy"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "..", "../service/src", "../kit/alkahest/src"]
 asyncio_mode = "auto"
 
 [tool.uv]

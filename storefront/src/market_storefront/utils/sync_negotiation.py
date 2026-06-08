@@ -46,12 +46,14 @@ from market_policy.negotiation_middleware import (
     NegotiationMiddleware,
     NegotiationRound,
     NegotiationStep,
-    _amount_from_proposal,
     load_negotiation_chain,
-    make_escrow_kind_dispatch_middleware,
     normalize_policies_by_escrow_kind_config,
     register_negotiation_middleware,
     run_negotiation_chain,
+)
+from domains.vms.negotiation.policies import (
+    _amount_from_proposal,
+    make_escrow_kind_dispatch_middleware,
 )
 
 from service.schemas import EscrowProposal

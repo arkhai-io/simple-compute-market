@@ -29,10 +29,10 @@ from market_policy.negotiation_middleware import (
     NegotiationMiddleware,
     NegotiationRound,
     load_negotiation_chain,
-    make_escrow_kind_dispatch_middleware,
     normalize_policies_by_escrow_kind_config,
     run_negotiation_chain,
 )
+from domains.vms.negotiation.policies import make_escrow_kind_dispatch_middleware
 from service.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
 
 
