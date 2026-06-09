@@ -424,7 +424,7 @@ async def start_sync_negotiation(
     # Imports deferred so unit tests can patch the registry / thread store
     # without paying for the whole import graph.
     from market_policy.negotiation_thread import NegotiationThreadTransaction
-    from market_storefront.models.domain_models import Listing
+    from domains.vms.listings.models import Listing
     from market_storefront.utils.stage_log import stage_event
 
     # Check global pause flag and per-order pause flag before doing any work.
@@ -614,7 +614,7 @@ async def continue_sync_negotiation(
     """
     from market_policy.negotiation_thread import NegotiationThreadTransaction
     from domains.vms.listings import determine_strategy_from_order
-    from market_storefront.models.domain_models import Listing
+    from domains.vms.listings.models import Listing
     from market_storefront.utils.stage_log import stage_event
 
     thread = await sqlite_client.load_negotiation_thread_row(negotiation_id=neg_id)

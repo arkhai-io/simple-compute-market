@@ -69,7 +69,7 @@ def negotiate_new_auth(body, request: Request) -> None:
     FastAPI injects it because it's declared on the endpoint and we request
     the same name here.
     """
-    from market_storefront.models.negotiation_models import NegotiateNewRequest
+    from market_core.storefront.models.negotiation_models import NegotiateNewRequest
     if not isinstance(body, NegotiateNewRequest):
         raise HTTPException(status_code=400, detail="Invalid request body type")
     _verify(request, "negotiate_new", body.listing_id, body.buyer_address)
@@ -77,7 +77,7 @@ def negotiate_new_auth(body, request: Request) -> None:
 
 def negotiate_continue_auth(neg_id: str, body, request: Request) -> None:
     """Depends for POST /negotiate/{neg_id}."""
-    from market_storefront.models.negotiation_models import NegotiateContinueRequest
+    from market_core.storefront.models.negotiation_models import NegotiateContinueRequest
     if not isinstance(body, NegotiateContinueRequest):
         raise HTTPException(status_code=400, detail="Invalid request body type")
     _verify(request, "negotiate_continue", neg_id, body.buyer_address)
@@ -85,7 +85,7 @@ def negotiate_continue_auth(neg_id: str, body, request: Request) -> None:
 
 def settle_escrow_auth(escrow_uid: str, body, request: Request) -> None:
     """Depends for POST /settle/{escrow_uid}."""
-    from market_storefront.models.settle_models import SettleRequest
+    from market_core.storefront.models.settle_models import SettleRequest
     if not isinstance(body, SettleRequest):
         raise HTTPException(status_code=400, detail="Invalid request body type")
     _verify(request, "settle_escrow", escrow_uid, body.buyer_address)

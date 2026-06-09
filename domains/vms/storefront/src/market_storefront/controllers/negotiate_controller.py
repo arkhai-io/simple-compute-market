@@ -14,7 +14,7 @@ from fastapi_utils.cbv import cbv
 
 import market_storefront.container as _container
 from market_storefront.middleware import buyer_auth
-from market_storefront.models.negotiation_models import (
+from market_core.storefront.models.negotiation_models import (
     NegotiateContinueRequest,
     NegotiateContinueResponse,
     NegotiateNewRequest,

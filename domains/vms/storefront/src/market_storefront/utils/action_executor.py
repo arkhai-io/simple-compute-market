@@ -37,7 +37,7 @@ from domains.vms.settlement import (
     encode_compute_lease as _vm_encode_compute_lease,
     token_resource_from_accepted_escrow as _vm_token_resource_from_accepted_escrow,
 )
-from market_storefront.models.domain_models import (
+from domains.vms.listings.models import (
     ComputeResource,
     Listing,
     TokenResource,

@@ -12,7 +12,7 @@ from domains.vms.listings import (
     determine_strategy_from_order as _vm_determine_strategy_from_order,
     determine_strategy_from_resources as _vm_determine_strategy_from_resources,
 )
-from market_storefront.models.domain_models import (
+from domains.vms.listings.models import (
     Listing,
     ComputeResource,
     ComputeDomainResource,

@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from market_storefront.models.listing_models import (
+from market_core.storefront.models.listing_models import (
     ArbitrateRequest,
     ClaimRequest,
     CloseListingResponse,
@@ -212,7 +212,7 @@ class ListingService:
     def _parse_offer_and_escrows(
         self, request: CreateListingRequest
     ) -> tuple[Any, list[dict[str, Any]], list[dict[str, Any]]]:
-        from market_storefront.models.domain_models import ComputeResource
+        from domains.vms.listings.models import ComputeResource
         try:
             offer_resource = parse_resource_from_dict(
                 self._normalize_token_resource(request.offer)
@@ -246,7 +246,7 @@ class ListingService:
         ``POST /api/v1/listings/{id}/resume`` which clears the flag and runs
         the same ``publish_order_to_registry`` path.
         """
-        from market_storefront.models.domain_models import Listing
+        from domains.vms.listings.models import Listing
         from market_storefront.utils.action_executor import publish_order_to_registry
         from market_storefront.utils.config import BASE_URL_OVERRIDE
 
@@ -332,7 +332,7 @@ class ListingService:
         negotiation strategy. The controller converts these to HTTP 404.
         """
         from domains.vms.negotiation.policies import _amount_from_proposal
-        from market_storefront.models.domain_models import Listing
+        from domains.vms.listings.models import Listing
         from market_storefront.utils.sync_negotiation import _compute_round_zero_decision
 
         row = await self._db.load_listing(listing_id=listing_id)

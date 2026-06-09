@@ -13,7 +13,7 @@ from fastapi_utils.cbv import cbv
 import market_storefront.container as _container
 from market_storefront.middleware import buyer_auth
 from market_storefront.middleware.admin_auth import require_admin_key
-from market_storefront.models.settle_models import (
+from market_core.storefront.models.settle_models import (
     EvaluateSettleRequest,
     EvaluateSettleResponse,
     SettleRequest,

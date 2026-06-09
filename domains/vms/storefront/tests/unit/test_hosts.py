@@ -14,7 +14,7 @@ import textwrap
 import pytest
 
 from market_storefront.resources import ComputeGpuResourceAdapter
-from market_storefront.models.domain_models import (
+from domains.vms.listings.models import (
     ComputeResource,
     GPUModel,
     GpuInterconnect,

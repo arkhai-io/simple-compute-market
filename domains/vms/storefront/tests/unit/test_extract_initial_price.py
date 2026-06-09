@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from market_storefront.models.domain_models import (
+from domains.vms.listings.models import (
     ComputeResource,
     GPUModel,
     Listing,

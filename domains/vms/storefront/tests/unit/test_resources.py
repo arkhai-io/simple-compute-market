@@ -2,7 +2,7 @@
 
 import pytest
 
-from market_storefront.models.domain_models import (
+from domains.vms.listings.models import (
     ComputeResource,
     ERC20TokenMetadata,
     GPUModel,
