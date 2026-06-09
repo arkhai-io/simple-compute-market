@@ -54,6 +54,7 @@ from core_storefront.negotiation_sync import (
     OfferUnfulfillableError,
     StorefrontPausedError,
     coerce_pinned_proposal as _coerce_pinned_proposal,
+    create_sync_negotiation_thread as _create_sync_negotiation_thread,
     history_from_messages as _history_from_messages,
     proposal_with_amount as _proposal_with_amount,
     record_buyer_accept_message as _record_buyer_accept_message,
@@ -282,9 +283,8 @@ async def start_sync_negotiation(
         raise ValueError(
             "compute provision_terms.payload.duration_seconds must be > 0"
         )
-    # Imports deferred so unit tests can patch the registry / thread store
-    # without paying for the whole import graph.
-    from market_policy.negotiation_thread import NegotiationThreadTransaction
+    # Imports deferred so unit tests can patch the registry without paying for
+    # the whole import graph.
     from domains.vms.listings.models import Listing
     from core_storefront.stage_log import stage_event
 
@@ -381,31 +381,23 @@ async def start_sync_negotiation(
 
     neg_id = "neg_" + uuid.uuid4().hex
 
-    async with NegotiationThreadTransaction("SYNC_NEGOTIATE_NEW") as txn:
-        await txn.ensure_thread(
-            negotiation_id=neg_id,
-            our_listing_id=our_listing_id,
-            their_listing_id="",  # buyer has no listing; engine column kept for symmetric schema
-            our_agent_id=our_base_url,
-            their_agent_id=their_agent_url,
-            our_initial_price=our_amount,  # column name retained; stores absolute amount
-            our_strategy=strategy,
-            requested_duration_seconds=requested_duration_seconds,
-            buyer_escrow_proposal=(
-                accepted_proposal.model_dump()
-                if accepted_proposal is not None
-                else None
-            ),
-        )
-        await txn.add_message(
-            negotiation_id=neg_id,
-            sender=their_agent_url or buyer_address,
-            our_price=our_amount,
-            their_price=their_amount,
-            proposed_price=their_amount,
-            action_taken="make_offer",
-            message_type="offer",
-        )
+    await _create_sync_negotiation_thread(
+        negotiation_id=neg_id,
+        our_listing_id=our_listing_id,
+        their_listing_id="",  # buyer has no listing; column kept for symmetry
+        our_agent_id=our_base_url,
+        their_agent_id=their_agent_url,
+        our_initial_amount=our_amount,
+        our_strategy=strategy,
+        requested_duration_seconds=requested_duration_seconds,
+        buyer_escrow_proposal=(
+            accepted_proposal.model_dump()
+            if accepted_proposal is not None
+            else None
+        ),
+        opening_sender=their_agent_url or buyer_address,
+        opening_amount=their_amount,
+    )
 
     await _record_seller_decision(
         neg_id=neg_id,

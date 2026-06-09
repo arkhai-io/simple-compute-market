@@ -220,3 +220,43 @@ async def record_buyer_counter_message(
             action_taken="counter_offer",
             message_type="counter_proposal",
         )
+
+
+async def create_sync_negotiation_thread(
+    *,
+    negotiation_id: str,
+    our_listing_id: str,
+    their_listing_id: str,
+    our_agent_id: str,
+    their_agent_id: str,
+    our_initial_amount: int,
+    our_strategy: str,
+    requested_duration_seconds: int | None,
+    buyer_escrow_proposal: dict[str, Any] | None,
+    opening_sender: str,
+    opening_amount: int,
+) -> None:
+    """Create a sync negotiation thread and persist the buyer opening offer."""
+    from market_policy.negotiation_thread import NegotiationThreadTransaction
+
+    async with NegotiationThreadTransaction("SYNC_NEGOTIATE_NEW") as txn:
+        await txn.ensure_thread(
+            negotiation_id=negotiation_id,
+            our_listing_id=our_listing_id,
+            their_listing_id=their_listing_id,
+            our_agent_id=our_agent_id,
+            their_agent_id=their_agent_id,
+            our_initial_price=our_initial_amount,
+            our_strategy=our_strategy,
+            requested_duration_seconds=requested_duration_seconds,
+            buyer_escrow_proposal=buyer_escrow_proposal,
+        )
+        await txn.add_message(
+            negotiation_id=negotiation_id,
+            sender=opening_sender,
+            our_price=our_initial_amount,
+            their_price=opening_amount,
+            proposed_price=opening_amount,
+            action_taken="make_offer",
+            message_type="offer",
+        )

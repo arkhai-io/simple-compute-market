@@ -467,8 +467,9 @@ Recommended order:
    the current VM sync-negotiation and logging functions.
    `core_storefront.negotiation_sync` owns generic synchronous-negotiation
    error carriers, live-listing status constants, pinned-proposal
-   reconstruction, persisted-message-to-round history conversion, and
-   sync-negotiation message plus terminal-state persistence; the VM
+   reconstruction, persisted-message-to-round history conversion,
+   sync-negotiation thread creation, and message plus terminal-state
+   persistence; the VM
    wrapper keeps policy/config adapters, listing validation, proposal amount
    extraction, and settlement-term materialization.
    `core_storefront.auth` owns framework-free signed request
