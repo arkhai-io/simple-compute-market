@@ -617,7 +617,7 @@ core/storefront/src/core_storefront/auth.py   seam 4 — framework-free signed r
 domains/vms/storefront/src/market_storefront/middleware/  seam 4 FastAPI/settings auth wrappers
 domains/vms/storefront/.../utils/sync_negotiation.py      seam 4 — per-round protocol; seam 1 normalization only
 domains/vms/storefront/.../services/publication_service.py  seam 4 — VM storefront registry publication/close wiring over core publication helpers
-domains/vms/storefront/.../utils/fulfillment_service.py       seam 4 — VM fulfillment orchestration wrapper for settled compute obligations
+domains/vms/storefront/.../services/fulfillment_service.py    seam 4 — VM fulfillment orchestration wrapper for settled compute obligations
 kit/policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escrow guard
 kit/policy/                                   package migration — generic policy-chain machinery; wheel/import names unchanged
 domains/vms/provisioning/service/             package migration — VM provisioning service; wheel/import names unchanged
