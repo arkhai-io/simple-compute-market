@@ -5,7 +5,6 @@ from pathlib import Path
 
 import typer
 
-from market_buyer.groups import buy as buy_module
 from market_buyer.groups import negotiate as negotiate_module
 from market_buyer.groups import settle as settle_module
 from market_buyer.groups.chain import chain_app
@@ -14,6 +13,7 @@ from market_buyer.groups.escrow import escrow_app
 from market_buyer.groups.logs import logs_app
 from market_buyer.groups.network import network_app
 
+from . import buy_cli as buy_module
 from .listing_cli import listing_app
 
 

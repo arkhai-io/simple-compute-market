@@ -249,14 +249,16 @@ this seam moves that concrete executable behavior toward `domains/vms`
 instead of treating core as having an embedded default market.
 
 - **Done so far:** `domains/vms/buyer` owns the concrete VM CLI assembly,
-  and `domains/vms/buyer/listing_cli.py` owns the VM listing list/show
-  commands. The historical `market_buyer.cli` and
-  `market_buyer.groups.listing` modules are compatibility wrappers.
+  `domains/vms/buyer/listing_cli.py` owns the VM listing list/show
+  commands, and `domains/vms/buyer/buy_cli.py` owns the VM `market buy`
+  command. The historical `market_buyer.cli`,
+  `market_buyer.groups.listing`, and `market_buyer.groups.buy` modules are
+  compatibility wrappers.
 - **Still present:** the registry backend is filter-spec-driven, and the CLI
   has a generic `--filter name=value` escape hatch, but the heavier buyer
   commands still carry VM behavior from the old package location
-  (`market buy`, `market negotiate`, `market settle`, token-oriented
-  selection shortcuts, and settlement prompts).
+  (`market negotiate`, `market settle`, split `market escrow create`,
+  token-oriented selection shortcuts, and settlement prompts).
 - **Target:** the VM domain package owns the concrete buyer executable. It
   owns named filter options, conversion to registry query params,
   listing/resource rendering, price-floor extraction, schema-specific
@@ -394,9 +396,10 @@ Recommended order:
    provision-term construction, fulfillment-plan construction,
    provisioning job-spec construction, and provisioning-service client
    helpers.
-   `domains/vms/buyer/` now owns the concrete VM CLI assembly and VM
-   listing list/show commands, while `market_buyer.cli` and
-   `market_buyer.groups.listing` remain compatibility wrappers.
+   `domains/vms/buyer/` now owns the concrete VM CLI assembly, VM listing
+   list/show commands, and the VM `market buy` command, while
+   `market_buyer.cli`, `market_buyer.groups.listing`, and
+   `market_buyer.groups.buy` remain compatibility wrappers.
    `buyer/` remains a temporary compatibility package that calls domain
    functions. Later, core receives only reusable orchestration helpers, not
    a concrete buyer executable.
@@ -493,7 +496,8 @@ core-shaped code. Seam 4 is the later packaging extraction.
 
 ```
 buyer/market_buyer/buy_orchestrator.py        seam 2, 4 — two-hook skeleton + legacy adapters
-buyer/market_buyer/groups/buy.py              seam 0b, 2 — plugin-shaped filters, derive_prices wiring
+domains/vms/buyer/buy_cli.py                  seam 0b, 2 — VM market buy command; old market_buyer module aliases this
+buyer/market_buyer/groups/buy.py              seam 0b compatibility wrapper
 buyer/market_buyer/groups/negotiate.py        seam 0 legacy — accepted proposal/terms run-log handoff
 buyer/market_buyer/groups/settle.py           seam 0 legacy — consume accepted proposal/terms
 buyer/market_buyer/groups/escrow.py           seam 0 legacy — consume accepted proposal/terms or retire split create
