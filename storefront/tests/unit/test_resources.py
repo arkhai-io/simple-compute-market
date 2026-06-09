@@ -15,6 +15,7 @@ from market_storefront.resources import (
     parse_resource_from_dict,
     register_resource_adapter,
 )
+from domains.vms.listings import resources as _resource_registry
 
 USDT = ERC20TokenMetadata(
     symbol="USDT",
@@ -189,7 +190,14 @@ class InformationNoteAdapter:
 class TestThirdPartyAdapterRegistration:
     @pytest.fixture(autouse=True)
     def _register(self):
+        resource_type_snapshot = dict(_resource_registry._RESOURCE_TYPE_TO_ADAPTER)
+        domain_type_snapshot = dict(_resource_registry._DOMAIN_TYPE_TO_ADAPTER)
         register_resource_adapter(InformationNoteAdapter())
+        yield
+        _resource_registry._RESOURCE_TYPE_TO_ADAPTER.clear()
+        _resource_registry._RESOURCE_TYPE_TO_ADAPTER.update(resource_type_snapshot)
+        _resource_registry._DOMAIN_TYPE_TO_ADAPTER.clear()
+        _resource_registry._DOMAIN_TYPE_TO_ADAPTER.update(domain_type_snapshot)
 
     def test_parse_from_dict_via_resource_type(self):
         data = {"resource_type": "information.note", "content": "hello", "format": "markdown"}

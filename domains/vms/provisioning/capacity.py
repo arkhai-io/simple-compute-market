@@ -14,10 +14,14 @@ remote listings being mirrored into the local DB and aren't ours to gate.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any, Protocol
 
-if TYPE_CHECKING:
-    from market_storefront.utils.sqlite_client import SQLiteClient
+
+class CapacityStore(Protocol):
+    db_path: str
+
+    async def get_host(self, *, name: str) -> dict[str, Any] | None:
+        ...
 
 
 @dataclass
@@ -49,7 +53,7 @@ class CapacityExceededError(ValueError):
 
 async def check_slice_fits_host(
     *,
-    sqlite_client: "SQLiteClient",
+    sqlite_client: CapacityStore,
     resource_id: str,
     host_name: str | None,
     gpu_count: int | None,
@@ -115,7 +119,7 @@ async def check_slice_fits_host(
 
 async def _sum_active_slices_for_host(
     *,
-    sqlite_client: "SQLiteClient",
+    sqlite_client: CapacityStore,
     host_name: str,
     exclude_resource_id: str | None,
 ) -> dict[str, int]:

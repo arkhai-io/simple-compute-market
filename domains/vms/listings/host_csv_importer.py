@@ -19,10 +19,12 @@ import csv
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, Protocol
 
-if TYPE_CHECKING:
-    from market_storefront.utils.sqlite_client import SQLiteClient
+
+class HostStore(Protocol):
+    async def upsert_host(self, **kwargs: Any) -> Any:
+        ...
 
 
 CORE_COLUMNS = {
@@ -169,7 +171,7 @@ def _build_host_kwargs(row: dict[str, Any]) -> dict[str, Any]:
 async def upsert_hosts_from_csv(
     *,
     csv_path: str,
-    sqlite_client: "SQLiteClient",
+    sqlite_client: HostStore,
     dry_run: bool = False,
 ) -> HostImportReport:
     """Import host rows from CSV into the storefront's hosts table.

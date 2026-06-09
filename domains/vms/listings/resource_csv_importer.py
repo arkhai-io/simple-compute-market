@@ -5,13 +5,26 @@ import json
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, Mapping, Protocol
 
 from domains.vms.listings.resources import get_resource_adapter
 
-if TYPE_CHECKING:
-    from market_storefront.utils.sqlite_client import SQLiteClient
-    from service.config_loader import EscrowTemplate
+
+class ResourceStore(Protocol):
+    async def upsert_resource(self, **kwargs: Any) -> Any:
+        ...
+
+
+class EscrowTemplateRateSlot(Protocol):
+    field: str
+    per: str
+
+
+class EscrowTemplateLike(Protocol):
+    chain: str
+    escrow_address: str
+    literal_fields: Mapping[str, Any]
+    rate_slots: Mapping[str, EscrowTemplateRateSlot]
 
 
 CORE_COLUMNS = {
@@ -32,7 +45,7 @@ ATTRIBUTE_PREFIX = "attribute."
 
 def parse_accepted_escrows_cell(
     cell: str,
-    templates: dict[str, "EscrowTemplate"],
+    templates: Mapping[str, EscrowTemplateLike],
 ) -> list[dict[str, Any]]:
     """Parse one ``accepted_escrows`` CSV cell into materialized entries.
 
@@ -70,7 +83,7 @@ def parse_accepted_escrows_cell(
 
 def _materialize_entry(
     entry: str,
-    templates: dict[str, "EscrowTemplate"],
+    templates: Mapping[str, EscrowTemplateLike],
 ) -> dict[str, Any]:
     colon = entry.find(":")
     equals = entry.find("=")
@@ -247,7 +260,7 @@ def _parse_attribute_value(raw: str) -> Any:
 
 def _build_db_resource_from_csv_row(
     row: dict[str, Any],
-    templates: dict[str, "EscrowTemplate"] | None = None,
+    templates: Mapping[str, EscrowTemplateLike] | None = None,
 ) -> dict[str, Any]:
     resource_id = _clean_cell(row.get("resource_id"))
     resource_type = _clean_cell(row.get("resource_type"))
@@ -329,9 +342,9 @@ def _build_db_resource_from_csv_row(
 async def upsert_resources_from_csv(
     *,
     csv_path: str,
-    sqlite_client: "SQLiteClient",
+    sqlite_client: ResourceStore,
     dry_run: bool = False,
-    templates: dict[str, "EscrowTemplate"] | None = None,
+    templates: Mapping[str, EscrowTemplateLike] | None = None,
 ) -> ImportReport:
     path = Path(csv_path)
     if not path.exists():
@@ -353,9 +366,9 @@ async def upsert_resources_from_csv_content(
     *,
     csv_content: str,
     source_label: str = "<inline>",
-    sqlite_client: "SQLiteClient",
+    sqlite_client: ResourceStore,
     dry_run: bool = False,
-    templates: dict[str, "EscrowTemplate"] | None = None,
+    templates: Mapping[str, EscrowTemplateLike] | None = None,
 ) -> ImportReport:
     """Import resources from a CSV string and upsert rows into the resources table.
 
