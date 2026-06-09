@@ -793,14 +793,12 @@ name = "market-alkahest"
 version = "0.1.0"
 source = { editable = "../kit/alkahest" }
 dependencies = [
-    { name = "market-core" },
     { name = "pydantic" },
     { name = "web3" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "market-core", editable = "../core" },
     { name = "pydantic", specifier = ">=2" },
     { name = "web3", specifier = ">=7.14.0" },
 ]

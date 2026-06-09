@@ -229,7 +229,7 @@ def run_settle_from_log(
 
         import time as _time
         from service.schemas import EscrowProposal
-        from service.clients.alkahest import (
+        from market_alkahest.alkahest import (
             get_erc20_escrow_obligation_nontierable,
         )
         from domains.vms.settlement import (

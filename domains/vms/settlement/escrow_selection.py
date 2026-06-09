@@ -47,7 +47,7 @@ def _balance(
 ) -> int:
     """Return token balance, or 0 when lookup fails."""
     try:
-        from service.clients.token import get_wallet_token_balance
+        from market_alkahest.token import get_wallet_token_balance
     except Exception:
         return 0
     try:

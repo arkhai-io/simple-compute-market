@@ -144,7 +144,7 @@ async def _do_reclaim(
 ) -> tuple[str, object]:
     """Run the on-chain reclaim_expired call and return the receipt."""
     from alkahest_py import AlkahestClient
-    from service.clients.alkahest import (
+    from market_alkahest.alkahest import (
         get_alkahest_network,
         prewarm_alkahest_address_config_cache,
         resolve_alkahest_address_config,
@@ -467,7 +467,7 @@ def create_cmd(
         )
     else:
         from service.schemas import EscrowProposal
-        from service.clients.alkahest import get_erc20_escrow_obligation_nontierable
+        from market_alkahest.alkahest import get_erc20_escrow_obligation_nontierable
         import time as _time
 
         escrow_address = get_erc20_escrow_obligation_nontierable(
@@ -593,7 +593,7 @@ def show_cmd(
         raise typer.Exit(2)
 
     import asyncio
-    from service.clients.alkahest import (
+    from market_alkahest.alkahest import (
         get_alkahest_network,
         get_escrow_obligation_with_codec,
         prewarm_alkahest_address_config_cache,

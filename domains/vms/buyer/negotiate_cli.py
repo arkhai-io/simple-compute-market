@@ -292,7 +292,7 @@ def register(app: typer.Typer) -> None:
                 int(token_decimals) if token_decimals is not None else None
             )
             if decimals is None:
-                from service.clients.token import (
+                from market_alkahest.token import (
                     resolve_token, TokenResolutionError,
                 )
                 tc = token_contract

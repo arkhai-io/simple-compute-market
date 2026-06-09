@@ -76,7 +76,7 @@ def proposal_escrow_kind(
     if not isinstance(escrow_address, str) or not escrow_address:
         return None
     try:
-        from service.clients.alkahest import address_to_slot
+        from market_alkahest.alkahest import address_to_slot
 
         return address_to_slot(
             chain_name,

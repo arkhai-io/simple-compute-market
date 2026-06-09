@@ -28,13 +28,13 @@ def token_resource_from_accepted_escrow(
     amount = primary_rate_value(accepted_escrow) or 0
     token = accepted_token_address(accepted_escrow)
     try:
-        from service.clients.token import ERC20TokenMetadata, resolve_token_cached
+        from market_alkahest.token import ERC20TokenMetadata, resolve_token_cached
     except Exception:
         return None
 
     if not isinstance(token, str) or not token:
         try:
-            from service.clients.alkahest import get_escrow_codec_for
+            from market_alkahest.alkahest import get_escrow_codec_for
 
             chain_name = accepted_escrow.get("chain_name", "")
             chain_config = (chain_configs or {}).get(chain_name)

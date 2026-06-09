@@ -33,7 +33,7 @@ def make_buyer_payment_escrow_terms_fn(
         agreed_amount: int,
         duration_seconds: int,
     ) -> list[EscrowTerms]:
-        from service.clients.alkahest import materialize_escrow_terms_from_proposal
+        from market_alkahest.alkahest import materialize_escrow_terms_from_proposal
 
         return materialize_escrow_terms_from_proposal(
             proposal=proposal,
@@ -57,7 +57,7 @@ def make_create_escrow_fn(
 
     def _create(escrows: list[EscrowTerms]) -> list[str]:
         from alkahest_py import AlkahestClient
-        from service.clients.alkahest import (
+        from market_alkahest.alkahest import (
             get_alkahest_network,
             get_escrow_kind_codec_by_address,
             prewarm_alkahest_address_config_cache,

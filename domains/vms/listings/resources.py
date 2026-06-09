@@ -11,7 +11,7 @@ from domains.vms.listings.models import (
     TokenResource,
     VirtualizationType,
 )
-from service.clients.token import resolve_token_cached
+from market_alkahest.token import resolve_token_cached
 
 
 # Slice fields stored directly on the resource row's ``attributes`` JSON.

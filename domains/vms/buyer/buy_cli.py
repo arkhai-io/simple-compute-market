@@ -136,7 +136,7 @@ def _run_resume_from(
             # selected yet. Use the chain pulled from the run-log via
             # _chain_name_from_run_log; falls back to skipping decimals
             # if the chain isn't yet known.
-            from service.clients.token import resolve_token, TokenResolutionError
+            from market_alkahest.token import resolve_token, TokenResolutionError
             from market_buyer.common import chain_by_name
             from market_buyer.groups.settle import _chain_name_from_run_log
             cname = chain_name or _chain_name_from_run_log(from_run)
@@ -546,7 +546,7 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(2)
         if explicit_prices:
             if token_decimals is None:
-                from service.clients.token import resolve_token, TokenResolutionError
+                from market_alkahest.token import resolve_token, TokenResolutionError
                 try:
                     meta = resolve_token(
                         tc, rpc_url=rpc, chain_id=chain_cfg.chain_id,

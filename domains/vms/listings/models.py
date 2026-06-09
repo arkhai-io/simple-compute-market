@@ -10,7 +10,7 @@ from service.schemas import (
     Resource as CoreResource,
 )
 
-from service.clients.token import ERC20TokenMetadata
+from market_alkahest.token import ERC20TokenMetadata
 
 # =============================================================================
 # Domain Model Class Hierarchy
@@ -163,7 +163,7 @@ class ComputeDomainResource(CoreResource):
                     f"Token string must be a 0x-prefixed address, got "
                     f"{token_value!r}"
                 )
-            from service.clients.token import resolve_token_cached
+            from market_alkahest.token import resolve_token_cached
 
             looked_up = resolve_token_cached(token_value)
             if looked_up is not None:
