@@ -35,6 +35,7 @@ from market_alkahest.alkahest import (
     TokenBundleNonTierableEscrowCodec,
     TokenBundleTierableEscrowCodec,
     materialize_escrow_terms_from_proposal,
+    materialize_escrow_terms_payload_from_proposal,
     _normalize_demand_bytes,
     get_escrow_kind_codec,
     get_escrow_kind_codec_by_address,
@@ -551,6 +552,37 @@ def test_materialize_escrow_terms_uses_final_agreed_amount_over_proposal_amount(
     )[0]
 
     assert terms.obligation_data["amount"] == 9500
+
+
+def test_materialize_escrow_terms_payload_matches_model_dump():
+    proposal = SimpleNamespace(
+        chain_name="anvil",
+        escrow_address="0x" + "00" * 20,
+        fields={
+            "arbiter": _ARBITER,
+            "demand": _DEMAND_HEX,
+            "token": _TOKEN,
+            "amount": 7000,
+        },
+        expiration_unix=1_800_000_000,
+    )
+
+    expected = [
+        term.model_dump()
+        for term in materialize_escrow_terms_from_proposal(
+            proposal=proposal,
+            seller_wallet_address="0x" + "12" * 20,
+            agreed_amount=9500,
+            duration_seconds=3600,
+        )
+    ]
+
+    assert materialize_escrow_terms_payload_from_proposal(
+        proposal=proposal,
+        seller_wallet_address="0x" + "12" * 20,
+        agreed_amount=9500,
+        duration_seconds=3600,
+    ) == expected
 
 
 def test_materialize_escrow_terms_assigns_indexed_bundle_rate_fields():

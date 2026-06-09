@@ -963,6 +963,28 @@ def materialize_escrow_terms_from_proposal(
     )]
 
 
+def materialize_escrow_terms_payload_from_proposal(
+    *,
+    proposal: Any,
+    seller_wallet_address: str | None,
+    agreed_amount: int | None,
+    duration_seconds: int,
+    addr_config_path: str | None = None,
+) -> list[dict[str, Any]]:
+    """Materialize proposal terms as JSON-serializable payload dicts."""
+    terms = materialize_escrow_terms_from_proposal(
+        proposal=proposal,
+        seller_wallet_address=seller_wallet_address,
+        agreed_amount=agreed_amount,
+        duration_seconds=duration_seconds,
+        addr_config_path=addr_config_path,
+    )
+    return [
+        term.model_dump() if hasattr(term, "model_dump") else dict(term)
+        for term in terms
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Escrow-kind codecs
 # ---------------------------------------------------------------------------

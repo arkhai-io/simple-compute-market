@@ -168,11 +168,11 @@ def _materialized_escrow_terms_payload(
 ) -> list[dict[str, Any]] | None:
     if proposal is None:
         return None
-    from market_alkahest.alkahest import materialize_escrow_terms_from_proposal
+    from market_alkahest.alkahest import materialize_escrow_terms_payload_from_proposal
     from market_storefront.utils.config import CHAINS
 
     chain_config = CHAINS.get(proposal.chain_name)
-    terms = materialize_escrow_terms_from_proposal(
+    return materialize_escrow_terms_payload_from_proposal(
         proposal=proposal,
         seller_wallet_address=seller_wallet_address,
         agreed_amount=agreed_amount,
@@ -181,7 +181,6 @@ def _materialized_escrow_terms_payload(
             chain_config.alkahest_address_config_path if chain_config else None
         ),
     )
-    return [term.model_dump() for term in terms]
 
 
 _LIVE_LISTING_STATUSES = LIVE_LISTING_STATUSES

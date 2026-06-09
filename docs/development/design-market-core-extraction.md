@@ -427,6 +427,9 @@ Recommended order:
    `market_alkahest.schemas` owns generic Alkahest accepted-escrow
    matching and proposal normalization across escrow kinds; VM code only
    extracts the listing's `accepted_escrows` collection before calling it.
+   `market_alkahest.alkahest` owns generic proposal-to-terms payload
+   materialization; VM storefront code only supplies the chain address
+   config path.
    `domains/vms/provisioning/` now owns VM capacity checks,
    provision-term construction, fulfillment-plan construction,
    provisioning job-spec construction, and provisioning-service client
