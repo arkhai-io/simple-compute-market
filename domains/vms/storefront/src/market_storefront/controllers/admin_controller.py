@@ -15,8 +15,8 @@ from fastapi_utils.cbv import cbv
 
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
-from market_storefront.models.system_models import (
-    AdminPauseResponse,
+from market_core.storefront.models.system_models import AdminPauseResponse
+from domains.vms.provisioning.storefront_models import (
     CapacityReleasedEventRequest,
     FulfillmentEventResponse,
     FulfillmentFailedEventRequest,

@@ -12,7 +12,7 @@ from fastapi_utils.cbv import cbv
 
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
-from market_storefront.models.system_models import (
+from market_core.storefront.models.system_models import (
     HealthResponse,
     StageEventResponse,
 )
@@ -92,4 +92,3 @@ class SystemController:
                     await asyncio.sleep(0.2)
 
         return StreamingResponse(_generate(), media_type="text/event-stream")
-
