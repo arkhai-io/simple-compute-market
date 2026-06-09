@@ -73,6 +73,20 @@ class EscrowTerms(BaseModel):
     )
 
 
+class EscrowDemand(BaseModel):
+    """One arbiter demand paired with an escrow obligation."""
+
+    chain_name: str | None = Field(
+        default=None,
+        description="Optional chain identifier for multi-chain demand lists.",
+    )
+    arbiter: str = Field(description="Deployed arbiter contract address.")
+    demand_data: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Codec-specific arbiter demand data.",
+    )
+
+
 PER_UNIT_SECONDS: dict[str, int] = {
     "hour": 3600,
 }
@@ -104,6 +118,18 @@ def compute_rate_total(rate: RateValue, duration_seconds: int) -> int:
     if divisor is None:
         raise ValueError(f"unknown rate.per unit: {rate.per!r}")
     return rate.value * duration_seconds // divisor
+
+
+class EscrowProposal(BaseModel):
+    """Alkahest escrow proposal used as a concrete negotiation message."""
+
+    chain_name: str
+    escrow_address: str
+    fields: dict[str, Any] = Field(default_factory=dict)
+    literal_fields: dict[str, Any] | None = None
+    rates: list[RateValue] | None = None
+    demands: list[EscrowDemand] | None = None
+    expiration_unix: int = Field(gt=0)
 
 
 def accepted_demands(accepted_or_proposal: Any) -> list[dict[str, Any]]:
@@ -178,6 +204,8 @@ def accepted_recipient_address(accepted_or_proposal: Any) -> str | None:
 
 __all__ = [
     "ERC20TokenMetadata",
+    "EscrowDemand",
+    "EscrowProposal",
     "EscrowTerms",
     "PER_UNIT_SECONDS",
     "RateValue",

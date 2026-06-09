@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from service.schemas import EscrowProposal
+from market_alkahest.schemas import EscrowProposal
 
 
 def escrow_proposal_from_accepted_entry(

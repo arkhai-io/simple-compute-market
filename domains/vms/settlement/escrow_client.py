@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
-from service.schemas import EscrowProposal, EscrowTerms
+from market_alkahest.schemas import EscrowTerms
 
 logger = logging.getLogger(__name__)
 
 
 BuildEscrowTermsFn = Callable[
-    [EscrowProposal, str | None, int, int],
+    [Any, str | None, int, int],
     list[EscrowTerms],
 ]
 
@@ -28,7 +28,7 @@ def make_buyer_payment_escrow_terms_fn(
     """Build a closure that materializes negotiated proposal to terms."""
 
     def _build(
-        proposal: EscrowProposal,
+        proposal: Any,
         seller_wallet_address: str,
         agreed_amount: int,
         duration_seconds: int,

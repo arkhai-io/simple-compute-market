@@ -19,10 +19,11 @@ from domains.vms.provisioning.job_spec import (
     build_provisioning_job_spec,
     required_compute_attributes,
 )
-from domains.vms.provisioning.terms import make_vm_provision_terms
+from domains.vms.provisioning.terms import VmProvisionTerms, make_vm_provision_terms
 
 __all__ = [
     "VmFulfillmentPlan",
+    "VmProvisionTerms",
     "build_provisioning_job_spec",
     "build_vm_fulfillment_plan",
     "CapacityExceededError",

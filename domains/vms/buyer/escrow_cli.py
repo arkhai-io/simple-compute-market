@@ -445,14 +445,14 @@ def create_cmd(
     console.print(Panel(header, title="market escrow create", border_style="cyan"))
 
     if deal.accepted_escrow_terms is not None:
-        from service.schemas import EscrowTerms
+        from market_alkahest.schemas import EscrowTerms
 
         escrow_terms_list = [
             EscrowTerms.model_validate(item)
             for item in deal.accepted_escrow_terms
         ]
     elif deal.accepted_escrow_proposal is not None:
-        from service.schemas import EscrowProposal
+        from market_alkahest.schemas import EscrowProposal
 
         proposal = EscrowProposal(**deal.accepted_escrow_proposal)
         build_terms = make_buyer_payment_escrow_terms_fn(
@@ -466,7 +466,7 @@ def create_cmd(
             int(effective_duration_seconds),
         )
     else:
-        from service.schemas import EscrowProposal
+        from market_alkahest.schemas import EscrowProposal
         from market_alkahest.alkahest import get_erc20_escrow_obligation_nontierable
         import time as _time
 

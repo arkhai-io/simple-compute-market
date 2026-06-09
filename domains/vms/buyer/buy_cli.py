@@ -29,7 +29,7 @@ from rich.table import Table
 from domains.vms.listings import build_vm_filter_params
 from domains.vms.provisioning import make_vm_provision_terms
 from domains.vms.settlement import escrow_proposal_from_accepted_entry
-from service.schemas import EscrowProposal
+from market_alkahest.schemas import EscrowProposal
 
 from market_buyer.buy_orchestrator import (
     BuyConfig,

@@ -25,7 +25,7 @@ from market_policy.negotiation_middleware import (
     register_negotiation_middleware,
     run_negotiation_chain,
 )
-from service.schemas import EscrowProposal
+from market_alkahest.schemas import EscrowProposal
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +96,16 @@ def _match_accepted_escrow(
     return None
 
 
+def _coerce_escrow_proposal(proposal: EscrowProposal | dict[str, Any]) -> EscrowProposal:
+    if isinstance(proposal, EscrowProposal):
+        return proposal
+    if isinstance(proposal, dict):
+        return EscrowProposal.model_validate(proposal)
+    if hasattr(proposal, "model_dump"):
+        return EscrowProposal.model_validate(proposal.model_dump())
+    return EscrowProposal.model_validate(proposal)
+
+
 def _accepted_entry_uses_scalar_amount(entry: dict[str, Any] | None) -> bool:
     if not isinstance(entry, dict):
         return True
@@ -116,11 +126,7 @@ def _proposal_uses_scalar_amount(
 ) -> bool:
     if proposal is None:
         return True
-    proposal_model = (
-        proposal
-        if isinstance(proposal, EscrowProposal)
-        else EscrowProposal.model_validate(proposal)
-    )
+    proposal_model = _coerce_escrow_proposal(proposal)
     fields = dict(proposal_model.fields or {})
     if "amount" in fields:
         return True

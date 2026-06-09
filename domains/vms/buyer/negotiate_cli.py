@@ -377,11 +377,12 @@ def register(app: typer.Typer) -> None:
         # settlement, so the escrow proposal is largely a formality
         # (the seller still validates it). Resume mode skips the
         # round-0 send and these fields are ignored.
-        from service.schemas import EscrowProposal, ProvisionTerms
+        from market_alkahest.schemas import EscrowProposal
+        from domains.vms.provisioning.terms import VmProvisionTerms
         from domains.vms.provisioning import make_vm_provision_terms
         from domains.vms.settlement import escrow_proposal_from_accepted_entry
         import time as _time
-        provision_terms: Optional[ProvisionTerms] = None
+        provision_terms: Optional[VmProvisionTerms] = None
         escrow_proposal: Optional[EscrowProposal] = None
         if resume_state is None:
             assert duration_seconds is not None  # gated above
