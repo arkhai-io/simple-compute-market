@@ -459,6 +459,11 @@ Recommended order:
    negotiation list/detail/admin-advance service logic over injected
    continue-round and stage-event hooks; the storefront wrapper supplies
    the current VM sync-negotiation and logging functions.
+   `core_storefront.negotiation_sync` owns generic synchronous-negotiation
+   error carriers, live-listing status constants, pinned-proposal
+   reconstruction, and persisted-message-to-round history conversion; the
+   VM wrapper keeps policy/config adapters, listing validation, and
+   settlement-term materialization.
    `core_storefront.auth` owns framework-free signed request
    verification and admin-key checks; `market_storefront.middleware.*`
    remains the FastAPI/settings adapter layer.
@@ -510,7 +515,7 @@ Top-level folder tracker:
 6. **Done: remove top-level `storefront/`.** The VM storefront executable,
    packaging project, tests, Dockerfile, and sample configs live under
    `domains/vms/storefront/`, while the already extracted schema-invariant
-   storefront pieces remain under `core/src/market_core/storefront/`.
+   storefront pieces remain under `core/storefront/`.
 7. **Done: move VM provisioning IaC.** The Ansible/Packer VM execution
    tree lives under `domains/vms/provisioning/iac/`, next to the
    provisioning service and storefront-facing provisioning hooks.
@@ -595,11 +600,12 @@ domains/vms/buyer/escrow_cli.py               seam 0 legacy — consume accepted
 domains/vms/buyer/listing_cli.py              seam 0b — VM listing commands
 domains/vms/buyer/aggregation.py              seam 0b — across-seller aggregation policies
 domains/vms/buyer/schema_plugins/ (new)       seam 0b — eventual plugin registry/loading boundary
-core/src/market_core/storefront/models/       seam 4 — schema-invariant storefront HTTP models
-core/src/market_core/storefront/stage_log.py  seam 4 — schema-invariant stage-event logger/persistence helper
-core/src/market_core/storefront/services/negotiation_service.py  seam 4 — generic negotiation query/admin service over injected hooks
+core/storefront/src/core_storefront/models/   seam 4 — schema-invariant storefront HTTP models
+core/storefront/src/core_storefront/stage_log.py  seam 4 — schema-invariant stage-event logger/persistence helper
+core/storefront/src/core_storefront/services/negotiation_service.py  seam 4 — generic negotiation query/admin service over injected hooks
+core/storefront/src/core_storefront/negotiation_sync.py  seam 4 — generic sync negotiation carriers/history reconstruction
 domains/vms/storefront/src/market_storefront/server.py  seam 4 — VM composition point wiring core negotiation service hooks
-core/src/market_core/storefront/auth.py       seam 4 — framework-free signed request/admin-key verification
+core/storefront/src/core_storefront/auth.py   seam 4 — framework-free signed request/admin-key verification
 domains/vms/storefront/src/market_storefront/middleware/  seam 4 FastAPI/settings auth wrappers
 domains/vms/storefront/.../utils/sync_negotiation.py      seam 4 — per-round protocol; seam 1 normalization only
 domains/vms/storefront/.../utils/action_executor.py       seam 4 — stateful storefront wrapper; pure VM pricing/encoding helpers moved to domains/vms

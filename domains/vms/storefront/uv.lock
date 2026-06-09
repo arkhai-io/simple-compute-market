@@ -449,6 +449,7 @@ source = { editable = "../../../core/storefront" }
 dependencies = [
     { name = "market-core", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "market-identity", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "market-policy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 
@@ -456,6 +457,7 @@ dependencies = [
 requires-dist = [
     { name = "market-core", editable = "../../../core" },
     { name = "market-identity", editable = "../../../kit/identity" },
+    { name = "market-policy", editable = "../../../kit/policy" },
     { name = "pydantic", specifier = ">=2" },
 ]
 

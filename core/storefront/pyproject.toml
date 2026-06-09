@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "market-core",
     "market-identity",
+    "market-policy",
     "pydantic>=2",
 ]
 
@@ -23,6 +24,7 @@ testpaths = ["tests/unit"]
 [tool.uv.sources]
 market-core = { path = "..", editable = true }
 market-identity = { path = "../../kit/identity", editable = true }
+market-policy = { path = "../../kit/policy", editable = true }
 
 [dependency-groups]
 dev = [

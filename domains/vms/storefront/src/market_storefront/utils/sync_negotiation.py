@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any
 
 from domains.vms.negotiation import storefront_round as vm_storefront_round
@@ -50,6 +50,14 @@ from market_policy.negotiation_middleware import (
 from domains.vms.negotiation.policies import _amount_from_proposal
 
 from market_core.schemas import EscrowProposal
+from core_storefront.negotiation_sync import (
+    LIVE_LISTING_STATUSES,
+    OfferUnfulfillableError,
+    StorefrontPausedError,
+    coerce_pinned_proposal as _coerce_pinned_proposal,
+    history_from_messages as _history_from_messages,
+    proposal_with_amount as _proposal_with_amount,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -190,143 +198,7 @@ def _materialized_escrow_terms_payload(
     return [term.model_dump() for term in terms]
 
 
-class StorefrontPausedError(Exception):
-    """Raised when a new negotiation is attempted while the storefront (or the
-    specific order) is paused.
-
-    The negotiate endpoints convert this to HTTP 503 with a machine-readable
-    body so callers can distinguish a pause from a real server error.
-    """
-
-    def __init__(self, reason: str = "paused") -> None:
-        super().__init__(reason)
-        self.reason = reason
-
-
-class OfferUnfulfillableError(Exception):
-    """Raised when the seller refuses an offer it can't actually fulfill.
-
-    Currently triggers on:
-      * ``listing_not_open`` — the listing is in a terminal/in-flight
-        status (for example closed); accepting a new
-        negotiation against it would race with whatever flow already
-        owns the listing.
-      * ``no_matching_inventory`` — no available compute resource
-        matches the listing's offer (gpu_model + region). The seller
-        listed capacity it doesn't currently have; refusing here is
-        better than agreeing then failing at fulfillment time.
-
-    The negotiate endpoints map this to HTTP 409 (Conflict) since the
-    request shape is valid but the seller's local state can't satisfy
-    it; the buyer's right move is to pick a different listing or come
-    back later.
-    """
-
-    def __init__(self, reason: str, *, listing_id: str | None = None) -> None:
-        super().__init__(reason)
-        self.reason = reason
-        self.listing_id = listing_id
-
-
-_LIVE_LISTING_STATUSES = frozenset({"open"})
-"""Statuses that allow a new negotiation. Anything else is in-flight or
-terminal and accepting a new negotiation would race with whatever owns
-the listing (settlement, refund, etc.)."""
-
-
-def _proposal_with_amount(
-    pinned: dict[str, Any] | None, amount: int | float | None,
-) -> dict[str, Any] | None:
-    """Build a full EscrowProposal dict by overlaying ``amount`` onto the
-    buyer's pinned skeleton.
-
-    The buyer pins ``(chain_name, escrow_address, fields)`` at round 0;
-    every subsequent round only varies ``fields["amount"]``. This helper
-    reconstructs the per-round proposal from the thread's pinned skeleton
-    plus the per-row amount stored in the messages table.
-
-    Returns ``None`` when both pinned skeleton and amount are missing
-    (legacy rows pre-refactor); the strategies handle absent proposals
-    by falling back to the reference amount.
-    """
-    if pinned is None and amount is None:
-        return None
-    pinned_fields = (pinned or {}).get("fields") if isinstance(pinned, dict) else None
-    merged_fields: dict[str, Any] = (
-        dict(pinned_fields) if isinstance(pinned_fields, dict) else {}
-    )
-    if amount is not None:
-        merged_fields["amount"] = int(amount)
-    if pinned is None:
-        return {"fields": merged_fields}
-    return {**pinned, "fields": merged_fields}
-
-
-def _coerce_pinned_proposal(value: Any) -> dict[str, Any] | None:
-    """Parse a stored buyer_escrow_proposal value (dict or JSON string)
-    into a dict. Returns ``None`` on missing/unparseable values.
-    """
-    import json as _json
-
-    if value is None:
-        return None
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        try:
-            parsed = _json.loads(value)
-        except (ValueError, TypeError):
-            return None
-        return parsed if isinstance(parsed, dict) else None
-    return None
-
-
-def _history_from_messages(
-    messages: list[dict[str, Any]],
-    our_sender: str,
-    *,
-    buyer_pinned_proposal: dict[str, Any] | None,
-) -> list[NegotiationRound]:
-    """Convert the SQLite-flavored thread messages into the symmetric
-    NegotiationRound shape strategies consume.
-
-    Per-round proposals are reconstructed from the buyer's pinned
-    skeleton (``thread.buyer_escrow_proposal``) overlaid with the
-    per-message amount stored in ``proposed_price``. The column name
-    is retained for migration symmetry; semantically it now holds the
-    absolute amount in base units.
-    """
-    out: list[NegotiationRound] = []
-    for i, m in enumerate(messages):
-        sender = "us" if m.get("sender") == our_sender else "them"
-        action_taken = m.get("action_taken", "")
-        if action_taken == "make_offer":
-            action = "initial"
-        elif action_taken == "counter_offer":
-            action = "counter"
-        elif action_taken == "accept_offer":
-            action = "accept"
-        elif action_taken in ("exit_negotiation",):
-            action = "exit"
-        else:
-            action = "counter"
-        amount_raw = m.get("proposed_price")
-        try:
-            amount: int | None = int(Decimal(str(amount_raw))) if amount_raw is not None else None
-        except (InvalidOperation, TypeError, ValueError):
-            amount = None
-        proposal = (
-            _proposal_with_amount(buyer_pinned_proposal, amount)
-            if amount is not None or buyer_pinned_proposal is not None
-            else None
-        )
-        out.append(NegotiationRound(
-            round_number=i,
-            sender=sender,
-            action=action,
-            proposal=proposal,
-        ))
-    return out
+_LIVE_LISTING_STATUSES = LIVE_LISTING_STATUSES
 
 
 async def _compute_round_zero_decision(
