@@ -23,7 +23,7 @@ from market_policy.negotiation_middleware import (
     load_negotiation_chain,
     normalize_policies_by_escrow_kind_config,
     register_negotiation_middleware,
-    run_negotiation_chain,
+    run_negotiation_chain_with_context,
 )
 from market_alkahest.schemas import EscrowProposal, match_accepted_escrow
 
@@ -37,6 +37,7 @@ class SellerRoundResult:
     direction: str
     chain_label: str
     decision: NegotiationDecision
+    intermediate: dict[str, Any] | None = None
 
 
 class SellerRoundHook(Protocol):
@@ -199,7 +200,11 @@ def _maybe_register_rl_middleware() -> None:
         logger.debug("[NEGOTIATION] torch_arkhai_strategy not available: %s", exc)
 
 
-_DEFAULT_GUARDS = ["has_matching_inventory_guard", "escrow_shape_guard"]
+_DEFAULT_GUARDS = [
+    "round_zero_opening_guard",
+    "has_matching_inventory_guard",
+    "escrow_shape_guard",
+]
 _DEFAULT_TERMINAL = "bisection"
 _RL_POLICY_NAMES = {"rl", "erc20_rl", "native_token_rl", "erc1155_rl"}
 
@@ -306,17 +311,10 @@ async def _run_default_seller_round_policy(
         if item.sender == "them":
             their_proposal = item.proposal
             break
-    uses_scalar_amount = _proposal_uses_scalar_amount(
-        listing=listing_dict if isinstance(listing_dict, dict) else {},
-        proposal=their_proposal,
-    )
-    our_amount = (
-        _seller_reference_amount(
-            listing,
-            requested_duration_seconds,
-            default_min_price=default_min_price,
-        )
-        if uses_scalar_amount else 0
+    reference_amount = _seller_reference_amount(
+        listing,
+        requested_duration_seconds,
+        default_min_price=default_min_price,
     )
     direction = _direction_from_strategy_label(strategy_label)
 
@@ -327,25 +325,31 @@ async def _run_default_seller_round_policy(
     )
     context = NegotiationContext(
         direction=direction,
-        our_reference_amount=float(our_amount),
+        our_reference_amount=float(reference_amount),
         listing=listing_dict if isinstance(listing_dict, dict) else {},
         our_escrow_proposal=their_proposal,
         available_resources=(
             (policy_inputs or {}).get("available_resources")
             or {"resources": []}
         ),
+        intermediate={
+            "requested_duration_seconds": requested_duration_seconds,
+            "seller_reference_amount": int(reference_amount),
+        },
     )
-    decision = run_negotiation_chain(chain, history, context)
+    decision, context = run_negotiation_chain_with_context(chain, history, context)
     chain_label = ",".join(
         type(mw).__name__ if not hasattr(mw, "__name__") else mw.__name__
         for mw in chain
     )
+    uses_scalar_amount = context.intermediate.get("uses_scalar_amount", True)
     return SellerRoundResult(
-        our_amount=int(our_amount),
+        our_amount=int(reference_amount) if uses_scalar_amount else 0,
         strategy_label=strategy_label,
         direction=direction,
         chain_label=chain_label,
         decision=decision,
+        intermediate=dict(context.intermediate),
     )
 
 

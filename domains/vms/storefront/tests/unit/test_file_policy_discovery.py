@@ -81,10 +81,12 @@ def test_load_storefront_chain_builds_dispatch_for_policy_table():
         extra_policy_paths=[],
     )
 
-    assert len(chain) == 3
-    assert getattr(chain[0], "__name__", "") == "has_matching_inventory_guard"
-    assert getattr(chain[1], "__name__", "") == "escrow_shape_guard"
-    assert getattr(chain[2], "__name__", "") == "escrow_kind_dispatch_middleware"
+    assert [getattr(item, "__name__", "") for item in chain] == [
+        "round_zero_opening_guard",
+        "has_matching_inventory_guard",
+        "escrow_shape_guard",
+        "escrow_kind_dispatch_middleware",
+    ]
 
 
 def test_xdg_default_path_is_discovered(tmp_path, monkeypatch):

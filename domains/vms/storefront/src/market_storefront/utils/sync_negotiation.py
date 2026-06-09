@@ -132,38 +132,6 @@ def _default_seller_round_hook(sqlite_client: Any) -> SellerRoundHook:
     )
 
 
-def _validate_escrow_proposal(
-    *,
-    proposal: EscrowProposal | None,
-    listing: dict[str, Any],
-) -> EscrowProposal | None:
-    """Normalize the buyer's escrow proposal against the listing.
-
-    When the proposal's ``(chain_name, escrow_address)`` resolves to an
-    entry in the listing's ``accepted_escrows``, merge the listing's
-    advertised literal fields and rates into the proposal the seller will
-    echo and persist. Listings without an advertised set pass through
-    unchecked (publish-time synthesis couldn't resolve a chain; the
-    buyer's strategy is on its own).
-
-    Accepted-set membership and field-by-field equality are *seller
-    policy*, not protocol — they live in the ``escrow_shape_guard``
-    middleware so operators can swap reject behavior for correction or
-    softer matching without code changes.
-
-    Returns the normalized proposal so the caller can echo it back.
-    Returns ``None`` when the buyer didn't include a proposal (legacy
-    clients) — in that case the seller assumes the canonical shape.
-    """
-    from market_alkahest.schemas import normalize_proposal_against_accepted_escrows
-
-    accepted = listing.get("accepted_escrows")
-    return normalize_proposal_against_accepted_escrows(
-        proposal=proposal,
-        accepted_escrows=accepted if isinstance(accepted, list) else None,
-    )
-
-
 def _materialized_escrow_terms_payload(
     *,
     proposal: EscrowProposal | None,
@@ -276,13 +244,6 @@ async def start_sync_negotiation(
     requested_duration_seconds = (
         provision_terms.duration_seconds if provision_terms is not None else None
     )
-    if (
-        requested_duration_seconds is not None
-        and int(requested_duration_seconds) <= 0
-    ):
-        raise ValueError(
-            "compute provision_terms.payload.duration_seconds must be > 0"
-        )
     # Imports deferred so unit tests can patch the registry without paying for
     # the whole import graph.
     from domains.vms.listings.models import Listing
@@ -307,45 +268,11 @@ async def start_sync_negotiation(
             listing_id=our_listing_id,
         )
 
-    raw_listing_max_seconds = our_order_dict.get("max_duration_seconds")
-    listing_max_seconds = (
-        int(raw_listing_max_seconds)
-        if raw_listing_max_seconds is not None and int(raw_listing_max_seconds) > 0
-        else None
-    )
-    if (
-        requested_duration_seconds is not None
-        and listing_max_seconds is not None
-        and int(requested_duration_seconds) > int(listing_max_seconds)
-    ):
-        raise ValueError(
-            f"Requested duration {requested_duration_seconds}s exceeds "
-            f"listing's max_duration_seconds={listing_max_seconds}s"
-        )
-
-    accepted_proposal = _validate_escrow_proposal(
-        proposal=proposal,
-        listing=our_order_dict,
-    )
-
     proposal_dict = (
         proposal.model_dump()
         if proposal is not None and hasattr(proposal, "model_dump")
         else proposal
     )
-    uses_scalar_amount = _proposal_uses_scalar_amount(
-        listing=our_order_dict,
-        proposal=accepted_proposal,
-    )
-    their_amount = _amount_from_proposal(proposal_dict)
-    if their_amount is None:
-        if uses_scalar_amount:
-            raise OfferUnfulfillableError(
-                "missing_amount: buyer's escrow proposal has no fields.amount",
-                listing_id=our_listing_id,
-            )
-        their_amount = 0
-    their_amount = int(their_amount)
 
     our_order = Listing.model_validate(our_order_dict)
 
@@ -378,6 +305,19 @@ async def start_sync_negotiation(
             decision.reason or "rejected",
             listing_id=our_listing_id,
         )
+
+    policy_intermediate = round_result.intermediate or {}
+    accepted_proposal_dict = policy_intermediate.get("accepted_escrow_proposal")
+    accepted_proposal = (
+        EscrowProposal.model_validate(accepted_proposal_dict)
+        if isinstance(accepted_proposal_dict, dict)
+        else proposal
+    )
+    uses_scalar_amount = bool(policy_intermediate.get("uses_scalar_amount", True))
+    their_amount = _amount_from_proposal(proposal_dict)
+    if their_amount is None:
+        their_amount = 0
+    their_amount = int(their_amount)
 
     neg_id = "neg_" + uuid.uuid4().hex
 

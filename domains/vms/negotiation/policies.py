@@ -408,6 +408,135 @@ def _accepted_escrow_for_proposal(
     return None
 
 
+def _is_round_zero(history: list[NegotiationRound]) -> bool:
+    return (
+        len(history) == 1
+        and history[0].round_number == 0
+        and history[0].sender == "them"
+        and history[0].action == "initial"
+    )
+
+
+def _accepted_entry_uses_scalar_amount(entry: dict[str, Any] | None) -> bool:
+    if not isinstance(entry, dict):
+        return True
+    literal_fields = entry.get("literal_fields") or {}
+    if isinstance(literal_fields, dict) and "amount" in literal_fields:
+        return True
+    for rate in entry.get("rates") or []:
+        field = rate.get("field") if isinstance(rate, dict) else getattr(rate, "field", None)
+        if field == "amount":
+            return True
+    return False
+
+
+def _proposal_uses_scalar_amount(
+    listing: dict[str, Any],
+    proposal: dict[str, Any] | None,
+) -> bool:
+    if proposal is None:
+        return True
+    fields = proposal.get("fields") or {}
+    if isinstance(fields, dict) and "amount" in fields:
+        return True
+    matched = _accepted_escrow_for_proposal(listing, proposal)
+    return _accepted_entry_uses_scalar_amount(matched)
+
+
+@register_negotiation_middleware("round_zero_opening_guard")
+def round_zero_opening_guard(
+    history: list[NegotiationRound],
+    context: NegotiationContext,
+) -> NegotiationStep:
+    """Validate and canonicalize VM opening-round negotiation content."""
+    if not _is_round_zero(history):
+        return None, context
+
+    listing = context.listing or {}
+    requested_duration_seconds = context.intermediate.get(
+        "requested_duration_seconds",
+    )
+    if (
+        requested_duration_seconds is not None
+        and int(requested_duration_seconds) <= 0
+    ):
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason="compute_duration_invalid:duration_seconds must be > 0",
+            ),
+            context,
+        )
+
+    raw_listing_max_seconds = listing.get("max_duration_seconds")
+    listing_max_seconds = (
+        int(raw_listing_max_seconds)
+        if raw_listing_max_seconds is not None and int(raw_listing_max_seconds) > 0
+        else None
+    )
+    if (
+        requested_duration_seconds is not None
+        and listing_max_seconds is not None
+        and int(requested_duration_seconds) > int(listing_max_seconds)
+    ):
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=(
+                    f"compute_duration_exceeds_listing_max:"
+                    f"{requested_duration_seconds}>{listing_max_seconds}"
+                ),
+            ),
+            context,
+        )
+
+    proposal = _peer_proposal(history)
+    accepted = _loads_json_list(listing.get("accepted_escrows"))
+    accepted_for_normalization = accepted if accepted else None
+    accepted_proposal = None
+    if isinstance(proposal, dict):
+        try:
+            from market_alkahest.schemas import (
+                EscrowProposal,
+                normalize_proposal_against_accepted_escrows,
+            )
+
+            accepted_proposal = normalize_proposal_against_accepted_escrows(
+                proposal=EscrowProposal.model_validate(proposal),
+                accepted_escrows=accepted_for_normalization,
+            )
+        except Exception as exc:
+            return (
+                NegotiationDecision(
+                    action="reject",
+                    reason=f"invalid_escrow_proposal:{exc}",
+                ),
+                context,
+            )
+
+    accepted_proposal_dict = (
+        accepted_proposal.model_dump()
+        if accepted_proposal is not None
+        else None
+    )
+    if accepted_proposal_dict is not None:
+        context.intermediate["accepted_escrow_proposal"] = accepted_proposal_dict
+
+    proposal_for_scalar = accepted_proposal_dict if accepted_proposal_dict is not None else proposal
+    uses_scalar_amount = _proposal_uses_scalar_amount(listing, proposal_for_scalar)
+    context.intermediate["uses_scalar_amount"] = uses_scalar_amount
+    if uses_scalar_amount and _amount_from_proposal(proposal_for_scalar) is None:
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason="missing_amount: buyer's escrow proposal has no fields.amount",
+            ),
+            context,
+        )
+
+    return None, context
+
+
 @register_negotiation_middleware("has_matching_inventory_guard")
 def has_matching_inventory_guard(
     history: list[NegotiationRound],
@@ -734,6 +863,7 @@ __all__ = [
     "our_first_proposal",
     "our_previous_counters",
     "proposal_escrow_kind",
+    "round_zero_opening_guard",
     "their_proposed_amount",
 ]
 

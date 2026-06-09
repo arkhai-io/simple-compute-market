@@ -106,10 +106,20 @@ def run_negotiation_chain(
     context: NegotiationContext,
 ) -> NegotiationDecision:
     """Run the middleware chain and return the first decision produced."""
+    decision, _context = run_negotiation_chain_with_context(chain, history, context)
+    return decision
+
+
+def run_negotiation_chain_with_context(
+    chain: list[NegotiationMiddleware],
+    history: list[NegotiationRound],
+    context: NegotiationContext,
+) -> tuple[NegotiationDecision, NegotiationContext]:
+    """Run the middleware chain and return the decision plus final context."""
     for middleware in chain:
         decision, context = middleware(history, context)
         if decision is not None:
-            return decision
+            return decision, context
     raise RuntimeError(
         "Negotiation chain exhausted without a decision. The terminal "
         "middleware must always return Some. Check [negotiation].chain config."
