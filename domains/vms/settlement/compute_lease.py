@@ -21,7 +21,7 @@ def token_resource_from_accepted_escrow(
     chain_configs: dict[str, Any] | None = None,
 ) -> TokenResource | None:
     """Build a payment ``TokenResource`` from an accepted-escrow entry."""
-    from service.schemas import accepted_token_address, primary_rate_value
+    from market_alkahest.schemas import accepted_token_address, primary_rate_value
 
     if not isinstance(accepted_escrow, dict):
         return None

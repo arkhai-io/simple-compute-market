@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def _entry_token(entry: dict[str, Any]) -> Optional[str]:
-    from service.schemas import accepted_token_address
+    from market_alkahest.schemas import accepted_token_address
 
     value = accepted_token_address(entry)
     return value.lower() if isinstance(value, str) and value.startswith("0x") else None
@@ -114,7 +114,7 @@ def select_escrow_entry(
     table.add_column("Escrow contract", overflow="fold")
     table.add_column("Token", overflow="fold")
     table.add_column("Price/hr", justify="right")
-    from service.schemas import primary_rate_value
+    from market_alkahest.schemas import primary_rate_value
 
     for i, entry in enumerate(candidates, start=1):
         token = _entry_token(entry) or "-"

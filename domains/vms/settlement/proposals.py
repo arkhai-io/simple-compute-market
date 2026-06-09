@@ -14,7 +14,7 @@ def escrow_proposal_from_accepted_entry(
     expiration_unix: int,
 ) -> EscrowProposal:
     """Build the buyer's negotiation proposal from a selected listing entry."""
-    from service.schemas import accepted_demands, accepted_token_address
+    from market_alkahest.schemas import accepted_demands, accepted_token_address
 
     literal_fields = dict(entry.get("literal_fields") or {})
     token = accepted_token_address(entry)

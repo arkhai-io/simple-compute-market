@@ -275,7 +275,7 @@ def register(app: typer.Typer) -> None:
                     msg += f" with token {token_contract}"
                 typer.secho(msg + ".", err=True, fg=typer.colors.RED)
                 raise typer.Exit(2)
-            from service.schemas import accepted_token_address
+            from market_alkahest.schemas import accepted_token_address
             entry_token = accepted_token_address(picked_entry)
             if isinstance(entry_token, str) and entry_token.startswith("0x"):
                 # Surface the picked token back to the run-log + the

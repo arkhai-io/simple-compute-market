@@ -125,11 +125,42 @@ def accepted_demands(accepted_or_proposal: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _rates_of(entry: Any) -> list[Any]:
+    if isinstance(entry, dict):
+        out = entry.get("rates")
+        return out if isinstance(out, list) else []
+    return list(getattr(entry, "rates", []) or [])
+
+
 def _literal_fields_of(entry: Any) -> dict[str, Any]:
     if isinstance(entry, dict):
         out = entry.get("literal_fields")
         return out if isinstance(out, dict) else {}
     return dict(getattr(entry, "literal_fields", {}) or {})
+
+
+def primary_rate_value(accepted_or_proposal: Any) -> int | None:
+    """Return the first advertised/negotiated rate value, if present."""
+    rates = _rates_of(accepted_or_proposal)
+    if not rates:
+        return None
+    first = rates[0]
+    if isinstance(first, dict):
+        value = first.get("value")
+    else:
+        value = getattr(first, "value", None)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return None
+
+
+def accepted_token_address(accepted_or_proposal: Any) -> str | None:
+    """Return the token literal from ERC-20/ERC-1155-style escrow entries."""
+    literals = _literal_fields_of(accepted_or_proposal)
+    val = literals.get("token") if isinstance(literals, dict) else None
+    return val if isinstance(val, str) and val else None
 
 
 def accepted_recipient_address(accepted_or_proposal: Any) -> str | None:
@@ -152,5 +183,7 @@ __all__ = [
     "RateValue",
     "accepted_demands",
     "accepted_recipient_address",
+    "accepted_token_address",
     "compute_rate_total",
+    "primary_rate_value",
 ]

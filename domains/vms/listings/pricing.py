@@ -39,7 +39,7 @@ def extract_initial_price_from_order(
     default_min_price: Any = None,
 ) -> int | float:
     """Extract the seller's initial negotiation floor from a VM listing."""
-    from service.schemas import primary_rate_value
+    from market_alkahest.schemas import primary_rate_value
 
     if isinstance(order, dict):
         order = Listing.model_validate(order)

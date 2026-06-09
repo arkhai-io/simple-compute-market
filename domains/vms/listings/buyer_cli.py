@@ -112,7 +112,7 @@ def format_accepted_escrows(entries: list) -> str:
         if not isinstance(entry, dict):
             lines.append(f"[{i}] {entry}")
             continue
-        from service.schemas import accepted_token_address, primary_rate_value
+        from market_alkahest.schemas import accepted_token_address, primary_rate_value
 
         chain = entry.get("chain_name") or "-"
         addr = short_contract_address(str(entry.get("escrow_address") or "-"))
