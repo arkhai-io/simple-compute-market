@@ -817,6 +817,7 @@ source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
     { name = "eth-account" },
+    { name = "market-config" },
     { name = "market-policy" },
     { name = "market-service" },
     { name = "pyinstaller" },
@@ -838,6 +839,7 @@ test = [
 requires-dist = [
     { name = "alkahest-py", specifier = ">=0.4.0" },
     { name = "eth-account", specifier = ">=0.13.0" },
+    { name = "market-config", editable = "../kit/config" },
     { name = "market-policy", editable = "../kit/policy" },
     { name = "market-service", editable = "../service" },
     { name = "pyinstaller", specifier = ">=6.19.0" },

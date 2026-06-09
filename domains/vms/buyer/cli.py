@@ -6,11 +6,11 @@ from pathlib import Path
 import typer
 
 from market_buyer.groups.chain import chain_app
-from market_buyer.groups.config import config_app
 from market_buyer.groups.logs import logs_app
 from market_buyer.groups.network import network_app
 
 from . import buy_cli as buy_module
+from .config_cli import config_app
 from . import negotiate_cli as negotiate_module
 from . import settle_cli as settle_module
 from .escrow_cli import escrow_app
@@ -34,7 +34,7 @@ def version_callback(value: bool) -> None:
 def _config_path_callback(value: str | None) -> str | None:
     """Set an explicit buyer config path before command bodies run."""
     if value:
-        from service.config_loader import set_user_config_path
+        from market_config.config_loader import set_user_config_path
 
         set_user_config_path(Path(value))
     return value
