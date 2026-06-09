@@ -80,7 +80,7 @@ def _confirm_settlement_interactive(*, terms, listing: dict, console: Console) -
         return False
 
 
-from market_buyer.groups._cli_helpers import resolve_prices_from_matches as _resolve_prices_from_matches  # noqa: E402,F401
+from .cli_helpers import resolve_prices_from_matches as _resolve_prices_from_matches  # noqa: E402,F401
 
 
 def _run_resume_from(
@@ -588,7 +588,7 @@ def register(app: typer.Typer) -> None:
         # Filter-aware discovery: pre-fetch matches with spec filters applied
         # so we can (a) show them to the user in interactive mode, (b) anchor
         # auto-price derivation on each listing's seller-advertised min_price.
-        from market_buyer.groups._cli_helpers import parse_filter_options
+        from .cli_helpers import parse_filter_options
         active_filters = build_vm_filter_params(
             gpu_model=gpu_model,
             gpu_count_min=gpu_count_min,

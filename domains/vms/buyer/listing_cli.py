@@ -152,7 +152,7 @@ def listing_list(
         datacenter_grade=datacenter_grade,
         static_ip=static_ip,
     ))
-    from market_buyer.groups._cli_helpers import parse_filter_options
+    from .cli_helpers import parse_filter_options
     query_params.update(parse_filter_options(raw_filters))
     params = urllib.parse.urlencode(query_params)
 
