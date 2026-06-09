@@ -26,7 +26,7 @@ from market_core.storefront.models.listing_models import (
     RefundRequest,
 )
 from market_storefront.resources import parse_resource_from_dict
-from market_storefront.utils.stage_log import stage_event
+from market_core.storefront.stage_log import stage_event
 
 logger = logging.getLogger(__name__)
 

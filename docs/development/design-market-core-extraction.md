@@ -452,8 +452,8 @@ Recommended order:
    and generic system responses; VM provisioning/admin payloads live in
    `domains/vms/provisioning/storefront_models.py`.
    `market_core.storefront.stage_log` owns structured stage-event logging
-   and SQLite persistence mechanics; the storefront wrapper only supplies
-   the configured DB path.
+   and SQLite persistence mechanics; the VM storefront configures its DB
+   path during FastAPI lifespan startup.
    `market_core.storefront.services.negotiation_service` owns the generic
    negotiation list/detail/admin-advance service logic over injected
    continue-round and stage-event hooks; the storefront wrapper supplies
@@ -585,7 +585,6 @@ domains/vms/buyer/aggregation.py              seam 0b — across-seller aggregat
 domains/vms/buyer/schema_plugins/ (new)       seam 0b — eventual plugin registry/loading boundary
 core/src/market_core/storefront/models/       seam 4 — schema-invariant storefront HTTP models
 core/src/market_core/storefront/stage_log.py  seam 4 — schema-invariant stage-event logger/persistence helper
-domains/vms/storefront/src/market_storefront/utils/stage_log.py  seam 4 compatibility wrapper supplying settings.db_path
 core/src/market_core/storefront/services/negotiation_service.py  seam 4 — generic negotiation query/admin service over injected hooks
 domains/vms/storefront/src/market_storefront/services/negotiation_service.py  seam 4 compatibility wrapper wiring VM sync negotiation + stage logging
 core/src/market_core/storefront/auth.py       seam 4 — framework-free signed request/admin-key verification

@@ -8,7 +8,7 @@ from market_core.storefront.services.negotiation_service import (
     NegotiationService as _CoreNegotiationService,
     NegotiationServiceError,
 )
-from market_storefront.utils.stage_log import stage_event
+from market_core.storefront.stage_log import stage_event
 from market_storefront.utils.sync_negotiation import continue_sync_negotiation
 
 

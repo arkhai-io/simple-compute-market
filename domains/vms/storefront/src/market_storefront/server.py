@@ -22,6 +22,7 @@ from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
 import market_storefront.container as _container
+from market_core.storefront.stage_log import set_stage_event_db_path
 from market_storefront.utils.config import settings, AGENT_ID
 from market_storefront.utils.sqlite_client import get_sqlite_client
 
@@ -68,6 +69,7 @@ async def lifespan(_: FastAPI):
     from market_storefront.startup import _startup_tasks
 
     sqlite_client = get_sqlite_client()
+    set_stage_event_db_path(sqlite_client.db_path)
     alkahest_clients = alkahest_service.build_clients()
 
     listing_svc = ListingService(

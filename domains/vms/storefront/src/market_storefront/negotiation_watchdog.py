@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 
 from market_storefront.utils.config import settings
 from market_storefront.utils.sqlite_client import SQLiteClient
-from market_storefront.utils.stage_log import stage_event
+from market_core.storefront.stage_log import stage_event
 
 logger = logging.getLogger(__name__)
 
