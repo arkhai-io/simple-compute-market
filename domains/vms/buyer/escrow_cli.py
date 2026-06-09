@@ -57,7 +57,7 @@ def _resolve_escrow_context_from_run(
     if not run_id:
         return None, None, None
     try:
-        from market_buyer.groups._deal import load_deal_context
+        from .deal_helpers import load_deal_context
 
         deal = load_deal_context(run_id)
     except Exception:
@@ -327,7 +327,7 @@ def create_cmd(
     """
     console = Console()
 
-    from market_buyer.groups._deal import load_deal_context, open_run_log, resolve_chain_settings
+    from .deal_helpers import load_deal_context, open_run_log, resolve_chain_settings
     from market_buyer.buy_orchestrator import AgreedTerms
     from domains.vms.settlement import (
         make_buyer_payment_escrow_terms_fn,

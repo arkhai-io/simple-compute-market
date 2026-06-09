@@ -27,7 +27,7 @@ from market_buyer.buy_orchestrator import (
     submit_settlement,
     wait_for_settlement,
 )
-from market_buyer.groups._deal import load_deal_context, open_run_log, resolve_chain_settings
+from .deal_helpers import load_deal_context, open_run_log, resolve_chain_settings
 from .run_log import read_run
 
 

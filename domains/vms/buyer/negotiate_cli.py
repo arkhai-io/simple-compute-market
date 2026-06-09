@@ -21,7 +21,7 @@ from rich.table import Table
 from market_buyer.buyer_client import ResumeState, negotiate_with_seller
 from .common import resolve_config_value
 from .cli_helpers import resolve_prices_from_matches
-from market_buyer.groups._deal import load_negotiation_resume_point
+from .deal_helpers import load_negotiation_resume_point
 from .run_log import RunLog
 
 

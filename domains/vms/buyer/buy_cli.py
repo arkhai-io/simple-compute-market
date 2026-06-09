@@ -42,7 +42,7 @@ from market_buyer.buy_orchestrator import (
 )
 from market_buyer.buyer_client import ResumeState, negotiate_with_seller
 from .common import resolve_config_value
-from market_buyer.groups._deal import (
+from .deal_helpers import (
     is_negotiation_complete,
     load_negotiation_resume_point,
     open_run_log,
