@@ -8,7 +8,7 @@ import os
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Iterable, Mapping, Protocol
 
 from domains.vms.listings import (
     determine_strategy_from_order,
@@ -177,18 +177,20 @@ def _register_file_policy(folder: Path) -> bool:
     return True
 
 
-def _discover_file_policies(force: bool = False) -> None:
+def _discover_file_policies(
+    force: bool = False,
+    *,
+    extra_policy_paths: Iterable[str | Path] | None = None,
+) -> None:
     """Register middleware from configured policy directories."""
     global _FILE_POLICIES_DISCOVERED
     if _FILE_POLICIES_DISCOVERED and not force:
         return
     _FILE_POLICIES_DISCOVERED = True
 
-    from market_storefront.utils.config import settings
-
     candidates = [
         _default_policy_dir(),
-        *(Path(p) for p in settings.negotiation.extra_policy_paths),
+        *(Path(p) for p in (extra_policy_paths or ())),
     ]
 
     for root in candidates:
@@ -222,13 +224,16 @@ def _policy_map_needs_rl(policies_by_kind: dict[str, list[str]]) -> bool:
     return any(_policy_names_need_rl(names) for names in policies_by_kind.values())
 
 
-def _load_storefront_chain() -> list[NegotiationMiddleware]:
+def _load_storefront_chain(
+    *,
+    negotiation_config: Any = None,
+    chains: Mapping[str, Any] | None = None,
+    extra_policy_paths: Iterable[str | Path] | None = None,
+) -> list[NegotiationMiddleware]:
     """Resolve the VM storefront's configured negotiation middleware chain."""
-    from market_storefront.utils.config import CHAINS, settings
+    _discover_file_policies(extra_policy_paths=extra_policy_paths)
 
-    _discover_file_policies()
-
-    negotiation_cfg = getattr(settings, "negotiation", None)
+    negotiation_cfg = negotiation_config
     raw_policies = getattr(negotiation_cfg, "policies", None)
     policies_by_kind = normalize_policies_by_escrow_kind_config(raw_policies)
     if policies_by_kind:
@@ -236,7 +241,7 @@ def _load_storefront_chain() -> list[NegotiationMiddleware]:
             _maybe_register_rl_middleware()
         chain_config_paths = {
             name: chain.alkahest_address_config_path
-            for name, chain in CHAINS.items()
+            for name, chain in (chains or {}).items()
         }
         return load_negotiation_chain(_DEFAULT_GUARDS) + [
             make_escrow_kind_dispatch_middleware(
@@ -266,15 +271,16 @@ def _direction_from_strategy_label(strategy: str) -> str:
 
 
 def _seller_reference_amount(
-    listing: Any, duration_seconds: int | None,
+    listing: Any,
+    duration_seconds: int | None,
+    *,
+    default_min_price: Any = None,
 ) -> int:
     """Compute the seller's absolute reference amount in base units."""
-    from market_storefront.utils.config import settings
-
     per_hour = Decimal(str(
         extract_initial_price_from_order(
             listing,
-            default_min_price=settings.pricing.default_min_price,
+            default_min_price=default_min_price,
         )
     ))
     seconds = int(duration_seconds) if duration_seconds is not None else 3600
@@ -288,6 +294,10 @@ async def _run_default_seller_round_policy(
     requested_duration_seconds: int | None = None,
     strategy_label: str | None = None,
     policy_inputs: dict[str, Any] | None = None,
+    negotiation_config: Any = None,
+    chains: Mapping[str, Any] | None = None,
+    extra_policy_paths: Iterable[str | Path] | None = None,
+    default_min_price: Any = None,
 ) -> SellerRoundResult:
     """Run the default VM seller per-round policy hook."""
     from domains.vms.listings.models import Listing
@@ -313,12 +323,20 @@ async def _run_default_seller_round_policy(
         proposal=their_proposal,
     )
     our_amount = (
-        _seller_reference_amount(listing, requested_duration_seconds)
+        _seller_reference_amount(
+            listing,
+            requested_duration_seconds,
+            default_min_price=default_min_price,
+        )
         if uses_scalar_amount else 0
     )
     direction = _direction_from_strategy_label(strategy_label)
 
-    chain = _load_storefront_chain()
+    chain = _load_storefront_chain(
+        negotiation_config=negotiation_config,
+        chains=chains,
+        extra_policy_paths=extra_policy_paths,
+    )
     context = NegotiationContext(
         direction=direction,
         our_reference_amount=float(our_amount),
@@ -346,6 +364,10 @@ async def _run_default_seller_round_policy(
 @dataclass
 class _DefaultSellerRoundHook:
     sqlite_client: Any
+    negotiation_config: Any = None
+    chains: Mapping[str, Any] | None = None
+    extra_policy_paths: Iterable[str | Path] | None = None
+    default_min_price: Any = None
 
     async def __call__(
         self,
@@ -362,8 +384,25 @@ class _DefaultSellerRoundHook:
             requested_duration_seconds=requested_duration_seconds,
             strategy_label=strategy_label,
             policy_inputs=policy_inputs,
+            negotiation_config=self.negotiation_config,
+            chains=self.chains,
+            extra_policy_paths=self.extra_policy_paths,
+            default_min_price=self.default_min_price,
         )
 
 
-def default_seller_round_hook(sqlite_client: Any) -> SellerRoundHook:
-    return _DefaultSellerRoundHook(sqlite_client=sqlite_client)
+def default_seller_round_hook(
+    sqlite_client: Any,
+    *,
+    negotiation_config: Any = None,
+    chains: Mapping[str, Any] | None = None,
+    extra_policy_paths: Iterable[str | Path] | None = None,
+    default_min_price: Any = None,
+) -> SellerRoundHook:
+    return _DefaultSellerRoundHook(
+        sqlite_client=sqlite_client,
+        negotiation_config=negotiation_config,
+        chains=chains,
+        extra_policy_paths=extra_policy_paths,
+        default_min_price=default_min_price,
+    )

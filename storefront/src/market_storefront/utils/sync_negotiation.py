@@ -36,17 +36,12 @@ import uuid
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from domains.vms.negotiation import storefront_round as vm_storefront_round
 from domains.vms.negotiation.storefront_round import (
     SellerRoundHook,
     SellerRoundResult,
-    _default_seller_policy_inputs,
-    _discover_file_policies,
-    _load_storefront_chain,
     _match_accepted_escrow,
     _proposal_uses_scalar_amount,
-    _run_default_seller_round_policy,
-    _seller_reference_amount,
-    default_seller_round_hook as _default_seller_round_hook,
 )
 from market_policy.negotiation_middleware import (
     NegotiationDecision,
@@ -57,6 +52,72 @@ from domains.vms.negotiation.policies import _amount_from_proposal
 from service.schemas import EscrowProposal
 
 logger = logging.getLogger(__name__)
+
+
+def _negotiation_settings() -> Any:
+    from market_storefront.utils.config import settings
+
+    return settings.negotiation
+
+
+def _extra_policy_paths() -> list[str]:
+    return list(getattr(_negotiation_settings(), "extra_policy_paths", []) or [])
+
+
+def _chain_settings() -> dict[str, Any]:
+    from market_storefront.utils.config import CHAINS
+
+    return dict(CHAINS)
+
+
+def _default_min_price() -> Any:
+    from market_storefront.utils.config import settings
+
+    return settings.pricing.default_min_price
+
+
+def _discover_file_policies(force: bool = False) -> None:
+    vm_storefront_round._discover_file_policies(
+        force=force,
+        extra_policy_paths=_extra_policy_paths(),
+    )
+
+
+def _load_storefront_chain():
+    return vm_storefront_round._load_storefront_chain(
+        negotiation_config=_negotiation_settings(),
+        chains=_chain_settings(),
+        extra_policy_paths=_extra_policy_paths(),
+    )
+
+
+def _seller_reference_amount(
+    listing: Any,
+    duration_seconds: int | None,
+) -> int:
+    return vm_storefront_round._seller_reference_amount(
+        listing,
+        duration_seconds,
+        default_min_price=_default_min_price(),
+    )
+
+
+async def _run_default_seller_round_policy(**kwargs: Any):
+    kwargs.setdefault("negotiation_config", _negotiation_settings())
+    kwargs.setdefault("chains", _chain_settings())
+    kwargs.setdefault("extra_policy_paths", _extra_policy_paths())
+    kwargs.setdefault("default_min_price", _default_min_price())
+    return await vm_storefront_round._run_default_seller_round_policy(**kwargs)
+
+
+def _default_seller_round_hook(sqlite_client: Any) -> SellerRoundHook:
+    return vm_storefront_round.default_seller_round_hook(
+        sqlite_client,
+        negotiation_config=_negotiation_settings(),
+        chains=_chain_settings(),
+        extra_policy_paths=_extra_policy_paths(),
+        default_min_price=_default_min_price(),
+    )
 
 
 def _validate_escrow_proposal(

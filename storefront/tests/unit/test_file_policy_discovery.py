@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
+from types import SimpleNamespace
 
 from market_policy.negotiation_middleware import (
     NegotiationContext,
@@ -19,7 +20,6 @@ from market_policy.negotiation_middleware import (
     load_negotiation_chain,
 )
 from domains.vms.negotiation import storefront_round
-from tests._settings_overrides import settings_overrides
 
 
 _STUB_POLICY = textwrap.dedent("""
@@ -55,8 +55,9 @@ def test_extra_policy_paths_register_each_subdir(tmp_path):
     _REGISTRY.pop("myfast", None)
     _REGISTRY.pop("myslow", None)
 
-    with settings_overrides(**{"negotiation.extra_policy_paths": [str(tmp_path)]}):
-        storefront_round._discover_file_policies()
+    storefront_round._discover_file_policies(
+        extra_policy_paths=[tmp_path],
+    )
 
     assert "myfast" in _REGISTRY
     assert "myslow" in _REGISTRY
@@ -69,14 +70,16 @@ def test_extra_policy_paths_register_each_subdir(tmp_path):
 
 
 def test_load_storefront_chain_builds_dispatch_for_policy_table():
-    with settings_overrides(**{
-        "negotiation.policies": {
-            "erc20": "erc20_bisection",
-            "native_token": {"policy": "native_token_bisection"},
-        },
-        "negotiation.extra_policy_paths": [],
-    }):
-        chain = storefront_round._load_storefront_chain()
+    chain = storefront_round._load_storefront_chain(
+        negotiation_config=SimpleNamespace(
+            policies={
+                "erc20": "erc20_bisection",
+                "native_token": {"policy": "native_token_bisection"},
+            },
+            policy_mode="",
+        ),
+        extra_policy_paths=[],
+    )
 
     assert len(chain) == 3
     assert getattr(chain[0], "__name__", "") == "has_matching_inventory_guard"
@@ -92,8 +95,7 @@ def test_xdg_default_path_is_discovered(tmp_path, monkeypatch):
     _force_rediscover()
     _REGISTRY.pop("myxdg", None)
 
-    with settings_overrides(**{"negotiation.extra_policy_paths": []}):
-        storefront_round._discover_file_policies()
+    storefront_round._discover_file_policies(extra_policy_paths=[])
 
     assert "myxdg" in _REGISTRY
 
@@ -107,8 +109,9 @@ def test_file_policy_overrides_builtin(tmp_path):
     original = _REGISTRY.get("bisection")
     try:
         _force_rediscover()
-        with settings_overrides(**{"negotiation.extra_policy_paths": [str(tmp_path)]}):
-            storefront_round._discover_file_policies()
+        storefront_round._discover_file_policies(
+            extra_policy_paths=[tmp_path],
+        )
 
         chain = load_negotiation_chain(["bisection"])
         decision, _ = chain[0]([], _ctx())
@@ -132,8 +135,9 @@ def test_broken_policy_does_not_block_siblings(tmp_path):
     _REGISTRY.pop("good", None)
     _REGISTRY.pop("bad", None)
 
-    with settings_overrides(**{"negotiation.extra_policy_paths": [str(tmp_path)]}):
-        storefront_round._discover_file_policies()
+    storefront_round._discover_file_policies(
+        extra_policy_paths=[tmp_path],
+    )
 
     assert "good" in _REGISTRY
     assert "bad" not in _REGISTRY
@@ -145,17 +149,21 @@ def test_discovery_runs_once_per_process(tmp_path):
     _force_rediscover()
     _REGISTRY.pop("once", None)
 
-    with settings_overrides(**{"negotiation.extra_policy_paths": [str(tmp_path)]}):
-        storefront_round._discover_file_policies()
+    storefront_round._discover_file_policies(
+        extra_policy_paths=[tmp_path],
+    )
     assert "once" in _REGISTRY
 
     # Drop the registration; a second call should NOT re-register (cached).
     _REGISTRY.pop("once", None)
-    with settings_overrides(**{"negotiation.extra_policy_paths": [str(tmp_path)]}):
-        storefront_round._discover_file_policies()
+    storefront_round._discover_file_policies(
+        extra_policy_paths=[tmp_path],
+    )
     assert "once" not in _REGISTRY
 
     # …unless we force.
-    with settings_overrides(**{"negotiation.extra_policy_paths": [str(tmp_path)]}):
-        storefront_round._discover_file_policies(force=True)
+    storefront_round._discover_file_policies(
+        force=True,
+        extra_policy_paths=[tmp_path],
+    )
     assert "once" in _REGISTRY
