@@ -2619,7 +2619,7 @@ class SQLiteClient:
 
         ``buyer_escrow_proposal`` is the persisted JSON blob captured at
         /negotiate/new; deserialized back to a dict for the caller. The
-        caller (settlement) re-types it via service.schemas.EscrowProposal.
+        caller (settlement) re-types it via market_core.schemas.EscrowProposal.
         """
         def _load() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)

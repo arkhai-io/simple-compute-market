@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from service.schemas import EscrowProposal
+from market_core.schemas import EscrowProposal
 from domains.vms.settlement.escrow_client import make_buyer_payment_escrow_terms_fn
 
 
@@ -25,7 +25,7 @@ def patched_alkahest(monkeypatch):
     Avoids needing a real chain config. Returns the capture dict so
     tests can inspect what was passed through.
     """
-    from service.clients import alkahest as alkahest_mod
+    from market_alkahest import alkahest as alkahest_mod
 
     captured: dict = {}
 

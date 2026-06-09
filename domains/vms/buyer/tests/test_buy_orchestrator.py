@@ -22,7 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from service.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
+from market_core.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
 
 _ESCROW_ADDR = "0x" + "cd" * 20
 

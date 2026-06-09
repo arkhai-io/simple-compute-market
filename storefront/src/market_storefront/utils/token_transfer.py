@@ -1,7 +1,7 @@
 """Direct ERC-20 token transfers.
 
 Used by the provider refund endpoint (`POST /orders/refund`). Separate
-from `service.clients.alkahest` because refunds bypass the escrow
+from `market_alkahest.alkahest` because refunds bypass the escrow
 lifecycle entirely: the provider sends tokens straight from their own
 wallet to the buyer to make them whole.
 """

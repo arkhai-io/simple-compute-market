@@ -47,7 +47,7 @@ def _recorder(*, agree_at: int | None = None) -> tuple[list[str], NegotiateFn]:
     ``agree_at``: index into the call-order list at which to return
     ``status="agreed"``. None means everyone exits (no agreement).
     """
-    from service.schemas import primary_rate_value
+    from market_core.schemas import primary_rate_value
 
     seen: list[str] = []
 

@@ -23,7 +23,7 @@ import json
 import logging
 from typing import Any
 
-from service.schemas import EscrowProposal, ProvisionTerms
+from market_core.schemas import EscrowProposal, ProvisionTerms
 
 logger = logging.getLogger(__name__)
 

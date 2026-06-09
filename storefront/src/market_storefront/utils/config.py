@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from dynaconf import Dynaconf
-from service.config_loader import (  # type: ignore[import-not-found]
+from market_config.config_loader import (  # type: ignore[import-not-found]
     ChainConfig,
     EscrowTemplate,
     chains_from_config,

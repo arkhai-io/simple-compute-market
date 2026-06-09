@@ -107,7 +107,7 @@ spec:
           {{- end }}
           env:
             # Sole env var: tell dynaconf where to find the mounted TOML
-            # files. service.config_loader.user_config_dir() resolves to
+            # files. The storefront config loader resolves this to
             # $XDG_CONFIG_HOME/arkhai, so this maps to
             # /etc/arkhai/{storefront.toml,storefront.secrets.toml}. The
             # dynaconf instance merges both files at startup; the ConfigMap

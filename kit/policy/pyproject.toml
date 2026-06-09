@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Domain-agnostic policy engine for the market — negotiation thread store, action builders, callable registry, and policy evaluation. Ships with the `market-policy` CLI for the train/eval/export lifecycle."
 requires-python = ">=3.10,<3.14"
 dependencies = [
-    "market-service",
     "pydantic>=2",
     "typer>=0.12.0",
 ]
@@ -53,7 +52,7 @@ allow-direct-references = true
 packages = ["src/market_policy"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "../..", "../../service/src", "../alkahest/src"]
+pythonpath = ["src", "../..", "../alkahest/src"]
 asyncio_mode = "auto"
 
 [tool.uv]
@@ -68,7 +67,6 @@ no-build-isolation-package = ["pufferlib"]
 pufferlib = ["setuptools", "Cython", "numpy<2"]
 
 [tool.uv.sources]
-market-service = { path = "../../service", editable = true }
 # Pin torch to the CPU index so installs don't hit the multi-GB CUDA
 # wheels on hosts that don't have an NVIDIA GPU. Trainers with a GPU
 # can override this in their own venv.

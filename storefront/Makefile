@@ -4,7 +4,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 
 # Path to the monorepo .dist/ wheel directory, relative to storefront/.
 # Used by uv when resolving pure-Python internal packages
-# (market-service, market-policy, provisioning-service) that are
+# (market-policy, provisioning-service) that are
 # distributed as wheels rather than editable source installs. The
 # Dockerfile passes --find-links /dist on the uv sync CLI instead;
 # this variable is for local development only.
@@ -17,11 +17,9 @@ init: ## Resolve deps and create .venv. Run once after checkout or after changin
 
 reinit: ## Force-reinstall internal wheels without bumping versions. Use after make dist-*.
 	uv sync --find-links $(DIST_DIR) \
-	--upgrade-package market-service \
 	--upgrade-package provisioning-service \
 	--upgrade-package arkhai-storefront-client \
 	--upgrade-package arkhai-registry-client \
-	--reinstall-package market-service \
 	--reinstall-package provisioning-service \
 	--reinstall-package arkhai-storefront-client \
 	--reinstall-package arkhai-registry-client

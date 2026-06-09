@@ -821,7 +821,6 @@ dependencies = [
     { name = "market-config" },
     { name = "market-core" },
     { name = "market-policy" },
-    { name = "market-service" },
     { name = "pyinstaller" },
     { name = "pyyaml" },
     { name = "rich" },
@@ -845,7 +844,6 @@ requires-dist = [
     { name = "market-config", editable = "../../../kit/config" },
     { name = "market-core", editable = "../../../core" },
     { name = "market-policy", editable = "../../../kit/policy" },
-    { name = "market-service", editable = "../../../service" },
     { name = "pyinstaller", specifier = ">=6.19.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
@@ -914,14 +912,12 @@ name = "market-policy"
 version = "0.1.0"
 source = { editable = "../../../kit/policy" }
 dependencies = [
-    { name = "market-service" },
     { name = "pydantic" },
     { name = "typer" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "market-service", editable = "../../../service" },
     { name = "pufferlib", marker = "extra == 'training'", git = "https://github.com/arkhai-io/ArkhaiPufferEnv?rev=f18e3b42c0ae22e8aec5e8d26a26f424e6b18a30" },
     { name = "pydantic", specifier = ">=2" },
     { name = "torch", marker = "extra == 'training'", specifier = ">=2.7.0", index = "https://download.pytorch.org/whl/cpu" },
@@ -931,40 +927,6 @@ provides-extras = ["training"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
-    { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
-]
-
-[[package]]
-name = "market-service"
-version = "0.1.1"
-source = { editable = "../../../service" }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "eth-account" },
-    { name = "market-alkahest" },
-    { name = "market-config" },
-    { name = "market-core" },
-    { name = "market-identity" },
-    { name = "pydantic" },
-    { name = "web3" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiohttp", specifier = ">=3.12.15" },
-    { name = "eth-account" },
-    { name = "market-alkahest", editable = "../../../kit/alkahest" },
-    { name = "market-config", editable = "../../../kit/config" },
-    { name = "market-core", editable = "../../../core" },
-    { name = "market-identity", editable = "../../../kit/identity" },
-    { name = "pydantic", specifier = ">=2" },
-    { name = "web3", specifier = ">=7.14.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "alkahest-py", specifier = ">=0.4.0" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
 ]

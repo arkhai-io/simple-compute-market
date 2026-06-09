@@ -49,7 +49,7 @@ from domains.vms.listings.reconciler import (
     stale_open_listing_ids,
 )
 from market_storefront.utils.config import CHAINS, settings, AGENT_ID, BASE_URL_OVERRIDE
-from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
+from market_alkahest.alkahest import encode_recipient_demand, get_recipient_arbiter
 from market_storefront.utils.sqlite_client import get_sqlite_client
 from registry_client import ListingRequest, UpdateListingRequest
 from market_policy.negotiation_thread import get_thread_store

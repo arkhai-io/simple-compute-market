@@ -90,7 +90,7 @@ from importlib import resources
 
 import pytest
 
-from service.clients.alkahest import get_recipient_arbiter
+from market_alkahest.alkahest import get_recipient_arbiter
 from src.settings import settings
 from tests.e2e.roles.scenarios.conftest import (
     DealState,

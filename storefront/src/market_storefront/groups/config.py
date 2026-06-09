@@ -12,7 +12,7 @@ import json
 
 import typer
 
-from service.config_loader import (
+from market_config.config_loader import (
     get_dotted,
     load_storefront_config,
     load_user_config,

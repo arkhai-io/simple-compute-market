@@ -37,7 +37,7 @@ def build_clients() -> dict[str, Any]:
         return {}
 
     from alkahest_py import AlkahestClient
-    from service.clients.alkahest import (
+    from market_alkahest.alkahest import (
         get_alkahest_network,
         prewarm_alkahest_address_config_cache,
         resolve_alkahest_address_config,

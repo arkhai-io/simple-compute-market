@@ -94,7 +94,7 @@ class MultiRegistryClient:
         return list(self._urls)
 
     async def __aenter__(self) -> "MultiRegistryClient":
-        from service.registry_url import lookup_registry_auth
+        from market_config.registry_url import lookup_registry_auth
         for url in self._urls:
             client = RegistryClient(url, api_key=lookup_registry_auth(self._auth, url))
             await client.__aenter__()

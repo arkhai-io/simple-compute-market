@@ -83,7 +83,7 @@ class ListingService:
         if alkahest is None:
             return row, chain_name, None, None
         from market_storefront.utils.config import CHAINS
-        from service.clients.alkahest import get_escrow_codec_for
+        from market_alkahest.alkahest import get_escrow_codec_for
 
         chain_cfg = CHAINS.get(chain_name)
         config_path = (
@@ -129,7 +129,7 @@ class ListingService:
         clients pass addresses + base-unit amounts. Symbol enrichment for
         display is best-effort via the chain-resolved cache.
         """
-        from service.clients.token import resolve_token_cached
+        from market_alkahest.token import resolve_token_cached
         if "token" not in resource_payload:
             return resource_payload
         token_value = resource_payload.get("token")
@@ -374,7 +374,7 @@ class ListingService:
                 "detail": "wallet.private_key and at least one [chains.<name>] entry must be set in storefront config.",
             }
         order = await self._db.load_listing(listing_id=listing_id)
-        from service.clients.token import resolve_token_cached, ERC20TokenMetadata
+        from market_alkahest.token import resolve_token_cached, ERC20TokenMetadata
         def _resolve_token(address: str) -> dict:
             """Resolve a 0x address to metadata for the refund transfer.
 

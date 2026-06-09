@@ -255,7 +255,7 @@ def test_erc1155_bisection_preserves_token_literals():
 
 
 def test_escrow_kind_dispatch_uses_family_policy(monkeypatch):
-    from service.clients import alkahest
+    from market_alkahest import alkahest
 
     monkeypatch.setattr(
         alkahest,
@@ -288,7 +288,7 @@ def test_escrow_kind_dispatch_uses_family_policy(monkeypatch):
 
 
 def test_escrow_kind_dispatch_rejects_unmapped_kind(monkeypatch):
-    from service.clients import alkahest
+    from market_alkahest import alkahest
 
     monkeypatch.setattr(
         alkahest,

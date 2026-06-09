@@ -1909,8 +1909,7 @@ make dist
   ├── dist-identity           → .dist/market_identity-*.whl        (Docker builds only)
   ├── dist-core               → .dist/market_core-*.whl            (Docker builds only)
   ├── dist-alkahest           → .dist/market_alkahest-*.whl        (Docker builds only)
-  ├── dist-config             → .dist/market_config-*.whl          (Docker builds only)
-  └── dist-service            → .dist/market_service-*.whl         (Docker builds only)
+  └── dist-config             → .dist/market_config-*.whl          (Docker builds only)
 ```
 
 ---
@@ -1932,8 +1931,7 @@ repo. The registries and their IAM are managed there; this repo only pushes.
 | `provisioning-service` wheel | PYTHON | `python` | wheel version |
 | `market` CLI binary | GENERIC | `cli` | git short SHA |
 
-The three internal-only wheels (`market-storefront`, `market-policy`,
-`market-service`) are consumed only via `--find-links` inside
+The internal-only wheels (`market-storefront`, `market-policy`) are consumed only via `--find-links` inside
 Docker builds and are never pushed to AR.
 
 **Push flow:**
@@ -2471,36 +2469,6 @@ All integration tests import `RegistryClient` from the `arkhai-registry-client` 
 
 The two legitimate raw-call exceptions (rejection-path tests and `db_session` state setup) apply here exactly as documented in the provisioning-service section above. `RegistryClient` and `SyncRegistryClient` expose typed methods covering `/api/v1/system/stats`, `GET /publishers{,/{id}}`, `POST /listings`, `PUT`/`DELETE /listings/{id}`, and `validate_publish_listing()` (`POST /api/v1/listings/validate-publish`) with `ValidatePublishRequest`/`ValidatePublishResponse` models. `ListingRequest` and `ValidatePublishRequest` carry a `storefront_url` field (`""` default) to satisfy the filter-spec's required-publish-candidate constraint; the storefront populates it from `BASE_URL_OVERRIDE`/its storefront URL.
 
-**service package (`market-service`)**:
-```
-service/tests/
-├── unit/
-│   ├── test_signing.py
-│   ├── test_heartbeat.py
-│   ├── test_role.py
-│   ├── test_alkahest.py
-│   ├── test_config_loader.py
-│   ├── test_token.py
-│   └── test_erc8004_blockchain.py   # pure-function tests (rpc_url conversion, canonical ID)
-└── integration/
-    └── test_abi_alignment.py        # ABI codec alignment — see pattern below
-```
-
-**ABI alignment test pattern (`service/tests/integration/test_abi_alignment.py`):**
-
-The `service.clients.erc8004.registration` module constructs Python dicts that are passed to web3's ABI codec as `MetadataEntry` struct arguments. If the dict field names do not match the ABI component names, web3 raises `KeyError` during `encode_abi()` before any transaction is broadcast — a silent registration crash whenever the vendored ABI drifts from the constructor.
-
-The integration tests guard this invariant by calling `contract.encode_abi()` against the real vendored ABI using a provider-less `Web3()` instance — no Anvil, no deployment, no network:
-
-```python
-def test_register_with_metadata_encodes_without_error(contract):
-    metadata = _build_metadata_entries("agent", {"name": "agent"})
-    encoded = contract.encode_abi("register", args=["http://example/reg", metadata])
-    assert encoded
-```
-
-The `_build_metadata_entries()` helper in `registration.py` is the single authoritative source for struct field names — all metadata construction goes through it. When the ABI is updated, `test_metadata_entry_field_names_match_abi_struct` fails with an explicit message pointing at `_build_metadata_entries`.
-
 **integration-tests**:
 ```
 integration-tests/
@@ -2562,22 +2530,21 @@ make build         →  docker build (COPY .dist/ /dist/, uv sync --find-links /
 
 Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockfile and breaks the other context. Setting it via `UV_FIND_LINKS` on the command line means the path stays out of version-controlled files entirely.
 
-**Rule:** downstream `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for wheel-consumed internal packages (`market-identity`, `market-core`, `market-alkahest`, `market-config`, `market-service`, `provisioning-service`, `arkhai-storefront-client`, or `arkhai-registry-client`). These packages are resolved exclusively from wheels in `.dist/` outside their owning package's local dev environment.
+**Rule:** downstream `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for wheel-consumed internal packages (`market-identity`, `market-core`, `market-alkahest`, `market-config`, `provisioning-service`, `arkhai-storefront-client`, or `arkhai-registry-client`). These packages are resolved exclusively from wheels in `.dist/` outside their owning package's local dev environment.
 
-**Why not `uv.sources` editable installs:** Editable path references (`{ path = "../service", editable = true }`) are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker that relative path does not exist, causing resolution failures. The wheel approach makes both the path and the mechanism context-specific (CLI flag, not lockfile entry).
+**Why not `uv.sources` editable installs:** Editable path references are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker that relative path does not exist, causing resolution failures. The wheel approach makes both the path and the mechanism context-specific (CLI flag, not lockfile entry).
 
 ### Internal wheel packages
 
-Eight pure-Python internal packages are distributed as wheels:
+Seven pure-Python internal packages are distributed as wheels:
 
 | Package | Wheel name | Source | Primary consumers |
 |---------|-----------|--------|-------------------|
-| `market-identity` | `market_identity-*.whl` | `kit/identity/` | `market-core`, `registry-service`, `storefront`, `market-service` |
-| `market-core` | `market_core-*.whl` | `core/` | `market-alkahest`, `market-service` |
-| `market-alkahest` | `market_alkahest-*.whl` | `kit/alkahest/` | `market-service` |
-| `market-config` | `market_config-*.whl` | `kit/config/` | `market-service`, `buyer`, `storefront` |
-| `market-service` | `market_service-*.whl` | `service/` | `integration-tests` |
-| `provisioning-service` | `provisioning_service-*.whl` | `domains/vms/provisioning/service/` | `integration-tests`, `service` |
+| `market-identity` | `market_identity-*.whl` | `kit/identity/` | `market-core`, `registry-service`, `storefront` |
+| `market-core` | `market_core-*.whl` | `core/` | `market-alkahest`, `buyer`, `storefront` |
+| `market-alkahest` | `market_alkahest-*.whl` | `kit/alkahest/` | `buyer`, `storefront`, `integration-tests` |
+| `market-config` | `market_config-*.whl` | `kit/config/` | `buyer`, `storefront` |
+| `provisioning-service` | `provisioning_service-*.whl` | `domains/vms/provisioning/service/` | `integration-tests`, `storefront` |
 | `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `core/storefront-client/` | `storefront`, `integration-tests`, `provisioning-service` |
 | `arkhai-registry-client` | `arkhai_registry_client-*.whl` | `core/registry-client/` | `integration-tests` |
 
@@ -2699,7 +2666,7 @@ cd core/registry && make reinit && make test-integration
 |---|---|---|---|---|
 | `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `StorefrontClient` | `SyncStorefrontClient` | `storefront`, `integration-tests` |
 | `core/registry-client/` | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `integration-tests`, `registry-service` tests |
-| `domains/vms/provisioning/service/src/client/` | `provisioning_service-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `integration-tests`, `service` shim |
+| `domains/vms/provisioning/service/src/client/` | `provisioning_service-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `integration-tests` |
 
 `arkhai-storefront-client` exposes EIP-191-signed methods on both
 `StorefrontClient` (async) and `SyncStorefrontClient` (sync):

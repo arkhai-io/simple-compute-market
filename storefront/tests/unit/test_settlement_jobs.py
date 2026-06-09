@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from service.schemas import ProvisionTerms
+from market_core.schemas import ProvisionTerms
 
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.settlement_jobs import (
@@ -43,7 +43,7 @@ def _anvil_chain(monkeypatch):
     """Inject a synthetic [chains.anvil] entry so start_settlement_job's
     ``CHAINS.get(chain_name)`` lookup resolves in tests that don't write a
     full storefront.toml."""
-    from service.config_loader import ChainConfig
+    from market_config.config_loader import ChainConfig
     from market_storefront.utils import config as agent_config
 
     monkeypatch.setattr(

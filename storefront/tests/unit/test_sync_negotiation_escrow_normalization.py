@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from market_storefront.utils.sync_negotiation import _validate_escrow_proposal
-from service.schemas import EscrowProposal
+from market_core.schemas import EscrowProposal
 
 
 def test_out_of_set_escrow_proposal_is_not_rejected_by_protocol_layer():

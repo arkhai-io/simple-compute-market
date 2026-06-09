@@ -29,7 +29,7 @@ from typer.testing import CliRunner
 from domains.vms.buyer.cli import app
 from domains.vms.buyer.buy_orchestrator import BuyResult
 from domains.vms.buyer.run_log import RunLog, read_run
-from service.config_loader import ChainConfig
+from market_config.config_loader import ChainConfig
 
 
 # Test wallet — derived address must match _BUYER_ADDR below for

@@ -87,7 +87,7 @@ from importlib import resources
 
 import pytest
 
-from service.clients.alkahest import (
+from market_alkahest.alkahest import (
     get_alkahest_network,
     get_recipient_arbiter,
     resolve_alkahest_address_config,

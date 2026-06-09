@@ -29,7 +29,7 @@ def resolve_storefront_url(
     """
     if explicit_url:
         return explicit_url
-    from service.config_loader import get_dotted, load_storefront_config
+    from market_config.config_loader import get_dotted, load_storefront_config
     cfg = load_storefront_config()
     base_url = get_dotted(cfg, "base_url")
     if isinstance(base_url, str) and base_url:
@@ -42,7 +42,7 @@ def _resolve_db_path(db: str | None) -> str | None:
     ``db_path`` in ``storefront.toml`` (same file the server reads)."""
     if db:
         return db
-    from service.config_loader import get_dotted, load_storefront_config
+    from market_config.config_loader import get_dotted, load_storefront_config
     cfg = load_storefront_config()
     toml_db = get_dotted(cfg, "db_path")
     if isinstance(toml_db, str) and toml_db and Path(toml_db).exists():

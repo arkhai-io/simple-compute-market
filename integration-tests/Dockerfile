@@ -31,7 +31,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --find-links /dist \
         --refresh-package market-buyer \
         --refresh-package market-policy \
-        --refresh-package market-service \
         --refresh-package market-storefront \
         --refresh-package provisioning-service \
         --refresh-package arkhai-storefront-client \

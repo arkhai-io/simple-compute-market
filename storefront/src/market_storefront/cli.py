@@ -46,7 +46,7 @@ def version_callback(value: bool) -> None:
 def _config_path_callback(value: str | None) -> str | None:
     """Override the TOML loader path before any subcommand body runs."""
     if value:
-        from service.config_loader import set_user_config_path
+        from market_config.config_loader import set_user_config_path
         set_user_config_path(Path(value))
     return value
 

@@ -23,7 +23,7 @@ import time
 from importlib import resources
 
 from alkahest_py import AlkahestClient
-from service.clients.alkahest import (
+from market_alkahest.alkahest import (
     encode_recipient_demand,
     get_alkahest_network,
     get_recipient_arbiter,

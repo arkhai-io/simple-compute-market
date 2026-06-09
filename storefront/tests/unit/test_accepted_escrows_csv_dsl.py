@@ -5,7 +5,7 @@ import pytest
 from market_storefront.utils.resource_csv_importer import (
     parse_accepted_escrows_cell,
 )
-from service.config_loader import EscrowTemplate, RateSlot
+from market_config.config_loader import EscrowTemplate, RateSlot
 
 
 def _template(

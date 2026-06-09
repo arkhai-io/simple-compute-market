@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "arkhai-e2e-tests"
 version = "0.1.0"
 description = "End-to-end integration tests for Arkhai deployed blockchain environments"
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.15"
 dependencies = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -24,14 +24,14 @@ dependencies = [
     # not a re-implementation. Keeps test behavior aligned with storefront behavior.
     "arkhai-storefront-client>=0.11.0",
     "arkhai-registry-client>=0.6.0",
-    "market-service>=0.1.0",
+    "market-alkahest>=0.1.0",
 	"market-storefront>=0.1.0",
     "provisioning-service>=0.4.0",
     # The buyer's `market` CLI, run as a subprocess by the buyer-machine
     # e2e (tests/e2e/roles/buyer_cli.py). Installed so the binary is on
     # PATH inside arkhai:integration-tests when the suite runs in-network.
     # market-policy is the buyer's sibling negotiation-strategy dep,
-    # resolved from .dist alongside market-service.
+    # resolved from .dist alongside the other internal wheels.
     "market-buyer>=0.1.0",
     "market-policy>=0.1.0",
 ]

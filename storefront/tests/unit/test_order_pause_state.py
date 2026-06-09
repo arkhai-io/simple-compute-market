@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
 
-from service.schemas import EscrowProposal
+from market_core.schemas import EscrowProposal
 
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.sync_negotiation import (
@@ -249,7 +249,7 @@ class TestStartSyncNegotiationPauseGuard:
         monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", False)
 
         from market_storefront.utils.sync_negotiation import start_sync_negotiation
-        from service.schemas import EscrowProposal, ProvisionTerms
+        from market_core.schemas import EscrowProposal, ProvisionTerms
         with pytest.raises(OfferUnfulfillableError) as exc_info:
             await start_sync_negotiation(
                 sqlite_client=db,

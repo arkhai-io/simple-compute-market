@@ -27,7 +27,7 @@ from market_storefront.cli_publish import (
     _publish_round,
     _stale_open_listing_ids,
 )
-from service.clients.token import ERC20TokenMetadata
+from market_alkahest.token import ERC20TokenMetadata
 from tests._settings_overrides import settings_overrides
 
 
@@ -54,7 +54,7 @@ def _stub_resolve_token(monkeypatch):
     def fake_resolve(address: str, *, rpc_url: str, chain_id: int, refresh: bool = False):
         key = address.lower()
         if key not in _TOKEN_DECIMALS:
-            from service.clients.token import TokenResolutionError
+            from market_alkahest.token import TokenResolutionError
             raise TokenResolutionError(f"untested address: {address}")
         sym, dec = _TOKEN_DECIMALS[key]
         return ERC20TokenMetadata(
@@ -67,9 +67,9 @@ def _stub_resolve_token(monkeypatch):
     # cli_publish imports resolve_token lazily inside _publish_round, so
     # patch the source module too.
     monkeypatch.setattr(
-        "service.clients.token.resolve_token", fake_resolve,
+        "market_alkahest.token.resolve_token", fake_resolve,
     )
-    from service.clients import alkahest as alkahest_mod
+    from market_alkahest import alkahest as alkahest_mod
     monkeypatch.setattr(
         alkahest_mod, "get_erc20_escrow_obligation_nontierable",
         lambda chain_name, *, config_path=None: "0x" + "cd" * 20,
@@ -78,7 +78,7 @@ def _stub_resolve_token(monkeypatch):
         alkahest_mod, "get_recipient_arbiter",
         lambda chain_name, *, config_path=None: "0x" + "ab" * 20,
     )
-    from service.config_loader import ChainConfig
+    from market_config.config_loader import ChainConfig
     from market_storefront.utils import config as agent_config
     monkeypatch.setattr(
         agent_config,

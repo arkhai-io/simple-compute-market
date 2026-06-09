@@ -17,8 +17,8 @@ import sqlite3
 import pytest
 
 from market_storefront.cli_publish import _publish_round, _scale_template_entries
-from service.clients.token import ERC20TokenMetadata, TokenResolutionError
-from service.config_loader import ChainConfig
+from market_alkahest.token import ERC20TokenMetadata, TokenResolutionError
+from market_config.config_loader import ChainConfig
 
 
 _USDC_BASE = "0x036cbd53842c5426634e7929541ec2318f3dcf7e"
@@ -58,8 +58,8 @@ def _stub_resolve_token(monkeypatch, chains):
             symbol=sym, contract_address=key, decimals=dec, chain_id=chain_id,
         )
 
-    monkeypatch.setattr("service.clients.token.resolve_token", fake_resolve)
-    from service.clients import alkahest as alkahest_mod
+    monkeypatch.setattr("market_alkahest.token.resolve_token", fake_resolve)
+    from market_alkahest import alkahest as alkahest_mod
     monkeypatch.setattr(
         alkahest_mod,
         "get_recipient_arbiter",
@@ -274,7 +274,7 @@ def test_publish_round_uses_row_templates(tmp_path, monkeypatch):
             "Template path must not call get_erc20_escrow_obligation_nontierable"
         )
 
-    from service.clients import alkahest as alkahest_mod
+    from market_alkahest import alkahest as alkahest_mod
     monkeypatch.setattr(
         alkahest_mod, "get_erc20_escrow_obligation_nontierable", boom_alkahest,
     )
@@ -419,7 +419,7 @@ def test_publish_round_no_template_falls_back_to_legacy(tmp_path, monkeypatch):
         min_price="2", token=_USDC_BASE,
     )
 
-    from service.clients import alkahest as alkahest_mod
+    from market_alkahest import alkahest as alkahest_mod
     monkeypatch.setattr(
         alkahest_mod, "get_erc20_escrow_obligation_nontierable",
         lambda chain_name, *, config_path=None: "0x" + "cd" * 20,

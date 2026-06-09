@@ -16,7 +16,6 @@ dependencies = [
   "alkahest-py>=0.4.0",
   "market-core",
   "market-alkahest",
-  "market-service",
   "market-config",
   "market-policy",
 ]
@@ -39,12 +38,9 @@ rl = [
 market = "domains.vms.buyer.cli:app"
 
 # Workspace resolution for sibling packages.
-# market-service: token registry + alkahest address resolution for the
-# buyer orchestrator (buy-sync).
 # market-policy: per-round negotiation decision logic, shared with the
 # storefront so both sides drive negotiation through one engine.
 [tool.uv.sources]
-market-service = { path = "../../../service", editable = true }
 market-core = { path = "../../../core", editable = true }
 market-alkahest = { path = "../../../kit/alkahest", editable = true }
 market-config = { path = "../../../kit/config", editable = true }

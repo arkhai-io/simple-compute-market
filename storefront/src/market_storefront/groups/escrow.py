@@ -250,7 +250,7 @@ def refund_cmd(
     result.add_row("Tx hash", str(resp.get("tx_hash", "-")))
     result.add_row("From", str(resp.get("from_address", "-")))
     result.add_row("To", str(resp.get("to_address", "-")))
-    from service.clients.token import render_token
+    from market_alkahest.token import render_token
     result.add_row("Token", render_token(resp.get("token")))
     result.add_row("Amount (raw)", str(resp.get("amount_raw", "-")))
     result.add_row("Block", str(resp.get("block_number", "-")))
@@ -283,7 +283,7 @@ def show_cmd(
     """
     import asyncio
     from ..utils.config import CHAINS, settings
-    from service.clients.alkahest import (
+    from market_alkahest.alkahest import (
         get_alkahest_network,
         get_escrow_obligation_with_codec,
         prewarm_alkahest_address_config_cache,

@@ -1,10 +1,9 @@
 version = 1
 revision = 3
-requires-python = ">=3.13"
+requires-python = ">=3.13, <3.15"
 resolution-markers = [
-    "python_full_version >= '3.15'",
+    "python_full_version >= '3.14'",
     "python_full_version < '3.14'",
-    "python_full_version == '3.14.*'",
 ]
 
 [[package]]
@@ -173,9 +172,9 @@ dependencies = [
     { name = "eth-account" },
     { name = "eth-typing" },
     { name = "httpx" },
+    { name = "market-alkahest" },
     { name = "market-buyer" },
     { name = "market-policy" },
-    { name = "market-service" },
     { name = "market-storefront" },
     { name = "provisioning-service" },
     { name = "pytest" },
@@ -206,9 +205,9 @@ requires-dist = [
     { name = "eth-typing", specifier = ">=4.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13" },
+    { name = "market-alkahest", specifier = ">=0.1.0" },
     { name = "market-buyer", specifier = ">=0.1.0" },
     { name = "market-policy", specifier = ">=0.1.0" },
-    { name = "market-service", specifier = ">=0.1.0" },
     { name = "market-storefront", specifier = ">=0.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8" },
     { name = "provisioning-service", specifier = ">=0.4.0" },
@@ -227,25 +226,25 @@ provides-extras = ["dev"]
 [[package]]
 name = "arkhai-registry-client"
 version = "0.10.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "eth-account" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_registry_client-0.10.0-py3-none-any.whl" },
+    { path = "arkhai_registry_client-0.10.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-storefront-client"
 version = "0.15.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "eth-account" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_storefront_client-0.15.0-py3-none-any.whl" },
+    { path = "arkhai_storefront_client-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -1318,54 +1317,90 @@ wheels = [
 ]
 
 [[package]]
+name = "market-alkahest"
+version = "0.1.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "market-core" },
+    { name = "pydantic" },
+    { name = "web3" },
+]
+wheels = [
+    { path = "market_alkahest-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "market-buyer"
 version = "0.1.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
     { name = "eth-account" },
+    { name = "market-alkahest" },
+    { name = "market-config" },
+    { name = "market-core" },
     { name = "market-policy" },
-    { name = "market-service" },
     { name = "pyinstaller" },
     { name = "pyyaml" },
     { name = "rich" },
     { name = "typer" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/market_buyer-0.1.0-py3-none-any.whl" },
+    { path = "market_buyer-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "market-config"
+version = "0.1.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "eth-account" },
+    { name = "market-alkahest" },
+]
+wheels = [
+    { path = "market_config-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "market-core"
+version = "0.1.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "market-identity" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "market_core-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "market-identity"
+version = "0.1.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "eth-account" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "market_identity-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "market-policy"
 version = "0.1.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
-    { name = "market-service" },
     { name = "pydantic" },
     { name = "typer" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/market_policy-0.1.0-py3-none-any.whl" },
-]
-
-[[package]]
-name = "market-service"
-version = "0.1.1"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "eth-account" },
-    { name = "pydantic" },
-    { name = "web3" },
-]
-wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/market_service-0.1.1-py3-none-any.whl" },
+    { path = "market_policy-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "market-storefront"
 version = "0.1.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
     { name = "arkhai-registry-client" },
@@ -1376,8 +1411,11 @@ dependencies = [
     { name = "fastapi-utils" },
     { name = "google-cloud-logging" },
     { name = "httpx" },
+    { name = "market-alkahest" },
+    { name = "market-config" },
+    { name = "market-core" },
+    { name = "market-identity" },
     { name = "market-policy" },
-    { name = "market-service" },
     { name = "opentelemetry-exporter-gcp-trace" },
     { name = "provisioning-service" },
     { name = "psycopg2-binary" },
@@ -1388,7 +1426,7 @@ dependencies = [
     { name = "websockets" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/market_storefront-0.1.0-py3-none-any.whl" },
+    { path = "market_storefront-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -1804,7 +1842,7 @@ wheels = [
 [[package]]
 name = "provisioning-service"
 version = "0.4.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "aiohttp" },
     { name = "arkhai-storefront-client" },
@@ -1824,7 +1862,7 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/provisioning_service-0.4.0-py3-none-any.whl" },
+    { path = "provisioning_service-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

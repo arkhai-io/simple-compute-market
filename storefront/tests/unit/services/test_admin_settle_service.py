@@ -27,7 +27,7 @@ def _stub_chains(monkeypatch):
     """Inject a synthetic [chains.anvil] entry so verify_escrow_dry_run's
     CHAINS lookup resolves and the chain-aware code path can run.
     """
-    from service.config_loader import ChainConfig
+    from market_config.config_loader import ChainConfig
     from market_storefront.utils import config as agent_config
 
     monkeypatch.setattr(

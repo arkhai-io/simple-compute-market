@@ -131,11 +131,11 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
         {"anvil": SimpleNamespace(rpc_url="http://rpc", alkahest_address_config_path="/addr.json")},
     )
     monkeypatch.setattr(
-        "service.clients.alkahest.materialize_escrow_terms_from_proposal",
+        "market_alkahest.alkahest.materialize_escrow_terms_from_proposal",
         lambda **kwargs: [fake_terms],
     )
     monkeypatch.setattr(
-        "service.clients.alkahest.get_escrow_codec_for",
+        "market_alkahest.alkahest.get_escrow_codec_for",
         lambda *args, **kwargs: fake_codec,
     )
 

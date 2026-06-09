@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from service.schemas import EscrowProposal
+from market_core.schemas import EscrowProposal
 
 from market_storefront.utils.escrow_verification import (
     EscrowVerificationError,
@@ -609,7 +609,7 @@ def patched_codec_lookup(monkeypatch):
     """Stub ``get_escrow_codec_for`` + ``address_to_slot`` so proposal-path
     verifies don't need a real chain config. Returns a capture dict the
     tests inspect."""
-    from service.clients import alkahest as alkahest_mod
+    from market_alkahest import alkahest as alkahest_mod
 
     captured: dict = {}
 

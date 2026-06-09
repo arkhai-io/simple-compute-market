@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from service.clients.alkahest import encode_recipient_demand
+from market_alkahest.alkahest import encode_recipient_demand
 
 
 _SAMPLE = "0xAaAaaaaaAAaaAAaaAaaaaAAAAAAAAAaaaAaaaAaA"

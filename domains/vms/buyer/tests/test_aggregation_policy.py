@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from unittest.mock import patch
 from urllib.parse import urlparse
 
-from service.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
+from market_core.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
 
 _ESCROW_ADDR_AGG = "0x" + "cd" * 20
 

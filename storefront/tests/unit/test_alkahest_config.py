@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from service.clients.alkahest import (
+from market_alkahest.alkahest import (
     NETWORK_ANVIL,
     NETWORK_BASE_SEPOLIA,
     NETWORK_ETHEREUM_SEPOLIA,
@@ -80,7 +80,7 @@ def test_get_trusted_oracle_arbiter_prefers_override(tmp_path: Path) -> None:
     path = tmp_path / "arbiter_override.json"
     path.write_text(json.dumps(override), encoding="utf-8")
     # Clear the lru_cache so the new path is picked up.
-    from service.clients.alkahest import _load_override_config_cached
+    from market_alkahest.alkahest import _load_override_config_cached
     _load_override_config_cached.cache_clear()
     resolved = get_trusted_oracle_arbiter(NETWORK_BASE_SEPOLIA, config_path=str(path))
     assert resolved == override["arbiters_addresses"]["trusted_oracle_arbiter"]

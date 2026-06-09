@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from market_storefront.utils.sqlite_client import SQLiteClient
-from service.config_loader import EscrowTemplate, RateSlot
+from market_config.config_loader import EscrowTemplate, RateSlot
 
 
 def _write_csv(path: Path, content: str) -> None:

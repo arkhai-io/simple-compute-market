@@ -11,7 +11,7 @@ from alkahest_py import AlkahestClient
 from eth_account.signers.local import LocalAccount
 from web3 import Web3
 
-from service.clients.alkahest import (
+from market_alkahest.alkahest import (
     Attestation2NonTierableEscrowCodec,
     Attestation2TierableEscrowCodec,
     AttestationNonTierableEscrowCodec,

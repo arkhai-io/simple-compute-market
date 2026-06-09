@@ -12,7 +12,7 @@ from market_storefront.utils.sync_negotiation import (
     continue_sync_negotiation,
     start_sync_negotiation,
 )
-from service.schemas import EscrowProposal, ProvisionTerms
+from market_core.schemas import EscrowProposal, ProvisionTerms
 
 
 _BUYER = "0xBuyer00000000000000000000000000000000AB"

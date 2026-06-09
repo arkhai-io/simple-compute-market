@@ -86,7 +86,7 @@ def buyer_chains() -> dict[str, "ChainConfig"]:
     """Return the buyer's configured ``[chains.<name>]`` tables.
 
     Thin wrapper around :func:`market_config.config_loader.chains_from_config`
-    so the buyer codebase doesn't have to import from service everywhere.
+    so the buyer codebase has one place for config-loader access.
     Empty dict when no chains are configured — callers decide whether
     that's fatal (most operations are; ``config show`` isn't).
     """

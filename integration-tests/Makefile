@@ -6,8 +6,8 @@ CONFIG_DIRECTORY ?= $(PWD)/config
 MODULE ?= contracts
 
 # Path to the monorepo .dist/ wheel directory, relative to integration-tests/.
-# Used by uv when resolving pure-Python internal packages (market-service,
-# provisioning-service) that are distributed as wheels rather than editable
+# Used by uv when resolving pure-Python internal packages (market-buyer,
+# market-policy, market-storefront, provisioning-service) that are distributed as wheels rather than editable
 # source installs.  The Dockerfile passes --find-links /dist on the uv sync
 # CLI instead; this variable is for local development only.
 DIST_DIR ?= $(abspath $(CURDIR)/../.dist)

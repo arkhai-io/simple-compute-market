@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from service.schemas import EscrowProposal, ProvisionTerms
+from market_core.schemas import EscrowProposal, ProvisionTerms
 
 from domains.vms.buyer.buyer_client import NegotiationOutcome, negotiate_with_seller
 

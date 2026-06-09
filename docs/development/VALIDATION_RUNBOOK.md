@@ -159,15 +159,6 @@ This runs unit + integration tests for:
 - `core/registry`
 - `storefront`
 
-Shared service package:
-
-```bash
-cd service
-make reinit
-make test
-cd ..
-```
-
 Policy package:
 
 ```bash

@@ -11,7 +11,7 @@ from unittest import mock
 import pytest
 import typer
 
-from service.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
+from market_core.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
 
 from domains.vms.buyer.buy_orchestrator import (
     BuyConfig,

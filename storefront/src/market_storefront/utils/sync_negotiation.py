@@ -49,7 +49,7 @@ from market_policy.negotiation_middleware import (
 )
 from domains.vms.negotiation.policies import _amount_from_proposal
 
-from service.schemas import EscrowProposal
+from market_core.schemas import EscrowProposal
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +174,7 @@ def _materialized_escrow_terms_payload(
 ) -> list[dict[str, Any]] | None:
     if proposal is None:
         return None
-    from service.clients.alkahest import materialize_escrow_terms_from_proposal
+    from market_alkahest.alkahest import materialize_escrow_terms_from_proposal
     from market_storefront.utils.config import CHAINS
 
     chain_config = CHAINS.get(proposal.chain_name)

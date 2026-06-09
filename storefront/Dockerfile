@@ -17,8 +17,11 @@ WORKDIR /app
 COPY .dist/ /.dist/
 
 COPY storefront/pyproject.toml storefront/uv.lock storefront/entrypoint.sh ./
-COPY service/ ../service/
-COPY kit/policy/ ../policy/
+COPY core/ ../core/
+COPY kit/identity/ ../kit/identity/
+COPY kit/alkahest/ ../kit/alkahest/
+COPY kit/config/ ../kit/config/
+COPY kit/policy/ ../kit/policy/
 
 # Pass the GCP service account JSON key from GitHub Actions secrets to authenticate
 # against GCP Artifact Registry for the alkahest-py private Python package.
@@ -34,14 +37,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         uv sync --no-dev --no-install-project --extra rl --find-links /.dist \
             --refresh-package arkhai-registry-client \
             --refresh-package arkhai-storefront-client \
-            --refresh-package market-service \
             --refresh-package market-policy \
             --refresh-package provisioning-service; \
     else \
         uv sync --no-dev --no-install-project --find-links /.dist \
             --refresh-package arkhai-registry-client \
             --refresh-package arkhai-storefront-client \
-            --refresh-package market-service \
             --refresh-package market-policy \
             --refresh-package provisioning-service; \
     fi
@@ -88,8 +89,11 @@ ENV XDG_CONFIG_HOME="/etc"
 COPY --chown=appuser:appuser storefront/src ./src
 COPY --chown=appuser:appuser storefront/scripts ./scripts
 COPY --chown=appuser:appuser domains/ ./domains/
-COPY --chown=appuser:appuser service/ ../service/
-COPY --chown=appuser:appuser kit/policy/ ../policy/
+COPY --chown=appuser:appuser core/ ../core/
+COPY --chown=appuser:appuser kit/identity/ ../kit/identity/
+COPY --chown=appuser:appuser kit/alkahest/ ../kit/alkahest/
+COPY --chown=appuser:appuser kit/config/ ../kit/config/
+COPY --chown=appuser:appuser kit/policy/ ../kit/policy/
 
 # Complete the two-phase uv install: deps were installed with
 # --no-install-project in the builder stage (for layer caching);
@@ -107,7 +111,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --find-links /.dist \
         --refresh-package arkhai-registry-client \
         --refresh-package arkhai-storefront-client \
-        --refresh-package market-service \
         --refresh-package market-policy \
         --refresh-package provisioning-service
 

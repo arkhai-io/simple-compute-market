@@ -167,7 +167,7 @@ do not import upward into `core`.
 | `kit/config`                      | shared config loading + registry URL helpers.                                                                                                                                                               | no domain deps          |
 | `kit/policy`                      | from-below middleware-chain mechanics and other policy utilities. VM inventory guards, scalar amount extraction, and Alkahest dispatch do not belong here.                                                   | no domain deps          |
 | `domains/vms`                     | the concrete VM market product surface: listing schema/filtering, negotiation messages/policies, settlement wiring, provisioning, and any VM-specific executables. It implements core hook shapes without importing core in the target graph. | kit                     |
-| compatibility packages            | existing names such as `market-service`, `market-buyer`, `market-storefront`, `registry-service`, and client packages may temporarily re-export or wrap the new locations during migration.                 | target package only     |
+| compatibility packages            | existing names such as `market-storefront`, `registry-service`, and client packages may temporarily re-export or wrap the new locations during migration. `market-service` and `market-buyer` have been removed on the reorganization branch. | target package only     |
 
 The kit does **not** need to be one wheel — "from below" means "depended on,
 never depending up." The cleanup the principle implies: ensure nothing in
@@ -505,11 +505,10 @@ Top-level folder tracker:
    packaging project, tests, and build entrypoint live under
    `domains/vms/buyer/`. Remaining ignored local state under top-level
    `buyer/` can be deleted locally without affecting repo source.
-5. **Next: drain `service/`.** This package currently aliases shared
-   schemas/config/client helpers now split across `core/` and `kit/`.
-   Remove it only after storefront, buyer tests, integration tests, and
-   package dependencies import those target packages directly.
-6. **Then: drain `storefront/`.** Move schema-invariant storefront runtime
+5. **Done: remove top-level `service/`.** Shared schemas, config, identity,
+   Alkahest, token, and chain helpers are consumed directly from
+   `core/` and `kit/`; the compatibility `market-service` wheel is gone.
+6. **Next: drain `storefront/`.** Move schema-invariant storefront runtime
    into `core/storefront`, and VM listing/negotiation/settlement/
    provisioning hooks into `domains/vms/*`. Delete the top-level package
    after deployment paths and tests depend on the new homes.
@@ -589,8 +588,6 @@ storefront/src/market_storefront/middleware/  seam 4 FastAPI/settings auth wrapp
 storefront/.../utils/sync_negotiation.py      seam 4 — per-round protocol; seam 1 normalization only
 storefront/.../utils/action_executor.py       seam 4 — stateful storefront wrapper; registry publication now delegates to market_core
 kit/policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escrow guard
-service/src/service/schemas.py                seam 3 — ProvisionTerms
-service/src/service/clients/                  kit — must not import up into core
 kit/policy/                                   package migration — generic policy-chain machinery; wheel/import names unchanged
 domains/vms/provisioning/service/             package migration — VM provisioning service; wheel/import names unchanged
 core/registry/                                package migration — core registry service; wheel/import names unchanged

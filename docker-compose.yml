@@ -109,7 +109,7 @@ services:
       - /dev/net/tun:/dev/net/tun
     environment:
       # Sole config-bearing env var: tell the typed config loader where
-      # to find the mounted TOML. service.config_loader resolves
+      # to find the mounted TOML. The storefront config loader resolves
       # $XDG_CONFIG_HOME/arkhai/config.toml → /etc/arkhai/storefront.toml.
       - XDG_CONFIG_HOME=/etc
       # Provisioning-mode override stays a host-level env var because

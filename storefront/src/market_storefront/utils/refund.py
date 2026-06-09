@@ -106,7 +106,7 @@ def derive_refund_params(
             )
         token_meta = resolve_token(token_override)
     else:
-        from service.schemas import accepted_token_address
+        from market_core.schemas import accepted_token_address
         token_addr_from_escrow = None
         if first_escrow is not None:
             candidate = accepted_token_address(first_escrow)
@@ -158,7 +158,7 @@ def derive_refund_params(
                 {"error": "Order has no accepted_escrows entry; "
                           "pass explicit 'amount'"},
             )
-        from service.schemas import primary_rate_value
+        from market_core.schemas import primary_rate_value
         base_rate = primary_rate_value(first_escrow)
         if base_rate is None:
             # Hidden reserve (no advertised rate, or pre-cutover row with

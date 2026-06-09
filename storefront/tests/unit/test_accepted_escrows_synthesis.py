@@ -45,8 +45,8 @@ def stub_alkahest_address(monkeypatch):
     real alkahest network up. Also injects a synthetic ``[chains.anvil]``
     entry so the function's per-chain iteration produces at least one row.
     """
-    from service.clients import alkahest as alkahest_mod
-    from service.config_loader import ChainConfig
+    from market_alkahest import alkahest as alkahest_mod
+    from market_config.config_loader import ChainConfig
     from market_storefront.utils import config as agent_config
 
     monkeypatch.setattr(
@@ -158,7 +158,7 @@ def test_synthesize_returns_none_for_token_without_contract_address(
 def test_synthesize_returns_none_when_alkahest_unavailable(monkeypatch):
     """If the alkahest helper raises (e.g. anvil chain with no config
     path), synthesis returns None."""
-    from service.clients import alkahest as alkahest_mod
+    from market_alkahest import alkahest as alkahest_mod
 
     def _raise(chain_name, *, config_path=None):
         raise ValueError("no alkahest config for this chain")

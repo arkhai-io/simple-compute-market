@@ -348,7 +348,7 @@ def _resolve_pricing(
     The ``token`` column on the row must be a 0x ERC-20 address — symbol
     shorthand was removed in favour of chain-resolved metadata. The
     address itself is the canonical token identity; symbols are derived
-    via ``service.clients.token.resolve_token``.
+    via ``market_alkahest.token.resolve_token``.
     """
     row_min_price = res.get("min_price")
     if row_min_price is None or row_min_price == "":
@@ -374,7 +374,7 @@ def _scale_template_entries(
     the entry references an unknown chain or a token whose metadata
     can't be resolved on that chain.
     """
-    from service.clients.token import resolve_token, TokenResolutionError
+    from market_alkahest.token import resolve_token, TokenResolutionError
 
     scaled: list[dict[str, Any]] = []
     for raw_entry in entries:
@@ -454,7 +454,7 @@ def _recipient_demands_for_chains(
     chain_names: set[str],
     recipient_address: str,
 ) -> list[dict[str, Any]]:
-    from service.clients.alkahest import get_recipient_arbiter
+    from market_alkahest.alkahest import get_recipient_arbiter
 
     demands: list[dict[str, Any]] = []
     for name in sorted(chain_names):
@@ -644,7 +644,7 @@ def _publish_round(
                 f"(symbol shorthand is no longer supported)",
             ))
             continue
-        from service.clients.token import resolve_token, TokenResolutionError
+        from market_alkahest.token import resolve_token, TokenResolutionError
         from .utils.config import CHAINS
         if not CHAINS:
             failed.append((res, "no [chains.<name>] tables configured"))
@@ -724,7 +724,7 @@ def _publish_round(
         }
         if res.get("resource_id"):
             offer["resource_id"] = res["resource_id"]
-        from service.clients.alkahest import get_erc20_escrow_obligation_nontierable
+        from market_alkahest.alkahest import get_erc20_escrow_obligation_nontierable
         accepted_escrows: list[dict] = []
         per_chain_errors: list[str] = []
         for chain in CHAINS.values():
@@ -909,7 +909,7 @@ def _print_publish_table(console: Console, published: list[dict], failed: list[t
     summary.add_column("Price/hr × Token")
     summary.add_column("Listing ID", overflow="fold")
     summary.add_column("Status")
-    from service.schemas import accepted_token_address, primary_rate_value
+    from market_core.schemas import accepted_token_address, primary_rate_value
     for entry in published:
         res = entry["resource"]
         resp = entry["response"]

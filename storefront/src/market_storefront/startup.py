@@ -24,8 +24,8 @@ async def _probe_chain_addresses() -> None:
     """For each configured chain, eth_getCode-check the alkahest addresses."""
     if not CHAINS:
         return
-    from service.clients.alkahest import resolve_alkahest_address_config
-    from service.clients.chain_probe import probe_addresses
+    from market_alkahest.alkahest import resolve_alkahest_address_config
+    from market_alkahest.chain_probe import probe_addresses
 
     for chain in CHAINS.values():
         addresses: dict[str, str] = {}

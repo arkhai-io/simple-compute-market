@@ -152,11 +152,11 @@ async def _refund_from_escrow_proposal(
         return {"action": "refund", "status": "failed", "reason": "escrow_chain_unknown"}
 
     from market_storefront.utils.config import CHAINS
-    from service.clients.alkahest import (
+    from market_alkahest.alkahest import (
         get_escrow_codec_for,
         materialize_escrow_terms_from_proposal,
     )
-    from service.schemas import EscrowProposal
+    from market_core.schemas import EscrowProposal
 
     chain_cfg = CHAINS.get(chain_name)
     if chain_cfg is None:
