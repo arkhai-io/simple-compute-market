@@ -419,6 +419,10 @@ Recommended order:
    `market_core.storefront.stage_log` owns structured stage-event logging
    and SQLite persistence mechanics; the storefront wrapper only supplies
    the configured DB path.
+   `market_core.storefront.services.negotiation_service` owns the generic
+   negotiation list/detail/admin-advance service logic over injected
+   continue-round and stage-event hooks; the storefront wrapper supplies
+   the current VM sync-negotiation and logging functions.
    `domains/vms/negotiation/storefront_round.py` owns the default VM
    seller-round hook, file policy discovery, and storefront chain loading.
    `domains/vms/provisioning/fulfillment.py` owns VM fulfillment
@@ -516,6 +520,8 @@ core/src/market_core/storefront/models/       seam 4 — schema-invariant storef
 storefront/src/market_storefront/models/{listing,negotiation,settle}_models.py  seam 4 compatibility wrappers
 core/src/market_core/storefront/stage_log.py  seam 4 — schema-invariant stage-event logger/persistence helper
 storefront/src/market_storefront/utils/stage_log.py  seam 4 compatibility wrapper supplying settings.db_path
+core/src/market_core/storefront/services/negotiation_service.py  seam 4 — generic negotiation query/admin service over injected hooks
+storefront/src/market_storefront/services/negotiation_service.py  seam 4 compatibility wrapper wiring VM sync negotiation + stage logging
 storefront/.../utils/sync_negotiation.py      seam 4 — per-round protocol; seam 1 normalization only
 storefront/.../utils/action_executor.py       seam 4 — stateful storefront wrapper; registry publication now delegates to market_core
 kit/policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escrow guard
