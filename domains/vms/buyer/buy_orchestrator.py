@@ -21,15 +21,28 @@ import asyncio
 import json
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from market_alkahest.schemas import (
     EscrowTerms,
     EscrowProposal,
     accepted_recipient_address,
+)
+from market_core.buyer import (
+    DEFAULT_HTTP_TIMEOUT,
+    BuyConfig,
+    BuyConstraints,
+    BuyResult,
+    NegotiationResult,
+    NegotiateFn,
+    SettleFn,
+    fetch_listing_dict,
+    fetch_listing_dict_multi,
+    query_registry_for_matches,
+    query_registry_for_matches_multi,
+    run_buy,
 )
 from market_core.schemas import ProvisionTerms
 from domains.vms.settlement import BuildEscrowTermsFn, CreateEscrowFn
@@ -41,38 +54,8 @@ from .buyer_client import (
 )
 
 
-DEFAULT_HTTP_TIMEOUT = 30.0
 DEFAULT_SETTLEMENT_POLL_INTERVAL = 5.0
 DEFAULT_SETTLEMENT_TIMEOUT = 600.0  # 10 minutes
-
-
-@dataclass
-class BuyConfig:
-    """Buyer identity + how to reach the world. Immutable per `run_buy` call.
-
-    ``registry_urls`` is the union of registries to consult for
-    discovery — see ``query_registry_for_matches_multi``. Single-URL
-    deployments pass a one-element list.
-
-    Provision-related fields (``ssh_public_key``, ``duration_seconds``)
-    moved to ``ProvisionTerms``; price-related fields stay on
-    ``BuyConstraints``. The three together fully parameterize ``run_buy``.
-    """
-    registry_urls: list[str]
-    buyer_address: str
-    buyer_private_key: str
-    # Per-registry deadline for discovery fan-in (seconds). ``run_buy``
-    # passes this to ``query_registry_for_matches_multi`` so a slow
-    # registry can't extend the wall time. ``None`` defers to the
-    # underlying urllib default.
-    discovery_timeout: Optional[float] = None
-    # Per-registry bearer tokens, keyed by URL. URLs without an entry
-    # are queried unauthenticated. See ``common.resolve_indexer_auth``.
-    indexer_auth: dict[str, str] = field(default_factory=dict)
-    # Across-seller aggregation policy name. Looked up via
-    # ``aggregation.load_aggregation_policy``. None = default
-    # (best_price). See domains/vms/buyer/aggregation.py.
-    aggregation_policy: Optional[str] = None
 
 
 # Factory: build the EscrowProposal for a specific candidate listing.
@@ -81,218 +64,6 @@ class BuyConfig:
 # skips that candidate. The caller closes over chain config + selection
 # rules; the orchestrator just invokes per match.
 BuildEscrowProposalFn = Callable[[dict[str, Any]], Optional["EscrowProposal"]]
-
-
-@dataclass
-class BuyConstraints:
-    """Price bounds the buyer enforces locally during negotiation.
-
-    ``max_price`` and ``initial_price`` may be ``None`` when ``run_buy`` is
-    invoked with a ``derive_prices`` callback that computes per-listing
-    prices from the seller's advertised min_price.
-    """
-    max_price: Optional[float] = None     # ceiling per order (base units, per-hour rate)
-    initial_price: Optional[float] = None # opening bid per order
-
-
-@dataclass
-class BuyResult:
-    status: str
-    negotiation_id: Optional[str] = None
-    seller_url: Optional[str] = None
-    agreed_amount: Optional[int] = None
-    escrow_uid: Optional[str] = None
-    fulfillment_uid: Optional[str] = None
-    connection_details: Optional[str] = None
-    tenant_credentials: Optional[dict[str, Any]] = None
-    reason: Optional[str] = None
-    rounds: int = 0
-    attempts: list[dict[str, Any]] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        out: dict[str, Any] = {"status": self.status, "rounds": self.rounds}
-        for k in (
-            "negotiation_id", "seller_url", "agreed_amount", "escrow_uid",
-            "fulfillment_uid", "connection_details", "tenant_credentials",
-            "reason",
-        ):
-            v = getattr(self, k)
-            if v is not None:
-                out[k] = v
-        if self.attempts:
-            out["attempts"] = self.attempts
-        return out
-
-
-# ---------------------------------------------------------------------------
-# Discovery: direct registry query
-# ---------------------------------------------------------------------------
-
-
-def query_registry_for_matches(
-    registry_url: str,
-    timeout: float = DEFAULT_HTTP_TIMEOUT,
-    *,
-    filters: Optional[dict[str, Any]] = None,
-    api_key: Optional[str] = None,
-) -> list[dict[str, Any]]:
-    """Ask the registry for open seller listings, optionally pre-filtered.
-
-    ``filters`` is a flat dict of registry filter params (gpu_model,
-    gpu_count_min, region, virtualization_type, etc.). ``None``/missing
-    values are dropped; booleans are serialized as the lowercase strings
-    FastAPI expects.
-
-    ``api_key``, when set, is sent as ``Authorization: Bearer <key>``
-    so private registries that gate access can recognise the buyer.
-    """
-    base_params: dict[str, Any] = {"status": "open"}
-    if filters:
-        for key, val in filters.items():
-            if val is None:
-                continue
-            base_params[key] = "true" if val is True else "false" if val is False else val
-    url = registry_url.rstrip("/") + "/listings?" + urllib.parse.urlencode(base_params)
-    headers: dict[str, str] = {"Accept": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    req = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            text = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
-        raise RuntimeError(f"Registry GET {url} -> HTTP {exc.code}: {detail[:200]}") from exc
-    except Exception as exc:
-        raise RuntimeError(f"Registry GET {url} failed: {exc}") from exc
-
-    try:
-        payload = json.loads(text) if text else []
-    except ValueError as exc:
-        raise RuntimeError(f"Registry returned non-JSON: {text[:200]!r}") from exc
-
-    # Registry returns {"items": [...]}; tolerate raw list / "listings" / "data".
-    if isinstance(payload, dict):
-        items = payload.get("items") or payload.get("listings") or payload.get("data") or []
-    else:
-        items = payload
-    if not isinstance(items, list):
-        return []
-
-    return items
-
-
-def query_registry_for_matches_multi(
-    registry_urls: list[str],
-    timeout: float = DEFAULT_HTTP_TIMEOUT,
-    *,
-    filters: Optional[dict[str, Any]] = None,
-    auth: Optional[dict[str, str]] = None,
-) -> list[dict[str, Any]]:
-    """Fan-in over every registry URL, dedupe by ``listing_id``.
-
-    A registry that errors out is logged via stderr and skipped — the
-    merge proceeds with whoever responded. First-seen wins on
-    collisions, which mirrors the storefront's ``MultiRegistryClient``
-    so a buyer's preferred registry (listed first in
-    ``registry.urls``) implicitly takes precedence.
-
-    ``auth`` maps registry URL → bearer token; URLs without an entry
-    are queried unauthenticated.
-    """
-    import sys
-    merged: dict[str, dict[str, Any]] = {}
-    auth = auth or {}
-    for url in registry_urls:
-        try:
-            items = query_registry_for_matches(
-                url, timeout=timeout, filters=filters, api_key=auth.get(url),
-            )
-        except RuntimeError as exc:
-            print(f"[registry] {url}: {exc}", file=sys.stderr)
-            continue
-        for item in items:
-            lid = item.get("listing_id") or item.get("id")
-            if lid is None:
-                continue
-            merged.setdefault(str(lid), item)
-    return list(merged.values())
-
-
-def fetch_listing_dict(
-    registry_url: str,
-    listing_id: str,
-    timeout: float = DEFAULT_HTTP_TIMEOUT,
-    *,
-    api_key: Optional[str] = None,
-) -> Optional[dict[str, Any]]:
-    """Fetch a single registry listing by id as a raw dict.
-
-    Same wire shape as ``query_registry_for_matches`` items, so
-    ``extract_seller_min_price`` consumes it directly. Returns None on
-    404 or unparseable responses; raises on other transport errors.
-
-    ``api_key``: see ``query_registry_for_matches``.
-    """
-    url = registry_url.rstrip("/") + "/listings/" + urllib.parse.quote(listing_id, safe="")
-    headers: dict[str, str] = {"Accept": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    req = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            text = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return None
-        detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
-        raise RuntimeError(f"Registry GET {url} -> HTTP {exc.code}: {detail[:200]}") from exc
-    except Exception as exc:
-        raise RuntimeError(f"Registry GET {url} failed: {exc}") from exc
-
-    try:
-        payload = json.loads(text) if text else None
-    except ValueError:
-        return None
-    if isinstance(payload, dict):
-        # Registry wraps single listing as {"listing": {...}}; some routes
-        # return the dict directly. Tolerate both.
-        return payload.get("listing") if "listing" in payload else payload
-    return None
-
-
-def fetch_listing_dict_multi(
-    registry_urls: list[str],
-    listing_id: str,
-    timeout: float = DEFAULT_HTTP_TIMEOUT,
-    *,
-    auth: Optional[dict[str, str]] = None,
-) -> Optional[dict[str, Any]]:
-    """Try each registry in order; return the first hit. ``None`` only
-    when every registry returned 404. Other transport errors are
-    re-raised once we've exhausted the list without finding the
-    listing — that's actionable for the operator (one registry being
-    flaky is logged but not fatal as long as another knows the id).
-
-    ``auth``: see ``query_registry_for_matches_multi``.
-    """
-    import sys
-    auth = auth or {}
-    last_error: Optional[Exception] = None
-    for url in registry_urls:
-        try:
-            result = fetch_listing_dict(url, listing_id, timeout=timeout, api_key=auth.get(url))
-        except RuntimeError as exc:
-            print(f"[registry] {url}: {exc}", file=sys.stderr)
-            last_error = exc
-            continue
-        if result is not None:
-            return result
-    if last_error is not None:
-        # Every registry that didn't 404 errored out — surface it so
-        # the caller can decide whether the run is salvageable.
-        raise last_error
-    return None
 
 
 def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
@@ -508,121 +279,6 @@ class AgreedTerms:
     listing_id: str
     agreed_amount: int                # base units, absolute payment total
     duration_seconds: int           # buyer's lease ask (negotiation init)
-
-
-@dataclass
-class NegotiationResult:
-    """Result of the buyer-side negotiate phase.
-
-    ``match`` and ``outcome`` are populated only when aggregation selected a
-    seller that agreed to terms. ``attempts`` carries per-candidate state for
-    run logs and failure reporting regardless of whether a winner exists.
-    """
-
-    match: Optional[dict[str, Any]] = None
-    outcome: Optional[NegotiationOutcome] = None
-    attempts: list[dict[str, Any]] = field(default_factory=list)
-    reason: str = "no_match_agreed_to_terms"
-
-
-NegotiateFn = Callable[
-    [list[dict[str, Any]], Callable[[str, dict], None]],
-    NegotiationResult,
-]
-SettleFn = Callable[
-    [NegotiationResult, Callable[[str, dict], None]],
-    BuyResult,
-]
-
-
-# ---------------------------------------------------------------------------
-# The orchestrator
-# ---------------------------------------------------------------------------
-
-
-def run_buy(
-    *,
-    config: BuyConfig,
-    constraints: BuyConstraints,
-    provision: ProvisionTerms,
-    negotiate: NegotiateFn,
-    settle: SettleFn,
-    matches: Optional[list[dict[str, Any]]] = None,
-    max_matches_to_try: int = 5,
-    on_event: Optional[Callable[[str, dict], None]] = None,
-) -> BuyResult:
-    """Run one buy attempt end-to-end. Sequential; every dependency is explicit.
-
-    Parameters
-    ----------
-    config, constraints, provision
-        Buyer identity plus the current compute-instantiated constraint
-        objects. ``run_buy`` itself only uses ``config`` for discovery;
-        ``constraints`` and ``provision`` remain in the signature while the
-        surrounding CLI/test adapters are split from the core package.
-    negotiate
-        Hook that receives capped discovery matches and returns the chosen
-        negotiated outcome plus its attempt log.
-    settle
-        Hook that consumes the selected negotiation and returns the final
-        buyer result.
-    matches
-        Pre-computed match list. If None, queries the registry directly.
-    on_event
-        Optional observer: called as `on_event(stage_name, payload)` at
-        each stage transition. Good for CLI progress UI.
-
-    Returns
-    -------
-    BuyResult with status ∈
-      - "ready"        — escrow collected and seller posted attestation
-      - "failed"       — provisioning failed on seller side
-      - "exited"       — no match agreed to terms
-      - "no_matches"   — registry returned nothing
-      - "timeout"      — settlement polling timed out
-    """
-    def _event(stage: str, payload: dict) -> None:
-        if on_event:
-            on_event(stage, payload)
-
-    # --- 1. Discover ---------------------------------------------------
-    if matches is None:
-        kwargs: dict[str, Any] = {}
-        if config.discovery_timeout is not None:
-            kwargs["timeout"] = config.discovery_timeout
-        if config.indexer_auth:
-            kwargs["auth"] = config.indexer_auth
-        matches = query_registry_for_matches_multi(config.registry_urls, **kwargs)
-    _event("discover", {"match_count": len(matches)})
-
-    if not matches:
-        return BuyResult(status="no_matches")
-
-    # --- 1b/2. Negotiate + aggregate -----------------------------------
-    capped = matches[:max_matches_to_try]
-    _event("aggregated", {
-        "policy": config.aggregation_policy or "best_price",
-        "match_count_after_cap": len(capped),
-    })
-
-    try:
-        negotiation = negotiate(capped, _event)
-    except RuntimeError as exc:
-        # A policy that didn't catch a per-candidate negotiation error.
-        return BuyResult(
-            status="exited",
-            reason=f"policy_error: {exc}",
-            attempts=[],
-        )
-
-    if negotiation.match is None or negotiation.outcome is None:
-        return BuyResult(
-            status="exited",
-            reason=negotiation.reason,
-            attempts=negotiation.attempts,
-        )
-
-    return settle(negotiation, _event)
 
 
 def make_legacy_negotiate_hook(

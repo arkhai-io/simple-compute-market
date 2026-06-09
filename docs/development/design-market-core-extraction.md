@@ -126,9 +126,9 @@ The eventual top-level repo shape is:
 
 ```
 core/
-  buyer/              # buyer orchestration contracts/helpers, no concrete CLI
-  storefront/         # storefront server factory/contracts, no concrete VM app
-  registry/           # schema-agnostic listing index service
+  buyer/              # core-buyer role shell; concrete market behavior injected
+  storefront/         # core-storefront role shell; concrete market behavior injected
+  registry/           # core-registry listing index shell; schema behavior injected
   registry-client/    # registry protocol client
   storefront-client/  # storefront protocol client
 
@@ -150,18 +150,19 @@ domains/
     training/         # offline training code/artifacts for VM policies
 ```
 
-Tests and users should depend on packages under `domains/` for concrete
-markets. `core/` should not ship a default concrete market or runnable
-fallback; it should define role contracts, protocol helpers, and
-orchestration pieces only in terms of injected dependencies. `kit/`
-provides reusable from-below implementations of those dependencies. The
-target dependency direction is one-way from the role runner/composition
-root into injected domain behavior; domain hook packages and kit packages
-do not import upward into `core`.
+`core` is shorthand for the three market roles, not one installable market
+package. The role packages are independently installable and executable
+(`core-buyer`, `core-storefront`, `core-registry`), but none ships a default
+concrete market. Each role executable is a composition root that loads or is
+given a domain implementation. `kit/` provides reusable from-below
+implementations used by those domain hooks. The target dependency direction
+is one-way from the role runner/composition root into injected domain
+behavior; domain hook packages and kit packages do not import upward into
+`core`.
 
 | Package / subtree                 | Role                                                                                                                                                                                                        | Depends on              |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `core/`                           | from-above: role contracts (buyer/seller/indexer) + discovery/negotiation/aggregation/settlement skeletons, defined over injected callables + generic primitives. No default market, no alkahest, no compute, no provisioning. | kit only where needed   |
+| `core/{buyer,storefront,registry}` | from-above: independently installable role shells + discovery/negotiation/aggregation/settlement/indexing skeletons, defined over injected callables + generic primitives. No default market, no alkahest, no compute, no provisioning. | kit only where needed   |
 | `kit/identity`                    | from-below identity models + verifiers that can implement core hooks or domain utilities.                                                                                                                    | no core/domain deps     |
 | `kit/alkahest`                    | from-below settlement codecs + token/chain helpers.                                                                                                                                                          | no core/domain deps     |
 | `kit/config`                      | shared config loading + registry URL helpers.                                                                                                                                                               | no domain deps          |
@@ -202,31 +203,29 @@ registries with incompatible listing shapes.
 
 The buyer CLI has a cross-domain user-facing shape: concrete domains should
 converge on common verbs such as `list` and `buy`, because buyers, scripts,
-and registry/schema plugin authors interact with that surface directly. The
-shared shape is a convention and a set of reusable utilities, not a default
-core executable. Domain buyer packages own named filter vocabularies,
-rendering, prompts, and settlement UX.
+and registry/schema plugin authors interact with that surface directly.
+That shape belongs in the core buyer role shell, but the command behavior is
+incomplete until a domain plugin supplies named filter vocabularies,
+rendering, prompts, negotiation hooks, and settlement UX.
 
 The storefront CLI is different. Buyers and registries care about the
 storefront HTTP/API contract and registry publication behavior, not the
-operator command surface. A storefront can be managed entirely through an
-HTTP API or another operator tool, so `start`, `update`, `publish`, and
-similar commands are domain implementation details. If those commands share
-mechanics, put the mechanics in kit packages; do not promote the CLI itself
-into core.
+operator command surface. `core-storefront` owns the generic server shell
+and role API. Operator commands such as `start`, `update`, and `publish`
+are domain/plugin commands unless they are purely generic lifecycle controls.
+If those commands share mechanics, put the mechanics in kit packages.
 
 ### Buyer executable and schema packages
 
-The buyer CLI is part of the schema instantiation, not the invariant core.
-The concrete `market` executable should eventually come from
-`domains/vms/buyer`, not from `core`. Core can define the buyer role
-contracts and an orchestration skeleton — discover listings, call an
-injected filter/query builder, run negotiation, and hand the resulting
-`Terms` to settlement — but it should not own a default CLI, default schema
-plugin, or generic runtime fallback. The domain executable may reuse kit
-utilities and expose hook callables matching the core contract; it should
-not need to import core just to exist. Core should not know compute flags
-such as `--gpu-model`, `--ram-gb-min`, or `--virt`, nor should it assume
+The buyer executable is a core role shell with domain injection. The
+concrete VM buyer package supplies a plugin/adapter for the core buyer role:
+filter flags, query construction, listing rendering, negotiation policy,
+settlement materialization, and run-log presentation. Core can define the
+buyer role contracts and orchestration skeleton — discover listings, call
+an injected filter/query builder, run negotiation, and hand the resulting
+`Terms` to settlement — but it should not own a default schema plugin or
+generic concrete market fallback. Core should not know compute flags such as
+`--gpu-model`, `--ram-gb-min`, or `--virt`, nor should it assume
 ERC20-oriented selectors such as `--token-contract` are meaningful for
 every accepted escrow.
 
@@ -234,7 +233,7 @@ Target split:
 
 | Layer | Owns |
 | ----- | ---- |
-| Core buyer role | callable contracts, registry fan-in helper, run-log carrier, `discover → negotiate → settle` orchestration over injected functions |
+| Core buyer role | `core-buyer` role shell, callable contracts, registry fan-in helper, run-log carrier, `discover → negotiate → settle` orchestration over injected functions |
 | Domain buyer package | executable CLI, named filter flags, conversion from CLI args to registry filter params, listing/resource rendering, price-floor extraction, schema-specific prompts and validation |
 | Domain settlement package | accepted-escrow selection UX, proposal materialization, demand encoding, chain submission/verification |
 
@@ -320,7 +319,7 @@ instead of treating core as having an embedded default market.
 
 ### 2. Collapse the six behavior hooks to `negotiate` + `settle` — done
 
-- **Done:** `buy_orchestrator.run_buy(...)` requires high-level
+- **Done:** `market_core.buyer.run_buy(...)` requires high-level
   `negotiate` and `settle` hooks and composes only
   discover → negotiate → settle at the top level. Tests can inject doubles
   at that two-hook granularity.
@@ -431,11 +430,13 @@ Recommended order:
    helpers.
    `domains/vms/buyer/` now owns the concrete VM CLI assembly and VM
    command implementations for listing, buy, negotiate, settle, escrow
-   lifecycle commands, aggregation, orchestration, negotiation HTTP client,
-   run logs, buyer config/log/network/chain commands, and the packaging/test
+   lifecycle commands, aggregation policies, negotiation HTTP client, run
+   logs, buyer config/log/network/chain commands, and the packaging/test
    project for the VM buyer console script.
-   Later, core receives only reusable orchestration helpers, not a concrete
-   buyer executable.
+   `market_core.buyer` now owns the schema-invariant buyer config/result
+   carriers, registry discovery fan-in, and `discover -> negotiate ->
+   settle` orchestration over injected hooks. The VM buyer module re-exports
+   those pieces while retaining VM-specific hook adapters.
 3. **In progress: extract storefront hooks before moving files.** The generic
    storefront belongs in `core/storefront`: auth, route shells, negotiation
    thread/history persistence, event/stage logging, and invocation of
@@ -585,7 +586,8 @@ core-shaped code. Seam 4 is the later packaging extraction.
 ## File map
 
 ```
-domains/vms/buyer/buy_orchestrator.py         seam 2, 4 — two-hook skeleton + legacy adapters
+core/src/market_core/buyer/                   seam 2, 4 — core buyer role carriers, discovery fan-in, run_buy shell
+domains/vms/buyer/buy_orchestrator.py         seam 2, 4 — VM legacy negotiate/settle hook adapters
 domains/vms/buyer/buy_cli.py                  seam 0b, 2 — VM market buy command
 domains/vms/buyer/negotiate_cli.py            seam 0 legacy — accepted proposal/terms run-log handoff
 domains/vms/buyer/settle_cli.py               seam 0 legacy — consume accepted proposal/terms
