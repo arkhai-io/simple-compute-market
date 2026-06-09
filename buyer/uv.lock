@@ -789,6 +789,30 @@ wheels = [
 ]
 
 [[package]]
+name = "market-alkahest"
+version = "0.1.0"
+source = { editable = "../kit/alkahest" }
+dependencies = [
+    { name = "market-core" },
+    { name = "pydantic" },
+    { name = "web3" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "market-core", editable = "../core" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "web3", specifier = ">=7.14.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "alkahest-py", specifier = ">=0.4.0" },
+    { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
+]
+
+[[package]]
 name = "market-buyer"
 version = "0.1.0"
 source = { editable = "." }
@@ -816,7 +840,7 @@ test = [
 requires-dist = [
     { name = "alkahest-py", specifier = ">=0.4.0" },
     { name = "eth-account", specifier = ">=0.13.0" },
-    { name = "market-policy", editable = "../policy" },
+    { name = "market-policy", editable = "../kit/policy" },
     { name = "market-service", editable = "../service" },
     { name = "pyinstaller", specifier = ">=6.19.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
@@ -828,9 +852,63 @@ requires-dist = [
 provides-extras = ["test", "rl"]
 
 [[package]]
+name = "market-config"
+version = "0.1.0"
+source = { editable = "../kit/config" }
+dependencies = [
+    { name = "eth-account" },
+    { name = "market-alkahest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "eth-account", specifier = ">=0.13.0" },
+    { name = "market-alkahest", editable = "../kit/alkahest" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
+
+[[package]]
+name = "market-core"
+version = "0.1.0"
+source = { editable = "../core" }
+dependencies = [
+    { name = "market-identity" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "market-identity", editable = "../kit/identity" },
+    { name = "pydantic", specifier = ">=2" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
+
+[[package]]
+name = "market-identity"
+version = "0.1.0"
+source = { editable = "../kit/identity" }
+dependencies = [
+    { name = "eth-account" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "eth-account", specifier = ">=0.13.0" },
+    { name = "pydantic", specifier = ">=2" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
+
+[[package]]
 name = "market-policy"
 version = "0.1.0"
-source = { editable = "../policy" }
+source = { editable = "../kit/policy" }
 dependencies = [
     { name = "market-service" },
     { name = "pydantic" },
@@ -860,6 +938,10 @@ source = { editable = "../service" }
 dependencies = [
     { name = "aiohttp" },
     { name = "eth-account" },
+    { name = "market-alkahest" },
+    { name = "market-config" },
+    { name = "market-core" },
+    { name = "market-identity" },
     { name = "pydantic" },
     { name = "web3" },
 ]
@@ -868,6 +950,10 @@ dependencies = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.12.15" },
     { name = "eth-account" },
+    { name = "market-alkahest", editable = "../kit/alkahest" },
+    { name = "market-config", editable = "../kit/config" },
+    { name = "market-core", editable = "../core" },
+    { name = "market-identity", editable = "../kit/identity" },
     { name = "pydantic", specifier = ">=2" },
     { name = "web3", specifier = ">=7.14.0" },
 ]
