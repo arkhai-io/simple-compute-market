@@ -22,9 +22,11 @@ from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
 import market_storefront.container as _container
-from market_core.storefront.stage_log import set_stage_event_db_path
+from market_core.storefront.services.negotiation_service import NegotiationService
+from market_core.storefront.stage_log import set_stage_event_db_path, stage_event
 from market_storefront.utils.config import settings, AGENT_ID
 from market_storefront.utils.sqlite_client import get_sqlite_client
+from market_storefront.utils.sync_negotiation import continue_sync_negotiation
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +66,6 @@ def run_serve(
 async def lifespan(_: FastAPI):
     from market_storefront.services import alkahest_service
     from market_storefront.services.listing_service import ListingService
-    from market_storefront.services.negotiation_service import NegotiationService
     from market_storefront.services.system_service import SystemService
     from market_storefront.startup import _startup_tasks
 
@@ -76,7 +77,11 @@ async def lifespan(_: FastAPI):
         sqlite_client=sqlite_client,
         alkahest_clients=alkahest_clients,
     )
-    negotiation_svc = NegotiationService(sqlite_client=sqlite_client)
+    negotiation_svc = NegotiationService(
+        sqlite_client=sqlite_client,
+        continue_negotiation=continue_sync_negotiation,
+        stage_event=stage_event,
+    )
     system_svc = SystemService(sqlite_client=sqlite_client, agent_id=AGENT_ID)
 
     _container.resolved_sqlite_client = sqlite_client

@@ -9,11 +9,12 @@ method, each class covering the happy path + key error branches.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from market_storefront.services.negotiation_service import (
+from market_core.storefront.services.negotiation_service import (
     NegotiationService,
     NegotiationServiceError,
 )
@@ -23,8 +24,25 @@ from market_storefront.services.negotiation_service import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_service(db: AsyncMock) -> NegotiationService:
-    return NegotiationService(sqlite_client=db)
+async def _continue_negotiation_stub(**_: Any) -> dict[str, Any]:
+    return {"action": "exit", "reason": "stubbed"}
+
+
+def _stage_event_stub(*_: Any, **__: Any) -> None:
+    return None
+
+
+def _make_service(
+    db: AsyncMock,
+    *,
+    continue_negotiation: AsyncMock | None = None,
+    stage_event_fn: MagicMock | None = None,
+) -> NegotiationService:
+    return NegotiationService(
+        sqlite_client=db,
+        continue_negotiation=continue_negotiation or _continue_negotiation_stub,
+        stage_event=stage_event_fn or _stage_event_stub,
+    )
 
 
 def _thread(
@@ -178,21 +196,17 @@ class TestAdvance:
     async def test_delegates_to_continue_sync_negotiation(self):
         db = AsyncMock()
         db.load_negotiation_thread_row.return_value = _thread()
-        svc = _make_service(db)
 
         mock_result = {"action": "exit", "reason": "operator_decision"}
-        with patch(
-            "market_storefront.services.negotiation_service.continue_sync_negotiation",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ) as mock_continue:
-            result = await svc.advance(
-                listing_id="ord-1",
-                neg_id="neg-1",
-                action="exit",
-                proposal=None,
-                reason="operator_decision",
-            )
+        mock_continue = AsyncMock(return_value=mock_result)
+        svc = _make_service(db, continue_negotiation=mock_continue)
+        result = await svc.advance(
+            listing_id="ord-1",
+            neg_id="neg-1",
+            action="exit",
+            proposal=None,
+            reason="operator_decision",
+        )
 
         mock_continue.assert_awaited_once()
         assert result["action"] == "exit"
@@ -234,11 +248,11 @@ class TestForceAccept:
         db.save_negotiation_message = AsyncMock()
         db.update_negotiation_thread_terminal = AsyncMock()
 
-        svc = _make_service(db)
-        with patch("market_storefront.services.negotiation_service.stage_event"):
-            result = await svc.force_accept(
-                listing_id="ord-1", neg_id="neg-1", amount=8500
-            )
+        stage_event = MagicMock()
+        svc = _make_service(db, stage_event_fn=stage_event)
+        result = await svc.force_accept(
+            listing_id="ord-1", neg_id="neg-1", amount=8500
+        )
 
         db.save_negotiation_message.assert_awaited_once()
         db.update_negotiation_thread_terminal.assert_awaited_once_with(
@@ -253,3 +267,4 @@ class TestForceAccept:
         assert result["action"] == "accept"
         assert result["amount"] == 8500
         assert result["source"] == "admin_force_accept"
+        stage_event.assert_called_once()

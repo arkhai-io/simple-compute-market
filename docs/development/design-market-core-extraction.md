@@ -586,7 +586,7 @@ domains/vms/buyer/schema_plugins/ (new)       seam 0b — eventual plugin regist
 core/src/market_core/storefront/models/       seam 4 — schema-invariant storefront HTTP models
 core/src/market_core/storefront/stage_log.py  seam 4 — schema-invariant stage-event logger/persistence helper
 core/src/market_core/storefront/services/negotiation_service.py  seam 4 — generic negotiation query/admin service over injected hooks
-domains/vms/storefront/src/market_storefront/services/negotiation_service.py  seam 4 compatibility wrapper wiring VM sync negotiation + stage logging
+domains/vms/storefront/src/market_storefront/server.py  seam 4 — VM composition point wiring core negotiation service hooks
 core/src/market_core/storefront/auth.py       seam 4 — framework-free signed request/admin-key verification
 domains/vms/storefront/src/market_storefront/middleware/  seam 4 FastAPI/settings auth wrappers
 domains/vms/storefront/.../utils/sync_negotiation.py      seam 4 — per-round protocol; seam 1 normalization only

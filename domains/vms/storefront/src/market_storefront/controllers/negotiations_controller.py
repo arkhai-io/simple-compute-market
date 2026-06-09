@@ -9,6 +9,7 @@ from fastapi_utils.cbv import cbv
 
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
+from market_core.storefront.services.negotiation_service import NegotiationServiceError
 from market_core.storefront.models.negotiation_models import (
     AdvanceRequest,
     AdvanceResponse,
@@ -17,7 +18,6 @@ from market_core.storefront.models.negotiation_models import (
     NegotiationDetailResponse,
     NegotiationListResponse,
 )
-from market_storefront.services.negotiation_service import NegotiationServiceError
 
 logger = logging.getLogger(__name__)
 

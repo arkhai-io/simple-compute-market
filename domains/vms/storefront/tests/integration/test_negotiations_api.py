@@ -24,7 +24,10 @@ from fastapi import FastAPI
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
 from market_storefront.controllers.negotiations_controller import router as negotiations_router
+from market_core.storefront.services.negotiation_service import NegotiationService
+from market_core.storefront.stage_log import stage_event
 from market_storefront.utils.sqlite_client import SQLiteClient
+from market_storefront.utils.sync_negotiation import continue_sync_negotiation
 from storefront_client.client import StorefrontClient, StorefrontClientError
 
 ADMIN_KEY = "test-admin-key"
@@ -123,6 +126,14 @@ async def _seed_thread(
     await asyncio.to_thread(_insert)
 
 
+def _make_negotiation_service(db: SQLiteClient) -> NegotiationService:
+    return NegotiationService(
+        sqlite_client=db,
+        continue_negotiation=continue_sync_negotiation,
+        stage_event=stage_event,
+    )
+
+
 @pytest_asyncio.fixture
 async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
     import market_policy.negotiation_thread as _nt_module
@@ -133,9 +144,8 @@ async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
         identity=Identity(agent_url="http://test-seller:8001"),
     )
 
-    from market_storefront.services.negotiation_service import NegotiationService
     _container.resolved_sqlite_client = db
-    _container.resolved_negotiation_service = NegotiationService(sqlite_client=db)
+    _container.resolved_negotiation_service = _make_negotiation_service(db)
 
     app = FastAPI()
     app.include_router(negotiations_router)
@@ -163,9 +173,8 @@ async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
         identity=Identity(agent_url="http://test-seller:8001"),
     )
 
-    from market_storefront.services.negotiation_service import NegotiationService
     _container.resolved_sqlite_client = db
-    _container.resolved_negotiation_service = NegotiationService(sqlite_client=db)
+    _container.resolved_negotiation_service = _make_negotiation_service(db)
 
     app = FastAPI()
     app.include_router(negotiations_router)
