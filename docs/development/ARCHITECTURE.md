@@ -1906,6 +1906,7 @@ make dist
   ├── dist-storefront-client  → .dist/arkhai_storefront_client-*.whl
   ├── dist-registry           → .dist/arkhai_registry_client-*.whl
   ├── dist-core-buyer         → .dist/core_buyer-*.whl
+  ├── dist-core-storefront    → .dist/core_storefront-*.whl
   ├── dist-provisioning       → .dist/provisioning_service-*.whl
   ├── dist-storefront         → .dist/market_storefront-*.whl      (Docker builds only)
   ├── dist-policy             → .dist/market_policy-*.whl          (Docker builds only)
@@ -2533,19 +2534,20 @@ make build         →  docker build (COPY .dist/ /dist/, uv sync --find-links /
 
 Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockfile and breaks the other context. Setting it via `UV_FIND_LINKS` on the command line means the path stays out of version-controlled files entirely.
 
-**Rule:** downstream `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for wheel-consumed internal packages (`market-identity`, `market-core`, `core-buyer`, `market-alkahest`, `market-config`, `provisioning-service`, `arkhai-storefront-client`, or `arkhai-registry-client`). These packages are resolved exclusively from wheels in `.dist/` outside their owning package's local dev environment.
+**Rule:** downstream `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for wheel-consumed internal packages (`market-identity`, `market-core`, `core-buyer`, `core-storefront`, `market-alkahest`, `market-config`, `provisioning-service`, `arkhai-storefront-client`, or `arkhai-registry-client`). These packages are resolved exclusively from wheels in `.dist/` outside their owning package's local dev environment.
 
 **Why not `uv.sources` editable installs:** Editable path references are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker that relative path does not exist, causing resolution failures. The wheel approach makes both the path and the mechanism context-specific (CLI flag, not lockfile entry).
 
 ### Internal wheel packages
 
-Eight pure-Python internal packages are distributed as wheels:
+Nine pure-Python internal packages are distributed as wheels:
 
 | Package | Wheel name | Source | Primary consumers |
 |---------|-----------|--------|-------------------|
 | `market-identity` | `market_identity-*.whl` | `kit/identity/` | `market-core`, `registry-service`, `storefront` |
 | `market-core` | `market_core-*.whl` | `core/` | `market-alkahest`, `storefront` |
 | `core-buyer` | `core_buyer-*.whl` | `core/buyer/` | `buyer` |
+| `core-storefront` | `core_storefront-*.whl` | `core/storefront/` | `storefront` |
 | `market-alkahest` | `market_alkahest-*.whl` | `kit/alkahest/` | `buyer`, `storefront`, `integration-tests` |
 | `market-config` | `market_config-*.whl` | `kit/config/` | `buyer`, `storefront` |
 | `provisioning-service` | `provisioning_service-*.whl` | `domains/vms/provisioning/service/` | `integration-tests`, `storefront` |

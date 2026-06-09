@@ -425,7 +425,7 @@ async def start_sync_negotiation(
     # without paying for the whole import graph.
     from market_policy.negotiation_thread import NegotiationThreadTransaction
     from domains.vms.listings.models import Listing
-    from market_core.storefront.stage_log import stage_event
+    from core_storefront.stage_log import stage_event
 
     # Check global pause flag and per-order pause flag before doing any work.
     from market_storefront.server import is_globally_paused
@@ -615,7 +615,7 @@ async def continue_sync_negotiation(
     from market_policy.negotiation_thread import NegotiationThreadTransaction
     from domains.vms.listings import determine_strategy_from_order
     from domains.vms.listings.models import Listing
-    from market_core.storefront.stage_log import stage_event
+    from core_storefront.stage_log import stage_event
 
     thread = await sqlite_client.load_negotiation_thread_row(negotiation_id=neg_id)
     if not thread:

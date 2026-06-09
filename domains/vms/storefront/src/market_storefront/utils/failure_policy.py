@@ -9,7 +9,7 @@ from domains.vms.listings.reconciler import (
     mark_derived_listings_open,
 )
 from market_storefront.utils.config import settings
-from market_core.storefront.stage_log import stage_event
+from core_storefront.stage_log import stage_event
 
 logger = logging.getLogger(__name__)
 

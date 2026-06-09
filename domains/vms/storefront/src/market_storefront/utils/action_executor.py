@@ -12,7 +12,7 @@ import logging
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
 
-from market_core.storefront.stage_log import stage_event
+from core_storefront.stage_log import stage_event
 
 from alkahest_py import AlkahestClient
 from market_core.registry_publication import (

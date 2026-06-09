@@ -135,7 +135,7 @@ async def test_seller_auth_rejects_wrong_signature():
 
 async def test_buyer_auth_accepts_matching_x_identity():
     """X-Identity matches body.buyer_address → passes."""
-    from market_core.storefront.models.negotiation_models import NegotiateNewRequest
+    from core_storefront.models.negotiation_models import NegotiateNewRequest
 
     ts = str(int(time.time()))
     sig = _sign(f"negotiate_new:listing-1:{ts}")
@@ -168,7 +168,7 @@ async def test_buyer_auth_accepts_matching_x_identity():
 
 async def test_buyer_auth_rejects_x_identity_mismatching_buyer_address():
     """If X-Identity disagrees with body.buyer_address, reject."""
-    from market_core.storefront.models.negotiation_models import NegotiateNewRequest
+    from core_storefront.models.negotiation_models import NegotiateNewRequest
 
     ts = str(int(time.time()))
     sig = _sign(f"negotiate_new:listing-1:{ts}")
@@ -199,7 +199,7 @@ async def test_buyer_auth_rejects_x_identity_mismatching_buyer_address():
 
 async def test_buyer_auth_back_compat_no_identity_headers():
     """No X-Identity headers → falls back to body.buyer_address (existing shape)."""
-    from market_core.storefront.models.negotiation_models import NegotiateNewRequest
+    from core_storefront.models.negotiation_models import NegotiateNewRequest
 
     ts = str(int(time.time()))
     sig = _sign(f"negotiate_new:listing-1:{ts}")

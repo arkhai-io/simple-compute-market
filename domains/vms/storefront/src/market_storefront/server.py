@@ -22,8 +22,8 @@ from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
 import market_storefront.container as _container
-from market_core.storefront.services.negotiation_service import NegotiationService
-from market_core.storefront.stage_log import set_stage_event_db_path, stage_event
+from core_storefront.services.negotiation_service import NegotiationService
+from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_storefront.utils.config import settings, AGENT_ID
 from market_storefront.utils.sqlite_client import get_sqlite_client
 from market_storefront.utils.sync_negotiation import continue_sync_negotiation

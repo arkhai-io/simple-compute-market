@@ -8,7 +8,7 @@
     market-storefront status <negotiation_id>       # derive current stage from DB state
 
 Reads the storefront's local SQLite ``stage_events`` table (written
-by the storefront runtime via market_core.storefront.stage_log).
+by the storefront runtime via core_storefront.stage_log).
 """
 
 from __future__ import annotations

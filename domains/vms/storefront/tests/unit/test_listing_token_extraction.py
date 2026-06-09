@@ -1,4 +1,4 @@
-"""``_extract_listing_token`` reads ``accepted_escrows[0]``.
+"""Listing token extraction reads ``accepted_escrows[0]``.
 
 The negotiation validator pulls the expected payment token off the
 listing to compare against the buyer's escrow proposal. The only source
@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import json
 
-from market_storefront.utils.sync_negotiation import _extract_listing_token
+import pytest
+
+from market_storefront.utils.escrow_verification import (
+    EscrowVerificationError,
+    _extract_token_contract_from_listing,
+)
 
 
 _TOKEN_NEW = "0x" + "ab" * 20
@@ -26,7 +31,7 @@ def test_reads_accepted_escrows_token():
             "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
         }],
     }
-    assert _extract_listing_token(listing) == _TOKEN_NEW
+    assert _extract_token_contract_from_listing(listing) == _TOKEN_NEW.lower()
 
 
 def test_accepted_escrows_as_json_string_is_parsed():
@@ -41,18 +46,20 @@ def test_accepted_escrows_as_json_string_is_parsed():
             "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
         }]),
     }
-    assert _extract_listing_token(listing) == _TOKEN_NEW
+    assert _extract_token_contract_from_listing(listing) == _TOKEN_NEW.lower()
 
 
-def test_returns_none_when_accepted_escrows_null():
-    assert _extract_listing_token({"accepted_escrows": None}) is None
+def test_raises_when_accepted_escrows_null():
+    with pytest.raises(EscrowVerificationError, match="no accepted_escrows"):
+        _extract_token_contract_from_listing({"accepted_escrows": None})
 
 
-def test_returns_none_when_accepted_escrows_empty_list():
-    assert _extract_listing_token({"accepted_escrows": []}) is None
+def test_raises_when_accepted_escrows_empty_list():
+    with pytest.raises(EscrowVerificationError, match="no accepted_escrows"):
+        _extract_token_contract_from_listing({"accepted_escrows": []})
 
 
-def test_returns_none_when_entry_lacks_token():
+def test_raises_when_entry_lacks_token():
     listing = {
         "accepted_escrows": [{
             "chain_name": "base_sepolia",
@@ -60,8 +67,10 @@ def test_returns_none_when_entry_lacks_token():
             "literal_fields": {},
         }],
     }
-    assert _extract_listing_token(listing) is None
+    with pytest.raises(EscrowVerificationError, match="no accepted_escrows"):
+        _extract_token_contract_from_listing(listing)
 
 
-def test_returns_none_for_empty_listing():
-    assert _extract_listing_token({}) is None
+def test_raises_for_empty_listing():
+    with pytest.raises(EscrowVerificationError, match="no accepted_escrows"):
+        _extract_token_contract_from_listing({})

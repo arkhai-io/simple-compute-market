@@ -24,8 +24,8 @@ from fastapi import FastAPI
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
 from market_storefront.controllers.negotiations_controller import router as negotiations_router
-from market_core.storefront.services.negotiation_service import NegotiationService
-from market_core.storefront.stage_log import stage_event
+from core_storefront.services.negotiation_service import NegotiationService
+from core_storefront.stage_log import stage_event
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.sync_negotiation import continue_sync_negotiation
 from storefront_client.client import StorefrontClient, StorefrontClientError

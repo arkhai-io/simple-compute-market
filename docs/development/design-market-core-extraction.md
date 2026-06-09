@@ -448,18 +448,18 @@ Recommended order:
    including RL checkpoints; `domains/vms/settlement/` for settlement
    verification/materialization; and `domains/vms/provisioning/` for VM
    fulfillment and lease/listing lifecycle hooks. Done so far:
-   `market_core.storefront.models` owns the schema-invariant HTTP
+   `core_storefront.models` owns the schema-invariant HTTP
    request/response model surface for listings, negotiation, settlement,
    and generic system responses; VM provisioning/admin payloads live in
    `domains/vms/provisioning/storefront_models.py`.
-   `market_core.storefront.stage_log` owns structured stage-event logging
+   `core_storefront.stage_log` owns structured stage-event logging
    and SQLite persistence mechanics; the VM storefront configures its DB
    path during FastAPI lifespan startup.
-   `market_core.storefront.services.negotiation_service` owns the generic
+   `core_storefront.services.negotiation_service` owns the generic
    negotiation list/detail/admin-advance service logic over injected
    continue-round and stage-event hooks; the storefront wrapper supplies
    the current VM sync-negotiation and logging functions.
-   `market_core.storefront.auth` owns framework-free signed request
+   `core_storefront.auth` owns framework-free signed request
    verification and admin-key checks; `market_storefront.middleware.*`
    remains the FastAPI/settings adapter layer.
    `domains/vms/negotiation/storefront_round.py` owns the default VM

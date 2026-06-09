@@ -9,8 +9,8 @@ from fastapi_utils.cbv import cbv
 
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
-from market_core.storefront.services.negotiation_service import NegotiationServiceError
-from market_core.storefront.models.negotiation_models import (
+from core_storefront.services.negotiation_service import NegotiationServiceError
+from core_storefront.models.negotiation_models import (
     AdvanceRequest,
     AdvanceResponse,
     ForceAcceptRequest,

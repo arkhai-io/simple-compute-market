@@ -15,7 +15,7 @@ from fastapi_utils.cbv import cbv
 
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
-from market_core.storefront.models.system_models import AdminPauseResponse
+from core_storefront.models.system_models import AdminPauseResponse
 from domains.vms.provisioning.storefront_models import (
     CapacityReleasedEventRequest,
     FulfillmentEventResponse,
@@ -38,7 +38,7 @@ from market_storefront.utils.failure_policy import (
 )
 from market_storefront.server import _set_globally_paused
 from market_storefront.utils.config import ESCROW_TEMPLATES
-from market_core.storefront.stage_log import stage_event
+from core_storefront.stage_log import stage_event
 
 logger = logging.getLogger(__name__)
 

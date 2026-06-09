@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from market_core.storefront.services.negotiation_service import (
+from core_storefront.services.negotiation_service import (
     NegotiationService,
     NegotiationServiceError,
 )

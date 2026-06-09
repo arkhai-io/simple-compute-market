@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
-    from market_core.storefront.services.negotiation_service import NegotiationService
+    from core_storefront.services.negotiation_service import NegotiationService
     from market_storefront.services.listing_service import ListingService
     from market_storefront.services.system_service import SystemService
     from market_storefront.utils.sqlite_client import SQLiteClient

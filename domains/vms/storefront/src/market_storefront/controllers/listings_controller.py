@@ -35,7 +35,7 @@ from fastapi_utils.cbv import cbv
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
 from market_storefront.middleware.seller_auth import make_seller_auth_dep
-from market_core.storefront.models.listing_models import (
+from core_storefront.models.listing_models import (
     ArbitrateRequest,
     ArbitrateResponse,
     ClaimRequest,

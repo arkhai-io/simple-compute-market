@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request
 
-from market_core.storefront.auth import (
+from core_storefront.auth import (
     AuthError,
     DEFAULT_IDENTITY_SCHEME,
     resolve_expected_identity,

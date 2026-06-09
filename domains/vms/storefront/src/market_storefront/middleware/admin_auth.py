@@ -21,7 +21,7 @@ from __future__ import annotations
 from fastapi import HTTPException, Security
 from fastapi.security import APIKeyHeader
 
-from market_core.storefront.auth import AuthError, verify_admin_key
+from core_storefront.auth import AuthError, verify_admin_key
 from market_storefront.utils.config import settings
 
 _admin_key_header = APIKeyHeader(
