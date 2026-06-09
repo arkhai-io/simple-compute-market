@@ -12,7 +12,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from market_buyer.buy_orchestrator import extract_seller_min_price
+from .buy_orchestrator import extract_seller_min_price
 
 
 def parse_filter_options(raw_filters: list[str] | None) -> dict[str, str]:

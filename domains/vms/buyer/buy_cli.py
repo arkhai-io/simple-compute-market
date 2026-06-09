@@ -31,7 +31,7 @@ from domains.vms.provisioning import make_vm_provision_terms
 from domains.vms.settlement import escrow_proposal_from_accepted_entry
 from market_alkahest.schemas import EscrowProposal
 
-from market_buyer.buy_orchestrator import (
+from .buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
     extract_seller_min_price,

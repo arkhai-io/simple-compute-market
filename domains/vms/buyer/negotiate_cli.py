@@ -181,7 +181,7 @@ def register(app: typer.Typer) -> None:
         # (the saved run-log carries the prior commitments).
         listing_dict: Optional[dict] = None
         if listing_id and resume_state is None:
-            from market_buyer.buy_orchestrator import fetch_listing_dict_multi
+            from .buy_orchestrator import fetch_listing_dict_multi
             try:
                 listing_dict = fetch_listing_dict_multi(
                     reg_urls, listing_id, timeout=deadline, auth=reg_auth,

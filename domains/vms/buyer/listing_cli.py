@@ -248,7 +248,7 @@ def listing_show(
     from .common import (
         resolve_indexer_urls, resolve_discovery_timeout, resolve_indexer_auth,
     )
-    from market_buyer.buy_orchestrator import fetch_listing_dict_multi
+    from .buy_orchestrator import fetch_listing_dict_multi
     urls = [_normalize_registry_url(u) for u in resolve_indexer_urls(override=registry_urls)]
     deadline = resolve_discovery_timeout(override=discovery_timeout)
     auth = resolve_indexer_auth()

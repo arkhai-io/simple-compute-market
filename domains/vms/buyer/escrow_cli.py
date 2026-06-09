@@ -328,7 +328,7 @@ def create_cmd(
     console = Console()
 
     from .deal_helpers import load_deal_context, open_run_log, resolve_chain_settings
-    from market_buyer.buy_orchestrator import AgreedTerms
+    from .buy_orchestrator import AgreedTerms
     from domains.vms.settlement import (
         make_buyer_payment_escrow_terms_fn,
         make_create_escrow_fn,
