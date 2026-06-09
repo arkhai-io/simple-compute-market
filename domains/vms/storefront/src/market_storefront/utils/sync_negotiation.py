@@ -56,6 +56,7 @@ from core_storefront.negotiation_sync import (
     coerce_pinned_proposal as _coerce_pinned_proposal,
     history_from_messages as _history_from_messages,
     proposal_with_amount as _proposal_with_amount,
+    record_seller_decision_message as _record_seller_decision_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -688,45 +689,18 @@ async def _record_seller_decision(
     their_amount: int,
     decision: NegotiationDecision,
 ) -> None:
-    """Persist the seller's decision as a message + terminal state if applicable.
-
-    ``proposed_price`` column on the messages table stores the absolute
-    amount (in base units) — the column name is retained for migration
-    symmetry; semantically it now holds the amount, not a per-hour rate.
-    """
-    from market_policy.negotiation_thread import NegotiationThreadTransaction
+    """Persist the seller's decision using VM proposal amount extraction."""
     from market_storefront.utils.config import BASE_URL_OVERRIDE
 
     sender = BASE_URL_OVERRIDE or "seller"
-    action_taken_map = {
-        "counter": "counter_offer",
-        "accept": "accept_offer",
-        "exit": "exit_negotiation",
-        "reject": "exit_negotiation",  # reject reuses exit terminal state
-    }
-    action_taken = action_taken_map[decision.action]
-    message_type_map = {
-        "counter": "counter_proposal",
-        "accept": "accepted",
-        "exit": "exit",
-        "reject": "exit",
-    }
     decision_amount = _amount_from_proposal(decision.proposal)
-    stored_amount = (
-        int(decision_amount) if decision_amount is not None else their_amount
+    await _record_seller_decision_message(
+        negotiation_id=neg_id,
+        sender=sender,
+        our_amount=our_amount,
+        their_amount=their_amount,
+        decision=decision,
+        decision_amount=(
+            int(decision_amount) if decision_amount is not None else None
+        ),
     )
-
-    async with NegotiationThreadTransaction("SYNC_NEGOTIATE_SELLER_DECISION") as txn:
-        await txn.add_message(
-            negotiation_id=neg_id,
-            sender=sender,
-            our_price=our_amount,
-            their_price=their_amount,
-            proposed_price=stored_amount,
-            action_taken=action_taken,
-            message_type=message_type_map[decision.action],
-        )
-        if decision.action in ("accept",):
-            await txn.mark_terminal(neg_id, "success")
-        elif decision.action in ("exit", "reject"):
-            await txn.mark_terminal(neg_id, "failure")

@@ -6,6 +6,7 @@ import json
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from market_policy.negotiation_middleware import NegotiationDecision
 from market_policy.negotiation_middleware import NegotiationRound
 
 
@@ -106,3 +107,49 @@ def _stored_amount(value: Any) -> int | None:
         return int(Decimal(str(value))) if value is not None else None
     except (InvalidOperation, TypeError, ValueError):
         return None
+
+
+async def record_seller_decision_message(
+    *,
+    negotiation_id: str,
+    sender: str,
+    our_amount: int,
+    their_amount: int,
+    decision: NegotiationDecision,
+    decision_amount: int | None,
+) -> None:
+    """Persist a seller decision as a negotiation message.
+
+    ``decision_amount`` is supplied by the schema/domain wrapper because the
+    core does not know how to interpret proposal payloads.
+    """
+    from market_policy.negotiation_thread import NegotiationThreadTransaction
+
+    action_taken_map = {
+        "counter": "counter_offer",
+        "accept": "accept_offer",
+        "exit": "exit_negotiation",
+        "reject": "exit_negotiation",
+    }
+    message_type_map = {
+        "counter": "counter_proposal",
+        "accept": "accepted",
+        "exit": "exit",
+        "reject": "exit",
+    }
+    stored_amount = decision_amount if decision_amount is not None else their_amount
+
+    async with NegotiationThreadTransaction("SYNC_NEGOTIATE_SELLER_DECISION") as txn:
+        await txn.add_message(
+            negotiation_id=negotiation_id,
+            sender=sender,
+            our_price=our_amount,
+            their_price=their_amount,
+            proposed_price=stored_amount,
+            action_taken=action_taken_map[decision.action],
+            message_type=message_type_map[decision.action],
+        )
+        if decision.action == "accept":
+            await txn.mark_terminal(negotiation_id, "success")
+        elif decision.action in ("exit", "reject"):
+            await txn.mark_terminal(negotiation_id, "failure")
