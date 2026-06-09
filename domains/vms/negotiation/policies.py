@@ -537,6 +537,53 @@ def round_zero_opening_guard(
     return None, context
 
 
+@register_negotiation_middleware("buyer_counter_guard")
+def buyer_counter_guard(
+    history: list[NegotiationRound],
+    context: NegotiationContext,
+) -> NegotiationStep:
+    """Validate and canonicalize buyer counter-round negotiation content."""
+    if not history:
+        return None, context
+    latest = history[-1]
+    if latest.sender != "them" or latest.action != "counter":
+        return None, context
+
+    listing = context.listing or {}
+    pinned = context.our_escrow_proposal
+    proposal = latest.proposal if isinstance(latest.proposal, dict) else None
+    proposal_for_scalar = proposal or pinned
+    uses_scalar_amount = _proposal_uses_scalar_amount(listing, proposal_for_scalar)
+    context.intermediate["uses_scalar_amount"] = uses_scalar_amount
+
+    raw_amount = _amount_from_proposal(proposal_for_scalar)
+    if raw_amount is None:
+        if uses_scalar_amount:
+            return (
+                NegotiationDecision(
+                    action="reject",
+                    reason="counter_missing_amount",
+                ),
+                context,
+            )
+        buyer_amount = 0
+    else:
+        buyer_amount = int(raw_amount)
+
+    context.intermediate["buyer_amount"] = buyer_amount
+    if uses_scalar_amount:
+        context.intermediate["buyer_counter_proposal"] = _set_proposal_amount(
+            pinned if isinstance(pinned, dict) else proposal or {},
+            buyer_amount,
+        )
+    elif proposal is not None:
+        context.intermediate["buyer_counter_proposal"] = dict(proposal)
+    elif isinstance(pinned, dict):
+        context.intermediate["buyer_counter_proposal"] = dict(pinned)
+
+    return None, context
+
+
 @register_negotiation_middleware("has_matching_inventory_guard")
 def has_matching_inventory_guard(
     history: list[NegotiationRound],
@@ -856,6 +903,7 @@ __all__ = [
     "accept_exact_listing_middleware",
     "amount_bisection_middleware",
     "bisection_middleware",
+    "buyer_counter_guard",
     "buyer_escrow_shape_guard",
     "escrow_shape_guard",
     "has_matching_inventory_guard",

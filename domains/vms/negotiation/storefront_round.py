@@ -25,7 +25,6 @@ from market_policy.negotiation_middleware import (
     register_negotiation_middleware,
     run_negotiation_chain_with_context,
 )
-from market_alkahest.schemas import EscrowProposal, match_accepted_escrow
 
 logger = logging.getLogger(__name__)
 
@@ -58,69 +57,6 @@ async def _default_seller_policy_inputs(sqlite_client: Any) -> dict[str, Any]:
             "resources": await sqlite_client.list_resources() or [],
         },
     }
-
-
-_ZERO_ADDRESS = "0x" + "0" * 40
-
-
-def _match_accepted_escrow(
-    listing: dict[str, Any], proposal: EscrowProposal,
-) -> dict[str, Any] | None:
-    """Find the listing accepted-escrow entry matching ``proposal``."""
-    import json as _json
-
-    if proposal.escrow_address.lower() == _ZERO_ADDRESS:
-        return None
-
-    accepted = listing.get("accepted_escrows")
-    if isinstance(accepted, str):
-        try:
-            accepted = _json.loads(accepted)
-        except (ValueError, TypeError):
-            return None
-    if not isinstance(accepted, list):
-        return None
-
-    matched = match_accepted_escrow(accepted, proposal)
-    return matched if isinstance(matched, dict) else None
-
-
-def _coerce_escrow_proposal(proposal: EscrowProposal | dict[str, Any]) -> EscrowProposal:
-    if isinstance(proposal, EscrowProposal):
-        return proposal
-    if isinstance(proposal, dict):
-        return EscrowProposal.model_validate(proposal)
-    if hasattr(proposal, "model_dump"):
-        return EscrowProposal.model_validate(proposal.model_dump())
-    return EscrowProposal.model_validate(proposal)
-
-
-def _accepted_entry_uses_scalar_amount(entry: dict[str, Any] | None) -> bool:
-    if not isinstance(entry, dict):
-        return True
-    literal_fields = entry.get("literal_fields") or {}
-    if isinstance(literal_fields, dict) and "amount" in literal_fields:
-        return True
-    for rate in entry.get("rates") or []:
-        field = rate.get("field") if isinstance(rate, dict) else getattr(rate, "field", None)
-        if field == "amount":
-            return True
-    return False
-
-
-def _proposal_uses_scalar_amount(
-    *,
-    listing: dict[str, Any],
-    proposal: EscrowProposal | dict[str, Any] | None,
-) -> bool:
-    if proposal is None:
-        return True
-    proposal_model = _coerce_escrow_proposal(proposal)
-    fields = dict(proposal_model.fields or {})
-    if "amount" in fields:
-        return True
-    matched = _match_accepted_escrow(listing, proposal_model)
-    return _accepted_entry_uses_scalar_amount(matched)
 
 
 _FILE_POLICIES_DISCOVERED = False
@@ -202,6 +138,7 @@ def _maybe_register_rl_middleware() -> None:
 
 _DEFAULT_GUARDS = [
     "round_zero_opening_guard",
+    "buyer_counter_guard",
     "has_matching_inventory_guard",
     "escrow_shape_guard",
 ]

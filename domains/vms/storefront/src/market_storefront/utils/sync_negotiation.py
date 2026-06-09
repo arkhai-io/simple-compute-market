@@ -40,7 +40,6 @@ from domains.vms.negotiation import storefront_round as vm_storefront_round
 from domains.vms.negotiation.storefront_round import (
     SellerRoundHook,
     SellerRoundResult,
-    _proposal_uses_scalar_amount,
 )
 from market_policy.negotiation_middleware import (
     NegotiationDecision,
@@ -426,10 +425,12 @@ async def continue_sync_negotiation(
     strategy = determine_strategy_from_order(our_order)
     requested_duration_seconds = thread.get("requested_duration_seconds")
     buyer_pinned_proposal = _coerce_pinned_proposal(thread.get("buyer_escrow_proposal"))
-    uses_scalar_amount = _proposal_uses_scalar_amount(
-        listing=our_order_dict,
-        proposal=buyer_pinned_proposal,
+    pinned_fields = (
+        buyer_pinned_proposal.get("fields")
+        if isinstance(buyer_pinned_proposal, dict)
+        else None
     )
+    uses_scalar_amount = isinstance(pinned_fields, dict) and "amount" in pinned_fields
     our_amount = (
         _seller_reference_amount(our_order_dict, requested_duration_seconds)
         if uses_scalar_amount else 0
@@ -508,20 +509,6 @@ async def continue_sync_negotiation(
 
     if buyer_action != "counter":
         raise ValueError(f"Unsupported buyer action {buyer_action!r}")
-    raw_amount = _amount_from_proposal(buyer_proposal)
-    if raw_amount is None:
-        if uses_scalar_amount:
-            raise ValueError("counter requires 'proposal' with fields.amount")
-        buyer_amount = 0
-    else:
-        buyer_amount = int(raw_amount)
-
-    await _record_buyer_counter_message(
-        negotiation_id=neg_id,
-        sender=buyer_address,
-        our_amount=our_amount,
-        counter_amount=buyer_amount,
-    )
 
     from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
     our_sender = BASE_URL_OVERRIDE or "seller"
@@ -534,10 +521,7 @@ async def continue_sync_negotiation(
         round_number=len(history),
         sender="them",
         action="counter",
-        proposal=(
-            _proposal_with_amount(buyer_pinned_proposal, buyer_amount)
-            if uses_scalar_amount else (buyer_proposal or buyer_pinned_proposal)
-        ),
+        proposal=buyer_proposal or buyer_pinned_proposal,
     ))
     round_hook = seller_round_hook or _default_seller_round_hook(sqlite_client)
     round_result = await round_hook(
@@ -546,7 +530,35 @@ async def continue_sync_negotiation(
         requested_duration_seconds=requested_duration_seconds,
         strategy_label=strategy,
     )
+    policy_intermediate = round_result.intermediate or {}
+    uses_scalar_amount = bool(
+        policy_intermediate.get("uses_scalar_amount", uses_scalar_amount),
+    )
+    fallback_buyer_amount = _amount_from_proposal(buyer_proposal)
+    buyer_amount = int(
+        policy_intermediate.get(
+            "buyer_amount",
+            fallback_buyer_amount if fallback_buyer_amount is not None else 0,
+        ),
+    )
+    buyer_counter_proposal = policy_intermediate.get("buyer_counter_proposal")
+    history[-1] = NegotiationRound(
+        round_number=history[-1].round_number,
+        sender="them",
+        action="counter",
+        proposal=(
+            buyer_counter_proposal
+            if isinstance(buyer_counter_proposal, dict)
+            else history[-1].proposal
+        ),
+    )
     our_amount = round_result.our_amount
+    await _record_buyer_counter_message(
+        negotiation_id=neg_id,
+        sender=buyer_address,
+        our_amount=our_amount,
+        counter_amount=buyer_amount,
+    )
     decision = round_result.decision
     await _record_seller_decision(
         neg_id=neg_id, our_amount=our_amount,

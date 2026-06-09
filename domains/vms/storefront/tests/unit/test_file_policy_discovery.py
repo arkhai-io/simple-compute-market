@@ -83,6 +83,7 @@ def test_load_storefront_chain_builds_dispatch_for_policy_table():
 
     assert [getattr(item, "__name__", "") for item in chain] == [
         "round_zero_opening_guard",
+        "buyer_counter_guard",
         "has_matching_inventory_guard",
         "escrow_shape_guard",
         "escrow_kind_dispatch_middleware",

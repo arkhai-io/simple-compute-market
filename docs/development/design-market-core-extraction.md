@@ -477,7 +477,8 @@ Recommended order:
    remains the FastAPI/settings adapter layer.
    `domains/vms/negotiation/storefront_round.py` owns the default VM
    seller-round hook, file policy discovery, storefront chain loading, and
-   round-zero opening semantic checks through `round_zero_opening_guard`.
+   opening/counter semantic checks through `round_zero_opening_guard` and
+   `buyer_counter_guard`.
    `domains/vms/provisioning/fulfillment.py` owns VM fulfillment
    orchestration behind explicit storefront callbacks. `sync_negotiation.py`
    remains a compatibility/stateful HTTP wrapper. `fulfillment_service.py` is now
