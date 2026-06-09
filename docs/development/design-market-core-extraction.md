@@ -248,17 +248,15 @@ but it is not the same thing: seam 0 made the current VM buyer CLI honest;
 this seam moves that concrete executable behavior toward `domains/vms`
 instead of treating core as having an embedded default market.
 
-- **Done so far:** `domains/vms/buyer` owns the concrete VM CLI assembly,
-  `domains/vms/buyer/listing_cli.py` owns the VM listing list/show
-  commands, and `domains/vms/buyer/buy_cli.py` owns the VM `market buy`
-  command. The historical `market_buyer.cli`,
-  `market_buyer.groups.listing`, and `market_buyer.groups.buy` modules are
-  compatibility wrappers.
-- **Still present:** the registry backend is filter-spec-driven, and the CLI
-  has a generic `--filter name=value` escape hatch, but the heavier buyer
-  commands still carry VM behavior from the old package location
-  (`market negotiate`, `market settle`, split `market escrow create`,
-  token-oriented selection shortcuts, and settlement prompts).
+- **Done so far:** `domains/vms/buyer` owns the concrete VM CLI assembly
+  and VM command implementations for listing, buy, negotiate, settle, and
+  escrow lifecycle commands. The historical `market_buyer.cli` and
+  `market_buyer.groups.{listing,buy,negotiate,settle,escrow}` modules are
+  compatibility wrappers/aliases.
+- **Still present:** `buyer/market_buyer` still owns reusable buyer
+  orchestration helpers, protocol clients, run-log utilities, config
+  commands, logs/network/chain commands, and compatibility imports. The
+  domain command implementations still call those helpers directly.
 - **Target:** the VM domain package owns the concrete buyer executable. It
   owns named filter options, conversion to registry query params,
   listing/resource rendering, price-floor extraction, schema-specific
@@ -396,10 +394,10 @@ Recommended order:
    provision-term construction, fulfillment-plan construction,
    provisioning job-spec construction, and provisioning-service client
    helpers.
-   `domains/vms/buyer/` now owns the concrete VM CLI assembly, VM listing
-   list/show commands, and the VM `market buy` command, while
-   `market_buyer.cli`, `market_buyer.groups.listing`, and
-   `market_buyer.groups.buy` remain compatibility wrappers.
+   `domains/vms/buyer/` now owns the concrete VM CLI assembly and VM
+   command implementations for listing, buy, negotiate, settle, and escrow
+   lifecycle commands, while the corresponding `market_buyer` modules
+   remain compatibility wrappers/aliases.
    `buyer/` remains a temporary compatibility package that calls domain
    functions. Later, core receives only reusable orchestration helpers, not
    a concrete buyer executable.
@@ -498,9 +496,12 @@ core-shaped code. Seam 4 is the later packaging extraction.
 buyer/market_buyer/buy_orchestrator.py        seam 2, 4 — two-hook skeleton + legacy adapters
 domains/vms/buyer/buy_cli.py                  seam 0b, 2 — VM market buy command; old market_buyer module aliases this
 buyer/market_buyer/groups/buy.py              seam 0b compatibility wrapper
-buyer/market_buyer/groups/negotiate.py        seam 0 legacy — accepted proposal/terms run-log handoff
-buyer/market_buyer/groups/settle.py           seam 0 legacy — consume accepted proposal/terms
-buyer/market_buyer/groups/escrow.py           seam 0 legacy — consume accepted proposal/terms or retire split create
+domains/vms/buyer/negotiate_cli.py            seam 0 legacy — accepted proposal/terms run-log handoff
+buyer/market_buyer/groups/negotiate.py        seam 0b compatibility wrapper
+domains/vms/buyer/settle_cli.py               seam 0 legacy — consume accepted proposal/terms
+buyer/market_buyer/groups/settle.py           seam 0b compatibility wrapper
+domains/vms/buyer/escrow_cli.py               seam 0 legacy — consume accepted proposal/terms or retire split create
+buyer/market_buyer/groups/escrow.py           seam 0b compatibility wrapper
 domains/vms/buyer/listing_cli.py              seam 0b — VM listing commands; old market_buyer module wraps this
 buyer/market_buyer/groups/listing.py          seam 0b compatibility wrapper
 buyer/market_buyer/schema_plugins/ (new)      seam 0b — eventual plugin registry/loading boundary
