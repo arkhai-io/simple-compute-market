@@ -45,7 +45,7 @@ from registry_client import (
 )
 
 from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
-from .services.compute_listing_reconciler import (
+from domains.vms.listings.reconciler import (
     available_compute_slices,
     listing_resource_key,
     load_derived_listing_for_slice,

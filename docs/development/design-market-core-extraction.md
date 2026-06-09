@@ -513,7 +513,9 @@ Top-level folder tracker:
 7. **Done: move VM provisioning IaC.** The Ansible/Packer VM execution
    tree lives under `domains/vms/provisioning/iac/`, next to the
    provisioning service and storefront-facing provisioning hooks.
-8. **Next: drain `domains/vms/storefront/` internals.** Move remaining
+8. **Done: remove compute listing reconciliation wrapper.** Storefront
+   callers import `domains.vms.listings.reconciler` directly.
+9. **Next: drain `domains/vms/storefront/` internals.** Move remaining
    schema-invariant storefront runtime into `core/storefront`, and VM
    listing/negotiation/settlement/provisioning hooks into `domains/vms/*`.
 

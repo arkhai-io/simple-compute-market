@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from market_storefront.services.compute_listing_reconciler import available_compute_slices
+from domains.vms.listings.reconciler import available_compute_slices
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 

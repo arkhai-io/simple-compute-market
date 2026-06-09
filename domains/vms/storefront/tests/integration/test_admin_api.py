@@ -25,7 +25,7 @@ from market_storefront.middleware.admin_auth import require_admin_key
 import market_storefront.server as _server
 from market_storefront.controllers.admin_controller import router as admin_router
 from market_storefront.controllers.system_controller import router as system_router
-from market_storefront.services.compute_listing_reconciler import record_derived_listing
+from domains.vms.listings.reconciler import record_derived_listing
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.services.system_service import SystemService
 from storefront_client.client import StorefrontClient, StorefrontClientError

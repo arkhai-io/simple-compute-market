@@ -383,7 +383,7 @@ class AdminController:
         )
 
     async def _close_oversized_compute_listings(self) -> list[str]:
-        from market_storefront.services.compute_listing_reconciler import (
+        from domains.vms.listings.reconciler import (
             mark_derived_listings_closed,
             stale_open_listing_ids,
         )
@@ -397,7 +397,7 @@ class AdminController:
         return closed_listing_ids
 
     async def _reopen_available_compute_listings(self) -> list[str]:
-        from market_storefront.services.compute_listing_reconciler import (
+        from domains.vms.listings.reconciler import (
             closed_available_listing_ids,
             mark_derived_listings_open,
         )

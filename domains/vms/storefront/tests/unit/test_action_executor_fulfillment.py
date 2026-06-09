@@ -6,7 +6,7 @@ import pytest
 
 from client import provisioning_client
 from market_storefront.utils import action_executor
-from market_storefront.services.compute_listing_reconciler import record_derived_listing
+from domains.vms.listings.reconciler import record_derived_listing
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 

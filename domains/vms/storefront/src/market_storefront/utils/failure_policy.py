@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from market_storefront.services.compute_listing_reconciler import (
+from domains.vms.listings.reconciler import (
     closed_available_listing_ids,
     mark_derived_listings_open,
 )
