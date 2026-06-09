@@ -12,10 +12,9 @@ the chain runner raises an operator-facing configuration error.
 
 This module is schema-agnostic. It owns only the shared transcript,
 decision, context carrier, chain runner, registration/discovery, and config
-normalization. VM-specific middlewares such as scalar bisection,
+normalization. Domain-specific middlewares such as scalar bisection,
 Alkahest escrow dispatch, escrow-shape guards, and inventory guards live in
-``domains.vms.negotiation.policies`` and are imported below only as
-temporary compatibility exports for existing callers.
+domain packages and self-register when those packages are imported.
 """
 
 from __future__ import annotations
@@ -159,8 +158,6 @@ def load_negotiation_chain(
         )
 
     _discover_file_middlewares()
-    _load_builtin_domain_middlewares()
-
     chain: list[NegotiationMiddleware] = []
     for name in names:
         if name in _REGISTRY:
@@ -193,7 +190,6 @@ def load_negotiation_chain(
 
 def list_negotiation_middlewares() -> list[str]:
     """Names of all registered middlewares."""
-    _load_builtin_domain_middlewares()
     return sorted(_REGISTRY)
 
 
@@ -255,45 +251,3 @@ def max_rounds_guard(
             context,
         )
     return None, context
-
-
-_DOMAIN_COMPAT_NAMES = (
-    "_amount_from_proposal",
-    "accept_exact_listing_middleware",
-    "amount_bisection_middleware",
-    "bisection_middleware",
-    "buyer_escrow_shape_guard",
-    "escrow_shape_guard",
-    "has_matching_inventory_guard",
-    "make_escrow_kind_dispatch_middleware",
-    "our_previous_counters",
-    "proposal_escrow_kind",
-    "their_proposed_amount",
-)
-_DOMAIN_COMPAT_LOADED = False
-
-
-def _load_builtin_domain_middlewares() -> None:
-    """Import in-repo VM policies for compatibility with old imports.
-
-    Once callers import domain policies directly, this compatibility import
-    can be removed and ``market_policy`` can become pure kit code.
-    """
-
-    global _DOMAIN_COMPAT_LOADED
-    if _DOMAIN_COMPAT_LOADED:
-        return
-    _DOMAIN_COMPAT_LOADED = True
-    try:
-        from domains.vms.negotiation import policies as vm_policies
-    except Exception as exc:
-        logger.debug("VM negotiation policies are unavailable: %s", exc)
-        return
-
-    for name in _DOMAIN_COMPAT_NAMES:
-        value = getattr(vm_policies, name, None)
-        if value is not None:
-            globals()[name] = value
-
-
-_load_builtin_domain_middlewares()
