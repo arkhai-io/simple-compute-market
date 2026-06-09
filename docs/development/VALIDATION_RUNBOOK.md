@@ -180,11 +180,11 @@ cd ..
 Buyer package:
 
 ```bash
-cd buyer
+cd domains/vms/buyer
 uv sync --python 3.12 --extra test
 uv run pytest tests/ -v
 make smoke-test
-cd ..
+cd ../../..
 ```
 
 Storefront client package:

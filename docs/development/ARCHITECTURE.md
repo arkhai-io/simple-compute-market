@@ -82,9 +82,13 @@ Parts of the code predate the principle and diverge from it. These seams are tra
   `kind` plus schema-specific `payload`; the current compute adapter uses
   `kind="compute.v1"` with `payload.duration_seconds`,
   `payload.ssh_public_key`, and optional `payload.compute_resource`. The
-  remaining split is packaging: the compute adapter still lives in
-  `buyer/` + `storefront/` rather than a separate market-compute package.
-- **The market skeleton is packaged inside `buyer/` + `storefront/`** alongside compute-specific code, so the package graph does not yet express the from-above/from-below joint that the function signatures already imply.
+  remaining split is packaging: the buyer side lives in
+  `domains/vms/buyer/`, while storefront still needs to be split out of the
+  top-level `storefront/` package.
+- **The market skeleton is packaged inside the VM buyer package and
+  top-level `storefront/`** alongside compute-specific code, so the package
+  graph does not yet express the from-above/from-below joint that the
+  function signatures already imply.
 
 ### Technology Anchors
 
@@ -956,7 +960,7 @@ No new DB state — reads `negotiation_threads`, `negotiation_messages`, and
 
 **Role:** The buyer side of the market. There is no buyer server, no
 agent runtime, no SQLite database — only the `market` console script
-(packaged from `buyer/`, implementation under `domains/vms/buyer`).
+(packaged and implemented under `domains/vms/buyer`).
 
 `market buy` is a one-shot orchestrator: it queries
 `registry-service` for matching seller orders, runs synchronous
@@ -1647,7 +1651,7 @@ storefront server (override either with `--config <path>`).
 
 | CLI | Package | Role | Top-level groups |
 |---|---|---|---|
-| `market` | `buyer/` | Buyer runtime (pure HTTP client) | `buy`, `negotiate`, `order`, `escrow reclaim`, `network join/get-peers`, `config`, `logs` |
+| `market` | `domains/vms/buyer/` | Buyer runtime (pure HTTP client) | `buy`, `negotiate`, `order`, `escrow reclaim`, `network join/get-peers`, `config`, `logs` |
 | `market-storefront` | `storefront/` | Seller runtime | `register`, `serve`, `provide`, `escrow claim/refund`, `portfolio import-csv`, `network join/get-peers`, `config`, `logs` |
 | `market-policy` | `kit/policy/` | Policy authoring tool | `train`, `eval`, `export` |
 
@@ -1880,7 +1884,7 @@ The subchart is self-contained: it owns all its own credentials and mounts nothi
 ```
 make build                       # production artifacts
   ├── dist                       # internal wheels → .dist/
-  ├── build-buyer                # PyInstaller → buyer/dist/market
+  ├── build-buyer                # PyInstaller → domains/vms/buyer/dist/market
   ├── build-registry             # arkhai:registry / arkhai:registry-<sha>
   ├── build-storefront           # arkhai:storefront / arkhai:storefront-<sha>
   └── build-provisioning         # arkhai:provisioning / arkhai:provisioning-<sha>

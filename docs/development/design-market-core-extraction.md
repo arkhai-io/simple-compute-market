@@ -299,9 +299,9 @@ instead of treating core as having an embedded default market.
 - **No core default:** if no domain package is installed, core should not
   produce a concrete `market buy` experience. Core helpers may be used by
   a domain package, but users/tests depend on the domain package.
-- **Boundary:** until the physical move is complete, the current `buyer/`
-  package can act as a compatibility wrapper around VM-domain functions.
-  That wrapper is migration scaffolding, not the final default.
+- **Done:** the physical buyer packaging/test project now lives under
+  `domains/vms/buyer/`; the top-level `buyer/` source folder has been
+  removed from git.
 
 ### 1. Escrow-shape validation: pre-chain gate → middleware — done
 
@@ -368,9 +368,9 @@ Receipt`; "materialize then submit" is internal factoring.
   carrier.
 - **Still present:** the current compute adapter interprets
   `kind="compute.v1"` through convenience accessors
-  (`duration_seconds`, `ssh_public_key`, `compute_resource`). That adapter
-  still lives in `buyer/` + `storefront/`; moving it into a separate
-  package belongs to seam 4.
+  (`duration_seconds`, `ssh_public_key`, `compute_resource`). The buyer
+  side now lives in `domains/vms/buyer/`; the storefront side still needs
+  the same split as part of seam 4.
 - **Target:** `market-compute` defines and validates the concrete compute
   payload. Structural validation of delivery terms (within what the
   listing offers) is core; semantic validation is an injected compute
@@ -383,7 +383,7 @@ Receipt`; "materialize then submit" is internal factoring.
   flow, the seller's per-round protocol from `sync_negotiation`, the
   settlement protocol) into `market-core`, defined over injected hooks +
   generic primitives only.
-- `buyer/` + `storefront/` (or a new `market-compute`) become the
+- `domains/vms/buyer/` + the remaining `storefront/` package become the
   instantiation: wire ERC20 escrow construction, compute resource schema,
   provisioning, the GPU filter-spec into the core hooks.
 - The untangling work is real: `action_executor.py` (~960 LOC) and
@@ -393,7 +393,7 @@ Receipt`; "materialize then submit" is internal factoring.
 
 ### 5. Package migration prerequisites
 
-The remaining physical moves from top-level packages (`buyer/`,
+The remaining physical moves from top-level packages (`service/`,
 `storefront/`) to `core/`, `kit/`, and `domains/vms/` should happen after
 the code boundaries express the target graph. Otherwise the move becomes a
 rename plus a behavior refactor plus a deployment refactor in one step. The protocol
@@ -419,8 +419,8 @@ Recommended order:
    `domains/vms/listings/` now owns VM models, resource adapters, resource
    CSV import, compute listing reconciliation, filter construction, listing
    rendering, price-floor extraction, compute-resource extraction, and
-   strategy selection used by the compatibility `buyer/` and `storefront/`
-   packages.
+   strategy selection used by the VM buyer and remaining storefront
+   package.
    `domains/vms/settlement/` now owns accepted-escrow selection,
    proposal materialization, compute lease encoding, token materialization,
    Alkahest escrow terms/create helpers, and post-provisioning fulfillment
@@ -432,8 +432,8 @@ Recommended order:
    `domains/vms/buyer/` now owns the concrete VM CLI assembly and VM
    command implementations for listing, buy, negotiate, settle, escrow
    lifecycle commands, aggregation, orchestration, negotiation HTTP client,
-   run logs, and buyer config/log/network/chain commands. `buyer/` remains
-   only as the packaging/test project for the VM buyer console script.
+   run logs, buyer config/log/network/chain commands, and the packaging/test
+   project for the VM buyer console script.
    Later, core receives only reusable orchestration helpers, not a concrete
    buyer executable.
 3. **In progress: extract storefront hooks before moving files.** The generic
@@ -501,12 +501,10 @@ Top-level folder tracker:
 3. **Done: remove top-level registry packages.** The registry service and
    protocol clients live under `core/` while preserving their import/wheel
    names.
-4. **In progress: drain `buyer/`.** Its implementation has moved into
-   `domains/vms/buyer/`; the remaining top-level folder is currently the
-   VM buyer packaging/test project. The next cleanup is to decide whether
-   that packaging/test project also moves under `domains/vms/buyer/`, or
-   whether it remains as the installable VM-domain executable root until a
-   broader packaging pass.
+4. **Done: remove top-level `buyer/`.** The VM buyer implementation,
+   packaging project, tests, and build entrypoint live under
+   `domains/vms/buyer/`. Remaining ignored local state under top-level
+   `buyer/` can be deleted locally without affecting repo source.
 5. **Next: drain `service/`.** This package currently aliases shared
    schemas/config/client helpers now split across `core/` and `kit/`.
    Remove it only after storefront, buyer tests, integration tests, and
@@ -530,16 +528,16 @@ directories such as `.dist/`, `.uv-cache/`, `.pytest_cache/`, `src/`,
    surface, adapter factories for the legacy compute behavior, and the
    `market buy` call site uses explicit hooks. The seller synchronous
    negotiation wrappers now call an injectable seller round hook. The later
-   package move happens in seam 4. No packaging change yet — still inside
-   `buyer/` + `storefront/`.
+   package move happens in seam 4. The buyer packaging has moved to
+   `domains/vms/buyer/`; the remaining packaging split is storefront-side.
 3. **Seam 3** (done): `ProvisionTerms` is opaque on the wire; concrete
    compute validation is no longer in the shared carrier. Moving the
    compute adapter into its own package belongs to seam 4.
-4. **Seam 4**: extract `market-core` package; split `buyer`/`storefront`
-   into skeleton-consumers; verify the kit has no upward imports.
-5. **Seam 0b**: extract the concrete VM buyer behavior into the VM domain
-   package. The existing `buyer/` package is a compatibility wrapper until
-   docs, tests, and scripts depend directly on the VM domain executable.
+4. **Seam 4**: extract `market-core` package; split the remaining
+   storefront package into skeleton-consumers; verify the kit has no upward
+   imports.
+5. **Seam 0b** (done): extract the concrete VM buyer behavior, packaging,
+   tests, and scripts into the VM domain package.
 6. **Package migration**: once the code boundaries are explicit, move the
    remaining top-level packages into `core/`, `kit/`, and `domains/vms/`
    with temporary compatibility wrappers and deployment-path updates.

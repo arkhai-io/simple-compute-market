@@ -1,8 +1,7 @@
 """VM-domain buyer/listing CLI helpers.
 
-The compatibility ``buyer/`` package still owns Typer command wiring for
-now. VM listing semantics live here: named filter flags and rendering of
-VM offer resources, accepted escrows, and demands.
+VM listing semantics live here: named filter flags and rendering of VM
+offer resources, accepted escrows, and demands.
 """
 
 from __future__ import annotations

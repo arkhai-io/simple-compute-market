@@ -10,7 +10,7 @@ Simple Compute Market is inspired by [Compositional Game Theory (CGT)](https://g
 
 ## Repository layout
 
-- `buyer/` — Buyer CLI (`market` console script)
+- `domains/vms/buyer/` — VM buyer CLI (`market` console script)
 - `storefront/` — Seller server + admin CLI (`market-storefront` console script)
 - `domains/vms/provisioning/service/` — VM provisioning microservice
 - `service/` — Shared infra clients (chain, alkahest, registry indexer) used by both buyer and storefront

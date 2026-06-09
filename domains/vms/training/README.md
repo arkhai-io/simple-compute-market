@@ -12,7 +12,7 @@ cd kit/policy && uv pip install -e ".[training]"
 
 # Inference only (storefront / buyer at runtime)
 cd storefront && uv pip install -e ".[rl]"   # torch only, no pufferlib
-cd buyer     && uv pip install -e ".[rl]"
+cd domains/vms/buyer && uv pip install -e ".[rl]"
 ```
 
 On macOS with uv-managed Python the pufferlib C extension build can pick up stale Xcode SDK paths from the Python sysconfig. If linking fails with `library 'c++' not found` or references to a non-existent `Xcode_15.2.app`, override the sysroot:

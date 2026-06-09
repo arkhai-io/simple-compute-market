@@ -50,7 +50,7 @@ Or from the repo:
 git clone https://github.com/arkhai-io/simple-compute-market.git
 cd simple-compute-market
 make build-buyer
-export PATH="$PWD/buyer/.venv/bin:$PATH"
+export PATH="$PWD/domains/vms/buyer/.venv/bin:$PATH"
 market --version
 ```
 

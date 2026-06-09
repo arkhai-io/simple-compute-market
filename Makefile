@@ -81,7 +81,7 @@ dist-service: ## Build market-service wheel into .dist/
 
 dist-buyer: ## Build market-buyer (the `market` CLI) wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd buyer && uv build --wheel --out-dir $(DIST_DIR)
+	cd domains/vms/buyer && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/market_buyer-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: market-buyer produced a platform-specific wheel — must build inside Docker" && exit 1)
 
@@ -127,7 +127,7 @@ build-seller-for-host: ## build-seller with appuser UID/GID matching the current
 	$(MAKE) build-seller APPUSER_UID=$(shell id -u) APPUSER_GID=$(shell id -g)
 
 build-buyer: init-prerequisites init-buyer
-	cd buyer && make build
+	cd domains/vms/buyer && make build
 
 # Regenerate the baked Anvil state + Alkahest address book by running
 # EnvTestManager once and snapshotting its chain (see test-env/generate_state.py).
@@ -170,7 +170,7 @@ init-zero-tier:
 	cd scripts/zerotier && make install
 
 init-buyer:
-	cd buyer && make init
+	cd domains/vms/buyer && make init
 
 init-storefront: dist-service dist-policy dist-provisioning dist-storefront-client dist-registry
 	cd storefront && make init
@@ -259,7 +259,7 @@ PROVISIONING_VERSION      := $(shell sed -n 's/^version = "\(.*\)"/\1/p' domains
 #   make dist              — wheels must exist in .dist/
 #   make build             — Docker images must be built locally
 #   make build-dev         — additionally required before push-dev-images
-#   make build-buyer       — buyer/dist/market binary must exist
+#   make build-buyer       — domains/vms/buyer/dist/market binary must exist
 #
 # Targets can be run individually or all at once via push-runtime-artifacts.
 # ---------------------------------------------------------------------------
@@ -342,7 +342,7 @@ push-cli: _require-ar-project
 	  --repository=$(AR_PREFIX)-cli \
 	  --package=market \
 	  --version=$(GIT_SUFFIX) \
-	  --source=buyer/dist/market
+	  --source=domains/vms/buyer/dist/market
 
 clobber-wheels: _require-ar-project
 	$(call clobber_python_wheel,arkhai-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)

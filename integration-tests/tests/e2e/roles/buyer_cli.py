@@ -12,7 +12,7 @@ events emitted by the CLI, and parses the JSONL for assertions.
 Resolution order for the binary path:
   1. ``MARKET_CLI_BIN`` env var (absolute path)
   2. ``shutil.which("market")`` (any PATH entry)
-  3. ``<repo_root>/buyer/.venv/bin/market`` (developer default)
+  3. ``<repo_root>/domains/vms/buyer/.venv/bin/market`` (developer default)
 
 If none of those exist the fixture skips, with instructions.
 """
@@ -51,7 +51,7 @@ def _resolve_market_binary() -> Optional[Path]:
     on_path = shutil.which("market")
     if on_path:
         return Path(on_path)
-    sibling = _REPO_ROOT / "buyer" / ".venv" / "bin" / "market"
+    sibling = _REPO_ROOT / "domains" / "vms" / "buyer" / ".venv" / "bin" / "market"
     if sibling.is_file():
         return sibling
     return None
@@ -320,7 +320,8 @@ def buyer_cli_binary() -> Path:
     if p is None:
         pytest.skip(
             "`market` binary not found. Install the buyer wheel "
-            "(`cd buyer && uv sync`) so $REPO/buyer/.venv/bin/market exists, "
+            "(`cd domains/vms/buyer && uv sync`) so "
+            "$REPO/domains/vms/buyer/.venv/bin/market exists, "
             "or set MARKET_CLI_BIN=/path/to/market."
         )
     try:
