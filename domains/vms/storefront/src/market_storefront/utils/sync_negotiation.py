@@ -56,6 +56,8 @@ from core_storefront.negotiation_sync import (
     coerce_pinned_proposal as _coerce_pinned_proposal,
     history_from_messages as _history_from_messages,
     proposal_with_amount as _proposal_with_amount,
+    record_buyer_accept_message as _record_buyer_accept_message,
+    record_buyer_exit_message as _record_buyer_exit_message,
     record_seller_decision_message as _record_seller_decision_message,
 )
 
@@ -516,17 +518,12 @@ async def continue_sync_negotiation(
              if m.get("action_taken") == "counter_offer" and m.get("sender") != buyer_address),
             our_amount,
         )
-        async with NegotiationThreadTransaction("SYNC_NEGOTIATE_ACCEPT") as txn:
-            await txn.add_message(
-                negotiation_id=neg_id,
-                sender=buyer_address,
-                our_price=our_amount,
-                their_price=last_seller_amount,
-                proposed_price=last_seller_amount,
-                action_taken="accept_offer",
-                message_type="accepted",
-            )
-            await txn.mark_terminal(neg_id, "success")
+        await _record_buyer_accept_message(
+            negotiation_id=neg_id,
+            sender=buyer_address,
+            our_amount=our_amount,
+            accepted_amount=last_seller_amount,
+        )
         agreed_duration_seconds = (
             requested_duration_seconds
             or our_order_dict.get("max_duration_seconds")
@@ -565,17 +562,11 @@ async def continue_sync_negotiation(
         return response
 
     if buyer_action == "exit":
-        async with NegotiationThreadTransaction("SYNC_NEGOTIATE_EXIT") as txn:
-            await txn.add_message(
-                negotiation_id=neg_id,
-                sender=buyer_address,
-                our_price=our_amount,
-                their_price=None,
-                proposed_price=None,
-                action_taken="exit_negotiation",
-                message_type="exit",
-            )
-            await txn.mark_terminal(neg_id, "failure")
+        await _record_buyer_exit_message(
+            negotiation_id=neg_id,
+            sender=buyer_address,
+            our_amount=our_amount,
+        )
         stage_event(
             "negotiation", "exited",
             negotiation_id=neg_id,

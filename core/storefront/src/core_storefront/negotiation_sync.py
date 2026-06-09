@@ -153,3 +153,48 @@ async def record_seller_decision_message(
             await txn.mark_terminal(negotiation_id, "success")
         elif decision.action in ("exit", "reject"):
             await txn.mark_terminal(negotiation_id, "failure")
+
+
+async def record_buyer_accept_message(
+    *,
+    negotiation_id: str,
+    sender: str,
+    our_amount: int,
+    accepted_amount: int,
+) -> None:
+    """Persist buyer acceptance of the seller's latest counter."""
+    from market_policy.negotiation_thread import NegotiationThreadTransaction
+
+    async with NegotiationThreadTransaction("SYNC_NEGOTIATE_ACCEPT") as txn:
+        await txn.add_message(
+            negotiation_id=negotiation_id,
+            sender=sender,
+            our_price=our_amount,
+            their_price=accepted_amount,
+            proposed_price=accepted_amount,
+            action_taken="accept_offer",
+            message_type="accepted",
+        )
+        await txn.mark_terminal(negotiation_id, "success")
+
+
+async def record_buyer_exit_message(
+    *,
+    negotiation_id: str,
+    sender: str,
+    our_amount: int,
+) -> None:
+    """Persist buyer exit and mark the negotiation failed."""
+    from market_policy.negotiation_thread import NegotiationThreadTransaction
+
+    async with NegotiationThreadTransaction("SYNC_NEGOTIATE_EXIT") as txn:
+        await txn.add_message(
+            negotiation_id=negotiation_id,
+            sender=sender,
+            our_price=our_amount,
+            their_price=None,
+            proposed_price=None,
+            action_taken="exit_negotiation",
+            message_type="exit",
+        )
+        await txn.mark_terminal(negotiation_id, "failure")

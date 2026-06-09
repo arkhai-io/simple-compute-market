@@ -468,9 +468,9 @@ Recommended order:
    `core_storefront.negotiation_sync` owns generic synchronous-negotiation
    error carriers, live-listing status constants, pinned-proposal
    reconstruction, persisted-message-to-round history conversion, and
-   seller-decision message/terminal-state persistence; the VM wrapper keeps
-   policy/config adapters, listing validation, proposal amount extraction,
-   and settlement-term materialization.
+   buyer/seller decision message plus terminal-state persistence; the VM
+   wrapper keeps policy/config adapters, listing validation, proposal amount
+   extraction, and settlement-term materialization.
    `core_storefront.auth` owns framework-free signed request
    verification and admin-key checks; `market_storefront.middleware.*`
    remains the FastAPI/settings adapter layer.
