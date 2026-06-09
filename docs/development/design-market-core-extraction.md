@@ -412,6 +412,10 @@ Recommended order:
    including RL checkpoints; `domains/vms/settlement/` for settlement
    verification/materialization; and `domains/vms/provisioning/` for VM
    fulfillment and lease/listing lifecycle hooks. Done so far:
+   `market_core.storefront.models` owns the schema-invariant HTTP
+   request/response model surface for listings, negotiation, and
+   settlement, while `market_storefront.models.*` remains a compatibility
+   wrapper.
    `domains/vms/negotiation/storefront_round.py` owns the default VM
    seller-round hook, file policy discovery, and storefront chain loading.
    `domains/vms/provisioning/fulfillment.py` owns VM fulfillment
@@ -505,6 +509,8 @@ buyer/market_buyer/groups/escrow.py           seam 0b compatibility wrapper
 domains/vms/buyer/listing_cli.py              seam 0b — VM listing commands; old market_buyer module wraps this
 buyer/market_buyer/groups/listing.py          seam 0b compatibility wrapper
 buyer/market_buyer/schema_plugins/ (new)      seam 0b — eventual plugin registry/loading boundary
+core/src/market_core/storefront/models/       seam 4 — schema-invariant storefront HTTP models
+storefront/src/market_storefront/models/{listing,negotiation,settle}_models.py  seam 4 compatibility wrappers
 storefront/.../utils/sync_negotiation.py      seam 4 — per-round protocol; seam 1 normalization only
 storefront/.../utils/action_executor.py       seam 4 — stateful storefront wrapper; registry publication now delegates to market_core
 kit/policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escrow guard
