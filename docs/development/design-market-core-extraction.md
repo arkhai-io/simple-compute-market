@@ -477,11 +477,13 @@ Recommended order:
    seller-round hook, file policy discovery, and storefront chain loading.
    `domains/vms/provisioning/fulfillment.py` owns VM fulfillment
    orchestration behind explicit storefront callbacks. `sync_negotiation.py`
-   and `action_executor.py` remain compatibility/stateful HTTP wrappers.
+   remains a compatibility/stateful HTTP wrapper. `action_executor.py` is now
+   limited to VM fulfillment orchestration for settled compute obligations.
    `core_storefront.registry_publication` owns schema-agnostic registry
    publish/close fan-out through injected registry clients and request
-   factories; the storefront wrapper keeps settings, SQLite publication
-   persistence, and stage-event logging.
+   factories; `market_storefront.services.publication_service` keeps VM
+   storefront settings, SQLite publication persistence, dynamic listing close
+   reconciliation, and stage-event logging.
 4. **Done: move provisioning as VM fulfillment.** `provisioning-service` is
    not core; it is the VM fulfillment backend. It moved to
    `domains/vms/provisioning/service/` after updating Docker build contexts,
@@ -614,7 +616,8 @@ domains/vms/storefront/src/market_storefront/server.py  seam 4 — VM compositio
 core/storefront/src/core_storefront/auth.py   seam 4 — framework-free signed request/admin-key verification
 domains/vms/storefront/src/market_storefront/middleware/  seam 4 FastAPI/settings auth wrappers
 domains/vms/storefront/.../utils/sync_negotiation.py      seam 4 — per-round protocol; seam 1 normalization only
-domains/vms/storefront/.../utils/action_executor.py       seam 4 — stateful storefront wrapper; pure VM pricing/encoding helpers moved to domains/vms
+domains/vms/storefront/.../services/publication_service.py  seam 4 — VM storefront registry publication/close wiring over core publication helpers
+domains/vms/storefront/.../utils/action_executor.py       seam 4 — VM fulfillment orchestration wrapper for settled compute obligations
 kit/policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escrow guard
 kit/policy/                                   package migration — generic policy-chain machinery; wheel/import names unchanged
 domains/vms/provisioning/service/             package migration — VM provisioning service; wheel/import names unchanged

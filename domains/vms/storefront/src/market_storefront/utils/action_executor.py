@@ -1,24 +1,14 @@
-"""Action execution.
-
-TODO(refactor): This module still contains compute-domain action logic.
-Move domain-specific execution into the domain package as refactor continues.
-"""
+"""VM fulfillment orchestration for settled compute obligations."""
 
 from __future__ import annotations
 
-import functools
 from datetime import datetime, timezone
 import logging
 from typing import Any, Awaitable, Callable
-from urllib.parse import urlparse
 
 from core_storefront.stage_log import stage_event
 
 from alkahest_py import AlkahestClient
-from core_storefront.registry_publication import (
-    close_listing_in_registries,
-    publish_listing_to_registries,
-)
 
 from domains.vms.provisioning import (
     build_provisioning_job_spec as _vm_build_provisioning_job_spec,
@@ -28,92 +18,16 @@ from domains.vms.provisioning import (
     schedule_vm_expiry_and_wait,
 )
 
-from domains.vms.listings.models import Listing
-from domains.vms.listings.reconciler import (
-    mark_derived_listings_closed,
-    stale_open_listing_ids,
-)
 from market_storefront.utils.config import CHAINS, settings, AGENT_ID, BASE_URL_OVERRIDE
-from market_alkahest.alkahest import encode_recipient_demand, get_recipient_arbiter
+from market_storefront.services.publication_service import (
+    close_stale_compute_listings_after_capacity_change,
+)
 from market_storefront.utils.sqlite_client import get_sqlite_client
-from registry_client import ListingRequest, UpdateListingRequest
-from market_policy.negotiation_thread import get_thread_store
 
 BASE_URL_OVERRIDE = BASE_URL_OVERRIDE
-PORT = settings.port
 AGENT_ID = AGENT_ID
-SSH_PUBLIC_KEY = settings.wallet.ssh_public_key
 
 logger = logging.getLogger(__name__)
-
-def _is_http_url(value: str | None) -> bool:
-    """Return True if value is a valid http(s) URL with hostname."""
-    if not value or not isinstance(value, str):
-        return False
-    parsed = urlparse(value.strip())
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
-
-
-def _coerce_agent_reference_to_url(agent_ref: str | None) -> str | None:
-    """Best-effort conversion from agent ref/alias to resolvable URL."""
-    if not isinstance(agent_ref, str):
-        return None
-    ref = agent_ref.strip()
-    if not ref:
-        return None
-
-    if _is_http_url(ref):
-        return ref
-
-    # Handle host[:port] strings without scheme.
-    if "://" not in ref and (":" in ref or "." in ref):
-        candidate = f"http://{ref}"
-        if _is_http_url(candidate):
-            return candidate
-    return None
-
-
-
-async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Close an order locally and in the registry (if enabled)."""
-    parameters = parameters or {}
-    order_id = parameters.get("listing_id")
-    if not isinstance(order_id, str) or not order_id.strip():
-        return {"status": "error", "message": "Missing listing_id for close_listing"}
-
-    try:
-        sqlite_client = get_sqlite_client()
-        await sqlite_client.update_listing(
-            listing_id=order_id,
-            status="closed",
-        )
-    except Exception as exc:
-        logger.warning("[LOCAL DB] Failed to update order %s as closed: %s", order_id, exc)
-
-    return await close_listing_in_registries(
-        order_id,
-        enabled=settings.enable_registry_discovery,
-        registry_client_factory=_make_registry_client,
-        update_listing_request_factory=UpdateListingRequest,
-        private_key=settings.wallet.private_key,
-        select_target_registries=_registries_to_target,
-        record_publications=_record_publications,
-    )
-
-
-async def close_stale_compute_listings_after_capacity_change(db_path: str) -> list[str]:
-    """Close open derived compute listings whose GPU slice no longer fits."""
-    closed_listing_ids: list[str] = []
-    for listing_id in stale_open_listing_ids(db_path):
-        result = await close_order({"listing_id": listing_id})
-        if str(result.get("status", "?")) in ("closed", "skipped", "queued"):
-            closed_listing_ids.append(listing_id)
-            continue
-        row = await get_sqlite_client().load_listing(listing_id=listing_id)
-        if row and row.get("status") == "closed":
-            closed_listing_ids.append(listing_id)
-    mark_derived_listings_closed(db_path, closed_listing_ids)
-    return closed_listing_ids
 
 
 async def _do_provision(
@@ -156,147 +70,6 @@ async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> d
         vm_host=vm_host,
         vm_target=vm_target,
     )
-
-
-def _canonical_agent_id(chain_name: str | None = None) -> str | None:
-    """Return the storefront's identity for downstream services.
-
-    Post-pluggable-identity (Phase 4): the storefront's identity is the
-    EIP-191 wallet address (``settings.wallet.address``, lowercased).
-    The ``chain_name`` argument is accepted for back-compat with callers
-    that previously dispatched per-chain but no longer affects the
-    returned value — identity is chain-agnostic.
-
-    Returns ``None`` when no wallet is configured.
-    """
-    del chain_name  # back-compat shim; identity is chain-agnostic now
-    address = (settings.wallet.address or "").strip().lower()
-    return address or None
-
-
-def _make_registry_client() -> "MultiRegistryClient":
-    """Construct a multi-registry client wrapping every configured URL.
-
-    Each call returns a fresh wrapper — callers use it as an async
-    context manager (``async with _make_registry_client() as rc:``).
-    The wrapper exposes the same surface as ``RegistryClient`` so call
-    sites (and the test mocks that patch this function) don't change
-    shape; reads fan in across every URL, writes fan out best-effort.
-    """
-    from .multi_registry_client import MultiRegistryClient
-    urls = list(settings.registry.urls) if settings.registry.urls else ["http://localhost:8080"]
-    return MultiRegistryClient(
-        urls,
-        timeout=settings.registry.discovery_timeout,
-        auth=settings.registry.auth,
-    )
-
-
-def _sender_id() -> str:
-    """Return the canonical ERC-8004 agent ID for use as negotiation message sender.
-
-    Falls back to the local AGENT_ID (e.g. 'agent_8000') when the on-chain
-    identity is not configured.
-    """
-    return _canonical_agent_id() or AGENT_ID
-
-
-async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
-    """Publish a new order to the registry so discoverers can find it.
-
-    Called by the MAKE_OFFER action path when /orders/create runs. No
-    fan-out to counterparties here — the buyer's orchestrator queries
-    the registry directly and initiates negotiations from there.
-
-    Returns a small status dict. Never raises for missing config or
-    registry errors; logs them. Callers interpret `status` to decide
-    whether to bubble up.
-    """
-    return await publish_listing_to_registries(
-        order,
-        enabled=settings.enable_registry_discovery,
-        registry_client_factory=_make_registry_client,
-        listing_request_factory=ListingRequest,
-        private_key=settings.wallet.private_key,
-        storefront_url=BASE_URL_OVERRIDE,
-        record_publications=_record_publications,
-        on_published=_record_listing_published_stage_event,
-    )
-
-
-def _record_listing_published_stage_event(
-    *,
-    listing_id: str,
-    offer_resource: dict[str, Any],
-    accepted_escrows: list[dict[str, Any]],
-    demands: list[dict[str, Any]],
-    max_duration_seconds: int | None,
-) -> None:
-    stage_event(
-        "discovery", "order_published",
-        order_id=listing_id,
-        agent_url=BASE_URL_OVERRIDE,
-        offer=offer_resource,
-        accepted_escrows=accepted_escrows,
-        demands=demands,
-        max_duration_seconds=max_duration_seconds,
-    )
-
-
-async def _registries_to_target(
-    listing_id: str, fallback_urls: list[str],
-) -> list[str]:
-    """Return the set of registry URLs to target for an update/delete on
-    ``listing_id``.
-
-    Consults the ``publications`` table — only registries that previously
-    received this listing get the update. Falls back to ``fallback_urls``
-    (typically ``registry_client.urls``) when no publications row exists
-    yet, which keeps update-before-publish flows (e.g. close_order on a
-    listing the storefront never published) functioning.
-
-    'unpublished' rows are skipped so a previously deleted listing doesn't
-    receive an update.
-    """
-    try:
-        sqlite_client = get_sqlite_client()
-        pubs = await sqlite_client.load_publications(listing_id=listing_id)
-    except Exception:
-        return list(fallback_urls)
-    active = [p["registry_url"] for p in pubs if p.get("status") != "unpublished"]
-    return active if active else list(fallback_urls)
-
-
-async def _record_publications(
-    listing_id: str, results: list[dict[str, Any]],
-) -> None:
-    """Persist one ``publications`` row per per-registry result.
-
-    Called after every fan-out write (publish / update / delete). Logged
-    rather than raised on persistence errors — the registry-side write
-    has already happened (or failed); the local audit row is best-effort.
-    """
-    try:
-        sqlite_client = get_sqlite_client()
-    except Exception:
-        return
-    for r in results:
-        payload = r.get("payload") or {}
-        status = "published" if r.get("success") else "failed"
-        try:
-            await sqlite_client.upsert_publication(
-                listing_id=listing_id,
-                registry_url=r["registry_url"],
-                payload=payload,
-                status=status,
-                registry_assigned_id=r.get("registry_assigned_id"),
-                last_error=r.get("error"),
-            )
-        except Exception as exc:
-            logger.warning(
-                "[PUBLICATIONS] Failed to record publication for %s @ %s: %s",
-                listing_id, r.get("registry_url"), exc,
-            )
 
 
 async def _build_provisioning_job_spec(

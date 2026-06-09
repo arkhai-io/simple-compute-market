@@ -1,6 +1,5 @@
-"""Tests that action_executor records a ``publications`` row after each
-fan-out write — publish_order_to_registry, close_order, and the maker
-fulfillment update path.
+"""Tests that publication_service records a ``publications`` row after each
+fan-out write — publish_order_to_registry and close_order.
 
 These wire the new ``MultiRegistryClient.publish_listing_per_registry``
 (et al.) into the SQLite ``publications`` table introduced in PR (b2).
@@ -14,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from market_storefront.utils import action_executor
+from market_storefront.services import publication_service
 from market_storefront.utils.multi_registry_client import PublishResult
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
@@ -43,7 +42,7 @@ def db(tmp_path):
 def patched_sqlite(db, monkeypatch):
     """Wire ``get_sqlite_client`` to return a fresh in-test DB so the
     publications rows can be asserted on after the action runs."""
-    monkeypatch.setattr(action_executor, "get_sqlite_client", lambda: db)
+    monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: db)
     return db
 
 
@@ -77,15 +76,12 @@ class TestPublishOrderRecordsPublications:
         ]
         cm, _client = _mock_multi_registry(["http://r1", "http://r2"], results)
         with (
-            patch("market_storefront.utils.action_executor._make_registry_client",
+            patch("market_storefront.services.publication_service._make_registry_client",
                   return_value=cm),
             settings_overrides(enable_registry_discovery=True,
                                **{"wallet.private_key": "0xkey"}),
-            patch("market_storefront.utils.action_executor.AGENT_ID", "agent-1"),
-            patch("market_storefront.utils.action_executor._canonical_agent_id",
-                  return_value="agent-1"),
         ):
-            out = await action_executor.publish_order_to_registry(order)
+            out = await publication_service.publish_order_to_registry(order)
         assert out["status"] == "published"
 
         rows = await patched_sqlite.load_publications(listing_id="L1")
@@ -126,15 +122,12 @@ class TestPublishOrderRecordsPublications:
         ]
         cm, _ = _mock_multi_registry(["http://r1", "http://r2"], results)
         with (
-            patch("market_storefront.utils.action_executor._make_registry_client",
+            patch("market_storefront.services.publication_service._make_registry_client",
                   return_value=cm),
             settings_overrides(enable_registry_discovery=True,
                                **{"wallet.private_key": "0xkey"}),
-            patch("market_storefront.utils.action_executor.AGENT_ID", "agent-1"),
-            patch("market_storefront.utils.action_executor._canonical_agent_id",
-                  return_value="agent-1"),
         ):
-            out = await action_executor.publish_order_to_registry(order)
+            out = await publication_service.publish_order_to_registry(order)
         # At least one OK → overall status is 'published'.
         assert out["status"] == "published"
 
@@ -161,7 +154,7 @@ class TestRegistriesToTarget:
             listing_id="L1", registry_url="http://r2",
             payload={}, status="published",
         )
-        urls = await action_executor._registries_to_target(
+        urls = await publication_service._registries_to_target(
             "L1", ["http://r1", "http://r2", "http://r3"],
         )
         assert sorted(urls) == ["http://r1", "http://r2"]
@@ -170,7 +163,7 @@ class TestRegistriesToTarget:
     async def test_falls_back_to_all_urls_when_no_publications(
         self, patched_sqlite,
     ):
-        urls = await action_executor._registries_to_target(
+        urls = await publication_service._registries_to_target(
             "no-such-listing", ["http://r1", "http://r2"],
         )
         assert urls == ["http://r1", "http://r2"]
@@ -187,7 +180,7 @@ class TestRegistriesToTarget:
             listing_id="L1", registry_url="http://r2",
             payload={}, status="unpublished",
         )
-        urls = await action_executor._registries_to_target(
+        urls = await publication_service._registries_to_target(
             "L1", ["http://r1", "http://r2"],
         )
         assert urls == ["http://r1"]

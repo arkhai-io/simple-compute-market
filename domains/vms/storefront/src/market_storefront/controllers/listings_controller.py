@@ -139,7 +139,7 @@ class ListingsController:
         if not row:
             raise HTTPException(status_code=404, detail=f"Listing {listing_id} not found")
         await self._db.set_listing_paused(listing_id=listing_id, paused=False)
-        from market_storefront.utils.action_executor import publish_order_to_registry
+        from market_storefront.services.publication_service import publish_order_to_registry
         publish_result = await publish_order_to_registry(row)
         registry_status = publish_result.get("status", "unknown")
         return PauseListingResponse(

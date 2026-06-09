@@ -3,7 +3,7 @@
 After the demand_resource cutover, ``synthesize_accepted_escrows_from_demand``
 lives at module scope and is called from two places:
 
-  * action_executor's MAKE_OFFER entry, converting the policy layer's
+  * listing publication/create paths, converting the policy layer's
     ``demand`` payload into ``accepted_escrows`` before persistence;
   * the one-shot backfill in ``SQLiteClient._ensure_tables_sync`` that
     populates ``accepted_escrows`` on any pre-cutover row still carrying

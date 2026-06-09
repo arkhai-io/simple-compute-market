@@ -247,7 +247,7 @@ class ListingService:
         the same ``publish_order_to_registry`` path.
         """
         from domains.vms.listings.models import Listing
-        from market_storefront.utils.action_executor import publish_order_to_registry
+        from market_storefront.services.publication_service import publish_order_to_registry
         from market_storefront.utils.config import BASE_URL_OVERRIDE
 
         offer, accepted_escrows, demands = self._parse_offer_and_escrows(request)
@@ -308,7 +308,7 @@ class ListingService:
         roll back the SQLite write — the seller's local state is the source of
         truth for what's available to negotiate against.
         """
-        from market_storefront.utils.action_executor import close_order
+        from market_storefront.services.publication_service import close_order
 
         result = await close_order({"listing_id": listing_id})
         return CloseListingResponse(

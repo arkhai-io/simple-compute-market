@@ -529,11 +529,10 @@ class TestCreateListing:
     async def test_listing_persisted_in_db(self, seller_auth_full_client):
         """Created listing returns a non-None listing_id in the response.
 
-        The full DB persistence path depends on action_executor which reads
-        the real CONFIG singleton at module level (set at import time, not
-        patchable per-test). This test therefore asserts the response contract
-        rather than raw DB state: a non-None listing_id proves the policy
-        pipeline ran and the controller serialised the response correctly.
+        The full DB persistence path depends on storefront services that read
+        the real CONFIG singleton. This test therefore asserts the response
+        contract rather than raw DB state: a non-None listing_id proves the
+        policy pipeline ran and the controller serialised the response correctly.
         """
         c, _ = seller_auth_full_client
         result = await c.create_listing(
@@ -553,7 +552,7 @@ class TestCreateListing:
         """paused=True create returns a listing_id without registry error.
 
         Full registry publish suppression requires the real settings.enable_registry_discovery
-        flag which is set at module level in action_executor. This test asserts the response
+        flag from the storefront settings singleton. This test asserts the response
         is well-formed (listing_id present, no 500), which is sufficient to prove the
         paused=True path through the controller works correctly.
         """

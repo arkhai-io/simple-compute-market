@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from client import provisioning_client
+from market_storefront.services import publication_service
 from market_storefront.utils import action_executor
 from domains.vms.listings.reconciler import record_derived_listing
 from market_storefront.utils.sqlite_client import SQLiteClient
@@ -103,6 +104,7 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
 
     await _seed_compute_pool(client)
     monkeypatch.setattr(action_executor, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(
         provisioning_client,
         "ProvisioningClient",
@@ -176,6 +178,7 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
     )
     await _seed_compute_listings(client, max_gpu_count=4)
     monkeypatch.setattr(action_executor, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(
         provisioning_client,
         "ProvisioningClient",
