@@ -57,6 +57,7 @@ from core_storefront.negotiation_sync import (
     history_from_messages as _history_from_messages,
     proposal_with_amount as _proposal_with_amount,
     record_buyer_accept_message as _record_buyer_accept_message,
+    record_buyer_counter_message as _record_buyer_counter_message,
     record_buyer_exit_message as _record_buyer_exit_message,
     record_seller_decision_message as _record_seller_decision_message,
 )
@@ -472,7 +473,6 @@ async def continue_sync_negotiation(
         commit agreed_terms and return action=accept in response.
       - "exit": the buyer is walking away; we mark the thread terminal.
     """
-    from market_policy.negotiation_thread import NegotiationThreadTransaction
     from domains.vms.listings import determine_strategy_from_order
     from domains.vms.listings.models import Listing
     from core_storefront.stage_log import stage_event
@@ -584,16 +584,12 @@ async def continue_sync_negotiation(
     else:
         buyer_amount = int(raw_amount)
 
-    async with NegotiationThreadTransaction("SYNC_NEGOTIATE_BUYER_COUNTER") as txn:
-        await txn.add_message(
-            negotiation_id=neg_id,
-            sender=buyer_address,
-            our_price=our_amount,
-            their_price=buyer_amount,
-            proposed_price=buyer_amount,
-            action_taken="counter_offer",
-            message_type="counter_proposal",
-        )
+    await _record_buyer_counter_message(
+        negotiation_id=neg_id,
+        sender=buyer_address,
+        our_amount=our_amount,
+        counter_amount=buyer_amount,
+    )
 
     from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
     our_sender = BASE_URL_OVERRIDE or "seller"

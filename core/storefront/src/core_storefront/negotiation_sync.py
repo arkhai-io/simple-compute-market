@@ -198,3 +198,25 @@ async def record_buyer_exit_message(
             message_type="exit",
         )
         await txn.mark_terminal(negotiation_id, "failure")
+
+
+async def record_buyer_counter_message(
+    *,
+    negotiation_id: str,
+    sender: str,
+    our_amount: int,
+    counter_amount: int,
+) -> None:
+    """Persist a buyer counter-proposal message."""
+    from market_policy.negotiation_thread import NegotiationThreadTransaction
+
+    async with NegotiationThreadTransaction("SYNC_NEGOTIATE_BUYER_COUNTER") as txn:
+        await txn.add_message(
+            negotiation_id=negotiation_id,
+            sender=sender,
+            our_price=our_amount,
+            their_price=counter_amount,
+            proposed_price=counter_amount,
+            action_taken="counter_offer",
+            message_type="counter_proposal",
+        )
