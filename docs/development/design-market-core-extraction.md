@@ -518,7 +518,10 @@ Top-level folder tracker:
 9. **Done: remove VM resource/import wrapper modules.** Storefront code
    imports VM listing resources, resource CSV import, host CSV import, and
    capacity checks directly from `domains.vms.*`.
-10. **Next: drain `domains/vms/storefront/` internals.** Move remaining
+10. **Done: remove stale storefront validation helpers.** Validation and
+   strategy selection now live directly in VM listing modules rather than
+   a storefront utility wrapper.
+11. **Next: drain `domains/vms/storefront/` internals.** Move remaining
    schema-invariant storefront runtime into `core/storefront`, and VM
    listing/negotiation/settlement/provisioning hooks into `domains/vms/*`.
 
