@@ -416,6 +416,9 @@ Recommended order:
    request/response model surface for listings, negotiation, and
    settlement, while `market_storefront.models.*` remains a compatibility
    wrapper.
+   `market_core.storefront.stage_log` owns structured stage-event logging
+   and SQLite persistence mechanics; the storefront wrapper only supplies
+   the configured DB path.
    `domains/vms/negotiation/storefront_round.py` owns the default VM
    seller-round hook, file policy discovery, and storefront chain loading.
    `domains/vms/provisioning/fulfillment.py` owns VM fulfillment
@@ -511,6 +514,8 @@ buyer/market_buyer/groups/listing.py          seam 0b compatibility wrapper
 buyer/market_buyer/schema_plugins/ (new)      seam 0b — eventual plugin registry/loading boundary
 core/src/market_core/storefront/models/       seam 4 — schema-invariant storefront HTTP models
 storefront/src/market_storefront/models/{listing,negotiation,settle}_models.py  seam 4 compatibility wrappers
+core/src/market_core/storefront/stage_log.py  seam 4 — schema-invariant stage-event logger/persistence helper
+storefront/src/market_storefront/utils/stage_log.py  seam 4 compatibility wrapper supplying settings.db_path
 storefront/.../utils/sync_negotiation.py      seam 4 — per-round protocol; seam 1 normalization only
 storefront/.../utils/action_executor.py       seam 4 — stateful storefront wrapper; registry publication now delegates to market_core
 kit/policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escrow guard
