@@ -30,7 +30,7 @@ from market_alkahest.schemas import (
     EscrowProposal,
     accepted_recipient_address,
 )
-from market_core.buyer import (
+from core_buyer import (
     DEFAULT_HTTP_TIMEOUT,
     BuyConfig,
     BuyConstraints,

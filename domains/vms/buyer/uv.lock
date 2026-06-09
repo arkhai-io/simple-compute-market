@@ -384,6 +384,16 @@ wheels = [
 ]
 
 [[package]]
+name = "core-buyer"
+version = "0.1.0"
+source = { editable = "../../../core/buyer" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
+
+[[package]]
 name = "cytoolz"
 version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -816,6 +826,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
+    { name = "core-buyer" },
     { name = "eth-account" },
     { name = "market-alkahest" },
     { name = "market-config" },
@@ -839,6 +850,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "alkahest-py", specifier = ">=0.4.0" },
+    { name = "core-buyer", editable = "../../../core/buyer" },
     { name = "eth-account", specifier = ">=0.13.0" },
     { name = "market-alkahest", editable = "../../../kit/alkahest" },
     { name = "market-config", editable = "../../../kit/config" },

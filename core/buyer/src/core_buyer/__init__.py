@@ -1,6 +1,6 @@
 """Core buyer role contracts and orchestration helpers."""
 
-from market_core.buyer.orchestrator import (
+from core_buyer.orchestrator import (
     DEFAULT_HTTP_TIMEOUT,
     BuyConfig,
     BuyConstraints,

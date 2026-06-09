@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
-from market_core.buyer import (
+from core_buyer import (
     BuyConfig,
     BuyConstraints,
     BuyResult,
@@ -37,7 +37,7 @@ def _config() -> BuyConfig:
 
 def test_run_buy_returns_no_matches_without_invoking_hooks() -> None:
     with patch(
-        "market_core.buyer.orchestrator.urllib.request.urlopen",
+        "core_buyer.orchestrator.urllib.request.urlopen",
         return_value=_FakeResp({"items": []}),
     ):
         result = run_buy(
@@ -110,7 +110,7 @@ def test_query_registry_for_matches_multi_dedupes_first_seen_listing() -> None:
     ])
 
     with patch(
-        "market_core.buyer.orchestrator.urllib.request.urlopen",
+        "core_buyer.orchestrator.urllib.request.urlopen",
         side_effect=lambda *_args, **_kwargs: next(responses),
     ):
         result = query_registry_for_matches_multi(["http://r1", "http://r2"])

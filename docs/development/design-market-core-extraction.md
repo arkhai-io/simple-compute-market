@@ -319,7 +319,7 @@ instead of treating core as having an embedded default market.
 
 ### 2. Collapse the six behavior hooks to `negotiate` + `settle` — done
 
-- **Done:** `market_core.buyer.run_buy(...)` requires high-level
+- **Done:** `core_buyer.run_buy(...)` requires high-level
   `negotiate` and `settle` hooks and composes only
   discover → negotiate → settle at the top level. Tests can inject doubles
   at that two-hook granularity.
@@ -433,7 +433,7 @@ Recommended order:
    lifecycle commands, aggregation policies, negotiation HTTP client, run
    logs, buyer config/log/network/chain commands, and the packaging/test
    project for the VM buyer console script.
-   `market_core.buyer` now owns the schema-invariant buyer config/result
+   `core-buyer` now owns the schema-invariant buyer config/result
    carriers, registry discovery fan-in, and `discover -> negotiate ->
    settle` orchestration over injected hooks. The VM buyer module re-exports
    those pieces while retaining VM-specific hook adapters.
@@ -586,7 +586,7 @@ core-shaped code. Seam 4 is the later packaging extraction.
 ## File map
 
 ```
-core/src/market_core/buyer/                   seam 2, 4 — core buyer role carriers, discovery fan-in, run_buy shell
+core/buyer/                                   seam 2, 4 — core buyer role carriers, discovery fan-in, run_buy shell
 domains/vms/buyer/buy_orchestrator.py         seam 2, 4 — VM legacy negotiate/settle hook adapters
 domains/vms/buyer/buy_cli.py                  seam 0b, 2 — VM market buy command
 domains/vms/buyer/negotiate_cli.py            seam 0 legacy — accepted proposal/terms run-log handoff

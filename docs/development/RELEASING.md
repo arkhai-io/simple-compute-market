@@ -7,6 +7,7 @@ The repo publishes internal Python packages to PyPI via
 |---|---|---|---|
 | `market-identity` | `kit/identity/` | 0.1.0 | none |
 | `market-core` | `core/` | 0.1.0 | `market-identity` |
+| `core-buyer` | `core/buyer/` | 0.1.0 | none |
 | `market-alkahest` | `kit/alkahest/` | 0.1.0 | `market-core` |
 | `market-config` | `kit/config/` | 0.1.0 | `market-alkahest` |
 | `market-policy` | `kit/policy/` | 0.1.0 | none |

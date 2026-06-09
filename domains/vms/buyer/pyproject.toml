@@ -14,6 +14,7 @@ dependencies = [
   # domains.vms.settlement.escrow_client so loading the CLI does not pay the
   # native-binary cost unless the orchestrator actually runs.
   "alkahest-py>=0.4.0",
+  "core-buyer",
   "market-core",
   "market-alkahest",
   "market-config",
@@ -42,6 +43,7 @@ market = "domains.vms.buyer.cli:app"
 # storefront so both sides drive negotiation through one engine.
 [tool.uv.sources]
 market-core = { path = "../../../core", editable = true }
+core-buyer = { path = "../../../core/buyer", editable = true }
 market-alkahest = { path = "../../../kit/alkahest", editable = true }
 market-config = { path = "../../../kit/config", editable = true }
 market-policy = { path = "../../../kit/policy", editable = true }

@@ -20,7 +20,7 @@ The README frames this as a market for "anything"; the structural test that make
 
 > **A behavior belongs in the market core (composed "from above") if and only if it is invariant across every possible listing schema. If it varies by schema, it is a utility composed "from below" that the core invokes through an injected hook** — and "requiring the hook" is the from-above part; "implementing it" is from-below.
 
-- **From above** — the role contracts (buyer, seller, indexer) and the three market processes (discovery, negotiation/aggregation, settlement), expressed purely in terms of injected dependencies and schema-opaque primitives. `market_core.buyer.run_buy(...)` is already this shape: a linear discover→negotiate→settle flow with high-level `negotiate` and `settle` hooks. The current compute instantiation still adapts legacy finer-grained hooks (`build_escrow_proposal`, `build_escrow_terms`, `create_escrow`, …) into that surface.
+- **From above** — the role contracts (buyer, seller, indexer) and the three market processes (discovery, negotiation/aggregation, settlement), expressed purely in terms of injected dependencies and schema-opaque primitives. `core_buyer.run_buy(...)` is already this shape: a linear discover→negotiate→settle flow with high-level `negotiate` and `settle` hooks. The current compute instantiation still adapts legacy finer-grained hooks (`build_escrow_proposal`, `build_escrow_terms`, `create_escrow`, …) into that surface.
 - **From below** — concrete, mutually-independent utilities: negotiation middlewares (`market-policy`), identity schemes (`market-identity`), generic schemas (`market-core`), settlement kits (`market-alkahest`), shared config (`market-config`), infra clients (chain, registry-client). The defining property is "depended on, never depending up into the skeleton" — not "packaged as one wheel."
 - **A market instantiation** for a given asset class / listing schema wires from-below implementations into the from-above hooks, and *uses* the from-below utilities inside those implementations.
 
@@ -1905,6 +1905,7 @@ Wheel builds happen separately via `make dist` (called automatically by
 make dist
   ├── dist-storefront-client  → .dist/arkhai_storefront_client-*.whl
   ├── dist-registry           → .dist/arkhai_registry_client-*.whl
+  ├── dist-core-buyer         → .dist/core_buyer-*.whl
   ├── dist-provisioning       → .dist/provisioning_service-*.whl
   ├── dist-storefront         → .dist/market_storefront-*.whl      (Docker builds only)
   ├── dist-policy             → .dist/market_policy-*.whl          (Docker builds only)
@@ -2532,18 +2533,19 @@ make build         →  docker build (COPY .dist/ /dist/, uv sync --find-links /
 
 Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockfile and breaks the other context. Setting it via `UV_FIND_LINKS` on the command line means the path stays out of version-controlled files entirely.
 
-**Rule:** downstream `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for wheel-consumed internal packages (`market-identity`, `market-core`, `market-alkahest`, `market-config`, `provisioning-service`, `arkhai-storefront-client`, or `arkhai-registry-client`). These packages are resolved exclusively from wheels in `.dist/` outside their owning package's local dev environment.
+**Rule:** downstream `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for wheel-consumed internal packages (`market-identity`, `market-core`, `core-buyer`, `market-alkahest`, `market-config`, `provisioning-service`, `arkhai-storefront-client`, or `arkhai-registry-client`). These packages are resolved exclusively from wheels in `.dist/` outside their owning package's local dev environment.
 
 **Why not `uv.sources` editable installs:** Editable path references are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker that relative path does not exist, causing resolution failures. The wheel approach makes both the path and the mechanism context-specific (CLI flag, not lockfile entry).
 
 ### Internal wheel packages
 
-Seven pure-Python internal packages are distributed as wheels:
+Eight pure-Python internal packages are distributed as wheels:
 
 | Package | Wheel name | Source | Primary consumers |
 |---------|-----------|--------|-------------------|
 | `market-identity` | `market_identity-*.whl` | `kit/identity/` | `market-core`, `registry-service`, `storefront` |
-| `market-core` | `market_core-*.whl` | `core/` | `market-alkahest`, `buyer`, `storefront` |
+| `market-core` | `market_core-*.whl` | `core/` | `market-alkahest`, `storefront` |
+| `core-buyer` | `core_buyer-*.whl` | `core/buyer/` | `buyer` |
 | `market-alkahest` | `market_alkahest-*.whl` | `kit/alkahest/` | `buyer`, `storefront`, `integration-tests` |
 | `market-config` | `market_config-*.whl` | `kit/config/` | `buyer`, `storefront` |
 | `provisioning-service` | `provisioning_service-*.whl` | `domains/vms/provisioning/service/` | `integration-tests`, `storefront` |
