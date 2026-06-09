@@ -4,11 +4,7 @@ from typing import Any, Literal, Union
 from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 import uuid
 
-from service.schemas import (
-    AcceptedEscrow,
-    EscrowDemand,
-    Resource as CoreResource,
-)
+from market_alkahest.schemas import AcceptedEscrow, EscrowDemand
 
 from market_alkahest.token import ERC20TokenMetadata
 
@@ -16,9 +12,9 @@ from market_alkahest.token import ERC20TokenMetadata
 # Domain Model Class Hierarchy
 # =============================================================================
 #
-# service.schemas (external wheel — canonical base types)
-# └── CoreResource                  Base resource model
-#     └── ComputeDomainResource     Parse/coerce helper; extends CoreResource
+# VM listing models
+# └── Resource                      Base resource model
+#     └── ComputeDomainResource     Parse/coerce helper; extends Resource
 #         ├── ComputeResource       A compute slice (GPU, CPU, RAM, region, ...)
 #         └── TokenResource         ERC-20 token payment
 #
@@ -135,7 +131,11 @@ class Host(BaseModel):
     enabled: bool = Field(default=True, description="Whether the host is active")
 
 
-class ComputeDomainResource(CoreResource):
+class Resource(BaseModel):
+    """Base resource model for VM-domain listing resources."""
+
+
+class ComputeDomainResource(Resource):
     """Compute-domain resource parser extension on top of core Resource."""
 
     @staticmethod
@@ -179,7 +179,7 @@ class ComputeDomainResource(CoreResource):
         )
 
     @classmethod
-    def parse_from_dict(cls, data: Any) -> CoreResource:
+    def parse_from_dict(cls, data: Any) -> Resource:
         """Parse a resource from a dictionary or return existing Resource instance.
 
         Converts dictionary payloads into the appropriate Resource subclass:
@@ -203,7 +203,7 @@ class ComputeDomainResource(CoreResource):
                         any resource type
         """
         # If already a Resource instance, return it unchanged
-        if isinstance(data, CoreResource):
+        if isinstance(data, Resource):
             return data
 
         # Deserialize JSON strings — SQLite stores resources as JSON text
@@ -259,7 +259,7 @@ def _serialize_uint256_str(v: int | None) -> str | None:
     return None if v is None else str(v)
 
 
-class TokenResource(CoreResource):
+class TokenResource(Resource):
     """ERC-20 token payment resource for the VM market."""
 
     token: ERC20TokenMetadata = Field(

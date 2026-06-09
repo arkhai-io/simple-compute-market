@@ -132,6 +132,15 @@ class EscrowProposal(BaseModel):
     expiration_unix: int = Field(gt=0)
 
 
+class AcceptedEscrow(BaseModel):
+    """One escrow shape a listing advertises as acceptable."""
+
+    chain_name: str
+    escrow_address: str
+    literal_fields: dict[str, Any] = Field(default_factory=dict)
+    rates: list[RateValue] = Field(default_factory=list)
+
+
 def accepted_demands(accepted_or_proposal: Any) -> list[dict[str, Any]]:
     """Return arbiter demands advertised/negotiated for this escrow shape."""
     if isinstance(accepted_or_proposal, dict):
@@ -207,6 +216,7 @@ __all__ = [
     "EscrowDemand",
     "EscrowProposal",
     "EscrowTerms",
+    "AcceptedEscrow",
     "PER_UNIT_SECONDS",
     "RateValue",
     "accepted_demands",
