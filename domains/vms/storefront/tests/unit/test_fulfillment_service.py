@@ -6,7 +6,7 @@ import pytest
 
 from client import provisioning_client
 from market_storefront.services import publication_service
-from market_storefront.utils import action_executor
+from market_storefront.services import fulfillment_service
 from domains.vms.listings.reconciler import record_derived_listing
 from market_storefront.utils.sqlite_client import SQLiteClient
 
@@ -103,7 +103,7 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
             return {"id": "lease-1", **kwargs}
 
     await _seed_compute_pool(client)
-    monkeypatch.setattr(action_executor, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(
         provisioning_client,
@@ -111,11 +111,11 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
         FakeProvisioningClient,
     )
     monkeypatch.setattr(
-        action_executor,
+        fulfillment_service,
         "_do_provision",
         AsyncMock(return_value={"ssh": "ssh tenant@example"}),
     )
-    monkeypatch.setattr(action_executor, "_do_shutdown", AsyncMock())
+    monkeypatch.setattr(fulfillment_service, "_do_shutdown", AsyncMock())
 
     alkahest = MagicMock()
     alkahest.string_obligation.do_obligation = AsyncMock(
@@ -123,7 +123,7 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
     )
     alkahest.oracle.request_arbitration = AsyncMock()
 
-    result = await action_executor.fulfill_compute_obligation(
+    result = await fulfillment_service.fulfill_compute_obligation(
         client=alkahest,
         escrow_uid="escrow-1",
         ssh_public_key="ssh-ed25519 AAAA",
@@ -177,7 +177,7 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         },
     )
     await _seed_compute_listings(client, max_gpu_count=4)
-    monkeypatch.setattr(action_executor, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(
         provisioning_client,
@@ -185,13 +185,13 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         FakeProvisioningClient,
     )
     monkeypatch.setattr(
-        action_executor,
+        fulfillment_service,
         "_do_provision",
         AsyncMock(return_value={"ssh": "ssh tenant@example"}),
     )
-    monkeypatch.setattr(action_executor, "_do_shutdown", AsyncMock())
+    monkeypatch.setattr(fulfillment_service, "_do_shutdown", AsyncMock())
 
-    result = await action_executor.fulfill_compute_obligation(
+    result = await fulfillment_service.fulfill_compute_obligation(
         client=None,
         escrow_uid="escrow-2x",
         ssh_public_key="ssh-ed25519 AAAA",

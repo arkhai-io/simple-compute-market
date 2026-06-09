@@ -385,10 +385,10 @@ Receipt`; "materialize then submit" is internal factoring.
 - `domains/vms/buyer/` + the remaining `domains/vms/storefront/` package become the
   instantiation: wire ERC20 escrow construction, compute resource schema,
   provisioning, the GPU filter-spec into the core hooks.
-- The untangling work is real: `action_executor.py` (~960 LOC) and
-  `sync_negotiation.py` (~949 LOC) interleave generic flow with
-  compute-flavored steps. The function-signature joints are clean; the
-  file-level separation is not.
+- The untangling work is real: the old `action_executor.py` has been split
+  into semantic storefront services, but `sync_negotiation.py` still
+  interleaves generic flow with compute-flavored steps. The function-signature
+  joints are clean; the remaining file-level separation is not.
 
 ### 5. Package migration prerequisites
 
@@ -477,7 +477,7 @@ Recommended order:
    seller-round hook, file policy discovery, and storefront chain loading.
    `domains/vms/provisioning/fulfillment.py` owns VM fulfillment
    orchestration behind explicit storefront callbacks. `sync_negotiation.py`
-   remains a compatibility/stateful HTTP wrapper. `action_executor.py` is now
+   remains a compatibility/stateful HTTP wrapper. `fulfillment_service.py` is now
    limited to VM fulfillment orchestration for settled compute obligations.
    `core_storefront.registry_publication` owns schema-agnostic registry
    publish/close fan-out through injected registry clients and request
@@ -617,7 +617,7 @@ core/storefront/src/core_storefront/auth.py   seam 4 — framework-free signed r
 domains/vms/storefront/src/market_storefront/middleware/  seam 4 FastAPI/settings auth wrappers
 domains/vms/storefront/.../utils/sync_negotiation.py      seam 4 — per-round protocol; seam 1 normalization only
 domains/vms/storefront/.../services/publication_service.py  seam 4 — VM storefront registry publication/close wiring over core publication helpers
-domains/vms/storefront/.../utils/action_executor.py       seam 4 — VM fulfillment orchestration wrapper for settled compute obligations
+domains/vms/storefront/.../utils/fulfillment_service.py       seam 4 — VM fulfillment orchestration wrapper for settled compute obligations
 kit/policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escrow guard
 kit/policy/                                   package migration — generic policy-chain machinery; wheel/import names unchanged
 domains/vms/provisioning/service/             package migration — VM provisioning service; wheel/import names unchanged

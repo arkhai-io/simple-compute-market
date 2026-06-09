@@ -351,12 +351,14 @@ domains/vms/storefront/src/market_storefront/
 │   ├── listing_service.py         # ListingService: create/close/refund/claim/reclaim/…
 │   ├── alkahest_service.py        # build_client(): AlkahestClient factory
 │   ├── negotiation_service.py     # NegotiationService: advance/force-accept/list/get
+│   ├── publication_service.py     # Registry publication/close orchestration
+│   ├── fulfillment_service.py     # VM fulfillment orchestration for settled escrows
 │   └── system_service.py          # SystemService: health/seed/evaluate + registry checks
 ├── groups/                 # CLI groups: config, escrow, network
 ├── cli_publish.py, cli_portfolio.py, cli_logs.py, cli_common.py
 ├── negotiation_watchdog.py
 ├── utils/
-│   ├── config.py, sqlite_client.py, action_executor.py
+│   ├── config.py, sqlite_client.py
 │   ├── sync_negotiation.py, settlement_jobs.py, serializer.py
 │   └── …
 └── data/                   # Alkahest address registry + sample resource CSVs
@@ -919,8 +921,8 @@ Listings can be **created already-paused** by passing `"paused": true` in the
 `listings_controller.py` reads the flag from the request body → adds it to `OrderCreateEvent.data["paused"]`
 → `oc_action_make_offer_from_order_create` in `domains/vms/negotiation/policies.py`
 propagates it into `action.parameters["paused"]`
-→ `action_executor.py` MAKE_OFFER handler writes the listing to SQLite with `paused=1`
-and **skips** `publish_order_to_registry`.
+→ `listing_service.py` writes the listing to SQLite with `paused=1` and
+**skips** `publication_service.publish_order_to_registry`.
 The listing is invisible to buyers until `POST /api/v1/listings/{id}/resume` is called,
 which clears `paused=0` and calls `publish_order_to_registry`. This is the mechanism
 used in the e2e test to assert registry non-visibility (stage 03) before controlled

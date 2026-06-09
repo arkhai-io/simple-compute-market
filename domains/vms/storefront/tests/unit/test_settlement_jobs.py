@@ -390,7 +390,7 @@ async def test_background_task_writes_ready_on_success(client):
     })
 
     with patch(
-        "market_storefront.utils.action_executor.fulfill_compute_obligation",
+        "market_storefront.services.fulfillment_service.fulfill_compute_obligation",
         new=mock_fulfill,
     ):
         await _run_settlement_job_bg(
@@ -415,7 +415,7 @@ async def test_background_task_writes_failed_on_exception(client):
     mock_fulfill = AsyncMock(side_effect=RuntimeError("vm host unreachable"))
 
     with patch(
-        "market_storefront.utils.action_executor.fulfill_compute_obligation",
+        "market_storefront.services.fulfillment_service.fulfill_compute_obligation",
         new=mock_fulfill,
     ):
         await _run_settlement_job_bg(
@@ -440,7 +440,7 @@ async def test_background_task_leaves_listing_open_on_failure(client):
     mock_fulfill = AsyncMock(side_effect=RuntimeError("vm host unreachable"))
 
     with patch(
-        "market_storefront.utils.action_executor.fulfill_compute_obligation",
+        "market_storefront.services.fulfillment_service.fulfill_compute_obligation",
         new=mock_fulfill,
     ):
         await _run_settlement_job_bg(
@@ -467,7 +467,7 @@ async def test_background_task_writes_failed_on_non_fulfilled_status(client):
     })
 
     with patch(
-        "market_storefront.utils.action_executor.fulfill_compute_obligation",
+        "market_storefront.services.fulfillment_service.fulfill_compute_obligation",
         new=mock_fulfill,
     ):
         await _run_settlement_job_bg(

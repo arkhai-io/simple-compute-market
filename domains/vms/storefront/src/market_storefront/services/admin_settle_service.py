@@ -22,7 +22,7 @@ from market_storefront.utils.escrow_verification import (  # noqa: E402
     EscrowVerificationError,
     verify_escrow_for_settlement,
 )
-from market_storefront.utils.action_executor import _build_provisioning_job_spec  # noqa: E402
+from market_storefront.services.fulfillment_service import _build_provisioning_job_spec  # noqa: E402
 
 
 class AdminSettleService:

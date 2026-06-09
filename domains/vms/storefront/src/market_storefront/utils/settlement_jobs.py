@@ -226,7 +226,7 @@ async def _run_settlement_job_bg(
     """Background coroutine: run fulfillment, patch the job row."""
     # Imported here so unit tests can mock fulfill_compute_obligation by
     # patching the symbol on this module.
-    from market_storefront.utils.action_executor import fulfill_compute_obligation
+    from market_storefront.services.fulfillment_service import fulfill_compute_obligation
     from market_storefront.utils.config import settings
 
     try:

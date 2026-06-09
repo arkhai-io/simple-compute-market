@@ -18,14 +18,11 @@ from domains.vms.provisioning import (
     schedule_vm_expiry_and_wait,
 )
 
-from market_storefront.utils.config import CHAINS, settings, AGENT_ID, BASE_URL_OVERRIDE
+from market_storefront.utils.config import CHAINS, settings, BASE_URL_OVERRIDE
 from market_storefront.services.publication_service import (
     close_stale_compute_listings_after_capacity_change,
 )
 from market_storefront.utils.sqlite_client import get_sqlite_client
-
-BASE_URL_OVERRIDE = BASE_URL_OVERRIDE
-AGENT_ID = AGENT_ID
 
 logger = logging.getLogger(__name__)
 
