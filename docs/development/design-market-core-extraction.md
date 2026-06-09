@@ -7,10 +7,20 @@ Principle" for the conceptual frame; this doc is the executable scope.
 
 ## Principle (the filing test)
 
-A behavior belongs in the market core (composed _from above_) **iff it is
-invariant across every possible listing schema**. If it varies by schema,
-it is a from-below utility the core invokes through an injected hook.
-"Requiring the hook" is from above; "implementing it" is from below.
+The core/kit/domain split is about **composition direction**, not only
+universality. `core` is composed _from above_: it defines role shapes,
+protocol boundaries, and the points where behavior is injected. `kit` is
+composed _from below_: reusable implementations and utilities that can help
+an injected dependency do its job. Domain packages are also from-below:
+they implement the hooks for a concrete market shape and may depend on kit
+packages, but the target architecture keeps them from depending back up on
+`core`.
+
+Universality is a useful smell, but it is not the filing rule. A behavior
+belongs in core when the core must require it as part of the role contract
+or protocol skeleton. A behavior belongs in kit or a domain package when it
+is an implementation of one of those requirements. "Requiring the hook" is
+from above; "implementing it" is from below.
 
 Negotiation is an exchange of opaque, schema-defined **messages**. The core's
 universal surface is that the whole buyer pipeline is well-typed end to end:
@@ -59,7 +69,10 @@ transport, thread/history persistence, middleware-chain execution
 semantics (a middleware that returns a value terminates the chain;
 returning none passes context to the next), and the determinism contract.
 Schemas supply the hooks; any further factoring inside a hook (helpers,
-shared logic) is the implementation's business, not the core contract.
+shared logic) is the implementation's business, not the core contract. A
+domain implementation should be able to expose callables with the required
+shape without importing the core package; adapters or composition roots can
+wire those callables into the core runner.
 
 The composition wants **two** behavior hooks. `run_buy` now exposes
 only `negotiate` and `settle`, while the current compute instantiation
@@ -133,7 +146,7 @@ domains/
     provisioning/     # VM fulfillment backend
     buyer/            # concrete VM buyer executable package
     storefront/       # concrete VM storefront executable package
-    wiring/           # thin adapters that bind VM hooks into core roles
+    hooks/            # exported VM hook implementations, no core imports
     training/         # offline training code/artifacts for VM policies
 ```
 
@@ -141,22 +154,25 @@ Tests and users should depend on packages under `domains/` for concrete
 markets. `core/` should not ship a default concrete market or runnable
 fallback; it should define role contracts, protocol helpers, and
 orchestration pieces only in terms of injected dependencies. `kit/`
-provides reusable from-below implementations of those dependencies, but
-does not depend upward into `core/` or sideways into a domain package.
+provides reusable from-below implementations of those dependencies. The
+target dependency direction is one-way from the role runner/composition
+root into injected domain behavior; domain hook packages and kit packages
+do not import upward into `core`.
 
 | Package / subtree                 | Role                                                                                                                                                                                                        | Depends on              |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `core/`                           | from-above: role contracts (buyer/seller/indexer) + discovery/negotiation/aggregation/settlement skeletons, defined over injected callables + generic primitives. No default market, no alkahest, no compute, no provisioning. | from-below kit only     |
-| `kit/identity`                    | domain-agnostic identity models + verifiers.                                                                                                                                                                | no core/domain deps     |
-| `kit/alkahest`                    | settlement codecs + token/chain helpers.                                                                                                                                                                    | no core/domain deps     |
+| `core/`                           | from-above: role contracts (buyer/seller/indexer) + discovery/negotiation/aggregation/settlement skeletons, defined over injected callables + generic primitives. No default market, no alkahest, no compute, no provisioning. | kit only where needed   |
+| `kit/identity`                    | from-below identity models + verifiers that can implement core hooks or domain utilities.                                                                                                                    | no core/domain deps     |
+| `kit/alkahest`                    | from-below settlement codecs + token/chain helpers.                                                                                                                                                          | no core/domain deps     |
 | `kit/config`                      | shared config loading + registry URL helpers.                                                                                                                                                               | no domain deps          |
-| `kit/policy`                      | middleware-chain mechanics and other schema-invariant policy utilities only. VM inventory guards, scalar amount extraction, and Alkahest dispatch do not belong here.                                       | no domain deps          |
-| `domains/vms`                     | the concrete VM market product surface: runnable buyer/storefront packages plus VM listing schema/filtering, negotiation messages/policies, settlement wiring, and provisioning. Thin role adapters bind those concepts into core. | core + kit              |
+| `kit/policy`                      | from-below middleware-chain mechanics and other policy utilities. VM inventory guards, scalar amount extraction, and Alkahest dispatch do not belong here.                                                   | no domain deps          |
+| `domains/vms`                     | the concrete VM market product surface: listing schema/filtering, negotiation messages/policies, settlement wiring, provisioning, and any VM-specific executables. It implements core hook shapes without importing core in the target graph. | kit                     |
 | compatibility packages            | existing names such as `market-service`, `market-buyer`, `market-storefront`, `registry-service`, and client packages may temporarily re-export or wrap the new locations during migration.                 | target package only     |
 
 The kit does **not** need to be one wheel — "from below" means "depended on,
-never depending up." The only kit cleanup the principle implies: ensure
-nothing in the kit imports up into the skeleton once the core is extracted.
+never depending up." The cleanup the principle implies: ensure nothing in
+the kit or domain hook packages imports up into the skeleton once the core
+is extracted.
 
 `domains/vms` should not mirror `core/`'s executable roles. The domain
 owns the concepts shared by those roles: listings are used by buyers,
@@ -164,8 +180,10 @@ storefronts, and registries for filtering/publishing/validation;
 negotiation messages and validators are shared by both participants;
 settlement is the VM market's chosen payment/escrow materialization; and
 provisioning is the VM fulfillment backend. Role-specific files under
-`domains/vms/buyer`, `domains/vms/storefront`, or `domains/vms/wiring/`
-should be thin adapters, not the main home for domain logic.
+`domains/vms/buyer`, `domains/vms/storefront`, or `domains/vms/hooks/`
+should be thin adapters over those concepts, not the main home for domain
+logic. Hook exports are shaped so a core runner can inject them, but the
+exports themselves do not import core.
 
 The old "agent" name is obsolete. Runtime VM RL negotiation policy code
 and checkpoints live under `domains/vms/negotiation/rl/`, with offline
@@ -180,23 +198,43 @@ filter-spec plus its typed client counterpart, versioned together) and the
 storefront/buyer plugins. The first realistic driver is two compute
 registries with incompatible listing shapes.
 
+### CLI surfaces
+
+The buyer CLI has a cross-domain user-facing shape: concrete domains should
+converge on common verbs such as `list` and `buy`, because buyers, scripts,
+and registry/schema plugin authors interact with that surface directly. The
+shared shape is a convention and a set of reusable utilities, not a default
+core executable. Domain buyer packages own named filter vocabularies,
+rendering, prompts, and settlement UX.
+
+The storefront CLI is different. Buyers and registries care about the
+storefront HTTP/API contract and registry publication behavior, not the
+operator command surface. A storefront can be managed entirely through an
+HTTP API or another operator tool, so `start`, `update`, `publish`, and
+similar commands are domain implementation details. If those commands share
+mechanics, put the mechanics in kit packages; do not promote the CLI itself
+into core.
+
 ### Buyer executable and schema packages
 
 The buyer CLI is part of the schema instantiation, not the invariant core.
 The concrete `market` executable should eventually come from
-`domains/vms/buyer`, not from `core`. Core can expose reusable buyer
-orchestration helpers — discover listings, call a domain-provided filter
-builder, run negotiation, and hand the resulting `Terms` to settlement —
-but it should not own a default CLI, default schema plugin, or generic
-runtime fallback. It should not know compute flags such as `--gpu-model`,
-`--ram-gb-min`, or `--virt`, nor should it assume ERC20-oriented selectors
-such as `--token-contract` are meaningful for every accepted escrow.
+`domains/vms/buyer`, not from `core`. Core can define the buyer role
+contracts and an orchestration skeleton — discover listings, call an
+injected filter/query builder, run negotiation, and hand the resulting
+`Terms` to settlement — but it should not own a default CLI, default schema
+plugin, or generic runtime fallback. The domain executable may reuse kit
+utilities and expose hook callables matching the core contract; it should
+not need to import core just to exist. Core should not know compute flags
+such as `--gpu-model`, `--ram-gb-min`, or `--virt`, nor should it assume
+ERC20-oriented selectors such as `--token-contract` are meaningful for
+every accepted escrow.
 
 Target split:
 
 | Layer | Owns |
 | ----- | ---- |
-| Core buyer helpers | callable contracts, registry fan-in helper, run-log carrier, `discover → negotiate → settle` orchestration over injected functions |
+| Core buyer role | callable contracts, registry fan-in helper, run-log carrier, `discover → negotiate → settle` orchestration over injected functions |
 | Domain buyer package | executable CLI, named filter flags, conversion from CLI args to registry filter params, listing/resource rendering, price-floor extraction, schema-specific prompts and validation |
 | Domain settlement package | accepted-escrow selection UX, proposal materialization, demand encoding, chain submission/verification |
 
