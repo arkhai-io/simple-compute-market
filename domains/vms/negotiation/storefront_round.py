@@ -198,7 +198,7 @@ def _discover_file_policies(force: bool = False) -> None:
 def _maybe_register_rl_middleware() -> None:
     """Trigger self-registration of the torch RL middleware if available."""
     try:
-        import domains.vms.agent.app.policy.torch_arkhai_strategy  # noqa: F401
+        import domains.vms.negotiation.rl.torch_arkhai_strategy  # noqa: F401
     except Exception as exc:
         logger.debug("[NEGOTIATION] torch_arkhai_strategy not available: %s", exc)
 

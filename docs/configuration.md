@@ -82,7 +82,7 @@ or `policy = "..."` is used when one escrow kind needs its own sequence.
 | `escrow_shape_guard` | Guard | every | Rejects with `escrow_field_mismatch` if any seller-pinned key on `accepted_escrows[i].literal_fields` doesn't equal the buyer's value in `escrow_proposal.literal_fields`. |
 | `max_rounds_guard` | Guard | every | Exits with `max_rounds_reached` once `len(history) >= [negotiation].max_rounds` (default 5). |
 | `bisection` | Terminal | every | Bisects between the seller's floor (`accepted_escrows[0]` primary rate × duration) and the peer's latest offer; accepts within ~1% convergence, counters at midpoint, exits with `price_unreasonable` when the peer's offer is below `floor / 1.5`. No ML dependencies. |
-| `rl` | Terminal | every | Loads the trained pufferlib checkpoint at `domains/vms/agent/app/policy/models/arkhai_negotiator_seller.pt` and produces the next move. Requires the `[rl]` extra (torch + pufferlib). Exits with `torch_unavailable` if torch isn't installed; exits with `model_missing` if the checkpoint isn't at the configured path. |
+| `rl` | Terminal | every | Loads the trained pufferlib checkpoint at `domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt` and produces the next move. Requires the `[rl]` extra (torch + pufferlib). Exits with `torch_unavailable` if torch isn't installed; exits with `model_missing` if the checkpoint isn't at the configured path. |
 | `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Terminal | every | Escrow-family names for the same scalar-`amount` bisection policy. Useful in `[negotiation.policies]` dispatch tables. |
 | `erc20_rl`, `native_token_rl`, `erc1155_rl` | Terminal | every | Escrow-family names for the same scalar-`amount` RL policy. Requires the same torch/checkpoint setup as `rl`. |
 | `accept_exact_listing` | Terminal | every | Accepts only when the buyer proposal exactly matches the selected listing escrow entry, listing-level demands, and concrete amount; rejects all mismatches and never counters. |
@@ -227,7 +227,7 @@ ones that make sense buyer-side:
 | `buyer_escrow_shape_guard` | Rejects any seller counter that diverges from a buyer-pinned escrow field (token, arbiter, escrow contract, expiration). Default first entry. |
 | `max_rounds_guard` | Same as seller — exits after `[negotiation].max_rounds`. |
 | `bisection` *(default terminal)* | Symmetric — bisects from the buyer's side (`minimize` direction). |
-| `rl` | Symmetric — loads the buyer's trained checkpoint at `domains/vms/agent/app/policy/models/arkhai_negotiator_buyer.pt`. |
+| `rl` | Symmetric — loads the buyer's trained checkpoint at `domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt`. |
 | `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Symmetric aliases for the scalar-`amount` bisection terminal. |
 | `erc20_rl`, `native_token_rl`, `erc1155_rl` | Symmetric aliases for the scalar-`amount` RL terminal. |
 | `accept_exact_listing` | Useful for non-negotiated exact-match escrow kinds. |

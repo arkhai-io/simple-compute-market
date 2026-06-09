@@ -45,13 +45,13 @@ def _maybe_register_rl_middleware() -> None:
     """Trigger self-registration of the torch RL middleware.
 
     Mirrors the storefront-side helper: imports
-    ``domains.vms.agent.app.policy.torch_arkhai_strategy`` so its
+    ``domains.vms.negotiation.rl.torch_arkhai_strategy`` so its
     ``register_negotiation_middleware("rl")`` call fires. Best-effort —
     if torch / pufferlib aren't installed, the chain loader raises its
     own actionable KeyError pointing at the [rl] extras.
     """
     try:
-        import domains.vms.agent.app.policy.torch_arkhai_strategy  # noqa: F401
+        import domains.vms.negotiation.rl.torch_arkhai_strategy  # noqa: F401
     except Exception:
         pass
 

@@ -45,7 +45,7 @@ dev = [
 [project.optional-dependencies]
 
 # Inference-only — just enough to load and run the trained .pt checkpoints
-# in domains/vms/agent/app/policy/models/. The architecture is
+# in domains/vms/negotiation/rl/models/. The architecture is
 # reproduced inline in arkhai_common.ArkhaiInferencePolicy (state-dict
 # compatible with checkpoints trained against pufferlib.models.Default,
 # verified bit-identical). Training (which still uses pufferlib's C env)

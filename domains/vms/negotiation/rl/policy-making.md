@@ -1,18 +1,18 @@
 # Compute Domain Policy Notes
 
 Core-generic policy authoring and evaluation guidance:
-- `core/agent/app/policy/policy-making.md`
+- `domains/vms/negotiation/rl/policy-making.md`
 
 ## Compute-specific modules
 
 | File | Role |
 |------|------|
-| `domains/vms/agent/app/policy/store.py` | All active compute callables (`ri.*`, `mo.*`, `negotiation.*`, fulfillment/arbitration transitions) |
-| `domains/vms/agent/app/policy/arkhai_common.py` | Shared RL utils: obs builder, model loader, action extraction |
-| `domains/vms/agent/app/policy/torch_arkhai_negotiator.py` | Active negotiation callable — puffer bilateral model inference |
-| `core/agent/app/policy/seeding.py` | Compute default policy seeding by trigger type |
-| `core/agent/app/schema/pydantic_models.py` | Compute event/resource enums and models |
-| `core/agent/app/utils/action_executor.py` | Compute-domain action execution |
+| `domains/vms/negotiation/policies.py` | All active compute callables (`ri.*`, `mo.*`, `negotiation.*`, fulfillment/arbitration transitions) |
+| `domains/vms/negotiation/rl/arkhai_common.py` | Shared RL utils: obs builder, model loader, action extraction |
+| `domains/vms/negotiation/rl/torch_arkhai_strategy.py` | Active negotiation callable — puffer bilateral model inference |
+| `domains/vms/negotiation/storefront_round.py` | Compute default policy seeding by trigger type |
+| `domains/vms/listings/models.py` | Compute event/resource enums and models |
+| `storefront/src/market_storefront/utils/action_executor.py` | Compute-domain action execution |
 
 ## Active policy chains
 
@@ -31,13 +31,13 @@ negotiation.action.safe_default_reject
 ```
 negotiation.guard.always_negotiate_on_price_diff
 negotiation.guard.bounded_rounds_and_timeout
-negotiation.action.torch_arkhai_negotiator   ← puffer bilateral model
+negotiation.rl.torch_arkhai_strategy   ← puffer bilateral model
 negotiation.action.safe_default_reject
 ```
 
 Model paths (configurable via env vars):
-- `ARKHAI_NEGOTIATOR_SELLER_MODEL_PATH` → `domains/vms/agent/app/policy/models/arkhai_negotiator_seller.pt`
-- `ARKHAI_NEGOTIATOR_BUYER_MODEL_PATH` → `domains/vms/agent/app/policy/models/arkhai_negotiator_buyer.pt`
+- `ARKHAI_NEGOTIATOR_SELLER_MODEL_PATH` → `domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt`
+- `ARKHAI_NEGOTIATOR_BUYER_MODEL_PATH` → `domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt`
 
 Train new models: `market policy train --total-timesteps 10000000 --wandb`
 Eval models: `market policy eval --episodes 20`

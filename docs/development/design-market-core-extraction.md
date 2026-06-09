@@ -167,11 +167,11 @@ provisioning is the VM fulfillment backend. Role-specific files under
 `domains/vms/buyer`, `domains/vms/storefront`, or `domains/vms/wiring/`
 should be thin adapters, not the main home for domain logic.
 
-The old "agent" name is obsolete. Current files under
-`domains/vms/agent/app/policy` are runtime VM negotiation policy code and
-checkpoints; their target home is under `domains/vms/negotiation/`
-(`policies/rl/` or equivalent), with offline training code kept under
-`domains/vms/training/`.
+The old "agent" name is obsolete. Runtime VM RL negotiation policy code
+and checkpoints live under `domains/vms/negotiation/rl/`, with offline
+training code kept under `domains/vms/training/`. The legacy
+`domains/vms/agent/app/policy` modules are compatibility wrappers during
+the migration.
 
 Distribution model (the why): a registry centralizes a schema; the
 per-schema instantiation is the _registry operator's_ deliverable. The core

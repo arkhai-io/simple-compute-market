@@ -2,7 +2,7 @@
 
 This project uses `ArkhaiPufferEnv` via `pufferlib` directly. Training produces `.pt` checkpoint files that are released as GitHub Release assets and downloaded at deployment time.
 
-Training pulls in pufferlib's C-backed env + trainer (heavy build, Python 3.12 only). **Inference does not** — the storefront and buyer load the trained `.pt` files into a small inline `ArkhaiInferencePolicy` (see `domains/vms/agent/app/policy/arkhai_common.py`) with just `torch` as a dep. The two paths are explicitly separate extras so a seller / buyer install doesn't drag in pufferlib.
+Training pulls in pufferlib's C-backed env + trainer (heavy build, Python 3.12 only). **Inference does not** — the storefront and buyer load the trained `.pt` files into a small inline `ArkhaiInferencePolicy` (see `domains/vms/negotiation/rl/arkhai_common.py`) with just `torch` as a dep. The two paths are explicitly separate extras so a seller / buyer install doesn't drag in pufferlib.
 
 ## Install
 
@@ -103,8 +103,8 @@ After training, copy the checkpoint and release it as a GitHub asset:
 
 ```bash
 # 1. Copy checkpoint to model directory
-cp experiments/puffer_arkhai_<run_id>.pt domains/vms/agent/app/policy/models/arkhai_seller.pt
-cp experiments/puffer_arkhai_<run_id>.pt domains/vms/agent/app/policy/models/arkhai_buyer.pt
+cp experiments/puffer_arkhai_<run_id>.pt domains/vms/negotiation/rl/models/arkhai_seller.pt
+cp experiments/puffer_arkhai_<run_id>.pt domains/vms/negotiation/rl/models/arkhai_buyer.pt
 
 # 2. Release to GitHub (requires gh CLI authenticated)
 make release-models VERSION=model-v0.1.0
@@ -173,8 +173,8 @@ See `agent/.env.sample` for a complete reference of all configurable variables.
 
 The trained models are loaded by the policy adapters at runtime:
 
-- `domains/vms/agent/app/policy/torch_arkhai_seller.py` loads `arkhai_seller.pt`
-- `domains/vms/agent/app/policy/torch_arkhai_buyer.py` loads `arkhai_buyer.pt`
+- `domains/vms/negotiation/rl/torch_arkhai_strategy.py` loads `arkhai_seller.pt`
+- `domains/vms/negotiation/rl/torch_arkhai_strategy.py` loads `arkhai_buyer.pt`
 - Override paths via env vars: `ARKHAI_SELLER_MODEL_PATH`, `ARKHAI_BUYER_MODEL_PATH`
 
 The policy manager chains: RL seller -> RL buyer -> rule-based accept. Each RL policy returns `None` when its `.pt` file is absent, falling through gracefully.

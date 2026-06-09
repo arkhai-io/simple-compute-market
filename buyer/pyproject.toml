@@ -25,7 +25,7 @@ test = [
 
 # RL negotiation strategy — inference only. Mirrors the storefront's
 # [rl] extra: ``uv pip install -e ".[rl]"`` runs trained pufferlib
-# checkpoints from domains/vms/agent/app/policy/models/ without
+# checkpoints from domains/vms/negotiation/rl/models/ without
 # pulling in pufferlib itself. The model architecture is reproduced
 # inline in arkhai_common.ArkhaiInferencePolicy (state-dict compatible).
 rl = [

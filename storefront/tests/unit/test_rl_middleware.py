@@ -23,8 +23,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-import domains.vms.agent.app.policy.torch_arkhai_strategy as strat_mod
-from domains.vms.agent.app.policy import arkhai_common
+import domains.vms.negotiation.rl.torch_arkhai_strategy as strat_mod
+from domains.vms.negotiation.rl import arkhai_common
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationDecision,
