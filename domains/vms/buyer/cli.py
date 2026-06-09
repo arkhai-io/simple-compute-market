@@ -5,12 +5,11 @@ from pathlib import Path
 
 import typer
 
-from market_buyer.groups.chain import chain_app
-from market_buyer.groups.network import network_app
-
 from . import buy_cli as buy_module
+from .chain_cli import chain_app
 from .config_cli import config_app
 from .logs_cli import logs_app
+from .network_cli import network_app
 from . import negotiate_cli as negotiate_module
 from . import settle_cli as settle_module
 from .escrow_cli import escrow_app
