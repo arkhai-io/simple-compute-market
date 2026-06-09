@@ -41,7 +41,7 @@ from market_buyer.buy_orchestrator import (
     run_buy,
 )
 from market_buyer.buyer_client import ResumeState, negotiate_with_seller
-from market_buyer.common import resolve_config_value
+from .common import resolve_config_value
 from market_buyer.groups._deal import (
     is_negotiation_complete,
     load_negotiation_resume_point,
@@ -114,7 +114,7 @@ def _run_resume_from(
             )
             raise typer.Exit(2)
 
-        from market_buyer.common import resolve_buyer_wallet
+        from .common import resolve_buyer_wallet
         addr, pk = resolve_buyer_wallet(
             override_addr=buyer_address, override_pk=buyer_private_key,
         )
@@ -137,7 +137,7 @@ def _run_resume_from(
             # _chain_name_from_run_log; falls back to skipping decimals
             # if the chain isn't yet known.
             from market_alkahest.token import resolve_token, TokenResolutionError
-            from market_buyer.common import chain_by_name
+            from .common import chain_by_name
             from market_buyer.groups.settle import _chain_name_from_run_log
             cname = chain_name or _chain_name_from_run_log(from_run)
             if cname:
@@ -485,7 +485,7 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(2)
 
         # Resolution: CLI flag > config.toml > derivation > default.
-        from market_buyer.common import (
+        from .common import (
             resolve_buyer_wallet,
             resolve_ssh_public_key, resolve_indexer_urls,
             resolve_discovery_timeout, resolve_indexer_auth,
@@ -770,7 +770,7 @@ def register(app: typer.Typer) -> None:
         # Without either, the buyer falls through to the default terminal
         # (RL needs torch — not installed in the lean buyer wheel).
         negotiation_chain = None
-        from market_buyer.common import resolve_negotiation_config
+        from .common import resolve_negotiation_config
         policies, policy_mode = resolve_negotiation_config()
         if policies or policy_mode:
             from market_buyer.buyer_client import _load_buyer_chain

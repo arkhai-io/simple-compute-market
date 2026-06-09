@@ -34,7 +34,7 @@ from domains.vms.listings import (
     shorten,
 )
 
-from market_buyer.common import resolve_config_value
+from .common import resolve_config_value
 
 
 listing_app = typer.Typer(no_args_is_help=True)
@@ -122,7 +122,7 @@ def listing_list(
     `_min` semantics for numerics. Without any filters, returns all open
     listings up to ``--limit``.
     """
-    from market_buyer.common import (
+    from .common import (
         resolve_indexer_urls, resolve_discovery_timeout, resolve_indexer_auth,
     )
     urls = [_normalize_registry_url(u) for u in resolve_indexer_urls(override=registry_urls)]
@@ -245,7 +245,7 @@ def listing_show(
 ) -> None:
     """Show a single listing by ID, fetched from the configured
     registry indexers — the first one that knows the listing wins."""
-    from market_buyer.common import (
+    from .common import (
         resolve_indexer_urls, resolve_discovery_timeout, resolve_indexer_auth,
     )
     from market_buyer.buy_orchestrator import fetch_listing_dict_multi

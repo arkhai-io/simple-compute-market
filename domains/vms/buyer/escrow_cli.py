@@ -22,7 +22,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from market_buyer.common import resolve_config_value
+from .common import resolve_config_value
 
 
 escrow_app = typer.Typer(no_args_is_help=True)
@@ -230,7 +230,7 @@ def reclaim_cmd(
         )
         raise typer.Exit(2)
 
-    from market_buyer.common import select_chain_for_listing
+    from .common import select_chain_for_listing
     chain_cfg = select_chain_for_listing(
         listing=None, override=chain_name or run_chain_name, yes=False,
     )
@@ -333,7 +333,7 @@ def create_cmd(
         make_buyer_payment_escrow_terms_fn,
         make_create_escrow_fn,
     )
-    from market_buyer.common import chain_by_name, select_chain_for_listing
+    from .common import chain_by_name, select_chain_for_listing
 
     deal = load_deal_context(run_id)
     if deal.escrow_uid:
@@ -371,7 +371,7 @@ def create_cmd(
             )
             raise typer.Exit(2)
         chain_cfg = chain_by_name(chain_name_flag or proposal_chain)
-        from market_buyer.common import resolve_buyer_wallet
+        from .common import resolve_buyer_wallet
         _, resolved_private_key = resolve_buyer_wallet(
             override_addr=buyer_address,
             override_pk=private_key,
@@ -576,7 +576,7 @@ def show_cmd(
             )
             raise typer.Exit(3)
 
-    from market_buyer.common import select_chain_for_listing
+    from .common import select_chain_for_listing
     chain_cfg = select_chain_for_listing(
         listing=None, override=chain_name_flag or run_chain_name, yes=False,
     )

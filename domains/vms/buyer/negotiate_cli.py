@@ -19,7 +19,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from market_buyer.buyer_client import ResumeState, negotiate_with_seller
-from market_buyer.common import resolve_config_value
+from .common import resolve_config_value
 from market_buyer.groups._cli_helpers import resolve_prices_from_matches
 from market_buyer.groups._deal import load_negotiation_resume_point
 from .run_log import RunLog
@@ -136,7 +136,7 @@ def register(app: typer.Typer) -> None:
         _max_explicit = max_price is not None
 
         # Resolution: CLI flag > config.toml > derivation.
-        from market_buyer.common import resolve_buyer_wallet
+        from .common import resolve_buyer_wallet
         addr, pk = resolve_buyer_wallet(
             override_addr=buyer_address, override_pk=buyer_private_key,
         )
@@ -169,7 +169,7 @@ def register(app: typer.Typer) -> None:
             )
 
         # Resolve registry URLs + per-registry deadline + auth once.
-        from market_buyer.common import (
+        from .common import (
             resolve_indexer_urls, resolve_discovery_timeout, resolve_indexer_auth,
         )
         reg_urls = resolve_indexer_urls(override=registry_urls)
@@ -250,7 +250,7 @@ def register(app: typer.Typer) -> None:
         # chain all come from the listing. ``--token-contract`` (when
         # set) filters entries to one ERC-20.
         from domains.vms.settlement import select_escrow_entry
-        from market_buyer.common import select_chain_for_listing
+        from .common import select_chain_for_listing
         picked_entry: Optional[dict] = None
         chain_cfg = None
         if listing_dict is not None:
@@ -405,7 +405,7 @@ def register(app: typer.Typer) -> None:
         # path blowing up. When both are unset, negotiate_with_seller
         # falls through to its default chain.
         chain = None
-        from market_buyer.common import resolve_negotiation_config
+        from .common import resolve_negotiation_config
         policies, policy_mode = resolve_negotiation_config()
         if policies or policy_mode:
             from market_buyer.buyer_client import _load_buyer_chain

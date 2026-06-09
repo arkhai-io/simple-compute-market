@@ -127,7 +127,7 @@ def run_settle_from_log(
         if token_decimals is not None
         else (int(deal.token_decimals) if deal.token_decimals is not None else None)
     )
-    from market_buyer.common import chain_by_name
+    from .common import chain_by_name
     chain_cfg_name = (
         chain_name
         or _accepted_proposal_chain(deal)
@@ -143,7 +143,7 @@ def run_settle_from_log(
         raise typer.Exit(2)
     chain_cfg = chain_by_name(chain_cfg_name)
     if deal.accepted_escrow_proposal is not None:
-        from market_buyer.common import resolve_buyer_wallet, resolve_ssh_public_key
+        from .common import resolve_buyer_wallet, resolve_ssh_public_key
 
         resolved_buyer_address, resolved_buyer_private_key = resolve_buyer_wallet(
             override_addr=buyer_address,
