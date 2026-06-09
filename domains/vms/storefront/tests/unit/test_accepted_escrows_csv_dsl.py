@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from market_storefront.utils.resource_csv_importer import (
+from domains.vms.listings.resource_csv_importer import (
     parse_accepted_escrows_cell,
 )
 from market_config.config_loader import EscrowTemplate, RateSlot

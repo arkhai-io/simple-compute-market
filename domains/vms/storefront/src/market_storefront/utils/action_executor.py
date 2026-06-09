@@ -42,7 +42,7 @@ from domains.vms.listings.models import (
     Listing,
     TokenResource,
 )
-from market_storefront.resources import parse_resource_from_dict
+from domains.vms.listings.resources import parse_resource_from_dict
 
 from domains.vms.listings.reconciler import (
     mark_derived_listings_closed,

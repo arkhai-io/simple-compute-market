@@ -9,7 +9,7 @@ from domains.vms.listings.models import (
     Region,
     TokenResource,
 )
-from market_storefront.resources import (
+from domains.vms.listings.resources import (
     adapt_db_resource_to_domain_resource,
     adapt_domain_resource_to_db_resource,
     parse_resource_from_dict,

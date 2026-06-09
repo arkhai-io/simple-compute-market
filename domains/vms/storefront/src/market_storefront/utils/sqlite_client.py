@@ -11,10 +11,14 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from domains.vms.listings.host_csv_importer import upsert_hosts_from_csv
+from domains.vms.listings.resource_csv_importer import (
+    upsert_resources_from_csv,
+    upsert_resources_from_csv_content,
+)
+
 from .config import settings
-from .host_csv_importer import upsert_hosts_from_csv
 from .migrations import apply_schema_migrations, synthesize_accepted_escrows_from_demand
-from .resource_csv_importer import upsert_resources_from_csv, upsert_resources_from_csv_content
 
 logger = logging.getLogger(__name__)
 

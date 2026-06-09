@@ -13,7 +13,7 @@ import textwrap
 
 import pytest
 
-from market_storefront.resources import ComputeGpuResourceAdapter
+from domains.vms.listings.resources import ComputeGpuResourceAdapter
 from domains.vms.listings.models import (
     ComputeResource,
     GPUModel,
@@ -373,7 +373,7 @@ class TestAdapterHostJoin:
 # ---------------------------------------------------------------------------
 
 
-from market_storefront.utils.capacity import CapacityExceededError
+from domains.vms.provisioning.capacity import CapacityExceededError
 
 
 class TestCapacityEnforcement:

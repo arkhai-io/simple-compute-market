@@ -515,7 +515,10 @@ Top-level folder tracker:
    provisioning service and storefront-facing provisioning hooks.
 8. **Done: remove compute listing reconciliation wrapper.** Storefront
    callers import `domains.vms.listings.reconciler` directly.
-9. **Next: drain `domains/vms/storefront/` internals.** Move remaining
+9. **Done: remove VM resource/import wrapper modules.** Storefront code
+   imports VM listing resources, resource CSV import, host CSV import, and
+   capacity checks directly from `domains.vms.*`.
+10. **Next: drain `domains/vms/storefront/` internals.** Move remaining
    schema-invariant storefront runtime into `core/storefront`, and VM
    listing/negotiation/settlement/provisioning hooks into `domains/vms/*`.
 
