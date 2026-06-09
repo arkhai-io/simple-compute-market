@@ -521,7 +521,11 @@ Top-level folder tracker:
 10. **Done: remove stale storefront validation helpers.** Validation and
    strategy selection now live directly in VM listing modules rather than
    a storefront utility wrapper.
-11. **Next: drain `domains/vms/storefront/` internals.** Move remaining
+11. **Done: remove pure VM helper exports from action executor.** VM
+   pricing, compute extraction, and compute lease encoding are referenced
+   through `domains.vms.listings` / `domains.vms.settlement`; the
+   storefront action executor remains only as stateful composition.
+12. **Next: drain `domains/vms/storefront/` internals.** Move remaining
    schema-invariant storefront runtime into `core/storefront`, and VM
    listing/negotiation/settlement/provisioning hooks into `domains/vms/*`.
 
@@ -596,7 +600,7 @@ domains/vms/storefront/src/market_storefront/server.py  seam 4 — VM compositio
 core/src/market_core/storefront/auth.py       seam 4 — framework-free signed request/admin-key verification
 domains/vms/storefront/src/market_storefront/middleware/  seam 4 FastAPI/settings auth wrappers
 domains/vms/storefront/.../utils/sync_negotiation.py      seam 4 — per-round protocol; seam 1 normalization only
-domains/vms/storefront/.../utils/action_executor.py       seam 4 — stateful storefront wrapper; registry publication now delegates to market_core
+domains/vms/storefront/.../utils/action_executor.py       seam 4 — stateful storefront wrapper; pure VM pricing/encoding helpers moved to domains/vms
 kit/policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escrow guard
 kit/policy/                                   package migration — generic policy-chain machinery; wheel/import names unchanged
 domains/vms/provisioning/service/             package migration — VM provisioning service; wheel/import names unchanged

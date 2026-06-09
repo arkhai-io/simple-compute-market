@@ -1,6 +1,6 @@
 """Tests for the seller's price-extraction logic.
 
-``_extract_initial_price_from_order(order)`` is the seller's read of the
+``_extract_initial_price_from_order(order)`` is the seller's configured read of the
 listing's price floor. Source is ``accepted_escrows[0].rates[0].value``.
 Tristate semantics:
 
@@ -20,7 +20,8 @@ from domains.vms.listings.models import (
     Listing,
     Region,
 )
-from market_storefront.utils.action_executor import _extract_initial_price_from_order
+from domains.vms.listings.pricing import extract_initial_price_from_order
+from market_storefront.utils.config import settings
 from tests._settings_overrides import settings_overrides
 
 
@@ -50,6 +51,13 @@ def _make_listing(*, demand_amount: int | None) -> Listing:
             "rates": rates,
         }],
         seller="http://seller:8001",
+    )
+
+
+def _extract_initial_price_from_order(order: Listing | dict) -> int | float:
+    return extract_initial_price_from_order(
+        order,
+        default_min_price=settings.pricing.default_min_price,
     )
 
 

@@ -518,10 +518,10 @@ escrow); the rest is forward shape.
 row via `sqlite_client.upsert_listing`, then (unless `paused=True`)
 publishes to the configured registries. Close is the symmetric
 procedural path: SQLite update → registry unpublish. No policy step
-gates either operation. `_extract_initial_price_from_order` reads the
-primary rate via `primary_rate_value(accepted_escrows[0])`; its
-hidden-reserve fallback (empty `rates`) is
-`[seller.pricing].default_min_price`.
+gates either operation. `domains.vms.listings.pricing.extract_initial_price_from_order`
+reads the primary rate via `primary_rate_value(accepted_escrows[0])`; its
+storefront binding supplies `[seller.pricing].default_min_price` as the
+hidden-reserve fallback for empty `rates`.
 
 **Escrow templates (CSV → `accepted_escrows`):** sellers populate
 `accepted_escrows` per-resource via the templates DSL in the resource CSV:
@@ -612,11 +612,11 @@ returns the first `Some<Response>`; raises if the chain exhausts (the
 terminal middleware must always return `Some`).
 
 **Negotiation direction:** determined by
-`determine_strategy_from_resources()` in `utils/validation.py`. Listings
-carry an `offer_resource`; the payment side lives in `accepted_escrows`.
-Seller offering `ComputeResource` → direction `"maximize"` (highest
-price the buyer will pay). The buyer's CLI runs in `"minimize"` from the
-other side.
+`domains.vms.listings.strategy.determine_strategy_from_resources()`.
+Listings carry an `offer_resource`; the payment side lives in
+`accepted_escrows`. Seller offering `ComputeResource` → direction
+`"maximize"` (highest price the buyer will pay). The buyer's CLI runs in
+`"minimize"` from the other side.
 
 **Policy loader:** `_load_storefront_chain()` in `sync_negotiation.py`
 reads `[negotiation] policies` from `storefront.toml`. If it is a list,
@@ -633,10 +633,11 @@ including built-in policies, the buyer's aggregation policy, and how
 to write a custom one.
 
 **`our_price` source:** the terminal middleware reads it via
-`_extract_initial_price_from_order()` in `action_executor.py`, which
-calls `primary_rate_value(accepted_escrows[0])`. This is the seller's
-price floor — the buyer's opening offer must be at or above this value
-for the seller to counter rather than exit immediately.
+`domains.vms.listings.pricing.extract_initial_price_from_order()`, with
+the storefront passing its configured default minimum price for hidden
+reserve listings. This calls `primary_rate_value(accepted_escrows[0])`.
+It is the seller's price floor — the buyer's opening offer must be at or
+above this value for the seller to counter rather than exit immediately.
 
 **`checks.negotiation_strategy` in system status:** `GET /api/v1/system/status`
 includes a `negotiation_strategy` check that instantiates the configured

@@ -17,15 +17,9 @@ from market_core.storefront.stage_log import stage_event
 from alkahest_py import AlkahestClient
 from market_core.registry_publication import (
     close_listing_in_registries,
-    ensure_json_obj as _ensure_json_obj,  # noqa: F401 - compatibility export
     publish_listing_to_registries,
 )
 
-from domains.vms.listings import (
-    extract_compute_from_order as _vm_extract_compute_from_order,
-    extract_initial_price_from_order as _vm_extract_initial_price_from_order,
-    resource_is_compute as _vm_resource_is_compute,
-)
 from domains.vms.provisioning import (
     build_provisioning_job_spec as _vm_build_provisioning_job_spec,
     fulfill_vm_obligation,
@@ -33,17 +27,8 @@ from domains.vms.provisioning import (
     register_vm_lease,
     schedule_vm_expiry_and_wait,
 )
-from domains.vms.settlement import (
-    encode_compute_lease as _vm_encode_compute_lease,
-    token_resource_from_accepted_escrow as _vm_token_resource_from_accepted_escrow,
-)
-from domains.vms.listings.models import (
-    ComputeResource,
-    Listing,
-    TokenResource,
-)
-from domains.vms.listings.resources import parse_resource_from_dict
 
+from domains.vms.listings.models import Listing
 from domains.vms.listings.reconciler import (
     mark_derived_listings_closed,
     stale_open_listing_ids,
@@ -67,13 +52,6 @@ def _is_http_url(value: str | None) -> bool:
         return False
     parsed = urlparse(value.strip())
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
-
-
-
-
-def _resource_is_compute(resource: Any) -> bool:
-    """Compatibility wrapper for VM-domain compute resource detection."""
-    return _vm_resource_is_compute(resource)
 
 
 def _coerce_agent_reference_to_url(agent_ref: str | None) -> str | None:
@@ -223,20 +201,6 @@ def _sender_id() -> str:
     return _canonical_agent_id() or AGENT_ID
 
 
-def extract_compute_from_order(order: dict) -> dict:
-    """Compatibility wrapper for VM-domain compute extraction."""
-    return _vm_extract_compute_from_order(order)
-
-
-def _extract_initial_price_from_order(order: Listing | dict) -> int | float:
-    """Compatibility wrapper for VM-domain price-floor extraction."""
-    return _vm_extract_initial_price_from_order(
-        order,
-        default_min_price=settings.pricing.default_min_price,
-    )
-
-
-
 async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
     """Publish a new order to the registry so discoverers can find it.
 
@@ -333,29 +297,6 @@ async def _record_publications(
                 "[PUBLICATIONS] Failed to record publication for %s @ %s: %s",
                 listing_id, r.get("registry_url"), exc,
             )
-
-
-def _token_resource_from_accepted_escrow(
-    accepted_escrow: dict[str, Any] | Any,
-) -> TokenResource | None:
-    """Compatibility wrapper for VM-domain token materialization."""
-    return _vm_token_resource_from_accepted_escrow(
-        accepted_escrow,
-        chain_configs=CHAINS,
-    )
-
-
-def encode_compute_lease(
-    compute_resource: ComputeResource | dict[str, Any],
-    token_resource: TokenResource | dict[str, Any],
-    duration_seconds: int,
-) -> bytes:
-    """Compatibility wrapper for VM-domain compute lease encoding."""
-    return _vm_encode_compute_lease(
-        compute_resource=compute_resource,
-        token_resource=token_resource,
-        duration_seconds=duration_seconds,
-    )
 
 
 async def _build_provisioning_job_spec(
