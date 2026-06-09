@@ -31,7 +31,7 @@ escrow_app = typer.Typer(no_args_is_help=True)
 def _resolve_escrow_uid_from_run(run_id: str) -> Optional[str]:
     """Read a buyer run-log JSONL and return the most recent
     escrow_uid logged by the buy_orchestrator."""
-    from market_buyer.run_log import read_run
+    from .run_log import read_run
 
     events = read_run(run_id)
     if not events:

@@ -22,7 +22,7 @@ from market_buyer.buyer_client import ResumeState, negotiate_with_seller
 from market_buyer.common import resolve_config_value
 from market_buyer.groups._cli_helpers import resolve_prices_from_matches
 from market_buyer.groups._deal import load_negotiation_resume_point
-from market_buyer.run_log import RunLog
+from .run_log import RunLog
 
 
 def register(app: typer.Typer) -> None:

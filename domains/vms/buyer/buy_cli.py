@@ -48,7 +48,7 @@ from market_buyer.groups._deal import (
     open_run_log,
 )
 from market_buyer.groups.settle import run_settle_from_log
-from market_buyer.run_log import RunLog
+from .run_log import RunLog
 
 
 def _confirm_settlement_interactive(*, terms, listing: dict, console: Console) -> bool:

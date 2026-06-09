@@ -28,7 +28,7 @@ from market_buyer.buy_orchestrator import (
     wait_for_settlement,
 )
 from market_buyer.groups._deal import load_deal_context, open_run_log, resolve_chain_settings
-from market_buyer.run_log import read_run
+from .run_log import read_run
 
 
 def _chain_name_from_run_log(run_id: str) -> Optional[str]:
