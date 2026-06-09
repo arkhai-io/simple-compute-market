@@ -21,6 +21,7 @@ from __future__ import annotations
 from fastapi import HTTPException, Security
 from fastapi.security import APIKeyHeader
 
+from market_core.storefront.auth import AuthError, verify_admin_key
 from market_storefront.utils.config import settings
 
 _admin_key_header = APIKeyHeader(
@@ -36,10 +37,7 @@ def require_admin_key(key: str | None = Security(_admin_key_header)) -> None:
     are unprotected — matching the previous middleware behaviour.
     """
     configured = settings.admin_api_key
-    if not configured:
-        return  # dev mode — unprotected
-    if not key or key != configured:
-        raise HTTPException(
-            status_code=403,
-            detail="Valid X-Admin-Key header required",
-        )
+    try:
+        verify_admin_key(configured=configured, supplied=key)
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

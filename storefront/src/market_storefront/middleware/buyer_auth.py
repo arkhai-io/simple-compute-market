@@ -19,17 +19,14 @@ mismatched identity claim.
 """
 from __future__ import annotations
 
-import logging
-import time
-
 from fastapi import HTTPException, Request
 
-from market_identity import Identity, get_identity_verifier
-
-logger = logging.getLogger(__name__)
-
-_MAX_TIMESTAMP_SKEW = 300  # seconds
-_DEFAULT_SCHEME = "eip191"
+from market_core.storefront.auth import (
+    AuthError,
+    resolve_buyer_identity as _core_resolve_buyer_identity,
+    verify_buyer_signature,
+)
+from market_identity import Identity
 
 
 def _resolve_buyer_identity(request: Request, claimed_address: str) -> Identity:
@@ -38,65 +35,25 @@ def _resolve_buyer_identity(request: Request, claimed_address: str) -> Identity:
     Raises HTTPException when the headers carry an identity that
     disagrees with the body's ``buyer_address`` (the legacy claim path).
     """
-    scheme = request.headers.get("X-Identity-Scheme") or _DEFAULT_SCHEME
-    header_identifier = request.headers.get("X-Identity")
-    identifier = header_identifier or claimed_address
-    identity = Identity(scheme=scheme, identifier=identifier)
-
-    if header_identifier is not None and scheme == _DEFAULT_SCHEME:
-        # Both header-supplied and body-supplied: must match. Compare on the
-        # normalized form so EIP-191 case differences don't reject.
-        if identity.identifier != claimed_address.lower():
-            raise HTTPException(
-                status_code=403,
-                detail="X-Identity does not match buyer_address",
-            )
-    return identity
+    try:
+        return _core_resolve_buyer_identity(request.headers, claimed_address)
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 def _verify(
     request: Request, operation: str, resource_id: str, claimed_address: str
 ) -> None:
     """Core signed-request verification; raises HTTPException on failure."""
-    if not claimed_address or not claimed_address.startswith("0x") or len(claimed_address) != 42:
-        raise HTTPException(status_code=400, detail="Missing or malformed buyer_address")
-
-    sig = request.headers.get("X-Signature")
-    ts_raw = request.headers.get("X-Timestamp")
-    if not sig or not ts_raw:
-        raise HTTPException(status_code=403, detail="Missing auth headers")
-
     try:
-        ts = int(ts_raw)
-    except ValueError:
-        raise HTTPException(status_code=403, detail="Invalid X-Timestamp")
-
-    if abs(time.time() - ts) > _MAX_TIMESTAMP_SKEW:
-        raise HTTPException(status_code=403, detail="Timestamp out of range")
-
-    identity = _resolve_buyer_identity(request, claimed_address)
-
-    try:
-        verifier = get_identity_verifier(identity.scheme)
-    except KeyError:
-        raise HTTPException(
-            status_code=400, detail=f"Unknown identity scheme: {identity.scheme}"
+        verify_buyer_signature(
+            headers=request.headers,
+            operation=operation,
+            resource_id=resource_id,
+            claimed_address=claimed_address,
         )
-
-    message = f"{operation}:{resource_id}:{ts}".encode("utf-8")
-    try:
-        proof = bytes.fromhex(sig.removeprefix("0x"))
-    except ValueError:
-        raise HTTPException(status_code=403, detail="Malformed X-Signature")
-
-    if not verifier.verify_signature(identity, message, proof):
-        logger.warning(
-            "[BUYER AUTH] Invalid signature for %s resource=%s claimed=%s scheme=%s",
-            operation, resource_id, claimed_address, identity.scheme,
-        )
-        raise HTTPException(
-            status_code=403, detail="Invalid signature for claimed buyer identity"
-        )
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 # ---------------------------------------------------------------------------

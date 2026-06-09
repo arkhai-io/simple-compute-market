@@ -20,17 +20,15 @@ different identity than the one its signature attests.
 """
 from __future__ import annotations
 
-import logging
-import time
-
 from fastapi import HTTPException, Request
 
-from market_identity import Identity, get_identity_verifier
-
-logger = logging.getLogger(__name__)
-
-_MAX_TIMESTAMP_SKEW = 300  # seconds
-_DEFAULT_SCHEME = "eip191"
+from market_core.storefront.auth import (
+    AuthError,
+    DEFAULT_IDENTITY_SCHEME,
+    resolve_expected_identity,
+    verify_expected_identity_signature,
+)
+from market_identity import Identity
 
 
 def _expected_identity() -> Identity | None:
@@ -40,7 +38,7 @@ def _expected_identity() -> Identity | None:
     owner = settings.wallet.address
     if not owner:
         return None
-    return Identity(scheme=_DEFAULT_SCHEME, identifier=owner)
+    return Identity(scheme=DEFAULT_IDENTITY_SCHEME, identifier=owner)
 
 
 def _resolve_identity(request: Request, expected: Identity) -> Identity:
@@ -49,17 +47,10 @@ def _resolve_identity(request: Request, expected: Identity) -> Identity:
     Raises HTTPException(403) when the client supplies an identity that
     disagrees with the storefront's configured identity.
     """
-    scheme = request.headers.get("X-Identity-Scheme") or expected.scheme
-    identifier = request.headers.get("X-Identity") or expected.identifier
-    claimed = Identity(scheme=scheme, identifier=identifier)
-
-    if claimed.scheme != expected.scheme:
-        raise HTTPException(status_code=403, detail="Identity scheme mismatch")
-    if claimed.identifier != expected.identifier:
-        # Identity.identifier is already lowercased for eip191 via the model
-        # validator, so the comparison is safe.
-        raise HTTPException(status_code=403, detail="Identity mismatch")
-    return claimed
+    try:
+        return resolve_expected_identity(request.headers, expected)
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 def verify_seller_signature(
@@ -73,45 +64,15 @@ def verify_seller_signature(
     supplies ``operation`` and ``resource_id`` from path/body params.
     """
     expected = _expected_identity()
-    if expected is None:
-        return  # Auth disabled in local dev
-
-    sig = request.headers.get("X-Signature")
-    ts_raw = request.headers.get("X-Timestamp")
-    if not sig or not ts_raw:
-        logger.warning("[SELLER AUTH] Missing headers for %s", operation)
-        raise HTTPException(status_code=403, detail="Missing auth headers")
-
     try:
-        ts = int(ts_raw)
-    except ValueError:
-        raise HTTPException(status_code=403, detail="Invalid X-Timestamp")
-
-    if abs(time.time() - ts) > _MAX_TIMESTAMP_SKEW:
-        raise HTTPException(status_code=403, detail="Timestamp out of range")
-
-    identity = _resolve_identity(request, expected)
-
-    try:
-        verifier = get_identity_verifier(identity.scheme)
-    except KeyError:
-        raise HTTPException(
-            status_code=400, detail=f"Unknown identity scheme: {identity.scheme}"
+        verify_expected_identity_signature(
+            headers=request.headers,
+            operation=operation,
+            resource_id=resource_id,
+            expected=expected,
         )
-
-    message = f"{operation}:{resource_id}:{ts}".encode("utf-8")
-    try:
-        proof = bytes.fromhex(sig.removeprefix("0x"))
-    except ValueError:
-        raise HTTPException(status_code=403, detail="Malformed X-Signature")
-
-    if not verifier.verify_signature(identity, message, proof):
-        logger.warning(
-            "[SELLER AUTH] Invalid signature for %s resource=%s",
-            operation,
-            resource_id,
-        )
-        raise HTTPException(status_code=403, detail="Invalid signature")
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 def make_seller_auth_dep(operation: str):
