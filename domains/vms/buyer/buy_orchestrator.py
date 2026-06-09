@@ -825,7 +825,7 @@ def _legacy_negotiate_matches(
         })
         return outcome
 
-    from market_buyer.aggregation import load_aggregation_policy
+    from .aggregation import load_aggregation_policy
     policy = load_aggregation_policy(config.aggregation_policy)
 
     try:

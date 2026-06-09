@@ -47,7 +47,7 @@ from .deal_helpers import (
     load_negotiation_resume_point,
     open_run_log,
 )
-from market_buyer.groups.settle import run_settle_from_log
+from .settle_cli import run_settle_from_log
 from .run_log import RunLog
 
 
@@ -138,7 +138,7 @@ def _run_resume_from(
             # if the chain isn't yet known.
             from market_alkahest.token import resolve_token, TokenResolutionError
             from .common import chain_by_name
-            from market_buyer.groups.settle import _chain_name_from_run_log
+            from .settle_cli import _chain_name_from_run_log
             cname = chain_name or _chain_name_from_run_log(from_run)
             if cname:
                 try:
