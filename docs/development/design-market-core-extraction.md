@@ -490,6 +490,36 @@ Recommended order:
    and deployment paths, run unit/e2e, then remove wrappers in a separate
    cleanup once consumers are on the new import paths.
 
+Top-level folder tracker:
+
+1. **Done: remove `domain/`.** This was a stale one-file package; the real
+   domain namespace is `domains/`.
+2. **Done: remove top-level `provisioning-service/` from git.** The VM
+   fulfillment backend lives under `domains/vms/provisioning/service/`.
+   Any remaining top-level `provisioning-service/` directory is ignored
+   local build/cache state, not repo source.
+3. **Done: remove top-level registry packages.** The registry service and
+   protocol clients live under `core/` while preserving their import/wheel
+   names.
+4. **In progress: drain `buyer/`.** Its implementation has moved into
+   `domains/vms/buyer/`; the remaining top-level folder is currently the
+   VM buyer packaging/test project. The next cleanup is to decide whether
+   that packaging/test project also moves under `domains/vms/buyer/`, or
+   whether it remains as the installable VM-domain executable root until a
+   broader packaging pass.
+5. **Next: drain `service/`.** This package currently aliases shared
+   schemas/config/client helpers now split across `core/` and `kit/`.
+   Remove it only after storefront, buyer tests, integration tests, and
+   package dependencies import those target packages directly.
+6. **Then: drain `storefront/`.** Move schema-invariant storefront runtime
+   into `core/storefront`, and VM listing/negotiation/settlement/
+   provisioning hooks into `domains/vms/*`. Delete the top-level package
+   after deployment paths and tests depend on the new homes.
+
+This tracker intentionally ignores generated or local-only top-level
+directories such as `.dist/`, `.uv-cache/`, `.pytest_cache/`, `src/`,
+`shared-env/`, and ignored `provisioning-service/` cache state.
+
 ## Phases
 
 1. **Seam 1** (done): escrow guard → chain middleware. Default behavior
