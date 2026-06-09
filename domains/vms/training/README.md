@@ -11,7 +11,7 @@ Training pulls in pufferlib's C-backed env + trainer (heavy build, Python 3.12 o
 cd kit/policy && uv pip install -e ".[training]"
 
 # Inference only (storefront / buyer at runtime)
-cd storefront && uv pip install -e ".[rl]"   # torch only, no pufferlib
+cd domains/vms/storefront && uv pip install -e ".[rl]"   # torch only, no pufferlib
 cd domains/vms/buyer && uv pip install -e ".[rl]"
 ```
 

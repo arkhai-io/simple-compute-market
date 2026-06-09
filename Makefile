@@ -27,7 +27,7 @@ dist-storefront-client: ## Build arkhai-storefront-client wheel into .dist/
 
 dist-storefront: ## Build market-storefront wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd storefront && uv build --wheel --out-dir $(DIST_DIR)
+	cd domains/vms/storefront && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/market_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: market-storefront produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
@@ -94,7 +94,7 @@ test-registry:
 	cd core/registry && make reinit && make test
 
 test-storefront:
-	cd storefront && make reinit && make test
+	cd domains/vms/storefront && make reinit && make test
 
 #Basic flow: build (optional), init (downloads if not built), run
 # `build` produces the production artifacts: the three runtime images
@@ -126,9 +126,9 @@ build-buyer: init-prerequisites init-buyer
 # Regenerate the baked Anvil state + Alkahest address book by running
 # EnvTestManager once and snapshotting its chain (see test-env/generate_state.py).
 # Runs through the storefront venv, which pins alkahest_py; the relative
-# --find-links keeps storefront/uv.lock paths portable.
+# --find-links keeps domains/vms/storefront/uv.lock paths portable.
 build-anvil-state:
-	cd storefront && uv run --find-links ../.dist python ../test-env/generate_state.py
+	cd domains/vms/storefront && uv run --find-links ../../../.dist python ../../../test-env/generate_state.py
 
 build-test-env: build-anvil-state
 	cd test-env && make build
@@ -137,7 +137,7 @@ build-registry:
 	cd core/registry && make build
 
 build-storefront:
-	cd storefront && make build
+	cd domains/vms/storefront && make build
 
 build-provisioning:
 	cd domains/vms/provisioning/service && make build
@@ -167,7 +167,7 @@ init-buyer:
 	cd domains/vms/buyer && make init
 
 init-storefront: dist-policy dist-provisioning dist-storefront-client dist-registry
-	cd storefront && make init
+	cd domains/vms/storefront && make init
 
 init-registry-service: dist-registry
 	cd core/registry && make init
@@ -204,7 +204,7 @@ deploy-registry:
 	cd core/registry && make deploy
 
 deploy-storefront:
-	cd storefront && make deploy
+	cd domains/vms/storefront && make deploy
 
 deploy-provisioning:
 	cd domains/vms/provisioning/service && make deploy

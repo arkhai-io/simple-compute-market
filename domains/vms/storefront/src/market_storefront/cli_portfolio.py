@@ -6,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from .cli_common import REPO_ROOT
+from .cli_common import STOREFRONT_ROOT
 
 
 portfolio_app = typer.Typer(no_args_is_help=True)
@@ -27,7 +27,7 @@ def portfolio_import_csv(
 ) -> None:
     """Import resource portfolio rows from CSV into the agent DB.
 
-    Calls `storefront/scripts/import_resources_csv.py` directly. Used
+    Calls the package's `scripts/import_resources_csv.py` directly. Used
     on a freshly provisioned seller before `provide` to seed the
     `resources` table.
     """
@@ -41,7 +41,7 @@ def portfolio_import_csv(
         if settings.db_path:
             db_path = settings.db_path
 
-    script = REPO_ROOT / "storefront" / "scripts" / "import_resources_csv.py"
+    script = STOREFRONT_ROOT / "scripts" / "import_resources_csv.py"
     if not script.exists():
         raise typer.BadParameter(f"Import script not found: {script}")
 
@@ -55,4 +55,4 @@ def portfolio_import_csv(
         cmd += ["--dry-run"]
 
     typer.echo(f"==> Import resource portfolio from CSV: {csv_file}")
-    subprocess.run(cmd, cwd=str(REPO_ROOT / "storefront"), check=True)
+    subprocess.run(cmd, cwd=str(STOREFRONT_ROOT), check=True)

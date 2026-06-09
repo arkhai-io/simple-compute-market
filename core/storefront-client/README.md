@@ -69,7 +69,7 @@ claim_listing    →  "claim_listing:<listing_id>:<timestamp>"
 discover_listings → "discover_listings:<listing_id>:<timestamp>"
 ```
 
-If this format changes in `storefront/src/market_storefront/agent.py`,
+If this format changes in `domains/vms/storefront/src/market_storefront/agent.py`,
 bump `storefront-client` version and update `_build_auth_headers` in
 `client.py` in the same commit.
 

@@ -344,7 +344,7 @@ registry would conflict if a folder name overlapped.)
 
 ## Reference
 
-- Seller settings schema: `storefront/src/market_storefront/settings.toml`.
+- Seller settings schema: `domains/vms/storefront/src/market_storefront/settings.toml`.
 - Buyer settings example: `domains/vms/buyer/config_cli.py` (the
   `init-user` template comment).
 - Middleware module: `kit/policy/src/market_policy/negotiation_middleware.py`.

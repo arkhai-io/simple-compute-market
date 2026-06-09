@@ -14,8 +14,10 @@ import subprocess
 
 import typer
 
-# parents[3]: market_storefront → src → storefront → repo root
-REPO_ROOT = Path(__file__).resolve().parents[3]
+# parents[2]: market_storefront -> src -> storefront
+STOREFRONT_ROOT = Path(__file__).resolve().parents[2]
+# parents[5]: market_storefront -> src -> storefront -> vms -> domains -> repo root
+REPO_ROOT = Path(__file__).resolve().parents[5]
 
 
 def resolve_storefront_url(
@@ -59,8 +61,8 @@ def run_step(
     typer.echo(f"==> {label} at {cwd}")
     env = os.environ.copy()
     venv_path = cwd / ".venv"
-    if cwd.resolve() == (REPO_ROOT / "storefront").resolve():
-        storefront_venv = REPO_ROOT / "storefront" / ".venv"
+    if cwd.resolve() == STOREFRONT_ROOT.resolve():
+        storefront_venv = STOREFRONT_ROOT / ".venv"
         if storefront_venv.exists():
             venv_path = storefront_venv
     venv_bin = venv_path / "bin"

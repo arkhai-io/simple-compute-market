@@ -2,13 +2,13 @@ IMAGE_NAME ?= arkhai
 IMAGE_TAG  ?= storefront
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 
-# Path to the monorepo .dist/ wheel directory, relative to storefront/.
+# Path to the monorepo .dist/ wheel directory, relative to domains/vms/storefront/.
 # Used by uv when resolving pure-Python internal packages
 # (market-policy, provisioning-service) that are
 # distributed as wheels rather than editable source installs. The
 # Dockerfile passes --find-links /dist on the uv sync CLI instead;
 # this variable is for local development only.
-DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
+DIST_DIR ?= $(abspath $(CURDIR)/../../../.dist)
 
 .PHONY: build build-images build-no-cache deploy deploy-storefront init reinit test test-unit test-integration
 
@@ -36,11 +36,11 @@ reinit: ## Force-reinstall internal wheels without bumping versions. Use after m
 build: build-images
 
 build-images:
-	docker build --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false -t ${IMAGE_NAME}:${IMAGE_TAG} ..
+	docker build --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false -t ${IMAGE_NAME}:${IMAGE_TAG} ../../..
 	docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX)
 
 build-no-cache: ## Full Docker cache bust — use when .dist/ changes are not picked up by build-images.
-	docker build --no-cache --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false -t ${IMAGE_NAME}:${IMAGE_TAG} ..
+	docker build --no-cache --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false -t ${IMAGE_NAME}:${IMAGE_TAG} ../../..
 	docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX)
 
 test: reinit test-unit test-integration ## Run all tests

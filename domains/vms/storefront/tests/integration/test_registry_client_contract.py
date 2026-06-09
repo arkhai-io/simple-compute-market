@@ -125,7 +125,7 @@ class TestListingRequestConstructor:
                 max_duration_seconds=order_dict.get("max_duration_seconds"),
             )
         If this raises TypeError the installed registry_client wheel is stale.
-        Run: make dist-registry-client && make reinit (in storefront/)
+        Run: make dist-registry-client && make reinit (in domains/vms/storefront/)
         """
         req = ListingRequest(
             listing_id=uuid.uuid4().hex,

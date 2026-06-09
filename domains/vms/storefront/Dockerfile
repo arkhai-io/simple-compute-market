@@ -16,7 +16,7 @@ WORKDIR /app
 # These are built on the host by `make dist` before `docker build`.
 COPY .dist/ /.dist/
 
-COPY storefront/pyproject.toml storefront/uv.lock storefront/entrypoint.sh ./
+COPY domains/vms/storefront/pyproject.toml domains/vms/storefront/uv.lock domains/vms/storefront/entrypoint.sh ./
 COPY core/ ../core/
 COPY kit/identity/ ../kit/identity/
 COPY kit/alkahest/ ../kit/alkahest/
@@ -86,8 +86,8 @@ ENV XDG_CONFIG_HOME="/etc"
 # /app/src/market_storefront so it's importable via the venv-installed
 # package; the domains/ tree is copied in for compute-domain policy
 # callables that the storefront's PolicyManager discovers at startup.
-COPY --chown=appuser:appuser storefront/src ./src
-COPY --chown=appuser:appuser storefront/scripts ./scripts
+COPY --chown=appuser:appuser domains/vms/storefront/src ./src
+COPY --chown=appuser:appuser domains/vms/storefront/scripts ./scripts
 COPY --chown=appuser:appuser domains/ ./domains/
 COPY --chown=appuser:appuser core/ ../core/
 COPY --chown=appuser:appuser kit/identity/ ../kit/identity/
@@ -100,7 +100,7 @@ COPY --chown=appuser:appuser kit/policy/ ../kit/policy/
 # now install the project itself so the `market-storefront` console
 # script is written to .venv/bin/.
 # /.dist/ carries the internal wheels needed for --find-links resolution.
-COPY --chown=appuser:appuser storefront/pyproject.toml storefront/uv.lock ./
+COPY --chown=appuser:appuser domains/vms/storefront/pyproject.toml domains/vms/storefront/uv.lock ./
 # Copy wheels directly from the build context (not from the builder stage).
 # Using --from=builder here would serve a cached /.dist that Docker baked at
 # the last full builder rebuild, silently ignoring any make dist updates since.
@@ -118,7 +118,7 @@ ARG PORT=8080
 ENV PORT=${PORT}
 EXPOSE ${PORT}
 
-COPY --chown=appuser:appuser storefront/entrypoint.sh ./entrypoint.sh
+COPY --chown=appuser:appuser domains/vms/storefront/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
 ARG MODEL_VERSION=""

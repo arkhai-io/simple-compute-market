@@ -72,7 +72,7 @@ def _import_csv(csv_path: str, db: Optional[str]) -> None:
 
     Uses ``sys.executable`` (the python running this CLI) and locates
     the script relative to this package — works in both dev checkouts
-    (``storefront/scripts/...``) and the container runtime
+    (``domains/vms/storefront/scripts/...``) and the container runtime
     (``/app/scripts/...``).
     """
     import sys

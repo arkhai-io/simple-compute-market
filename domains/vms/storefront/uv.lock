@@ -181,7 +181,7 @@ wheels = [
 [[package]]
 name = "arkhai-registry-client"
 version = "0.10.0"
-source = { registry = "../.dist" }
+source = { registry = "../../../.dist" }
 dependencies = [
     { name = "eth-account", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -193,7 +193,7 @@ wheels = [
 [[package]]
 name = "arkhai-storefront-client"
 version = "0.15.0"
-source = { registry = "../.dist" }
+source = { registry = "../../../.dist" }
 dependencies = [
     { name = "eth-account", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -1603,7 +1603,7 @@ wheels = [
 [[package]]
 name = "market-alkahest"
 version = "0.1.0"
-source = { editable = "../kit/alkahest" }
+source = { editable = "../../../kit/alkahest" }
 dependencies = [
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "web3", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -1625,7 +1625,7 @@ dev = [
 [[package]]
 name = "market-config"
 version = "0.1.0"
-source = { editable = "../kit/config" }
+source = { editable = "../../../kit/config" }
 dependencies = [
     { name = "eth-account", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "market-alkahest", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -1634,7 +1634,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "eth-account", specifier = ">=0.13.0" },
-    { name = "market-alkahest", editable = "../kit/alkahest" },
+    { name = "market-alkahest", editable = "../../../kit/alkahest" },
 ]
 
 [package.metadata.requires-dev]
@@ -1643,7 +1643,7 @@ dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 [[package]]
 name = "market-core"
 version = "0.1.0"
-source = { editable = "../core" }
+source = { editable = "../../../core" }
 dependencies = [
     { name = "market-identity", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -1651,7 +1651,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "market-identity", editable = "../kit/identity" },
+    { name = "market-identity", editable = "../../../kit/identity" },
     { name = "pydantic", specifier = ">=2" },
 ]
 
@@ -1661,7 +1661,7 @@ dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 [[package]]
 name = "market-identity"
 version = "0.1.0"
-source = { editable = "../kit/identity" }
+source = { editable = "../../../kit/identity" }
 dependencies = [
     { name = "eth-account", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -1679,7 +1679,7 @@ dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 [[package]]
 name = "market-policy"
 version = "0.1.0"
-source = { editable = "../kit/policy" }
+source = { editable = "../../../kit/policy" }
 dependencies = [
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -1767,11 +1767,11 @@ requires-dist = [
     { name = "google-cloud-logging", specifier = ">=3.12.0,<4.0.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "jupyter", marker = "extra == 'jupyter'", specifier = ">=1.0.0,<2.0.0" },
-    { name = "market-alkahest", editable = "../kit/alkahest" },
-    { name = "market-config", editable = "../kit/config" },
-    { name = "market-core", editable = "../core" },
-    { name = "market-identity", editable = "../kit/identity" },
-    { name = "market-policy", editable = "../kit/policy" },
+    { name = "market-alkahest", editable = "../../../kit/alkahest" },
+    { name = "market-config", editable = "../../../kit/config" },
+    { name = "market-core", editable = "../../../core" },
+    { name = "market-identity", editable = "../../../kit/identity" },
+    { name = "market-policy", editable = "../../../kit/policy" },
     { name = "mypy", marker = "extra == 'lint'", specifier = ">=1.15.0,<2.0.0" },
     { name = "opentelemetry-exporter-gcp-trace", specifier = ">=1.9.0,<2.0.0" },
     { name = "provisioning-service", specifier = ">=0.4.0" },
@@ -2312,7 +2312,7 @@ wheels = [
 [[package]]
 name = "provisioning-service"
 version = "0.4.0"
-source = { registry = "../.dist" }
+source = { registry = "../../../.dist" }
 dependencies = [
     { name = "aiohttp", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-storefront-client", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },

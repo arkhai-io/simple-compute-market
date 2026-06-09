@@ -881,7 +881,7 @@ class TestStage07b_VerifyEscrow:
 # in the synthetic-buyer version of this test. With the buyer driving
 # the real submit via `market settle`, the resource is reserved by the
 # time we could run them — and their narrow coverage is already exercised
-# by storefront/tests/integration/test_settle_controller.py
+# by domains/vms/storefront/tests/integration/test_settle_controller.py
 # (evaluate_settle) and domains/vms/provisioning/service/src/tests/unit/services/
 # test_programmable_mock.py (evaluate_job).
 # ===========================================================================

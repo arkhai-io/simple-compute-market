@@ -111,7 +111,7 @@ _INIT_USER_TEMPLATE = """\
 # arkhai storefront config — see `market-storefront config path` for this
 # file's location. Every key is optional; the resolver falls back to
 # built-in defaults when a key is missing. Schema matches
-# storefront/src/market_storefront/settings.toml (top-level keys + named
+# domains/vms/storefront/src/market_storefront/settings.toml (top-level keys + named
 # sections; no [seller] prefix).
 
 # ---------------------------------------------------------------------------

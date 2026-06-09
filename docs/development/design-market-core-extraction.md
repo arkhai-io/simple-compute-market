@@ -305,7 +305,7 @@ instead of treating core as having an embedded default market.
 
 ### 1. Escrow-shape validation: pre-chain gate → middleware — done
 
-- **Done:** `storefront/.../utils/sync_negotiation.py::_validate_escrow_proposal`
+- **Done:** `domains/vms/storefront/.../utils/sync_negotiation.py::_validate_escrow_proposal`
   no longer raises on proposals outside the listing's `accepted_escrows`.
   It only canonicalizes matched proposals by merging listing
   `literal_fields` and `rates`.
@@ -383,7 +383,7 @@ Receipt`; "materialize then submit" is internal factoring.
   flow, the seller's per-round protocol from `sync_negotiation`, the
   settlement protocol) into `market-core`, defined over injected hooks +
   generic primitives only.
-- `domains/vms/buyer/` + the remaining `storefront/` package become the
+- `domains/vms/buyer/` + the remaining `domains/vms/storefront/` package become the
   instantiation: wire ERC20 escrow construction, compute resource schema,
   provisioning, the GPU filter-spec into the core hooks.
 - The untangling work is real: `action_executor.py` (~960 LOC) and
@@ -393,8 +393,8 @@ Receipt`; "materialize then submit" is internal factoring.
 
 ### 5. Package migration prerequisites
 
-The remaining physical moves from top-level packages (`service/`,
-`storefront/`) to `core/`, `kit/`, and `domains/vms/` should happen after
+The remaining physical moves from top-level packages to `core/`, `kit/`,
+and `domains/vms/` should happen after
 the code boundaries express the target graph. Otherwise the move becomes a
 rename plus a behavior refactor plus a deployment refactor in one step. The protocol
 client packages (`registry-client`, `storefront-client`) have already moved
@@ -508,10 +508,13 @@ Top-level folder tracker:
 5. **Done: remove top-level `service/`.** Shared schemas, config, identity,
    Alkahest, token, and chain helpers are consumed directly from
    `core/` and `kit/`; the compatibility `market-service` wheel is gone.
-6. **Next: drain `storefront/`.** Move schema-invariant storefront runtime
-   into `core/storefront`, and VM listing/negotiation/settlement/
-   provisioning hooks into `domains/vms/*`. Delete the top-level package
-   after deployment paths and tests depend on the new homes.
+6. **Done: remove top-level `storefront/`.** The VM storefront executable,
+   packaging project, tests, Dockerfile, and sample configs live under
+   `domains/vms/storefront/`, while the already extracted schema-invariant
+   storefront pieces remain under `core/src/market_core/storefront/`.
+7. **Next: drain `domains/vms/storefront/` internals.** Move remaining
+   schema-invariant storefront runtime into `core/storefront`, and VM
+   listing/negotiation/settlement/provisioning hooks into `domains/vms/*`.
 
 This tracker intentionally ignores generated or local-only top-level
 directories such as `.dist/`, `.uv-cache/`, `.pytest_cache/`, `src/`,
@@ -578,15 +581,15 @@ domains/vms/buyer/listing_cli.py              seam 0b — VM listing commands
 domains/vms/buyer/aggregation.py              seam 0b — across-seller aggregation policies
 domains/vms/buyer/schema_plugins/ (new)       seam 0b — eventual plugin registry/loading boundary
 core/src/market_core/storefront/models/       seam 4 — schema-invariant storefront HTTP models
-storefront/src/market_storefront/models/{listing,negotiation,settle}_models.py  seam 4 compatibility wrappers
+domains/vms/storefront/src/market_storefront/models/{listing,negotiation,settle}_models.py  seam 4 compatibility wrappers
 core/src/market_core/storefront/stage_log.py  seam 4 — schema-invariant stage-event logger/persistence helper
-storefront/src/market_storefront/utils/stage_log.py  seam 4 compatibility wrapper supplying settings.db_path
+domains/vms/storefront/src/market_storefront/utils/stage_log.py  seam 4 compatibility wrapper supplying settings.db_path
 core/src/market_core/storefront/services/negotiation_service.py  seam 4 — generic negotiation query/admin service over injected hooks
-storefront/src/market_storefront/services/negotiation_service.py  seam 4 compatibility wrapper wiring VM sync negotiation + stage logging
+domains/vms/storefront/src/market_storefront/services/negotiation_service.py  seam 4 compatibility wrapper wiring VM sync negotiation + stage logging
 core/src/market_core/storefront/auth.py       seam 4 — framework-free signed request/admin-key verification
-storefront/src/market_storefront/middleware/  seam 4 FastAPI/settings auth wrappers
-storefront/.../utils/sync_negotiation.py      seam 4 — per-round protocol; seam 1 normalization only
-storefront/.../utils/action_executor.py       seam 4 — stateful storefront wrapper; registry publication now delegates to market_core
+domains/vms/storefront/src/market_storefront/middleware/  seam 4 FastAPI/settings auth wrappers
+domains/vms/storefront/.../utils/sync_negotiation.py      seam 4 — per-round protocol; seam 1 normalization only
+domains/vms/storefront/.../utils/action_executor.py       seam 4 — stateful storefront wrapper; registry publication now delegates to market_core
 kit/policy/src/market_policy/negotiation_middleware.py  seam 1 — home for the escrow guard
 kit/policy/                                   package migration — generic policy-chain machinery; wheel/import names unchanged
 domains/vms/provisioning/service/             package migration — VM provisioning service; wheel/import names unchanged

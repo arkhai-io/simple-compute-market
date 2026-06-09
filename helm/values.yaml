@@ -146,7 +146,7 @@ storefront:
     - name: bob
       port: 8001
       component: seller
-      agentId: ""        # pin after first registration; see storefront/values.yaml
+      agentId: ""        # pin after first registration; see charts/storefront/values.yaml
       autoRegister: true # set false once registered to prevent accidental re-registration
       secret:
         createSecret: true

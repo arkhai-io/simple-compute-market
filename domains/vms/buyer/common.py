@@ -6,7 +6,8 @@ import subprocess
 
 import typer
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
+STOREFRONT_ROOT = REPO_ROOT / "domains" / "vms" / "storefront"
 
 
 def resolve_config_value(
@@ -356,8 +357,8 @@ def run_step(
     # When running storefront-side commands (e.g. registration scripts)
     # the working dir is the storefront package, but uv created the
     # venv at the storefront package root.
-    if cwd.resolve() == (REPO_ROOT / "storefront").resolve():
-        storefront_venv = REPO_ROOT / "storefront" / ".venv"
+    if cwd.resolve() == STOREFRONT_ROOT.resolve():
+        storefront_venv = STOREFRONT_ROOT / ".venv"
         if storefront_venv.exists():
             venv_path = storefront_venv
     venv_bin = venv_path / "bin"

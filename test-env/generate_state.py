@@ -9,13 +9,13 @@ then captures two artifacts from that one deployment:
     container startup via ``anvil --load-state``. Produced by decoding the
     ``anvil_dumpState`` blob (hex-encoded gzip) into the JSON form that
     ``--load-state`` consumes.
-  * ``storefront/.../data/alkahest_anvil_addresses.json`` — the deployed
+  * ``domains/vms/storefront/.../data/alkahest_anvil_addresses.json`` — the deployed
     contract addresses, read by the storefront at runtime.
 
 Both derive from the same deployment, so they cannot drift. Regenerate when
 the alkahest_py version changes:
 
-    cd storefront && uv run --find-links ../.dist python ../test-env/generate_state.py
+    cd domains/vms/storefront && uv run --find-links ../../../.dist python ../../../test-env/generate_state.py
 """
 
 from __future__ import annotations
@@ -44,7 +44,14 @@ TEST_ENV_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = TEST_ENV_DIR.parent
 STATE_PATH = TEST_ENV_DIR / "state" / "state.json"
 ADDRESSES_PATH = (
-    REPO_ROOT / "storefront" / "src" / "market_storefront" / "data" / "alkahest_anvil_addresses.json"
+    REPO_ROOT
+    / "domains"
+    / "vms"
+    / "storefront"
+    / "src"
+    / "market_storefront"
+    / "data"
+    / "alkahest_anvil_addresses.json"
 )
 
 # Fields mirrored from the storefront's address config schema. Each maps to an

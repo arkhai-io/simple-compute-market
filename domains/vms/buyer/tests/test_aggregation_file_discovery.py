@@ -5,7 +5,7 @@ and ``[aggregation] extra_policy_paths`` are picked up as policies
 named after the folder. Each subdir is expected to expose ``policy.py``
 with a callable ``factory(cfg) -> AggregationPolicy``.
 
-Mirror of ``storefront/tests/unit/test_file_policy_discovery.py`` for
+Mirror of ``domains/vms/storefront/tests/unit/test_file_policy_discovery.py`` for
 the buyer side. Cleans up registry state between tests so re-registering
 a folder name doesn't leak into the next test's assertions.
 """

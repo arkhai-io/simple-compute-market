@@ -18,7 +18,7 @@
 #                              seller-provisioning, so the secret lives in
 #                              one place.
 #   ./resources.csv          — inventory CSV. Starter:
-#                              storefront/src/market_storefront/data/resources.sample.csv
+#                              domains/vms/storefront/src/market_storefront/data/resources.sample.csv
 #
 # Required images (run `make build-seller` from the repo root):
 #   arkhai:storefront

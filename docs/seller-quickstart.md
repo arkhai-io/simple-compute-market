@@ -93,7 +93,7 @@ default_max_duration_seconds = 86400
 ```
 
 The full schema is at
-[`storefront/src/market_storefront/settings.toml`](../storefront/src/market_storefront/settings.toml).
+[`domains/vms/storefront/src/market_storefront/settings.toml`](../domains/vms/storefront/src/market_storefront/settings.toml).
 
 ## 3. resources.csv
 
@@ -115,7 +115,7 @@ slice-001,compute.gpu,H200,count,1,available,2,0x036CbD53842c5426634e7929541eC23
   service's ansible inventory (§6). For mock mode any string works.
 
 A larger sample is at
-[`storefront/src/market_storefront/data/resources.sample.csv`](../storefront/src/market_storefront/data/resources.sample.csv).
+[`domains/vms/storefront/src/market_storefront/data/resources.sample.csv`](../domains/vms/storefront/src/market_storefront/data/resources.sample.csv).
 
 ## 4. Bring it up
 

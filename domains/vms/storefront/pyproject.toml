@@ -71,7 +71,7 @@ lint = [
 # Without this, uv attempts to solve for all platforms and fails to
 # find provisioning-service wheels for platforms
 # where it has no local find-links path to check.
-find-links = ["../.dist"]
+find-links = ["../../../.dist"]
 environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
@@ -79,11 +79,11 @@ environments = [
 ]
 
 [tool.uv.sources]
-market-core = { path = "../core", editable = true }
-market-identity = { path = "../kit/identity", editable = true }
-market-alkahest = { path = "../kit/alkahest", editable = true }
-market-config = { path = "../kit/config", editable = true }
-market-policy = { path = "../kit/policy", editable = true }
+market-core = { path = "../../../core", editable = true }
+market-identity = { path = "../../../kit/identity", editable = true }
+market-alkahest = { path = "../../../kit/alkahest", editable = true }
+market-config = { path = "../../../kit/config", editable = true }
+market-policy = { path = "../../../kit/policy", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]
@@ -142,7 +142,7 @@ build-backend = "hatchling.build"
 
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "..", "../kit/policy/src", "../kit/alkahest/src", "../kit/config/src", "../core/src"]
+pythonpath = ["src", "../../..", "../../../kit/policy/src", "../../../kit/alkahest/src", "../../../kit/config/src", "../../../core/src"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 

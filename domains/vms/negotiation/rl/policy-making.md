@@ -12,7 +12,7 @@ Core-generic policy authoring and evaluation guidance:
 | `domains/vms/negotiation/rl/torch_arkhai_strategy.py` | Active negotiation callable — puffer bilateral model inference |
 | `domains/vms/negotiation/storefront_round.py` | Compute default policy seeding by trigger type |
 | `domains/vms/listings/models.py` | Compute event/resource enums and models |
-| `storefront/src/market_storefront/utils/action_executor.py` | Compute-domain action execution |
+| `domains/vms/storefront/src/market_storefront/utils/action_executor.py` | Compute-domain action execution |
 
 ## Active policy chains
 
