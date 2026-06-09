@@ -193,17 +193,19 @@ class TestNegotiateNew:
         assert messages[0]["their_price"] == large_amount
         assert messages[0]["proposed_price"] == large_amount
 
-    async def test_zero_duration_returns_422(self, client):
-        """duration_seconds=0 is rejected by Pydantic (gt=0)."""
-        c, _ = client
+    async def test_zero_duration_returns_policy_rejection(self, client, db):
+        """duration_seconds=0 is rejected by the opening-round policy guard."""
+        c, db = client
+        await _seed_listing(db, "neg-listing-zero-duration")
         with pytest.raises((StorefrontClientError, Exception)) as exc_info:
             await c.negotiate_new(
-                listing_id="some-listing",
+                listing_id="neg-listing-zero-duration",
                 buyer_address=_BUYER,
                 initial_amount=8000,
                 duration_seconds=0,
             )
-        assert any(code in str(exc_info.value) for code in ("422", "400"))
+        assert "409" in str(exc_info.value)
+        assert "compute_duration_invalid" in str(exc_info.value)
 
     async def test_listing_not_open_returns_409(self, client, db):
         """Listing in a terminal state is refused with 409."""

@@ -483,6 +483,9 @@ Recommended order:
    orchestration behind explicit storefront callbacks. `sync_negotiation.py`
    remains a compatibility/stateful HTTP wrapper. `fulfillment_service.py` is now
    limited to VM fulfillment orchestration for settled compute obligations.
+   `domains/vms/settlement/proposals.py` owns VM accepted-escrow response
+   artifact assembly by supplying domain inputs to the generic Alkahest kit
+   materializer.
    `core_storefront.registry_publication` owns schema-agnostic registry
    publish/close fan-out through injected registry clients and request
    factories; `market_storefront.services.publication_service` keeps VM

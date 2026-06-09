@@ -430,7 +430,7 @@ def _accepted_entry_uses_scalar_amount(entry: dict[str, Any] | None) -> bool:
     return False
 
 
-def _proposal_uses_scalar_amount(
+def proposal_uses_scalar_amount(
     listing: dict[str, Any],
     proposal: dict[str, Any] | None,
 ) -> bool:
@@ -523,7 +523,7 @@ def round_zero_opening_guard(
         context.intermediate["accepted_escrow_proposal"] = accepted_proposal_dict
 
     proposal_for_scalar = accepted_proposal_dict if accepted_proposal_dict is not None else proposal
-    uses_scalar_amount = _proposal_uses_scalar_amount(listing, proposal_for_scalar)
+    uses_scalar_amount = proposal_uses_scalar_amount(listing, proposal_for_scalar)
     context.intermediate["uses_scalar_amount"] = uses_scalar_amount
     if uses_scalar_amount and _amount_from_proposal(proposal_for_scalar) is None:
         return (
@@ -553,7 +553,7 @@ def buyer_counter_guard(
     pinned = context.our_escrow_proposal
     proposal = latest.proposal if isinstance(latest.proposal, dict) else None
     proposal_for_scalar = proposal or pinned
-    uses_scalar_amount = _proposal_uses_scalar_amount(listing, proposal_for_scalar)
+    uses_scalar_amount = proposal_uses_scalar_amount(listing, proposal_for_scalar)
     context.intermediate["uses_scalar_amount"] = uses_scalar_amount
 
     raw_amount = _amount_from_proposal(proposal_for_scalar)
@@ -911,6 +911,7 @@ __all__ = [
     "our_first_proposal",
     "our_previous_counters",
     "proposal_escrow_kind",
+    "proposal_uses_scalar_amount",
     "round_zero_opening_guard",
     "their_proposed_amount",
 ]

@@ -14,7 +14,10 @@ from domains.vms.listings import (
     determine_strategy_from_order,
     extract_initial_price_from_order,
 )
-from domains.vms.negotiation.policies import make_escrow_kind_dispatch_middleware
+from domains.vms.negotiation.policies import (
+    make_escrow_kind_dispatch_middleware,
+    proposal_uses_scalar_amount,
+)
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationDecision,
@@ -146,6 +149,14 @@ _DEFAULT_TERMINAL = "bisection"
 _RL_POLICY_NAMES = {"rl", "erc20_rl", "native_token_rl", "erc1155_rl"}
 
 
+def _prepend_default_guards(policy_names: list[str]) -> list[str]:
+    out = list(policy_names)
+    for guard in reversed(_DEFAULT_GUARDS):
+        if guard not in out:
+            out.insert(0, guard)
+    return out
+
+
 def _policy_names_need_rl(policy_names: list[str]) -> bool:
     return any(name in _RL_POLICY_NAMES for name in policy_names)
 
@@ -186,7 +197,8 @@ def _load_storefront_chain(
             (getattr(negotiation_cfg, "policy_mode", "") or "").strip()
             or _DEFAULT_TERMINAL
         )
-        policy_names = _DEFAULT_GUARDS + [policy_mode]
+        policy_names = [policy_mode]
+    policy_names = _prepend_default_guards(policy_names)
 
     if _policy_names_need_rl(policy_names):
         _maybe_register_rl_middleware()
@@ -248,10 +260,17 @@ async def _run_default_seller_round_policy(
         if item.sender == "them":
             their_proposal = item.proposal
             break
-    reference_amount = _seller_reference_amount(
-        listing,
-        requested_duration_seconds,
-        default_min_price=default_min_price,
+    uses_scalar_amount = proposal_uses_scalar_amount(
+        listing_dict if isinstance(listing_dict, dict) else {},
+        their_proposal,
+    )
+    reference_amount = (
+        _seller_reference_amount(
+            listing,
+            requested_duration_seconds,
+            default_min_price=default_min_price,
+        )
+        if uses_scalar_amount else 0
     )
     direction = _direction_from_strategy_label(strategy_label)
 
@@ -272,6 +291,7 @@ async def _run_default_seller_round_policy(
         intermediate={
             "requested_duration_seconds": requested_duration_seconds,
             "seller_reference_amount": int(reference_amount),
+            "uses_scalar_amount": uses_scalar_amount,
         },
     )
     decision, context = run_negotiation_chain_with_context(chain, history, context)

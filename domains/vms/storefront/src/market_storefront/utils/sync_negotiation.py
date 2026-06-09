@@ -55,12 +55,12 @@ from core_storefront.negotiation_sync import (
     coerce_pinned_proposal as _coerce_pinned_proposal,
     create_sync_negotiation_thread as _create_sync_negotiation_thread,
     history_from_messages as _history_from_messages,
-    proposal_with_amount as _proposal_with_amount,
     record_buyer_accept_message as _record_buyer_accept_message,
     record_buyer_counter_message as _record_buyer_counter_message,
     record_buyer_exit_message as _record_buyer_exit_message,
     record_seller_decision_message as _record_seller_decision_message,
 )
+from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
 
 logger = logging.getLogger(__name__)
 
@@ -131,28 +131,34 @@ def _default_seller_round_hook(sqlite_client: Any) -> SellerRoundHook:
     )
 
 
-def _materialized_escrow_terms_payload(
-    *,
-    proposal: EscrowProposal | None,
-    seller_wallet_address: str | None,
-    agreed_amount: int,
-    duration_seconds: int,
-) -> list[dict[str, Any]] | None:
-    if proposal is None:
-        return None
-    from market_alkahest.alkahest import materialize_escrow_terms_payload_from_proposal
+def _chain_config_paths() -> dict[str, str | None]:
     from market_storefront.utils.config import CHAINS
 
-    chain_config = CHAINS.get(proposal.chain_name)
-    return materialize_escrow_terms_payload_from_proposal(
+    return {
+        name: chain.alkahest_address_config_path
+        for name, chain in CHAINS.items()
+    }
+
+
+def _accepted_escrow_artifacts(
+    *,
+    proposal: EscrowProposal | dict[str, Any] | None,
+    agreed_amount: int,
+    duration_seconds: int,
+    uses_scalar_amount: bool = True,
+) -> dict[str, Any]:
+    artifacts = accepted_escrow_artifacts_from_proposal(
         proposal=proposal,
-        seller_wallet_address=seller_wallet_address,
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
-        addr_config_path=(
-            chain_config.alkahest_address_config_path if chain_config else None
-        ),
+        uses_scalar_amount=uses_scalar_amount,
+        seller_wallet_address=None,
+        chain_config_paths=_chain_config_paths(),
     )
+    error = artifacts.pop("accepted_escrow_terms_error", None)
+    if error:
+        logger.debug("Could not materialize accepted escrow terms: %s", error)
+    return artifacts
 
 
 _LIVE_LISTING_STATUSES = LIVE_LISTING_STATUSES
@@ -371,17 +377,28 @@ async def start_sync_negotiation(
     if provision_terms is not None:
         response["accepted_provision_terms"] = provision_terms.model_dump()
     if accepted_proposal is not None:
-        response["accepted_escrow_proposal"] = accepted_proposal.model_dump()
-        if decision.action == "accept":
-            try:
-                response["accepted_escrow_terms"] = _materialized_escrow_terms_payload(
-                    proposal=accepted_proposal,
-                    seller_wallet_address=None,
-                    agreed_amount=int(agreed_amount),
-                    duration_seconds=int(agreed_duration_seconds),
+        artifacts = _accepted_escrow_artifacts(
+            proposal=accepted_proposal,
+            agreed_amount=int(
+                agreed_amount if decision.action == "accept" else our_amount
+            ),
+            duration_seconds=int(
+                agreed_duration_seconds
+                if decision.action == "accept"
+                else (
+                    requested_duration_seconds
+                    or our_order_dict.get("max_duration_seconds")
+                    or 3600
                 )
-            except Exception as exc:
-                logger.debug("Could not materialize accepted escrow terms: %s", exc)
+            ),
+            uses_scalar_amount=uses_scalar_amount,
+        )
+        if decision.action == "accept":
+            response.update(artifacts)
+        else:
+            response["accepted_escrow_proposal"] = artifacts[
+                "accepted_escrow_proposal"
+            ]
     return response
 
 
@@ -473,25 +490,17 @@ async def continue_sync_negotiation(
             agreed_amount=last_seller_amount,
             our_initial_amount=our_amount,
         )
-        final_proposal = _proposal_with_amount(
-            buyer_pinned_proposal,
-            last_seller_amount if uses_scalar_amount else None,
-        )
         response = {
             "action": "accept",
-            "proposal": final_proposal,
         }
-        try:
-            accepted = EscrowProposal.model_validate(final_proposal)
-            response["accepted_escrow_proposal"] = accepted.model_dump()
-            response["accepted_escrow_terms"] = _materialized_escrow_terms_payload(
-                proposal=accepted,
-                seller_wallet_address=None,
+        response.update(
+            _accepted_escrow_artifacts(
+                proposal=buyer_pinned_proposal,
                 agreed_amount=int(last_seller_amount),
                 duration_seconds=int(agreed_duration_seconds),
+                uses_scalar_amount=uses_scalar_amount,
             )
-        except Exception as exc:
-            logger.debug("Could not materialize accepted escrow terms: %s", exc)
+        )
         return response
 
     if buyer_action == "exit":
@@ -589,27 +598,22 @@ async def continue_sync_negotiation(
     )
     response = decision.to_dict()
     if decision.action == "accept":
-        final_proposal = _proposal_with_amount(
-            buyer_pinned_proposal,
-            (
-                int(decision_amount) if decision_amount is not None else int(our_amount)
-            ) if uses_scalar_amount else None,
-        )
-        try:
-            accepted = EscrowProposal.model_validate(final_proposal)
-            response["accepted_escrow_proposal"] = accepted.model_dump()
-            response["accepted_escrow_terms"] = _materialized_escrow_terms_payload(
-                proposal=accepted,
-                seller_wallet_address=None,
-                agreed_amount=int(decision_amount) if decision_amount is not None else int(our_amount),
+        response.update(
+            _accepted_escrow_artifacts(
+                proposal=buyer_pinned_proposal,
+                agreed_amount=(
+                    int(decision_amount)
+                    if decision_amount is not None
+                    else int(our_amount)
+                ),
                 duration_seconds=int(
                     requested_duration_seconds
                     or our_order_dict.get("max_duration_seconds")
                     or 3600
                 ),
+                uses_scalar_amount=uses_scalar_amount,
             )
-        except Exception as exc:
-            logger.debug("Could not materialize accepted escrow terms: %s", exc)
+        )
     return response
 
 
