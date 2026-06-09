@@ -17,13 +17,13 @@ def resolve_config_value(
 ) -> str:
     """Lookup a scalar config value: CLI override > config.toml > default.
 
-    The TOML file location is whatever ``service.config_loader.load_user_config``
+    The TOML file location is whatever ``market_config.config_loader.load_user_config``
     resolves to (XDG default, or the override set by ``--config``).
     """
     if override:
         return override
     if toml_path:
-        from service.config_loader import get_dotted, load_user_config
+        from market_config.config_loader import get_dotted, load_user_config
         v = get_dotted(load_user_config(), toml_path)
         if v not in (None, ""):
             return str(v)
@@ -32,7 +32,7 @@ def resolve_config_value(
 
 def resolve_negotiation_config() -> tuple[object | None, str | None]:
     """Resolve negotiation policy config without flattening TOML lists."""
-    from service.config_loader import get_dotted, load_user_config
+    from market_config.config_loader import get_dotted, load_user_config
 
     cfg = load_user_config()
     raw_policies = get_dotted(cfg, "negotiation.policies")
@@ -67,7 +67,7 @@ def resolve_buyer_wallet(
     addr = resolve_config_value(override=override_addr, toml_path="wallet.address")
     pk = resolve_config_value(override=override_pk, toml_path="wallet.private_key")
     if pk:
-        from service.config_loader import derive_wallet_address
+        from market_config.config_loader import derive_wallet_address
         derived = derive_wallet_address(pk)
         if derived:
             if not addr:
@@ -85,12 +85,12 @@ def resolve_buyer_wallet(
 def buyer_chains() -> dict[str, "ChainConfig"]:
     """Return the buyer's configured ``[chains.<name>]`` tables.
 
-    Thin wrapper around :func:`service.config_loader.chains_from_config`
+    Thin wrapper around :func:`market_config.config_loader.chains_from_config`
     so the buyer codebase doesn't have to import from service everywhere.
     Empty dict when no chains are configured — callers decide whether
     that's fatal (most operations are; ``config show`` isn't).
     """
-    from service.config_loader import chains_from_config, ChainConfig  # noqa: F401
+    from market_config.config_loader import chains_from_config, ChainConfig  # noqa: F401
     return chains_from_config()
 
 
@@ -257,7 +257,7 @@ def resolve_indexer_urls(*, override: str | None = None) -> list[str]:
         parts = [p.strip() for p in override.split(",") if p.strip()]
         if parts:
             return parts
-    from service.config_loader import get_dotted, load_user_config
+    from market_config.config_loader import get_dotted, load_user_config
     raw = get_dotted(load_user_config(), "registry.urls")
     if isinstance(raw, list) and raw:
         cleaned = [str(u).strip() for u in raw if str(u).strip()]
@@ -274,7 +274,7 @@ def resolve_indexer_auth() -> dict[str, str]:
     credentials are config-only by design (avoids accidental shell-
     history exposure on a multi-user box).
     """
-    from service.config_loader import get_dotted, load_user_config
+    from market_config.config_loader import get_dotted, load_user_config
     raw = get_dotted(load_user_config(), "registry.auth")
     if not isinstance(raw, dict):
         return {}
@@ -295,7 +295,7 @@ def resolve_discovery_timeout(*, override: float | None = None) -> float:
     """
     if override is not None and override > 0:
         return float(override)
-    from service.config_loader import get_dotted, load_user_config
+    from market_config.config_loader import get_dotted, load_user_config
     raw = get_dotted(load_user_config(), "registry.discovery_timeout")
     try:
         v = float(raw)
@@ -336,7 +336,7 @@ def resolve_storefront_url(
     """
     if agent_url:
         return agent_url
-    from service.config_loader import get_dotted, load_user_config
+    from market_config.config_loader import get_dotted, load_user_config
     cfg = load_user_config()
     base_url = get_dotted(cfg, "seller.base_url")
     if isinstance(base_url, str) and base_url:

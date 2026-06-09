@@ -26,12 +26,12 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from service.schemas import (
+from market_alkahest.schemas import (
     EscrowTerms,
     EscrowProposal,
-    ProvisionTerms,
     accepted_recipient_address,
 )
+from market_core.schemas import ProvisionTerms
 from domains.vms.settlement import BuildEscrowTermsFn, CreateEscrowFn
 
 from .buyer_client import NegotiationOutcome, negotiate_with_seller, _sign
@@ -298,7 +298,7 @@ def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
     token rate advertised on the seller's first accepted escrow tuple.
     Returns ``None`` for hidden-reserve listings (empty ``rates``).
     """
-    from service.schemas import primary_rate_value
+    from market_alkahest.schemas import primary_rate_value
 
     accepted = listing.get("accepted_escrows") or []
     if isinstance(accepted, str):

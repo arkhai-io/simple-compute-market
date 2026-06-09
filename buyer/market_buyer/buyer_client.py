@@ -33,7 +33,8 @@ from market_policy.negotiation_middleware import (
     run_negotiation_chain,
 )
 from domains.vms.negotiation.policies import make_escrow_kind_dispatch_middleware
-from service.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
+from market_alkahest.schemas import EscrowProposal, EscrowTerms
+from market_core.schemas import ProvisionTerms
 
 
 DEFAULT_MAX_ROUNDS = 10

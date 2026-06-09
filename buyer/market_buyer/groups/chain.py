@@ -58,8 +58,8 @@ def chain_check(
     else:
         targets = chains
 
-    from service.clients.alkahest import resolve_alkahest_address_config
-    from service.clients.chain_probe import probe_addresses_sync
+    from market_alkahest.alkahest import resolve_alkahest_address_config
+    from market_alkahest.chain_probe import probe_addresses_sync
 
     console = Console()
     all_results: dict[str, dict[str, bool]] = {}

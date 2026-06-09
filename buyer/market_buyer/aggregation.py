@@ -125,11 +125,11 @@ def _load_buyer_config() -> dict[str, Any]:
 
     Returns ``{}`` if the loader isn't importable (no service package
     on path) or the file doesn't exist. The buyer reads config inline
-    via ``service.config_loader.load_user_config`` everywhere else;
+    via ``market_config.config_loader.load_user_config`` everywhere else;
     this mirrors that pattern instead of building a singleton.
     """
     try:
-        from service.config_loader import load_user_config
+        from market_config.config_loader import load_user_config
         return load_user_config() or {}
     except Exception as exc:
         logger.debug("[AGG-POLICY] config load failed (%s); using empty dict", exc)
@@ -143,7 +143,7 @@ def _resolve_extra_policy_paths(cfg: dict[str, Any]) -> list[str]:
     (list) or a single string. Empty / unset → empty list.
     """
     try:
-        from service.config_loader import get_dotted
+        from market_config.config_loader import get_dotted
     except Exception:
         return []
     raw = get_dotted(cfg, "aggregation.extra_policy_paths")
@@ -327,7 +327,7 @@ def _extract_advertised_price(match: dict[str, Any]) -> float | None:
     Returns ``None`` if no usable rate is published — callers fall back
     to their own ``initial_price``.
     """
-    from service.schemas import primary_rate_value
+    from market_alkahest.schemas import primary_rate_value
 
     accepted = match.get("accepted_escrows") or []
     if isinstance(accepted, str):
@@ -433,7 +433,7 @@ def _resolve_best_price_timeout() -> float | None:
     """
     cfg = _load_buyer_config()
     try:
-        from service.config_loader import get_dotted
+        from market_config.config_loader import get_dotted
     except Exception:
         return None
     raw = get_dotted(cfg, "aggregation.best_price_timeout")

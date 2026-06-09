@@ -19,7 +19,7 @@ from ..common import resolve_config_value
 from ..run_log import RunLog, read_run
 
 if TYPE_CHECKING:
-    from service.config_loader import ChainConfig
+    from market_config.config_loader import ChainConfig
 
 
 @dataclass
@@ -86,7 +86,10 @@ def load_deal_context(run_id: str) -> DealContext:
         raw_proposal = ev.get("accepted_escrow_proposal")
         if isinstance(raw_proposal, dict):
             accepted_escrow_proposal = raw_proposal
-            from service.schemas import accepted_recipient_address, accepted_token_address
+            from market_alkahest.schemas import (
+                accepted_recipient_address,
+                accepted_token_address,
+            )
 
             recipient = accepted_recipient_address(raw_proposal)
             if recipient:
@@ -263,7 +266,7 @@ def resolve_chain_settings(
         )
         raise typer.Exit(2)
     if decimals is None:
-        from service.clients.token import resolve_token, TokenResolutionError
+        from market_alkahest.token import TokenResolutionError, resolve_token
         try:
             meta = resolve_token(
                 tc, rpc_url=chain.rpc_url, chain_id=chain.chain_id,

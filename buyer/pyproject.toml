@@ -14,6 +14,8 @@ dependencies = [
   # market_buyer.escrow_client so loading the CLI does not pay the
   # native-binary cost unless the orchestrator actually runs.
   "alkahest-py>=0.4.0",
+  "market-core",
+  "market-alkahest",
   "market-service",
   "market-config",
   "market-policy",
@@ -43,6 +45,8 @@ market = "market_buyer.cli:app"
 # storefront so both sides drive negotiation through one engine.
 [tool.uv.sources]
 market-service = { path = "../service", editable = true }
+market-core = { path = "../core", editable = true }
+market-alkahest = { path = "../kit/alkahest", editable = true }
 market-config = { path = "../kit/config", editable = true }
 market-policy = { path = "../kit/policy", editable = true }
 torch = [
