@@ -22,8 +22,6 @@ testpaths = ["tests/unit"]
 
 [tool.uv.sources]
 market-alkahest = { path = "../alkahest", editable = true }
-market-core = { path = "../../core", editable = true }
-market-identity = { path = "../identity", editable = true }
 
 [dependency-groups]
 dev = [
