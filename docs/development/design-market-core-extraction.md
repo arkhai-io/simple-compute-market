@@ -448,9 +448,9 @@ Recommended order:
    verification/materialization; and `domains/vms/provisioning/` for VM
    fulfillment and lease/listing lifecycle hooks. Done so far:
    `market_core.storefront.models` owns the schema-invariant HTTP
-   request/response model surface for listings, negotiation, and
-   settlement, while `market_storefront.models.*` remains a compatibility
-   wrapper.
+   request/response model surface for listings, negotiation, settlement,
+   and generic system responses; VM provisioning/admin payloads live in
+   `domains/vms/provisioning/storefront_models.py`.
    `market_core.storefront.stage_log` owns structured stage-event logging
    and SQLite persistence mechanics; the storefront wrapper only supplies
    the configured DB path.
@@ -582,7 +582,6 @@ domains/vms/buyer/listing_cli.py              seam 0b — VM listing commands
 domains/vms/buyer/aggregation.py              seam 0b — across-seller aggregation policies
 domains/vms/buyer/schema_plugins/ (new)       seam 0b — eventual plugin registry/loading boundary
 core/src/market_core/storefront/models/       seam 4 — schema-invariant storefront HTTP models
-domains/vms/storefront/src/market_storefront/models/{listing,negotiation,settle}_models.py  seam 4 compatibility wrappers
 core/src/market_core/storefront/stage_log.py  seam 4 — schema-invariant stage-event logger/persistence helper
 domains/vms/storefront/src/market_storefront/utils/stage_log.py  seam 4 compatibility wrapper supplying settings.db_path
 core/src/market_core/storefront/services/negotiation_service.py  seam 4 — generic negotiation query/admin service over injected hooks
