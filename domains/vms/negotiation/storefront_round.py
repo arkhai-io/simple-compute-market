@@ -25,7 +25,7 @@ from market_policy.negotiation_middleware import (
     register_negotiation_middleware,
     run_negotiation_chain,
 )
-from market_alkahest.schemas import EscrowProposal
+from market_alkahest.schemas import EscrowProposal, match_accepted_escrow
 
 logger = logging.getLogger(__name__)
 
@@ -68,32 +68,20 @@ def _match_accepted_escrow(
     """Find the listing accepted-escrow entry matching ``proposal``."""
     import json as _json
 
+    if proposal.escrow_address.lower() == _ZERO_ADDRESS:
+        return None
+
     accepted = listing.get("accepted_escrows")
     if isinstance(accepted, str):
         try:
             accepted = _json.loads(accepted)
         except (ValueError, TypeError):
             return None
-    if not isinstance(accepted, list) or not accepted:
+    if not isinstance(accepted, list):
         return None
 
-    proposal_addr = proposal.escrow_address.lower()
-    if proposal_addr == _ZERO_ADDRESS:
-        return None
-
-    proposal_chain = proposal.chain_name
-    for entry in accepted:
-        if not isinstance(entry, dict):
-            continue
-        entry_chain = entry.get("chain_name")
-        entry_addr = entry.get("escrow_address")
-        if (
-            entry_chain == proposal_chain
-            and isinstance(entry_addr, str)
-            and entry_addr.lower() == proposal_addr
-        ):
-            return entry
-    return None
+    matched = match_accepted_escrow(accepted, proposal)
+    return matched if isinstance(matched, dict) else None
 
 
 def _coerce_escrow_proposal(proposal: EscrowProposal | dict[str, Any]) -> EscrowProposal:

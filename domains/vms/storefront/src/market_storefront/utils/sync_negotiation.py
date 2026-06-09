@@ -40,7 +40,6 @@ from domains.vms.negotiation import storefront_round as vm_storefront_round
 from domains.vms.negotiation.storefront_round import (
     SellerRoundHook,
     SellerRoundResult,
-    _match_accepted_escrow,
     _proposal_uses_scalar_amount,
 )
 from market_policy.negotiation_middleware import (
@@ -151,25 +150,12 @@ def _validate_escrow_proposal(
     Returns ``None`` when the buyer didn't include a proposal (legacy
     clients) — in that case the seller assumes the canonical shape.
     """
-    if proposal is None:
-        return None
-    matched = _match_accepted_escrow(listing, proposal)
-    if not matched:
-        return proposal
+    from market_alkahest.schemas import normalize_proposal_against_accepted_escrows
 
-    literal_fields = dict(matched.get("literal_fields") or {})
-    literal_fields.update(dict(proposal.literal_fields or {}))
-    rates = proposal.rates
-    if rates is None:
-        rates = matched.get("rates") or []
-    return EscrowProposal(
-        chain_name=proposal.chain_name,
-        escrow_address=proposal.escrow_address,
-        fields=dict(proposal.fields or {}),
-        literal_fields=literal_fields,
-        rates=rates,
-        demands=proposal.demands,
-        expiration_unix=proposal.expiration_unix,
+    accepted = listing.get("accepted_escrows")
+    return normalize_proposal_against_accepted_escrows(
+        proposal=proposal,
+        accepted_escrows=accepted if isinstance(accepted, list) else None,
     )
 
 

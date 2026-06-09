@@ -167,6 +167,20 @@ def _rates_of(entry: Any) -> list[Any]:
     return list(getattr(entry, "rates", []) or [])
 
 
+def _rates_as_input(rates: list[Any] | None) -> list[Any] | None:
+    if rates is None:
+        return None
+    out: list[Any] = []
+    for rate in rates:
+        if isinstance(rate, dict):
+            out.append(dict(rate))
+        elif hasattr(rate, "model_dump"):
+            out.append(rate.model_dump())
+        else:
+            out.append(rate)
+    return out
+
+
 def _literal_fields_of(entry: Any) -> dict[str, Any]:
     if isinstance(entry, dict):
         out = entry.get("literal_fields")
@@ -211,6 +225,64 @@ def accepted_recipient_address(accepted_or_proposal: Any) -> str | None:
     return val if isinstance(val, str) and val else None
 
 
+def match_accepted_escrow(
+    accepted_escrows: list[Any] | None,
+    proposal: EscrowProposal,
+) -> Any | None:
+    """Return the accepted escrow matching a proposal's chain and contract."""
+    if not accepted_escrows:
+        return None
+    for entry in accepted_escrows:
+        chain_name = (
+            entry.get("chain_name") if isinstance(entry, dict)
+            else getattr(entry, "chain_name", None)
+        )
+        escrow_address = (
+            entry.get("escrow_address") if isinstance(entry, dict)
+            else getattr(entry, "escrow_address", None)
+        )
+        if chain_name != proposal.chain_name:
+            continue
+        if str(escrow_address or "").lower() != proposal.escrow_address.lower():
+            continue
+        return entry
+    return None
+
+
+def normalize_proposal_against_accepted_escrows(
+    *,
+    proposal: EscrowProposal | None,
+    accepted_escrows: list[Any] | None,
+) -> EscrowProposal | None:
+    """Merge advertised literals/rates into a matching Alkahest proposal.
+
+    Accepted-set membership and literal equality are policy decisions. This
+    helper only performs mechanical normalization for a proposal that matches
+    one advertised ``(chain_name, escrow_address)`` tuple.
+    """
+    if proposal is None:
+        return None
+    matched = match_accepted_escrow(accepted_escrows, proposal)
+    if matched is None:
+        return proposal
+
+    literal_fields = _literal_fields_of(matched)
+    literal_fields.update(dict(proposal.literal_fields or {}))
+    rates = proposal.rates
+    if rates is None:
+        rates = _rates_of(matched)
+    rates = _rates_as_input(rates)
+    return EscrowProposal(
+        chain_name=proposal.chain_name,
+        escrow_address=proposal.escrow_address,
+        fields=dict(proposal.fields or {}),
+        literal_fields=literal_fields,
+        rates=rates,
+        demands=proposal.demands,
+        expiration_unix=proposal.expiration_unix,
+    )
+
+
 __all__ = [
     "ERC20TokenMetadata",
     "EscrowDemand",
@@ -223,5 +295,7 @@ __all__ = [
     "accepted_recipient_address",
     "accepted_token_address",
     "compute_rate_total",
+    "match_accepted_escrow",
+    "normalize_proposal_against_accepted_escrows",
     "primary_rate_value",
 ]

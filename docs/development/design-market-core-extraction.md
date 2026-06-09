@@ -424,6 +424,9 @@ Recommended order:
    proposal materialization, compute lease encoding, token materialization,
    Alkahest escrow terms/create helpers, and post-provisioning fulfillment
    submission.
+   `market_alkahest.schemas` owns generic Alkahest accepted-escrow
+   matching and proposal normalization across escrow kinds; VM code only
+   extracts the listing's `accepted_escrows` collection before calling it.
    `domains/vms/provisioning/` now owns VM capacity checks,
    provision-term construction, fulfillment-plan construction,
    provisioning job-spec construction, and provisioning-service client

@@ -130,8 +130,8 @@ DEMAND_RESOURCE = {
 }
 # Listing-side accepted_escrows advertisement. The escrow_address here is a
 # stub — the buyer sends the placeholder zero address on its EscrowProposal
-# (see negotiate_new's defaults), which skips the (chain, address) strict
-# match in _match_accepted_escrow; field-level equality on
+# (see negotiate_new's defaults), which skips the accepted-escrow
+# (chain, address) strict match; field-level equality on
 # literal_fields["token"] is what gates the proposal. The real
 # escrow_address used on-chain is what the buyer's CLI resolves through
 # alkahest at settle time.
