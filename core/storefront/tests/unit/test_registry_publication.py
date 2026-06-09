@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from market_core.registry_publication import (
+from core_storefront.registry_publication import (
     close_listing_in_registries,
     ensure_json_obj,
     publish_listing_to_registries,

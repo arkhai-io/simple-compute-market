@@ -467,7 +467,7 @@ Recommended order:
    `domains/vms/provisioning/fulfillment.py` owns VM fulfillment
    orchestration behind explicit storefront callbacks. `sync_negotiation.py`
    and `action_executor.py` remain compatibility/stateful HTTP wrappers.
-   `market_core.registry_publication` owns schema-agnostic registry
+   `core_storefront.registry_publication` owns schema-agnostic registry
    publish/close fan-out through injected registry clients and request
    factories; the storefront wrapper keeps settings, SQLite publication
    persistence, and stage-event logging.

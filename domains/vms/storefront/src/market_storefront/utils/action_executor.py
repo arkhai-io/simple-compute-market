@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from core_storefront.stage_log import stage_event
 
 from alkahest_py import AlkahestClient
-from market_core.registry_publication import (
+from core_storefront.registry_publication import (
     close_listing_in_registries,
     publish_listing_to_registries,
 )
