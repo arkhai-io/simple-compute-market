@@ -13,6 +13,7 @@ contracts. Tests cover:
 """
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -42,7 +43,6 @@ from market_alkahest.alkahest import (
     reclaim_expired_escrow_with_codec,
     register_escrow_kind_codec,
 )
-from market_core.schemas import EscrowProposal
 
 
 _ARBITER = "0x" + "ab" * 20
@@ -531,7 +531,7 @@ def test_erc20_tierable_get_obligation_dispatches_to_sdk():
 
 
 def test_materialize_escrow_terms_uses_final_agreed_amount_over_proposal_amount():
-    proposal = EscrowProposal(
+    proposal = SimpleNamespace(
         chain_name="anvil",
         escrow_address="0x" + "00" * 20,
         fields={
@@ -554,7 +554,7 @@ def test_materialize_escrow_terms_uses_final_agreed_amount_over_proposal_amount(
 
 
 def test_materialize_escrow_terms_assigns_indexed_bundle_rate_fields():
-    proposal = EscrowProposal(
+    proposal = SimpleNamespace(
         chain_name="anvil",
         escrow_address="0x" + "00" * 20,
         literal_fields={
@@ -583,7 +583,7 @@ def test_materialize_escrow_terms_assigns_indexed_bundle_rate_fields():
 
 
 def test_materialize_escrow_terms_does_not_add_amount_for_amountless_escrow():
-    proposal = EscrowProposal(
+    proposal = SimpleNamespace(
         chain_name="anvil",
         escrow_address="0x" + "00" * 20,
         literal_fields={

@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Alkahest settlement codecs, token helpers, and chain probes for the market"
 requires-python = ">=3.10,<3.14"
 dependencies = [
-    "market-core",
     "pydantic>=2",
     "web3>=7.14.0",
 ]
@@ -20,9 +19,6 @@ packages = ["src/market_alkahest"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
 testpaths = ["tests/unit"]
-
-[tool.uv.sources]
-market-core = { path = "../../core", editable = true }
 
 [dependency-groups]
 dev = [

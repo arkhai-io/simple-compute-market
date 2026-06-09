@@ -1,14 +1,13 @@
 from enum import Enum
 from datetime import datetime
 from typing import Any, Literal, Union
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 import uuid
 
 from service.schemas import (
     AcceptedEscrow,
     EscrowDemand,
     Resource as CoreResource,
-    TokenResource as CoreTokenResource,
 )
 
 from service.clients.token import ERC20TokenMetadata
@@ -21,7 +20,7 @@ from service.clients.token import ERC20TokenMetadata
 # └── CoreResource                  Base resource model
 #     └── ComputeDomainResource     Parse/coerce helper; extends CoreResource
 #         ├── ComputeResource       A compute slice (GPU, CPU, RAM, region, ...)
-#         └── TokenResource         ERC-20 token payment (= CoreTokenResource alias)
+#         └── TokenResource         ERC-20 token payment
 #
 # Marketplace-layer types (defined here)
 # ├── Listing                       A published marketplace listing
@@ -232,7 +231,57 @@ class ComputeDomainResource(CoreResource):
         )
 
 
-TokenResource = CoreTokenResource
+def _parse_uint256_str(v: Any, field_name: str) -> int | None:
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        raise ValueError(f"{field_name}: expected non-negative decimal, got bool")
+    if isinstance(v, int):
+        if v < 0:
+            raise ValueError(f"{field_name}: must be non-negative, got {v}")
+        return v
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return None
+        if not s.isdigit():
+            raise ValueError(
+                f"{field_name}: must be a non-negative decimal-digit string, got {v!r}"
+            )
+        return int(s)
+    raise ValueError(
+        f"{field_name}: must be int, decimal string, or None; got "
+        f"{type(v).__name__}"
+    )
+
+
+def _serialize_uint256_str(v: int | None) -> str | None:
+    return None if v is None else str(v)
+
+
+class TokenResource(CoreResource):
+    """ERC-20 token payment resource for the VM market."""
+
+    token: ERC20TokenMetadata = Field(
+        description="Token metadata resolved from registry or local chain cache"
+    )
+    amount: int | None = Field(
+        default=None,
+        description=(
+            "Non-negative amount in base units. On the wire as a "
+            "decimal-digit string; Python int internally."
+        ),
+    )
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _parse_amount(cls, v: Any) -> int | None:
+        return _parse_uint256_str(v, "amount")
+
+    @field_serializer("amount")
+    def _serialize_amount(self, v: int | None) -> str | None:
+        return _serialize_uint256_str(v)
+
 
 class ComputeResource(ComputeDomainResource):
     """Describes a compute slice — a sliceable allocation from a host that

@@ -17,7 +17,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Optional
 
-from market_core.schemas import ERC20TokenMetadata
+from market_alkahest.schemas import ERC20TokenMetadata
 
 logger = logging.getLogger(__name__)
 

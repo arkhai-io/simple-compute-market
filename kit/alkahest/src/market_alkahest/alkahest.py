@@ -864,7 +864,7 @@ def materialize_escrow_terms_from_proposal(
     is authoritative for the flat ``amount`` field because proposals can carry
     stale round amounts while settlement receives the final negotiated total.
     """
-    from market_core.schemas import (
+    from market_alkahest.schemas import (
         EscrowTerms,
         RateValue,
         accepted_demands,
