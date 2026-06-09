@@ -8,10 +8,10 @@
 # Override specific values at runtime via PROVISIONING_* env vars.
 # ---------------------------------------------------------------------------
 
-playbook_path: "/opt/compute-provisioning-iac/ansible/playbooks/single-tenant/vm-operations.yaml"
-inventory_path: "/opt/compute-provisioning-iac/ansible/inventory/hosts"
-management_vars_path: "/opt/compute-provisioning-iac/ansible/inventory/management-vars.yaml"
-ansible_cfg: "/opt/compute-provisioning-iac/ansible/ansible.cfg"
+playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
+inventory_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/hosts"
+management_vars_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
+ansible_cfg: "/opt/domains/vms/provisioning/iac/ansible/ansible.cfg"
 
 # ---------------------------------------------------------------------------
 # Storefront callback target for the lease watchdog.

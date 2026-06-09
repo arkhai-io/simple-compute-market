@@ -102,11 +102,11 @@ storefront:
 config:
   database_url: "sqlite:////app/data/provisioning.db"
 
-  # Ansible paths — set to the IaC submodule location inside the container.
+  # Ansible paths — set to the IaC tree location inside the container.
   # Override here for environments that mount the IaC at a different path.
-  playbook_path: "/opt/compute-provisioning-iac/ansible/playbooks/single-tenant/vm-operations.yaml"
-  inventory_path: "/opt/compute-provisioning-iac/ansible/inventory/hosts"
-  management_vars_path: "/opt/compute-provisioning-iac/ansible/inventory/management-vars.yaml"
+  playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
+  inventory_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/hosts"
+  management_vars_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
 
   # Ansible runtime
   ansible_timeout_seconds: 1800

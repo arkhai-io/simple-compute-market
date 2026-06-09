@@ -100,7 +100,7 @@ Parts of the code predate the principle and diverge from it. These seams are tra
 | Buyer ↔ seller protocol | Plain HTTP request/response, EIP-191-signed bodies |
 | Seller server framework | FastAPI / Starlette + uvicorn |
 | Buyer | Pure HTTP client — `market` CLI, no server |
-| VM automation | Ansible (via `compute-provisioning-iac` submodule) |
+| VM automation | Ansible (via `domains/vms/provisioning/iac`) |
 | Job queue | In-process `asyncio.Queue` (no external queue dependency) |
 | Overlay networking (optional) | ZeroTier |
 | Local dev chain | Anvil (Foundry) |
@@ -131,7 +131,7 @@ Parts of the code predate the principle and diverge from it. These seams are tra
          │  signed bodies     │      ┌────────▼────────────────┐
          └────────────────────┘      │  Ansible playbooks      │
                                      │  (compute-provisioning- │
-                                     │   iac submodule)        │
+                                     │   iac tree)        │
                                      └─────────────────────────┘
 
  ┌──────────────┐   ┌────────────────────────────────────────┐
@@ -1508,9 +1508,9 @@ GET    /api/v1/hosts/{host}/connectivity   Run ansible -m ping
 
 ---
 
-### `compute-provisioning-iac` (submodule)
+### `domains/vms/provisioning/iac`
 
-**Role:** Infrastructure-as-code for the physical layer. A git submodule.
+**Role:** Infrastructure-as-code for the physical layer.
 
 Contains Ansible roles and Terraform modules used by both the provisioning worker (at runtime) and operators (to set up seller hardware).
 

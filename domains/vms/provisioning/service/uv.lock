@@ -143,7 +143,7 @@ wheels = [
 [[package]]
 name = "arkhai-storefront-client"
 version = "0.15.0"
-source = { registry = "../.dist" }
+source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "eth-account" },
     { name = "httpx" },

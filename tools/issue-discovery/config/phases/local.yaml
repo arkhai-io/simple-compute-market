@@ -166,7 +166,7 @@ phases:
     commands:
       - id: iac_unittest
         run: python3 -m unittest discover -s tests -p 'test_*.py' -v
-        workdir: compute-provisioning-iac
+        workdir: domains/vms/provisioning/iac
 
   - id: integration_harness_unit_tests
     name: Integration harness unit tests

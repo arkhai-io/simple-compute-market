@@ -38,7 +38,7 @@ A comprehensive Terraform and Ansible-based Infrastructure as Code solution for 
 ### 1. Clone the Repository
 ```bash
 git clone <repository-url>
-cd compute-provisioning-iac/ansible
+cd domains/vms/provisioning/iac/ansible
 ```
 
 ### 2. Install Required Ansible Collections
@@ -103,7 +103,7 @@ export SSH_PRIVATE_KEY=$(base64 < ~/.ssh/provisioner_ed25519 | tr -d '\n')
 
 #### Encoding management-vars.yaml for Container Injection
 
-The Async Provisioning Service container reads `MANAGEMENT_VARS_YAML` as a **base64-encoded single-line string** and writes the decoded file to `/app/compute-provisioning-iac/ansible/inventory/management-vars.yaml` at startup. This file is required when running VM operations that use Packer-generated Golden Images.
+The Async Provisioning Service container reads `MANAGEMENT_VARS_YAML` as a **base64-encoded single-line string** and writes the decoded file to `/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml` at startup. This file is required when running VM operations that use Packer-generated Golden Images.
 
 management-vars.yaml is only required when runtime VM operations use golden images.
 
@@ -149,7 +149,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 
 **Parameter notes**:
 - `SSH_PRIVATE_KEY`: base64-encoded private key (no newlines). The container decodes it to `~/.ssh/id_ed25519` on startup.
-- `MANAGEMENT_VARS_YAML`: base64-encoded `management-vars.yaml` (no newlines). The container decodes it to `/app/compute-provisioning-iac/ansible/inventory/management-vars.yaml` on startup. Required when using Golden Images (`vm_action=create` or `vm_action=undefine`).
+- `MANAGEMENT_VARS_YAML`: base64-encoded `management-vars.yaml` (no newlines). The container decodes it to `/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml` on startup. Required when using Golden Images (`vm_action=create` or `vm_action=undefine`).
 - `DEFAULT_VM_HOST`: alias of the KVM host from the Ansible inventory (e.g. `kvm1`) that the service will SSH into for provisioning operations.
 - `ANSIBLE_BECOME_PASS`: sudo password on the target KVM host.
 - Store the generated FRP credentials JSON outside version control. The FRP setup role writes it to `credentials/frp-server-credentials-<host>-<timestamp>.json` at the repo root on the Ansible control machine.
@@ -199,7 +199,7 @@ cd ../../ansible
 
 ## Validation
 
-Run the repo-local validation entrypoints from the submodule root before
+Run the repo-local validation entrypoints from the IaC root before
 changing playbooks, roles, or inventory:
 
 ```bash
@@ -1887,7 +1887,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 - `REGISTRY_CACHE_TTL_SECONDS`: Cache TTL for ERC Registry responses in seconds (`300`)
 - `REGISTRY_CACHE_MAX_SIZE`: Maximum number of cached registry entries (`256`)
 - `SSH_PRIVATE_KEY`: base64-encoded SSH private key (no newlines). The container decodes it to `~/.ssh/id_ed25519` on startup. Encode with: `base64 < ~/.ssh/provisioner_ed25519 | tr -d '\n'`
-- `MANAGEMENT_VARS_YAML`: base64-encoded `management-vars.yaml` (no newlines). The container decodes it to `/app/compute-provisioning-iac/ansible/inventory/management-vars.yaml` on startup. Required when using Golden Images (`vm_action=create` or `vm_action=undefine`). Encode with: `base64 < inventory/management-vars.yaml | tr -d '\n'`
+- `MANAGEMENT_VARS_YAML`: base64-encoded `management-vars.yaml` (no newlines). The container decodes it to `/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml` on startup. Required when using Golden Images (`vm_action=create` or `vm_action=undefine`). Encode with: `base64 < inventory/management-vars.yaml | tr -d '\n'`
 
 **Access URLs**:
 - HTTP: `http://provisioner.vm-market.arkhai.io:8888` (via FRP tunnel)

@@ -494,10 +494,8 @@ Top-level folder tracker:
 
 1. **Done: remove `domain/`.** This was a stale one-file package; the real
    domain namespace is `domains/`.
-2. **Done: remove top-level `provisioning-service/` from git.** The VM
-   fulfillment backend lives under `domains/vms/provisioning/service/`.
-   Any remaining top-level `provisioning-service/` directory is ignored
-   local build/cache state, not repo source.
+2. **Done: remove top-level `provisioning-service/`.** The VM fulfillment
+   backend lives under `domains/vms/provisioning/service/`.
 3. **Done: remove top-level registry packages.** The registry service and
    protocol clients live under `core/` while preserving their import/wheel
    names.
@@ -512,13 +510,16 @@ Top-level folder tracker:
    packaging project, tests, Dockerfile, and sample configs live under
    `domains/vms/storefront/`, while the already extracted schema-invariant
    storefront pieces remain under `core/src/market_core/storefront/`.
-7. **Next: drain `domains/vms/storefront/` internals.** Move remaining
+7. **Done: move VM provisioning IaC.** The Ansible/Packer VM execution
+   tree lives under `domains/vms/provisioning/iac/`, next to the
+   provisioning service and storefront-facing provisioning hooks.
+8. **Next: drain `domains/vms/storefront/` internals.** Move remaining
    schema-invariant storefront runtime into `core/storefront`, and VM
    listing/negotiation/settlement/provisioning hooks into `domains/vms/*`.
 
 This tracker intentionally ignores generated or local-only top-level
 directories such as `.dist/`, `.uv-cache/`, `.pytest_cache/`, `src/`,
-`shared-env/`, and ignored `provisioning-service/` cache state.
+and `shared-env/`.
 
 ## Phases
 

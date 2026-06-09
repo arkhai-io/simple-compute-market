@@ -181,13 +181,13 @@ deploy-compose:
 #   make deploy SSH_KEY_FILE=/path/to/key HOSTS_INI=/path/to/hosts
 deploy: deploy-helm
 
-IAC_DIR      ?= $(CURDIR)/compute-provisioning-iac
+IAC_DIR      ?= $(CURDIR)/domains/vms/provisioning/iac
 HOSTS_INI    ?= $(IAC_DIR)/ansible/inventory/hosts
 SSH_KEY_FILE ?= $(HOME)/.ssh/id_ed25519
 
 ## Install or upgrade the Helm release.
 ## Requires a reachable cluster context (kubectl) and SSH_KEY_FILE.
-## HOSTS_INI defaults to the IAC submodule inventory.
+## HOSTS_INI defaults to the IAC inventory.
 deploy-helm:
 	$(MAKE) -C helm deploy \
 		SSH_KEY_FILE=$(SSH_KEY_FILE) \

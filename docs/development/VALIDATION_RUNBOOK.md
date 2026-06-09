@@ -69,14 +69,14 @@ Defaults:
 - Code-level tests are enabled.
 - Compose smoke/e2e tests are enabled.
 - Redis host-port publishing is disabled through `/tmp/scm-no-redis-port.yml`.
-- `compute-provisioning-iac` contract tests run by default because they do not
+- `domains/vms/provisioning/iac` contract tests run by default because they do not
   require a live KVM host or Ansible inventory.
 - Bob/Alice storefront named volumes are pre-chowned to UID/GID `1000:1000`
   before stack startup to avoid the known SQLite volume ownership failure.
 - A quiet `anvil_dumpState` check runs after Anvil is reachable.
 - Helm render validation runs automatically when `helm` is available.
 - Compute-provisioning IAC validation runs automatically when Ansible tooling
-  and `compute-provisioning-iac/ansible/inventory/hosts` are available.
+  and `domains/vms/provisioning/iac/ansible/inventory/hosts` are available.
 - The single-pass `integration-tests make test` sweep is off by default because
   it reruns stack-mutating e2e tests after the marker-specific runs.
 
@@ -190,7 +190,7 @@ cd ../..
 Compute provisioning IAC contract tests:
 
 ```bash
-cd compute-provisioning-iac
+cd domains/vms/provisioning/iac
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 cd ..
 ```
@@ -214,10 +214,10 @@ Current note:
 ## 5. Optional Environment-Dependent Local Tests
 
 Compute provisioning IAC inventory/playbook validation requires Ansible tooling
-and `compute-provisioning-iac/ansible/inventory/hosts`:
+and `domains/vms/provisioning/iac/ansible/inventory/hosts`:
 
 ```bash
-cd compute-provisioning-iac
+cd domains/vms/provisioning/iac
 make validate
 cd ..
 ```
@@ -225,7 +225,7 @@ cd ..
 Do not run acceptance validation unless a real KVM host is configured:
 
 ```bash
-cd compute-provisioning-iac
+cd domains/vms/provisioning/iac
 make validate-acceptance KVM_HOST=<inventory-host>
 cd ..
 ```
@@ -259,7 +259,7 @@ These are not covered by the standard local run above:
   were retired with the buyer-storefront drop.
 - Helm/Kubernetes test pods: `helm test` coverage requires a deployed Helm
   release and is separate from the local compose stack.
-- `compute-provisioning-iac make validate-acceptance`: requires a real KVM host
+- `domains/vms/provisioning/iac make validate-acceptance`: requires a real KVM host
   and `KVM_HOST` set to an inventory alias.
 - Policy training/RL behavior: no current standard local test command covers
   the training stack or trained model inference.
@@ -991,7 +991,7 @@ for attempt in $(seq 1 30); do
 done
 test "$ssh_ready" -eq 1
 
-cd compute-provisioning-iac
+cd domains/vms/provisioning/iac
 
 ANSIBLE_CONFIG=ansible/ansible.cfg \
   ansible-galaxy collection install -r ansible/requirements.yml

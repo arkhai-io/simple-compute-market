@@ -227,7 +227,7 @@ services:
       - PROVISIONING_STOREFRONT_URL=http://bob-storefront:8001
       - PROVISIONING_STOREFRONT_ADMIN_KEY=${STOREFRONT_ADMIN_KEY:-test-api-key}
     volumes:
-      - ./compute-provisioning-iac:/app/compute-provisioning-iac
+      - ./domains/vms/provisioning/iac:/opt/domains/vms/provisioning/iac
       - ${HOME}/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro
     restart: unless-stopped
     deploy:

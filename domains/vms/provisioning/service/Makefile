@@ -17,9 +17,9 @@ reinit: ## Force-reinstall internal wheels after make dist. Use when bumping int
 		--reinstall-package arkhai-storefront-client
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-# Absolute path to compute-provisioning-iac, resolved from this Makefile's
+# Absolute path to the sibling VM provisioning IaC tree, resolved from this Makefile's
 # directory regardless of where make is invoked from.
-IAC_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../../../compute-provisioning-iac)
+IAC_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../iac)
 
 # ── Local dev ─────────────────────────────────────────────────────────────────
 
@@ -83,7 +83,7 @@ docker-run-dev: ## Run the service with host IaC + SSH key mounted (local dev)
 	docker run -it --rm --name provisioning \
 	-e ACTIVE_PROFILES=docker,mock \
 	--network market -p 8081:8081 \
-	-v "$(IAC_DIR):/opt/compute-provisioning-iac" \
+	-v "$(IAC_DIR):/opt/domains/vms/provisioning/iac" \
 	-v "$(SSH_KEY):/home/appuser/.ssh/id_ed25519:ro" \
 	$(IMAGE_NAME):$(IMAGE_TAG)
 

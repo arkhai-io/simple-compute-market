@@ -4,20 +4,25 @@
 *
 
 # ── provisioning-service ───────────────────────────────────────
+!domains/
+!domains/vms/
+!domains/vms/provisioning/
+!domains/vms/provisioning/service/
 !domains/vms/provisioning/service/pyproject.toml
 !domains/vms/provisioning/service/uv.lock
-!domains/vms/provisioning/service/src/
+!domains/vms/provisioning/service/src/**
 
 # ── Internal package wheels (built by make dist before docker build) ────────
 !.dist/
 
-# ── compute-provisioning-iac (Ansible only, no Terraform) ───────────
-!compute-provisioning-iac/ansible/
+# ── domains/vms/provisioning/iac (Ansible only, no Terraform) ───────────
+!domains/vms/provisioning/iac/
+!domains/vms/provisioning/iac/ansible/**
 
 # Exclude sensitive / generated files inside ansible/
-compute-provisioning-iac/ansible/inventory/management-vars.yaml
-compute-provisioning-iac/ansible/keys/
-compute-provisioning-iac/ansible/ansible.log
+domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml
+domains/vms/provisioning/iac/ansible/keys/
+domains/vms/provisioning/iac/ansible/ansible.log
 
 # ── Global excludes ─────────────────────────────────────────────────
 **/.git

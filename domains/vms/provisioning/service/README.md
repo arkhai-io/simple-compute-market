@@ -1,12 +1,12 @@
 # async-provisioning-service
 
-Async VM provisioning service. Exposes a REST API that queues provisioning jobs (create, destroy, start, stop, etc.) onto a Redis-backed worker that executes Ansible playbooks from the `compute-provisioning-iac` submodule.
+Async VM provisioning service. Exposes a REST API that queues provisioning jobs (create, destroy, start, stop, etc.) onto a Redis-backed worker that executes Ansible playbooks from `domains/vms/provisioning/iac`.
 
 ## Architecture
 
 ```
 Client ──▶ FastAPI (port 8081) ──▶ Redis queue ──▶ Worker ──▶ Ansible playbooks
-                                                              (compute-provisioning-iac)
+                                                              (domains/vms/provisioning/iac)
 ```
 
 ## Local Development
@@ -23,11 +23,7 @@ make serve
 
 ### Prerequisites
 
-Initialize the `compute-provisioning-iac` submodule (the Dockerfile copies it into the image):
-
-```bash
-git submodule update --init compute-provisioning-iac
-```
+The Dockerfile copies `domains/vms/provisioning/iac` into the image. Keep that tree present when building from the repository root.
 
 ### Build
 
@@ -35,7 +31,7 @@ git submodule update --init compute-provisioning-iac
 make build
 ```
 
-This runs from the repo root so both `domains/vms/provisioning/service/` and `compute-provisioning-iac/` are in the build context.
+This runs from the repo root so both `domains/vms/provisioning/service/` and `domains/vms/provisioning/iac/` are in the build context.
 
 ### Run
 
@@ -54,13 +50,13 @@ Override only what you need:
 ```bash
 # Mount inventory + SSH keys
 docker run --rm --env-file .env.local -p 8081:8081 \
-  -v /path/to/hosts:/app/compute-provisioning-iac/ansible/inventory/hosts:ro \
-  -v /path/to/keys:/app/compute-provisioning-iac/ansible/keys:ro \
+  -v /path/to/hosts:/opt/domains/vms/provisioning/iac/ansible/inventory/hosts:ro \
+  -v /path/to/keys:/opt/domains/vms/provisioning/iac/ansible/keys:ro \
   async-provisioning-service
 
-# Full IaC override (entire submodule)
+# Full IaC override
 docker run --rm --env-file .env.local -p 8081:8081 \
-  -v $(pwd)/../compute-provisioning-iac:/app/compute-provisioning-iac \
+  -v $(pwd)/../iac:/opt/domains/vms/provisioning/iac \
   async-provisioning-service
 ```
 
@@ -68,10 +64,10 @@ docker run --rm --env-file .env.local -p 8081:8081 \
 
 | Container path | Purpose |
 |---|---|
-| `/app/compute-provisioning-iac/` | Entire IaC submodule (full override) |
-| `/app/compute-provisioning-iac/ansible/inventory/hosts` | Ansible inventory |
-| `/app/compute-provisioning-iac/ansible/inventory/management-vars.yaml` | Management variables |
-| `/app/compute-provisioning-iac/ansible/keys/` | SSH private keys |
+| `/opt/domains/vms/provisioning/iac/` | Entire IaC tree (full override) |
+| `/opt/domains/vms/provisioning/iac/ansible/inventory/hosts` | Ansible inventory |
+| `/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml` | Management variables |
+| `/opt/domains/vms/provisioning/iac/ansible/keys/` | SSH private keys |
 
 ### Environment variables
 

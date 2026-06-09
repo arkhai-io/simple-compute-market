@@ -30,7 +30,7 @@ WORKDIR /app
 RUN chown appuser:appuser /app
 USER appuser
 
-COPY --chown=appuser:appuser compute-provisioning-iac/ansible/requirements.yml /tmp/requirements.yml
+COPY --chown=appuser:appuser domains/vms/provisioning/iac/ansible/requirements.yml /tmp/requirements.yml
 # Keep Ansible in its own venv so the Galaxy collection layer does not depend
 # on the application venv, local wheels, or provisioning-service source.
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
@@ -97,7 +97,7 @@ COPY --from=builder --chown=appuser:appuser /home/appuser/.ansible /home/appuser
 
 RUN mkdir -p /app/data
 COPY --chown=appuser:appuser domains/vms/provisioning/service/src ./src
-COPY --chown=appuser:appuser compute-provisioning-iac /opt/compute-provisioning-iac
+COPY --chown=appuser:appuser domains/vms/provisioning/iac /opt/domains/vms/provisioning/iac
 
 ENV PATH="/home/appuser/ansible-venv/bin:/app/.venv/bin:$PATH"
 ENV PYTHONPATH=/app/src

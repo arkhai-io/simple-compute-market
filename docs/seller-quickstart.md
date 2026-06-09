@@ -186,7 +186,7 @@ touching libvirt. To create real VMs:
 3. Customize your KVM inventory:
 
    ```bash
-   cd compute-provisioning-iac/ansible/inventory
+   cd domains/vms/provisioning/iac/ansible/inventory
    cp hosts.example hosts
    # edit hosts with your real KVM host(s)
    ```
@@ -233,7 +233,7 @@ touching libvirt. To create real VMs:
    ```bash
    docker compose -f compose/seller.yml -f compose/seller.live.yml exec \
      seller-provisioning ansible \
-     -i /opt/compute-provisioning-iac/ansible/inventory/hosts \
+     -i /opt/domains/vms/provisioning/iac/ansible/inventory/hosts \
      <your_host_alias> -m ping
    ```
 
