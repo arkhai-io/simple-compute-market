@@ -138,7 +138,7 @@ _INIT_USER_TEMPLATE = """\
 # policy = "best_price"                        # across-seller match policy: best_price (default) |
                                                 # fastest_agreed | cheapest_first | registry_order |
                                                 # random_shuffle | priceless_last | any custom name registered
-                                                # via market_buyer.aggregation.register_aggregation_policy,
+                                                # via domains.vms.buyer.aggregation.register_aggregation_policy,
                                                 # or a folder name under
                                                 # $XDG_CONFIG_HOME/arkhai/aggregation_policies/.
 # extra_policy_paths = []                      # additional directories to scan for file-based policies.

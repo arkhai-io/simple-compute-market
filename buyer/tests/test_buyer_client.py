@@ -21,7 +21,7 @@ import pytest
 
 from service.schemas import EscrowProposal, ProvisionTerms
 
-from market_buyer.buyer_client import NegotiationOutcome, negotiate_with_seller
+from domains.vms.buyer.buyer_client import NegotiationOutcome, negotiate_with_seller
 
 
 # Canonical provision / escrow proposals used by every negotiate test —
@@ -92,7 +92,7 @@ _BUYER_PK = "0x" + "11" * 32
 _BUYER_ADDR = "0x" + "cc" * 20
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_round_0_seller_accepts_immediately(mock_urlopen):
     mock_urlopen.side_effect = _urlopen_fake([
         {"negotiation_id": "neg-1", "action": "accept", "proposal": _seller_proposal(50)},
@@ -110,7 +110,7 @@ def test_round_0_seller_accepts_immediately(mock_urlopen):
     assert outcome.negotiation_id == "neg-1"
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_round_0_request_preserves_literal_fields(mock_urlopen):
     seen_body = {}
 
@@ -157,7 +157,7 @@ def test_round_0_request_preserves_literal_fields(mock_urlopen):
     }
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_round_0_request_omits_amount_for_amountless_escrow(mock_urlopen):
     seen_body = {}
 
@@ -204,7 +204,7 @@ def test_round_0_request_omits_amount_for_amountless_escrow(mock_urlopen):
     assert proposal["literal_fields"] == {"attestationUid": "0x" + "aa" * 32}
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_round_0_request_preserves_rates(mock_urlopen):
     seen_body = {}
 
@@ -242,7 +242,7 @@ def test_round_0_request_preserves_rates(mock_urlopen):
     assert seen_body["proposal"]["rates"] == rates
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_round_0_seller_exits(mock_urlopen):
     mock_urlopen.side_effect = _urlopen_fake([
         {"negotiation_id": "neg-1", "action": "exit", "reason": "price_unreasonable"},
@@ -256,7 +256,7 @@ def test_round_0_seller_exits(mock_urlopen):
     assert outcome.reason == "price_unreasonable"
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_counter_loop_converges_to_accept(mock_urlopen):
     """Seller keeps countering, buyer accepts when under ceiling."""
     mock_urlopen.side_effect = _urlopen_fake([
@@ -275,7 +275,7 @@ def test_counter_loop_converges_to_accept(mock_urlopen):
     assert outcome.rounds == 1
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_counter_loop_seller_walks_away(mock_urlopen):
     """Buyer counters, seller exits."""
     mock_urlopen.side_effect = _urlopen_fake([
@@ -294,7 +294,7 @@ def test_counter_loop_seller_walks_away(mock_urlopen):
     assert outcome.rounds == 1
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_buyer_exits_when_seller_unreasonable(mock_urlopen):
     """Seller counters far above ceiling → buyer exits."""
     mock_urlopen.side_effect = _urlopen_fake([
@@ -312,7 +312,7 @@ def test_buyer_exits_when_seller_unreasonable(mock_urlopen):
     assert outcome.reason == "price_unreasonable"
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_signed_requests_include_signature_and_timestamp(mock_urlopen):
     seen_headers = []
 
@@ -337,7 +337,7 @@ def test_signed_requests_include_signature_and_timestamp(mock_urlopen):
     assert hdrs_lower.get("x-timestamp", "").isdigit()
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_on_round_hook_receives_each_round(mock_urlopen):
     mock_urlopen.side_effect = _urlopen_fake([
         {"negotiation_id": "neg-1", "action": "counter", "proposal": _seller_proposal(90)},

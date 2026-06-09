@@ -3,7 +3,7 @@
 Replaces the legacy test_agents.py, which tested the symmetric two-
 storefront flow (one "buyer" storefront posting buy-shaped orders, one
 "seller" posting sell-shaped). Buyers no longer host a storefront —
-they're a pure HTTP client surfaced via the `market` CLI / market_buyer
+they're a pure HTTP client surfaced via the `market` CLI / domains.vms.buyer
 library — so what the helm smoke pod actually wants to confirm is "the
 seller storefront is reachable and on-chain registered".
 

@@ -23,12 +23,12 @@ from service.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
 
 _ESCROW_ADDR_AGG = "0x" + "cd" * 20
 
-from market_buyer.aggregation import (
+from domains.vms.buyer.aggregation import (
     NegotiateFn,
     gather_outcomes,
     register_aggregation_policy,
 )
-from market_buyer.buy_orchestrator import (
+from domains.vms.buyer.buy_orchestrator import (
     AgreedTerms,
     BuyConfig,
     BuyConstraints,
@@ -36,7 +36,7 @@ from market_buyer.buy_orchestrator import (
     make_legacy_settle_hook,
     run_buy,
 )
-from market_buyer.buyer_client import NegotiationOutcome
+from domains.vms.buyer.buyer_client import NegotiationOutcome
 
 
 _BUYER_PK = "0x" + "11" * 32
@@ -224,7 +224,7 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
     }
 
     with patch(
-        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        "domains.vms.buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_route_by_url(routes),
     ):
         result = _run_buy_with_legacy_hooks(
@@ -280,7 +280,7 @@ def test_cheapest_first_preserves_first_agreed_semantics():
     }
 
     with patch(
-        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        "domains.vms.buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_route_by_url(routes),
     ):
         result = _run_buy_with_legacy_hooks(
@@ -340,7 +340,7 @@ def test_custom_policy_can_short_circuit():
     }
 
     with patch(
-        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        "domains.vms.buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_route_by_url(routes),
     ):
         result = _run_buy_with_legacy_hooks(
@@ -364,7 +364,7 @@ def test_policy_returning_none_yields_exited():
         return None
 
     with patch(
-        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        "domains.vms.buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_route_by_url({
             "registry": [
                 {"items": [{"listing_id": "x", "seller": "http://seller-a:8001"}]},

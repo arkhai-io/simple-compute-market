@@ -86,7 +86,7 @@ services:
       start_period: 10s
 
   # 3. Bob's storefront — the primary test seller.
-  # Buyers are pure HTTP clients (the `market` CLI / market_buyer
+  # Buyers are pure HTTP clients (the `market` CLI / domains.vms.buyer
   # library). The buyer-side e2e runs as a one-shot container on this same
   # network (the integration-tests image, which bundles the `market`
   # binary), so discovery resolves the seller's registry-advertised URL

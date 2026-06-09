@@ -34,7 +34,7 @@ from market_policy.negotiation_middleware import (
     NegotiationStep,
 )
 
-from market_buyer.buyer_client import (
+from domains.vms.buyer.buyer_client import (
     NegotiationOutcome,
     ResumeState,
     negotiate_with_seller,
@@ -113,7 +113,7 @@ def _fixed_chain(decisions: list[NegotiationDecision]):
 # ---------------------------------------------------------------------------
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_resume_buyer_accepts_recovered_seller_price(mock_urlopen):
     """Resume from a run-log where seller last countered at 90, buyer
     decides to accept. The seller echoes accept → outcome.agreed at 90."""
@@ -153,7 +153,7 @@ def test_resume_buyer_accepts_recovered_seller_price(mock_urlopen):
     assert "/negotiate/new" not in seen[0]["url"]
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_resume_signed_message_uses_continue_not_new(mock_urlopen):
     """The EIP-191 message must be `negotiate_continue:{neg_id}:...`,
     proving the resume path skipped /negotiate/new entirely."""
@@ -193,7 +193,7 @@ def test_resume_signed_message_uses_continue_not_new(mock_urlopen):
     assert recovered.lower() == expected.lower()
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_resume_buyer_counters_then_seller_accepts(mock_urlopen):
     """Two-round resume: buyer counters at 70, seller accepts."""
     fake, seen = _urlopen_capture([
@@ -226,7 +226,7 @@ def test_resume_buyer_counters_then_seller_accepts(mock_urlopen):
     assert seen[0]["body"]["proposal"]["fields"]["amount"] == 70
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_resume_buyer_exits(mock_urlopen):
     """Buyer's strategy chooses exit → outcome.exited, reason carried."""
     fake, _seen = _urlopen_capture([
@@ -263,7 +263,7 @@ def test_resume_buyer_exits(mock_urlopen):
 # ---------------------------------------------------------------------------
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_resume_without_last_seller_price_raises(mock_urlopen):
     """Cannot resume the round loop without knowing the seller's last
     counter — the strategy needs `their_proposed_price`."""
@@ -287,7 +287,7 @@ def test_resume_without_last_seller_price_raises(mock_urlopen):
         )
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_resume_carries_rounds_completed_into_outcome(mock_urlopen):
     """When resume points at rounds_completed=3, an immediate accept
     in the next round should report rounds=3 (not 1)."""
@@ -317,7 +317,7 @@ def test_resume_carries_rounds_completed_into_outcome(mock_urlopen):
     assert outcome.rounds == 3
 
 
-@patch("market_buyer.buyer_client.urllib.request.urlopen")
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_resume_skips_negotiate_new_endpoint_entirely(mock_urlopen):
     """Cross-cutting check: every HTTP call's URL contains the neg_id
     (i.e. /negotiate/{id}); none hit /negotiate/new."""

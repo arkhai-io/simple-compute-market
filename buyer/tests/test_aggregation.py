@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from market_buyer.aggregation import (
+from domains.vms.buyer.aggregation import (
     DEFAULT_POLICY_NAME,
     NegotiateFn,
     gather_outcomes,
@@ -22,7 +22,7 @@ from market_buyer.aggregation import (
     load_aggregation_policy,
     register_aggregation_policy,
 )
-from market_buyer.buyer_client import NegotiationOutcome
+from domains.vms.buyer.buyer_client import NegotiationOutcome
 
 
 def _match(listing_id: str, *, price: int | None = None, seller: str = "http://s") -> dict[str, Any]:
@@ -358,7 +358,7 @@ class TestBestPriceTimeoutResolver:
     def _with_cfg(self, raw):
         from unittest.mock import patch
 
-        from market_buyer import aggregation as agg
+        from domains.vms.buyer import aggregation as agg
 
         # Patch the config load to return a single key. get_dotted
         # then traverses it normally — so we exercise the real
@@ -368,7 +368,7 @@ class TestBestPriceTimeoutResolver:
             return agg._resolve_best_price_timeout()
 
     def test_unset_returns_none(self):
-        from market_buyer import aggregation as agg
+        from domains.vms.buyer import aggregation as agg
         from unittest.mock import patch
         with patch.object(agg, "_load_buyer_config", lambda: {}):
             assert agg._resolve_best_price_timeout() is None
@@ -408,7 +408,7 @@ class TestBestPriceTimeout:
         completions wins."""
         from unittest.mock import patch
 
-        from market_buyer import aggregation as agg
+        from domains.vms.buyer import aggregation as agg
 
         slow_completed = 0
 
@@ -456,7 +456,7 @@ class TestBestPriceTimeout:
     def test_returns_none_when_nobody_agrees_in_time(self):
         from unittest.mock import patch
 
-        from market_buyer import aggregation as agg
+        from domains.vms.buyer import aggregation as agg
 
         async def _all_slow(_m: dict[str, Any]) -> NegotiationOutcome:
             await asyncio.sleep(0.5)
@@ -477,7 +477,7 @@ class TestBestPriceTimeout:
         slowest seller's outcome still counts toward the comparison."""
         from unittest.mock import patch
 
-        from market_buyer import aggregation as agg
+        from domains.vms.buyer import aggregation as agg
 
         async def _negotiate(match: dict[str, Any]) -> NegotiationOutcome:
             if match["listing_id"] == "slow_cheapest":

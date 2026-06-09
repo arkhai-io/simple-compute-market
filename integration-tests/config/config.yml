@@ -18,7 +18,7 @@ registry: # injected from environment profile file
   api_url:
 
 buyer:
-  # The buyer is a pure HTTP client (market_buyer CLI / library) — only
+  # The buyer is a pure HTTP client (market CLI / domains.vms.buyer library) — only
   # wallet keys are configured here; they sign negotiation requests
   # against the seller's storefront and on-chain escrow calls.
   private_key:       "" # injected from secret profile file

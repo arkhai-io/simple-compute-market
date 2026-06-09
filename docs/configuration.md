@@ -294,7 +294,7 @@ the survivors.
 ### The aggregation contract
 
 ```python
-from market_buyer.aggregation import (
+from domains.vms.buyer.aggregation import (
     AggregationPolicy,
     NegotiateFn,
     register_aggregation_policy,
@@ -315,7 +315,7 @@ Same two paths as on the seller side:
 **1. Decorator (in-process):**
 
 ```python
-from market_buyer.aggregation import (
+from domains.vms.buyer.aggregation import (
     NegotiationOutcome,
     register_aggregation_policy,
 )
@@ -345,7 +345,7 @@ registry would conflict if a folder name overlapped.)
 ## Reference
 
 - Seller settings schema: `storefront/src/market_storefront/settings.toml`.
-- Buyer settings example: `buyer/market_buyer/groups/config.py` (the
+- Buyer settings example: `domains/vms/buyer/config_cli.py` (the
   `init-user` template comment).
 - Middleware module: `kit/policy/src/market_policy/negotiation_middleware.py`.
-- Aggregation module: `buyer/market_buyer/aggregation.py`.
+- Aggregation module: `domains/vms/buyer/aggregation.py`.

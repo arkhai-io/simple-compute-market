@@ -26,7 +26,7 @@ from service.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
 
 _ESCROW_ADDR = "0x" + "cd" * 20
 
-from market_buyer.buy_orchestrator import (
+from domains.vms.buyer.buy_orchestrator import (
     AgreedTerms,
     BuyConfig,
     BuyConstraints,
@@ -37,7 +37,7 @@ from market_buyer.buy_orchestrator import (
     run_buy,
     submit_settlement,
 )
-from market_buyer.buyer_client import NegotiationOutcome
+from domains.vms.buyer.buyer_client import NegotiationOutcome
 
 
 _BUYER_PK = "0x" + "11" * 32
@@ -217,7 +217,7 @@ def _urlopen_sequence(responses):
 
 def test_no_matches_returns_no_matches_status():
     with patch(
-        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        "domains.vms.buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_urlopen_sequence([{"items": []}]),
     ):
         result = _run_buy_with_legacy_hooks(
@@ -235,7 +235,7 @@ def test_matches_can_be_preseeded_skipping_registry_query():
     """When caller passes matches directly, registry is never hit."""
     # Negotiation immediately exits so we don't need escrow/settle stubs.
     with patch(
-        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        "domains.vms.buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_urlopen_sequence([
             # /negotiate/new → seller exits
             {"negotiation_id": "neg-1", "action": "exit",
@@ -349,7 +349,7 @@ def test_happy_path_drives_to_ready():
     events: list[tuple[str, dict]] = []
 
     with patch(
-        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        "domains.vms.buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_urlopen_sequence(responses),
     ):
         result = _run_buy_with_legacy_hooks(
@@ -431,7 +431,7 @@ def test_first_match_exits_second_agrees():
         {"status": "ready", "fulfillment_uid": "0xattest"},
     ]
     with patch(
-        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        "domains.vms.buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_urlopen_sequence(responses),
     ):
         result = _run_buy_with_legacy_hooks(
@@ -465,7 +465,7 @@ def test_escrow_hook_failure_returns_exited_with_reason():
         raise RuntimeError("chain RPC down")
 
     with patch(
-        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        "domains.vms.buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_urlopen_sequence(responses),
     ):
         result = _run_buy_with_legacy_hooks(
@@ -494,7 +494,7 @@ def test_provisioning_failed_returns_failed_status():
         {"status": "failed", "reason": "no available VM"},
     ]
     with patch(
-        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        "domains.vms.buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_urlopen_sequence(responses),
     ):
         result = _run_buy_with_legacy_hooks(
@@ -530,7 +530,7 @@ def test_settlement_timeout_returns_timeout_status():
     ] + [{"status": "provisioning"}] * 50  # never terminal
 
     with patch(
-        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        "domains.vms.buyer.buy_orchestrator.urllib.request.urlopen",
         side_effect=_urlopen_sequence(responses),
     ):
         result = _run_buy_with_legacy_hooks(
@@ -603,7 +603,7 @@ def test_submit_settlement_retries_on_propagation_lag(monkeypatch):
         return {"escrow_uid": "0x" + "ff" * 32, "status": "provisioning"}
 
     sleeps: list[float] = []
-    monkeypatch.setattr("market_buyer.buy_orchestrator._signed_json", fake_signed_json)
+    monkeypatch.setattr("domains.vms.buyer.buy_orchestrator._signed_json", fake_signed_json)
     out = submit_settlement(**_settle_kwargs(), sleep=sleeps.append, retry_backoff=0.0)
 
     assert out["status"] == "provisioning"
@@ -622,7 +622,7 @@ def test_submit_settlement_does_not_retry_other_400s(monkeypatch):
             "{\"detail\":\"agreed_amount mismatch: 1000000 vs 2000000\"}"
         )
 
-    monkeypatch.setattr("market_buyer.buy_orchestrator._signed_json", fake_signed_json)
+    monkeypatch.setattr("domains.vms.buyer.buy_orchestrator._signed_json", fake_signed_json)
     with pytest.raises(RuntimeError, match="agreed_amount mismatch"):
         submit_settlement(**_settle_kwargs(), sleep=lambda _s: None)
     assert calls["n"] == 1
@@ -640,7 +640,7 @@ def test_submit_settlement_gives_up_after_max_attempts(monkeypatch):
             "ABI decoding failed: buffer overrun while deserializing\"}"
         )
 
-    monkeypatch.setattr("market_buyer.buy_orchestrator._signed_json", fake_signed_json)
+    monkeypatch.setattr("domains.vms.buyer.buy_orchestrator._signed_json", fake_signed_json)
     with pytest.raises(RuntimeError, match="buffer overrun"):
         submit_settlement(
             **_settle_kwargs(),

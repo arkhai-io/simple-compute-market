@@ -26,9 +26,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from market_buyer.cli import app
-from market_buyer.buy_orchestrator import BuyResult
-from market_buyer.run_log import RunLog, read_run
+from domains.vms.buyer.cli import app
+from domains.vms.buyer.buy_orchestrator import BuyResult
+from domains.vms.buyer.run_log import RunLog, read_run
 from service.config_loader import ChainConfig
 
 
@@ -137,7 +137,7 @@ class TestNegotiateFrom:
 
         # Seller's accept response to our resumed continue.
         monkeypatch.setattr(
-            "market_buyer.buyer_client.urllib.request.urlopen",
+            "domains.vms.buyer.buyer_client.urllib.request.urlopen",
             _urlopen_for([{"action": "accept", "proposal": {"fields": {"amount": 70}}}]),
         )
         result = runner.invoke(app, [
@@ -168,7 +168,7 @@ class TestNegotiateFrom:
         original_run = _seed_partial_negotiation("http://seller:8001", "L-1")
 
         monkeypatch.setattr(
-            "market_buyer.buyer_client.urllib.request.urlopen",
+            "domains.vms.buyer.buyer_client.urllib.request.urlopen",
             _urlopen_for([{"action": "accept", "proposal": {"fields": {"amount": 70}}}]),
         )
         result = runner.invoke(app, [
@@ -181,7 +181,7 @@ class TestNegotiateFrom:
         assert result.exit_code == 0, result.output
 
         # Find the new run-log (the one that wasn't `original_run`).
-        from market_buyer.run_log import list_runs
+        from domains.vms.buyer.run_log import list_runs
         new_runs = [r for r in list_runs() if r.run_id != original_run]
         assert len(new_runs) == 1
         events = read_run(new_runs[0].run_id)
@@ -210,7 +210,7 @@ class TestBuyFrom:
         run_id = _seed_partial_negotiation("http://seller:8001", "L-1")
 
         monkeypatch.setattr(
-            "market_buyer.buyer_client.urllib.request.urlopen",
+            "domains.vms.buyer.buyer_client.urllib.request.urlopen",
             _urlopen_for([{"action": "accept", "proposal": {"fields": {"amount": 70}}}]),
         )
 
@@ -219,7 +219,7 @@ class TestBuyFrom:
             settle_calls.append(kwargs)
             return {"status": "ready"}
         monkeypatch.setattr(
-            "market_buyer.groups.buy.run_settle_from_log",
+            "domains.vms.buyer.buy_cli.run_settle_from_log",
             _fake_settle,
         )
 
@@ -255,13 +255,13 @@ class TestBuyFrom:
         def _fail_urlopen(*a, **k):
             raise AssertionError("urlopen called on already-agreed --from path")
         monkeypatch.setattr(
-            "market_buyer.buyer_client.urllib.request.urlopen",
+            "domains.vms.buyer.buyer_client.urllib.request.urlopen",
             _fail_urlopen,
         )
 
         settle_calls: list[dict] = []
         monkeypatch.setattr(
-            "market_buyer.groups.buy.run_settle_from_log",
+            "domains.vms.buyer.buy_cli.run_settle_from_log",
             lambda **kw: settle_calls.append(kw) or {"status": "ready"},
         )
 
@@ -284,7 +284,7 @@ class TestBuyFrom:
 
         # Seller exits when we counter.
         monkeypatch.setattr(
-            "market_buyer.buyer_client.urllib.request.urlopen",
+            "domains.vms.buyer.buyer_client.urllib.request.urlopen",
             _urlopen_for([{"action": "exit", "reason": "price_unreasonable"}]),
         )
 
@@ -293,7 +293,7 @@ class TestBuyFrom:
             settle_calls.append(kwargs)
             return {"status": "ready"}
         monkeypatch.setattr(
-            "market_buyer.groups.buy.run_settle_from_log",
+            "domains.vms.buyer.buy_cli.run_settle_from_log",
             _fake_settle,
         )
 
@@ -356,7 +356,7 @@ class TestBuyFrom:
         captured = {}
 
         monkeypatch.setattr(
-            "market_buyer.common.select_chain_for_listing",
+            "domains.vms.buyer.common.select_chain_for_listing",
             lambda listing, override, yes: ChainConfig(
                 name="anvil",
                 rpc_url="http://rpc",
@@ -365,19 +365,19 @@ class TestBuyFrom:
             ),
         )
         monkeypatch.setattr(
-            "market_buyer.groups.buy.query_registry_for_matches_multi",
+            "domains.vms.buyer.buy_cli.query_registry_for_matches_multi",
             lambda *a, **kw: [listing],
         )
         monkeypatch.setattr(
-            "market_buyer.groups.buy._resolve_prices_from_matches",
+            "domains.vms.buyer.buy_cli._resolve_prices_from_matches",
             lambda **kw: (100, 150),
         )
         monkeypatch.setattr(
-            "market_buyer.escrow_client.make_buyer_payment_escrow_terms_fn",
+            "domains.vms.settlement.escrow_client.make_buyer_payment_escrow_terms_fn",
             lambda **kw: lambda *a, **inner_kw: [],
         )
         monkeypatch.setattr(
-            "market_buyer.escrow_client.make_create_escrow_fn",
+            "domains.vms.settlement.escrow_client.make_create_escrow_fn",
             lambda **kw: lambda escrows: [],
         )
 
@@ -390,7 +390,7 @@ class TestBuyFrom:
             return _hook
 
         monkeypatch.setattr(
-            "market_buyer.groups.buy.make_legacy_negotiate_hook",
+            "domains.vms.buyer.buy_cli.make_legacy_negotiate_hook",
             fake_make_negotiate_hook,
         )
 
@@ -401,7 +401,7 @@ class TestBuyFrom:
             assert "build_escrow_proposal" not in kwargs
             return BuyResult(status="ready", negotiation_id="neg-1", rounds=1)
 
-        monkeypatch.setattr("market_buyer.groups.buy.run_buy", fake_run_buy)
+        monkeypatch.setattr("domains.vms.buyer.buy_cli.run_buy", fake_run_buy)
 
         result = runner.invoke(app, [
             "buy",
@@ -428,7 +428,7 @@ class TestBuyFrom:
         # Patch settle so a stray invocation would be visible (it
         # shouldn't be reached at all here).
         monkeypatch.setattr(
-            "market_buyer.groups.buy.run_settle_from_log",
+            "domains.vms.buyer.buy_cli.run_settle_from_log",
             lambda **kw: pytest.fail("settle should not run when validation fails"),
         )
 

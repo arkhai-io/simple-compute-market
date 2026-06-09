@@ -546,7 +546,7 @@ listings from the resulting pool availability. The three places where
 policy plugs in are:
 
 - **Buyer-side aggregation** (buyer-only) — `aggregate(negotiate, listings)`
-  in `buyer/market_buyer/aggregation.py` owns the iteration shape across
+  in `domains/vms/buyer/aggregation.py` owns the iteration shape across
   listing candidates. Built-ins: `best_price`, `cheapest_first`,
   `registry_order`. Custom strategies plug in via entry-point or file
   discovery.
@@ -952,11 +952,11 @@ No new DB state — reads `negotiation_threads`, `negotiation_messages`, and
 
 ---
 
-### `buyer` (Pure HTTP client)
+### VM Buyer CLI (Pure HTTP client)
 
 **Role:** The buyer side of the market. There is no buyer server, no
 agent runtime, no SQLite database — only the `market` console script
-(package: `buyer/`, import: `market_buyer`).
+(packaged from `buyer/`, implementation under `domains/vms/buyer`).
 
 `market buy` is a one-shot orchestrator: it queries
 `registry-service` for matching seller orders, runs synchronous
@@ -965,7 +965,7 @@ negotiations against each candidate seller's storefront (POST
 escrow via `alkahest_py` directly from the CLI process before POSTing
 `/settle/{escrow_uid}` and polling for fulfillment. `market negotiate`
 is the same loop bound to a single known seller; both share
-`buy_orchestrator`.
+`domains.vms.buyer.buy_orchestrator`.
 
 The negotiation chain the buyer runs is built from the same
 `market-policy` middlewares the seller uses — both sides instantiate
@@ -976,13 +976,14 @@ round events land in a per-run JSONL log under
 
 **Key source layout:**
 ```
-buyer/market_buyer/
+domains/vms/buyer/
 ├── cli.py                  # `market` console-script entry
-├── groups/                 # buy, negotiate, settle, listing, escrow, chain,
-│                           # network, config, logs (+ _deal/_cli_helpers shared)
+├── *_cli.py                # buy, negotiate, settle, listing, escrow, chain,
+│                           # network, config, logs
 ├── buy_orchestrator.py     # the one-shot buy flow
 ├── buyer_client.py         # signed HTTP client for /negotiate, /api/v1/settle
-├── escrow_client.py        # alkahest-py escrow create/reclaim
+├── deal_helpers.py         # run-log recovery + chain settings helpers
+├── aggregation.py          # across-seller aggregation policies
 ├── run_log.py              # JSONL run logs under XDG_STATE_HOME
 └── common.py               # config-resolution + REPO_ROOT helpers
 ```

@@ -13,7 +13,7 @@ import typer
 
 from service.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
 
-from market_buyer.buy_orchestrator import (
+from domains.vms.buyer.buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
     extract_seller_min_price,
@@ -22,7 +22,7 @@ from market_buyer.buy_orchestrator import (
     query_registry_for_matches,
     run_buy,
 )
-from market_buyer.groups._cli_helpers import parse_filter_options
+from domains.vms.buyer.cli_helpers import parse_filter_options
 
 
 def _escrow_proposal() -> EscrowProposal:
@@ -157,7 +157,7 @@ class TestQueryRegistryFilters:
                 __exit__=lambda *a: False,
             )
 
-        monkeypatch.setattr("market_buyer.buy_orchestrator.urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr("domains.vms.buyer.buy_orchestrator.urllib.request.urlopen", fake_urlopen)
         return captured
 
     def test_no_filters_sends_only_status(self, monkeypatch):
@@ -218,14 +218,14 @@ class TestRunBuyDerivePrices:
 
         def fake_negotiate(**kwargs):
             seen_prices.append((kwargs["initial_price"], kwargs["max_price"]))
-            from market_buyer.buyer_client import NegotiationOutcome
+            from domains.vms.buyer.buyer_client import NegotiationOutcome
             return NegotiationOutcome(
                 status="exited", agreed_amount=None, rounds=1, reason="exited",
                 negotiation_id="neg-1", duration_seconds=3600,
             )
 
         monkeypatch.setattr(
-            "market_buyer.buy_orchestrator.negotiate_with_seller",
+            "domains.vms.buyer.buy_orchestrator.negotiate_with_seller",
             fake_negotiate,
         )
 
@@ -267,11 +267,11 @@ class TestRunBuyDerivePrices:
 
         def fake_negotiate(**kwargs):
             called["negotiate"] = True
-            from market_buyer.buyer_client import NegotiationOutcome
+            from domains.vms.buyer.buyer_client import NegotiationOutcome
             return NegotiationOutcome(status="exited", rounds=0)
 
         monkeypatch.setattr(
-            "market_buyer.buy_orchestrator.negotiate_with_seller", fake_negotiate,
+            "domains.vms.buyer.buy_orchestrator.negotiate_with_seller", fake_negotiate,
         )
 
         constraints = BuyConstraints()
@@ -305,7 +305,7 @@ class TestRunBuyDerivePrices:
 def _agree_negotiate_factory(price: int = 100):
     """Build a fake negotiate_with_seller that always agrees at the given price."""
     def fake(**kwargs):
-        from market_buyer.buyer_client import NegotiationOutcome
+        from domains.vms.buyer.buyer_client import NegotiationOutcome
         provision_terms = kwargs.get("provision_terms")
         escrow_proposal = kwargs.get("escrow_proposal")
         return NegotiationOutcome(
@@ -323,7 +323,7 @@ def _agree_negotiate_factory(price: int = 100):
 class TestConfirmSettlementGate:
     def _setup_orchestrator(self, monkeypatch, agree_price: int = 100):
         monkeypatch.setattr(
-            "market_buyer.buy_orchestrator.negotiate_with_seller",
+            "domains.vms.buyer.buy_orchestrator.negotiate_with_seller",
             _agree_negotiate_factory(agree_price),
         )
 
@@ -377,11 +377,11 @@ class TestConfirmSettlementGate:
 
         # Settlement submit + poll need stubbing too — short-circuit to "ready".
         monkeypatch.setattr(
-            "market_buyer.buy_orchestrator.submit_settlement",
+            "domains.vms.buyer.buy_orchestrator.submit_settlement",
             lambda **kw: {"status": "queued"},
         )
         monkeypatch.setattr(
-            "market_buyer.buy_orchestrator.wait_for_settlement",
+            "domains.vms.buyer.buy_orchestrator.wait_for_settlement",
             lambda **kw: {"status": "ready", "result": {"connection_details": "ssh ..."}},
         )
 
@@ -405,11 +405,11 @@ class TestConfirmSettlementGate:
         """Default behavior (no callback) doesn't add a confirmation step."""
         self._setup_orchestrator(monkeypatch)
         monkeypatch.setattr(
-            "market_buyer.buy_orchestrator.submit_settlement",
+            "domains.vms.buyer.buy_orchestrator.submit_settlement",
             lambda **kw: {"status": "queued"},
         )
         monkeypatch.setattr(
-            "market_buyer.buy_orchestrator.wait_for_settlement",
+            "domains.vms.buyer.buy_orchestrator.wait_for_settlement",
             lambda **kw: {"status": "ready", "result": {}},
         )
         escrow_count = {"n": 0}

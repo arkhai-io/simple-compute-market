@@ -71,7 +71,7 @@ class BuyConfig:
     indexer_auth: dict[str, str] = field(default_factory=dict)
     # Across-seller aggregation policy name. Looked up via
     # ``aggregation.load_aggregation_policy``. None = default
-    # (best_price). See buyer/market_buyer/aggregation.py.
+    # (best_price). See domains/vms/buyer/aggregation.py.
     aggregation_policy: Optional[str] = None
 
 

@@ -2,7 +2,7 @@
 
 The buyer doesn't have a server or a SQLite DB; each `market buy` /
 `market negotiate` invocation appends to a per-run JSONL file under
-``$XDG_STATE_HOME/arkhai/buy-runs/`` (see market_buyer.run_log).
+``$XDG_STATE_HOME/arkhai/buy-runs/`` (see domains.vms.buyer.run_log).
 
 Subcommands:
 

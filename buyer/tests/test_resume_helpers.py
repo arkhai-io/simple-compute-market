@@ -1,6 +1,6 @@
 """Unit tests for the run-log inspection helpers used by resume.
 
-Covers two pure-Python functions in ``market_buyer.groups._deal``:
+Covers two pure-Python functions in ``domains.vms.buyer.deal_helpers``:
 
 - ``load_negotiation_resume_point(run_id)`` rebuilds the
   ``NegotiationResumePoint`` from a JSONL run-log: seller url, listing
@@ -23,8 +23,8 @@ from __future__ import annotations
 import pytest
 import typer
 
-from market_buyer.run_log import RunLog
-from market_buyer.groups._deal import (
+from domains.vms.buyer.run_log import RunLog
+from domains.vms.buyer.deal_helpers import (
     is_negotiation_complete,
     load_deal_context,
     load_negotiation_resume_point,

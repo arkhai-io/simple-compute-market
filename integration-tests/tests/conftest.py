@@ -53,7 +53,7 @@ def registry_settings() -> dict:
 
 @pytest.fixture(scope="session")
 def buyer_settings() -> dict:
-    """Buyer wallet config. The buyer is a pure HTTP client (market_buyer
+    """Buyer wallet config. The buyer is a pure HTTP client (domains.vms.buyer
     CLI / library) — there is no buyer api_url because no buyer-side
     server runs. Only the wallet keys are exposed: they sign negotiation
     requests against the seller's storefront and on-chain escrow calls.

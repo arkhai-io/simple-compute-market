@@ -11,7 +11,7 @@ dependencies = [
   "eth-account>=0.13.0",
   # Needed by the buyer orchestrator (market buy-sync) for in-process
   # on-chain escrow creation. Imported lazily from
-  # market_buyer.escrow_client so loading the CLI does not pay the
+  # domains.vms.settlement.escrow_client so loading the CLI does not pay the
   # native-binary cost unless the orchestrator actually runs.
   "alkahest-py>=0.4.0",
   "market-core",
@@ -36,7 +36,7 @@ rl = [
 ]
 
 [project.scripts]
-market = "market_buyer.cli:app"
+market = "domains.vms.buyer.cli:app"
 
 # Workspace resolution for sibling packages.
 # market-service: token registry + alkahest address resolution for the
@@ -66,7 +66,12 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["market_buyer"]
+only-include = ["main.py"]
+dev-mode-dirs = [".."]
+
+[tool.hatch.build.targets.wheel.force-include]
+"../domains/__init__.py" = "domains/__init__.py"
+"../domains/vms" = "domains/vms"
 
 [tool.pytest.ini_options]
 pythonpath = ["..", "."]

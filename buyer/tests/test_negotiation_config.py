@@ -1,4 +1,4 @@
-from market_buyer.common import resolve_negotiation_config
+from domains.vms.buyer.common import resolve_negotiation_config
 
 
 def test_resolve_negotiation_config_preserves_policy_lists(monkeypatch):
@@ -34,9 +34,9 @@ def test_resolve_negotiation_config_preserves_policy_tables(monkeypatch):
 
 
 def test_load_buyer_chain_builds_dispatch_for_policy_table(monkeypatch):
-    from market_buyer.buyer_client import _load_buyer_chain
+    from domains.vms.buyer.buyer_client import _load_buyer_chain
 
-    monkeypatch.setattr("market_buyer.common.buyer_chains", lambda: {})
+    monkeypatch.setattr("domains.vms.buyer.common.buyer_chains", lambda: {})
 
     chain = _load_buyer_chain(policies={
         "erc20": "erc20_bisection",

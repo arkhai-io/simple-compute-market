@@ -69,7 +69,7 @@ Three places ``load_aggregation_policy`` looks, in order:
    logged but don't poison its siblings. A file policy with the same
    name as a built-in overwrites it — the local-tuning override UX,
    matching the storefront's behaviour.
-3. Python entry points in group ``market_buyer.aggregation_policies``.
+3. Python entry points in group ``domains.vms.buyer.aggregation_policies``.
 """
 from __future__ import annotations
 
@@ -259,7 +259,7 @@ def load_aggregation_policy(name: str | None) -> AggregationPolicy:
 
     Triggers a one-shot scan of file-based policies on first call (see
     ``_discover_file_policies``). Lookup order: in-process registry →
-    Python entry points in group ``market_buyer.aggregation_policies``.
+    Python entry points in group ``domains.vms.buyer.aggregation_policies``.
     File policies are registered into the in-process registry by the
     scan, so they're found at step 1.
     """
@@ -272,7 +272,7 @@ def load_aggregation_policy(name: str | None) -> AggregationPolicy:
 
     try:
         import importlib.metadata as md
-        eps = md.entry_points(group="market_buyer.aggregation_policies")
+        eps = md.entry_points(group="domains.vms.buyer.aggregation_policies")
     except Exception:
         eps = []
     for ep in eps:
