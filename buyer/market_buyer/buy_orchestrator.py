@@ -34,7 +34,11 @@ from market_alkahest.schemas import (
 from market_core.schemas import ProvisionTerms
 from domains.vms.settlement import BuildEscrowTermsFn, CreateEscrowFn
 
-from .buyer_client import NegotiationOutcome, negotiate_with_seller, _sign
+from domains.vms.buyer.buyer_client import (
+    NegotiationOutcome,
+    negotiate_with_seller,
+    _sign,
+)
 
 
 DEFAULT_HTTP_TIMEOUT = 30.0

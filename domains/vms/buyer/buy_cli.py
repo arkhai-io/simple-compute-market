@@ -40,7 +40,7 @@ from market_buyer.buy_orchestrator import (
     query_registry_for_matches_multi,
     run_buy,
 )
-from market_buyer.buyer_client import ResumeState, negotiate_with_seller
+from .buyer_client import ResumeState, negotiate_with_seller
 from .common import resolve_config_value
 from .deal_helpers import (
     is_negotiation_complete,
@@ -773,7 +773,7 @@ def register(app: typer.Typer) -> None:
         from .common import resolve_negotiation_config
         policies, policy_mode = resolve_negotiation_config()
         if policies or policy_mode:
-            from market_buyer.buyer_client import _load_buyer_chain
+            from .buyer_client import _load_buyer_chain
             negotiation_chain = _load_buyer_chain(policies=policies, policy_mode=policy_mode)
 
         negotiate_hook = make_legacy_negotiate_hook(

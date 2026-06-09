@@ -82,7 +82,7 @@ import random as _random
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from .buyer_client import NegotiationOutcome
+from domains.vms.buyer.buyer_client import NegotiationOutcome
 
 logger = logging.getLogger(__name__)
 
