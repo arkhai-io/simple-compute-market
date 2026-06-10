@@ -257,6 +257,13 @@ resources_csv_inline = """
 """
 {{- end }}
 
+{{- if $agent.secret.registryAuthToken }}
+
+[registry.auth]
+# Key must match the rendered [registry] urls entry exactly.
+{{ default (include "registry.url" $root) ($cfg.registryUrl) | quote }} = {{ $agent.secret.registryAuthToken | quote }}
+{{- end }}
+
 [wallet]
 address     = {{ $agent.secret.walletAddress | quote }}
 private_key = {{ $agent.secret.privKey | quote }}

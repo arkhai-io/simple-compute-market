@@ -13,7 +13,7 @@ For the seller side see [`seller-quickstart.md`](./seller-quickstart.md).
   plus whatever ERC-20 the seller accepts. Examples below use Base
   Sepolia + USDC at `0x036CbD53842c5426634e7929541eC2318f3dCF7e` (test
   funds from [faucet.circle.com](https://faucet.circle.com)); any EVM
-  chain with ERC-8004 + Alkahest deployed works.
+  chain with Alkahest deployed works.
 - An RPC URL for that chain.
 - An SSH keypair for leased VMs:
 
@@ -108,7 +108,8 @@ market listing show <listing_id>
 market buy \
   --gpu-model H200 \
   --duration-hours 1 \
-  --price-markup 1.5 \
+  --initial-price 1 \
+  --max-price 2 \
   --settlement-timeout 1800 \
   --yes
 ```
@@ -119,9 +120,9 @@ escrow on chain, and polls until the seller returns
 
 Useful flags:
 
-- `--initial-price` / `--max-price` — both required if either given;
-  bid range in human / whole-token units per hour (USDC: `--max-price 2`
-  = $2/hr; the CLI scales by the token's on-chain `decimals()`).
+- `--initial-price` / `--max-price` — bid range in human / whole-token
+  units per hour (USDC: `--max-price 2` = $2/hr; the CLI scales by the
+  token's on-chain `decimals()`).
 - `--gpu-count-min`, `--region`, `--vcpu-min`, `--ram-gb-min`,
   `--disk-gb-min` — additional listing filters.
 - `--settlement-timeout` — default 600s. Real cloud-init can take 5-10

@@ -1,7 +1,7 @@
 # Seller quickstart
 
-How to bring up a compute storefront: register on-chain, publish a
-listing, and (optionally) provision real KVM VMs to buyers.
+How to bring up a compute storefront: publish listings (signed with
+your wallet key), and (optionally) provision real KVM VMs to buyers.
 
 For the buyer side see [`buyer-quickstart.md`](./buyer-quickstart.md).
 To run your own indexer registry instead of pointing at an existing one,
@@ -16,7 +16,7 @@ via wildcard subdomains instead of direct port-forward NAT, see
   whatever ERC-20 you'll accept as payment. The examples in this guide
   use Base Sepolia + USDC at `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
   (test funds from [faucet.circle.com](https://faucet.circle.com)), but
-  any EVM chain with ERC-8004 + Alkahest contracts deployed works.
+  any EVM chain with Alkahest contracts deployed works.
 - An RPC URL for that chain.
 - An indexer URL + (if private) bearer token to publish to.
 - **Live provisioning only** — KVM-capable host: `egrep -c "(vmx|svm)"
@@ -44,7 +44,6 @@ which the compose mounts from `./config.seller.toml` (override with
 
 ```toml
 agent_id         = "seller_one"          # Python identifier; no dashes
-# onchain_agent_id = "<N>"                # pin after first registration (§4)
 
 port             = 8001
 base_url         = "http://<YOUR_PUBLIC_IP>:8001/"
@@ -70,10 +69,11 @@ urls = ["http://34.41.205.175/registry"]
 
 [registry.auth]
 # Required when the indexer gates writes (REGISTRY_REQUIRE_WRITE_API_KEY=true);
-# the key must be write-scoped. The public preprod indexer does not
-# currently gate writes (publishes are EIP-191 signature-verified), so
-# no entry is needed for it. For gated indexers:
-# "http://<INDEXER_HOST>:8080" = "<your-write-token>"
+# the key must be write-scoped. The Arkhai public indexer gates writes —
+# request a write key from the operator, or run your own indexer.
+# Keys must exactly match the URLs in [registry] urls (scheme, host,
+# port, trailing slash).
+"http://34.41.205.175/registry" = "<your-write-token>"
 
 [provisioning]
 service_url = "http://seller-provisioning:8081"
@@ -140,12 +140,9 @@ provisioning service reads it from the same mounted TOML, so you
 don't repeat it anywhere else. Likewise `[provisioning].mode` in
 the TOML drives mock-vs-live; no separate env knob.
 
-Wait for `Started heartbeat for eip155:...:<N>` — that's your numeric
-agent ID. **Pin it now** to skip re-registering on every restart:
-
-```toml
-onchain_agent_id = "<N>"
-```
+There is no registration step: your identity is the wallet. Every
+publish is EIP-191-signed, and the indexer creates your publisher
+record from the signature the first time you publish.
 
 ## 5. Publish
 
@@ -159,9 +156,8 @@ Verify directly against the storefront and the indexer:
 ```bash
 curl -s http://<YOUR_PUBLIC_IP>:8001/api/v1/listings | jq '.listings[]'
 
-# Indexer requires the full canonical agent ID, URL-encoded:
-curl -sH "Authorization: Bearer <your-token>" \
-  "http://<INDEXER_HOST>:8080/agents/eip155%3A84532%3A0x8004A818BFB912233c491871b3d84c89A494BD9e%3A<N>/listings" \
+# Indexer: filter listings by your publishing wallet address:
+curl -s "http://34.41.205.175/registry/listings?publisher=<YOUR_WALLET_ADDRESS>" \
   | jq '.items[]'
 ```
 

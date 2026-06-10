@@ -54,6 +54,17 @@ spec:
             # Set via ops repo values overlay; empty for local dev.
             - name: ROOT_PATH
               value: {{ .Values.config.rootPath | default "" | quote }}
+            - name: REGISTRY_REQUIRE_READ_API_KEY
+              value: {{ .Values.config.requireReadApiKey | default false | quote }}
+            - name: REGISTRY_REQUIRE_WRITE_API_KEY
+              value: {{ .Values.config.requireWriteApiKey | default false | quote }}
+            {{- if ((.Values.auth).bootstrapKeySecret).name }}
+            - name: REGISTRY_BOOTSTRAP_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.bootstrapKeySecret.name | quote }}
+                  key: {{ .Values.auth.bootstrapKeySecret.key | quote }}
+            {{- end }}
             # --- sourced from global ---
             - name: CHAIN_ID
               value: {{ .Values.global.rpc.chainId | quote }}

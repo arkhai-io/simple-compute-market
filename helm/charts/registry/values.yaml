@@ -28,6 +28,19 @@ config:
   endpointCheckTimeout: 10
   heartbeatTtlSecs: 60
   logLevel: "info"
+  # API-key gating (both off => fully public registry; write on => open
+  # discovery, gated publishing). See core/registry/src/config.py.
+  requireReadApiKey: false
+  requireWriteApiKey: false
+
+# Optional bootstrap API key sourced from an existing Kubernetes Secret
+# (e.g. ESO-synced from Secret Manager) — never from values. When set and
+# the api_keys table is empty at startup, the registry seeds one
+# write-scoped operator key with this value.
+auth:
+  bootstrapKeySecret:
+    name: ""
+    key: ""
   # rootPath: set to the gateway path prefix for this service.
   # In cloud deployments this is set via the ops repo values overlay.
   # Leave empty for local dev (direct access, no gateway prefix stripping).
