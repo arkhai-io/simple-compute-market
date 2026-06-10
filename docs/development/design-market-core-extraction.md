@@ -74,7 +74,11 @@ domain implementation should be able to expose callables with the required
 shape without importing the core package; adapters or composition roots can
 wire those callables into the core runner.
 
-The composition wants **two** behavior hooks. `run_buy` now exposes
+The composition wants **two** behavior hooks for the current synchronous
+instantiation. (Asynchronous-arbiter settlement adds a third post-settle
+phase, `service`; that is additive and planned separately in
+`design-settlement-lifecycle-and-capacity.md` — it does not change this
+extraction.) `run_buy` now exposes
 only `negotiate` and `settle`, while the current compute instantiation
 still adapts the previous fine-grained hooks outside the core
 orchestration call
@@ -154,7 +158,36 @@ domains/
 package. The role packages are independently installable and executable
 (`core-buyer`, `core-storefront`, `core-registry`), but none ships a default
 concrete market. Each role executable is a composition root that loads or is
-given a domain implementation. `kit/` provides reusable from-below
+given a domain implementation.
+
+> **Current divergence:** `core/src/market_core/` exists as a shared
+> `market-core` wheel of carrier schemas. That is acceptable only as
+> schema-invariant carriers with zero domain vocabulary. Today
+> `market_core.schemas.ProvisionTerms` still defines `compute.v1`
+> convenience accessors (`duration_seconds`, `ssh_public_key`,
+> `compute_resource`) — compute vocabulary that moved *into* core during
+> the `service/` removal. Those accessors move out to `domains/vms`
+> (seam 3/4). Whether the carriers wheel ultimately survives or folds into
+> the role packages is open; the no-domain-vocabulary rule is not.
+
+**Executable entrypoints split by role.** The buyer executable is
+core-owned: `core-buyer` ships the `market` console script, the common
+verb skeleton (`list`, `buy`, …), and schema-plugin discovery (Python
+entry-points group); domain buyer packages ship plugins, not competing
+CLIs. The buyer is the distribution-sensitive role — one binary, many
+registry schemas — and plugin inversion preserves the dependency
+direction (core discovers plugins by contract; it never imports
+`domains.*`). Without plugins the core binary offers only generic
+`--filter` passthrough and raw listing output, never a concrete buy
+experience. Storefront executables are the opposite: domain packages own
+them, one storefront process per market schema domain. A multi-domain
+operator (e.g. raw VMs plus inference) runs parallel storefront
+processes that share backend services (capacity/site authority — see
+`design-settlement-lifecycle-and-capacity.md`) rather than one
+multi-domain process; the shared parts are libraries in
+`core_storefront`, not a shared process. The registry stays a core
+executable with schema injected as config (`filter-spec.yaml`), as
+today. `kit/` provides reusable from-below
 implementations used by those domain hooks. The target dependency direction
 is one-way from the role runner/composition root into injected domain
 behavior; domain hook packages and kit packages do not import upward into
@@ -358,18 +391,22 @@ Receipt`; "materialize then submit" is internal factoring.
 
 ### 3. `ProvisionTerms` genericization
 
-- **Done:** `service/schemas.py::ProvisionTerms` carries delivery terms as
+- **Done:** `ProvisionTerms` (now `core/src/market_core/schemas.py`)
+  carries delivery terms as
   `{kind, payload}`. The old flat compute shape
   `{duration_seconds, ssh_public_key, compute_resource}` is accepted for
   compatibility and normalized into `payload`.
 - **Done:** compute-specific duration validation now lives at the
   storefront compute negotiation boundary rather than in the shared
   carrier.
-- **Still present:** the current compute adapter interprets
-  `kind="compute.v1"` through convenience accessors
-  (`duration_seconds`, `ssh_public_key`, `compute_resource`). The buyer
-  side now lives in `domains/vms/buyer/`; the storefront side still needs
-  the same split as part of seam 4.
+- **Still present (and relocated into core):** the `compute.v1`
+  convenience accessors
+  (`duration_seconds`, `ssh_public_key`, `compute_resource`) are now
+  defined on `market_core.schemas.ProvisionTerms` itself, so the compute
+  interpretation sits inside `core/` — the wrong direction. The carrier
+  should stay an opaque `{kind, payload}` envelope; the accessors and
+  payload validation move to `domains/vms` as part of seam 4, with VM
+  code interpreting the payload through its own adapter.
 - **Target:** `market-compute` defines and validates the concrete compute
   payload. Structural validation of delivery terms (within what the
   listing offers) is core; semantic validation is an injected compute
@@ -546,9 +583,19 @@ Top-level folder tracker:
    pricing, compute extraction, and compute lease encoding are referenced
    through `domains.vms.listings` / `domains.vms.settlement`; the
    storefront action executor remains only as stateful composition.
-12. **Next: drain `domains/vms/storefront/` internals.** Move remaining
-   schema-invariant storefront runtime into `core/storefront`, and VM
-   listing/negotiation/settlement/provisioning hooks into `domains/vms/*`.
+12. **In progress: drain `domains/vms/storefront/` internals.** Move
+   remaining schema-invariant storefront runtime into `core/storefront`,
+   and VM listing/negotiation/settlement/provisioning hooks into
+   `domains/vms/*`. `utils/sync_negotiation.py` is now a thin
+   stateful/config wrapper over `core_storefront.negotiation_sync`; the
+   remaining `market_storefront` controllers/middleware/services are
+   adapters over core, which is the intended end shape. **Constraint:**
+   do not drain the capacity/inventory tables (`hosts`,
+   `compute_allocations`) into `core_storefront` — they are slated to
+   move *down* into the site authority, while the aggregation tables
+   (`compute_inventory_pools`, `compute_pool_members`,
+   `derived_compute_listings`) stay storefront-side as the market-domain
+   view. See `design-settlement-lifecycle-and-capacity.md`.
 
 This tracker intentionally ignores generated or local-only top-level
 directories such as `.dist/`, `.uv-cache/`, `.pytest_cache/`, `src/`,
@@ -577,15 +624,20 @@ and `shared-env/`.
 6. **Package migration**: once the code boundaries are explicit, move the
    remaining top-level packages into `core/`, `kit/`, and `domains/vms/`
    with temporary compatibility wrappers and deployment-path updates.
-7. **Policy split cleanup**: the implementation now lives in the right
-   direction, but old imports are still compatibility-exported from
-   `market_policy.negotiation_middleware`. Remove those shims after buyer
-   and storefront code import only the domain policy module.
+7. **Policy split cleanup** (done): `market_policy.negotiation_middleware`
+   now exports only the schema-agnostic chain machinery
+   (`NegotiationRound`, `NegotiationDecision`, context, chain execution,
+   policy discovery); remaining importers consume only the generic types.
 
-Each phase keeps the branch green and the e2e suite passing. Seam 3 is the
-current target: the wire shape now carries opaque provision terms, and the
-remaining work is to move concrete compute interpretation out of shared
-core-shaped code. Seam 4 is the later packaging extraction.
+Each phase keeps the branch green and the e2e suite passing. Seams 0–3,
+0b, and the policy cleanup are done; seam 4 is the remaining target. Its
+largest outstanding items are moving the `compute.v1` interpretation out
+of `market_core.schemas` into `domains/vms`, and the buyer plugin
+extraction (verb skeleton + plugin discovery into `core-buyer`, VM
+commands as the first plugin). Follow-on architecture beyond this
+reorganization — asynchronous settlement lifecycles and the shared
+capacity/site-authority split — is planned in
+`design-settlement-lifecycle-and-capacity.md`.
 
 ## What's deferred / non-goals
 
@@ -614,7 +666,8 @@ domains/vms/buyer/settle_cli.py               seam 0 legacy — consume accepted
 domains/vms/buyer/escrow_cli.py               seam 0 legacy — consume accepted proposal/terms or retire split create
 domains/vms/buyer/listing_cli.py              seam 0b — VM listing commands
 domains/vms/buyer/aggregation.py              seam 0b — across-seller aggregation policies
-domains/vms/buyer/schema_plugins/ (new)       seam 0b — eventual plugin registry/loading boundary
+core/buyer/ (plugin discovery, new)           seam 0b — `market` console script, verb skeleton, entry-points plugin loading
+domains/vms/buyer/ (plugin export, new)       seam 0b — VM schema plugin exposed via entry point; CLI assembly moves behind it
 core/storefront/src/core_storefront/models/   seam 4 — schema-invariant storefront HTTP models
 core/storefront/src/core_storefront/stage_log.py  seam 4 — schema-invariant stage-event logger/persistence helper
 core/storefront/src/core_storefront/services/negotiation_service.py  seam 4 — generic negotiation query/admin service over injected hooks
@@ -637,3 +690,6 @@ core/registry-client/, core/storefront-client/  package migration — core proto
 - `ARCHITECTURE.md` → "Organizing Principle: composition from above and below"
 - `TODO.md` → Core Stack → "Market Core Extraction"
 - `docs/configuration.md` — current negotiation/aggregation policy config surface
+- `docs/development/design-settlement-lifecycle-and-capacity.md` —
+  follow-on architecture: asynchronous settlement lifecycles, shared
+  capacity / site authority, executable entrypoint topology
