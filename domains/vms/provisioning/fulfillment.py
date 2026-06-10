@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 StageEventFn = Callable[..., Any]
 SQLiteClientFactory = Callable[[], Any]
+# Site-authority capacity client (core_storefront.capacity.CapacityClient
+# shape); duck-typed so this concept module needs no core import.
+CapacityClientLike = Any
 ProvisionVmFn = Callable[..., Awaitable[Any]]
 ScheduleShutdownFn = Callable[..., Awaitable[Any]]
 CloseStaleListingsFn = Callable[[str], Awaitable[list[str]]]
@@ -36,6 +39,7 @@ async def fulfill_vm_obligation(
     chain_configs: dict[str, Any] | None = None,
     base_url: str | None = None,
     get_sqlite_client: SQLiteClientFactory,
+    capacity: CapacityClientLike,
     stage_event: StageEventFn,
     close_stale_listings_after_capacity_change: CloseStaleListingsFn,
     provision_vm: ProvisionVmFn,
@@ -63,10 +67,12 @@ async def fulfill_vm_obligation(
 
     try:
         sqlite_client = get_sqlite_client()
-        reserved = await sqlite_client.reserve_available_compute_vm(
-            required_attributes=required_attributes or None,
-            listing_id=listing_id or order_id,
-            escrow_uid=escrow_uid,
+        reserved = await capacity.reserve(
+            claim=required_attributes or None,
+            deal_ref={
+                "listing_id": listing_id or order_id,
+                "escrow_uid": escrow_uid,
+            },
         )
         if not reserved:
             raise RuntimeError("No available compute VM matched required attributes")
@@ -177,25 +183,12 @@ async def fulfill_vm_obligation(
 
     if reserved_resource_id:
         try:
-            if reserved_allocation_id:
-                await get_sqlite_client().update_compute_allocation_state(
-                    allocation_id=reserved_allocation_id,
-                    state="leased",
-                )
-                await get_sqlite_client().apply_resource_set_transition(
-                    resource_id=reserved_resource_id,
-                    event_type="lease_started_after_provisioning",
-                    idempotency_key=f"lease-attrs:{escrow_uid}:{reserved_resource_id}",
-                    set_attribute={"$.lease_end_utc": lease_end_utc},
-                )
-            else:
-                await get_sqlite_client().apply_resource_set_transition(
-                    resource_id=reserved_resource_id,
-                    event_type="lease_started_after_provisioning",
-                    idempotency_key=f"lease:{escrow_uid}:{reserved_resource_id}",
-                    set_state="leased",
-                    set_attribute={"$.lease_end_utc": lease_end_utc},
-                )
+            await capacity.commit(
+                resource_id=reserved_resource_id,
+                allocation_id=reserved_allocation_id,
+                lease_end_utc=lease_end_utc,
+                idempotency_ref=escrow_uid,
+            )
         except Exception as lease_err:
             logger.warning(
                 "[LOCAL DB] Failed to mark resource %s as leased after provisioning: %s",

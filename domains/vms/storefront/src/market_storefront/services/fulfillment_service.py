@@ -19,6 +19,7 @@ from domains.vms.provisioning import (
 )
 
 from market_storefront.utils.config import CHAINS, settings, BASE_URL_OVERRIDE
+from market_storefront.services.capacity_client import build_capacity_client
 from market_storefront.services.publication_service import (
     close_stale_compute_listings_after_capacity_change,
 )
@@ -171,6 +172,9 @@ async def fulfill_compute_obligation(
         chain_configs=CHAINS,
         base_url=BASE_URL_OVERRIDE,
         get_sqlite_client=get_sqlite_client,
+        # Late-bound factory: tests monkeypatch this module's
+        # get_sqlite_client, and the capacity client must follow it.
+        capacity=build_capacity_client(lambda: get_sqlite_client()),
         stage_event=stage_event,
         close_stale_listings_after_capacity_change=(
             close_stale_compute_listings_after_capacity_change

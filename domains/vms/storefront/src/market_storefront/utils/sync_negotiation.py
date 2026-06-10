@@ -123,8 +123,13 @@ async def _run_default_seller_round_policy(**kwargs: Any):
 
 
 def _default_seller_round_hook(sqlite_client: Any) -> SellerRoundHook:
+    # The round hook reads its availability snapshot through the
+    # site-authority capacity client; embedded mode wraps the same
+    # SQLite handle the rest of this flow uses.
+    from market_storefront.services.capacity_client import build_capacity_client
+
     return vm_storefront_round.default_seller_round_hook(
-        sqlite_client,
+        build_capacity_client(lambda: sqlite_client),
         negotiation_config=_negotiation_settings(),
         chains=_chain_settings(),
         extra_policy_paths=_extra_policy_paths(),

@@ -54,10 +54,16 @@ class SellerRoundHook(Protocol):
         ...
 
 
-async def _default_seller_policy_inputs(sqlite_client: Any) -> dict[str, Any]:
+async def _default_seller_policy_inputs(capacity: Any) -> dict[str, Any]:
+    """Advisory availability snapshot for the inventory guard.
+
+    ``capacity`` is a site-authority capacity client (anything with an
+    async ``snapshot()`` returning resource rows) — duck-typed so this
+    concept module needs no core import.
+    """
     return {
         "available_resources": {
-            "resources": await sqlite_client.list_resources() or [],
+            "resources": await capacity.snapshot() or [],
         },
     }
 
@@ -312,7 +318,7 @@ async def _run_default_seller_round_policy(
 
 @dataclass
 class _DefaultSellerRoundHook:
-    sqlite_client: Any
+    capacity: Any
     negotiation_config: Any = None
     chains: Mapping[str, Any] | None = None
     extra_policy_paths: Iterable[str | Path] | None = None
@@ -326,7 +332,7 @@ class _DefaultSellerRoundHook:
         requested_duration_seconds: int | None = None,
         strategy_label: str | None = None,
     ) -> SellerRoundResult:
-        policy_inputs = await _default_seller_policy_inputs(self.sqlite_client)
+        policy_inputs = await _default_seller_policy_inputs(self.capacity)
         return await _run_default_seller_round_policy(
             listing=listing,
             history=history,
@@ -341,15 +347,21 @@ class _DefaultSellerRoundHook:
 
 
 def default_seller_round_hook(
-    sqlite_client: Any,
+    capacity: Any,
     *,
     negotiation_config: Any = None,
     chains: Mapping[str, Any] | None = None,
     extra_policy_paths: Iterable[str | Path] | None = None,
     default_min_price: Any = None,
 ) -> SellerRoundHook:
+    """Build the default VM seller round hook.
+
+    ``capacity`` provides the round-start availability snapshot
+    (site-authority capacity client; ``snapshot()`` feeds the inventory
+    guard's ``available_resources`` input).
+    """
     return _DefaultSellerRoundHook(
-        sqlite_client=sqlite_client,
+        capacity=capacity,
         negotiation_config=negotiation_config,
         chains=chains,
         extra_policy_paths=extra_policy_paths,
