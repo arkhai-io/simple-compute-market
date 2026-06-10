@@ -10,8 +10,8 @@ class Settings(BaseSettings):
         env_file=[".env.local", ".env", "/app/shared-env/.env"],
         env_file_encoding="utf-8",
         case_sensitive=False,
-        # Tolerate stale env vars left over from the ERC-8004 era so the
-        # registry boots cleanly against pre-Phase-4 .env files.
+        # Tolerate unknown env vars (e.g. stale cross-service entries in
+        # shared-env/.env) so the registry boots cleanly.
         extra="ignore",
     )
     

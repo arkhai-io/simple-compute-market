@@ -9,7 +9,7 @@ as independent roles within each stage.
 These correspond to four independently-deployed units of software, each
 run by a different party in production:
 
-1. **External** — the EVM chain with Alkahest + ERC-8004 contracts.
+1. **External** — the EVM chain with Alkahest contracts.
    Run by: nobody in this repo (it's a real chain).
    Dev stand-in: `compose/external.yml` (Anvil + contract deployer).
 

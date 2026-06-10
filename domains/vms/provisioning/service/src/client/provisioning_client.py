@@ -145,7 +145,7 @@ class ProvisioningClient(_ProvisioningClientBase):
         (the storefront's ``admin_api_key``). ``None`` for local dev where
         the service runs with no key configured.
     agent_id:
-        ERC-8004 agent identity sent as ``X-Agent-ID`` when provisioning
+        Operator-assigned agent identifier sent as ``X-Agent-ID`` when provisioning
         auth is enabled.
     timeout:
         HTTP timeout in seconds.
@@ -530,7 +530,7 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         Shared operator admin key sent as ``X-Admin-Key`` on every request
         (the storefront's ``admin_api_key``). ``None`` for local dev.
     agent_id:
-        ERC-8004 agent identity sent as ``X-Agent-ID`` when provisioning
+        Operator-assigned agent identifier sent as ``X-Agent-ID`` when provisioning
         auth is enabled.
     timeout:
         HTTP timeout in seconds.

@@ -65,7 +65,7 @@ serve:
 		NODE_ID=$$(sudo zerotier-cli info | cut -d " " -f3); \
 	fi; \
 	echo "==============================================================================="; \
-	echo "| 🚀 Starting ERC-8004 Registry/Indexer server...                            |"; \
+	echo "| 🚀 Starting Registry/Indexer server...                                     |"; \
 	echo "|                                                                             |"; \
 	echo "| 🌐 Server will be available at: http://$$HOST:$$PORT                          |"; \
 	if [ -n "$$ENV_ARG" ]; then \

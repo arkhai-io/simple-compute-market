@@ -57,14 +57,6 @@ spec:
             # --- sourced from global ---
             - name: CHAIN_ID
               value: {{ .Values.global.rpc.chainId | quote }}
-            - name: RPC_URL
-              value: {{ include "rpc.url" . | quote }}
-            - name: REPUTATION_REGISTRY_ADDRESS
-              value: {{ .Values.global.registry.reputation_address | quote }}
-            - name: VALIDATION_REGISTRY_ADDRESS
-              value: {{ .Values.global.registry.validation_address | quote }}
-            - name: IDENTITY_REGISTRY_ADDRESS
-              value: {{ .Values.global.registry.identity_address | quote }}
           volumeMounts:
             - name: arkhai-data
               mountPath: {{ .Values.persistence.mountPath | quote }}

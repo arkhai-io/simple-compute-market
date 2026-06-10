@@ -47,36 +47,6 @@ def seller_client(seller_api_url: str, seller_settings: dict) -> SyncStorefrontC
 class TestStorefrontRegistration:
     """Verify the deployed seller storefront is reachable and its identity is published."""
 
-    def test_storefront_publishes_agent_wallet(
-        self, seller_api_url: str, seller_settings: dict
-    ) -> None:
-        """GET /.well-known/agent-wallet.json must echo back the configured wallet.
-
-        Post-pluggable-identity the agent-wallet well-known is the only
-        identity surface peers consult; it advertises the EVM address
-        settlement counterparties verify against.
-        """
-        import httpx
-
-        try:
-            resp = httpx.get(
-                f"{seller_api_url}/.well-known/agent-wallet.json", timeout=5.0,
-            )
-        except Exception as exc:
-            pytest.fail(f"Could not reach /.well-known/agent-wallet.json: {exc}")
-
-        assert resp.status_code == 200, (
-            f"agent-wallet returned {resp.status_code}: {resp.text[:200]}"
-        )
-        body = resp.json()
-        published = (body.get("agent_wallet_address") or "").lower()
-        configured = (seller_settings.get("wallet_address") or "").lower()
-        assert published, "agent-wallet returned an empty address."
-        assert published == configured, (
-            f"agent-wallet address {published!r} != configured {configured!r}"
-        )
-        log.info("✓ Storefront publishes wallet %s", published)
-
     def test_storefront_registry_connectivity(
         self,
         seller_api_url: str,

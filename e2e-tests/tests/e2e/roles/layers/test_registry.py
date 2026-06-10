@@ -69,9 +69,9 @@ class TestRegistryLayer:
         # Response shape: {"items": [...], "count": N} or similar
         assert isinstance(data, dict), f"Unexpected /listings response: {data!r}"
 
-    def test_registry_has_agents_endpoint(self, registry_layer: dict):
-        """Registry exposes /agents for querying."""
-        status, body = _http_get(f"{registry_layer['url']}/agents")
+    def test_registry_has_publishers_endpoint(self, registry_layer: dict):
+        """Registry exposes /publishers for querying."""
+        status, body = _http_get(f"{registry_layer['url']}/publishers")
         assert status == 200, (
-            f"GET {registry_layer['url']}/agents failed: status={status}"
+            f"GET {registry_layer['url']}/publishers failed: status={status}"
         )

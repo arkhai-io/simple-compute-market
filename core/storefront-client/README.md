@@ -40,7 +40,6 @@ with SyncStorefrontClient("http://seller-storefront:8001", private_key="0x...") 
 
 Both clients cover:
 
-- `GET  /.well-known/erc-8004-registration.json`  → `get_registration`
 - `POST /listings/create`                            → `create_listing`
 - `POST /api/v1/listings/{listing_id}/close`         → `close_listing`
 - `POST /listings/refund`                            → `refund_listing`

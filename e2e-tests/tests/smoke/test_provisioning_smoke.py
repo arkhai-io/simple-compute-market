@@ -1,8 +1,10 @@
 """Smoke tests for the deployed provisioning service.
 
-Read-only checks are selected by the Helm smoke hook. Write-path checks are
-kept under a separate marker because deployed environments may require a pinned
-ERC-8004 agent identity before mutating provisioning state.
+The provisioning service gates every non-health route on a single
+shared admin key (``X-Admin-Key``); there is no per-agent identity.
+Read-only checks are selected by the Helm smoke hook; write-path checks
+are kept under a separate marker because they mutate provisioning
+state.
 """
 
 from __future__ import annotations
@@ -21,38 +23,22 @@ log = logging.getLogger(__name__)
 def _client(
     provisioning_settings: dict,
     seller_settings: dict,
-    provisioning_auth_settings: dict,
-    *,
-    auth: bool = False,
 ) -> SyncProvisioningClient:
-    admin_key = (seller_settings.get("admin_api_key") or None) if auth else None
-    agent_id = (provisioning_auth_settings.get("agent_id") or None) if auth else None
     return SyncProvisioningClient(
         base_url=provisioning_settings["api_url"],
-        admin_key=admin_key,
-        agent_id=agent_id,
+        admin_key=seller_settings.get("admin_api_key") or None,
         timeout=15.0,
     )
-
-
-def _require_agent_id(provisioning_auth_settings: dict) -> str:
-    agent_id = str(provisioning_auth_settings.get("agent_id") or "")
-    if not agent_id:
-        pytest.skip(
-            "seller.agent_id is not pinned; cannot construct provisioning X-Agent-ID. "
-            "Pin storefront.agents[].agentId after registration to smoke-test write paths."
-        )
-    return agent_id
 
 
 @pytest.mark.provisioning
 class TestProvisioningSmoke:
     @pytest.mark.provisioning_readonly
     def test_health_returns_ok(
-        self, provisioning_settings: dict, seller_settings: dict, provisioning_auth_settings: dict
+        self, provisioning_settings: dict, seller_settings: dict
     ):
         """GET /health -> 200 with status field present."""
-        with _client(provisioning_settings, seller_settings, provisioning_auth_settings) as client:
+        with _client(provisioning_settings, seller_settings) as client:
             data = client.get_health()
         assert "status" in data, f"Missing status field: {data}"
         assert data["status"] in ("ok", "degraded"), f"Unexpected status: {data['status']}"
@@ -60,10 +46,10 @@ class TestProvisioningSmoke:
 
     @pytest.mark.provisioning_readonly
     def test_ansible_readiness_returns_structured_response(
-        self, provisioning_settings: dict, seller_settings: dict, provisioning_auth_settings: dict
+        self, provisioning_settings: dict, seller_settings: dict
     ):
         """GET /api/v1/system/ansible/readiness returns structured diagnostics."""
-        with _client(provisioning_settings, seller_settings, provisioning_auth_settings) as client:
+        with _client(provisioning_settings, seller_settings) as client:
             data = client.get_ansible_readiness()
         assert "inventory" in data, f"Missing inventory field: {data}"
         assert "playbook" in data, f"Missing playbook field: {data}"
@@ -79,20 +65,20 @@ class TestProvisioningSmoke:
 
     @pytest.mark.provisioning_readonly
     def test_list_hosts_returns_200(
-        self, provisioning_settings: dict, seller_settings: dict, provisioning_auth_settings: dict
+        self, provisioning_settings: dict, seller_settings: dict
     ):
         """GET /api/v1/hosts/ returns a hosts list."""
-        with _client(provisioning_settings, seller_settings, provisioning_auth_settings) as client:
+        with _client(provisioning_settings, seller_settings) as client:
             data = client.list_hosts()
         assert isinstance(data.hosts, list), f"Missing hosts list: {data}"
         log.info("Registered hosts: %d", len(data.hosts))
 
     @pytest.mark.provisioning_readonly
     def test_connectivity_check_on_first_host_if_available(
-        self, provisioning_settings: dict, seller_settings: dict, provisioning_auth_settings: dict
+        self, provisioning_settings: dict, seller_settings: dict
     ):
         """If any hosts are registered, connectivity returns a structured result."""
-        with _client(provisioning_settings, seller_settings, provisioning_auth_settings) as client:
+        with _client(provisioning_settings, seller_settings) as client:
             hosts = client.list_hosts().hosts
             if not hosts:
                 pytest.skip("No hosts registered - skipping connectivity check")
@@ -103,10 +89,9 @@ class TestProvisioningSmoke:
 
     @pytest.mark.provisioning_write
     def test_host_crud_round_trip(
-        self, provisioning_settings: dict, seller_settings: dict, provisioning_auth_settings: dict
+        self, provisioning_settings: dict, seller_settings: dict
     ):
         """Register -> GET -> disable -> re-enable -> cleanup a transient test host."""
-        _require_agent_id(provisioning_auth_settings)
         test_host = HostCreate(
             name="smoke-test-host",
             kvm_host="192.0.2.1",
@@ -117,7 +102,7 @@ class TestProvisioningSmoke:
             enabled=True,
         )
 
-        with _client(provisioning_settings, seller_settings, provisioning_auth_settings, auth=True) as client:
+        with _client(provisioning_settings, seller_settings) as client:
             try:
                 reg = client.register_host(test_host)
             except ProvisioningError as exc:
@@ -151,17 +136,15 @@ class TestProvisioningSmoke:
 
     @pytest.mark.provisioning_write
     def test_auth_enforcement_when_enabled(
-        self, provisioning_settings: dict, seller_settings: dict, provisioning_auth_settings: dict
+        self, provisioning_settings: dict, seller_settings: dict
     ):
         """POST without X-Admin-Key returns 401 when a key is configured."""
         if not seller_settings.get("admin_api_key"):
             pytest.skip("No admin key configured on this deployment - skipping 401 check")
-        _require_agent_id(provisioning_auth_settings)
 
         with SyncProvisioningClient(
             base_url=provisioning_settings["api_url"],
             admin_key=None,
-            agent_id=provisioning_auth_settings["agent_id"],
             timeout=15.0,
         ) as client:
             with pytest.raises(ProvisioningError) as err:

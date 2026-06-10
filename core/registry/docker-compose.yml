@@ -1,8 +1,8 @@
 version: '3.8'
 
 services:
-  erc-8004-registry:
-    image: arkhai-io/arkhai-erc-8004-registry:latest
+  registry:
+    image: arkhai:registry
     # Uncomment to build locally instead
     # build: .
     ports:

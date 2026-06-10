@@ -44,10 +44,6 @@ def rpc_settings() -> dict:
 def registry_settings() -> dict:
     return {
         "api_url": settings.REGISTRY.API_URL,
-        "identity_address": settings.REGISTRY.IDENTITY_ADDRESS,
-        "reputation_address": settings.REGISTRY.REPUTATION_ADDRESS,
-        "validation_address": settings.REGISTRY.VALIDATION_ADDRESS,
-        "owner_address": settings.REGISTRY.OWNER_ADDRESS,
     }
 
 
@@ -86,15 +82,6 @@ def provisioning_settings() -> dict:
     return {
         "api_url": settings.PROVISIONING.API_URL,
     }
-
-
-@pytest.fixture(scope="session")
-def provisioning_auth_settings(rpc_settings, registry_settings, seller_settings) -> dict:
-    token_id = str(seller_settings.get("agent_id", "") or "").strip()
-    chain_id = str(rpc_settings.get("chain_id", "") or "").strip()
-    identity = str(registry_settings.get("identity_address", "") or "").strip().lower()
-    agent_id = f"eip155:{chain_id}:{identity}:{token_id}" if token_id and chain_id and identity else ""
-    return {"agent_id": agent_id}
 
 
 # ---------------------------------------------------------------------------

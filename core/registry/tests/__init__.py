@@ -1,2 +1,2 @@
-"""Tests for ERC-8004 Registry API."""
+"""Tests for the registry (listing index) API."""
 

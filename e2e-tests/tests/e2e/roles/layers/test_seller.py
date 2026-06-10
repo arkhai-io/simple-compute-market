@@ -60,7 +60,7 @@ class TestSellerNode:
 
     def test_storefront_reachable(self, seller_node: dict):
         """Storefront responds on its HTTP port."""
-        status, body = _http_get(f"{seller_node['storefront_url']}/.well-known/agent.json")
+        status, body = _http_get(f"{seller_node['storefront_url']}/health")
         assert status == 200, (
             f"Storefront at {seller_node['storefront_url']} not reachable: "
             f"status={status} body={body[:200]}"

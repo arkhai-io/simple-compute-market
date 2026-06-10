@@ -1,8 +1,8 @@
 """External layer: the world an infra provider assumes already exists.
 
-This is the EVM chain with Alkahest contracts and ERC-8004 registry
-contracts deployed, and funded accounts. Nothing marketplace-specific
-lives here — this is pure blockchain infrastructure.
+This is the EVM chain with Alkahest contracts deployed and funded
+accounts. Nothing marketplace-specific lives here — this is pure
+blockchain infrastructure.
 
 These tests verify the external world is ready. Later stages depend on
 the ``external_world`` fixture, which is only valid if these pass.
@@ -25,8 +25,8 @@ log = logging.getLogger(__name__)
 
 
 @pytest.fixture(scope="session")
-def external_world(w3: Web3, rpc_settings, registry_settings, buyer_settings, seller_settings) -> dict:
-    """The external world: RPC connection + contract addresses + funded accounts.
+def external_world(w3: Web3, rpc_settings, buyer_settings, seller_settings) -> dict:
+    """The external world: RPC connection + funded accounts.
 
     Consumed by all downstream stages. Represents what an infrastructure
     provider (marketplace deployer) assumes already exists before they set
@@ -36,9 +36,6 @@ def external_world(w3: Web3, rpc_settings, registry_settings, buyer_settings, se
         "rpc_url": rpc_settings["url"],
         "chain_id": rpc_settings["chain_id"],
         "w3": w3,
-        "identity_registry": w3.to_checksum_address(registry_settings["identity_address"]),
-        "reputation_registry": w3.to_checksum_address(registry_settings["reputation_address"]),
-        "validation_registry": w3.to_checksum_address(registry_settings["validation_address"]),
         "buyer": {
             "private_key": buyer_settings["private_key"],
             "wallet_address": w3.to_checksum_address(buyer_settings["wallet_address"]),
@@ -68,14 +65,6 @@ class TestExternalWorld:
             f"Chain ID mismatch: expected {external_world['chain_id']}, "
             f"got {w3.eth.chain_id}"
         )
-
-    @pytest.mark.contracts
-    @pytest.mark.parametrize("label", ["identity_registry", "reputation_registry", "validation_registry"])
-    def test_erc8004_contract_deployed(self, external_world: dict, label: str):
-        """ERC-8004 registry contracts have deployed bytecode."""
-        w3 = external_world["w3"]
-        code = w3.eth.get_code(external_world[label])
-        assert len(code) > 2, f"No contract deployed at {label} ({external_world[label]})"
 
     @pytest.mark.parametrize("role", ["buyer", "seller"])
     def test_account_has_funds(self, external_world: dict, min_eth_balance: Decimal, role: str):

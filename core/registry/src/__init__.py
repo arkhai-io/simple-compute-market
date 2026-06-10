@@ -1,2 +1,2 @@
-# ERC-8004 Registry Python Package
+# Registry (listing discovery/index) service package.
 

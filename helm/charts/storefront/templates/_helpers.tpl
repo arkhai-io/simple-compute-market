@@ -81,8 +81,8 @@ Compose the provisioning service URL from global.provisioning.{host,port}.
 
 {{/*
 Compose the agent's externally-advertised base URL from the agent's
-Service DNS + port. This is what the agent writes to its on-chain
-ERC-8004 registration file (and what other agents dial to reach it).
+Service DNS + port. This is what the storefront advertises on its
+registry listings (and what buyers dial to reach it).
 Argument: dict with `root` and `agent`.
 */}}
 {{- define "storefront.agentBaseUrl" -}}

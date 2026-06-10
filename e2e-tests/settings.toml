@@ -15,14 +15,10 @@ retry_attempts = 3
 retry_backoff_seconds = 2
 
 # ---------------------------------------------------------------------------
-# Registry contract addresses
+# Registry (discovery index) service
 # ---------------------------------------------------------------------------
 [default.registry]
 api_url            = ""
-identity_address   = ""
-reputation_address = ""
-validation_address = ""
-owner_address      = ""
 
 # ---------------------------------------------------------------------------
 # Buyer wallet

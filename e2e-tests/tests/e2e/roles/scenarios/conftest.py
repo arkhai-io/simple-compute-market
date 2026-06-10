@@ -195,9 +195,9 @@ def registry_client():
 def provisioning_client():
     """Canonical SyncProvisioningClient.
 
-    Provisioning is an internal dependency of the storefront. Since the
-    ERC-8004 removal it gates every non-health route on a single shared
-    admin key (X-Admin-Key); there is no per-agent identity anymore.
+    Provisioning is an internal dependency of the storefront. It gates
+    every non-health route on a single shared admin key (X-Admin-Key);
+    there is no per-agent identity.
     """
     from client.provisioning_client import SyncProvisioningClient
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
