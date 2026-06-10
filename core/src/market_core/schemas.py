@@ -11,6 +11,16 @@ Rules: zero domain vocabulary (explicitly marked legacy wire shims are
 the only exception, and they leave with the client-wheel wire bump) and
 no dependencies beyond pydantic — the wheel must stay importable by
 every role without dragging in role or kit code.
+
+Known divergence: the escrow carriers below still bake the alkahest
+settlement mechanism into their required fields (``EscrowTerms`` is the
+``doObligation`` call shape; proposals key on chain + contract
+address). The target is lifecycle universals + a ``{mechanism, params}``
+envelope interpreted by kit codecs, so fiat escrow and other mechanisms
+fit without carrier surgery; that reshape deliberately rides the
+settlement-plan generalization (work item I.1 of
+``docs/development/design-settlement-lifecycle-and-capacity.md``) so
+the negotiation wire churns once, not twice.
 """
 
 from __future__ import annotations

@@ -24,6 +24,12 @@ Decisions recorded here (rationale in the body):
   "Target packaging"; restated here only as context.)
 - `Terms` generalizes to a **settlement plan**; the buyer pipeline gains
   a third phase: `discover → negotiate → settle → service`.
+- The plan carrier is **settlement-mechanism-neutral**: lifecycle
+  universals (payer/claimant, amount/asset, expiration, conditions) as
+  typed fields, everything mechanism-specific behind a
+  `{mechanism, params}` envelope interpreted by kit codecs. Alkahest is
+  the first mechanism, not the structural assumption; fiat escrow is
+  the second (already customer-requested).
 - The authoritative capacity ledger moves out of the storefront into a
   per-site **site authority**; storefronts keep a market-domain
   **aggregation view**. Executors become stateless workers behind the
@@ -79,16 +85,45 @@ Example lifecycles in scope:
 Today `Terms` materializes to one escrow collected once. The general
 carrier is a **plan**:
 
-- a set of escrows/bonds, each with: payer, claimant, amount/asset, and
-  an arbiter demand tree;
+- a set of obligations (escrows/bonds), each with: payer, claimant,
+  amount/asset, expiration, a condition set, and a **settlement
+  mechanism tag with opaque mechanism params**;
 - the off-chain obligations each party takes on: heartbeat cadence and
   schema, oracle identity, evidence format, interval boundaries.
 
+**The plan carrier is mechanism-neutral by construction.** Alkahest
+must not be the only structurally supported settlement mechanism —
+fiat escrow is already requested by customers, and it follows the same
+lifecycle (payer/claimant, amount, expiration, conditions gate
+collect-vs-reclaim) with a different identifier scheme and different
+verification semantics: provider + account/payment refs instead of
+chain id + contract address, and "the provider object satisfies the
+agreed terms" (an adapter call against the provider API) instead of
+byte-compare against a chain read, because a fiat materialization
+creates a provider-side object whose id is generated, not derivable.
+The trust model also shifts — the chain is a neutral arbiter, a
+payment provider is a trusted third party — which changes how penalty
+bonds and heartbeat-gated collection cash out, but not the engine's
+shape. So the carrier keeps only the lifecycle universals as typed
+fields and pushes everything mechanism-specific into a
+`{mechanism, params}` envelope whose deterministic interpretation
+lives in kit codecs — the same pattern as the `ProvisionTerms`
+`{kind, payload}` envelope. `kit/alkahest` is the first codec; a
+`kit/fiat-<provider>` package is the second, with no further carrier
+surgery. The current flat alkahest shapes (`EscrowTerms` mirroring
+`doObligation`, `EscrowProposal`/`AcceptedEscrow` keyed on
+`(chain_name, escrow_address)`) become a marked legacy coercion into
+the envelope, exactly like the flat compute provision terms.
+
 The determinism contract extends unchanged in kind: both sides must
 derive the same *plan* from the shared message history, not just the
-same single escrow. Negotiation vocabulary for proposing/accepting plan
-shapes (intervals, bond sizes, oracle choice) is schema policy, exactly
-like price.
+same single escrow — for mechanisms whose materialization is not
+independently derivable (fiat), determinism covers the agreed terms,
+and verification of the materialized object against those terms is the
+mechanism codec's job. Negotiation vocabulary for proposing/accepting
+plan shapes (intervals, bond sizes, oracle choice, *mechanism choice*)
+is schema policy, exactly like price; a listing's accepted-escrows set
+generalizes to advertising accepted settlement mechanisms.
 
 ### `Receipt` is not terminal: deal servicing engines
 
@@ -124,9 +159,9 @@ implements it.
 
 | Layer         | Owns                                                                                                                                                                       |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| core          | the lifecycle engine mechanics: deal → escrows → conditions → claims as a persisted state machine; scheduling/retry; chain-event subscription points; the `service` phase contract and its injection points. Same altitude as `negotiation_sync`/`stage_log` — mechanics, no vocabulary. |
-| kit/alkahest  | arbiter demand-tree codec (AllArbiter `DemandData` encode/decode), `TrustedOracleArbiter` interaction (`arbitrate`, `requestArbitration`, `ArbitrationMade`/`ArbitrationRequested` watching), collection/reclaim call primitives                                              |
-| domains/vms   | which conditions a VM lease uses; heartbeat schema and verification; interval/bond split policy; oracle selection; evidence bundle construction                                                                                                                              |
+| core          | the lifecycle engine mechanics: deal → obligations → conditions → claims as a persisted state machine; scheduling/retry; event subscription points; the `service` phase contract and its injection points. Drives injected per-mechanism `materialize`/`check conditions`/`collect`/`reclaim` hooks and never learns which mechanism it is driving. Same altitude as `negotiation_sync`/`stage_log` — mechanics, no vocabulary. |
+| kit (one package per settlement mechanism) | `kit/alkahest` is the first mechanism codec: arbiter demand-tree codec (AllArbiter `DemandData` encode/decode), `TrustedOracleArbiter` interaction (`arbitrate`, `requestArbitration`, `ArbitrationMade`/`ArbitrationRequested` watching), collection/reclaim call primitives, byte-compare verification. A future `kit/fiat-<provider>` is the second: payment-intent/hold materialization, provider-API condition checks and terms verification, capture/payout vs refund primitives. |
+| domains/vms   | which conditions a VM lease uses; heartbeat schema and verification; interval/bond split policy; oracle/mechanism selection; evidence bundle construction                                                                                                                    |
 
 ### Pipeline: a third phase
 
@@ -162,13 +197,22 @@ callable, so Part I does not block on Part II.
 
 1. **Plan carrier.** Generalize the accepted-proposal/terms handoff to a
    settlement plan (single-escrow plans first; shape must already admit
-   N escrows + bonds). Both sides derive it from the message history.
+   N escrows + bonds **and N settlement mechanisms**: each obligation
+   carries lifecycle universals as typed fields plus a
+   `{mechanism, params}` envelope — do not build the plan carrier
+   alkahest-shaped). Both sides derive it from the message history.
+   This is also where the `market-core` escrow carriers shed their
+   baked-in alkahest field skeleton (see the resolved callout in the
+   extraction doc): one wire change, not two.
 2. **kit/alkahest codecs.** AllArbiter demand-tree encode/decode; oracle
    arbitrate/request/watch helpers; collect/reclaim primitives.
    (`market_alkahest` already owns generic proposal/terms
-   materialization — this extends the same package.)
+   materialization — this extends the same package, now explicitly as
+   the first *mechanism codec* behind the plan carrier's envelope.)
 3. **Core lifecycle engine.** Persisted deal state machine + scheduler +
-   chain-event hook points; seller engine embedded in the storefront
+   event hook points; mechanism-generic — the engine drives injected
+   `materialize`/`check conditions`/`collect`/`reclaim` hooks supplied
+   by the mechanism codec. Seller engine embedded in the storefront
    runtime, buyer engine runnable from the buyer CLI (`market service
    --run <run-log>` or daemon mode) — run-log persistence already exists
    as the handoff carrier.
@@ -432,6 +476,11 @@ available as a fallback.
 - **Generic oracle implementations.** Kit owns talking *to*
   `TrustedOracleArbiter`; operating an oracle (heartbeat verification
   service) starts as a domain-side tool.
+- **A concrete fiat mechanism codec.** The plan carrier's mechanism
+  envelope is in scope now (item I.1) precisely so fiat support later
+  is additive — a `kit/fiat-<provider>` codec plus a domain policy that
+  proposes/accepts the mechanism — but building a specific provider
+  integration waits for a committed customer/provider pairing.
 
 ## References
 

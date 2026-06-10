@@ -174,6 +174,31 @@ given a domain implementation.
 > explicitly marked legacy wire shim that leaves with the
 > `storefront-client` wire bump), and zero dependencies beyond pydantic
 > (`core/tests/unit/test_carrier_purity.py` walks the imports).
+>
+> **Known divergence — settlement-mechanism vocabulary.** The purity
+> rules cover the resource/market axis and the import graph, but the
+> current escrow carriers bake one settlement *mechanism* into their
+> required fields: `EscrowTerms` is literally the alkahest
+> `doObligation(data, expirationTime)` call shape, and
+> `EscrowProposal`/`AcceptedEscrow` key on
+> `(chain_name, escrow_address)`. Alkahest must not be the only
+> structurally supported mechanism (fiat escrow is already requested:
+> same payer/claimant/amount/expiration/conditions lifecycle, different
+> identifier scheme and verification semantics — provider + payment
+> refs instead of chain + contract; "provider object satisfies the
+> agreed terms" instead of byte-compare against a chain read). The
+> wheel's contract is therefore *lifecycle universals + mechanism
+> envelope*, not alkahest shapes: each obligation carries
+> payer/claimant, asset/amount, expiration, conditions, and a
+> mechanism tag with opaque params whose deterministic interpretation
+> lives in kit codecs (`kit/alkahest` first, fiat providers later) —
+> the same pattern as the `ProvisionTerms` `{kind, payload}` envelope.
+> Deliberately NOT fixed standalone: the carrier reshape rides the
+> settlement-plan generalization (work item I.1 of
+> `design-settlement-lifecycle-and-capacity.md`) so the
+> `/negotiate/*` wire and client wheels churn once, not twice. The
+> current flat alkahest shapes then become a marked legacy coercion,
+> exactly like the flat compute provision terms.
 
 **Executable entrypoints split by role.** The buyer executable is
 core-owned: `core-buyer` ships the `market` console script, the common
