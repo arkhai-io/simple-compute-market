@@ -6,11 +6,11 @@ placeholder uid would be rejected by alkahest's ``get_obligation``
 call. So we drive alkahest-py against the local Anvil from the
 buyer's wallet, the same way
 ``domains.vms.settlement.escrow_client.make_create_escrow_fn`` does in
-production — but inlined here because integration-tests doesn't
+production — but inlined here because e2e-tests doesn't
 depend on the buyer wheel.
 
 Token distribution is baked into the chain state (account #1 holds
-MockERC20 — see test-env/generate_state.py). Escrow creation is runtime: in production
+MockERC20 — see dev-env/generate_state.py). Escrow creation is runtime: in production
 the buyer signs and sends this transaction themselves, so the test
 does the same — with the buyer's private key, against the just-
 finalized negotiation terms.
@@ -82,7 +82,7 @@ def _ensure_ws_rpc_url(rpc_url: str) -> str:
 def _alkahest_addresses_path() -> str:
     """Locate the bundled alkahest_anvil_addresses.json shipped with
     market-storefront. It's the same file the seller container uses,
-    and it's installed into the integration-tests venv as a
+    and it's installed into the e2e-tests venv as a
     transitive resource via the ``market-storefront`` dependency."""
     ref = resources.files("market_storefront.data").joinpath(
         "alkahest_anvil_addresses.json"

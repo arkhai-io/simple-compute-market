@@ -115,7 +115,7 @@ test-storefront:
 build: init-prerequisites dist build-buyer
 	$(MAKE) -j3 build-registry build-storefront build-provisioning
 
-build-dev: build build-test-env build-test-image
+build-dev: build build-dev-env build-test-image
 
 # Seller-only build: the two runtime images a seller actually needs
 # (`arkhai:storefront`, `arkhai:provisioning`) and just the wheels they
@@ -136,14 +136,14 @@ build-buyer: init-prerequisites init-buyer
 	cd domains/vms/buyer && make build
 
 # Regenerate the baked Anvil state + Alkahest address book by running
-# EnvTestManager once and snapshotting its chain (see test-env/generate_state.py).
+# EnvTestManager once and snapshotting its chain (see dev-env/generate_state.py).
 # Runs through the storefront venv, which pins alkahest_py; the relative
 # --find-links keeps domains/vms/storefront/uv.lock paths portable.
 build-anvil-state:
-	cd domains/vms/storefront && uv run --find-links ../../../.dist python ../../../test-env/generate_state.py
+	cd domains/vms/storefront && uv run --find-links ../../../.dist python ../../../dev-env/generate_state.py
 
-build-test-env: build-anvil-state
-	cd test-env && make build
+build-dev-env: build-anvil-state
+	cd dev-env && make build
 
 build-registry:
 	cd core/registry && make build
@@ -155,7 +155,7 @@ build-provisioning:
 	cd domains/vms/provisioning/service && make build
 
 build-test-image:
-	cd integration-tests && make build
+	cd e2e-tests && make build
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.
@@ -206,11 +206,11 @@ deploy-helm:
 		EXTRA_SET_FILE_ARGS="--set-file provisioning.inventory.hostsIni=$(HOSTS_INI)"
 
 ## Docker-run based local deploy (legacy, still useful for local dev without k8s).
-deploy-docker: deploy-test-env deploy-registry deploy-storefront deploy-provisioning
+deploy-docker: deploy-dev-env deploy-registry deploy-storefront deploy-provisioning
 
-#docker run -it --rm -v ./test-env/state:/state arkhai:test-env-$(GIT_SUFFIX) anvil --load-state /state/state.json
-deploy-test-env:
-	cd test-env && make deploy
+#docker run -it --rm -v ./dev-env/state:/state arkhai:dev-env-$(GIT_SUFFIX) anvil --load-state /state/state.json
+deploy-dev-env:
+	cd dev-env && make deploy
 
 deploy-registry:
 	cd core/registry && make deploy
@@ -222,7 +222,7 @@ deploy-provisioning:
 	cd domains/vms/provisioning/service && make deploy
 
 test-deployment:
-	cd integration-tests && make test
+	cd e2e-tests && make test
 
 stop:
 	docker ps -aq | xargs -r docker stop
@@ -329,8 +329,8 @@ push-images: _require-ar-project
 	$(call push_image,provisioning,provisioning)
 
 push-dev-images: _require-ar-project
-	$(call push_image,test-env,test-env)
-	$(call push_image,integration-tests,integration-tests)
+	$(call push_image,dev-env,dev-env)
+	$(call push_image,e2e-tests,e2e-tests)
 
 push-charts: _require-ar-project dist-helm
 	helm push $(DIST_DIR)/arkhai-node-operator-*.tgz $(HELM_REGISTRY)

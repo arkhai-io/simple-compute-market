@@ -11,7 +11,7 @@ global:
   # ---------------------------------------------------------------------------
   rpc:
     chainId: 31337
-    host: "arkhai-node-operator-test-env"
+    host: "arkhai-node-operator-dev-env"
     port: 8545
 
   # ---------------------------------------------------------------------------
@@ -83,15 +83,15 @@ global:
         profileRefs: {}
 
 # ---------------------------------------------------------------------------
-# test-env subchart
+# dev-env subchart
 # ---------------------------------------------------------------------------
-test-env:
+dev-env:
   enabled: true
 
   image:
     repository: ""
     name: arkhai
-    tag: test-env
+    tag: dev-env
     pullPolicy: IfNotPresent
 
   service:
@@ -224,20 +224,20 @@ provisioning:
 # ---------------------------------------------------------------------------
 # validate-contracts subchart
 # Runs the contract validation helm test.
-# When test-env is enabled, tests run against that deployment via global.rpc.
-# When test-env is disabled, set rpcUrl to point at your target endpoint.
+# When dev-env is enabled, tests run against that deployment via global.rpc.
+# When dev-env is disabled, set rpcUrl to point at your target endpoint.
 # ---------------------------------------------------------------------------
 validate-contracts:
   enabled: true
   # Override the RPC endpoint. Leave empty to use global.rpc.host:port
-  # (i.e. the test-env service when that subchart is enabled).
+  # (i.e. the dev-env service when that subchart is enabled).
   rpcUrl: ""
 
 integrationTests:
   image:
     repository: ""
     name: arkhai
-    tag: integration-tests
+    tag: e2e-tests
     pullPolicy: IfNotPresent
 
 # ---------------------------------------------------------------------------
@@ -253,7 +253,7 @@ e2e-tests:
   integrationTests:
     repository: ""
     name: arkhai
-    tag: integration-tests
+    tag: e2e-tests
     pullPolicy: IfNotPresent
 
   # Seller credentials for the agent this e2e run targets.

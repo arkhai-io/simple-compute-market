@@ -1,13 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "test-env.fullname" . }}
+  name: {{ include "dev-env.fullname" . }}
   labels:
-    {{- include "test-env.labels" . | nindent 4 }}
+    {{- include "dev-env.labels" . | nindent 4 }}
 spec:
   type: {{ .Values.service.type }}
   selector:
-    {{- include "test-env.selectorLabels" . | nindent 4 }}
+    {{- include "dev-env.selectorLabels" . | nindent 4 }}
   ports:
     - name: rpc
       port: {{ .Values.global.rpc.port }}

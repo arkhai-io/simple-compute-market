@@ -177,11 +177,11 @@ phases:
     commands:
       - id: integration_reinit
         run: make reinit
-        workdir: integration-tests
+        workdir: e2e-tests
         timeout_seconds: 600
       - id: integration_unit_pytest
         run: .venv/bin/pytest tests/unit/ -v
-        workdir: integration-tests
+        workdir: e2e-tests
         timeout_seconds: 600
 
   - id: compose_preexisting_stack_check
@@ -282,19 +282,19 @@ phases:
     commands:
       - id: contracts
         run: make test-module MODULE=contracts ACTIVE_PROFILES=local
-        workdir: integration-tests
+        workdir: e2e-tests
       - id: wallets
         run: make test-module MODULE=wallets ACTIVE_PROFILES=local
-        workdir: integration-tests
+        workdir: e2e-tests
       - id: registry
         run: make test-module MODULE=registry ACTIVE_PROFILES=local
-        workdir: integration-tests
+        workdir: e2e-tests
       - id: storefront
         run: make test-module MODULE=storefront ACTIVE_PROFILES=local
-        workdir: integration-tests
+        workdir: e2e-tests
       - id: provisioning
         run: make test-module MODULE=provisioning ACTIVE_PROFILES=local
-        workdir: integration-tests
+        workdir: e2e-tests
     collect_on_failure:
       - compose_logs
     classifiers:
@@ -310,13 +310,13 @@ phases:
     commands:
       - id: roles_layer_external
         run: make test-module MODULE=roles_layer_external ACTIVE_PROFILES=local
-        workdir: integration-tests
+        workdir: e2e-tests
       - id: roles_layer_registry
         run: make test-module MODULE=roles_layer_registry ACTIVE_PROFILES=local
-        workdir: integration-tests
+        workdir: e2e-tests
       - id: roles_layer_seller
         run: make test-module MODULE=roles_layer_seller ACTIVE_PROFILES=local
-        workdir: integration-tests
+        workdir: e2e-tests
     collect_on_failure:
       - compose_logs
     classifiers:
@@ -332,13 +332,13 @@ phases:
     commands:
       - id: e2e_deal
         run: make test-module MODULE=e2e_deal ACTIVE_PROFILES=local
-        workdir: integration-tests
+        workdir: e2e-tests
       - id: e2e_deal_buyer_cli
         run: make test-module MODULE=e2e_deal_buyer_cli ACTIVE_PROFILES=local
-        workdir: integration-tests
+        workdir: e2e-tests
       - id: multi_registry
         run: make test-module MODULE=multi_registry ACTIVE_PROFILES=local
-        workdir: integration-tests
+        workdir: e2e-tests
     collect_on_failure:
       - compose_logs
     classifiers:
@@ -353,7 +353,7 @@ phases:
     commands:
       - id: integration_full
         run: make test ACTIVE_PROFILES=local
-        workdir: integration-tests
+        workdir: e2e-tests
     collect_on_failure:
       - compose_logs
     classifiers:

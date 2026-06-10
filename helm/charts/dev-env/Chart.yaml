@@ -1,5 +1,5 @@
 apiVersion: v2
-name: test-env
+name: dev-env
 description: Anvil-based EVM test node for the Arkhai stack (dev / CI)
 type: application
 version: 0.1.0

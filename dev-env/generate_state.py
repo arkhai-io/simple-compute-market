@@ -5,7 +5,7 @@ Spins up ``EnvTestManager`` (which boots an internal Anvil and deploys the
 full Alkahest contract suite + mock tokens), funds Alice and Bob with MOCK,
 then captures two artifacts from that one deployment:
 
-  * ``test-env/state/state.json`` — the Anvil state snapshot, loaded at
+  * ``dev-env/state/state.json`` — the Anvil state snapshot, loaded at
     container startup via ``anvil --load-state``. Produced by decoding the
     ``anvil_dumpState`` blob (hex-encoded gzip) into the JSON form that
     ``--load-state`` consumes.
@@ -15,7 +15,7 @@ then captures two artifacts from that one deployment:
 Both derive from the same deployment, so they cannot drift. Regenerate when
 the alkahest_py version changes:
 
-    cd domains/vms/storefront && uv run --find-links ../../../.dist python ../../../test-env/generate_state.py
+    cd domains/vms/storefront && uv run --find-links ../../../.dist python ../../../dev-env/generate_state.py
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import urllib.request
 from alkahest_py import EnvTestManager, MockERC20
 
 # The market's test wallets are the standard deterministic Anvil accounts the
-# buyer/seller configs use (integration-tests/config/*, the storefront .toml
+# buyer/seller configs use (e2e-tests/config/*, the storefront .toml
 # files) — NOT alkahest's env.alice/env.bob, which newer alkahest randomizes.
 # The buyer (account #1) escrows MOCK during a deal with no runtime funding, so
 # it must hold enough raw base units for bundled 18-decimal dev inventory;

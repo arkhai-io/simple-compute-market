@@ -6,7 +6,7 @@ and the ``registry_client`` fixture is an async fixture — pytest-asyncio
 handles both transparently because ``asyncio_mode = "auto"`` is set in
 pyproject.toml.
 
-``SyncRegistryClient`` is used in ``integration-tests/`` against real deployed
+``SyncRegistryClient`` is used in ``e2e-tests/`` against real deployed
 endpoints where a real network socket is available.
 
 Database isolation

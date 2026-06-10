@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
 # Profile: local
-# Targets a prebuilt test-env Anvil node running on localhost.
+# Targets a prebuilt dev-env Anvil node running on localhost.
 # Addresses and keys are ok to commit
 # ---------------------------------------------------------------------------
 

@@ -6,10 +6,10 @@ version: 0.1.0
 appVersion: "0.1.0"
 
 dependencies:
-  - name: test-env
+  - name: dev-env
     version: "0.1.0"
-    repository: "file://charts/test-env"
-    condition: test-env.enabled
+    repository: "file://charts/dev-env"
+    condition: dev-env.enabled
   - name: registry
     version: "0.1.0"
     repository: "file://charts/registry"

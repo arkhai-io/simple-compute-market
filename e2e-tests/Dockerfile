@@ -16,12 +16,12 @@ WORKDIR /app
 # Copy the pre-built wheels from the monorepo .dist/ directory.
 # These are built on the host by `make dist` before `docker build`.
 # The Dockerfile is built from the monorepo root:
-#   cd .. && docker build -t arkhai:integration-tests -f integration-tests/Dockerfile .
+#   cd .. && docker build -t arkhai:e2e-tests -f e2e-tests/Dockerfile .
 COPY .dist/ /dist/
 
-COPY integration-tests/src ./src
-COPY integration-tests/tests ./tests
-COPY integration-tests/pyproject.toml ./
+COPY e2e-tests/src ./src
+COPY e2e-tests/tests ./tests
+COPY e2e-tests/pyproject.toml ./
 
 # --refresh-package the monorepo workspace wheels: they are rebuilt into
 # .dist/ without a version bump, so a cached same-version wheel in the uv
@@ -44,10 +44,10 @@ WORKDIR /app
 COPY --from=builder /app/.venv ./.venv
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/tests ./tests
-COPY integration-tests/config ./config
-COPY integration-tests/conftest.py .
-COPY integration-tests/pyproject.toml .
-COPY integration-tests/settings.toml .
+COPY e2e-tests/config ./config
+COPY e2e-tests/conftest.py .
+COPY e2e-tests/pyproject.toml .
+COPY e2e-tests/settings.toml .
 
 ENV PATH="/app/.venv/bin:$PATH"
 

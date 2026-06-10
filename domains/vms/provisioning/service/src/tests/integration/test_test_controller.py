@@ -44,7 +44,7 @@ HOST = "kvm1"
 # ---------------------------------------------------------------------------
 # AsyncProvisioningTestClient
 #
-# The canonical ProvisioningTestClient (integration-tests/src/) is sync-only.
+# The canonical ProvisioningTestClient (e2e-tests/src/) is sync-only.
 # This async variant is backed by the same ASGITransport as the main
 # ProvisioningClient so all calls share the in-process app.  No raw HTTP
 # calls appear in test bodies — all test code calls named methods here.

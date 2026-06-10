@@ -5,7 +5,7 @@ ACTIVE_PROFILES ?= local
 CONFIG_DIRECTORY ?= $(PWD)/config
 MODULE ?= contracts
 
-# Path to the monorepo .dist/ wheel directory, relative to integration-tests/.
+# Path to the monorepo .dist/ wheel directory, relative to e2e-tests/.
 # Used by uv when resolving pure-Python internal packages (arkhai-vms-buyer,
 # arkhai-kit-policy, arkhai-vms-storefront, arkhai-vms-provisioning) that are distributed as wheels rather than editable
 # source installs.  The Dockerfile passes --find-links /dist on the uv sync
@@ -40,14 +40,14 @@ reinit: init-venv
 # -----------------------------------------------------------------------
 
 IMAGE_NAME ?= arkhai
-IMAGE_TAG  ?= integration-tests
+IMAGE_TAG  ?= e2e-tests
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 PYTHON_VERSION := 3.13
 
 build: build-images
 
 build-images: reinit
-	cd .. && docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f integration-tests/Dockerfile .
+	cd .. && docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f e2e-tests/Dockerfile .
 	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
 
 # -----------------------------------------------------------------------
@@ -83,9 +83,9 @@ test-container-module:
 # run`) so it works under daemonless podman, where the docker-compose
 # provider can't reach a daemon.
 #
-# Prereqs: the stack is up (`docker compose up -d`) and the integration-tests
+# Prereqs: the stack is up (`docker compose up -d`) and the e2e-tests
 # image is rebuilt with the buyer wheel (`make build` at the repo root, then
-# `make -C integration-tests build`).
+# `make -C e2e-tests build`).
 #
 # NETWORK defaults to the compose project's default network
 # (<repo-dir>_default). Override if your project name differs.

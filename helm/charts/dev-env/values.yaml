@@ -1,12 +1,12 @@
-# Default values for test-env.
-# These are overridden by the parent chart's test-env: block in values.yaml.
+# Default values for dev-env.
+# These are overridden by the parent chart's dev-env: block in values.yaml.
 # The RPC port and host are authoritative in global.rpc (parent values.yaml)
 # and are not duplicated here.
 
 image:
   repository: ""
   name: arkhai
-  tag: test-env
+  tag: dev-env
   pullPolicy: IfNotPresent
 
 service:

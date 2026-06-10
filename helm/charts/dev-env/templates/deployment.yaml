@@ -1,23 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "test-env.fullname" . }}
+  name: {{ include "dev-env.fullname" . }}
   labels:
-    {{- include "test-env.labels" . | nindent 4 }}
+    {{- include "dev-env.labels" . | nindent 4 }}
 spec:
   # Anvil maintains in-memory chain state; more than one replica is not useful.
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      {{- include "test-env.selectorLabels" . | nindent 6 }}
+      {{- include "dev-env.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "test-env.selectorLabels" . | nindent 8 }}
+        {{- include "dev-env.selectorLabels" . | nindent 8 }}
     spec:
       containers:
         - name: anvil
-          image: {{ include "test-env.image" . }}
+          image: {{ include "dev-env.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: rpc

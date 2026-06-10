@@ -1,12 +1,12 @@
 {{/*
-charts/test-env/templates/_helpers.tpl
+charts/dev-env/templates/_helpers.tpl
 */}}
 
-{{- define "test-env.name" -}}
+{{- define "dev-env.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "test-env.fullname" -}}
+{{- define "dev-env.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -19,25 +19,25 @@ charts/test-env/templates/_helpers.tpl
 {{- end }}
 {{- end }}
 
-{{- define "test-env.labels" -}}
+{{- define "dev-env.labels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
-{{ include "test-env.selectorLabels" . }}
+{{ include "dev-env.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
-{{- define "test-env.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "test-env.name" . }}
+{{- define "dev-env.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "dev-env.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Resolve the full image reference for the test-env container.
+Resolve the full image reference for the dev-env container.
 Supports an optional global.imageRepository passed down from the parent.
 */}}
-{{- define "test-env.image" -}}
+{{- define "dev-env.image" -}}
 {{- $repo := .Values.image.repository -}}
 {{- if and (not $repo) .Values.global -}}
   {{- $repo = .Values.global.imageRepository -}}

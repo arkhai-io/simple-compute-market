@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
 # Profile: docker
-# Targets a prebuilt test-env Anvil node running on a local container named anvil.
+# Targets a prebuilt dev-env Anvil node running on a local container named anvil.
 # Addresses and keys are ok to commit
 # ---------------------------------------------------------------------------
 

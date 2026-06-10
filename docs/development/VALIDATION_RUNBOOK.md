@@ -8,10 +8,10 @@ then run a CLI-first GCP proof for real Ansible/KVM provisioning.
 
 - All commands assume the repo root unless a step explicitly changes
   directories.
-- `make test-module MODULE=<marker>` in `integration-tests/` runs
+- `make test-module MODULE=<marker>` in `e2e-tests/` runs
   `pytest -m <marker>`.
 - High `deselected` counts are expected for marker-specific runs. Pytest
-  discovers the whole `integration-tests/tests/` tree, then runs only tests
+  discovers the whole `e2e-tests/tests/` tree, then runs only tests
   matching the requested marker.
 - Keep `docker compose -f docker-compose.yml -f /tmp/scm-no-redis-port.yml`
   together for every compose command if the Redis port override is in use.
@@ -77,7 +77,7 @@ Defaults:
 - Helm render validation runs automatically when `helm` is available.
 - Compute-provisioning IAC validation runs automatically when Ansible tooling
   and `domains/vms/provisioning/iac/ansible/inventory/hosts` are available.
-- The single-pass `integration-tests make test` sweep is off by default because
+- The single-pass `e2e-tests make test` sweep is off by default because
   it reruns stack-mutating e2e tests after the marker-specific runs.
 
 ## 1. Prerequisites
@@ -139,7 +139,7 @@ make build-dev
 ```
 
 Expected build products include `.dist/`, `shared-env/.env`,
-`test-env/state/state.json`, runtime Docker images, and dev/test Docker images
+`dev-env/state/state.json`, runtime Docker images, and dev/test Docker images
 for the local stack.
 
 ## 4. Code-Level Tests
@@ -198,7 +198,7 @@ cd ..
 Integration-test harness unit tests:
 
 ```bash
-cd integration-tests
+cd e2e-tests
 make reinit
 .venv/bin/pytest tests/unit/ -v
 cd ..
@@ -350,7 +350,7 @@ Registry agents:
 curl -sf http://localhost:8080/agents | jq
 ```
 
-Test-env state smoke, as a quieter equivalent of `cd test-env && make smoke`:
+Dev-env state smoke, as a quieter equivalent of `cd dev-env && make smoke`:
 
 ```bash
 curl -sf http://localhost:8545 -H 'Content-Type: application/json' \
@@ -395,7 +395,7 @@ docker run --rm -v simple-compute-market_alice-storefront-data:/data alpine:3.20
 ## 11. Deployment Smoke Tests
 
 ```bash
-cd integration-tests
+cd e2e-tests
 
 make test-module MODULE=contracts ACTIVE_PROFILES=local
 make test-module MODULE=wallets ACTIVE_PROFILES=local
@@ -425,7 +425,7 @@ make test-module MODULE=multi_registry ACTIVE_PROFILES=local
 ## 13. Optional Single-Pass Integration-Test Sweep
 
 After running the marker-specific commands above, this can catch any unmarked
-test in `integration-tests/tests/`. Run it before teardown and expect it to
+test in `e2e-tests/tests/`. Run it before teardown and expect it to
 rerun tests that mutate stack state:
 
 ```bash
@@ -517,7 +517,7 @@ tar \
   --exclude='dist' \
   --exclude='build' \
   --exclude='node_modules' \
-  --exclude='test-env/state' \
+  --exclude='dev-env/state' \
   --exclude='.scm-local/issue-discovery' \
   --exclude='.scm-local/clean-room-runs' \
   --exclude='scm-clean-room-transfer' \
@@ -809,7 +809,7 @@ Deploy the current dev overlay as-is first. This proves images, Helm values,
 secret mounts, and service wiring before real provisioning is enabled.
 On a reused dev cluster, restart the application deployments in dependency
 order so mutable image tags and startup-read config are actually reloaded. Do
-not restart `test-env` here unless you intentionally want to reset the dev
+not restart `dev-env` here unless you intentionally want to reset the dev
 Anvil chain state.
 
 ```bash

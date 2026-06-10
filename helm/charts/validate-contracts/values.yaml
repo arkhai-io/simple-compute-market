@@ -2,13 +2,13 @@
 
 # Override the RPC URL used by the contract validation test.
 # When empty, the URL is composed from global.rpc.host and global.rpc.port,
-# which resolves to the test-env deployment when that subchart is enabled.
-# Set this to a production or staging endpoint when test-env is disabled.
+# which resolves to the dev-env deployment when that subchart is enabled.
+# Set this to a production or staging endpoint when dev-env is disabled.
 rpcUrl: ""
 activeProfiles: ""
 
 integrationTests:
   repository: ""
   name: arkhai
-  tag: integration-tests
+  tag: e2e-tests
   pullPolicy: IfNotPresent

@@ -36,7 +36,7 @@ from src.settings import settings
 
 log = logging.getLogger(__name__)
 
-# buyer_cli.py lives at integration-tests/tests/e2e/roles/buyer_cli.py
+# buyer_cli.py lives at e2e-tests/tests/e2e/roles/buyer_cli.py
 # Four parents = simple-compute-market (the repo root).
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -300,7 +300,7 @@ def _alkahest_addresses_path() -> Optional[str]:
     """Locate the alkahest_anvil_addresses.json shipped with market-storefront.
 
     Same import path the storefront uses internally; it's installed
-    transitively into the integration-tests venv via the market-storefront
+    transitively into the e2e-tests venv via the market-storefront
     dep so this resolves without runtime config.
     """
     try:

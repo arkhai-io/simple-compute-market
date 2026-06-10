@@ -29,7 +29,7 @@ dependencies = [
     "arkhai-vms-provisioning>=0.4.0",
     # The buyer's `market` CLI, run as a subprocess by the buyer-machine
     # e2e (tests/e2e/roles/buyer_cli.py). Installed so the binary is on
-    # PATH inside arkhai:integration-tests when the suite runs in-network.
+    # PATH inside arkhai:e2e-tests when the suite runs in-network.
     # arkhai-kit-policy is the buyer's sibling negotiation-strategy dep,
     # resolved from .dist alongside the other internal wheels.
     "arkhai-vms-buyer>=0.1.0",

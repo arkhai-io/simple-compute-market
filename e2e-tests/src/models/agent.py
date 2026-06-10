@@ -36,7 +36,7 @@ from storefront_client.models import (  # noqa: F401 — re-exported for backwar
 
 # Listing-create / -close request builders previously lived here. They were
 # tied to the legacy ``{offer, demand}`` shape and had no remaining callers
-# inside integration-tests/ after the cutover. The canonical client method
+# inside e2e-tests/ after the cutover. The canonical client method
 # ``SyncStorefrontClient.create_listing(offer=..., accepted_escrows=...)`` is
 # the supported path — see e.g. ``test_full_deal.py:02b``.
 
