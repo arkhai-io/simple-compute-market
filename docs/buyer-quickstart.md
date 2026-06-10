@@ -69,13 +69,17 @@ chain_id = 84532
 rpc_url  = "https://sepolia.base.org"   # public RPC; or your own provider
 
 [registry]
-urls = ["http://<INDEXER_HOST>:8080"]
+# The Arkhai public indexer registry (preprod, Base Sepolia listings):
+urls = ["http://34.41.205.175/registry"]
+# Or point at any other indexer, e.g. a self-hosted one:
+# urls = ["http://<INDEXER_HOST>:8080"]
 
 [registry.auth]
 # Required when the indexer gates reads (REGISTRY_REQUIRE_READ_API_KEY=true).
+# The public preprod indexer is currently read-open — no token needed.
 # Keys must match the URLs in [registry] urls exactly (scheme, host,
 # port, no trailing slash).
-"http://<INDEXER_HOST>:8080" = "<your-token>"
+# "http://<INDEXER_HOST>:8080" = "<your-token>"
 
 [negotiation]
 # Ordered policy chain run per round. The buyer's default chain pairs

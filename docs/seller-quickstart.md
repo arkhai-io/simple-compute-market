@@ -63,14 +63,17 @@ chain_id = 84532
 rpc_url  = "https://sepolia.base.org"   # public RPC; or your own provider
 
 [registry]
-urls = ["http://<INDEXER_HOST>:8080"]
+# The Arkhai public indexer registry (preprod, Base Sepolia listings):
+urls = ["http://34.41.205.175/registry"]
+# Or point at any other indexer, e.g. a self-hosted one:
+# urls = ["http://<INDEXER_HOST>:8080"]
 
 [registry.auth]
 # Required when the indexer gates writes (REGISTRY_REQUIRE_WRITE_API_KEY=true);
-# the key must be write-scoped.
-# Keys must exactly match the URLs in [registry] urls (scheme, host,
-# port, trailing slash).
-"http://<INDEXER_HOST>:8080" = "<your-token>"
+# the key must be write-scoped. The public preprod indexer does not
+# currently gate writes (publishes are EIP-191 signature-verified), so
+# no entry is needed for it. For gated indexers:
+# "http://<INDEXER_HOST>:8080" = "<your-write-token>"
 
 [provisioning]
 service_url = "http://seller-provisioning:8081"
