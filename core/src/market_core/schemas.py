@@ -1,8 +1,16 @@
-"""Domain-agnostic shared schemas.
+"""Domain-agnostic negotiation/settlement wire carriers.
 
-These models are intentionally minimal and stable. Both the policy
-engine (market-policy) and the storefront/buyer runtimes import from
-here, so any change is a cross-package break.
+This is the protocol-carrier wheel: the shapes both sides of
+``/negotiate/*`` must derive identically from the shared message
+history (escrow proposals/terms, rate slots, provision-terms envelope).
+Both role shells (``core_storefront.models``) and the domain adapters
+on either side (buyer client, storefront runtime, provisioning terms)
+import from here, so any change is a cross-package wire break.
+
+Rules: zero domain vocabulary (explicitly marked legacy wire shims are
+the only exception, and they leave with the client-wheel wire bump) and
+no dependencies beyond pydantic — the wheel must stay importable by
+every role without dragging in role or kit code.
 """
 
 from __future__ import annotations
@@ -17,8 +25,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-
-from market_identity import Identity  # noqa: F401
 
 
 class ERC20TokenMetadata(BaseModel):

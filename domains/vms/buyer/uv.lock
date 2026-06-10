@@ -896,33 +896,11 @@ name = "market-core"
 version = "0.1.0"
 source = { editable = "../../../core" }
 dependencies = [
-    { name = "market-identity" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "market-identity", editable = "../../../kit/identity" },
-    { name = "pydantic", specifier = ">=2" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
-
-[[package]]
-name = "market-identity"
-version = "0.1.0"
-source = { editable = "../../../kit/identity" }
-dependencies = [
-    { name = "eth-account" },
-    { name = "pydantic" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "eth-account", specifier = ">=0.13.0" },
-    { name = "pydantic", specifier = ">=2" },
-]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]

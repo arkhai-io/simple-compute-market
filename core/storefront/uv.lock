@@ -421,15 +421,11 @@ name = "market-core"
 version = "0.1.0"
 source = { editable = "../" }
 dependencies = [
-    { name = "market-identity" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "market-identity", editable = "../../kit/identity" },
-    { name = "pydantic", specifier = ">=2" },
-]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]

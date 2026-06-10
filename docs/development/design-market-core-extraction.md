@@ -160,15 +160,20 @@ package. The role packages are independently installable and executable
 concrete market. Each role executable is a composition root that loads or is
 given a domain implementation.
 
-> **Current divergence:** `core/src/market_core/` exists as a shared
-> `market-core` wheel of carrier schemas. That is acceptable only as
-> schema-invariant carriers with zero domain vocabulary. Today
-> `market_core.schemas.ProvisionTerms` still defines `compute.v1`
-> convenience accessors (`duration_seconds`, `ssh_public_key`,
-> `compute_resource`) — compute vocabulary that moved *into* core during
-> the `service/` removal. Those accessors move out to `domains/vms`
-> (seam 3/4). Whether the carriers wheel ultimately survives or folds into
-> the role packages is open; the no-domain-vocabulary rule is not.
+> **Resolved:** `core/src/market_core/` survives as the shared
+> `market-core` wheel — the protocol-carrier package for the
+> negotiation/settlement wire shapes (escrow proposals/terms, rate
+> slots, the opaque provision-terms envelope) that buyer and storefront
+> must derive identically from the same message history. It cannot fold
+> into either role package without inverting a dependency (the other
+> role would import it), and duplicating it would break the determinism
+> contract, so it stays a peer of the protocol clients
+> (`registry-client`, `storefront-client`). Two rules, both now
+> enforced: zero domain vocabulary (the `compute.v1` accessors moved to
+> `domains/vms/provisioning/terms.py`; the only residue is the
+> explicitly marked legacy wire shim that leaves with the
+> `storefront-client` wire bump), and zero dependencies beyond pydantic
+> (`core/tests/unit/test_carrier_purity.py` walks the imports).
 
 **Executable entrypoints split by role.** The buyer executable is
 core-owned: `core-buyer` ships the `market` console script, the common
@@ -428,7 +433,11 @@ Receipt`; "materialize then submit" is internal factoring.
 - Move the discover→negotiate→settle skeleton (`buy_orchestrator`'s
   flow, the seller's per-round protocol from `sync_negotiation`, the
   settlement protocol) into `market-core`, defined over injected hooks +
-  generic primitives only.
+  generic primitives only. *(How it actually landed: the role skeletons
+  went into the role packages — `core_buyer.orchestrator`,
+  `core_storefront.negotiation_sync` — and `market-core` kept only the
+  shared wire carriers; see the resolved callout in "Target
+  packaging".)*
 - `domains/vms/buyer/` + the remaining `domains/vms/storefront/` package become the
   instantiation: wire ERC20 escrow construction, compute resource schema,
   provisioning, the GPU filter-spec into the core hooks.
@@ -626,9 +635,12 @@ and `shared-env/`.
 3. **Seam 3** (done): `ProvisionTerms` is opaque on the wire; concrete
    compute validation is no longer in the shared carrier. Moving the
    compute adapter into its own package belongs to seam 4.
-4. **Seam 4**: extract `market-core` package; split the remaining
-   storefront package into skeleton-consumers; verify the kit has no upward
-   imports.
+4. **Seam 4** (done): the role skeletons live in the role packages
+   (`core_buyer`, `core_storefront`), the remaining storefront package
+   is skeleton-consuming adapters, the kit has no upward imports
+   (enforced by the dependency-direction guardrail), and `market-core`
+   is settled as the pure protocol-carrier wheel (stdlib + pydantic
+   only, enforced by `test_carrier_purity.py`).
 5. **Seam 0b** (done): extract the concrete VM buyer behavior, packaging,
    tests, and scripts into the VM domain package.
 6. **Package migration**: once the code boundaries are explicit, move the
@@ -639,20 +651,24 @@ and `shared-env/`.
    (`NegotiationRound`, `NegotiationDecision`, context, chain execution,
    policy discovery); remaining importers consume only the generic types.
 
-Each phase keeps the branch green and the e2e suite passing. Seams 0–3,
-0b, and the policy cleanup are done; seam 4 is the remaining target.
-Three of its largest items have landed: the `compute.v1` interpretation
-moved out of `market_core.schemas` into `domains/vms/provisioning`, the
-buyer plugin extraction is done (verb skeleton + entry-point plugin
-discovery in `core-buyer`, the VM CLI as the first plugin), and the
-storefront's capacity access now goes through the site-authority client
-boundary (`core_storefront.capacity` contract, embedded adapter,
-snapshot/reserve re-route, event-driven stale-listing closure — work
-items II.1–II.3 of the capacity doc). What remains of seam 4 is
-settling the `market-core` carriers-wheel question.
-Follow-on architecture beyond this
-reorganization — asynchronous settlement lifecycles and the shared
-capacity/site-authority split — is planned in
+Each phase keeps the branch green and the e2e suite passing. Seams 0–4,
+0b, and the policy cleanup are done. Seam 4 closed in four moves: the
+`compute.v1` interpretation moved out of `market_core.schemas` into
+`domains/vms/provisioning`; the buyer plugin extraction landed (verb
+skeleton + entry-point plugin discovery in `core-buyer`, the VM CLI as
+the first plugin); the storefront's capacity access went behind the
+site-authority client boundary (`core_storefront.capacity` contract,
+embedded adapter, snapshot/reserve re-route, event-driven stale-listing
+closure — work items II.1–II.3 of the capacity doc); and the
+`market-core` carriers-wheel question is settled (the wheel survives as
+the pure protocol-carrier package — see the resolved callout in
+"Target packaging"). Known residue: the `storefront-client` wheel still
+sends the flat legacy provision-terms wire shape, which is what keeps
+the marked legacy shim in `ProvisionTerms`; genericizing that client
+API is the remaining wire-compat item. Follow-on architecture beyond
+this reorganization — asynchronous settlement lifecycles and the shared
+capacity/site-authority split (next: work item II.4, the site-authority
+service itself) — is planned in
 `design-settlement-lifecycle-and-capacity.md`.
 
 ## What's deferred / non-goals
@@ -674,6 +690,7 @@ capacity/site-authority split — is planned in
 ## File map
 
 ```
+core/src/market_core/schemas.py               seam 3, 4 done — pure protocol carriers (escrow/rate/provision-terms wire shapes); purity enforced by core/tests/unit/test_carrier_purity.py
 core/buyer/                                   seam 2, 4 — core buyer role carriers, discovery fan-in, run_buy shell
 domains/vms/buyer/buy_orchestrator.py         seam 2, 4 — VM legacy negotiate/settle hook adapters
 domains/vms/buyer/buy_cli.py                  seam 0b, 2 — VM market buy command

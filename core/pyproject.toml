@@ -3,8 +3,10 @@ name = "market-core"
 version = "0.1.0"
 description = "Core market wire models and orchestration-neutral helpers"
 requires-python = ">=3.10,<3.14"
+# Carriers only: the wheel must stay importable by every role package
+# without dragging in role or kit code (see schemas.py module docstring;
+# enforced by tests/unit/test_carrier_purity.py).
 dependencies = [
-    "market-identity",
     "pydantic>=2",
 ]
 
@@ -19,9 +21,6 @@ packages = ["src/market_core"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
 testpaths = ["tests/unit"]
-
-[tool.uv.sources]
-market-identity = { path = "../kit/identity", editable = true }
 
 [dependency-groups]
 dev = [
