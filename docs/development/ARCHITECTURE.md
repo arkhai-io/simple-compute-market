@@ -73,23 +73,53 @@ The structure baked into the core is the structure shared by every market shape 
 
 The indexer registry plays the platform role of existing compute markets: it is where a listing schema is *declared* (on the wire via `filter-spec.yaml`) and centralized. A registry typically serves a single schema, and the realistic first driver of the core/instantiation split is not a different asset class but **heterogeneous listing schemas within "compute"** that don't make sense on the same registry. Under this model a per-schema instantiation is the *registry operator's* deliverable: the core ships the from-above skeleton + the from-below kit; an operator stands up a registry and publishes a schema (its `filter-spec.yaml` plus the typed client counterpart, versioned together) and the storefront/buyer plugins that wire kit implementations into core hooks. The registry is already the most complete instance of this — it stores `offer_resource` as an opaque blob and drives discovery off a swappable filter-spec, with zero schema-specific code.
 
-### Where the current code deviates from the principle
+### Package layout (the principle, implemented)
 
-Parts of the code predate the principle and diverge from it. These seams are tracked in [`TODO.md`](TODO.md) / [`design-market-core-extraction.md`](design-market-core-extraction.md):
+The core/kit/domain extraction is complete; the package graph expresses
+the principle, and distribution names mirror it
+(`arkhai-{core,kit,vms}-*`; the `arkhai-` prefix drops once publishing
+moves under the organization's PyPI scope). Import names and console
+scripts (`market`, `market-storefront`, `market-policy`) are unchanged.
 
-- **`derive_prices` remains in the legacy compute adapter.** It exists only because `bisection` needs `(initial, max)` bounds; a different negotiation policy has different inputs. The high-level `negotiate` hook now gives a schema instantiation a place to own that setup, and `run_buy` no longer accepts the callback directly.
-- **`ProvisionTerms` is now an opaque carrier.** On the wire it carries
-  `kind` plus schema-specific `payload`; the current compute adapter uses
-  `kind="compute.v1"` with `payload.duration_seconds`,
-  `payload.ssh_public_key`, and optional `payload.compute_resource`. The
-  remaining split is internal extraction: the buyer side lives in
-  `domains/vms/buyer/`, while the VM storefront package under
-  `domains/vms/storefront/` still contains both skeleton wiring and
-  compute-specific code.
-- **The market skeleton is packaged inside the VM buyer package and
-  `domains/vms/storefront/`** alongside compute-specific code, so the package
-  graph does not yet express the from-above/from-below joint that the
-  function signatures already imply.
+| Layer | Distribution (path) | Role |
+|---|---|---|
+| core | `arkhai-core` (`core/`) | protocol-carrier wheel: negotiation/settlement wire shapes both roles must derive identically. Stdlib + pydantic only. |
+| core | `arkhai-core-buyer` (`core/buyer/`) | buyer role shell: `market` console script, verb skeleton, `market.buyer_plugins` entry-point discovery, `run_buy` orchestration, registry fan-in |
+| core | `arkhai-core-storefront` (`core/storefront/`) | storefront role shell (library, framework-free): sync-negotiation protocol, registry publication, stage log, auth, HTTP models, capacity-client contract |
+| core | `arkhai-core-registry` (`core/registry/`) | registry service; schema injected as `filter-spec.yaml` config |
+| core | `arkhai-core-registry-client`, `arkhai-core-storefront-client` | protocol clients |
+| kit | `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-alkahest`, `arkhai-kit-config` | from-below capabilities; alkahest is the first *settlement-mechanism codec* |
+| domain | `arkhai-vms-buyer` (`domains/vms/buyer/`) | no console script — publishes the `vms.compute` plugin the core `market` CLI discovers |
+| domain | `arkhai-vms-storefront` (`domains/vms/storefront/`) | the VM storefront executable/composition root (FastAPI adapters over core) |
+| domain | `arkhai-vms-provisioning` (`domains/vms/provisioning/service/`) | the VM fulfillment executor service |
+
+The VM *concept* modules (`domains/vms/{listings,negotiation,settlement,provisioning}`)
+are not separate wheels: they ship inside the buyer/storefront wheels
+and implement core hook shapes by injection, without importing core.
+
+Executable ownership splits by role: the buyer binary is core-owned
+with domain schema plugins (one binary, many registry schemas; without
+plugins it degrades to generic `--filter` browsing, never a concrete
+market); storefront executables are domain-owned, one process per
+market schema domain (multi-domain operators run parallel processes
+sharing the capacity layer underneath); the registry is core + schema
+config.
+
+Three rules are mechanically enforced, not just documented:
+kit and concept modules import no core/composition packages
+(`domains/vms/storefront/tests/unit/test_architecture_imports.py`);
+`market_core` imports nothing beyond stdlib + pydantic
+(`core/tests/unit/test_carrier_purity.py`); core never imports
+`domains.*` (plugin inversion on the buyer, injected hooks on the
+storefront).
+
+Remaining divergences are aggregated in [`TODO.md`](TODO.md) → "Core
+Stack"; the two design records are
+[`design-market-core-extraction.md`](design-market-core-extraction.md)
+(decisions behind the split) and
+[`design-settlement-lifecycle-and-capacity.md`](design-settlement-lifecycle-and-capacity.md)
+(the follow-on behavior work: settlement lifecycles, mechanism-neutral
+plan carrier, site authority).
 
 ### Technology Anchors
 
@@ -119,7 +149,7 @@ Parts of the code predate the principle and diverge from it. These seams are tra
          │  arkhai-core-registry  │   │  storefront             │
          │  :8080             │   │  :8001 (seller only)    │
          │  FastAPI indexer   │◄──┤  FastAPI                │
-         │  SQLite/Postgres   │   │  arkhai-vms-storefront serve│
+         │  SQLite/Postgres   │   │  market-storefront serve│
          └─────────▲──────────┘   └────────────┬────────────┘
                    │  GET /listings            │ HTTP (provisioning API)
                    │  signed reqs    ┌─────────▼───────────────┐
@@ -137,8 +167,8 @@ Parts of the code predate the principle and diverge from it. These seams are tra
  ┌──────────────┐   ┌────────────────────────────────────────┐
  │  test-env    │   │  Participant CLIs                       │
  │  Anvil node  │   │   market           — buyer runtime     │
- │  (dev only)  │   │   arkhai-vms-storefront — seller runtime   │
- └──────────────┘   │   arkhai-kit-policy    — train/eval/export │
+ │  (dev only)  │   │   market-storefront — seller runtime   │
+ └──────────────┘   │   market-policy    — train/eval/export    │
                     └────────────────────────────────────────┘
 ```
 
@@ -264,14 +294,14 @@ core/registry/src/
 **Role:** The seller's HTTP server. Hosts the `/listings/...`,
 `/negotiate`, `/settle/{escrow_uid}`, `/alerts/resource`, and
 `.well-known/agent-wallet.json` endpoints that buyers and the
-provisioning service call. Runs as `arkhai-vms-storefront serve` (uvicorn,
+provisioning service call. Runs as `market-storefront serve` (uvicorn,
 FastAPI/Starlette). Internally it uses Alkahest for on-chain escrow
 operations.
 
 **Ports:** `8001` (default seller port; `port` in storefront.toml).
 
 **Startup sequence:** `entrypoint.sh` starts the ZeroTier daemon,
-then `exec arkhai-vms-storefront serve`. The lifespan hook joins the
+then `exec market-storefront serve`. The lifespan hook joins the
 configured ZeroTier network if any, initializes the negotiation
 thread store, seeds resources from CSV if the table is empty, probes
 the configured alkahest contract addresses on each chain, starts the
@@ -691,11 +721,11 @@ dependency install separately from the volatile project source:
 2. **Runtime stage** — copies the pre-built `.venv` from the builder,
    then copies the project source, then runs a completing
    `uv sync --no-dev --find-links /dist` (without `--no-install-project`)
-   to install the project package and write the `arkhai-vms-storefront`
+   to install the project package and write the `market-storefront`
    console script to `.venv/bin/`.
 
 Omitting the completing `uv sync` in the runtime stage means
-`arkhai-vms-storefront` is absent from `.venv/bin/` and `entrypoint.sh`
+`market-storefront` is absent from `.venv/bin/` and `entrypoint.sh`
 exits 127. Both stages must be present for the console script to work.
 
 **Critical: `/dist/` must be sourced from the build context in both stages.**
@@ -1025,7 +1055,7 @@ Shared negotiation machinery + the RL training/eval tool. Two surfaces:
   native-token, and ERC1155) ship registered. The shared
   escrow-kind dispatcher is constructed from config rather than
   registered as a plain global middleware.
-- **CLI**: `arkhai-kit-policy train / eval / export` — invoked by policy
+- **CLI**: `market-policy train / eval / export` — invoked by policy
   authors to produce RL checkpoints that the `rl` terminal middleware
   loads at inference time.
 
@@ -1650,16 +1680,16 @@ There are three console scripts, each a separate distributable. They
 split by concern (runtime vs. tooling) rather than
 by buyer-vs-seller role. Built with Typer; config is read from a TOML
 file under `$XDG_CONFIG_HOME/arkhai/` — `buyer.toml` for the buyer's
-`market` CLI, `storefront.toml` for `arkhai-vms-storefront` and the
+`market` CLI, `storefront.toml` for `market-storefront` and the
 storefront server (override either with `--config <path>`).
 
 | CLI | Package | Role | Top-level groups |
 |---|---|---|---|
 | `market` | `domains/vms/buyer/` | Buyer runtime (pure HTTP client) | `buy`, `negotiate`, `order`, `escrow reclaim`, `network join/get-peers`, `config`, `logs` |
-| `arkhai-vms-storefront` | `domains/vms/storefront/` | Seller runtime | `register`, `serve`, `provide`, `escrow claim/refund`, `portfolio import-csv`, `network join/get-peers`, `config`, `logs` |
-| `arkhai-kit-policy` | `kit/policy/` | Policy authoring tool | `train`, `eval`, `export` |
+| `market-storefront` | `domains/vms/storefront/` | Seller runtime | `register`, `serve`, `provide`, `escrow claim/refund`, `portfolio import-csv`, `network join/get-peers`, `config`, `logs` |
+| `market-policy` | `kit/policy/` | Policy authoring tool | `train`, `eval`, `export` |
 
-The two runtimes (`market`, `arkhai-vms-storefront`) share `network join`
+The two runtimes (`market`, `market-storefront`) share `network join`
 and `get-peers` because each participant manages their own ZeroTier
 membership. The owner-side actions (`install` / `create` / `add`) are
 Make targets in `scripts/zerotier/`, run by whoever stands up the overlay.
@@ -1667,14 +1697,14 @@ Make targets in `scripts/zerotier/`, run by whoever stands up the overlay.
 Deployment shells just compose CLI verbs:
 
 - **Docker (storefront image):** `entrypoint.sh` brings up the
-  ZeroTier daemon, then runs `arkhai-vms-storefront register` and
-  `exec arkhai-vms-storefront serve`.
+  ZeroTier daemon, then runs `market-storefront register` and
+  `exec market-storefront serve`.
 - **Helm:** the init container runs
-  `./entrypoint.sh arkhai-vms-storefront register --chain-id N` and the
-  main container runs `./entrypoint.sh arkhai-vms-storefront serve` —
+  `./entrypoint.sh market-storefront register --chain-id N` and the
+  main container runs `./entrypoint.sh market-storefront serve` —
   same image, two CLI verbs.
 
-`arkhai-vms-storefront serve` only forwards `host` and `port` into
+`market-storefront serve` only forwards `host` and `port` into
 `server.run_serve()`. The CLI/server argument contract is covered by a
 storefront unit test because a mismatch crashes the container before any
 integration or e2e test can run.
@@ -1808,7 +1838,7 @@ it falls back to a live `eth_chainId` RPC when `[chain] chain_id` is unset.
 
 The storefront's TOML file pair is **role-scoped** — buyer and seller no
 longer share a single config file. The buyer CLI reads `buyer.toml` +
-`buyer.secrets.toml`; the storefront server *and* `arkhai-vms-storefront`
+`buyer.secrets.toml`; the storefront server *and* `market-storefront`
 CLI both read `storefront.toml` + `storefront.secrets.toml`. When the
 same operator runs both buyer and seller on one machine (e.g. a
 seller-also-buyer setup), each role has its own wallet and own file pair.
@@ -2695,7 +2725,7 @@ The wheel ships `EvaluateNegotiateResponse`, `SettleResponse`, and
 | Term | Meaning |
 |---|---|
 | Alkahest | Arkhai's smart contract suite for peer-to-peer agreements and escrow |
-| Storefront | The seller-side HTTP server (`arkhai-vms-storefront serve`); the only running agent process in the negotiation flow |
+| Storefront | The seller-side HTTP server (`market-storefront serve`); the only running agent process in the negotiation flow |
 | Identity | Scheme-tagged `(scheme, identifier)` pair; default scheme is `eip191` with the wallet address as identifier |
 | FRP | Fast Reverse Proxy — used to give buyers network access to their VMs |
 | Anvil | Local EVM testnet node from Foundry |

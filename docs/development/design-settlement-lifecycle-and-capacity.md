@@ -21,7 +21,7 @@ Decisions recorded here (rationale in the body):
 - The buyer executable is core-owned with schema plugins; storefront
   executables are domain-owned, one process per market domain; the
   registry stays core + schema config. (Recorded in the extraction doc's
-  "Target packaging"; restated here only as context.)
+  "Packaging decisions"; restated here only as context.)
 - `Terms` generalizes to a **settlement plan**; the buyer pipeline gains
   a third phase: `discover → negotiate → settle → service`.
 - The plan carrier is **settlement-mechanism-neutral**: lifecycle
@@ -202,7 +202,7 @@ callable, so Part I does not block on Part II.
    `{mechanism, params}` envelope — do not build the plan carrier
    alkahest-shaped). Both sides derive it from the message history.
    This is also where the `arkhai-core` escrow carriers shed their
-   baked-in alkahest field skeleton (see the resolved callout in the
+   baked-in alkahest field skeleton (see "Packaging decisions" in the
    extraction doc): one wire change, not two.
 2. **kit/alkahest codecs.** AllArbiter demand-tree encode/decode; oracle
    arbitrate/request/watch helpers; collect/reclaim primitives.

@@ -53,39 +53,76 @@ Infrastructure-side (compute-market-internal-infra):
 
 ## Core Stack
 
-### Market Core Extraction (from-above / from-below packaging)
+### Market Core Extraction — done; remaining follow-on work
 
-**Status:** Planned. Full scope in [`design-market-core-extraction.md`](design-market-core-extraction.md); principle documented in `ARCHITECTURE.md` → "Organizing Principle".
+**Status:** Done (branch `reorg-market-core-extraction`). The package
+graph expresses the core/kit/domain split, distribution names mirror it
+(`arkhai-{core,kit,vms}-*`), and the boundaries are enforced by tests
+(dependency-direction guardrail, carrier purity, no-plugin buyer CLI).
+Current-state layout: `ARCHITECTURE.md` → "Package layout". Decision
+record: [`design-market-core-extraction.md`](design-market-core-extraction.md).
+Follow-on design: [`design-settlement-lifecycle-and-capacity.md`](design-settlement-lifecycle-and-capacity.md).
 
-**Principle (the filing test):** a behavior belongs in the market core (composed *from above*) iff it is invariant across every possible listing schema; otherwise it is a from-below utility the core invokes through an injected hook. The core's universal surface is thin: negotiation is an exchange of opaque, schema-defined **messages**, and the only structural requirement is that `terms = negotiate(messages…); receipt = settle(terms)` is well-typed — negotiation reduces a message history to `Terms`, settlement consumes exactly that `Terms`. The core knows nothing about message content (offers/counters/bids/acceptances are schema vocabulary), how a participant picks its next message, an "acceptance set," floor/ceiling semantics, or how a mismatched message is answered; all of that is policy. Price and escrow shape are the same kind of thing (message content constrained by advertised data) and flow through the same negotiation chain.
+**This list is the single aggregation of what remains**, in rough
+dependency order:
 
-**Motivation:** the realistic first driver is heterogeneous listing schemas *within* compute that don't share a registry — not a different asset class. The registry is the schema-centralizing/platform point; per-schema instantiations (filter-spec + typed client + storefront/buyer plugins) become the registry operator's deliverable, depending on the core's from-above skeleton and from-below kit.
+1. **Settlement lifecycles** (lifecycle doc, Part I — items I.1–I.6):
+   generalize the accepted-proposal/terms handoff to a
+   **mechanism-neutral settlement plan** (lifecycle universals as typed
+   fields + `{mechanism, params}` envelope; this is also where the
+   alkahest-shaped escrow carriers in `market_core.schemas` shed their
+   baked-in field skeleton, and where the `EscrowProposal` →
+   message/terms naming aligns — one `/negotiate/*` wire change, not
+   two); `kit/alkahest` extended into the first mechanism codec
+   (AllArbiter demand trees, `TrustedOracleArbiter`
+   arbitrate/request/watch, collect/reclaim); the core lifecycle engine
+   (persisted deal state machine driving injected
+   materialize/check-conditions/collect/reclaim hooks; buyer engine as
+   `market service`, seller engine in the storefront runtime); the
+   heartbeat endpoint (core shell + persistence, VM schema); VM
+   lifecycle policies (heartbeat-gated single escrow → interval escrows
+   → penalty bonds, each a plan shape); and wiring `request_arbitration`
+   into the engine instead of fire-and-forget. A `kit/fiat-<provider>`
+   mechanism codec is deferred until a committed customer/provider
+   pairing.
 
-**Concrete seams to fix** (each filed against the principle today):
-- **Buyer executable domain boundary:** the registry backend is already filter-spec-driven, and the current CLI has generic `--filter name=value` as an escape hatch, but the buyer executable is still a VM-schema instantiation with hardcoded `--gpu-*`, `--ram-*`, `--region`, etc. Long term, concrete executable packages come from domains (first `domains/vms/buyer`), not from a core default. Core exposes reusable orchestration helpers only; the VM domain package owns named filter flags, listing/resource rendering, price extraction, schema-specific prompts, and accepted-escrow selection UX.
-- Escrow-shape validation now runs in the seller policy chain: the default
-  `escrow_shape_guard` rejects proposals outside the listing's
-  `accepted_escrows` and literal-field mismatches, while
-  `_validate_escrow_proposal` only canonicalizes matched proposal
-  fields/rates. This seam is done; later work can add custom correction
-  middlewares.
-- **Minimal hook surface:** `run_buy` now requires high-level `negotiate`
-  and `settle` hooks and composes only discover → negotiate → settle at
-  the top level. The current compute buyer still adapts the legacy hooks
-  (`build_escrow_proposal`, `derive_prices`, `build_escrow_terms`,
-  `create_escrow`, `confirm_settlement`, `chain`) into that surface
-  through adapter factories, and `market buy` constructs explicit hooks
-  through those adapters.
-  The seller synchronous negotiation wrappers now call an injectable seller
-  round hook whose default implementation owns strategy lookup, reference
-  amount, internal side-input collection, and middleware-chain execution.
-  The later hook-bearing skeleton move is part of the `arkhai-core`
-  package extraction.
-- `ProvisionTerms` now carries opaque `{kind, payload}` delivery terms on the wire; concrete `compute.v1` duration validation is at the storefront compute boundary. Moving the compute adapter into its own package belongs to the later `arkhai-core` extraction.
-- The market skeleton still lives across the VM buyer domain package and `domains/vms/storefront/`, tangled with compute code → extract `arkhai-core` so the package graph expresses the joint the `run_buy(...)` signature already implies.
-- **Package migration target:** move the remaining executable-package internals into the `core/`, `kit/`, `domains/vms` framework after the import graph matches the target boundaries. `domains/vms` should be organized by VM market concepts (`listings/`, `negotiation/`, `settlement/`, `provisioning`) plus thin concrete executable packages (`buyer/`, `storefront/`), rather than mirroring core roles. The policy implementation split is done: generic chain machinery lives in `kit/policy/`, while VM negotiation/settlement policies live under `domains/vms/negotiation/`. VM models, resource adapters, resource CSV import, compute listing reconciliation, listing filters/rendering/price/strategy helpers now live under `domains/vms/listings/`; accepted-escrow selection, proposal materialization, accepted response artifact assembly, compute lease encoding, token materialization, Alkahest escrow creation, and post-provisioning fulfillment submission live under `domains/vms/settlement/`; generic Alkahest accepted-escrow matching, proposal normalization, and proposal-to-terms payload materialization live in `market_alkahest`; VM capacity checks, provision-term construction, fulfillment-plan construction, provisioning job-spec construction, arkhai-vms-provisioning client helpers, fulfillment orchestration, and the arkhai-vms-provisioning executable package now live under `domains/vms/provisioning/`; the VM buyer CLI package now lives under `domains/vms/buyer/`; the VM storefront executable package now lives under `domains/vms/storefront/`; the default VM storefront seller-round hook and opening/counter semantic checks now live under `domains/vms/negotiation/`; schema-agnostic registry publication fan-out, generic synchronous-negotiation history reconstruction, sync thread creation, and sync-negotiation message persistence now live in `core_storefront`; VM storefront publication/registry-close wiring now lives in `market_storefront.services.publication_service`; and the registry/storefront protocol client packages plus schema-agnostic registry service now live under `core/` while preserving their import and wheel names. The next concrete prerequisite is draining remaining schema-invariant runtime code and VM hooks out of `domains/vms/storefront/` internals.
+2. **Capacity / site authority** (lifecycle doc, Part II — items
+   II.4–II.7; II.1–II.3 are done — the storefront already reaches
+   capacity only through the `core_storefront.capacity` client
+   boundary, with event-driven stale-listing closure): stand up the
+   site-authority service (move `hosts`/`compute_allocations` merged
+   with `vm_leases` + job queue/watchdog into it; today's provisioning
+   service becomes the first executor; **retire the
+   `PATCH /admin/portfolio/resources` and fulfillment-event callback
+   endpoints** — deal events and anonymous versioned capacity deltas
+   replace them); re-home pools/members/derived listings as the
+   storefront-side aggregator module keyed by `(site, resource_id)`;
+   two-phase TTL reserve (hold at terms acceptance, commit at
+   settlement; early termination → lease truncation); a second executor
+   kind, then a second market-domain storefront sharing the pool.
 
-**Not an immediate target** — this is the filing principle for *where new behavior goes*, captured so the next non-trivial change to negotiation/settlement is filed correctly rather than by precedent. The packaging extraction is the eventual payoff; the cheap wins (escrow guard → middleware, `derive_prices` placement) can land independently.
+3. **`storefront-client` wire genericization:** the client wheel still
+   sends the flat legacy provision-terms shape
+   (`{duration_seconds, ssh_public_key, compute_resource}`) and exposes
+   compute-vocabulary parameters. Genericizing it retires the marked
+   legacy shim in `market_core.schemas.ProvisionTerms`. Wire-compat
+   change; bump client wheels. Pairs naturally with the plan-carrier
+   work in item 1.
+
+4. **Schema identity/version for plugins:** the registry advertises its
+   schema via `filter-spec.yaml`, but there is no stable schema
+   identity/version letting a buyer plugin prove compatibility with a
+   registry. Needed before second-schema plugins ship.
+
+5. **Buyer CLI residue (small):** render top-level listing `demands`
+   wherever listing detail should expose payment constraints; keep
+   old-run-log compatibility code clearly marked legacy.
+
+6. **PyPI re-setup after the rename:** the four published packages
+   (`arkhai-kit-policy`, `arkhai-vms-provisioning`,
+   `arkhai-core-storefront-client`, `arkhai-core-registry-client`) need
+   new PyPI projects + trusted-publisher environments per
+   `RELEASING.md`; the old-name projects stay frozen.
 
 ---
 
