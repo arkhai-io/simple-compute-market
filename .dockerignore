@@ -3,3 +3,15 @@
 #   - Helm: --set-file storefront.agents[0].secret.resourcesCsvInline=<path>
 #   - Compose: bind-mount via RESOURCES_CSV_FILE in storefront/Makefile
 storefront/src/market_storefront/data/*.csv
+
+# Keep repo-root build contexts small: never ship venvs, git history,
+# caches, or local state into images. (.dist/ must stay included — the
+# Dockerfiles resolve internal wheels from it via --find-links.)
+.git
+**/.venv
+**/__pycache__
+**/.pytest_cache
+.uv-cache
+.snapshot
+**/node_modules
+dev-env/state

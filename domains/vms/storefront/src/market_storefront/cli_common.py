@@ -16,8 +16,24 @@ import typer
 
 # parents[2]: market_storefront -> src -> storefront
 STOREFRONT_ROOT = Path(__file__).resolve().parents[2]
-# parents[5]: market_storefront -> src -> storefront -> vms -> domains -> repo root
-REPO_ROOT = Path(__file__).resolve().parents[5]
+
+
+def _find_repo_root() -> Path:
+    """Best-effort monorepo root: nearest ancestor with the repo markers.
+
+    In the container image the package lives at /app/src/... with no
+    repo checkout above it; fall back to the filesystem root so import
+    succeeds — REPO_ROOT consumers are dev-machine conveniences (the
+    zerotier scripts path) that don't apply in-container.
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "domains").is_dir() and (parent / "kit").is_dir():
+            return parent
+    return here.parents[-1]
+
+
+REPO_ROOT = _find_repo_root()
 
 
 def resolve_storefront_url(

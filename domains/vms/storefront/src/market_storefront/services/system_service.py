@@ -269,7 +269,18 @@ class SystemService:
             label = f"chain[{len(chain)}]"
             history = [NegotiationRound(
                 round_number=0, sender="them", action="initial",
-                proposal={"fields": {"amount": 10_000}},
+                # Minimal structurally-valid opening proposal: the VM
+                # opening guard validates the full EscrowProposal shape
+                # (chain_name/escrow_address/expiration_unix required).
+                # The zero escrow address keeps the shape guard's legacy
+                # carve-out applicable, so the probe needs no
+                # accepted-escrows context on a listing.
+                proposal={
+                    "chain_name": "probe",
+                    "escrow_address": "0x" + "00" * 20,
+                    "fields": {"amount": 10_000},
+                    "expiration_unix": 4_102_444_800,  # 2100-01-01
+                },
             )]
             context = NegotiationContext(
                 direction="maximize",

@@ -17,11 +17,6 @@ WORKDIR /app
 COPY .dist/ /.dist/
 
 COPY domains/vms/storefront/pyproject.toml domains/vms/storefront/uv.lock domains/vms/storefront/entrypoint.sh ./
-COPY core/ ../core/
-COPY kit/identity/ ../kit/identity/
-COPY kit/alkahest/ ../kit/alkahest/
-COPY kit/config/ ../kit/config/
-COPY kit/policy/ ../kit/policy/
 
 # Pass the GCP service account JSON key from GitHub Actions secrets to authenticate
 # against GCP Artifact Registry for the alkahest-py private Python package.
@@ -34,13 +29,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         export UV_INDEX_ALKAHEST_GAR_PASSWORD="$(echo "${GAR_STG_READER_KEY}" | tr -d '\n' | python3 -c 'import sys,json; print(json.dumps(json.loads(sys.stdin.read())))' 2>/dev/null || echo "${GAR_STG_READER_KEY}")"; \
     fi && \
     if [ "${INSTALL_RL_DEPS}" = "true" ]; then \
-        uv sync --no-dev --no-install-project --extra rl --find-links /.dist \
+        uv sync --no-sources --no-dev --no-install-project --extra rl --find-links /.dist \
             --refresh-package arkhai-core-registry-client \
             --refresh-package arkhai-core-storefront-client \
             --refresh-package arkhai-kit-policy \
             --refresh-package arkhai-vms-provisioning; \
     else \
-        uv sync --no-dev --no-install-project --find-links /.dist \
+        uv sync --no-sources --no-dev --no-install-project --find-links /.dist \
             --refresh-package arkhai-core-registry-client \
             --refresh-package arkhai-core-storefront-client \
             --refresh-package arkhai-kit-policy \
@@ -89,11 +84,6 @@ ENV XDG_CONFIG_HOME="/etc"
 COPY --chown=appuser:appuser domains/vms/storefront/src ./src
 COPY --chown=appuser:appuser domains/vms/storefront/scripts ./scripts
 COPY --chown=appuser:appuser domains/ ./domains/
-COPY --chown=appuser:appuser core/ ../core/
-COPY --chown=appuser:appuser kit/identity/ ../kit/identity/
-COPY --chown=appuser:appuser kit/alkahest/ ../kit/alkahest/
-COPY --chown=appuser:appuser kit/config/ ../kit/config/
-COPY --chown=appuser:appuser kit/policy/ ../kit/policy/
 
 # Complete the two-phase uv install: deps were installed with
 # --no-install-project in the builder stage (for layer caching);
@@ -107,8 +97,12 @@ COPY --chown=appuser:appuser domains/vms/storefront/pyproject.toml domains/vms/s
 # Sourcing from the build context means this layer invalidates whenever
 # .dist/ changes on disk, which is exactly what we want.
 COPY .dist/ /.dist/
+# --no-sources: the pyproject's [tool.uv.sources] editable workspace paths
+# (../../../core, ../../../kit/*) exist for local dev only and cannot
+# resolve inside the image; every internal package installs from its
+# /.dist wheel instead.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --find-links /.dist \
+    uv sync --no-sources --no-dev --find-links /.dist \
         --refresh-package arkhai-core-registry-client \
         --refresh-package arkhai-core-storefront-client \
         --refresh-package arkhai-kit-policy \

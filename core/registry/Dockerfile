@@ -8,13 +8,18 @@ ENV UV_LINK_MODE=copy
 
 WORKDIR /app
 
-COPY src ./src
-COPY alembic ./alembic
-COPY filter-spec.yaml ./
-COPY pyproject.toml uv.lock ./
+# Build context is the repo root (see Makefile): internal wheels
+# (arkhai-kit-identity) resolve from /.dist via --find-links, and
+# --no-sources ignores the pyproject's editable workspace paths, which
+# exist for local dev only and cannot resolve inside the image.
+COPY .dist/ /.dist/
+COPY core/registry/src ./src
+COPY core/registry/alembic ./alembic
+COPY core/registry/filter-spec.yaml ./
+COPY core/registry/pyproject.toml core/registry/uv.lock ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --no-sources --no-dev --no-install-project --find-links /.dist
 
 # Stage 2: Lean runtime image
 FROM python:${PYTHON_VERSION}-slim AS runtime

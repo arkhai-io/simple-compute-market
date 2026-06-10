@@ -23,7 +23,7 @@ init-uv:
 build: reinit build-images
 
 build-images:
-	docker build --ulimit nofile=65536:65536 -f Dockerfile -t arkhai:registry .
+	docker build --ulimit nofile=65536:65536 -f Dockerfile -t arkhai:registry ../..
 	docker tag arkhai:registry arkhai:registry-$(GIT_SUFFIX)
 
 deploy:
