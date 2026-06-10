@@ -11,8 +11,8 @@ from unittest import mock
 import pytest
 import typer
 
-from market_core.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
-
+from market_core.schemas import EscrowProposal, EscrowTerms
+from domains.vms.provisioning import VmProvisionTerms, make_vm_provision_terms
 from domains.vms.buyer.buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
@@ -230,7 +230,7 @@ class TestRunBuyDerivePrices:
         )
 
         constraints = BuyConstraints()  # prices None
-        provision = ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA")
+        provision = make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA")
         config = BuyConfig(
             registry_urls=["http://reg"],
             buyer_address="0x" + "1" * 40,
@@ -275,7 +275,7 @@ class TestRunBuyDerivePrices:
         )
 
         constraints = BuyConstraints()
-        provision = ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA")
+        provision = make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA")
         config = BuyConfig(
             registry_urls=["http://reg"],
             buyer_address="0x" + "1" * 40,
@@ -338,7 +338,7 @@ class TestConfirmSettlementGate:
         return BuyConstraints(initial_price=50, max_price=200)
 
     def _provision(self):
-        return ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA")
+        return make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA")
 
     def test_confirm_returning_false_aborts_before_escrow(self, monkeypatch):
         """User decline keeps the on-chain side completely untouched."""

@@ -19,7 +19,14 @@ from domains.vms.provisioning.job_spec import (
     build_provisioning_job_spec,
     required_compute_attributes,
 )
-from domains.vms.provisioning.terms import VmProvisionTerms, make_vm_provision_terms
+from domains.vms.provisioning.terms import (
+    VmProvisionTerms,
+    make_vm_provision_terms,
+    provision_compute_resource,
+    provision_duration_seconds,
+    provision_payload,
+    provision_ssh_public_key,
+)
 
 __all__ = [
     "VmFulfillmentPlan",
@@ -31,6 +38,10 @@ __all__ = [
     "check_slice_fits_host",
     "fulfill_vm_obligation",
     "make_vm_provision_terms",
+    "provision_compute_resource",
+    "provision_duration_seconds",
+    "provision_payload",
+    "provision_ssh_public_key",
     "provision_vm_and_wait",
     "register_vm_lease",
     "required_compute_attributes",

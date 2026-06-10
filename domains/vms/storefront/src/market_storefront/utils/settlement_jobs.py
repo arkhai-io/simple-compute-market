@@ -23,7 +23,8 @@ import json
 import logging
 from typing import Any
 
-from market_core.schemas import EscrowProposal, ProvisionTerms
+from domains.vms.provisioning import VmProvisionTerms, make_vm_provision_terms
+from market_core.schemas import EscrowProposal
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ def _resolve_compute_resource(order_dict: dict[str, Any]) -> dict[str, Any] | No
     SQLite stores resources as JSON text; the listing-load path may
     have already deserialized it, or it may still be a string. None
     when the field is missing or unparseable — the resulting
-    ``ProvisionTerms`` simply has no compute snapshot in that case.
+    ``VmProvisionTerms`` simply has no compute snapshot in that case.
     """
     raw = order_dict.get("offer_resource")
     if isinstance(raw, dict):
@@ -127,7 +128,7 @@ async def start_settlement_job(
     # Single source of truth for what the seller commits to deliver.
     # Same shape the buyer will eventually send in the negotiate-init
     # request; for now built locally from the negotiation thread + listing.
-    provision = ProvisionTerms(
+    provision = make_vm_provision_terms(
         duration_seconds=_resolve_duration_seconds(thread, our_order_dict),
         ssh_public_key=ssh_public_key,
         compute_resource=_resolve_compute_resource(our_order_dict),
@@ -217,7 +218,7 @@ async def start_settlement_job(
 async def _run_settlement_job_bg(
     *,
     escrow_uid: str,
-    provision: ProvisionTerms,
+    provision: VmProvisionTerms,
     listing_id: str,
     order_dict: dict[str, Any],
     sqlite_client: Any,

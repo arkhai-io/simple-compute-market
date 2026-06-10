@@ -60,6 +60,7 @@ from core_storefront.negotiation_sync import (
     record_buyer_exit_message as _record_buyer_exit_message,
     record_seller_decision_message as _record_seller_decision_message,
 )
+from domains.vms.provisioning import provision_duration_seconds
 from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
 
 logger = logging.getLogger(__name__)
@@ -247,7 +248,7 @@ async def start_sync_negotiation(
     the listing accepts.
     """
     requested_duration_seconds = (
-        provision_terms.duration_seconds if provision_terms is not None else None
+        provision_duration_seconds(provision_terms) if provision_terms is not None else None
     )
     # Imports deferred so unit tests can patch the registry without paying for
     # the whole import graph.

@@ -33,6 +33,7 @@ from market_policy.negotiation_middleware import (
     run_negotiation_chain,
 )
 from domains.vms.negotiation.policies import make_escrow_kind_dispatch_middleware
+from domains.vms.provisioning import VmProvisionTerms
 from market_alkahest.schemas import EscrowProposal, EscrowTerms
 from market_core.schemas import ProvisionTerms
 
@@ -277,7 +278,7 @@ def negotiate_with_seller(
     listing_id: str,
     initial_price: float,
     max_price: float,
-    provision_terms: Optional[ProvisionTerms] = None,
+    provision_terms: Optional[VmProvisionTerms] = None,
     escrow_proposal: Optional[EscrowProposal] = None,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
     on_round: Optional[Callable[[int, dict, dict], None]] = None,

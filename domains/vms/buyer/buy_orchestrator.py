@@ -44,7 +44,7 @@ from core_buyer import (
     query_registry_for_matches_multi,
     run_buy,
 )
-from market_core.schemas import ProvisionTerms
+from domains.vms.provisioning import VmProvisionTerms
 from domains.vms.settlement import BuildEscrowTermsFn, CreateEscrowFn
 
 from .buyer_client import (
@@ -285,7 +285,7 @@ def make_legacy_negotiate_hook(
     *,
     config: BuyConfig,
     constraints: BuyConstraints,
-    provision: ProvisionTerms,
+    provision: VmProvisionTerms,
     build_escrow_proposal: BuildEscrowProposalFn,
     max_negotiation_rounds: int,
     derive_prices: Optional[Callable[[dict[str, Any]], tuple[int, int]]],
@@ -322,7 +322,7 @@ def _legacy_negotiate_matches(
     matches: list[dict[str, Any]],
     config: BuyConfig,
     constraints: BuyConstraints,
-    provision: ProvisionTerms,
+    provision: VmProvisionTerms,
     build_escrow_proposal: BuildEscrowProposalFn,
     max_negotiation_rounds: int,
     derive_prices: Optional[Callable[[dict[str, Any]], tuple[int, int]]],
@@ -502,7 +502,7 @@ def _legacy_negotiate_matches(
 def make_legacy_settle_hook(
     *,
     config: "BuyConfig",
-    provision: ProvisionTerms,
+    provision: VmProvisionTerms,
     build_escrow_terms: BuildEscrowTermsFn,
     create_escrow: CreateEscrowFn,
     confirm_settlement: Optional[Callable[["AgreedTerms", dict[str, Any]], bool]],
@@ -541,7 +541,7 @@ def _settle_one(
     match: dict[str, Any],
     outcome: NegotiationOutcome,
     config: "BuyConfig",
-    provision: ProvisionTerms,
+    provision: VmProvisionTerms,
     build_escrow_terms: BuildEscrowTermsFn,
     create_escrow: CreateEscrowFn,
     confirm_settlement: Optional[Callable[["AgreedTerms", dict[str, Any]], bool]],

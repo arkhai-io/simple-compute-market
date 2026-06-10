@@ -22,7 +22,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from market_core.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
+from market_core.schemas import EscrowProposal, EscrowTerms
+from domains.vms.provisioning import VmProvisionTerms, make_vm_provision_terms
 
 _ESCROW_ADDR = "0x" + "cd" * 20
 
@@ -65,8 +66,8 @@ def _constraints(max_price=100, initial_price=50) -> BuyConstraints:
     )
 
 
-def _provision(duration_seconds=7200, ssh_public_key="ssh-rsa AAAA...") -> ProvisionTerms:
-    return ProvisionTerms(
+def _provision(duration_seconds=7200, ssh_public_key="ssh-rsa AAAA...") -> VmProvisionTerms:
+    return make_vm_provision_terms(
         duration_seconds=duration_seconds,
         ssh_public_key=ssh_public_key,
     )

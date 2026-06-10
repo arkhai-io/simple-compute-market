@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from market_core.schemas import ProvisionTerms
+from domains.vms.provisioning import make_vm_provision_terms
 
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.settlement_jobs import (
@@ -395,7 +395,7 @@ async def test_background_task_writes_ready_on_success(client):
     ):
         await _run_settlement_job_bg(
             escrow_uid="0xescrow",
-            provision=ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
+            provision=make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
             listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
             sqlite_client=client,
@@ -420,7 +420,7 @@ async def test_background_task_writes_failed_on_exception(client):
     ):
         await _run_settlement_job_bg(
             escrow_uid="0xescrow",
-            provision=ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
+            provision=make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
             listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
             sqlite_client=client,
@@ -445,7 +445,7 @@ async def test_background_task_leaves_listing_open_on_failure(client):
     ):
         await _run_settlement_job_bg(
             escrow_uid="0xescrow",
-            provision=ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
+            provision=make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
             listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
             sqlite_client=client,
@@ -472,7 +472,7 @@ async def test_background_task_writes_failed_on_non_fulfilled_status(client):
     ):
         await _run_settlement_job_bg(
             escrow_uid="0xescrow",
-            provision=ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
+            provision=make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
             listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
             sqlite_client=client,

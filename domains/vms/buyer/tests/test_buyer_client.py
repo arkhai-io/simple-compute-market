@@ -19,15 +19,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from market_core.schemas import EscrowProposal, ProvisionTerms
-
+from market_core.schemas import EscrowProposal
 from domains.vms.buyer.buyer_client import NegotiationOutcome, negotiate_with_seller
+from domains.vms.provisioning import VmProvisionTerms, make_vm_provision_terms
 
 
 # Canonical provision / escrow proposals used by every negotiate test —
 # kept here so individual tests don't need to repeat the boilerplate.
-def _provision(duration_seconds: int = 3600) -> ProvisionTerms:
-    return ProvisionTerms(
+def _provision(duration_seconds: int = 3600) -> VmProvisionTerms:
+    return make_vm_provision_terms(
         duration_seconds=duration_seconds, ssh_public_key="ssh-rsa AAAA",
     )
 

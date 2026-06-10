@@ -138,28 +138,18 @@ class TokenResource(Resource):
         return _serialize_uint256_str(v)
 
 
-COMPUTE_PROVISION_KIND = "compute.v1"
-
-
 class ProvisionTerms(BaseModel):
     """Opaque off-chain delivery terms negotiated alongside escrow terms.
 
     The core protocol treats provision terms as a schema-tagged payload:
     ``kind`` identifies the market/schema-specific interpreter and
-    ``payload`` carries that interpreter's data. The current compute
-    instantiation uses ``kind="compute.v1"`` and a payload with
-    ``duration_seconds``, ``ssh_public_key``, and optional
-    ``compute_resource``.
-
-    Compatibility: callers may still construct or parse the legacy flat
-    compute shape (``duration_seconds=...``, ``ssh_public_key=...``). It
-    is normalized into ``payload`` at model-validation time. Compute
-    adapters should use the convenience accessors below; core code should
-    treat ``payload`` as opaque.
+    ``payload`` carries that interpreter's data. Core code treats
+    ``payload`` as opaque; interpreting it (and constructing it) is the
+    job of domain adapters — e.g. ``domains.vms.provisioning.terms`` for
+    the ``compute.v1`` payload shape.
     """
 
     kind: str = Field(
-        default=COMPUTE_PROVISION_KIND,
         description="Schema/interpreter for this provision payload.",
     )
     payload: dict[str, Any] = Field(
@@ -169,7 +159,18 @@ class ProvisionTerms(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _coerce_legacy_compute_shape(cls, value: Any) -> Any:
+    def _coerce_legacy_wire_shapes(cls, value: Any) -> Any:
+        """LEGACY wire compatibility — not part of the carrier contract.
+
+        Early compute clients (including the current ``storefront-client``
+        wheel) send a flat ``{duration_seconds, ssh_public_key,
+        compute_resource}`` dict with no ``kind``/``payload`` envelope,
+        and some transitional payloads used ``schema``/``terms`` key
+        names. Normalize all of those into the envelope here so old wire
+        data and run logs keep parsing. The ``compute.v1`` literal below
+        is a legacy wire tag, not a core interpretation of the payload.
+        Remove once no deployed client sends the flat shape.
+        """
         if not isinstance(value, dict):
             return value
 
@@ -191,24 +192,9 @@ class ProvisionTerms(BaseModel):
                         except (TypeError, ValueError):
                             pass
                     payload[key] = raw
-            data["kind"] = data.get("kind") or COMPUTE_PROVISION_KIND
+            data["kind"] = data.get("kind") or "compute.v1"
             data["payload"] = payload
         return data
-
-    @property
-    def duration_seconds(self) -> int | None:
-        raw = self.payload.get("duration_seconds")
-        return int(raw) if raw is not None else None
-
-    @property
-    def ssh_public_key(self) -> str:
-        raw = self.payload.get("ssh_public_key")
-        return raw if isinstance(raw, str) else ""
-
-    @property
-    def compute_resource(self) -> dict[str, Any] | None:
-        raw = self.payload.get("compute_resource")
-        return raw if isinstance(raw, dict) else None
 
 
 class EscrowTerms(BaseModel):

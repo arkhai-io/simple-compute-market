@@ -19,7 +19,8 @@ from dataclasses import dataclass
 from unittest.mock import patch
 from urllib.parse import urlparse
 
-from market_core.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
+from market_core.schemas import EscrowProposal, EscrowTerms
+from domains.vms.provisioning import VmProvisionTerms, make_vm_provision_terms
 
 _ESCROW_ADDR_AGG = "0x" + "cd" * 20
 
@@ -59,8 +60,8 @@ def _constraints() -> BuyConstraints:
     return BuyConstraints(max_price=100, initial_price=50)
 
 
-def _provision() -> ProvisionTerms:
-    return ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa AAAA...")
+def _provision() -> VmProvisionTerms:
+    return make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-rsa AAAA...")
 
 
 def _escrow_proposal() -> EscrowProposal:
