@@ -21,7 +21,6 @@ SQLiteClientFactory = Callable[[], Any]
 CapacityClientLike = Any
 ProvisionVmFn = Callable[..., Awaitable[Any]]
 ScheduleShutdownFn = Callable[..., Awaitable[Any]]
-CloseStaleListingsFn = Callable[[str], Awaitable[list[str]]]
 RegisterLeaseFn = Callable[..., Awaitable[Any]]
 ApplyFailurePolicyFn = Callable[..., Awaitable[None]]
 
@@ -41,7 +40,6 @@ async def fulfill_vm_obligation(
     get_sqlite_client: SQLiteClientFactory,
     capacity: CapacityClientLike,
     stage_event: StageEventFn,
-    close_stale_listings_after_capacity_change: CloseStaleListingsFn,
     provision_vm: ProvisionVmFn,
     schedule_shutdown: ScheduleShutdownFn,
     register_lease: RegisterLeaseFn,
@@ -66,7 +64,6 @@ async def fulfill_vm_obligation(
     required_attributes = plan.required_attributes
 
     try:
-        sqlite_client = get_sqlite_client()
         reserved = await capacity.reserve(
             claim=required_attributes or None,
             deal_ref={
@@ -95,24 +92,10 @@ async def fulfill_vm_obligation(
             allocation_id=reserved_allocation_id,
             allocated_gpu_count=reserved.get("allocated_gpu_count"),
         )
-        try:
-            closed_listing_ids = await close_stale_listings_after_capacity_change(
-                sqlite_client.db_path,
-            )
-            if closed_listing_ids:
-                stage_event(
-                    "provision", "stale_compute_listings_closed",
-                    listing_id=order_id,
-                    escrow_uid=escrow_uid,
-                    resource_id=reserved_resource_id,
-                    allocation_id=reserved_allocation_id,
-                    closed_listing_ids=closed_listing_ids,
-                )
-        except Exception as close_err:
-            logger.warning(
-                "[LISTINGS] Failed to close stale compute listings after reservation: %s",
-                close_err,
-            )
+        # Stale derived listings are closed by the storefront's
+        # capacity-delta subscriber (reacting to the reserve above), not
+        # inline here — another storefront's reservation must trigger
+        # the same reconciliation, so it can't live in this deal flow.
 
         async def _record_job_id(job_id: str) -> None:
             await get_sqlite_client().update_escrow(

@@ -370,18 +370,26 @@ consumer.
 
 ### Work items
 
-1. **Site authority client interface.** Define
-   snapshot/subscribe/reserve(+TTL)/commit/release/truncate-lease and
-   the job API in resource-domain vocabulary; implement first as an
-   embedded adapter over the existing storefront tables (no behavior
-   change, single storefront).
-2. **Swap the snapshot source.** Point the seller round hook's
-   availability snapshot at the client interface
-   (`storefront_round.py` seam).
-3. **Event channel.** Versioned capacity deltas + deal events behind the
-   same interface; convert
-   `close_stale_compute_listings_after_capacity_change` from
-   inline-after-reservation to an event subscriber.
+1. **Site authority client interface.** Done:
+   `core_storefront.capacity` defines the `CapacityClient` contract
+   (snapshot/probe/reserve(+TTL)/commit/release/truncate-lease/
+   subscribe) plus the anonymous versioned `CapacityDelta` carrier and
+   in-process event bus;
+   `market_storefront.services.capacity_client.EmbeddedCapacityClient`
+   is the single-consumer adapter over the existing storefront tables.
+   TTL holds raise until item 6; the job API joins with item 4 (the
+   embedded adapter has no queue to front).
+2. **Swap the snapshot source.** Done: the seller round hook takes a
+   capacity client and feeds the inventory guard from
+   `capacity.snapshot()`; the fulfillment path's
+   check-and-reserve/commit went through the same boundary
+   (`capacity.reserve(claim, deal_ref)` / `capacity.commit`).
+3. **Event channel.** Capacity half done: every embedded
+   reserve/commit/release/truncation emits a versioned delta, and
+   `close_stale_compute_listings_after_capacity_change` runs as a delta
+   subscriber instead of inline-after-reservation. Deal-scoped events
+   still arrive as the provisioning service's admin HTTP callbacks and
+   move behind the interface with item 4.
 4. **Stand up the site authority service.** Move
    `hosts`/`compute_allocations` (merged with `vm_leases`) and the job
    queue/watchdog into it; today's provisioning service becomes the

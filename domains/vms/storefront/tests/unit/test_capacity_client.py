@@ -209,3 +209,52 @@ async def test_ttl_holds_are_explicitly_unimplemented(capacity, db):
     await _seed_compute_pool(db)
     with pytest.raises(NotImplementedError):
         await capacity.reserve(claim={"gpu_model": "H200"}, ttl_seconds=60.0)
+
+
+@pytest.mark.asyncio
+async def test_reserve_delta_closes_stale_derived_listings(capacity, db, monkeypatch):
+    """The stale-listing reconcile reacts to capacity deltas, not the deal flow."""
+    from domains.vms.listings.reconciler import record_derived_listing
+    from market_storefront.services import publication_service
+
+    monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: db)
+
+    await _seed_compute_pool(db, gpu_count=2)
+    for gpu_count in (1, 2):
+        listing_id = f"listing-{gpu_count}x"
+        await db.upsert_listing(
+            listing_id=listing_id,
+            status="open",
+            created_at="2026-01-01T00:00:00",
+            updated_at="2026-01-01T00:00:00",
+            offer_resource={
+                "resource_id": "pool-h200-1",
+                "gpu_model": "H200",
+                "gpu_count": gpu_count,
+                "region": "California, US",
+                "sla": 99.0,
+            },
+            accepted_escrows=[],
+            demands=[],
+            fulfillment_resource=None,
+            max_duration_seconds=3600,
+            seller="http://seller",
+        )
+        record_derived_listing(
+            db.db_path,
+            listing_id=listing_id,
+            resource_id="pool-h200-1",
+            gpu_count=gpu_count,
+        )
+
+    reserved = await capacity.reserve(
+        claim={"gpu_model": "H200", "gpu_count": 2},
+        deal_ref={"listing_id": "listing-2x", "escrow_uid": "0xesc"},
+    )
+    assert reserved is not None
+
+    statuses = {
+        gpu_count: (await db.load_listing(listing_id=f"listing-{gpu_count}x"))["status"]
+        for gpu_count in (1, 2)
+    }
+    assert statuses == {1: "closed", 2: "closed"}

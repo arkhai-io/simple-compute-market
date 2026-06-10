@@ -640,13 +640,16 @@ and `shared-env/`.
    policy discovery); remaining importers consume only the generic types.
 
 Each phase keeps the branch green and the e2e suite passing. Seams 0–3,
-0b, and the policy cleanup are done; seam 4 is the remaining target. Two
-of its largest items have landed: the `compute.v1` interpretation moved
-out of `market_core.schemas` into `domains/vms/provisioning`, and the
+0b, and the policy cleanup are done; seam 4 is the remaining target.
+Three of its largest items have landed: the `compute.v1` interpretation
+moved out of `market_core.schemas` into `domains/vms/provisioning`, the
 buyer plugin extraction is done (verb skeleton + entry-point plugin
-discovery in `core-buyer`, the VM CLI as the first plugin). What remains
-of seam 4 is the storefront-side drain through the capacity client
-interface and settling the `market-core` carriers-wheel question.
+discovery in `core-buyer`, the VM CLI as the first plugin), and the
+storefront's capacity access now goes through the site-authority client
+boundary (`core_storefront.capacity` contract, embedded adapter,
+snapshot/reserve re-route, event-driven stale-listing closure — work
+items II.1–II.3 of the capacity doc). What remains of seam 4 is
+settling the `market-core` carriers-wheel question.
 Follow-on architecture beyond this
 reorganization — asynchronous settlement lifecycles and the shared
 capacity/site-authority split — is planned in

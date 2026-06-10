@@ -20,9 +20,6 @@ from domains.vms.provisioning import (
 
 from market_storefront.utils.config import CHAINS, settings, BASE_URL_OVERRIDE
 from market_storefront.services.capacity_client import build_capacity_client
-from market_storefront.services.publication_service import (
-    close_stale_compute_listings_after_capacity_change,
-)
 from market_storefront.utils.sqlite_client import get_sqlite_client
 
 logger = logging.getLogger(__name__)
@@ -176,9 +173,6 @@ async def fulfill_compute_obligation(
         # get_sqlite_client, and the capacity client must follow it.
         capacity=build_capacity_client(lambda: get_sqlite_client()),
         stage_event=stage_event,
-        close_stale_listings_after_capacity_change=(
-            close_stale_compute_listings_after_capacity_change
-        ),
         provision_vm=_do_provision,
         schedule_shutdown=_do_shutdown,
         register_lease=_register_vm_lease_with_settings,

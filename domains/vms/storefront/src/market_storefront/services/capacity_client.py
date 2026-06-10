@@ -187,8 +187,51 @@ class EmbeddedCapacityClient:
         ))
 
 
+# Delta kinds that shrink availability and can strand open derived
+# listings whose GPU slice no longer fits.
+_CONSUMING_DELTA_KINDS = frozenset({"reserved", "committed", "lease_truncated"})
+
+
+def _make_stale_listing_subscriber(
+    sqlite_client_factory: SQLiteClientFactory,
+) -> CapacitySubscriber:
+    """Close stale derived listings whenever capacity shrinks.
+
+    This is the storefront's *reaction* to a capacity delta, not part of
+    the reserving deal's flow — in the multi-storefront topology another
+    seller's reservation invalidates our listings just the same, so the
+    reconcile must hang off the event channel.
+    """
+
+    async def _close_stale_listings(delta: CapacityDelta) -> None:
+        if delta.kind not in _CONSUMING_DELTA_KINDS:
+            return
+        # Late imports: publication machinery pulls registry/config
+        # wiring this module shouldn't load just to snapshot capacity.
+        from core_storefront.stage_log import stage_event
+        from market_storefront.services.publication_service import (
+            close_stale_compute_listings_after_capacity_change,
+        )
+
+        closed_listing_ids = await close_stale_compute_listings_after_capacity_change(
+            sqlite_client_factory().db_path,
+        )
+        if closed_listing_ids:
+            stage_event(
+                "provision", "stale_compute_listings_closed",
+                resource_id=delta.resource_id,
+                pool_id=delta.pool_id,
+                capacity_version=delta.version,
+                closed_listing_ids=closed_listing_ids,
+            )
+
+    return _close_stale_listings
+
+
 def build_capacity_client(
     sqlite_client_factory: SQLiteClientFactory,
 ) -> EmbeddedCapacityClient:
     """Assemble the storefront's capacity client with default subscribers."""
-    return EmbeddedCapacityClient(sqlite_client_factory)
+    client = EmbeddedCapacityClient(sqlite_client_factory)
+    client.subscribe(_make_stale_listing_subscriber(sqlite_client_factory))
+    return client
