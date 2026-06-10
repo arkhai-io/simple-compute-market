@@ -40,7 +40,7 @@ class BuyerSchemaPlugin:
     schema_id: str
     register: Callable[[Any], None]
     #: Distribution name to report a version for under ``--version``
-    #: (e.g. ``"market-buyer"``). None means "don't try".
+    #: (e.g. ``"arkhai-vms-buyer"``). None means "don't try".
     distribution: str | None = None
 
 

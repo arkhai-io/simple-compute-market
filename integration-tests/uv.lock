@@ -162,21 +162,82 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-core"
+version = "0.1.0"
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+dependencies = [
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_core-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-core-buyer"
+version = "0.1.0"
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+dependencies = [
+    { name = "arkhai-kit-config" },
+    { name = "typer" },
+]
+wheels = [
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_core_buyer-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-core-registry-client"
+version = "0.10.0"
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+dependencies = [
+    { name = "eth-account" },
+    { name = "httpx" },
+]
+wheels = [
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_core_registry_client-0.10.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-core-storefront"
+version = "0.1.0"
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+dependencies = [
+    { name = "arkhai-core" },
+    { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-policy" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_core_storefront-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-core-storefront-client"
+version = "0.15.0"
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+dependencies = [
+    { name = "eth-account" },
+    { name = "httpx" },
+]
+wheels = [
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_core_storefront_client-0.15.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-e2e-tests"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "arkhai-registry-client" },
-    { name = "arkhai-storefront-client" },
+    { name = "arkhai-core-registry-client" },
+    { name = "arkhai-core-storefront-client" },
+    { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-policy" },
+    { name = "arkhai-vms-buyer" },
+    { name = "arkhai-vms-provisioning" },
+    { name = "arkhai-vms-storefront" },
     { name = "dynaconf" },
     { name = "eth-account" },
     { name = "eth-typing" },
     { name = "httpx" },
-    { name = "market-alkahest" },
-    { name = "market-buyer" },
-    { name = "market-policy" },
-    { name = "market-storefront" },
-    { name = "provisioning-service" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-html" },
@@ -197,20 +258,20 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-registry-client", specifier = ">=0.6.0" },
-    { name = "arkhai-storefront-client", specifier = ">=0.11.0" },
+    { name = "arkhai-core-registry-client", specifier = ">=0.6.0" },
+    { name = "arkhai-core-storefront-client", specifier = ">=0.11.0" },
+    { name = "arkhai-kit-alkahest", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-policy", specifier = ">=0.1.0" },
+    { name = "arkhai-vms-buyer", specifier = ">=0.1.0" },
+    { name = "arkhai-vms-provisioning", specifier = ">=0.4.0" },
+    { name = "arkhai-vms-storefront", specifier = ">=0.1.0" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.0" },
     { name = "dynaconf", specifier = ">=3.2" },
     { name = "eth-account", specifier = ">=0.12" },
     { name = "eth-typing", specifier = ">=4.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13" },
-    { name = "market-alkahest", specifier = ">=0.1.0" },
-    { name = "market-buyer", specifier = ">=0.1.0" },
-    { name = "market-policy", specifier = ">=0.1.0" },
-    { name = "market-storefront", specifier = ">=0.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8" },
-    { name = "provisioning-service", specifier = ">=0.4.0" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
     { name = "pytest-html", specifier = ">=4.0" },
@@ -224,27 +285,131 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [[package]]
-name = "arkhai-registry-client"
-version = "0.10.0"
-source = { registry = "../.dist" }
+name = "arkhai-kit-alkahest"
+version = "0.1.0"
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
 dependencies = [
-    { name = "eth-account" },
-    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "web3" },
 ]
 wheels = [
-    { path = "arkhai_registry_client-0.10.0-py3-none-any.whl" },
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_kit_alkahest-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
-name = "arkhai-storefront-client"
-version = "0.15.0"
-source = { registry = "../.dist" }
+name = "arkhai-kit-config"
+version = "0.1.0"
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
 dependencies = [
+    { name = "arkhai-kit-alkahest" },
     { name = "eth-account" },
-    { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_storefront_client-0.15.0-py3-none-any.whl" },
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_kit_config-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-identity"
+version = "0.1.0"
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+dependencies = [
+    { name = "eth-account" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_kit_identity-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-policy"
+version = "0.1.0"
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "typer" },
+]
+wheels = [
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_kit_policy-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-vms-buyer"
+version = "0.1.0"
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+dependencies = [
+    { name = "alkahest-py" },
+    { name = "arkhai-core" },
+    { name = "arkhai-core-buyer" },
+    { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-policy" },
+    { name = "eth-account" },
+    { name = "pyinstaller" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "typer" },
+]
+wheels = [
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_vms_buyer-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-vms-provisioning"
+version = "0.4.0"
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "arkhai-core-storefront-client" },
+    { name = "cachetools" },
+    { name = "cryptography" },
+    { name = "dependency-injector" },
+    { name = "dynaconf" },
+    { name = "fastapi" },
+    { name = "fastapi-utils" },
+    { name = "httpx" },
+    { name = "psycopg2-binary" },
+    { name = "pydantic" },
+    { name = "python-multipart" },
+    { name = "pyyaml" },
+    { name = "sqlalchemy" },
+    { name = "typing-inspect" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+wheels = [
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_vms_provisioning-0.4.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-vms-storefront"
+version = "0.1.0"
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+dependencies = [
+    { name = "alkahest-py" },
+    { name = "arkhai-core" },
+    { name = "arkhai-core-registry-client" },
+    { name = "arkhai-core-storefront" },
+    { name = "arkhai-core-storefront-client" },
+    { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-policy" },
+    { name = "arkhai-vms-provisioning" },
+    { name = "dynaconf" },
+    { name = "eth-account" },
+    { name = "fastapi" },
+    { name = "fastapi-utils" },
+    { name = "google-cloud-logging" },
+    { name = "httpx" },
+    { name = "opentelemetry-exporter-gcp-trace" },
+    { name = "psycopg2-binary" },
+    { name = "rich" },
+    { name = "typer" },
+    { name = "uvicorn" },
+    { name = "web3" },
+    { name = "websockets" },
+]
+wheels = [
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_vms_storefront-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -1317,119 +1482,6 @@ wheels = [
 ]
 
 [[package]]
-name = "market-alkahest"
-version = "0.1.0"
-source = { registry = "../.dist" }
-dependencies = [
-    { name = "market-core" },
-    { name = "pydantic" },
-    { name = "web3" },
-]
-wheels = [
-    { path = "market_alkahest-0.1.0-py3-none-any.whl" },
-]
-
-[[package]]
-name = "market-buyer"
-version = "0.1.0"
-source = { registry = "../.dist" }
-dependencies = [
-    { name = "alkahest-py" },
-    { name = "eth-account" },
-    { name = "market-alkahest" },
-    { name = "market-config" },
-    { name = "market-core" },
-    { name = "market-policy" },
-    { name = "pyinstaller" },
-    { name = "pyyaml" },
-    { name = "rich" },
-    { name = "typer" },
-]
-wheels = [
-    { path = "market_buyer-0.1.0-py3-none-any.whl" },
-]
-
-[[package]]
-name = "market-config"
-version = "0.1.0"
-source = { registry = "../.dist" }
-dependencies = [
-    { name = "eth-account" },
-    { name = "market-alkahest" },
-]
-wheels = [
-    { path = "market_config-0.1.0-py3-none-any.whl" },
-]
-
-[[package]]
-name = "market-core"
-version = "0.1.0"
-source = { registry = "../.dist" }
-dependencies = [
-    { name = "market-identity" },
-    { name = "pydantic" },
-]
-wheels = [
-    { path = "market_core-0.1.0-py3-none-any.whl" },
-]
-
-[[package]]
-name = "market-identity"
-version = "0.1.0"
-source = { registry = "../.dist" }
-dependencies = [
-    { name = "eth-account" },
-    { name = "pydantic" },
-]
-wheels = [
-    { path = "market_identity-0.1.0-py3-none-any.whl" },
-]
-
-[[package]]
-name = "market-policy"
-version = "0.1.0"
-source = { registry = "../.dist" }
-dependencies = [
-    { name = "pydantic" },
-    { name = "typer" },
-]
-wheels = [
-    { path = "market_policy-0.1.0-py3-none-any.whl" },
-]
-
-[[package]]
-name = "market-storefront"
-version = "0.1.0"
-source = { registry = "../.dist" }
-dependencies = [
-    { name = "alkahest-py" },
-    { name = "arkhai-registry-client" },
-    { name = "arkhai-storefront-client" },
-    { name = "dynaconf" },
-    { name = "eth-account" },
-    { name = "fastapi" },
-    { name = "fastapi-utils" },
-    { name = "google-cloud-logging" },
-    { name = "httpx" },
-    { name = "market-alkahest" },
-    { name = "market-config" },
-    { name = "market-core" },
-    { name = "market-identity" },
-    { name = "market-policy" },
-    { name = "opentelemetry-exporter-gcp-trace" },
-    { name = "provisioning-service" },
-    { name = "psycopg2-binary" },
-    { name = "rich" },
-    { name = "typer" },
-    { name = "uvicorn" },
-    { name = "web3" },
-    { name = "websockets" },
-]
-wheels = [
-    { path = "market_storefront-0.1.0-py3-none-any.whl" },
-]
-
-[[package]]
 name = "markupsafe"
 version = "3.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1837,32 +1889,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/9b/ca/25afc144934014700c52e05103c2421997482d561f3101ff352e1292fb81/protobuf-6.33.6-cp39-abi3-manylinux2014_s390x.whl", hash = "sha256:c96c37eec15086b79762ed265d59ab204dabc53056e3443e702d2681f4b39ce3", size = 339381, upload-time = "2026-03-18T19:04:54.616Z" },
     { url = "https://files.pythonhosted.org/packages/16/92/d1e32e3e0d894fe00b15ce28ad4944ab692713f2e7f0a99787405e43533a/protobuf-6.33.6-cp39-abi3-manylinux2014_x86_64.whl", hash = "sha256:e9db7e292e0ab79dd108d7f1a94fe31601ce1ee3f7b79e0692043423020b0593", size = 323436, upload-time = "2026-03-18T19:04:55.768Z" },
     { url = "https://files.pythonhosted.org/packages/c4/72/02445137af02769918a93807b2b7890047c32bfb9f90371cbc12688819eb/protobuf-6.33.6-py3-none-any.whl", hash = "sha256:77179e006c476e69bf8e8ce866640091ec42e1beb80b213c3900006ecfba6901", size = 170656, upload-time = "2026-03-18T19:04:59.826Z" },
-]
-
-[[package]]
-name = "provisioning-service"
-version = "0.4.0"
-source = { registry = "../.dist" }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "arkhai-storefront-client" },
-    { name = "cachetools" },
-    { name = "cryptography" },
-    { name = "dependency-injector" },
-    { name = "dynaconf" },
-    { name = "fastapi" },
-    { name = "fastapi-utils" },
-    { name = "httpx" },
-    { name = "psycopg2-binary" },
-    { name = "pydantic" },
-    { name = "python-multipart" },
-    { name = "pyyaml" },
-    { name = "sqlalchemy" },
-    { name = "typing-inspect" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-wheels = [
-    { path = "provisioning_service-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

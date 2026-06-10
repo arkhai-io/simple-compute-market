@@ -1,5 +1,5 @@
 [project]
-name = "market-buyer"
+name = "arkhai-vms-buyer"
 version = "0.1.0"
 description = "Buyer-side CLI for the market: discover sellers, negotiate, place orders. Pure HTTP client; no server, no agent runtime."
 requires-python = ">=3.12"
@@ -14,11 +14,11 @@ dependencies = [
   # domains.vms.settlement.escrow_client so loading the CLI does not pay the
   # native-binary cost unless the orchestrator actually runs.
   "alkahest-py>=0.4.0",
-  "core-buyer",
-  "market-core",
-  "market-alkahest",
-  "market-config",
-  "market-policy",
+  "arkhai-core-buyer",
+  "arkhai-core",
+  "arkhai-kit-alkahest",
+  "arkhai-kit-config",
+  "arkhai-kit-policy",
 ]
 
 [project.optional-dependencies]
@@ -35,20 +35,20 @@ rl = [
   "torch>=2.7.0",
 ]
 
-# The `market` console script ships from core-buyer; this package only
+# The `market` console script ships from arkhai-core-buyer; this package only
 # contributes the VM compute schema plugin the core CLI discovers.
 [project.entry-points."market.buyer_plugins"]
 vms = "domains.vms.buyer.cli:plugin"
 
 # Workspace resolution for sibling packages.
-# market-policy: per-round negotiation decision logic, shared with the
+# arkhai-kit-policy: per-round negotiation decision logic, shared with the
 # storefront so both sides drive negotiation through one engine.
 [tool.uv.sources]
-market-core = { path = "../../../core", editable = true }
-core-buyer = { path = "../../../core/buyer", editable = true }
-market-alkahest = { path = "../../../kit/alkahest", editable = true }
-market-config = { path = "../../../kit/config", editable = true }
-market-policy = { path = "../../../kit/policy", editable = true }
+arkhai-core = { path = "../../../core", editable = true }
+arkhai-core-buyer = { path = "../../../core/buyer", editable = true }
+arkhai-kit-alkahest = { path = "../../../kit/alkahest", editable = true }
+arkhai-kit-config = { path = "../../../kit/config", editable = true }
+arkhai-kit-policy = { path = "../../../kit/policy", editable = true }
 torch = [
   { index = "pytorch-cpu" },
 ]

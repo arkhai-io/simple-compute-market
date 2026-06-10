@@ -21,7 +21,7 @@ The README frames this as a market for "anything"; the structural test that make
 > **A behavior belongs in the market core (composed "from above") if and only if it is invariant across every possible listing schema. If it varies by schema, it is a utility composed "from below" that the core invokes through an injected hook** — and "requiring the hook" is the from-above part; "implementing it" is from-below.
 
 - **From above** — the role contracts (buyer, seller, indexer) and the three market processes (discovery, negotiation/aggregation, settlement), expressed purely in terms of injected dependencies and schema-opaque primitives. `core_buyer.run_buy(...)` is already this shape: a linear discover→negotiate→settle flow with high-level `negotiate` and `settle` hooks. The current compute instantiation still adapts legacy finer-grained hooks (`build_escrow_proposal`, `build_escrow_terms`, `create_escrow`, …) into that surface.
-- **From below** — concrete, mutually-independent utilities: negotiation middlewares (`market-policy`), identity schemes (`market-identity`), generic schemas (`market-core`), settlement kits (`market-alkahest`), shared config (`market-config`), infra clients (chain, registry-client). The defining property is "depended on, never depending up into the skeleton" — not "packaged as one wheel."
+- **From below** — concrete, mutually-independent utilities: negotiation middlewares (`arkhai-kit-policy`), identity schemes (`arkhai-kit-identity`), generic schemas (`arkhai-core`), settlement kits (`arkhai-kit-alkahest`), shared config (`arkhai-kit-config`), infra clients (chain, registry-client). The defining property is "depended on, never depending up into the skeleton" — not "packaged as one wheel."
 - **A market instantiation** for a given asset class / listing schema wires from-below implementations into the from-above hooks, and *uses* the from-below utilities inside those implementations.
 
 Negotiation is an exchange of **messages** — opaque, schema-defined units passed between participants. The invariant the core rests on is that settlement composes with negotiation:
@@ -96,7 +96,7 @@ Parts of the code predate the principle and diverge from it. These seams are tra
 | Concern | Technology |
 |---|---|
 | On-chain settlement / escrow | [Alkahest](https://github.com/arkhai-io/alkahest) contracts |
-| Seller identity | Pluggable scheme registry (EIP-191 wallet by default; see `market-identity`) |
+| Seller identity | Pluggable scheme registry (EIP-191 wallet by default; see `arkhai-kit-identity`) |
 | Buyer ↔ seller protocol | Plain HTTP request/response, EIP-191-signed bodies |
 | Seller server framework | FastAPI / Starlette + uvicorn |
 | Buyer | Pure HTTP client — `market` CLI, no server |
@@ -116,14 +116,14 @@ Parts of the code predate the principle and diverge from it. These seams are tra
 └──────────────────┬──────────────────────┬───────────────────────────┘
                    │ events / txns         │ events / txns
          ┌─────────▼──────────┐   ┌───────▼─────────────────┐
-         │  registry-service  │   │  storefront             │
+         │  arkhai-core-registry  │   │  storefront             │
          │  :8080             │   │  :8001 (seller only)    │
          │  FastAPI indexer   │◄──┤  FastAPI                │
-         │  SQLite/Postgres   │   │  market-storefront serve│
+         │  SQLite/Postgres   │   │  arkhai-vms-storefront serve│
          └─────────▲──────────┘   └────────────┬────────────┘
                    │  GET /listings            │ HTTP (provisioning API)
                    │  signed reqs    ┌─────────▼───────────────┐
-                   │                 │ provisioning-service    │
+                   │                 │ arkhai-vms-provisioning    │
          ┌─────────┴──────────┐      │   API  :8081  (FastAPI) │
          │  buyer (`market`)  ├─────▶│   Job loop (in-process) │
          │  pure HTTP client  │ HTTP └────────┬────────────────┘
@@ -137,13 +137,13 @@ Parts of the code predate the principle and diverge from it. These seams are tra
  ┌──────────────┐   ┌────────────────────────────────────────┐
  │  test-env    │   │  Participant CLIs                       │
  │  Anvil node  │   │   market           — buyer runtime     │
- │  (dev only)  │   │   market-storefront — seller runtime   │
- └──────────────┘   │   market-policy    — train/eval/export │
+ │  (dev only)  │   │   arkhai-vms-storefront — seller runtime   │
+ └──────────────┘   │   arkhai-kit-policy    — train/eval/export │
                     └────────────────────────────────────────┘
 ```
 
 Negotiation flow: the buyer's `market buy`/`market negotiate`
-discovers seller orders from `registry-service`, then issues
+discovers seller orders from `arkhai-core-registry`, then issues
 synchronous signed POSTs against the seller's storefront
 (`/negotiate`, `/listings/...`, `/settle/{escrow_uid}`). The seller's
 storefront runs the request through a per-round middleware chain
@@ -170,7 +170,7 @@ In production this component is absent — the agent and registry configs point 
 
 ---
 
-### `registry-service`
+### `arkhai-core-registry`
 
 **Role:** Listings registry — discovery surface for the marketplace.
 
@@ -220,7 +220,7 @@ matching listings. Array-projection paths (`accepted_escrows[*]...`) are
 supported via jsonpath-ng. The storefront's `GET /api/v1/listings` is a
 slim local-enumeration view (`status`, `paused`, `limit`, `offset`) —
 discovery goes through the registry; the storefront is the seller's local
-state surface. `arkhai-registry-client.list_listings()` and the
+state surface. `arkhai-core-registry-client.list_listings()` and the
 storefront-client equivalent take a filter param dict that the caller
 composes from the active spec.
 
@@ -264,14 +264,14 @@ core/registry/src/
 **Role:** The seller's HTTP server. Hosts the `/listings/...`,
 `/negotiate`, `/settle/{escrow_uid}`, `/alerts/resource`, and
 `.well-known/agent-wallet.json` endpoints that buyers and the
-provisioning service call. Runs as `market-storefront serve` (uvicorn,
+provisioning service call. Runs as `arkhai-vms-storefront serve` (uvicorn,
 FastAPI/Starlette). Internally it uses Alkahest for on-chain escrow
 operations.
 
 **Ports:** `8001` (default seller port; `port` in storefront.toml).
 
 **Startup sequence:** `entrypoint.sh` starts the ZeroTier daemon,
-then `exec market-storefront serve`. The lifespan hook joins the
+then `exec arkhai-vms-storefront serve`. The lifespan hook joins the
 configured ZeroTier network if any, initializes the negotiation
 thread store, seeds resources from CSV if the table is empty, probes
 the configured alkahest contract addresses on each chain, starts the
@@ -575,7 +575,7 @@ policy plugs in are:
   defaults. Buyer-side `reclaim_expired` is a separate post-expiry escape hatch
   and is not a seller refund.
 
-The negotiation hooks live in `market-policy` (package: `kit/policy/`, import:
+The negotiation hooks live in `arkhai-kit-policy` (package: `kit/policy/`, import:
 `market_policy`); the buyer and seller import from the same wheel. The
 negotiation data model is symmetric — `NegotiationRound`,
 `NegotiationContext`, `NegotiationDecision` are shared. Each side
@@ -691,11 +691,11 @@ dependency install separately from the volatile project source:
 2. **Runtime stage** — copies the pre-built `.venv` from the builder,
    then copies the project source, then runs a completing
    `uv sync --no-dev --find-links /dist` (without `--no-install-project`)
-   to install the project package and write the `market-storefront`
+   to install the project package and write the `arkhai-vms-storefront`
    console script to `.venv/bin/`.
 
 Omitting the completing `uv sync` in the runtime stage means
-`market-storefront` is absent from `.venv/bin/` and `entrypoint.sh`
+`arkhai-vms-storefront` is absent from `.venv/bin/` and `entrypoint.sh`
 exits 127. Both stages must be present for the console script to work.
 
 **Critical: `/dist/` must be sourced from the build context in both stages.**
@@ -967,7 +967,7 @@ agent runtime, no SQLite database — only the `market` console script
 (packaged and implemented under `domains/vms/buyer`).
 
 `market buy` is a one-shot orchestrator: it queries
-`registry-service` for matching seller orders, runs synchronous
+`arkhai-core-registry` for matching seller orders, runs synchronous
 negotiations against each candidate seller's storefront (POST
 `/negotiate`, signed bodies), and on agreement creates the on-chain
 escrow via `alkahest_py` directly from the CLI process before POSTing
@@ -976,7 +976,7 @@ is the same loop bound to a single known seller; both share
 `domains.vms.buyer.buy_orchestrator`.
 
 The negotiation chain the buyer runs is built from the same
-`market-policy` middlewares the seller uses — both sides instantiate
+`arkhai-kit-policy` middlewares the seller uses — both sides instantiate
 the chain via `load_negotiation_chain([...])`, with `bisection` as the
 default terminal (or `rl` behind the optional torch extra). Round-by-
 round events land in a per-run JSONL log under
@@ -1009,7 +1009,7 @@ differ in the appropriate guards. Both honour the legacy
 
 ---
 
-### `policy` (`market-policy`)
+### `policy` (`arkhai-kit-policy`)
 
 Shared negotiation machinery + the RL training/eval tool. Two surfaces:
 
@@ -1025,7 +1025,7 @@ Shared negotiation machinery + the RL training/eval tool. Two surfaces:
   native-token, and ERC1155) ship registered. The shared
   escrow-kind dispatcher is constructed from config rather than
   registered as a plain global middleware.
-- **CLI**: `market-policy train / eval / export` — invoked by policy
+- **CLI**: `arkhai-kit-policy train / eval / export` — invoked by policy
   authors to produce RL checkpoints that the `rl` terminal middleware
   loads at inference time.
 
@@ -1034,7 +1034,7 @@ a tooling concern separate from the buyer or seller process.
 
 ---
 
-### `provisioning-service`
+### `arkhai-vms-provisioning`
 
 **Role:** Physical settlement layer. Converts completed on-chain agreements into running VMs.
 
@@ -1301,7 +1301,7 @@ Only mounted when `mock` is in `ACTIVE_PROFILES`. Never present in production or
 
 Provides an HTTP API for configuring `ProgrammableMockAnsibleService` rules and waiting for job lifecycle events without polling loops.
 
-In provisioning-service integration tests, `/test/*` callers use a fresh
+In arkhai-vms-provisioning integration tests, `/test/*` callers use a fresh
 `ProgrammableMockAnsibleService` wired through `container.resolved_ansible_service`
 for the lifetime of the test client. The regular provisioning API integration
 fixtures may still use a `MagicMock` at the Ansible subprocess boundary when a
@@ -1650,16 +1650,16 @@ There are three console scripts, each a separate distributable. They
 split by concern (runtime vs. tooling) rather than
 by buyer-vs-seller role. Built with Typer; config is read from a TOML
 file under `$XDG_CONFIG_HOME/arkhai/` — `buyer.toml` for the buyer's
-`market` CLI, `storefront.toml` for `market-storefront` and the
+`market` CLI, `storefront.toml` for `arkhai-vms-storefront` and the
 storefront server (override either with `--config <path>`).
 
 | CLI | Package | Role | Top-level groups |
 |---|---|---|---|
 | `market` | `domains/vms/buyer/` | Buyer runtime (pure HTTP client) | `buy`, `negotiate`, `order`, `escrow reclaim`, `network join/get-peers`, `config`, `logs` |
-| `market-storefront` | `domains/vms/storefront/` | Seller runtime | `register`, `serve`, `provide`, `escrow claim/refund`, `portfolio import-csv`, `network join/get-peers`, `config`, `logs` |
-| `market-policy` | `kit/policy/` | Policy authoring tool | `train`, `eval`, `export` |
+| `arkhai-vms-storefront` | `domains/vms/storefront/` | Seller runtime | `register`, `serve`, `provide`, `escrow claim/refund`, `portfolio import-csv`, `network join/get-peers`, `config`, `logs` |
+| `arkhai-kit-policy` | `kit/policy/` | Policy authoring tool | `train`, `eval`, `export` |
 
-The two runtimes (`market`, `market-storefront`) share `network join`
+The two runtimes (`market`, `arkhai-vms-storefront`) share `network join`
 and `get-peers` because each participant manages their own ZeroTier
 membership. The owner-side actions (`install` / `create` / `add`) are
 Make targets in `scripts/zerotier/`, run by whoever stands up the overlay.
@@ -1667,14 +1667,14 @@ Make targets in `scripts/zerotier/`, run by whoever stands up the overlay.
 Deployment shells just compose CLI verbs:
 
 - **Docker (storefront image):** `entrypoint.sh` brings up the
-  ZeroTier daemon, then runs `market-storefront register` and
-  `exec market-storefront serve`.
+  ZeroTier daemon, then runs `arkhai-vms-storefront register` and
+  `exec arkhai-vms-storefront serve`.
 - **Helm:** the init container runs
-  `./entrypoint.sh market-storefront register --chain-id N` and the
-  main container runs `./entrypoint.sh market-storefront serve` —
+  `./entrypoint.sh arkhai-vms-storefront register --chain-id N` and the
+  main container runs `./entrypoint.sh arkhai-vms-storefront serve` —
   same image, two CLI verbs.
 
-`market-storefront serve` only forwards `host` and `port` into
+`arkhai-vms-storefront serve` only forwards `host` and `port` into
 `server.run_serve()`. The CLI/server argument contract is covered by a
 storefront unit test because a mismatch crashes the container before any
 integration or e2e test can run.
@@ -1691,7 +1691,7 @@ See `docs/cli-redesign-plan.md` for the rationale behind the current
 ```
 compose/external.yml     — Anvil node + one-shot contract deployer (the "external"
                            chain layer; in prod this is a live RPC, not run here)
-compose/registry.dev.yml — registry-service against the dev chain
+compose/registry.dev.yml — arkhai-core-registry against the dev chain
                            (compose/registry.yml is the operator-facing variant)
 compose/seller.yml       — storefront server + provisioning service (unified)
 ```
@@ -1718,7 +1718,7 @@ helm/
 │   └── tests/test-config.yaml  # Shared ConfigMap for helm test pods
 └── charts/
     ├── test-env/           # Anvil node (condition: test-env.enabled)
-    ├── registry/           # registry-service (condition: registry.enabled)
+    ├── registry/           # arkhai-core-registry (condition: registry.enabled)
     ├── storefront/         # storefront-service (condition: agents>0)
     ├── provisioning/       # Unified provisioning service (condition: provisioning.enabled)
     └── validate-contracts/ # Helm test: chain connectivity check
@@ -1808,7 +1808,7 @@ it falls back to a live `eth_chainId` RPC when `[chain] chain_id` is unset.
 
 The storefront's TOML file pair is **role-scoped** — buyer and seller no
 longer share a single config file. The buyer CLI reads `buyer.toml` +
-`buyer.secrets.toml`; the storefront server *and* `market-storefront`
+`buyer.secrets.toml`; the storefront server *and* `arkhai-vms-storefront`
 CLI both read `storefront.toml` + `storefront.secrets.toml`. When the
 same operator runs both buyer and seller on one machine (e.g. a
 seller-also-buyer setup), each role has its own wallet and own file pair.
@@ -1907,8 +1907,8 @@ Wheel builds happen separately via `make dist` (called automatically by
 make dist
   ├── dist-storefront-client  → .dist/arkhai_storefront_client-*.whl
   ├── dist-registry           → .dist/arkhai_registry_client-*.whl
-  ├── dist-core-buyer         → .dist/core_buyer-*.whl
-  ├── dist-core-storefront    → .dist/core_storefront-*.whl
+  ├── dist-arkhai-core-buyer         → .dist/core_buyer-*.whl
+  ├── dist-arkhai-core-storefront    → .dist/core_storefront-*.whl
   ├── dist-provisioning       → .dist/provisioning_service-*.whl
   ├── dist-storefront         → .dist/market_storefront-*.whl      (Docker builds only)
   ├── dist-policy             → .dist/market_policy-*.whl          (Docker builds only)
@@ -1932,12 +1932,12 @@ repo. The registries and their IAM are managed there; this repo only pushes.
 | Docker images (registry, storefront, provisioning) | DOCKER | `docker` | git short SHA |
 | Docker dev images (test-env, integration-tests) | DOCKER | `docker` | git short SHA |
 | Helm chart (`arkhai-node-operator`) | DOCKER (OCI) | `helm` | git short SHA |
-| `arkhai-storefront-client` wheel | PYTHON | `python` | wheel version |
-| `arkhai-registry-client` wheel | PYTHON | `python` | wheel version |
-| `provisioning-service` wheel | PYTHON | `python` | wheel version |
+| `arkhai-core-storefront-client` wheel | PYTHON | `python` | wheel version |
+| `arkhai-core-registry-client` wheel | PYTHON | `python` | wheel version |
+| `arkhai-vms-provisioning` wheel | PYTHON | `python` | wheel version |
 | `market` CLI binary | GENERIC | `cli` | git short SHA |
 
-The internal-only wheels (`market-storefront`, `market-policy`) are consumed only via `--find-links` inside
+The internal-only wheels (`arkhai-vms-storefront`, `arkhai-kit-policy`) are consumed only via `--find-links` inside
 Docker builds and are never pushed to AR.
 
 **Push flow:**
@@ -1986,8 +1986,8 @@ package/version/filename. Semver tags (`<version>-rc.N` for preprod,
 
 **Dev wheel overwrite path:** during dev-cluster iteration, use
 `make clobber-wheels` to delete the current published versions of
-`arkhai-storefront-client`, `arkhai-registry-client`, and
-`provisioning-service`, then immediately re-upload the local `.dist/` wheels.
+`arkhai-core-storefront-client`, `arkhai-core-registry-client`, and
+`arkhai-vms-provisioning`, then immediately re-upload the local `.dist/` wheels.
 This is intentionally separate from `push-wheels` because it mutates the Python
 repository by deleting package versions. Use it only for development
 repositories; preprod/prod wheel changes should bump package versions instead.
@@ -2000,7 +2000,7 @@ gcloud artifacts versions list \
   --project=compute-market-1-dev \
   --location=us-central1 \
   --repository=compute-market-1-dev-python \
-  --package=provisioning-service
+  --package=arkhai-vms-provisioning
 ```
 
 Use the target `AR_PROJECT` and package name as needed.
@@ -2184,7 +2184,7 @@ The registry is shared infrastructure. A schema or API change that breaks compat
 
 Postgres enables running old and new registry versions concurrently against the same database, giving operators a defined compatibility window to upgrade their storefront and provisioning service versions before the old API is retired. SQLite on a ReadWriteOnce PVC fundamentally cannot support concurrent pod versions.
 
-Until this infrastructure is in place, all registry schema and API changes must be backward-compatible with at least the immediately preceding release of `arkhai-registry-client`. The expand-contract policy makes individual releases additive, satisfying this requirement.
+Until this infrastructure is in place, all registry schema and API changes must be backward-compatible with at least the immediately preceding release of `arkhai-core-registry-client`. The expand-contract policy makes individual releases additive, satisfying this requirement.
 
 ---
 
@@ -2372,7 +2372,7 @@ buyer proposal's token literal must match the selected listing
 by their own `(chain_name, escrow_address, literal_fields, rates)` shape
 and by the configured negotiation policy. If an e2e test raises
 `TypeError: SyncStorefrontClient.negotiate_new() got an unexpected keyword
-argument`, the runtime is importing a stale `arkhai-storefront-client`
+argument`, the runtime is importing a stale `arkhai-core-storefront-client`
 install. Rebuild the wheel and reinstall consumers with `make reinit` so
 `uv.lock` is re-resolved against the current `.dist/` wheel.
 
@@ -2434,7 +2434,7 @@ Each level has a defined jurisdiction. Duplicating coverage across levels create
 
 ### Test File Layout
 
-**provisioning-service** (reference layout):
+**arkhai-vms-provisioning** (reference layout):
 ```
 domains/vms/provisioning/service/src/tests/
 ├── unit/
@@ -2445,7 +2445,7 @@ domains/vms/provisioning/service/src/tests/
     └── test_{controller}.py
 ```
 
-**registry-service**:
+**arkhai-core-registry**:
 ```
 core/registry/tests/
 ├── conftest.py                  # db_session fixture (in-memory SQLite), sign_order_auth helper
@@ -2469,11 +2469,11 @@ core/registry/tests/
     └── test_system.py           # GET /health (including 503 on DB failure), GET /api/v1/system/stats
 ```
 
-**Client contract enforcement in registry-service integration tests:**
+**Client contract enforcement in arkhai-core-registry integration tests:**
 
-All integration tests import `RegistryClient` from the `arkhai-registry-client` wheel and exercise the API exclusively through it.  The transport is `httpx.ASGITransport(app=app)` — real HTTP through the full FastAPI stack, no network socket.  If the API renames a field or changes a response shape, the client's `from_dict` parser will either raise or silently drop the field, and the assertion will fail immediately.  The `get_db` dependency is overridden per-test to yield the fixture's isolated in-memory SQLite session.
+All integration tests import `RegistryClient` from the `arkhai-core-registry-client` wheel and exercise the API exclusively through it.  The transport is `httpx.ASGITransport(app=app)` — real HTTP through the full FastAPI stack, no network socket.  If the API renames a field or changes a response shape, the client's `from_dict` parser will either raise or silently drop the field, and the assertion will fail immediately.  The `get_db` dependency is overridden per-test to yield the fixture's isolated in-memory SQLite session.
 
-The two legitimate raw-call exceptions (rejection-path tests and `db_session` state setup) apply here exactly as documented in the provisioning-service section above. `RegistryClient` and `SyncRegistryClient` expose typed methods covering `/api/v1/system/stats`, `GET /publishers{,/{id}}`, `POST /listings`, `PUT`/`DELETE /listings/{id}`, and `validate_publish_listing()` (`POST /api/v1/listings/validate-publish`) with `ValidatePublishRequest`/`ValidatePublishResponse` models. `ListingRequest` and `ValidatePublishRequest` carry a `storefront_url` field (`""` default) to satisfy the filter-spec's required-publish-candidate constraint; the storefront populates it from `BASE_URL_OVERRIDE`/its storefront URL.
+The two legitimate raw-call exceptions (rejection-path tests and `db_session` state setup) apply here exactly as documented in the arkhai-vms-provisioning section above. `RegistryClient` and `SyncRegistryClient` expose typed methods covering `/api/v1/system/stats`, `GET /publishers{,/{id}}`, `POST /listings`, `PUT`/`DELETE /listings/{id}`, and `validate_publish_listing()` (`POST /api/v1/listings/validate-publish`) with `ValidatePublishRequest`/`ValidatePublishResponse` models. `ListingRequest` and `ValidatePublishRequest` carry a `storefront_url` field (`""` default) to satisfy the filter-spec's required-publish-candidate constraint; the storefront populates it from `BASE_URL_OVERRIDE`/its storefront URL.
 
 **integration-tests**:
 ```
@@ -2536,7 +2536,7 @@ make build         →  docker build (COPY .dist/ /dist/, uv sync --find-links /
 
 Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockfile and breaks the other context. Setting it via `UV_FIND_LINKS` on the command line means the path stays out of version-controlled files entirely.
 
-**Rule:** downstream `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for wheel-consumed internal packages (`market-identity`, `market-core`, `core-buyer`, `core-storefront`, `market-alkahest`, `market-config`, `provisioning-service`, `arkhai-storefront-client`, or `arkhai-registry-client`). These packages are resolved exclusively from wheels in `.dist/` outside their owning package's local dev environment.
+**Rule:** downstream `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for wheel-consumed internal packages (`arkhai-kit-identity`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-core-storefront`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-vms-provisioning`, `arkhai-core-storefront-client`, or `arkhai-core-registry-client`). These packages are resolved exclusively from wheels in `.dist/` outside their owning package's local dev environment.
 
 **Why not `uv.sources` editable installs:** Editable path references are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker that relative path does not exist, causing resolution failures. The wheel approach makes both the path and the mechanism context-specific (CLI flag, not lockfile entry).
 
@@ -2546,29 +2546,29 @@ Nine pure-Python internal packages are distributed as wheels:
 
 | Package | Wheel name | Source | Primary consumers |
 |---------|-----------|--------|-------------------|
-| `market-identity` | `market_identity-*.whl` | `kit/identity/` | `market-core`, `registry-service`, `storefront` |
-| `market-core` | `market_core-*.whl` | `core/` | `market-alkahest`, `storefront` |
-| `core-buyer` | `core_buyer-*.whl` | `core/buyer/` | `buyer` |
-| `core-storefront` | `core_storefront-*.whl` | `core/storefront/` | `storefront` |
-| `market-alkahest` | `market_alkahest-*.whl` | `kit/alkahest/` | `buyer`, `storefront`, `integration-tests` |
-| `market-config` | `market_config-*.whl` | `kit/config/` | `buyer`, `storefront` |
-| `provisioning-service` | `provisioning_service-*.whl` | `domains/vms/provisioning/service/` | `integration-tests`, `storefront` |
-| `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `core/storefront-client/` | `storefront`, `integration-tests`, `provisioning-service` |
-| `arkhai-registry-client` | `arkhai_registry_client-*.whl` | `core/registry-client/` | `integration-tests` |
+| `arkhai-kit-identity` | `market_identity-*.whl` | `kit/identity/` | `arkhai-core`, `arkhai-core-registry`, `storefront` |
+| `arkhai-core` | `market_core-*.whl` | `core/` | `arkhai-kit-alkahest`, `storefront` |
+| `arkhai-core-buyer` | `core_buyer-*.whl` | `core/buyer/` | `buyer` |
+| `arkhai-core-storefront` | `core_storefront-*.whl` | `core/storefront/` | `storefront` |
+| `arkhai-kit-alkahest` | `market_alkahest-*.whl` | `kit/alkahest/` | `buyer`, `storefront`, `integration-tests` |
+| `arkhai-kit-config` | `market_config-*.whl` | `kit/config/` | `buyer`, `storefront` |
+| `arkhai-vms-provisioning` | `provisioning_service-*.whl` | `domains/vms/provisioning/service/` | `integration-tests`, `storefront` |
+| `arkhai-core-storefront-client` | `arkhai_storefront_client-*.whl` | `core/storefront-client/` | `storefront`, `integration-tests`, `arkhai-vms-provisioning` |
+| `arkhai-core-registry-client` | `arkhai_registry_client-*.whl` | `core/registry-client/` | `integration-tests` |
 
-`arkhai-storefront-client` exists as a separate lightweight package to avoid pulling `market-storefront`'s heavyweight dependencies (`pufferlib`, `torch`, native RL wheels under the `[rl]` extra) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `core/storefront-client/src/storefront_client/client.py` and exposes `StorefrontClient` (async) and `SyncStorefrontClient` (sync).
+`arkhai-core-storefront-client` exists as a separate lightweight package to avoid pulling `arkhai-vms-storefront`'s heavyweight dependencies (`pufferlib`, `torch`, native RL wheels under the `[rl]` extra) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `core/storefront-client/src/storefront_client/client.py` and exposes `StorefrontClient` (async) and `SyncStorefrontClient` (sync).
 
-**Dependency direction note — provisioning-service → arkhai-storefront-client:**
+**Dependency direction note — arkhai-vms-provisioning → arkhai-core-storefront-client:**
 
-The provisioning service depends on `arkhai-storefront-client` for two call sites:
+The provisioning service depends on `arkhai-core-storefront-client` for two call sites:
 1. `lease_lifecycle_service._patch_storefront_resource()` — PATCH storefront resource on lease expiry
 2. `system_service.get_status()` — probe storefront reachability for the diagnostic status endpoint
 
-This inverts the conceptual layer (provisioning is infrastructure; storefront is a consumer). It does not create a circular import — `storefront-client` has no dependency on `provisioning-service`. The `make dist` ordering already builds `arkhai-storefront-client` before `provisioning-service`, so wheel resolution is correct.
+This inverts the conceptual layer (provisioning is infrastructure; storefront is a consumer). It does not create a circular import — `storefront-client` has no dependency on `arkhai-vms-provisioning`. The `make dist` ordering already builds `arkhai-core-storefront-client` before `arkhai-vms-provisioning`, so wheel resolution is correct.
 
-**`arkhai-storefront-client` versioning policy:**
+**`arkhai-core-storefront-client` versioning policy:**
 
-`arkhai-storefront-client` encodes two contracts with the storefront server that are not enforced at import time — mismatches produce silent 403s or wrong response shapes at runtime:
+`arkhai-core-storefront-client` encodes two contracts with the storefront server that are not enforced at import time — mismatches produce silent 403s or wrong response shapes at runtime:
 
 1. **Auth message format** — `_build_auth_headers` must match `domains/vms/storefront/src/market_storefront/middleware/seller_auth.py`:
    - `create_listing` → `"create_listing:<agent_wallet_address>:<timestamp>"`
@@ -2585,8 +2585,8 @@ When either contract changes: bump `version` in `core/storefront-client/pyprojec
 **Internal builds (Docker images):** `.dist/` wheels are consumed via
 `--find-links` inside Docker `RUN` instructions. This path is unchanged.
 
-**External distribution:** The three client packages (`arkhai-storefront-client`,
-`arkhai-registry-client`, `provisioning-service`) are published to GCP Artifact
+**External distribution:** The three client packages (`arkhai-core-storefront-client`,
+`arkhai-core-registry-client`, `arkhai-vms-provisioning`) are published to GCP Artifact
 Registry via `make push-wheels`. See the `## Artifact Registry Publishing`
 section for the full push flow.
 
@@ -2672,11 +2672,11 @@ cd core/registry && make reinit && make test-integration
 
 | Package | Wheel | Async client | Sync client | Consumers |
 |---|---|---|---|---|
-| `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `StorefrontClient` | `SyncStorefrontClient` | `storefront`, `integration-tests` |
-| `core/registry-client/` | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `integration-tests`, `registry-service` tests |
+| `arkhai-core-storefront-client` | `arkhai_storefront_client-*.whl` | `StorefrontClient` | `SyncStorefrontClient` | `storefront`, `integration-tests` |
+| `core/registry-client/` | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `integration-tests`, `arkhai-core-registry` tests |
 | `domains/vms/provisioning/service/src/client/` | `provisioning_service-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `integration-tests` |
 
-`arkhai-storefront-client` exposes EIP-191-signed methods on both
+`arkhai-core-storefront-client` exposes EIP-191-signed methods on both
 `StorefrontClient` (async) and `SyncStorefrontClient` (sync):
 
 - `negotiate_new()` / `negotiate_counter()` — take `token` and populate
@@ -2690,12 +2690,12 @@ cd core/registry && make reinit && make test-integration
 The wheel ships `EvaluateNegotiateResponse`, `SettleResponse`, and
 `SettleStatusResponse` typed models alongside these methods.
 
-`provisioning-service` bundles its client inside the service wheel (under `src/client/`) because the request/response models (`CreateVmRequest`, `JobStatusResponse`, etc.) are shared between the server and client. Consumers import as `from client.provisioning_client import ProvisioningClient`.
+`arkhai-vms-provisioning` bundles its client inside the service wheel (under `src/client/`) because the request/response models (`CreateVmRequest`, `JobStatusResponse`, etc.) are shared between the server and client. Consumers import as `from client.provisioning_client import ProvisioningClient`.
 
 | Term | Meaning |
 |---|---|
 | Alkahest | Arkhai's smart contract suite for peer-to-peer agreements and escrow |
-| Storefront | The seller-side HTTP server (`market-storefront serve`); the only running agent process in the negotiation flow |
+| Storefront | The seller-side HTTP server (`arkhai-vms-storefront serve`); the only running agent process in the negotiation flow |
 | Identity | Scheme-tagged `(scheme, identifier)` pair; default scheme is `eip191` with the wallet address as identifier |
 | FRP | Fast Reverse Proxy — used to give buyers network access to their VMs |
 | Anvil | Local EVM testnet node from Foundry |

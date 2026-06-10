@@ -49,7 +49,7 @@ def register(app: typer.Typer) -> None:
 plugin = BuyerSchemaPlugin(
     schema_id="vms.compute",
     register=register,
-    distribution="market-buyer",
+    distribution="arkhai-vms-buyer",
 )
 
 #: Pre-assembled app for the PyInstaller binary (main.py), which can't rely

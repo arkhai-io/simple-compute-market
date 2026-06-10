@@ -130,6 +130,51 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-alkahest"
+version = "0.1.0"
+source = { editable = "../alkahest" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "web3" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2" },
+    { name = "web3", specifier = ">=7.14.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "alkahest-py", specifier = ">=0.4.0" },
+    { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
+]
+
+[[package]]
+name = "arkhai-kit-config"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "arkhai-kit-alkahest" },
+    { name = "eth-account" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "arkhai-kit-alkahest", editable = "../alkahest" },
+    { name = "eth-account", specifier = ">=0.13.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
+
+[[package]]
 name = "async-timeout"
 version = "5.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -704,51 +749,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/72/34/14ca021ce8e5dfedc
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl", hash = "sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12", size = 7484, upload-time = "2025-10-18T21:55:41.639Z" },
 ]
-
-[[package]]
-name = "market-alkahest"
-version = "0.1.0"
-source = { editable = "../alkahest" }
-dependencies = [
-    { name = "pydantic" },
-    { name = "web3" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "pydantic", specifier = ">=2" },
-    { name = "web3", specifier = ">=7.14.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "alkahest-py", specifier = ">=0.4.0" },
-    { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
-    { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
-]
-
-[[package]]
-name = "market-config"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "eth-account" },
-    { name = "market-alkahest" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "eth-account", specifier = ">=0.13.0" },
-    { name = "market-alkahest", editable = "../alkahest" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 
 [[package]]
 name = "multidict"

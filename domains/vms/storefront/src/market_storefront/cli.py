@@ -1,7 +1,7 @@
 """Storefront admin CLI — `market-storefront` console script.
 
 Provider-side commands for managing a running storefront. Buyer
-operations live in market-buyer (`market` console script). The two
+operations live in arkhai-vms-buyer (`market` console script). The two
 ship as separate wheels; install both if you both buy and sell.
 
 Subcommands:
@@ -36,7 +36,7 @@ app = typer.Typer(no_args_is_help=True)
 def version_callback(value: bool) -> None:
     if value:
         try:
-            __version__ = version("market-storefront")
+            __version__ = version("arkhai-vms-storefront")
         except PackageNotFoundError:
             __version__ = "unknown (not installed)"
         typer.echo(f"market-storefront version {__version__}")

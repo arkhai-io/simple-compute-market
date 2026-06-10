@@ -201,7 +201,7 @@ def build_app(plugins: list[BuyerSchemaPlugin] | None = None) -> typer.Typer:
 
     def version_callback(value: bool) -> None:
         if value:
-            typer.echo(f"market (core-buyer) version {_dist_version('core-buyer')}")
+            typer.echo(f"market (arkhai-core-buyer) version {_dist_version('arkhai-core-buyer')}")
             for plugin in plugins:
                 suffix = (
                     f" ({plugin.distribution} {_dist_version(plugin.distribution)})"

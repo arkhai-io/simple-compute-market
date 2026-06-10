@@ -143,6 +143,69 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-core-buyer"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "arkhai-kit-config" },
+    { name = "typer" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "arkhai-kit-config", editable = "../../kit/config" },
+    { name = "typer", specifier = ">=0.12.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
+
+[[package]]
+name = "arkhai-kit-alkahest"
+version = "0.1.0"
+source = { editable = "../../kit/alkahest" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "web3" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2" },
+    { name = "web3", specifier = ">=7.14.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "alkahest-py", specifier = ">=0.4.0" },
+    { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
+]
+
+[[package]]
+name = "arkhai-kit-config"
+version = "0.1.0"
+source = { editable = "../../kit/config" }
+dependencies = [
+    { name = "arkhai-kit-alkahest" },
+    { name = "eth-account" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "arkhai-kit-alkahest", editable = "../../kit/alkahest" },
+    { name = "eth-account", specifier = ">=0.13.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
+
+[[package]]
 name = "attrs"
 version = "26.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -341,29 +404,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
 ]
-
-[[package]]
-name = "core-buyer"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "market-config" },
-    { name = "typer" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "market-config", editable = "../../kit/config" },
-    { name = "typer", specifier = ">=0.12.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 
 [[package]]
 name = "cytoolz"
@@ -727,46 +767,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/06/ff/7841249c247aa650a
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/81/4da04ced5a082363ecfa159c010d200ecbd959ae410c10c0264a38cac0f5/markdown_it_py-4.2.0-py3-none-any.whl", hash = "sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a", size = 91687, upload-time = "2026-05-07T12:08:27.182Z" },
 ]
-
-[[package]]
-name = "market-alkahest"
-version = "0.1.0"
-source = { editable = "../../kit/alkahest" }
-dependencies = [
-    { name = "pydantic" },
-    { name = "web3" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "pydantic", specifier = ">=2" },
-    { name = "web3", specifier = ">=7.14.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "alkahest-py", specifier = ">=0.4.0" },
-    { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
-    { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
-]
-
-[[package]]
-name = "market-config"
-version = "0.1.0"
-source = { editable = "../../kit/config" }
-dependencies = [
-    { name = "eth-account" },
-    { name = "market-alkahest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "eth-account", specifier = ">=0.13.0" },
-    { name = "market-alkahest", editable = "../../kit/alkahest" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 
 [[package]]
 name = "mdurl"

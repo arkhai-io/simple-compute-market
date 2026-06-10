@@ -5,16 +5,16 @@ The repo publishes internal Python packages to PyPI via
 
 | Package | Path | Initial version | Internal deps |
 |---|---|---|---|
-| `market-identity` | `kit/identity/` | 0.1.0 | none |
-| `market-core` | `core/` | 0.1.0 | `market-identity` |
-| `core-buyer` | `core/buyer/` | 0.1.0 | none |
-| `core-storefront` | `core/storefront/` | 0.1.0 | `market-core`, `market-identity`, `market-policy` |
-| `market-alkahest` | `kit/alkahest/` | 0.1.0 | `market-core` |
-| `market-config` | `kit/config/` | 0.1.0 | `market-alkahest` |
-| `market-policy` | `kit/policy/` | 0.1.0 | none |
-| `provisioning-service` | `domains/vms/provisioning/service/` | 0.1.2 | none |
-| `arkhai-storefront-client` | `core/storefront-client/` | 0.4.0 | none |
-| `arkhai-registry-client` | `core/registry-client/` | 0.2.0 | none |
+| `arkhai-kit-identity` | `kit/identity/` | 0.1.0 | none |
+| `arkhai-core` | `core/` | 0.1.0 | none |
+| `arkhai-core-buyer` | `core/buyer/` | 0.1.0 | `arkhai-kit-config` |
+| `arkhai-core-storefront` | `core/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-kit-identity`, `arkhai-kit-policy` |
+| `arkhai-kit-alkahest` | `kit/alkahest/` | 0.1.0 | `arkhai-core` |
+| `arkhai-kit-config` | `kit/config/` | 0.1.0 | `arkhai-kit-alkahest` |
+| `arkhai-kit-policy` | `kit/policy/` | 0.1.0 | none |
+| `arkhai-vms-provisioning` | `domains/vms/provisioning/service/` | 0.1.2 | none |
+| `arkhai-core-storefront-client` | `core/storefront-client/` | 0.4.0 | none |
+| `arkhai-core-registry-client` | `core/registry-client/` | 0.2.0 | none |
 
 ## One-time setup (per package)
 
@@ -30,7 +30,7 @@ For each package, configure trusted publishing on PyPI:
    - **Repository**: `simple-compute-market`
    - **Workflow**: `publish-pypi.yml`
    - **Environment**: `pypi-<pkg>` — e.g.
-     `pypi-arkhai-storefront-client`, etc. (matches `environment.name`
+     `pypi-arkhai-core-storefront-client`, etc. (matches `environment.name`
      in the workflow).
 4. Create the matching environment in this repo at
    `https://github.com/arkhai-io/simple-compute-market/settings/environments`.

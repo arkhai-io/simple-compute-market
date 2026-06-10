@@ -6,8 +6,8 @@ CONFIG_DIRECTORY ?= $(PWD)/config
 MODULE ?= contracts
 
 # Path to the monorepo .dist/ wheel directory, relative to integration-tests/.
-# Used by uv when resolving pure-Python internal packages (market-buyer,
-# market-policy, market-storefront, provisioning-service) that are distributed as wheels rather than editable
+# Used by uv when resolving pure-Python internal packages (arkhai-vms-buyer,
+# arkhai-kit-policy, arkhai-vms-storefront, arkhai-vms-provisioning) that are distributed as wheels rather than editable
 # source installs.  The Dockerfile passes --find-links /dist on the uv sync
 # CLI instead; this variable is for local development only.
 DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
@@ -26,14 +26,14 @@ init: init-venv
 
 reinit: init-venv
 	uv sync --find-links $(DIST_DIR) \
-	--upgrade-package arkhai-registry-client \
-	--upgrade-package arkhai-storefront-client \
-	--upgrade-package provisioning-service \
-	--upgrade-package market-storefront \
-	--reinstall-package arkhai-registry-client \
-	--reinstall-package arkhai-storefront-client \
-	--reinstall-package provisioning-service \
-	--reinstall-package market-storefront
+	--upgrade-package arkhai-core-registry-client \
+	--upgrade-package arkhai-core-storefront-client \
+	--upgrade-package arkhai-vms-provisioning \
+	--upgrade-package arkhai-vms-storefront \
+	--reinstall-package arkhai-core-registry-client \
+	--reinstall-package arkhai-core-storefront-client \
+	--reinstall-package arkhai-vms-provisioning \
+	--reinstall-package arkhai-vms-storefront
 
 # -----------------------------------------------------------------------
 # Build

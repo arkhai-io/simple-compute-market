@@ -22,7 +22,7 @@ def test_entry_point_discovery_finds_vm_plugin():
         "installed — `market` (core_buyer.cli:main) would fall back to "
         "the generic no-plugin CLI"
     )
-    assert discovered["vms.compute"].distribution == "market-buyer"
+    assert discovered["vms.compute"].distribution == "arkhai-vms-buyer"
 
 
 def test_plugin_is_well_formed():
@@ -54,4 +54,4 @@ def test_version_reports_plugin():
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
     assert "vms.compute" in result.output
-    assert "market-buyer" in result.output
+    assert "arkhai-vms-buyer" in result.output

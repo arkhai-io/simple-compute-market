@@ -11,7 +11,7 @@
 #
 # The agent always calls the provisioning service HTTP API regardless of
 # this profile — mock mode is a provisioning service concern, not an agent
-# concern.  Set this profile on the provisioning-service container; the
+# concern.  Set this profile on the arkhai-vms-provisioning container; the
 # agent container needs no configuration change.
 # ---------------------------------------------------------------------------
 

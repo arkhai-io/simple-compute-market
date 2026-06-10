@@ -1,5 +1,5 @@
 [project]
-name = "market-alkahest"
+name = "arkhai-kit-alkahest"
 version = "0.1.0"
 description = "Alkahest settlement codecs, token helpers, and chain probes for the market"
 requires-python = ">=3.10,<3.14"

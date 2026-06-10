@@ -2,7 +2,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-dev build-seller dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-identity dist-core dist-core-buyer dist-core-storefront dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-registry-service push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: build build-dev build-seller dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -17,79 +17,79 @@ DIST_DIR := ${CURDIR}/.dist
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-storefront-client dist-identity dist-core dist-core-buyer dist-core-storefront dist-alkahest dist-config dist-storefront dist-policy dist-provisioning dist-registry dist-buyer
+dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-storefront dist-policy dist-provisioning dist-registry dist-buyer
 
-dist-storefront-client: ## Build arkhai-storefront-client wheel into .dist/
+dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd core/storefront-client && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_storefront_client-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-storefront-client produced a platform-specific wheel -- must build inside Docker" && exit 1)
+	@ls $(DIST_DIR)/arkhai_core_storefront_client-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-core-storefront-client produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-storefront: ## Build market-storefront wheel into .dist/
+dist-storefront: ## Build arkhai-vms-storefront wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd domains/vms/storefront && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/market_storefront-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: market-storefront produced a platform-specific wheel -- must build inside Docker" && exit 1)
+	@ls $(DIST_DIR)/arkhai_vms_storefront-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-vms-storefront produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-policy: ## Build market-policy wheel into .dist/
+dist-policy: ## Build arkhai-kit-policy wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd kit/policy && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/market_policy-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: market-policy produced a platform-specific wheel -- must build inside Docker" && exit 1)
+	@ls $(DIST_DIR)/arkhai_kit_policy-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-policy produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-provisioning: ## Build provisioning-service wheel into .dist/
+dist-provisioning: ## Build arkhai-vms-provisioning wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd domains/vms/provisioning/service && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/provisioning_service-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: provisioning-service produced a platform-specific wheel — must build inside Docker" && exit 1)
+	@ls $(DIST_DIR)/arkhai_vms_provisioning-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-vms-provisioning produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-registry: ## Build arkhai-registry-client wheel into .dist/
+dist-registry: ## Build arkhai-core-registry-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd core/registry-client && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_registry_client-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-registry-client produced a platform-specific wheel — must build inside Docker" && exit 1)
+	@ls $(DIST_DIR)/arkhai_core_registry_client-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-core-registry-client produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-identity: ## Build market-identity wheel into .dist/
+dist-identity: ## Build arkhai-kit-identity wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd kit/identity && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/market_identity-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: market-identity produced a platform-specific wheel — must build inside Docker" && exit 1)
+	@ls $(DIST_DIR)/arkhai_kit_identity-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-identity produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-core: ## Build market-core wheel into .dist/
+dist-core: ## Build arkhai-core wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd core && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/market_core-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: market-core produced a platform-specific wheel — must build inside Docker" && exit 1)
+	@ls $(DIST_DIR)/arkhai_core-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-core produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-core-buyer: ## Build core-buyer wheel into .dist/
+dist-arkhai-core-buyer: ## Build arkhai-core-buyer wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd core/buyer && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/core_buyer-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: core-buyer produced a platform-specific wheel — must build inside Docker" && exit 1)
+	@ls $(DIST_DIR)/arkhai_core_buyer-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-core-buyer produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-core-storefront: ## Build core-storefront wheel into .dist/
+dist-arkhai-core-storefront: ## Build arkhai-core-storefront wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd core/storefront && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/core_storefront-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: core-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
+	@ls $(DIST_DIR)/arkhai_core_storefront-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-core-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-alkahest: ## Build market-alkahest wheel into .dist/
+dist-alkahest: ## Build arkhai-kit-alkahest wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd kit/alkahest && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/market_alkahest-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: market-alkahest produced a platform-specific wheel — must build inside Docker" && exit 1)
+	@ls $(DIST_DIR)/arkhai_kit_alkahest-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-alkahest produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-config: ## Build market-config wheel into .dist/
+dist-config: ## Build arkhai-kit-config wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd kit/config && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/market_config-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: market-config produced a platform-specific wheel — must build inside Docker" && exit 1)
+	@ls $(DIST_DIR)/arkhai_kit_config-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-config produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-buyer: ## Build market-buyer (the `market` CLI) wheel into .dist/
+dist-buyer: ## Build arkhai-vms-buyer (the `market` CLI) wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd domains/vms/buyer && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/market_buyer-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: market-buyer produced a platform-specific wheel — must build inside Docker" && exit 1)
+	@ls $(DIST_DIR)/arkhai_vms_buyer-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-vms-buyer produced a platform-specific wheel — must build inside Docker" && exit 1)
 
 dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 	helm package helm/ --destination $(DIST_DIR)
@@ -162,7 +162,7 @@ build-test-image:
 # `make init` resolves dependencies for all three roles. Each role's
 # Makefile owns its own venv; we just delegate so a fresh clone has one
 # entry point. Run `make build` separately to produce wheel/Docker artifacts.
-init: init-prerequisites init-submodules init-buyer init-storefront init-registry-service
+init: init-prerequisites init-submodules init-buyer init-storefront init-arkhai-core-registry
 
 init-prerequisites:
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
@@ -181,7 +181,7 @@ init-buyer:
 init-storefront: dist-policy dist-provisioning dist-storefront-client dist-registry
 	cd domains/vms/storefront && make init
 
-init-registry-service: dist-registry
+init-arkhai-core-registry: dist-registry
 	cd core/registry && make init
 
 deploy-compose:
@@ -337,9 +337,9 @@ push-charts: _require-ar-project dist-helm
 	rm $(DIST_DIR)/arkhai-node-operator-*.tgz
 
 push-wheels: _require-ar-project
-	$(call publish_python_wheel,arkhai-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)
-	$(call publish_python_wheel,arkhai-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
-	$(call publish_python_wheel,provisioning-service,$(PROVISIONING_VERSION),$(DIST_DIR)/provisioning_service-$(PROVISIONING_VERSION)-py3-none-any.whl)
+	$(call publish_python_wheel,arkhai-core-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)
+	$(call publish_python_wheel,arkhai-core-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
+	$(call publish_python_wheel,arkhai-vms-provisioning,$(PROVISIONING_VERSION),$(DIST_DIR)/arkhai_vms_provisioning-$(PROVISIONING_VERSION)-py3-none-any.whl)
 
 push-cli: _require-ar-project
 	gcloud artifacts generic upload \
@@ -351,9 +351,9 @@ push-cli: _require-ar-project
 	  --source=domains/vms/buyer/dist/market
 
 clobber-wheels: _require-ar-project
-	$(call clobber_python_wheel,arkhai-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)
-	$(call clobber_python_wheel,arkhai-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
-	$(call clobber_python_wheel,provisioning-service,$(PROVISIONING_VERSION),$(DIST_DIR)/provisioning_service-$(PROVISIONING_VERSION)-py3-none-any.whl)
+	$(call clobber_python_wheel,arkhai-core-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)
+	$(call clobber_python_wheel,arkhai-core-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
+	$(call clobber_python_wheel,arkhai-vms-provisioning,$(PROVISIONING_VERSION),$(DIST_DIR)/arkhai_vms_provisioning-$(PROVISIONING_VERSION)-py3-none-any.whl)
 
 code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot

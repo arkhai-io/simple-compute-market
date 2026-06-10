@@ -1,11 +1,11 @@
 [project]
-name = "market-config"
+name = "arkhai-kit-config"
 version = "0.1.0"
 description = "Shared market configuration loading and registry URL helpers"
 requires-python = ">=3.10,<3.14"
 dependencies = [
     "eth-account>=0.13.0",
-    "market-alkahest",
+    "arkhai-kit-alkahest",
 ]
 
 [build-system]
@@ -21,7 +21,7 @@ asyncio_mode = "auto"
 testpaths = ["tests/unit"]
 
 [tool.uv.sources]
-market-alkahest = { path = "../alkahest", editable = true }
+arkhai-kit-alkahest = { path = "../alkahest", editable = true }
 
 [dependency-groups]
 dev = [

@@ -22,18 +22,18 @@ dependencies = [
     "httpx>=0.27",            # used by storefront smoke and canonical service clients
     # Workspace dependency: tests use the real discovery/matching logic,
     # not a re-implementation. Keeps test behavior aligned with storefront behavior.
-    "arkhai-storefront-client>=0.11.0",
-    "arkhai-registry-client>=0.6.0",
-    "market-alkahest>=0.1.0",
-	"market-storefront>=0.1.0",
-    "provisioning-service>=0.4.0",
+    "arkhai-core-storefront-client>=0.11.0",
+    "arkhai-core-registry-client>=0.6.0",
+    "arkhai-kit-alkahest>=0.1.0",
+	"arkhai-vms-storefront>=0.1.0",
+    "arkhai-vms-provisioning>=0.4.0",
     # The buyer's `market` CLI, run as a subprocess by the buyer-machine
     # e2e (tests/e2e/roles/buyer_cli.py). Installed so the binary is on
     # PATH inside arkhai:integration-tests when the suite runs in-network.
-    # market-policy is the buyer's sibling negotiation-strategy dep,
+    # arkhai-kit-policy is the buyer's sibling negotiation-strategy dep,
     # resolved from .dist alongside the other internal wheels.
-    "market-buyer>=0.1.0",
-    "market-policy>=0.1.0",
+    "arkhai-vms-buyer>=0.1.0",
+    "arkhai-kit-policy>=0.1.0",
 ]
 
 [tool.uv]

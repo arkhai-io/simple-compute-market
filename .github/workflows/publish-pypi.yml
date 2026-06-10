@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
     paths:
-      - 'service/**'
       - 'kit/policy/**'
       - 'domains/vms/provisioning/service/**'
       - 'core/storefront-client/**'
@@ -29,25 +28,20 @@ permissions:
 #   Workflow    = publish-pypi.yml
 #   Environment = pypi-<pkg>            (matches `environment.name` below)
 #
-# Internal dep graph:
-#   market-service        -> no internal deps
-#   market-policy         -> depends on market-service (PyPI)
-#   provisioning-service, arkhai-storefront-client, arkhai-registry-client
-#                         -> no internal deps
-#
-# When market-service's version bumps, market-policy can pick it up on a
-# subsequent push that touches kit/policy/. There is no sequencing inside one
-# run -- both publish in parallel against the *previous* market-service
-# version on PyPI. That is fine because pyproject.toml uses `>=` constraints,
-# not exact pins.
+# Distribution names follow the core/kit/domain split with an `arkhai-`
+# prefix (to be dropped once published under the organization's PyPI
+# scope):
+#   arkhai-kit-policy, arkhai-vms-provisioning,
+#   arkhai-core-storefront-client, arkhai-core-registry-client
+# None of the published packages has internal deps on another published
+# package, so there is no sequencing inside one run.
 
 jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
-      service:              ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.service }}
       policy:               ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.policy }}
-      provisioning-service: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.provisioning-service }}
+      vms-provisioning:     ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.vms-provisioning }}
       storefront-client:    ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.storefront-client }}
       registry-client:      ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.registry-client }}
     steps:
@@ -57,62 +51,22 @@ jobs:
         if: github.event_name != 'workflow_dispatch'
         with:
           filters: |
-            service:
-              - 'service/**'
             policy:
               - 'kit/policy/**'
-            provisioning-service:
+            vms-provisioning:
               - 'domains/vms/provisioning/service/**'
             storefront-client:
               - 'core/storefront-client/**'
             registry-client:
               - 'core/registry-client/**'
 
-  publish-service:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.service == 'true'
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi-market-service
-      url: https://pypi.org/p/market-service
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-        with:
-          version: "0.8.13"
-      - name: Check version not yet on PyPI
-        id: check
-        env:
-          PKG_DIR: service
-        run: |
-          set -euo pipefail
-          version=$(awk -F'"' '/^version *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
-          name=$(awk -F'"' '/^name *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
-          echo "name=${name}" >> "$GITHUB_OUTPUT"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          if curl -sSL "https://pypi.org/pypi/${name}/json" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if '${version}' in d.get('releases', {}) else 1)"; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::${name} ${version} already on PyPI; skipping"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Build wheel + sdist
-        if: steps.check.outputs.skip == 'false'
-        working-directory: service
-        run: uv build --no-sources
-      - name: Publish to PyPI
-        if: steps.check.outputs.skip == 'false'
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: service/dist
-
   publish-policy:
     needs: detect-changes
     if: needs.detect-changes.outputs.policy == 'true'
     runs-on: ubuntu-latest
     environment:
-      name: pypi-market-policy
-      url: https://pypi.org/p/market-policy
+      name: pypi-arkhai-kit-policy
+      url: https://pypi.org/p/arkhai-kit-policy
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
@@ -138,7 +92,7 @@ jobs:
         if: steps.check.outputs.skip == 'false'
         working-directory: kit/policy
         # --no-sources strips tool.uv.sources overrides so the wheel records
-        # the plain `market-service` dep instead of a workspace path.
+        # plain PyPI deps instead of workspace paths.
         run: uv build --no-sources
       - name: Publish to PyPI
         if: steps.check.outputs.skip == 'false'
@@ -146,13 +100,13 @@ jobs:
         with:
           packages-dir: kit/policy/dist
 
-  publish-provisioning-service:
+  publish-vms-provisioning:
     needs: detect-changes
-    if: needs.detect-changes.outputs.provisioning-service == 'true'
+    if: needs.detect-changes.outputs.vms-provisioning == 'true'
     runs-on: ubuntu-latest
     environment:
-      name: pypi-provisioning-service
-      url: https://pypi.org/p/provisioning-service
+      name: pypi-arkhai-vms-provisioning
+      url: https://pypi.org/p/arkhai-vms-provisioning
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
@@ -189,8 +143,8 @@ jobs:
     if: needs.detect-changes.outputs.storefront-client == 'true'
     runs-on: ubuntu-latest
     environment:
-      name: pypi-arkhai-storefront-client
-      url: https://pypi.org/p/arkhai-storefront-client
+      name: pypi-arkhai-core-storefront-client
+      url: https://pypi.org/p/arkhai-core-storefront-client
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
@@ -227,8 +181,8 @@ jobs:
     if: needs.detect-changes.outputs.registry-client == 'true'
     runs-on: ubuntu-latest
     environment:
-      name: pypi-arkhai-registry-client
-      url: https://pypi.org/p/arkhai-registry-client
+      name: pypi-arkhai-core-registry-client
+      url: https://pypi.org/p/arkhai-core-registry-client
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3

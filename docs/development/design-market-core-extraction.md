@@ -130,8 +130,8 @@ The eventual top-level repo shape is:
 
 ```
 core/
-  buyer/              # core-buyer role shell; concrete market behavior injected
-  storefront/         # core-storefront role shell; concrete market behavior injected
+  buyer/              # arkhai-core-buyer role shell; concrete market behavior injected
+  storefront/         # arkhai-core-storefront role shell; concrete market behavior injected
   registry/           # core-registry listing index shell; schema behavior injected
   registry-client/    # registry protocol client
   storefront-client/  # storefront protocol client
@@ -156,12 +156,12 @@ domains/
 
 `core` is shorthand for the three market roles, not one installable market
 package. The role packages are independently installable and executable
-(`core-buyer`, `core-storefront`, `core-registry`), but none ships a default
+(`arkhai-core-buyer`, `arkhai-core-storefront`, `core-registry`), but none ships a default
 concrete market. Each role executable is a composition root that loads or is
 given a domain implementation.
 
 > **Resolved:** `core/src/market_core/` survives as the shared
-> `market-core` wheel — the protocol-carrier package for the
+> `arkhai-core` wheel — the protocol-carrier package for the
 > negotiation/settlement wire shapes (escrow proposals/terms, rate
 > slots, the opaque provision-terms envelope) that buyer and storefront
 > must derive identically from the same message history. It cannot fold
@@ -201,7 +201,7 @@ given a domain implementation.
 > exactly like the flat compute provision terms.
 
 **Executable entrypoints split by role.** The buyer executable is
-core-owned: `core-buyer` ships the `market` console script, the common
+core-owned: `arkhai-core-buyer` ships the `market` console script, the common
 verb skeleton (`list`, `buy`, …), and schema-plugin discovery (Python
 entry-points group); domain buyer packages ship plugins, not competing
 CLIs. The buyer is the distribution-sensitive role — one binary, many
@@ -231,7 +231,7 @@ behavior; domain hook packages and kit packages do not import upward into
 | `kit/config`                      | shared config loading + registry URL helpers.                                                                                                                                                               | no domain deps          |
 | `kit/policy`                      | from-below middleware-chain mechanics and other policy utilities. VM inventory guards, scalar amount extraction, and Alkahest dispatch do not belong here.                                                   | no domain deps          |
 | `domains/vms`                     | the concrete VM market product surface: listing schema/filtering, negotiation messages/policies, settlement wiring, provisioning, and any VM-specific executables. It implements core hook shapes without importing core in the target graph. | kit                     |
-| compatibility packages            | existing names such as `market-storefront`, `registry-service`, and client packages may temporarily re-export or wrap the new locations during migration. `market-service` and `market-buyer` have been removed on the reorganization branch. | target package only     |
+| compatibility packages            | existing names such as `arkhai-vms-storefront`, `arkhai-core-registry`, and client packages may temporarily re-export or wrap the new locations during migration. `market-service` and `arkhai-vms-buyer` have been removed on the reorganization branch. | target package only     |
 
 The kit does **not** need to be one wheel — "from below" means "depended on,
 never depending up." The cleanup the principle implies: ensure nothing in
@@ -258,7 +258,7 @@ load unchanged from the new location.
 
 Distribution model (the why): a registry centralizes a schema; the
 per-schema instantiation is the _registry operator's_ deliverable. The core
-repo ships `market-core` plus the kit; an operator publishes a schema (the
+repo ships `arkhai-core` plus the kit; an operator publishes a schema (the
 filter-spec plus its typed client counterpart, versioned together) and the
 storefront/buyer plugins. The first realistic driver is two compute
 registries with incompatible listing shapes.
@@ -274,7 +274,7 @@ rendering, prompts, negotiation hooks, and settlement UX.
 
 The storefront CLI is different. Buyers and registries care about the
 storefront HTTP/API contract and registry publication behavior, not the
-operator command surface. `core-storefront` owns the generic server shell
+operator command surface. `arkhai-core-storefront` owns the generic server shell
 and role API. Operator commands such as `start`, `update`, and `publish`
 are domain/plugin commands unless they are purely generic lifecycle controls.
 If those commands share mechanics, put the mechanics in kit packages.
@@ -297,7 +297,7 @@ Target split:
 
 | Layer | Owns |
 | ----- | ---- |
-| Core buyer role | `core-buyer` role shell, callable contracts, registry fan-in helper, run-log carrier, `discover → negotiate → settle` orchestration over injected functions |
+| Core buyer role | `arkhai-core-buyer` role shell, callable contracts, registry fan-in helper, run-log carrier, `discover → negotiate → settle` orchestration over injected functions |
 | Domain buyer package | executable CLI, named filter flags, conversion from CLI args to registry filter params, listing/resource rendering, price-floor extraction, schema-specific prompts and validation |
 | Domain settlement package | accepted-escrow selection UX, proposal materialization, demand encoding, chain submission/verification |
 
@@ -337,7 +337,7 @@ escrows and listing-level arbiter demands.
 - **Verify/cleanup:** ensure top-level listing `demands` render wherever
   listing detail output should expose payment constraints, and keep old-log
   compatibility code clearly marked as legacy rather than schema core.
-- **Boundary:** this does not require plugin discovery, `market-core`, or a
+- **Boundary:** this does not require plugin discovery, `arkhai-core`, or a
   `ProvisionTerms` wire change. It makes the current compute-instantiated
   CLI honest about the new listing/proposal model so later extraction is a
   move, not another behavior change.
@@ -361,7 +361,7 @@ instead of treating core as having an embedded default market.
   `market.buyer_plugins` entry-point group. `domains/vms/buyer/cli.py`
   is the first plugin: it claims `buy`/`negotiate`/`settle` and the
   `listing` group (named compute filter flags, rendered output) plus the
-  operator groups, and `market-buyer` publishes it via the entry point
+  operator groups, and `arkhai-vms-buyer` publishes it via the entry point
   instead of a competing console script. The PyInstaller binary
   pre-assembles the same plugin explicitly since frozen bundles can't
   rely on entry-point metadata.
@@ -453,14 +453,14 @@ Receipt`; "materialize then submit" is internal factoring.
   validator — same protocol-vs-policy split as escrow.
 - **Cost:** wire-compat change on `/negotiate/*`; bump client wheels.
 
-### 4. Extract `market-core`
+### 4. Extract `arkhai-core`
 
 - Move the discover→negotiate→settle skeleton (`buy_orchestrator`'s
   flow, the seller's per-round protocol from `sync_negotiation`, the
-  settlement protocol) into `market-core`, defined over injected hooks +
+  settlement protocol) into `arkhai-core`, defined over injected hooks +
   generic primitives only. *(How it actually landed: the role skeletons
   went into the role packages — `core_buyer.orchestrator`,
-  `core_storefront.negotiation_sync` — and `market-core` kept only the
+  `core_storefront.negotiation_sync` — and `arkhai-core` kept only the
   shared wire carriers; see the resolved callout in "Target
   packaging".)*
 - `domains/vms/buyer/` + the remaining `domains/vms/storefront/` package become the
@@ -513,14 +513,14 @@ Recommended order:
    config path.
    `domains/vms/provisioning/` now owns VM capacity checks,
    provision-term construction, fulfillment-plan construction,
-   provisioning job-spec construction, and provisioning-service client
+   provisioning job-spec construction, and arkhai-vms-provisioning client
    helpers.
    `domains/vms/buyer/` now owns the concrete VM CLI assembly and VM
    command implementations for listing, buy, negotiate, settle, escrow
    lifecycle commands, aggregation policies, negotiation HTTP client, run
    logs, buyer config/log/network/chain commands, and the packaging/test
    project for the VM buyer console script.
-   `core-buyer` now owns the schema-invariant buyer config/result
+   `arkhai-core-buyer` now owns the schema-invariant buyer config/result
    carriers, registry discovery fan-in, and `discover -> negotiate ->
    settle` orchestration over injected hooks. The VM buyer module re-exports
    those pieces while retaining VM-specific hook adapters.
@@ -572,7 +572,7 @@ Recommended order:
    factories; `market_storefront.services.publication_service` keeps VM
    storefront settings, SQLite publication persistence, dynamic listing close
    reconciliation, and stage-event logging.
-4. **Done: move provisioning as VM fulfillment.** `provisioning-service` is
+4. **Done: move provisioning as VM fulfillment.** `arkhai-vms-provisioning` is
    not core; it is the VM fulfillment backend. It moved to
    `domains/vms/provisioning/service/` after updating Docker build contexts,
    compose service paths, e2e image/build references, storefront dependency
@@ -596,7 +596,7 @@ Top-level folder tracker:
 
 1. **Done: remove `domain/`.** This was a stale one-file package; the real
    domain namespace is `domains/`.
-2. **Done: remove top-level `provisioning-service/`.** The VM fulfillment
+2. **Done: remove top-level `arkhai-vms-provisioning/`.** The VM fulfillment
    backend lives under `domains/vms/provisioning/service/`.
 3. **Done: remove top-level registry packages.** The registry service and
    protocol clients live under `core/` while preserving their import/wheel
@@ -663,7 +663,7 @@ and `shared-env/`.
 4. **Seam 4** (done): the role skeletons live in the role packages
    (`core_buyer`, `core_storefront`), the remaining storefront package
    is skeleton-consuming adapters, the kit has no upward imports
-   (enforced by the dependency-direction guardrail), and `market-core`
+   (enforced by the dependency-direction guardrail), and `arkhai-core`
    is settled as the pure protocol-carrier wheel (stdlib + pydantic
    only, enforced by `test_carrier_purity.py`).
 5. **Seam 0b** (done): extract the concrete VM buyer behavior, packaging,
@@ -680,12 +680,12 @@ Each phase keeps the branch green and the e2e suite passing. Seams 0–4,
 0b, and the policy cleanup are done. Seam 4 closed in four moves: the
 `compute.v1` interpretation moved out of `market_core.schemas` into
 `domains/vms/provisioning`; the buyer plugin extraction landed (verb
-skeleton + entry-point plugin discovery in `core-buyer`, the VM CLI as
+skeleton + entry-point plugin discovery in `arkhai-core-buyer`, the VM CLI as
 the first plugin); the storefront's capacity access went behind the
 site-authority client boundary (`core_storefront.capacity` contract,
 embedded adapter, snapshot/reserve re-route, event-driven stale-listing
 closure — work items II.1–II.3 of the capacity doc); and the
-`market-core` carriers-wheel question is settled (the wheel survives as
+`arkhai-core` carriers-wheel question is settled (the wheel survives as
 the pure protocol-carrier package — see the resolved callout in
 "Target packaging"). Known residue: the `storefront-client` wheel still
 sends the flat legacy provision-terms wire shape, which is what keeps

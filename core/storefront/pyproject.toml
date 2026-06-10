@@ -1,12 +1,12 @@
 [project]
-name = "core-storefront"
+name = "arkhai-core-storefront"
 version = "0.1.0"
 description = "Core storefront role shell and protocol helpers"
 requires-python = ">=3.12"
 dependencies = [
-    "market-core",
-    "market-identity",
-    "market-policy",
+    "arkhai-core",
+    "arkhai-kit-identity",
+    "arkhai-kit-policy",
     "pydantic>=2",
 ]
 
@@ -22,9 +22,9 @@ pythonpath = ["src"]
 testpaths = ["tests/unit"]
 
 [tool.uv.sources]
-market-core = { path = "..", editable = true }
-market-identity = { path = "../../kit/identity", editable = true }
-market-policy = { path = "../../kit/policy", editable = true }
+arkhai-core = { path = "..", editable = true }
+arkhai-kit-identity = { path = "../../kit/identity", editable = true }
+arkhai-kit-policy = { path = "../../kit/policy", editable = true }
 
 [dependency-groups]
 dev = [

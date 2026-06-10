@@ -141,15 +141,70 @@ wheels = [
 ]
 
 [[package]]
-name = "arkhai-storefront-client"
+name = "arkhai-core-storefront-client"
 version = "0.15.0"
-source = { registry = "../../../../.dist" }
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
 dependencies = [
     { name = "eth-account" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_storefront_client-0.15.0-py3-none-any.whl" },
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_core_storefront_client-0.15.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-vms-provisioning"
+version = "0.4.0"
+source = { editable = "." }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "arkhai-core-storefront-client" },
+    { name = "cachetools" },
+    { name = "cryptography" },
+    { name = "dependency-injector" },
+    { name = "dynaconf" },
+    { name = "fastapi" },
+    { name = "fastapi-utils" },
+    { name = "httpx" },
+    { name = "psycopg2-binary" },
+    { name = "pydantic" },
+    { name = "python-multipart" },
+    { name = "pyyaml" },
+    { name = "sqlalchemy" },
+    { name = "typing-inspect" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.9" },
+    { name = "arkhai-core-storefront-client", specifier = ">=0.11.0" },
+    { name = "cachetools", specifier = ">=5.3" },
+    { name = "cryptography", specifier = ">=42.0" },
+    { name = "dependency-injector", specifier = ">=4.41.0" },
+    { name = "dynaconf", specifier = ">=3.0.0" },
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "fastapi-utils", specifier = ">=0.8.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "psycopg2-binary", specifier = ">=2.9" },
+    { name = "pydantic", specifier = ">=2.7" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
+    { name = "typing-inspect", specifier = ">=0.9.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
 ]
 
 [[package]]
@@ -1138,61 +1193,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/cb/ef/3c6ecf8b317aa982f309835e8f96987466123c6e596646d4e6a1dfcd080f/propcache-0.4.1-cp314-cp314t-win_amd64.whl", hash = "sha256:990f6b3e2a27d683cb7602ed6c86f15ee6b43b1194736f9baaeb93d0016633b1", size = 46259, upload-time = "2025-10-08T19:48:34.226Z" },
     { url = "https://files.pythonhosted.org/packages/c4/2d/346e946d4951f37eca1e4f55be0f0174c52cd70720f84029b02f296f4a38/propcache-0.4.1-cp314-cp314t-win_arm64.whl", hash = "sha256:ecef2343af4cc68e05131e45024ba34f6095821988a9d0a02aa7c73fcc448aa9", size = 40428, upload-time = "2025-10-08T19:48:35.441Z" },
     { url = "https://files.pythonhosted.org/packages/5b/5a/bc7b4a4ef808fa59a816c17b20c4bef6884daebbdf627ff2a161da67da19/propcache-0.4.1-py3-none-any.whl", hash = "sha256:af2a6052aeb6cf17d3e46ee169099044fd8224cbaf75c76a2ef596e8163e2237", size = 13305, upload-time = "2025-10-08T19:49:00.792Z" },
-]
-
-[[package]]
-name = "provisioning-service"
-version = "0.4.0"
-source = { editable = "." }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "arkhai-storefront-client" },
-    { name = "cachetools" },
-    { name = "cryptography" },
-    { name = "dependency-injector" },
-    { name = "dynaconf" },
-    { name = "fastapi" },
-    { name = "fastapi-utils" },
-    { name = "httpx" },
-    { name = "psycopg2-binary" },
-    { name = "pydantic" },
-    { name = "python-multipart" },
-    { name = "pyyaml" },
-    { name = "sqlalchemy" },
-    { name = "typing-inspect" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiohttp", specifier = ">=3.9" },
-    { name = "arkhai-storefront-client", specifier = ">=0.11.0" },
-    { name = "cachetools", specifier = ">=5.3" },
-    { name = "cryptography", specifier = ">=42.0" },
-    { name = "dependency-injector", specifier = ">=4.41.0" },
-    { name = "dynaconf", specifier = ">=3.0.0" },
-    { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "fastapi-utils", specifier = ">=0.8.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "psycopg2-binary", specifier = ">=2.9" },
-    { name = "pydantic", specifier = ">=2.7" },
-    { name = "python-multipart", specifier = ">=0.0.20" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "sqlalchemy", specifier = ">=2.0" },
-    { name = "typing-inspect", specifier = ">=0.9.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pytest-asyncio", specifier = ">=0.23" },
 ]
 
 [[package]]

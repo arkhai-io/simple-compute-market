@@ -4,7 +4,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 
 # Path to the monorepo .dist/ wheel directory, relative to domains/vms/storefront/.
 # Used by uv when resolving pure-Python internal packages
-# (market-policy, provisioning-service) that are
+# (arkhai-kit-policy, arkhai-vms-provisioning) that are
 # distributed as wheels rather than editable source installs. The
 # Dockerfile passes --find-links /dist on the uv sync CLI instead;
 # this variable is for local development only.
@@ -17,12 +17,12 @@ init: ## Resolve deps and create .venv. Run once after checkout or after changin
 
 reinit: ## Force-reinstall internal wheels without bumping versions. Use after make dist-*.
 	uv sync --find-links $(DIST_DIR) \
-	--upgrade-package provisioning-service \
-	--upgrade-package arkhai-storefront-client \
-	--upgrade-package arkhai-registry-client \
-	--reinstall-package provisioning-service \
-	--reinstall-package arkhai-storefront-client \
-	--reinstall-package arkhai-registry-client
+	--upgrade-package arkhai-vms-provisioning \
+	--upgrade-package arkhai-core-storefront-client \
+	--upgrade-package arkhai-core-registry-client \
+	--reinstall-package arkhai-vms-provisioning \
+	--reinstall-package arkhai-core-storefront-client \
+	--reinstall-package arkhai-core-registry-client
 
 # build deliberately does NOT depend on reinit. reinit drives a host-side
 # `uv sync` that resolves the [rl] extra (incl. torch) across whatever

@@ -1,5 +1,5 @@
 [project]
-name = "core-buyer"
+name = "arkhai-core-buyer"
 version = "0.1.0"
 description = "Core buyer role shell and orchestration contracts"
 requires-python = ">=3.12"
@@ -8,14 +8,14 @@ dependencies = [
   "typer>=0.12.0",
   # Generic registry discovery config (registry.urls/auth/discovery_timeout)
   # comes from the shared buyer TOML loader in kit.
-  "market-config",
+  "arkhai-kit-config",
 ]
 
 [project.scripts]
 market = "core_buyer.cli:main"
 
 [tool.uv.sources]
-market-config = { path = "../../kit/config", editable = true }
+arkhai-kit-config = { path = "../../kit/config", editable = true }
 
 [build-system]
 requires = ["hatchling"]

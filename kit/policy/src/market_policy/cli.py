@@ -47,7 +47,7 @@ app = typer.Typer(no_args_is_help=True)
 def _version_callback(value: bool) -> None:
     if value:
         try:
-            v = version("market-policy")
+            v = version("arkhai-kit-policy")
         except PackageNotFoundError:
             v = "unknown (not installed)"
         typer.echo(f"market-policy version {v}")

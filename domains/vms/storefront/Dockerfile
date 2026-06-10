@@ -35,16 +35,16 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     fi && \
     if [ "${INSTALL_RL_DEPS}" = "true" ]; then \
         uv sync --no-dev --no-install-project --extra rl --find-links /.dist \
-            --refresh-package arkhai-registry-client \
-            --refresh-package arkhai-storefront-client \
-            --refresh-package market-policy \
-            --refresh-package provisioning-service; \
+            --refresh-package arkhai-core-registry-client \
+            --refresh-package arkhai-core-storefront-client \
+            --refresh-package arkhai-kit-policy \
+            --refresh-package arkhai-vms-provisioning; \
     else \
         uv sync --no-dev --no-install-project --find-links /.dist \
-            --refresh-package arkhai-registry-client \
-            --refresh-package arkhai-storefront-client \
-            --refresh-package market-policy \
-            --refresh-package provisioning-service; \
+            --refresh-package arkhai-core-registry-client \
+            --refresh-package arkhai-core-storefront-client \
+            --refresh-package arkhai-kit-policy \
+            --refresh-package arkhai-vms-provisioning; \
     fi
 
 # Stage 2: Lean runtime image
@@ -109,10 +109,10 @@ COPY --chown=appuser:appuser domains/vms/storefront/pyproject.toml domains/vms/s
 COPY .dist/ /.dist/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --find-links /.dist \
-        --refresh-package arkhai-registry-client \
-        --refresh-package arkhai-storefront-client \
-        --refresh-package market-policy \
-        --refresh-package provisioning-service
+        --refresh-package arkhai-core-registry-client \
+        --refresh-package arkhai-core-storefront-client \
+        --refresh-package arkhai-kit-policy \
+        --refresh-package arkhai-vms-provisioning
 
 ARG PORT=8080
 ENV PORT=${PORT}

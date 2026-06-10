@@ -201,7 +201,7 @@ callable, so Part I does not block on Part II.
    carries lifecycle universals as typed fields plus a
    `{mechanism, params}` envelope — do not build the plan carrier
    alkahest-shaped). Both sides derive it from the message history.
-   This is also where the `market-core` escrow carriers shed their
+   This is also where the `arkhai-core` escrow carriers shed their
    baked-in alkahest field skeleton (see the resolved callout in the
    extraction doc): one wire change, not two.
 2. **kit/alkahest codecs.** AllArbiter demand-tree encode/decode; oracle

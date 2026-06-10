@@ -3,12 +3,12 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "provisioning-service"
+name = "arkhai-vms-provisioning"
 version = "0.4.0"
 description = "Async VM provisioning service"
 requires-python = ">=3.12"
 dependencies = [
-    "arkhai-storefront-client>=0.11.0",
+    "arkhai-core-storefront-client>=0.11.0",
     "dynaconf>=3.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",

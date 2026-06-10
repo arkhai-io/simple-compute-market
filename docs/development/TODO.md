@@ -79,11 +79,11 @@ Infrastructure-side (compute-market-internal-infra):
   The seller synchronous negotiation wrappers now call an injectable seller
   round hook whose default implementation owns strategy lookup, reference
   amount, internal side-input collection, and middleware-chain execution.
-  The later hook-bearing skeleton move is part of the `market-core`
+  The later hook-bearing skeleton move is part of the `arkhai-core`
   package extraction.
-- `ProvisionTerms` now carries opaque `{kind, payload}` delivery terms on the wire; concrete `compute.v1` duration validation is at the storefront compute boundary. Moving the compute adapter into its own package belongs to the later `market-core` extraction.
-- The market skeleton still lives across the VM buyer domain package and `domains/vms/storefront/`, tangled with compute code → extract `market-core` so the package graph expresses the joint the `run_buy(...)` signature already implies.
-- **Package migration target:** move the remaining executable-package internals into the `core/`, `kit/`, `domains/vms` framework after the import graph matches the target boundaries. `domains/vms` should be organized by VM market concepts (`listings/`, `negotiation/`, `settlement/`, `provisioning`) plus thin concrete executable packages (`buyer/`, `storefront/`), rather than mirroring core roles. The policy implementation split is done: generic chain machinery lives in `kit/policy/`, while VM negotiation/settlement policies live under `domains/vms/negotiation/`. VM models, resource adapters, resource CSV import, compute listing reconciliation, listing filters/rendering/price/strategy helpers now live under `domains/vms/listings/`; accepted-escrow selection, proposal materialization, accepted response artifact assembly, compute lease encoding, token materialization, Alkahest escrow creation, and post-provisioning fulfillment submission live under `domains/vms/settlement/`; generic Alkahest accepted-escrow matching, proposal normalization, and proposal-to-terms payload materialization live in `market_alkahest`; VM capacity checks, provision-term construction, fulfillment-plan construction, provisioning job-spec construction, provisioning-service client helpers, fulfillment orchestration, and the provisioning-service executable package now live under `domains/vms/provisioning/`; the VM buyer CLI package now lives under `domains/vms/buyer/`; the VM storefront executable package now lives under `domains/vms/storefront/`; the default VM storefront seller-round hook and opening/counter semantic checks now live under `domains/vms/negotiation/`; schema-agnostic registry publication fan-out, generic synchronous-negotiation history reconstruction, sync thread creation, and sync-negotiation message persistence now live in `core_storefront`; VM storefront publication/registry-close wiring now lives in `market_storefront.services.publication_service`; and the registry/storefront protocol client packages plus schema-agnostic registry service now live under `core/` while preserving their import and wheel names. The next concrete prerequisite is draining remaining schema-invariant runtime code and VM hooks out of `domains/vms/storefront/` internals.
+- `ProvisionTerms` now carries opaque `{kind, payload}` delivery terms on the wire; concrete `compute.v1` duration validation is at the storefront compute boundary. Moving the compute adapter into its own package belongs to the later `arkhai-core` extraction.
+- The market skeleton still lives across the VM buyer domain package and `domains/vms/storefront/`, tangled with compute code → extract `arkhai-core` so the package graph expresses the joint the `run_buy(...)` signature already implies.
+- **Package migration target:** move the remaining executable-package internals into the `core/`, `kit/`, `domains/vms` framework after the import graph matches the target boundaries. `domains/vms` should be organized by VM market concepts (`listings/`, `negotiation/`, `settlement/`, `provisioning`) plus thin concrete executable packages (`buyer/`, `storefront/`), rather than mirroring core roles. The policy implementation split is done: generic chain machinery lives in `kit/policy/`, while VM negotiation/settlement policies live under `domains/vms/negotiation/`. VM models, resource adapters, resource CSV import, compute listing reconciliation, listing filters/rendering/price/strategy helpers now live under `domains/vms/listings/`; accepted-escrow selection, proposal materialization, accepted response artifact assembly, compute lease encoding, token materialization, Alkahest escrow creation, and post-provisioning fulfillment submission live under `domains/vms/settlement/`; generic Alkahest accepted-escrow matching, proposal normalization, and proposal-to-terms payload materialization live in `market_alkahest`; VM capacity checks, provision-term construction, fulfillment-plan construction, provisioning job-spec construction, arkhai-vms-provisioning client helpers, fulfillment orchestration, and the arkhai-vms-provisioning executable package now live under `domains/vms/provisioning/`; the VM buyer CLI package now lives under `domains/vms/buyer/`; the VM storefront executable package now lives under `domains/vms/storefront/`; the default VM storefront seller-round hook and opening/counter semantic checks now live under `domains/vms/negotiation/`; schema-agnostic registry publication fan-out, generic synchronous-negotiation history reconstruction, sync thread creation, and sync-negotiation message persistence now live in `core_storefront`; VM storefront publication/registry-close wiring now lives in `market_storefront.services.publication_service`; and the registry/storefront protocol client packages plus schema-agnostic registry service now live under `core/` while preserving their import and wheel names. The next concrete prerequisite is draining remaining schema-invariant runtime code and VM hooks out of `domains/vms/storefront/` internals.
 
 **Not an immediate target** — this is the filing principle for *where new behavior goes*, captured so the next non-trivial change to negotiation/settlement is filed correctly rather than by precedent. The packaging extraction is the eventual payoff; the cheap wins (escrow guard → middleware, `derive_prices` placement) can land independently.
 
@@ -91,13 +91,13 @@ Infrastructure-side (compute-market-internal-infra):
 
 ### Native Launch CLI for Provisioning Service
 
-**Status:** Planned. The registry is launched directly via `registry-service` (`make serve`); provisioning has no native launch path.
+**Status:** Planned. The registry is launched directly via `arkhai-core-registry` (`make serve`); provisioning has no native launch path.
 
 **Problem:** The provisioning service is launched today only via raw `uvicorn` in its Dockerfile (`domains/vms/provisioning/service/Dockerfile:105`). There is no native, `pip install …` + run path — running it without docker-compose requires manually invoking uvicorn against the right module and managing the worker process separately. This blocks the "provider runs a provisioning service" half of the four-parties topology: a provider should be able to install and run the service on their own machine without inheriting the dev stack's container assumptions.
 
-**Planned fix:** add a `provisioning-service` console script that wraps both the API uvicorn process and the worker process (likely as two subcommands: `provisioning-service serve` and `provisioning-service worker`). Compose / Helm configs then invoke the console script instead of `uvicorn …` directly.
+**Planned fix:** add a `arkhai-vms-provisioning` console script that wraps both the API uvicorn process and the worker process (likely as two subcommands: `arkhai-vms-provisioning serve` and `arkhai-vms-provisioning worker`). Compose / Helm configs then invoke the console script instead of `uvicorn …` directly.
 
-The `provisioning-service` wheel stays its own distributable — it's operated by providers, who already install `market-storefront` from a separate wheel, and the existing Helm chart structure already treats it as a separate workload.
+The `arkhai-vms-provisioning` wheel stays its own distributable — it's operated by providers, who already install `arkhai-vms-storefront` from a separate wheel, and the existing Helm chart structure already treats it as a separate workload.
 
 ---
 
@@ -146,7 +146,7 @@ Until then: the `indexed: bool` field stays as a no-op in the loader so the YAML
 
 **Problem:** `domains/vms/provisioning/service/src/config.py` (~100 LOC) and `integration-tests/src/settings.py` (~80 LOC) each carry their own near-identical Dynaconf bootstrap (profile selection from `ACTIVE_PROFILES`, `CONFIG_DIRECTORY` resolution, deep-merged `settings.toml` → `.secrets.toml` → `config.yml` → `config-<profile>.yml` → env vars layering). The storefront has since gained its own dynaconf loader at `domains/vms/storefront/src/market_storefront/utils/config.py` with the `STOREFRONT_*` prefix — that one is structurally similar but profile-free, so isn't part of the duplication.
 
-**Planned fix:** lift the shared bootstrap (profile resolution + layered loader factory) into `kit/config` alongside `market_config.config_loader`. `provisioning-service` and `integration-tests` import from there and pass in their per-service prefix (`PROVISIONING_*` / `ARKHAI_*`) + defaults path. No behavior change; pure dedup.
+**Planned fix:** lift the shared bootstrap (profile resolution + layered loader factory) into `kit/config` alongside `market_config.config_loader`. `arkhai-vms-provisioning` and `integration-tests` import from there and pass in their per-service prefix (`PROVISIONING_*` / `ARKHAI_*`) + defaults path. No behavior change; pure dedup.
 
 ---
 
@@ -196,7 +196,7 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 
 **Status:** Planned.
 
-**Problem:** The `registry-service` is currently deployed as a subchart of the `arkhai-node-operator` Helm chart, implying it is part of every provider node's deployment. In practice the registry is a shared marketplace service — there is one per market, not one per provider. Multiple seller nodes should all register with and publish orders to the same registry instance run by the marketplace operator. Bundling it with the provider chart conflates the marketplace operator role with the provider role.
+**Problem:** The `arkhai-core-registry` is currently deployed as a subchart of the `arkhai-node-operator` Helm chart, implying it is part of every provider node's deployment. In practice the registry is a shared marketplace service — there is one per market, not one per provider. Multiple seller nodes should all register with and publish orders to the same registry instance run by the marketplace operator. Bundling it with the provider chart conflates the marketplace operator role with the provider role.
 
 **Planned fix:** Make `registry` an optional subchart (add `condition: registry.enabled`, default `false`). Provider deployments point at an externally-operated registry via `global.registry.api_url`. Only marketplace operator deployments enable the subchart. Document the two deployment topologies (operator vs. provider) in the Helm `values.yaml` and in `ARCHITECTURE.md`.
 
@@ -359,7 +359,7 @@ creates real VMs, and that teardown is Compute-API-based (no SSH key required on
 
 **Status:** Planned. Refactor.
 
-**Problem:** The provisioning-service package exposes its modules at the flat `client.*` level (e.g. `from client.provisioning_client import ...`) because setuptools maps `src/` directly as the package root. To expose a clean `provisioning_service.*` namespace, all internal imports within the package would need to be converted from bare names (e.g. `from models.jobs_model import ...`) to relative imports (e.g. `from .models.jobs_model import ...`).
+**Problem:** The arkhai-vms-provisioning package exposes its modules at the flat `client.*` level (e.g. `from client.provisioning_client import ...`) because setuptools maps `src/` directly as the package root. To expose a clean `provisioning_service.*` namespace, all internal imports within the package would need to be converted from bare names (e.g. `from models.jobs_model import ...`) to relative imports (e.g. `from .models.jobs_model import ...`).
 
 **Planned fix:** do the relative-imports refactor; switch `service/clients/provisioning.py` to import from `provisioning_service.client.provisioning_client`.
 
@@ -379,9 +379,9 @@ creates real VMs, and that teardown is Compute-API-based (no SSH key required on
 
 **Status:** Conditional — only do this if the dependency direction becomes a maintenance problem.
 
-**Problem:** The provisioning service depends on `arkhai-storefront-client` for two call sites — `lease_lifecycle_service._patch_storefront_resource()` and `system_service.get_status()`. This inverts the conceptual layer (provisioning is infrastructure; storefront is a consumer). Not a circular import — `storefront-client` doesn't depend on `provisioning-service` — but the direction is inverted.
+**Problem:** The provisioning service depends on `arkhai-core-storefront-client` for two call sites — `lease_lifecycle_service._patch_storefront_resource()` and `system_service.get_status()`. This inverts the conceptual layer (provisioning is infrastructure; storefront is a consumer). Not a circular import — `storefront-client` doesn't depend on `arkhai-vms-provisioning` — but the direction is inverted.
 
-**Planned fix (if triggered):** extract the two call sites into a thin `StorefrontCallbackClient` inside `domains/vms/provisioning/service/src/client/storefront_callback_client.py` wrapping `httpx` directly for `GET /health` and `PATCH /api/v1/admin/portfolio/resources/{id}`. Keeps `provisioning-service` self-contained without a wheel dependency on the storefront layer.
+**Planned fix (if triggered):** extract the two call sites into a thin `StorefrontCallbackClient` inside `domains/vms/provisioning/service/src/client/storefront_callback_client.py` wrapping `httpx` directly for `GET /health` and `PATCH /api/v1/admin/portfolio/resources/{id}`. Keeps `arkhai-vms-provisioning` self-contained without a wheel dependency on the storefront layer.
 
 ---
 

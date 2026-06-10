@@ -3,7 +3,7 @@
 
 *
 
-# ── provisioning-service ───────────────────────────────────────
+# ── arkhai-vms-provisioning ───────────────────────────────────────
 !domains/
 !domains/vms/
 !domains/vms/provisioning/

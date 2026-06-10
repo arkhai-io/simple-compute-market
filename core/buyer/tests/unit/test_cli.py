@@ -136,7 +136,7 @@ def _vm_like_plugin() -> BuyerSchemaPlugin:
             typer.echo(f"plugin buy at {max_price}")
 
     return BuyerSchemaPlugin(
-        schema_id="vms.compute", register=register, distribution="market-buyer",
+        schema_id="vms.compute", register=register, distribution="arkhai-vms-buyer",
     )
 
 
@@ -169,7 +169,7 @@ def test_plugins_command_lists_schema_ids():
 def test_version_reports_core_and_plugins():
     result = runner.invoke(build_app(plugins=[_vm_like_plugin()]), ["--version"])
     assert result.exit_code == 0
-    assert "core-buyer" in result.output
+    assert "arkhai-core-buyer" in result.output
     assert "vms.compute" in result.output
 
 

@@ -32,7 +32,7 @@ USER appuser
 
 COPY --chown=appuser:appuser domains/vms/provisioning/iac/ansible/requirements.yml /tmp/requirements.yml
 # Keep Ansible in its own venv so the Galaxy collection layer does not depend
-# on the application venv, local wheels, or provisioning-service source.
+# on the application venv, local wheels, or arkhai-vms-provisioning source.
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
     uv venv /home/appuser/ansible-venv && \
     uv pip install --python /home/appuser/ansible-venv/bin/python 'ansible-core>=2.17,<2.20'
@@ -66,7 +66,7 @@ RUN mkdir -p /tmp/galaxy-tarballs && \
         /tmp/galaxy-tarballs/community-general-4.8.7.tar.gz
 
 # Copy pre-built internal wheels (built by make dist before docker build).
-# arkhai-storefront-client and other internal packages are resolved from here.
+# arkhai-core-storefront-client and other internal packages are resolved from here.
 COPY --chown=appuser:appuser .dist/ /dist/
 
 COPY --chown=appuser:appuser domains/vms/provisioning/service/pyproject.toml ./
