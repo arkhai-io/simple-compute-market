@@ -121,7 +121,7 @@ build-dev: build build-dev-env build-test-image
 # (`arkhai:storefront`, `arkhai:provisioning`) and just the wheels they
 # consume via --find-links. Skips `build-registry` (sellers point at
 # someone else's registry).
-build-seller: init-prerequisites dist-storefront-client dist-identity dist-core dist-alkahest dist-config dist-storefront dist-policy dist-provisioning dist-registry ## Build only what a seller needs: storefront + provisioning images.
+build-seller: init-prerequisites dist-storefront-client dist-identity dist-core dist-arkhai-core-storefront dist-alkahest dist-config dist-storefront dist-policy dist-provisioning dist-registry ## Build only what a seller needs: storefront + provisioning images.
 	$(MAKE) -j2 build-storefront build-provisioning
 
 # Same as build-seller, but the provisioning image's in-container appuser
