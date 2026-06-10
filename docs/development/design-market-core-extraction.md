@@ -325,13 +325,22 @@ instead of treating core as having an embedded default market.
   commands. The historical top-level buyer compatibility package has been
   removed on the reorganization branch; tests and the console entrypoint
   import the domain package directly.
-- **Target:** the VM domain package owns the concrete buyer executable. It
-  owns named filter options, conversion to registry query params,
-  listing/resource rendering, price-floor extraction, schema-specific
-  prompts/validation, and accepted-escrow selection UX.
-- **No core default:** if no domain package is installed, core should not
-  produce a concrete `market buy` experience. Core helpers may be used by
-  a domain package, but users/tests depend on the domain package.
+- **Done (plugin inversion):** `core_buyer.cli` ships the `market`
+  console script and verb skeleton; `core_buyer.plugins` defines the
+  `BuyerSchemaPlugin` contract discovered through the
+  `market.buyer_plugins` entry-point group. `domains/vms/buyer/cli.py`
+  is the first plugin: it claims `buy`/`negotiate`/`settle` and the
+  `listing` group (named compute filter flags, rendered output) plus the
+  operator groups, and `market-buyer` publishes it via the entry point
+  instead of a competing console script. The PyInstaller binary
+  pre-assembles the same plugin explicitly since frozen bundles can't
+  rely on entry-point metadata.
+- **Done (no core default):** without plugins the core binary offers only
+  generic `market listing list/show` (raw JSON, repeatable
+  `--filter name=value` passthrough) and helpful stubs for the buy verbs;
+  verbs a plugin claims replace the core fallbacks. Covered by
+  `core/buyer/tests/unit/test_cli.py` and the domain-side
+  `tests/test_plugin_export.py` end-to-end discovery test.
 - **Done:** the physical buyer packaging/test project now lives under
   `domains/vms/buyer/`; the top-level `buyer/` source folder has been
   removed from git.
@@ -631,11 +640,14 @@ and `shared-env/`.
    policy discovery); remaining importers consume only the generic types.
 
 Each phase keeps the branch green and the e2e suite passing. Seams 0–3,
-0b, and the policy cleanup are done; seam 4 is the remaining target. Its
-largest outstanding items are moving the `compute.v1` interpretation out
-of `market_core.schemas` into `domains/vms`, and the buyer plugin
-extraction (verb skeleton + plugin discovery into `core-buyer`, VM
-commands as the first plugin). Follow-on architecture beyond this
+0b, and the policy cleanup are done; seam 4 is the remaining target. Two
+of its largest items have landed: the `compute.v1` interpretation moved
+out of `market_core.schemas` into `domains/vms/provisioning`, and the
+buyer plugin extraction is done (verb skeleton + entry-point plugin
+discovery in `core-buyer`, the VM CLI as the first plugin). What remains
+of seam 4 is the storefront-side drain through the capacity client
+interface and settling the `market-core` carriers-wheel question.
+Follow-on architecture beyond this
 reorganization — asynchronous settlement lifecycles and the shared
 capacity/site-authority split — is planned in
 `design-settlement-lifecycle-and-capacity.md`.
@@ -667,8 +679,8 @@ domains/vms/buyer/settle_cli.py               seam 0 legacy — consume accepted
 domains/vms/buyer/escrow_cli.py               seam 0 legacy — consume accepted proposal/terms or retire split create
 domains/vms/buyer/listing_cli.py              seam 0b — VM listing commands
 domains/vms/buyer/aggregation.py              seam 0b — across-seller aggregation policies
-core/buyer/ (plugin discovery, new)           seam 0b — `market` console script, verb skeleton, entry-points plugin loading
-domains/vms/buyer/ (plugin export, new)       seam 0b — VM schema plugin exposed via entry point; CLI assembly moves behind it
+core/buyer/src/core_buyer/{cli,plugins}.py    seam 0b done — `market` console script, verb skeleton, entry-points plugin loading
+domains/vms/buyer/cli.py                      seam 0b done — VM schema plugin exposed via `market.buyer_plugins` entry point
 core/storefront/src/core_storefront/models/   seam 4 — schema-invariant storefront HTTP models
 core/storefront/src/core_storefront/stage_log.py  seam 4 — schema-invariant stage-event logger/persistence helper
 core/storefront/src/core_storefront/services/negotiation_service.py  seam 4 — generic negotiation query/admin service over injected hooks

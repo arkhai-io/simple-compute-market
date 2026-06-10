@@ -11,6 +11,9 @@ dependencies = [
   "market-config",
 ]
 
+[project.scripts]
+market = "core_buyer.cli:main"
+
 [tool.uv.sources]
 market-config = { path = "../../kit/config", editable = true }
 

@@ -35,8 +35,10 @@ rl = [
   "torch>=2.7.0",
 ]
 
-[project.scripts]
-market = "domains.vms.buyer.cli:app"
+# The `market` console script ships from core-buyer; this package only
+# contributes the VM compute schema plugin the core CLI discovers.
+[project.entry-points."market.buyer_plugins"]
+vms = "domains.vms.buyer.cli:plugin"
 
 # Workspace resolution for sibling packages.
 # market-policy: per-round negotiation decision logic, shared with the
