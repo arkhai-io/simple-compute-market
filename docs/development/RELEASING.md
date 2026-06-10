@@ -1,15 +1,20 @@
 # Releasing Python packages
 
-The repo publishes five internal Python packages to PyPI via
+The repo publishes internal Python packages to PyPI via
 `.github/workflows/publish-pypi.yml`:
 
 | Package | Path | Initial version | Internal deps |
 |---|---|---|---|
-| `market-service` | `service/` | 0.1.0 | none |
-| `market-policy` | `policy/` | 0.1.0 | `market-service` |
-| `provisioning-service` | `provisioning-service/` | 0.1.2 | none |
-| `arkhai-storefront-client` | `storefront-client/` | 0.4.0 | none |
-| `arkhai-registry-client` | `registry-client/` | 0.2.0 | none |
+| `arkhai-kit-identity` | `kit/identity/` | 0.1.0 | none |
+| `arkhai-core` | `core/` | 0.1.0 | none |
+| `arkhai-core-buyer` | `core/buyer/` | 0.1.0 | `arkhai-kit-config` |
+| `arkhai-core-storefront` | `core/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-kit-identity`, `arkhai-kit-policy` |
+| `arkhai-kit-alkahest` | `kit/alkahest/` | 0.1.0 | `arkhai-core` |
+| `arkhai-kit-config` | `kit/config/` | 0.1.0 | `arkhai-kit-alkahest` |
+| `arkhai-kit-policy` | `kit/policy/` | 0.1.0 | none |
+| `arkhai-vms-provisioning` | `domains/vms/provisioning/service/` | 0.1.2 | none |
+| `arkhai-core-storefront-client` | `core/storefront-client/` | 0.4.0 | none |
+| `arkhai-core-registry-client` | `core/registry-client/` | 0.2.0 | none |
 
 ## One-time setup (per package)
 
@@ -24,8 +29,8 @@ For each package, configure trusted publishing on PyPI:
    - **Owner**: `arkhai-io`
    - **Repository**: `simple-compute-market`
    - **Workflow**: `publish-pypi.yml`
-   - **Environment**: `pypi-<pkg>` — e.g. `pypi-market-service`,
-     `pypi-arkhai-storefront-client`, etc. (matches `environment.name`
+   - **Environment**: `pypi-<pkg>` — e.g.
+     `pypi-arkhai-core-storefront-client`, etc. (matches `environment.name`
      in the workflow).
 4. Create the matching environment in this repo at
    `https://github.com/arkhai-io/simple-compute-market/settings/environments`.
@@ -43,17 +48,6 @@ so version-only commits trigger publishes and other commits don't.
 
 `workflow_dispatch` is also available — it forces a publish attempt for
 every package whose current version isn't yet on PyPI.
-
-## Internal dep ordering
-
-`market-policy` depends on `market-service`. When both bump in the same
-PR they publish in parallel, against whatever `market-service` version
-is currently on PyPI — the new policy wheel records `market-service`
-as a `>=` constraint, not an exact pin, so resolution still works.
-
-If a `market-policy` change requires a *just-published* `market-service`
-version, land the `market-service` bump first, wait for it to publish,
-then merge `market-policy`.
 
 ## Versioning policy
 

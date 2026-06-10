@@ -18,7 +18,7 @@ services:
     ports:
       - "8080:8080"
     env_file:
-      - ../registry-service/.env.docker-compose
+      - ../core/registry/.env.docker-compose
     volumes:
       - ../shared-env:/app/shared-env
     restart: unless-stopped

@@ -1,0 +1,21 @@
+# ---------------------------------------------------------------------------
+# Profile: local
+# Copy this file to config-local.yml and set ACTIVE_PROFILES=local in .env.
+# config-local.yml is gitignored and never committed.
+# ---------------------------------------------------------------------------
+
+# Uncomment to use PostgreSQL instead of the default SQLite:
+# database_url: "postgresql+psycopg2://postgres:postgres@localhost:5432/provisioning"
+
+# Override Ansible paths to your local checkout of domains/vms/provisioning/iac:
+# playbook_path: "/home/you/code/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
+# inventory_path: "/home/you/code/domains/vms/provisioning/iac/ansible/inventory/hosts"
+# management_vars_path: "/home/you/code/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
+
+# Shared admin key with the storefront (X-Admin-Key gate + callback secret).
+# Leave unset locally to disable auth; set to match the storefront's admin_api_key.
+# storefront_admin_key: "dev-shared-secret"
+
+# Golden image credentials for local testing:
+# golden_root_ssh_filename: "id_ed25519"
+# golden_root_ssh_password: "yourpassword"

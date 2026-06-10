@@ -1,0 +1,32 @@
+[project]
+name = "arkhai-core-storefront"
+version = "0.1.0"
+description = "Core storefront role shell and protocol helpers"
+requires-python = ">=3.12"
+dependencies = [
+    "arkhai-core",
+    "arkhai-kit-identity",
+    "arkhai-kit-policy",
+    "pydantic>=2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/core_storefront"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests/unit"]
+
+[tool.uv.sources]
+arkhai-core = { path = "..", editable = true }
+arkhai-kit-identity = { path = "../../kit/identity", editable = true }
+arkhai-kit-policy = { path = "../../kit/policy", editable = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4,<9.0.0",
+]

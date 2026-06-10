@@ -1,0 +1,158 @@
+[project]
+name = "arkhai-vms-storefront"
+version = "0.1.0"
+description = "Provider-side storefront server: hosts /orders, /negotiate, /settle, /alerts/resource endpoints. The provider-side counterpart to arkhai-vms-buyer."
+authors = [
+    {name = "Your Name", email = "your@email.com"},
+]
+requires-python = ">=3.12"
+dependencies = [
+	"arkhai-core-registry-client>=0.7.0",
+    "arkhai-core-storefront-client>=0.15.0",
+    "arkhai-core-storefront",
+    "arkhai-core",
+    "arkhai-kit-identity",
+    "arkhai-kit-alkahest",
+    "arkhai-kit-config",
+    "arkhai-kit-policy",
+    "arkhai-vms-provisioning>=0.4.0",
+    "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
+    "google-cloud-logging>=3.12.0,<4.0.0",
+    "fastapi~=0.115.8",
+    "fastapi-utils>=0.8.0",
+    "uvicorn~=0.34.0",
+    "psycopg2-binary>=2.9.10,<3.0.0",
+    "alkahest-py>=0.4.0",
+    "web3>=7.14.0",
+    "websockets>=15.0.1",
+    "httpx>=0.27",
+    # CLI surface (`market-storefront` console script).
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "eth-account>=0.13.0",
+    "dynaconf>=3.0.0",
+]
+
+[project.scripts]
+market-storefront = "market_storefront.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4,<9.0.0",
+    "pytest-asyncio>=0.23.8,<1.0.0",
+    "nest-asyncio>=1.6.0,<2.0.0",
+    "wandb>=0.23.0",
+]
+
+[project.optional-dependencies]
+
+# Inference-only — just enough to load and run the trained .pt checkpoints
+# in domains/vms/negotiation/rl/models/. The architecture is
+# reproduced inline in arkhai_common.ArkhaiInferencePolicy (state-dict
+# compatible with checkpoints trained against pufferlib.models.Default,
+# verified bit-identical). Training (which still uses pufferlib's C env)
+# lives in domains/vms/training and is not exposed as an extra here.
+rl = [
+    "torch>=2.7.0",
+]
+
+jupyter = [
+    "jupyter>=1.0.0,<2.0.0",
+]
+lint = [
+    "ruff>=0.4.6,<1.0.0",
+    "mypy>=1.15.0,<2.0.0",
+    "codespell>=2.2.0,<3.0.0",
+    "types-pyyaml>=6.0.12.20240917,<7.0.0",
+    "types-requests>=2.32.0.20240914,<3.0.0",
+]
+
+[tool.uv]
+# Internal wheels (clients, arkhai-vms-provisioning) come from the repo's
+# .dist/ via the CLI flag — `make init`/`reinit`/`test` and the Dockerfile
+# all pass --find-links. No find-links entry here: a relative path can't
+# normalize inside the Docker build, where /app is the project root.
+# Restrict resolution to platforms that have alkahest_py wheels.
+# Without this, uv attempts to solve for all platforms and fails to
+# find arkhai-vms-provisioning wheels for platforms
+# where it has no local find-links path to check.
+environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+]
+
+[tool.uv.sources]
+arkhai-core-storefront = { path = "../../../core/storefront", editable = true }
+arkhai-core = { path = "../../../core", editable = true }
+arkhai-kit-identity = { path = "../../../kit/identity", editable = true }
+arkhai-kit-alkahest = { path = "../../../kit/alkahest", editable = true }
+arkhai-kit-config = { path = "../../../kit/config", editable = true }
+arkhai-kit-policy = { path = "../../../kit/policy", editable = true }
+torch = [
+    { index = "pytorch-cpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "C",  # flake8-comprehensions
+    "B",   # flake8-bugbear
+    "UP", # pyupgrade
+    "RUF", # ruff specific rules
+]
+ignore = ["E501", "C901", "B006"] # ignore line too long, too complex
+
+[tool.ruff.lint.isort]
+known-first-party = ["market_storefront"]
+
+[tool.mypy]
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_subclassing_any = true
+warn_incomplete_stub = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+follow_imports = "silent"
+ignore_missing_imports = true
+explicit_package_bases = true
+disable_error_code = ["misc", "no-untyped-call", "no-any-return"]
+
+exclude = [".venv"]
+
+[tool.codespell]
+ignore-words-list = "rouge"
+skip = "./locust_env/*,uv.lock,.venv,./frontend,**/*.ipynb"
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "../../..", "../../../kit/policy/src", "../../../kit/alkahest/src", "../../../kit/config/src", "../../../core/src"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.hatch.metadata]
+allow-direct-references=true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/market_storefront"]

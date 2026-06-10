@@ -273,7 +273,7 @@ install_repo() {
 # ── Set up venv and install CLI ───────────────────────────────
 
 install_cli() {
-    local buyer_dir="$INSTALL_DIR/buyer"
+    local buyer_dir="$INSTALL_DIR/domains/vms/buyer"
     local buyer_venv="$buyer_dir/.venv"
 
     info "Installing buyer CLI into venv..."
@@ -285,7 +285,7 @@ install_cli() {
 # ── Create symlink and set up PATH ────────────────────────────
 
 setup_path() {
-    local market_bin="$INSTALL_DIR/buyer/.venv/bin/market"
+    local market_bin="$INSTALL_DIR/domains/vms/buyer/.venv/bin/market"
 
     mkdir -p "$BIN_DIR"
 

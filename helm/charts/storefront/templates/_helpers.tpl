@@ -81,8 +81,8 @@ Compose the provisioning service URL from global.provisioning.{host,port}.
 
 {{/*
 Compose the agent's externally-advertised base URL from the agent's
-Service DNS + port. This is what the agent writes to its on-chain
-ERC-8004 registration file (and what other agents dial to reach it).
+Service DNS + port. This is what the storefront advertises on its
+registry listings (and what buyers dial to reach it).
 Argument: dict with `root` and `agent`.
 */}}
 {{- define "storefront.agentBaseUrl" -}}
@@ -144,7 +144,7 @@ string the ConfigMap template embeds under `storefront.toml`.
 Argument: dict with `root` (chart root) and `agent`.
 
 Pairs with `storefront.agentSecretsToml` — together they form the
-complete config the runtime loader (`service.config_loader`) merges
+complete config the storefront runtime loader merges
 at startup. Sensitive values (wallet.address, wallet.private_key,
 admin_api_key, resources_csv_inline, integrations.gemini_api_key)
 live in the Secret-rendered overlay and are not duplicated here.

@@ -1,0 +1,87 @@
+# async-provisioning-service
+
+Async VM provisioning service. Exposes a REST API that queues provisioning jobs (create, destroy, start, stop, etc.) onto a Redis-backed worker that executes Ansible playbooks from `domains/vms/provisioning/iac`.
+
+## Architecture
+
+```
+Client ──▶ FastAPI (port 8081) ──▶ Redis queue ──▶ Worker ──▶ Ansible playbooks
+                                                              (domains/vms/provisioning/iac)
+```
+
+## Local Development
+
+```bash
+# Install dependencies
+make install
+
+# Start API server
+make serve
+```
+
+## Docker
+
+### Prerequisites
+
+The Dockerfile copies `domains/vms/provisioning/iac` into the image. Keep that tree present when building from the repository root.
+
+### Build
+
+```bash
+make build
+```
+
+This runs from the repo root so both `domains/vms/provisioning/service/` and `domains/vms/provisioning/iac/` are in the build context.
+
+### Run
+
+```bash
+# Basic — uses baked-in IaC
+make docker-run
+
+# Dev — mounts host IaC for live edits
+make docker-run-dev
+```
+
+### Mounting specific files at runtime
+
+Override only what you need:
+
+```bash
+# Mount inventory + SSH keys
+docker run --rm --env-file .env.local -p 8081:8081 \
+  -v /path/to/hosts:/opt/domains/vms/provisioning/iac/ansible/inventory/hosts:ro \
+  -v /path/to/keys:/opt/domains/vms/provisioning/iac/ansible/keys:ro \
+  async-provisioning-service
+
+# Full IaC override
+docker run --rm --env-file .env.local -p 8081:8081 \
+  -v $(pwd)/../iac:/opt/domains/vms/provisioning/iac \
+  async-provisioning-service
+```
+
+### Mount points reference
+
+| Container path | Purpose |
+|---|---|
+| `/opt/domains/vms/provisioning/iac/` | Entire IaC tree (full override) |
+| `/opt/domains/vms/provisioning/iac/ansible/inventory/hosts` | Ansible inventory |
+| `/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml` | Management variables |
+| `/opt/domains/vms/provisioning/iac/ansible/keys/` | SSH private keys |
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `HOST` | `0.0.0.0` | API bind address |
+| `PORT` | `8081` | API port |
+| `LOG_LEVEL` | `info` | Logging level |
+| `DATABASE_URL` | `postgresql+psycopg2://...` | Database connection string |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection for job queue |
+| `ANSIBLE_TIMEOUT_SECONDS` | `1800` | Max seconds per Ansible run |
+| `DEFAULT_VM_HOST` | `kvm1` | Default KVM host target |
+| `PROVISIONING_REPO_ROOT` | *(auto-detected)* | Override project root path |
+| `PLAYBOOK_PATH` | *(auto-resolved)* | Override playbook path |
+| `INVENTORY_PATH` | *(auto-resolved)* | Override inventory path |
+| `PROVISIONING_STOREFRONT_ADMIN_KEY` | *(empty)* | Shared secret with the storefront; gates every non-health request as `X-Admin-Key`. Empty = auth disabled (dev). |
+| `ENABLE_RATE_LIMITING` | `false` | Enable per-agent rate limiting |

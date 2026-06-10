@@ -1,0 +1,137 @@
+# ---------------------------------------------------------------------------
+# Storefront base defaults.
+# This file documents every supported key and its default. Do NOT put
+# environment-specific values here.
+#
+# Override via (highest priority first):
+#   1. STOREFRONT_* environment variables (separator __)
+#   2. $XDG_CONFIG_HOME/arkhai/storefront.secrets.toml  (Secret overlay)
+#   3. $XDG_CONFIG_HOME/arkhai/storefront.toml          (ConfigMap base)
+#   4. This file
+# ---------------------------------------------------------------------------
+
+# Identity
+agent_id        = ""        # must be a Python identifier; empty → "root_agent"
+agent_name      = ""        # display name; falls back to agent_id
+
+# HTTP server
+port            = 8000
+base_url        = "http://localhost:8000"  # advertised on-chain; may contain ${zerotier} placeholder
+mcp_server_url  = "http://localhost:8080/mcp"
+zerotier_network = ""
+
+# Storage / logging
+# Persist by default: this is the path the seller compose mounts a named
+# volume at (compose/seller.yml -> .../data/storefront) and the one the
+# quickstart documents, so a config that omits db_path still survives a
+# container recreate. The parent dir is auto-created on first start. An
+# ephemeral default (e.g. /tmp) silently loses all listing/deal state on
+# restart. Operators running outside the container should set an absolute
+# db_path in storefront.toml.
+db_path         = "./src/market_storefront/data/storefront/agent.db"
+log_file_path   = ""
+log_level       = "INFO"
+
+# Resource auto-seeding — inline content wins over path
+resources_csv_inline = ""
+resources_csv_path   = ""
+
+# Admin API key — protects /admin/* routes. Empty means unprotected (local dev).
+admin_api_key   = ""
+
+# Registry discovery (seller-side)
+enable_registry_discovery = true
+registry_order_timeout    = 30
+max_discovery_agents      = 10
+enable_order_retry        = true
+order_retry_interval      = 300
+
+# Resource poller
+resource_check_interval      = 300
+resource_lease_grace_seconds = 1800
+
+# Negotiation watchdog
+negotiation_timeout_seconds   = 1800
+negotiation_watchdog_interval = 60
+default_vm_host               = "kvm1"
+
+[wallet]
+# Sensitive — populated by Secret overlay in k8s, by local file otherwise.
+address        = ""
+private_key    = ""
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess demo@example"
+
+# [chains.<name>] tables — one per chain the operator wants to transact
+# on. The operator provides these via storefront.toml; no defaults ship
+# here (the storefront refuses to start with zero configured chains, so
+# the absent-key state has a clear error path). Each entry supports:
+#   rpc_url                       (required)
+#   chain_id                      (optional, defaults to KNOWN_CHAIN_IDS lookup by name)
+#   alkahest_address_config_path  (optional, anvil-style file deployments only)
+# Listings advertise their accepted chains via
+# accepted_escrows[].chain_name tuples; the runtime dispatches to the
+# matching [chains.<name>] entry when settling.
+
+[registry]
+# Leave empty by default. Any user-supplied list at a higher overlay
+# (storefront.toml / env / secrets) fully replaces this. If we shipped
+# a default URL here, dynaconf's merge_enabled=True would *append* the
+# user's list onto the default, leaving the storefront heartbeating to
+# both registries.
+urls              = []
+discovery_timeout = 5.0
+
+[registry.auth]
+# Free-form table of {url = "bearer-token"} pairs for private registries.
+# Empty by default; populate via storefront.secrets.toml.
+
+[gateway]
+# Path prefix when behind a reverse proxy (e.g. "/storefront"). Empty for direct.
+root_path = ""
+
+[provisioning]
+service_url            = "http://localhost:8085"
+mode                   = ""        # "mock" | "" — selects mock vs real ansible/kvm path
+timeout                = 3600
+poll_interval          = 15
+preflight_timeout      = 30
+fail_on_unreachable    = true
+frp_server_addr        = ""
+frp_domain             = ""
+frp_dashboard_password = ""
+
+[fulfillment.failure_policy]
+# Actions applied when provisioning/fulfillment fails. `release_capacity`
+# repairs local inventory/listings; `emit_event` writes to stage_events/SSE;
+# `webhook` POSTs the failure payload to webhook_url; `refund` attempts the
+# explicit seller refund path through the selected token escrow codec when a
+# stored proposal is available.
+actions         = ["release_capacity", "emit_event"]
+webhook_url     = ""
+webhook_timeout = 5.0
+
+[negotiation]
+# Ordered policies run per round. Guards short-circuit (`reject`/`exit`)
+# when their preconditions fail; the terminal policy (typically
+# `bisection` or `rl`) always returns a counter/accept/exit. `rl`
+# requires torch + the pufferlib checkpoint. The legacy
+# `policy_mode = "bisection"` key still works and synthesizes the same
+# default chain (kept for back-compat).
+# For per-escrow-kind terminal dispatch, replace the list with a
+# [negotiation.policies] table, e.g. erc20 = "erc20_bisection";
+# use [negotiation.policies.<kind>] chain = [...] when a kind needs
+# its own guard + terminal sequence.
+policies           = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
+seller_model_path  = "domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt"
+buyer_model_path   = "domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt"
+extra_policy_paths = []
+
+[pricing]
+default_min_price            = ""
+default_token_address        = ""
+default_max_duration_seconds = 0   # 0 means unlimited
+publish_priceless            = false
+
+[integrations]
+# Sensitive — populated by Secret overlay.
+gemini_api_key = ""

@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  registry:
+    image: arkhai:registry
+    # Uncomment to build locally instead
+    # build: .
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      # Load from .env file (never commit .env to git!)
+      - DATABASE_URL=${DATABASE_URL}
+      - PORT=${PORT:-8080}
+      - HOST=${HOST:-0.0.0.0}
+      - ENABLE_HEALTH_CHECKS=${ENABLE_HEALTH_CHECKS:-false}
+      - HEALTH_CHECK_INTERVAL=${HEALTH_CHECK_INTERVAL:-60}
+      - ENDPOINT_CHECK_TIMEOUT=${ENDPOINT_CHECK_TIMEOUT:-10}
+      - HEARTBEAT_TTL_SECS=${HEARTBEAT_TTL_SECS:-60}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    env_file:
+      - .env  # Create this file from .env.sample
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

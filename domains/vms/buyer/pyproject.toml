@@ -1,0 +1,125 @@
+[project]
+name = "arkhai-vms-buyer"
+version = "0.1.0"
+description = "Buyer-side CLI for the market: discover sellers, negotiate, place orders. Pure HTTP client; no server, no agent runtime."
+requires-python = ">=3.12"
+dependencies = [
+  "typer>=0.12.0",
+  "rich>=13.7.0",
+  "PyYAML>=6.0.0",
+  "pyinstaller>=6.19.0",
+  "eth-account>=0.13.0",
+  # Needed by the buyer orchestrator (market buy-sync) for in-process
+  # on-chain escrow creation. Imported lazily from
+  # domains.vms.settlement.escrow_client so loading the CLI does not pay the
+  # native-binary cost unless the orchestrator actually runs.
+  "alkahest-py>=0.4.0",
+  "arkhai-core-buyer",
+  "arkhai-core",
+  "arkhai-kit-alkahest",
+  "arkhai-kit-config",
+  "arkhai-kit-policy",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0.0",
+]
+
+# RL negotiation strategy — inference only. Mirrors the storefront's
+# [rl] extra: ``uv pip install -e ".[rl]"`` runs trained pufferlib
+# checkpoints from domains/vms/negotiation/rl/models/ without
+# pulling in pufferlib itself. The model architecture is reproduced
+# inline in arkhai_common.ArkhaiInferencePolicy (state-dict compatible).
+rl = [
+  "torch>=2.7.0",
+]
+
+# The `market` console script ships from arkhai-core-buyer; this package only
+# contributes the VM compute schema plugin the core CLI discovers.
+[project.entry-points."market.buyer_plugins"]
+vms = "domains.vms.buyer.cli:plugin"
+
+# Workspace resolution for sibling packages.
+# arkhai-kit-policy: per-round negotiation decision logic, shared with the
+# storefront so both sides drive negotiation through one engine.
+[tool.uv.sources]
+arkhai-core = { path = "../../../core", editable = true }
+arkhai-core-buyer = { path = "../../../core/buyer", editable = true }
+arkhai-kit-alkahest = { path = "../../../kit/alkahest", editable = true }
+arkhai-kit-config = { path = "../../../kit/config", editable = true }
+arkhai-kit-policy = { path = "../../../kit/policy", editable = true }
+torch = [
+  { index = "pytorch-cpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+only-include = ["main.py"]
+dev-mode-dirs = ["../../.."]
+
+[tool.hatch.build.targets.wheel.force-include]
+"../../__init__.py" = "domains/__init__.py"
+"../__init__.py" = "domains/vms/__init__.py"
+"__init__.py" = "domains/vms/buyer/__init__.py"
+"aggregation.py" = "domains/vms/buyer/aggregation.py"
+"buy_cli.py" = "domains/vms/buyer/buy_cli.py"
+"buy_orchestrator.py" = "domains/vms/buyer/buy_orchestrator.py"
+"buyer_client.py" = "domains/vms/buyer/buyer_client.py"
+"chain_cli.py" = "domains/vms/buyer/chain_cli.py"
+"cli.py" = "domains/vms/buyer/cli.py"
+"cli_helpers.py" = "domains/vms/buyer/cli_helpers.py"
+"common.py" = "domains/vms/buyer/common.py"
+"config_cli.py" = "domains/vms/buyer/config_cli.py"
+"deal_helpers.py" = "domains/vms/buyer/deal_helpers.py"
+"escrow_cli.py" = "domains/vms/buyer/escrow_cli.py"
+"listing_cli.py" = "domains/vms/buyer/listing_cli.py"
+"logs_cli.py" = "domains/vms/buyer/logs_cli.py"
+"negotiate_cli.py" = "domains/vms/buyer/negotiate_cli.py"
+"network_cli.py" = "domains/vms/buyer/network_cli.py"
+"run_log.py" = "domains/vms/buyer/run_log.py"
+"settle_cli.py" = "domains/vms/buyer/settle_cli.py"
+"../listings/__init__.py" = "domains/vms/listings/__init__.py"
+"../listings/buyer_cli.py" = "domains/vms/listings/buyer_cli.py"
+"../listings/host_csv_importer.py" = "domains/vms/listings/host_csv_importer.py"
+"../listings/models.py" = "domains/vms/listings/models.py"
+"../listings/pricing.py" = "domains/vms/listings/pricing.py"
+"../listings/reconciler.py" = "domains/vms/listings/reconciler.py"
+"../listings/resource_csv_importer.py" = "domains/vms/listings/resource_csv_importer.py"
+"../listings/resources.py" = "domains/vms/listings/resources.py"
+"../listings/strategy.py" = "domains/vms/listings/strategy.py"
+"../negotiation/__init__.py" = "domains/vms/negotiation/__init__.py"
+"../negotiation/policies.py" = "domains/vms/negotiation/policies.py"
+"../negotiation/storefront_round.py" = "domains/vms/negotiation/storefront_round.py"
+"../negotiation/rl/__init__.py" = "domains/vms/negotiation/rl/__init__.py"
+"../negotiation/rl/arkhai_common.py" = "domains/vms/negotiation/rl/arkhai_common.py"
+"../negotiation/rl/torch_arkhai_strategy.py" = "domains/vms/negotiation/rl/torch_arkhai_strategy.py"
+"../negotiation/rl/models/arkhai_negotiator_buyer.pt" = "domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt"
+"../negotiation/rl/models/arkhai_negotiator_seller.pt" = "domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt"
+"../provisioning/__init__.py" = "domains/vms/provisioning/__init__.py"
+"../provisioning/capacity.py" = "domains/vms/provisioning/capacity.py"
+"../provisioning/client.py" = "domains/vms/provisioning/client.py"
+"../provisioning/fulfillment.py" = "domains/vms/provisioning/fulfillment.py"
+"../provisioning/fulfillment_plan.py" = "domains/vms/provisioning/fulfillment_plan.py"
+"../provisioning/job_spec.py" = "domains/vms/provisioning/job_spec.py"
+"../provisioning/terms.py" = "domains/vms/provisioning/terms.py"
+"../settlement/__init__.py" = "domains/vms/settlement/__init__.py"
+"../settlement/compute_lease.py" = "domains/vms/settlement/compute_lease.py"
+"../settlement/escrow_client.py" = "domains/vms/settlement/escrow_client.py"
+"../settlement/escrow_selection.py" = "domains/vms/settlement/escrow_selection.py"
+"../settlement/fulfillment.py" = "domains/vms/settlement/fulfillment.py"
+"../settlement/proposals.py" = "domains/vms/settlement/proposals.py"
+
+[tool.pytest.ini_options]
+pythonpath = ["../../..", "."]

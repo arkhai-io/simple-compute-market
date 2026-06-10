@@ -1,0 +1,125 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "arkhai-e2e-tests"
+version = "0.1.0"
+description = "End-to-end integration tests for Arkhai deployed blockchain environments"
+requires-python = ">=3.13,<3.15"
+dependencies = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-html>=4.0",
+    "pytest-xdist>=3.5",
+    "dynaconf>=3.2",
+    "web3>=7.0",
+    "eth-account>=0.12",
+    "eth-typing>=4.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "rich>=13.0",
+    "httpx>=0.27",            # used by storefront smoke and canonical service clients
+    # Workspace dependency: tests use the real discovery/matching logic,
+    # not a re-implementation. Keeps test behavior aligned with storefront behavior.
+    "arkhai-core-storefront-client>=0.11.0",
+    "arkhai-core-registry-client>=0.6.0",
+    "arkhai-kit-alkahest>=0.1.0",
+	"arkhai-vms-storefront>=0.1.0",
+    "arkhai-vms-provisioning>=0.4.0",
+    # The buyer's `market` CLI, run as a subprocess by the buyer-machine
+    # e2e (tests/e2e/roles/buyer_cli.py). Installed so the binary is on
+    # PATH inside arkhai:e2e-tests when the suite runs in-network.
+    # arkhai-kit-policy is the buyer's sibling negotiation-strategy dep,
+    # resolved from .dist alongside the other internal wheels.
+    "arkhai-vms-buyer>=0.1.0",
+    "arkhai-kit-policy>=0.1.0",
+]
+
+[tool.uv]
+
+[project.optional-dependencies]
+dev = [
+    "black>=24.0",
+    "isort>=5.13",
+    "mypy>=1.8",
+    "ruff>=0.3",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "--tb=short",
+    "-v",
+    "--strict-markers",
+]
+# Third-party deprecation noise we can't fix at our level. Keep filters
+# narrow so genuine new deprecations still surface.
+filterwarnings = [
+    # web3 7.x still uses websockets.legacy and pins websockets<16; the
+    # warning fires on first import. Library-level migration upstream.
+    "ignore:websockets.legacy is deprecated:DeprecationWarning:websockets.legacy",
+]
+markers = [
+    "contracts: Tests that validate on-chain contract state",
+    "wallets: Smoke tests that validate wallet balances and key pairs",
+    "registry: Smoke tests that validate the Registry REST API",
+    "storefront: Smoke tests that validate seller storefront",
+    "provisioning: Smoke tests for the deployed provisioning service REST API",
+    "provisioning_readonly: Read-only provisioning smoke tests safe for default Helm hooks",
+    "provisioning_write: Provisioning smoke tests that exercise write-path APIs",
+    "e2e_deal: Full buyer-seller deal lifecycle e2e test (synthetic-buyer + force-accept, follows the dry-run + advance stage pattern)",
+    "e2e_deal_buyer_cli: Full deal driven by the buyer's `market` CLI subprocess against the live storefront (two-machine production interaction)",
+    "e2e_buy: One-shot `market buy` (discovery-driven) lifecycle from the buyer machine, against the live storefront",
+    "e2e_compute_dynamic_listings: Compute dynamic listing lifecycle from admin reserve through release callbacks",
+    "multi_registry: Multi-registry publish + discovery e2e scenario (stops at negotiation start)",
+    "e2e_alkahest_escrow_codecs: Real Alkahest escrow codec create/read scenario",
+    "e2e_non_erc20_settlement: Full settlement path for scalar non-ERC20 Alkahest escrow variants",
+    "smoke: Quick smoke tests",
+    "slow: Tests that may take longer due to RPC latency",
+    "mock_provisioning: E2E mock provisioning flow tests",
+    "mock_provisioning_happy: Happy path — deal completes successfully",
+    "mock_provisioning_failure: Failure path — provisioning fails, orders reopen",
+    "roles_layer_external: External layer — EVM chain + deployed contracts",
+    "roles_layer_registry: Registry layer — marketplace operator's registry service",
+    "roles_layer_seller: Seller layer — a seller's agent + provisioning service",
+    "roles_layer_buyer: Buyer layer — a buyer's agent",
+    "roles_discovery_seller: Discovery stage, seller perspective",
+    "roles_discovery_buyer: Discovery stage, buyer perspective",
+    "roles_negotiation_seller: Negotiation stage, seller perspective",
+    "roles_negotiation_buyer: Negotiation stage, buyer perspective",
+    "roles_settlement_seller: Settlement stage, seller perspective",
+    "roles_settlement_buyer: Settlement stage, buyer perspective",
+    "roles_provision_seller: Provision stage, seller perspective",
+    "roles_provision_buyer: Provision stage, buyer perspective",
+    "roles_post_settlement_seller: Post-settlement stage, seller perspective",
+    "roles_post_settlement_buyer: Post-settlement stage, buyer perspective",
+    "roles_cli_buy: CLI tests for `market buy` (consumes seller inventory; run separately from roles_stage_*)",
+    "roles_cli_provide: CLI tests for `market provide` (imports a throwaway CSV, publishes orders)",
+    
+]
+log_cli = true
+log_cli_level = "INFO"
+log_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
+log_date_format = "%Y-%m-%dT%H:%M:%S"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true

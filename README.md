@@ -10,13 +10,14 @@ Simple Compute Market is inspired by [Compositional Game Theory (CGT)](https://g
 
 ## Repository layout
 
-- `buyer/` — Buyer CLI (`market` console script)
-- `storefront/` — Seller server + admin CLI (`market-storefront` console script)
-- `provisioning-service/` — VM provisioning microservice
-- `service/` — Shared infra clients (chain, alkahest, registry indexer) used by both buyer and storefront
-- `policy/` — Shared negotiation middleware machinery
-- `registry-service/` — Listings registry / indexer API (FastAPI)
-- `registry-client/` — Async + sync Python client for the registry HTTP API
+- `domains/vms/buyer/` — VM buyer CLI (`market` console script)
+- `domains/vms/storefront/` — VM seller server + admin CLI (`market-storefront` console script)
+- `domains/vms/provisioning/service/` — VM provisioning microservice
+- `kit/alkahest/`, `kit/config/`, `kit/identity/` — Shared from-below helpers for chain settlement, config, and identity
+- `kit/policy/` — Shared negotiation middleware machinery
+- `core/registry/` — Listings registry / indexer API (FastAPI)
+- `core/registry-client/` — Async + sync Python client for the registry HTTP API
+- `core/storefront-client/` — Async + sync Python client for the storefront HTTP API
 - `compose/` — Docker Compose stacks for the seller side
 - `helm/` — Kubernetes/Helm charts for production seller + registry deployments
 - `scripts/zerotier/` — ZeroTier controller scripts
