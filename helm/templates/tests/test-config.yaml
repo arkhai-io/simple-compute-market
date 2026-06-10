@@ -37,10 +37,6 @@ continue to work.
 {{- $generated := dict -}}
 {{- $_ := set $generated "rpc" (dict "url" $rpcUrl "chain_id" .Values.global.rpc.chainId) -}}
 {{- $_ := set $generated "registry" (dict
-  "identity_address" .Values.global.registry.identity_address
-  "reputation_address" .Values.global.registry.reputation_address
-  "validation_address" .Values.global.registry.validation_address
-  "owner_address" .Values.global.registry.owner_address
   "api_url" (printf "http://%s-registry:%d" .Release.Name (int .Values.registry.service.port))
 ) -}}
 {{- $_ := set $generated $component (dict

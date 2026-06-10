@@ -54,7 +54,8 @@ Compose the HTTP RPC URL from global.rpc.host and global.rpc.port.
 Mirrors the definition in the root chart's _helpers.tpl.
 */}}
 {{- define "rpc.url" -}}
-{{- printf "http://%s:%d" .Values.global.rpc.host (int .Values.global.rpc.port) -}}
+{{- $scheme := .Values.global.rpc.scheme | default "http" -}}
+{{- printf "%s://%s:%d" $scheme .Values.global.rpc.host (int .Values.global.rpc.port) -}}
 {{- end }}
 
 {{/*
@@ -62,7 +63,8 @@ Compose the WebSocket RPC URL from global.rpc.host and global.rpc.port.
 Agents connect to Anvil over WebSocket for event subscriptions.
 */}}
 {{- define "rpc.wsUrl" -}}
-{{- printf "ws://%s:%d" .Values.global.rpc.host (int .Values.global.rpc.port) -}}
+{{- $scheme := ternary "wss" "ws" (eq (.Values.global.rpc.scheme | default "http") "https") -}}
+{{- printf "%s://%s:%d" $scheme .Values.global.rpc.host (int .Values.global.rpc.port) -}}
 {{- end }}
 
 {{/*
@@ -185,7 +187,6 @@ ssh_public_key = {{ $seller.sshPublicKey | default "" | quote }}
 [chains.{{ $chain.name | default "ethereum_sepolia" }}]
 rpc_url = {{ default (include "rpc.wsUrl" $root) $chain.rpcUrl | quote }}
 chain_id = {{ $root.Values.global.rpc.chainId | int }}
-identity_registry_address = {{ $root.Values.global.registry.identity_address | quote }}
 {{- if $chain.alkahestAddressConfigPath }}
 alkahest_address_config_path = {{ $chain.alkahestAddressConfigPath | quote }}
 {{- end }}

@@ -1,7 +1,8 @@
 ARG PYTHON_VERSION=3.13
 
 # Stage 1: Install dependencies into .venv
-FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
+# --platform=linux/amd64 is intentional: production targets Linux x86_64.
+FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
 
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
@@ -17,12 +18,15 @@ COPY core/registry/src ./src
 COPY core/registry/alembic ./alembic
 COPY core/registry/filter-spec.yaml ./
 COPY core/registry/pyproject.toml core/registry/uv.lock ./
+# Normalize the lock's find-links registry path to the in-image wheel dir
+# (uv records it relative to the repo, which cannot normalize from /app).
+RUN sed -E -i 's|registry = "[^"]*\.dist"|registry = "/.dist"|' uv.lock
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-sources --no-dev --no-install-project --find-links /.dist
 
 # Stage 2: Lean runtime image
-FROM python:${PYTHON_VERSION}-slim AS runtime
+FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime
 
 WORKDIR /app
 RUN useradd --create-home --uid 1000 --shell /bin/bash appuser && \
