@@ -387,8 +387,16 @@ wheels = [
 name = "core-buyer"
 version = "0.1.0"
 source = { editable = "../../../core/buyer" }
+dependencies = [
+    { name = "market-config" },
+    { name = "typer" },
+]
 
 [package.metadata]
+requires-dist = [
+    { name = "market-config", editable = "../../../kit/config" },
+    { name = "typer", specifier = ">=0.12.0" },
+]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]

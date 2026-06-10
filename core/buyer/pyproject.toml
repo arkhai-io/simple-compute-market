@@ -3,7 +3,16 @@ name = "core-buyer"
 version = "0.1.0"
 description = "Core buyer role shell and orchestration contracts"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  # The `market` verb skeleton + plugin assembly (core_buyer.cli).
+  "typer>=0.12.0",
+  # Generic registry discovery config (registry.urls/auth/discovery_timeout)
+  # comes from the shared buyer TOML loader in kit.
+  "market-config",
+]
+
+[tool.uv.sources]
+market-config = { path = "../../kit/config", editable = true }
 
 [build-system]
 requires = ["hatchling"]
