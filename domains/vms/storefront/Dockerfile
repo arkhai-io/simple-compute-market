@@ -17,6 +17,11 @@ WORKDIR /app
 COPY .dist/ /.dist/
 
 COPY domains/vms/storefront/pyproject.toml domains/vms/storefront/uv.lock domains/vms/storefront/entrypoint.sh ./
+# The lock records the internal-wheel find-links dir relative to the repo
+# (../../../.dist), which cannot normalize from /app. Point it at the
+# in-image wheel dir instead. (uv re-canonicalizes the path on every
+# relock, so this is normalized here rather than in the committed lock.)
+RUN sed -E -i 's|registry = "[^"]*\.dist"|registry = "/.dist"|' uv.lock
 
 # Pass the GCP service account JSON key from GitHub Actions secrets to authenticate
 # against GCP Artifact Registry for the alkahest-py private Python package.
@@ -91,6 +96,8 @@ COPY --chown=appuser:appuser domains/ ./domains/
 # script is written to .venv/bin/.
 # /.dist/ carries the internal wheels needed for --find-links resolution.
 COPY --chown=appuser:appuser domains/vms/storefront/pyproject.toml domains/vms/storefront/uv.lock ./
+# Same lock normalization as the builder stage (see comment there).
+RUN sed -E -i 's|registry = "[^"]*\.dist"|registry = "/.dist"|' uv.lock
 # Copy wheels directly from the build context (not from the builder stage).
 # Using --from=builder here would serve a cached /.dist that Docker baked at
 # the last full builder rebuild, silently ignoring any make dist updates since.
