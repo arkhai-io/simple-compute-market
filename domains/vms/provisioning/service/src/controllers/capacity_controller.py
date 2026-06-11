@@ -173,6 +173,8 @@ class CapacityController:
         return AllocationResponse(allocation=self._ledger.release(
             allocation_id=body.allocation_id,
             deal_ref=body.deal_ref,
+            failure_reason=body.failure_reason,
+            failure_message=body.failure_message,
         ))
 
     @router.post(

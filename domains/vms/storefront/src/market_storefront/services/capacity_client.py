@@ -1,20 +1,30 @@
-"""Embedded site-authority adapter over the storefront's own tables.
+"""Site-authority capacity clients: embedded and remote.
 
-The single-storefront degenerate deployment of the capacity topology
-(docs/development/design-settlement-lifecycle-and-capacity.md, Part II):
-the ``hosts``/``compute_allocations`` ledger still lives in this
-storefront's SQLite, but every consumer goes through the
-``core_storefront.capacity.CapacityClient`` boundary so the move to a
-real site-authority service is a move, not a behavior change.
+Two implementations of ``core_storefront.capacity.CapacityClient``
+(docs/development/design-settlement-lifecycle-and-capacity.md, Part II),
+selected by ``[capacity] mode`` in settings:
 
-Embedded mode is for a provably single consumer — another storefront
-must never reach this ledger through this process.
+- ``EmbeddedCapacityClient`` (default): the single-storefront degenerate
+  deployment — the ``hosts``/``compute_allocations`` ledger still lives
+  in this storefront's SQLite. Embedded mode is for a provably single
+  consumer; another storefront must never reach this ledger through
+  this process.
+- ``RemoteCapacityClient`` (``mode = "site"``): the ledger lives in the
+  site authority (hosted by the provisioning service) and this client
+  speaks its ``/api/v1/capacity`` HTTP surface. Capacity deltas arrive
+  by tailing the authority's versioned event feed
+  (``capacity_events_poller_loop``) — the remote verbs themselves emit
+  nothing locally, so a *different* storefront's reservation triggers
+  exactly the same listing reconciliation ours does.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Callable, Mapping
+
+import httpx
 
 from core_storefront.capacity import (
     CapacityDelta,
@@ -228,10 +238,424 @@ def _make_stale_listing_subscriber(
     return _close_stale_listings
 
 
+class RemoteCapacityClient:
+    """``CapacityClient`` over the site authority's HTTP capacity API.
+
+    Verbs map one-to-one onto ``/api/v1/capacity/*`` (see the
+    provisioning service's capacity controller — the payload shapes are
+    the wire contract). Mutations do NOT emit into the local bus: the
+    event-feed poller is the single source of deltas, so reactions fire
+    identically whether this storefront or another one moved capacity.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        admin_key: str = "",
+        *,
+        bus: CapacityEventBus | None = None,
+        timeout: float = 30.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._admin_key = admin_key
+        self._bus = bus or CapacityEventBus()
+        self._timeout = timeout
+        self._transport = transport  # test seam (httpx.MockTransport / ASGI)
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
+    def _headers(self) -> dict[str, str]:
+        return {"X-Admin-Key": self._admin_key} if self._admin_key else {}
+
+    def _http(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(timeout=self._timeout, transport=self._transport)
+
+    async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict:
+        async with self._http() as http:
+            resp = await http.get(
+                f"{self._base_url}{path}", params=params, headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def _post(self, path: str, body: dict[str, Any]) -> httpx.Response:
+        async with self._http() as http:
+            return await http.post(
+                f"{self._base_url}{path}", json=body, headers=self._headers(),
+            )
+
+    async def snapshot(self) -> list[dict[str, Any]]:
+        data = await self._get("/api/v1/capacity/snapshot")
+        return list(data.get("resources") or [])
+
+    async def probe(
+        self, *, claim: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        resp = await self._post(
+            "/api/v1/capacity/probe", {"claim": dict(claim or {})},
+        )
+        resp.raise_for_status()
+        return resp.json().get("match")
+
+    async def reserve(
+        self,
+        *,
+        claim: Mapping[str, Any] | None = None,
+        deal_ref: Mapping[str, Any] | None = None,
+        ttl_seconds: float | None = None,
+    ) -> dict[str, Any] | None:
+        body: dict[str, Any] = {
+            "claim": dict(claim or {}),
+            "deal_ref": dict(deal_ref or {}),
+        }
+        if ttl_seconds is not None:
+            body["ttl_seconds"] = float(ttl_seconds)
+        resp = await self._post("/api/v1/capacity/reservations", body)
+        resp.raise_for_status()
+        return resp.json().get("allocation")
+
+    async def commit(
+        self,
+        *,
+        resource_id: str,
+        allocation_id: str | None = None,
+        lease_end_utc: str,
+        idempotency_ref: str | None = None,
+    ) -> None:
+        if not allocation_id:
+            raise ValueError(
+                "remote capacity commit requires the allocation_id the "
+                "reserve returned (the site ledger has no aggregate path)",
+            )
+        resp = await self._post(
+            f"/api/v1/capacity/allocations/{allocation_id}/commit",
+            {
+                "resource_id": resource_id,
+                "lease_end_utc": str(lease_end_utc),
+                "idempotency_ref": idempotency_ref,
+            },
+        )
+        resp.raise_for_status()
+
+    async def release(
+        self,
+        *,
+        allocation_id: str | None = None,
+        deal_ref: Mapping[str, Any] | None = None,
+        failure_reason: str | None = None,
+        failure_message: str | None = None,
+    ) -> dict[str, Any] | None:
+        body: dict[str, Any] = {
+            "allocation_id": allocation_id,
+            "deal_ref": dict(deal_ref or {}),
+        }
+        if failure_reason is not None:
+            body["failure_reason"] = failure_reason
+        if failure_message is not None:
+            body["failure_message"] = failure_message
+        resp = await self._post("/api/v1/capacity/releases", body)
+        resp.raise_for_status()
+        return resp.json().get("allocation")
+
+    async def truncate_lease(
+        self,
+        *,
+        allocation_id: str,
+        lease_end_utc: str,
+    ) -> dict[str, Any] | None:
+        resp = await self._post(
+            f"/api/v1/capacity/allocations/{allocation_id}/truncate-lease",
+            {"lease_end_utc": str(lease_end_utc)},
+        )
+        resp.raise_for_status()
+        return resp.json().get("allocation")
+
+    def subscribe(self, subscriber: CapacitySubscriber) -> Callable[[], None]:
+        return self._bus.subscribe(subscriber)
+
+    # Beyond the protocol: the feed the poller tails and the registry
+    # mirror used by inventory seeding.
+
+    async def events_after(
+        self, after_version: int, *, limit: int = 500,
+    ) -> tuple[list[dict[str, Any]], int]:
+        data = await self._get(
+            "/api/v1/capacity/events",
+            params={"after": int(after_version), "limit": int(limit)},
+        )
+        return list(data.get("events") or []), int(data.get("latest_version") or 0)
+
+    async def register_resource(
+        self,
+        resource_id: str,
+        *,
+        total_units: int,
+        resource_subtype: str | None = None,
+        attributes: Mapping[str, Any] | None = None,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        async with self._http() as http:
+            resp = await http.put(
+                f"{self._base_url}/api/v1/capacity/resources/{resource_id}",
+                json={
+                    "total_units": int(total_units),
+                    "resource_subtype": resource_subtype,
+                    "attributes": dict(attributes or {}),
+                    "enabled": enabled,
+                },
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def emit_local(self, delta: CapacityDelta) -> None:
+        """Feed a delta from the poller into local subscribers."""
+        await self._bus.emit(delta)
+
+
+def _capacity_settings() -> tuple[str, str, str]:
+    """Resolve (mode, authority_url, admin_key) from live settings.
+
+    Read at call time so tests that patch
+    ``market_storefront.utils.config.settings`` are honored. The
+    authority URL defaults to the provisioning service — that process
+    hosts the site authority.
+    """
+    from market_storefront.utils import config
+
+    cap = getattr(config.settings, "capacity", None)
+    mode = str(getattr(cap, "mode", "") or "").strip().lower()
+    url = str(getattr(cap, "authority_url", "") or "").strip()
+    if mode == "site" and not url:
+        url = str(getattr(
+            getattr(config.settings, "provisioning", None), "service_url", "",
+        ) or "")
+    admin_key = str(getattr(config.settings, "admin_api_key", "") or "")
+    return mode, url.rstrip("/"), admin_key
+
+
+async def site_held_by_resource(client: RemoteCapacityClient) -> dict[str, int]:
+    """Per-resource held units derived from a site snapshot.
+
+    The listing reconciler keeps totals and market attributes local (the
+    aggregator view) but must take consumption from the authority's
+    ledger in remote mode.
+    """
+    held: dict[str, int] = {}
+    for row in await client.snapshot():
+        resource_id = row.get("resource_id")
+        available = row.get("available_units")
+        if not resource_id or available is None:
+            continue
+        total = int(row.get("value") or 0)
+        held[str(resource_id)] = max(total - int(available), 0)
+    return held
+
+
+def _make_remote_listing_subscriber(
+    sqlite_client_factory: SQLiteClientFactory,
+    client: RemoteCapacityClient,
+) -> CapacitySubscriber:
+    """Reconcile derived listings against site-authority availability.
+
+    Handles both directions — consuming deltas close stranded listings,
+    "released" reopens ones that fit again (in embedded mode the reopen
+    leg is driven by the admin fulfillment-event handlers instead).
+    """
+
+    async def _reconcile_listings(delta: CapacityDelta) -> None:
+        from core_storefront.stage_log import stage_event
+        from market_storefront.services.publication_service import (
+            close_stale_compute_listings_after_capacity_change,
+            reopen_available_compute_listings_after_capacity_change,
+        )
+
+        held = await site_held_by_resource(client)
+        db_path = sqlite_client_factory().db_path
+        if delta.kind in _CONSUMING_DELTA_KINDS:
+            closed = await close_stale_compute_listings_after_capacity_change(
+                db_path, held_by_resource=held,
+            )
+            if closed:
+                stage_event(
+                    "provision", "stale_compute_listings_closed",
+                    resource_id=delta.resource_id,
+                    capacity_version=delta.version,
+                    closed_listing_ids=closed,
+                )
+        elif delta.kind == "released":
+            reopened = await reopen_available_compute_listings_after_capacity_change(
+                db_path, held_by_resource=held,
+            )
+            if reopened:
+                stage_event(
+                    "provision", "compute_listings_reopened",
+                    resource_id=delta.resource_id,
+                    capacity_version=delta.version,
+                    reopened_listing_ids=reopened,
+                )
+
+    return _reconcile_listings
+
+
+# Remote mode shares one bus across client instances: deltas come from
+# the poller, not from whichever client instance happened to mutate.
+_remote_bus = CapacityEventBus()
+_remote_subscriber_attached = False
+
+
 def build_capacity_client(
     sqlite_client_factory: SQLiteClientFactory,
-) -> EmbeddedCapacityClient:
-    """Assemble the storefront's capacity client with default subscribers."""
+) -> Any:
+    """Assemble the storefront's capacity client with default subscribers.
+
+    Mode comes from ``[capacity]`` in settings: "" → embedded (local
+    tables), "site" → remote ledger at the authority URL.
+    """
+    mode, url, admin_key = _capacity_settings()
+    if mode == "site" and url:
+        global _remote_subscriber_attached
+        client = RemoteCapacityClient(url, admin_key, bus=_remote_bus)
+        if not _remote_subscriber_attached:
+            _remote_bus.subscribe(
+                _make_remote_listing_subscriber(sqlite_client_factory, client),
+            )
+            _remote_subscriber_attached = True
+        return client
     client = EmbeddedCapacityClient(sqlite_client_factory)
     client.subscribe(_make_stale_listing_subscriber(sqlite_client_factory))
     return client
+
+
+async def sync_site_resources(
+    sqlite_client_factory: SQLiteClientFactory | None = None,
+) -> int:
+    """Mirror local compute inventory into the site authority's ledger.
+
+    Remote mode only (no-op otherwise). Local rows keep the market view
+    (pricing, escrows, pools); the ledger gets the resource-domain core:
+    unit totals and attributes. Deleted rows are mirrored as disabled so
+    the authority stops matching them. Returns the number of rows
+    synced.
+    """
+    mode, url, admin_key = _capacity_settings()
+    if mode != "site" or not url:
+        return 0
+    if sqlite_client_factory is None:
+        from market_storefront.utils.sqlite_client import get_sqlite_client
+        sqlite_client_factory = get_sqlite_client
+
+    import json as _json
+
+    client = RemoteCapacityClient(url, admin_key, bus=_remote_bus)
+    rows = await sqlite_client_factory().list_resources() or []
+    synced = 0
+    for row in rows:
+        if str(row.get("resource_type") or "") != "compute.gpu":
+            continue
+        attrs_raw = row.get("attributes") or {}
+        if isinstance(attrs_raw, str):
+            try:
+                attrs_raw = _json.loads(attrs_raw)
+            except (ValueError, TypeError):
+                attrs_raw = {}
+        attrs = {
+            k: v for k, v in dict(attrs_raw or {}).items()
+            if k != "lease_end_utc"  # lease tail belongs to the ledger now
+        }
+        total = row.get("value")
+        if total is None:
+            total = attrs.get("gpu_count", 1)
+        try:
+            total_units = max(int(total), 0)
+        except (TypeError, ValueError):
+            total_units = 0
+        await client.register_resource(
+            str(row["resource_id"]),
+            total_units=total_units,
+            resource_subtype=row.get("resource_subtype"),
+            attributes=attrs,
+            enabled=str(row.get("state") or "") != "deleted",
+        )
+        synced += 1
+    if synced:
+        logger.info(
+            "[CAPACITY] Synced %d compute resource(s) to site authority %s",
+            synced, url,
+        )
+    return synced
+
+
+async def capacity_events_poller_loop() -> None:
+    """Tail the site authority's capacity-event feed into the local bus.
+
+    Remote mode's delivery half: positions at the feed head, runs one
+    full listing reconcile to converge with anything missed while down,
+    then polls for new versions and emits each as a ``CapacityDelta``.
+    A feed head that moves backwards (ledger reset) re-runs the full
+    reconcile instead of replaying.
+    """
+    mode, url, admin_key = _capacity_settings()
+    if mode != "site" or not url:
+        return
+
+    from market_storefront.utils import config
+    from market_storefront.utils.sqlite_client import get_sqlite_client
+
+    interval = float(getattr(
+        getattr(config.settings, "capacity", None), "poll_interval", 5,
+    ) or 5)
+    client = build_capacity_client(lambda: get_sqlite_client())
+
+    async def _full_reconcile() -> None:
+        from market_storefront.services.publication_service import (
+            close_stale_compute_listings_after_capacity_change,
+            reopen_available_compute_listings_after_capacity_change,
+        )
+        held = await site_held_by_resource(client)
+        db_path = get_sqlite_client().db_path
+        await close_stale_compute_listings_after_capacity_change(
+            db_path, held_by_resource=held,
+        )
+        await reopen_available_compute_listings_after_capacity_change(
+            db_path, held_by_resource=held,
+        )
+
+    last_applied: int | None = None
+    logger.info("[CAPACITY] Event poller started against %s (interval=%ss)",
+                client.base_url, interval)
+    while True:
+        try:
+            if last_applied is None:
+                _, last_applied = await client.events_after(0, limit=1)
+                await _full_reconcile()
+            events, latest = await client.events_after(last_applied)
+            if latest < last_applied:
+                logger.warning(
+                    "[CAPACITY] Feed head moved backwards (%d -> %d) — "
+                    "ledger reset? Resyncing from snapshot.",
+                    last_applied, latest,
+                )
+                last_applied = latest
+                await _full_reconcile()
+                events = []
+            for event in events:
+                await client.emit_local(CapacityDelta(
+                    kind=str(event.get("kind") or ""),
+                    version=int(event.get("version") or 0),
+                    resource_id=(
+                        str(event["resource_id"])
+                        if event.get("resource_id") else None
+                    ),
+                ))
+                last_applied = int(event.get("version") or last_applied)
+            if events and latest > last_applied:
+                continue  # truncated page — keep draining before sleeping
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("[CAPACITY] Event poller cycle failed: %s", exc)
+        await asyncio.sleep(interval)

@@ -82,8 +82,18 @@ def held_gpu_counts_by_resource(conn: sqlite3.Connection) -> dict[str, int]:
     return held_gpu_counts(conn)
 
 
-def available_compute_slices(db_path: str) -> list[dict[str, Any]]:
-    """Return publishable compute listing slices from current storefront state."""
+def available_compute_slices(
+    db_path: str,
+    *,
+    held_by_resource: dict[str, int] | None = None,
+) -> list[dict[str, Any]]:
+    """Return publishable compute listing slices from current storefront state.
+
+    ``held_by_resource`` overrides the locally computed held counts — in
+    remote-capacity mode the holds ledger lives in the site authority, so
+    the caller supplies consumption from a site snapshot while totals and
+    market attributes stay local (the aggregator view).
+    """
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
     try:
@@ -93,7 +103,8 @@ def available_compute_slices(db_path: str) -> list[dict[str, Any]]:
         has_members = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_pool_members'"
         ).fetchone() is not None
-        held_by_resource = held_gpu_counts_by_resource(conn)
+        if held_by_resource is None:
+            held_by_resource = held_gpu_counts_by_resource(conn)
         if has_pools and has_members:
             rows = conn.execute(
                 """
@@ -234,9 +245,13 @@ def available_compute_slices(db_path: str) -> list[dict[str, Any]]:
     return out
 
 
-def current_available_resource_keys(db_path: str) -> set[str]:
+def current_available_resource_keys(
+    db_path: str,
+    *,
+    held_by_resource: dict[str, int] | None = None,
+) -> set[str]:
     keys: set[str] = set()
-    for row in available_compute_slices(db_path):
+    for row in available_compute_slices(db_path, held_by_resource=held_by_resource):
         if row.get("resource_key"):
             keys.add(str(row["resource_key"]))
         if row.get("legacy_resource_key"):
@@ -274,9 +289,15 @@ def open_listing_resource_keys(db_path: str) -> set[str]:
     return covered
 
 
-def stale_open_listing_ids(db_path: str) -> list[str]:
+def stale_open_listing_ids(
+    db_path: str,
+    *,
+    held_by_resource: dict[str, int] | None = None,
+) -> list[str]:
     """Open listing IDs whose requested slice no longer fits capacity."""
-    available_keys = current_available_resource_keys(db_path)
+    available_keys = current_available_resource_keys(
+        db_path, held_by_resource=held_by_resource,
+    )
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     try:
         rows = conn.execute(
@@ -309,9 +330,15 @@ def stale_open_listing_ids(db_path: str) -> list[str]:
     return stale
 
 
-def closed_available_listing_ids(db_path: str) -> list[str]:
+def closed_available_listing_ids(
+    db_path: str,
+    *,
+    held_by_resource: dict[str, int] | None = None,
+) -> list[str]:
     """Closed derived listing IDs whose requested slice fits capacity again."""
-    available_keys = current_available_resource_keys(db_path)
+    available_keys = current_available_resource_keys(
+        db_path, held_by_resource=held_by_resource,
+    )
     if not available_keys:
         return []
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)

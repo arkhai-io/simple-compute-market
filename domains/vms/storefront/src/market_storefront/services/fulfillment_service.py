@@ -109,6 +109,9 @@ async def _apply_fulfillment_failure_policy_adapter(
             message=message,
             source=source,
         ),
+        # In remote-capacity mode the hold lives in the site ledger; the
+        # policy's release_capacity action must go back through the client.
+        capacity=build_capacity_client(lambda: get_sqlite_client()),
     )
 
 

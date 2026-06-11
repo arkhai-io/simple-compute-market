@@ -94,6 +94,11 @@ class ReleaseRequest(BaseModel):
 
     allocation_id: Optional[str] = None
     deal_ref: dict[str, Any] = Field(default_factory=dict)
+    failure_reason: Optional[str] = Field(
+        default=None,
+        description="Recorded on the allocation when releasing after a failure.",
+    )
+    failure_message: Optional[str] = None
 
 
 class TruncateLeaseRequest(BaseModel):

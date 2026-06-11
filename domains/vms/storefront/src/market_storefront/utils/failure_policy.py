@@ -254,8 +254,40 @@ async def _refund_from_escrow_proposal(
 async def _release_capacity(
     db: Any,
     ctx: FulfillmentFailureContext,
+    capacity: Any | None = None,
 ) -> FulfillmentFailurePolicyResult:
+    from market_storefront.services.capacity_client import (
+        RemoteCapacityClient,
+        site_held_by_resource,
+    )
+
     result = FulfillmentFailurePolicyResult(allocation_id=ctx.allocation_id)
+
+    if isinstance(capacity, RemoteCapacityClient):
+        # Remote-capacity mode: the hold lives in the site authority's
+        # ledger, not the local tables — release it there and reconcile
+        # listings against the site's availability.
+        allocation = await capacity.release(
+            allocation_id=ctx.allocation_id,
+            deal_ref={"escrow_uid": ctx.escrow_uid} if ctx.escrow_uid else None,
+            failure_reason=ctx.reason,
+            failure_message=ctx.message,
+        )
+        if allocation is not None:
+            result.allocation_id = allocation.get("allocation_id")
+            result.state = "released"
+            result.resource_id = allocation.get("resource_id")
+            result.gpu_count = allocation.get("allocated_gpu_count")
+            held = await site_held_by_resource(capacity)
+            reopened = closed_available_listing_ids(
+                db.db_path, held_by_resource=held,
+            )
+            for listing_id in reopened:
+                await db.update_listing(listing_id=listing_id, status="open")
+            mark_derived_listings_open(db.db_path, reopened)
+            result.reopened_listing_ids = reopened
+        return result
+
     allocation = None
     if ctx.allocation_id and hasattr(db, "update_compute_allocation_state"):
         allocation = await db.update_compute_allocation_state(
@@ -362,6 +394,8 @@ async def _refund(
 async def apply_fulfillment_failure_policy(
     db: Any,
     ctx: FulfillmentFailureContext,
+    *,
+    capacity: Any | None = None,
 ) -> FulfillmentFailurePolicyResult:
     actions = configured_failure_actions()
     listing_id = await _resolve_listing_id(db, ctx)
@@ -371,7 +405,7 @@ async def apply_fulfillment_failure_policy(
     for action in actions:
         if action == "release_capacity":
             try:
-                released = await _release_capacity(db, ctx)
+                released = await _release_capacity(db, ctx, capacity)
                 result.allocation_id = released.allocation_id
                 result.state = released.state
                 result.resource_id = released.resource_id

@@ -49,10 +49,20 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
     )
 
 
-async def close_stale_compute_listings_after_capacity_change(db_path: str) -> list[str]:
-    """Close open derived compute listings whose GPU slice no longer fits."""
+async def close_stale_compute_listings_after_capacity_change(
+    db_path: str,
+    *,
+    held_by_resource: dict[str, int] | None = None,
+) -> list[str]:
+    """Close open derived compute listings whose GPU slice no longer fits.
+
+    ``held_by_resource`` carries site-authority consumption in
+    remote-capacity mode (the local allocation table is empty there).
+    """
     closed_listing_ids: list[str] = []
-    for listing_id in stale_open_listing_ids(db_path):
+    for listing_id in stale_open_listing_ids(
+        db_path, held_by_resource=held_by_resource,
+    ):
         result = await close_order({"listing_id": listing_id})
         if str(result.get("status", "?")) in ("closed", "skipped", "queued"):
             closed_listing_ids.append(listing_id)
@@ -62,6 +72,31 @@ async def close_stale_compute_listings_after_capacity_change(db_path: str) -> li
             closed_listing_ids.append(listing_id)
     mark_derived_listings_closed(db_path, closed_listing_ids)
     return closed_listing_ids
+
+
+async def reopen_available_compute_listings_after_capacity_change(
+    db_path: str,
+    *,
+    held_by_resource: dict[str, int] | None = None,
+) -> list[str]:
+    """Reopen closed derived listings whose slice fits capacity again.
+
+    The freeing counterpart of the close path above, run for "released"
+    capacity deltas — same mechanics as the admin fulfillment-event
+    handlers' reopen step.
+    """
+    from domains.vms.listings.reconciler import (
+        closed_available_listing_ids,
+        mark_derived_listings_open,
+    )
+
+    reopened_listing_ids = closed_available_listing_ids(
+        db_path, held_by_resource=held_by_resource,
+    )
+    for listing_id in reopened_listing_ids:
+        await get_sqlite_client().update_listing(listing_id=listing_id, status="open")
+    mark_derived_listings_open(db_path, reopened_listing_ids)
+    return reopened_listing_ids
 
 
 def _make_registry_client() -> "MultiRegistryClient":

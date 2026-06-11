@@ -203,3 +203,23 @@ async def _startup_tasks() -> None:
     )
 
     await _preflight_provisioning()
+
+    # Remote-capacity mode: mirror inventory into the site authority's
+    # ledger and start tailing its capacity-event feed. Both no-op in
+    # embedded mode. Runs after the provisioning preflight because that
+    # process hosts the site authority.
+    from market_storefront.services.capacity_client import (
+        capacity_events_poller_loop,
+        sync_site_resources,
+    )
+
+    try:
+        await sync_site_resources()
+    except Exception as exc:
+        logger.error(
+            "[STARTUP] Site-authority resource sync failed: %s — the ledger "
+            "may be empty; reserves will not match until inventory is "
+            "registered",
+            exc,
+        )
+    asyncio.create_task(capacity_events_poller_loop())

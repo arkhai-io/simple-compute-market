@@ -104,6 +104,18 @@ discovery_timeout = 5.0
 # Path prefix when behind a reverse proxy (e.g. "/storefront"). Empty for direct.
 root_path = ""
 
+[capacity]
+# Where the authoritative capacity ledger lives.
+#   ""     — embedded: this storefront's own tables (single-consumer only).
+#   "site" — remote: the site authority's /api/v1/capacity surface, at
+#            authority_url (defaults to provisioning.service_url — that
+#            process hosts the site authority), authenticated with
+#            admin_api_key. Capacity deltas arrive by polling the
+#            authority's versioned event feed.
+mode          = ""
+authority_url = ""
+poll_interval = 5
+
 [provisioning]
 service_url            = "http://localhost:8085"
 mode                   = ""        # "mock" | "" — selects mock vs real ansible/kvm path
