@@ -195,15 +195,23 @@ callable, so Part I does not block on Part II.
 
 ### Work items
 
-1. **Plan carrier.** Generalize the accepted-proposal/terms handoff to a
-   settlement plan (single-escrow plans first; shape must already admit
-   N escrows + bonds **and N settlement mechanisms**: each obligation
-   carries lifecycle universals as typed fields plus a
-   `{mechanism, params}` envelope — do not build the plan carrier
-   alkahest-shaped). Both sides derive it from the message history.
-   This is also where the `arkhai-core` escrow carriers shed their
-   baked-in alkahest field skeleton (see "Packaging decisions" in the
-   extraction doc): one wire change, not two.
+1. **Plan carrier.** Done for the single-mechanism case:
+   `market_core.schemas.SettlementObligation`/`SettlementPlan` carry
+   the lifecycle universals as typed fields plus the
+   `{mechanism, params}` envelope, with the flat `EscrowTerms` shapes
+   surviving as marked legacy coercions (the ProvisionTerms pattern);
+   `kit/alkahest/plans.py` is the first mechanism codec (structural
+   carrier mirror, envelope↔terms converters, deterministic plan
+   materialization); the `/negotiate/*` responses, seller artifacts,
+   buyer outcome, deal context, and run-log all carry
+   `settlement_plan`, with the flat terms list kept as a legacy wire
+   mirror that leaves with the client-wheel wire bump. Still open
+   under this item: the proposal/listing vocabulary
+   (`EscrowProposal`/`AcceptedEscrow` still key on
+   `(chain_name, escrow_address)`; a listing's accepted-escrows set
+   has not yet generalized to advertising accepted mechanisms) — that
+   churn rides whichever lifecycle policy first needs a second
+   mechanism or plan shape proposed in-band (I.5).
 2. **kit/alkahest codecs.** AllArbiter demand-tree encode/decode; oracle
    arbitrate/request/watch helpers; collect/reclaim primitives.
    (`market_alkahest` already owns generic proposal/terms

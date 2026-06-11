@@ -41,6 +41,11 @@ class DealContext:
     token_contract: Optional[str] = None
     token_decimals: Optional[float] = None
     accepted_escrow_proposal: Optional[dict[str, Any]] = None
+    # Canonical settlement carrier: mechanism-neutral plan dict
+    # (market_core.schemas.SettlementPlan shape). accepted_escrow_terms
+    # is its LEGACY flat-alkahest view — derived from the plan when the
+    # log carries one, read directly from pre-plan logs otherwise.
+    settlement_plan: Optional[dict[str, Any]] = None
     accepted_escrow_terms: Optional[list[dict[str, Any]]] = None
     accepted_provision_terms: Optional[dict[str, Any]] = None
 
@@ -71,13 +76,18 @@ def load_deal_context(run_id: str) -> DealContext:
     token_contract: Optional[str] = None
     token_decimals: Optional[float] = None
     accepted_escrow_proposal: Optional[dict[str, Any]] = None
+    settlement_plan: Optional[dict[str, Any]] = None
     accepted_escrow_terms: Optional[list[dict[str, Any]]] = None
     accepted_provision_terms: Optional[dict[str, Any]] = None
     last_status: Optional[str] = None
 
     def _capture_accepted_terms(ev: dict[str, Any]) -> None:
-        nonlocal accepted_escrow_proposal, accepted_escrow_terms, accepted_provision_terms
+        nonlocal accepted_escrow_proposal, settlement_plan, accepted_escrow_terms
+        nonlocal accepted_provision_terms
         nonlocal seller_wallet_address, token_contract
+        raw_plan = ev.get("settlement_plan")
+        if isinstance(raw_plan, dict):
+            settlement_plan = raw_plan
         raw_terms = ev.get("accepted_escrow_terms")
         if isinstance(raw_terms, list):
             accepted_escrow_terms = [
@@ -170,6 +180,23 @@ def load_deal_context(run_id: str) -> DealContext:
             f"prior `agreed` outcome."
         )
 
+    # Pre-plan logs carry only the flat terms; coerce them so consumers
+    # always see a plan. New logs carry the plan; keep the flat view in
+    # sync by deriving it from the plan's alkahest obligations.
+    if settlement_plan is None and accepted_escrow_terms:
+        from market_core.schemas import SettlementPlan
+
+        settlement_plan = SettlementPlan.model_validate(
+            accepted_escrow_terms
+        ).model_dump()
+    elif settlement_plan is not None and not accepted_escrow_terms:
+        from market_alkahest.plans import escrow_terms_from_settlement_plan
+
+        accepted_escrow_terms = [
+            terms.model_dump()
+            for terms in escrow_terms_from_settlement_plan(settlement_plan)
+        ]
+
     return DealContext(
         seller_url=seller_url,                # type: ignore[arg-type]
         listing_id=listing_id,                # type: ignore[arg-type]
@@ -181,6 +208,7 @@ def load_deal_context(run_id: str) -> DealContext:
         token_contract=token_contract,
         token_decimals=token_decimals,
         accepted_escrow_proposal=accepted_escrow_proposal,
+        settlement_plan=settlement_plan,
         accepted_escrow_terms=accepted_escrow_terms,
         accepted_provision_terms=accepted_provision_terms,
     )

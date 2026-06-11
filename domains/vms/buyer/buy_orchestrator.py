@@ -463,6 +463,11 @@ def _legacy_negotiate_matches(
                 if outcome.accepted_escrow_proposal is not None
                 else None
             ),
+            settlement_plan=(
+                outcome.settlement_plan.model_dump()
+                if outcome.settlement_plan is not None
+                else None
+            ),
             accepted_escrow_terms=(
                 [term.model_dump() for term in outcome.accepted_escrow_terms]
                 if outcome.accepted_escrow_terms is not None

@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from market_core.schemas import EscrowProposal, ProvisionTerms
+from market_core.schemas import EscrowProposal, ProvisionTerms, SettlementPlan
 
 
 class NegotiateNewRequest(BaseModel):
@@ -34,6 +34,11 @@ class NegotiateNewResponse(BaseModel):
     "exit" / "reject" it's absent. ``accepted_provision_terms`` and
     ``accepted_escrow_proposal`` echo back the buyer's round-0 ask
     after the seller validated it.
+
+    ``settlement_plan`` is the negotiated outcome's canonical carrier
+    (mechanism-neutral obligations); ``accepted_escrow_terms`` is its
+    LEGACY flat-alkahest mirror, kept for buyers that predate the plan
+    carrier and removed with the client-wheel wire bump.
     """
 
     negotiation_id: str
@@ -42,6 +47,7 @@ class NegotiateNewResponse(BaseModel):
     reason: str | None = None
     accepted_provision_terms: ProvisionTerms | None = None
     accepted_escrow_proposal: EscrowProposal | None = None
+    settlement_plan: SettlementPlan | None = None
     accepted_escrow_terms: list[dict[str, Any]] | None = None
 
 
@@ -57,6 +63,7 @@ class NegotiateContinueResponse(BaseModel):
     proposal: dict[str, Any] | None = None
     reason: str | None = None
     accepted_escrow_proposal: EscrowProposal | None = None
+    settlement_plan: SettlementPlan | None = None
     accepted_escrow_terms: list[dict[str, Any]] | None = None
 
 

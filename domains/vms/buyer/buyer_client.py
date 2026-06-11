@@ -35,7 +35,7 @@ from market_policy.negotiation_middleware import (
 from domains.vms.negotiation.policies import make_escrow_kind_dispatch_middleware
 from domains.vms.provisioning import VmProvisionTerms
 from market_alkahest.schemas import EscrowProposal, EscrowTerms
-from market_core.schemas import ProvisionTerms
+from market_core.schemas import ProvisionTerms, SettlementPlan
 
 
 DEFAULT_MAX_ROUNDS = 10
@@ -138,6 +138,9 @@ class NegotiationOutcome:
     rounds: int = 0
     accepted_provision_terms: Optional[ProvisionTerms] = None
     accepted_escrow_proposal: Optional[EscrowProposal] = None
+    settlement_plan: Optional[SettlementPlan] = None
+    # LEGACY mirror of the plan's alkahest obligations; kept while old
+    # run-log readers exist. Leaves with the client-wheel wire bump.
     accepted_escrow_terms: Optional[list[EscrowTerms]] = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -154,6 +157,8 @@ class NegotiationOutcome:
             d["accepted_provision_terms"] = self.accepted_provision_terms.model_dump()
         if self.accepted_escrow_proposal is not None:
             d["accepted_escrow_proposal"] = self.accepted_escrow_proposal.model_dump()
+        if self.settlement_plan is not None:
+            d["settlement_plan"] = self.settlement_plan.model_dump()
         if self.accepted_escrow_terms is not None:
             d["accepted_escrow_terms"] = [
                 term.model_dump() for term in self.accepted_escrow_terms
@@ -166,16 +171,21 @@ def _parse_accepted_terms_from_reply(
 ) -> tuple[
     Optional[ProvisionTerms],
     Optional[EscrowProposal],
+    Optional[SettlementPlan],
     Optional[list[EscrowTerms]],
 ]:
     """Extract the seller's echoed accepted terms from a negotiate reply.
 
-    Returns (None, None) if the seller didn't include them — happens on
+    Returns all-None if the seller didn't include them — happens on
     exit/reject paths or against legacy sellers that haven't shipped the
-    new fields yet.
+    new fields yet. ``settlement_plan`` is preferred from the wire;
+    against pre-plan sellers it is coerced from the flat
+    ``accepted_escrow_terms`` mirror (the carrier's legacy coercion), so
+    downstream code sees a plan either way.
     """
     raw_prov = reply.get("accepted_provision_terms")
     raw_esc = reply.get("accepted_escrow_proposal")
+    raw_plan = reply.get("settlement_plan")
     raw_terms = reply.get("accepted_escrow_terms")
     prov = ProvisionTerms.model_validate(raw_prov) if isinstance(raw_prov, dict) else None
     esc = EscrowProposal.model_validate(raw_esc) if isinstance(raw_esc, dict) else None
@@ -184,7 +194,12 @@ def _parse_accepted_terms_from_reply(
         if isinstance(raw_terms, list)
         else None
     )
-    return prov, esc, terms
+    plan: Optional[SettlementPlan] = None
+    if isinstance(raw_plan, dict):
+        plan = SettlementPlan.model_validate(raw_plan)
+    elif terms is not None:
+        plan = SettlementPlan.model_validate([t.model_dump() for t in terms])
+    return prov, esc, plan, terms
 
 
 def _sign(message: str, private_key: str) -> tuple[str, int]:
@@ -320,6 +335,7 @@ def negotiate_with_seller(
     # the negotiation thread); subsequent rounds don't re-echo them.
     accepted_prov: Optional[ProvisionTerms] = None
     accepted_esc: Optional[EscrowProposal] = None
+    accepted_plan: Optional[SettlementPlan] = None
     accepted_terms: Optional[list[EscrowTerms]] = None
     duration_seconds: Optional[float] = None  # populated from provision_terms or resume
     if chain is None:
@@ -436,7 +452,7 @@ def negotiate_with_seller(
 
         neg_id = reply.get("negotiation_id")
         seller_action = reply.get("action")
-        accepted_prov, accepted_esc, accepted_terms = _parse_accepted_terms_from_reply(reply)
+        accepted_prov, accepted_esc, accepted_plan, accepted_terms = _parse_accepted_terms_from_reply(reply)
 
         if seller_action == "accept":
             return NegotiationOutcome(
@@ -447,6 +463,7 @@ def negotiate_with_seller(
                 rounds=0,
                 accepted_provision_terms=accepted_prov,
                 accepted_escrow_proposal=accepted_esc,
+                settlement_plan=accepted_plan,
                 accepted_escrow_terms=accepted_terms,
             )
         # On non-agreed paths we still carry forward what the seller
@@ -546,7 +563,7 @@ def negotiate_with_seller(
         if next_move.action == "accept":
             # We told the seller we accept; their reply should echo accept.
             if reply.get("action") == "accept":
-                reply_prov, reply_esc, reply_terms = _parse_accepted_terms_from_reply(reply)
+                reply_prov, reply_esc, reply_plan, reply_terms = _parse_accepted_terms_from_reply(reply)
                 return NegotiationOutcome(
                     status="agreed",
                     negotiation_id=neg_id,
@@ -558,6 +575,7 @@ def negotiate_with_seller(
                     rounds=round_idx,
                     accepted_provision_terms=reply_prov or accepted_prov,
                     accepted_escrow_proposal=reply_esc or accepted_esc,
+                    settlement_plan=reply_plan or accepted_plan,
                     accepted_escrow_terms=reply_terms or accepted_terms,
                 )
             # Non-accept reply to our accept is anomalous but treat as terminal.
@@ -593,7 +611,7 @@ def negotiate_with_seller(
 
         seller_action = reply.get("action")
         if seller_action == "accept":
-            reply_prov, reply_esc, reply_terms = _parse_accepted_terms_from_reply(reply)
+            reply_prov, reply_esc, reply_plan, reply_terms = _parse_accepted_terms_from_reply(reply)
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=neg_id,
@@ -605,6 +623,7 @@ def negotiate_with_seller(
                 rounds=round_idx,
                 accepted_provision_terms=reply_prov or accepted_prov,
                 accepted_escrow_proposal=reply_esc or accepted_esc,
+                settlement_plan=reply_plan or accepted_plan,
                 accepted_escrow_terms=reply_terms or accepted_terms,
             )
         if seller_action in ("exit", "reject"):

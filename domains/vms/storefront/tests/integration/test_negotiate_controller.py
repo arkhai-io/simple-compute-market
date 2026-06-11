@@ -381,6 +381,19 @@ class TestNegotiateNew:
         assert result["accepted_escrow_proposal"]["literal_fields"] == literals
         assert "amount" not in result["accepted_escrow_terms"][0]["obligation_data"]
 
+        # The canonical plan carrier rides alongside the legacy terms
+        # mirror and stays byte-consistent with it.
+        plan = result["settlement_plan"]
+        assert len(plan["obligations"]) == len(result["accepted_escrow_terms"])
+        ob = plan["obligations"][0]
+        legacy = result["accepted_escrow_terms"][0]
+        assert ob["mechanism"] == "alkahest.v1"
+        assert ob["payer"] == legacy["maker"]
+        assert ob["claimant"] == "seller"
+        assert ob["expiration_unix"] == legacy["expiration_unix"]
+        assert ob["params"]["escrow_contract"] == legacy["escrow_contract"]
+        assert ob["params"]["obligation_data"] == legacy["obligation_data"]
+
     async def test_inventory_with_wrong_attributes_is_refused(self, client, db):
         """An available resource with the wrong gpu_model doesn't satisfy
         a listing offering a different gpu_model."""

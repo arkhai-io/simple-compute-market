@@ -75,19 +75,26 @@ def accepted_escrow_artifacts_from_proposal(
         "accepted_escrow_proposal": accepted.model_dump(),
     }
     try:
-        from market_alkahest.alkahest import (
-            materialize_escrow_terms_payload_from_proposal,
+        from market_alkahest.plans import (
+            escrow_terms_from_settlement_plan,
+            materialize_settlement_plan_from_proposal,
         )
 
-        out["accepted_escrow_terms"] = (
-            materialize_escrow_terms_payload_from_proposal(
-                proposal=accepted,
-                seller_wallet_address=seller_wallet_address,
-                agreed_amount=int(agreed_amount),
-                duration_seconds=int(duration_seconds),
-                addr_config_path=(chain_config_paths or {}).get(accepted.chain_name),
-            )
+        plan = materialize_settlement_plan_from_proposal(
+            proposal=accepted,
+            seller_wallet_address=seller_wallet_address,
+            agreed_amount=int(agreed_amount),
+            duration_seconds=int(duration_seconds),
+            addr_config_path=(chain_config_paths or {}).get(accepted.chain_name),
         )
+        out["settlement_plan"] = plan.model_dump()
+        # LEGACY mirror of the plan's alkahest obligations, kept for
+        # buyers that predate the settlement-plan carrier. Leaves with
+        # the client-wheel wire bump.
+        out["accepted_escrow_terms"] = [
+            terms.model_dump()
+            for terms in escrow_terms_from_settlement_plan(plan)
+        ]
     except Exception as exc:
         out["accepted_escrow_terms_error"] = str(exc)
     return out
