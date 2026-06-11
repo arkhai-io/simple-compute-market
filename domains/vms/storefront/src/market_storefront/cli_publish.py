@@ -473,6 +473,67 @@ def _recipient_demands_for_chains(
     return demands
 
 
+def _heartbeat_oracle_demands_for_chains(
+    chains: dict[str, Any],
+    chain_names: set[str],
+    oracle_address: str,
+) -> list[dict[str, Any]]:
+    """Oracle-gated plan shape: TrustedOracleArbiter demands.
+
+    Collection through these listings waits for the named third-party
+    oracle to ``arbitrate()`` true. First instantiation of lifecycle
+    work item I.5: the oracle is assumed to arbitrate true at end of
+    lease unless a dispute is raised (manual for now; the buyer's
+    signed heartbeats and the seller's persisted evidence inform
+    dispute handling). A plan shape, not a code path: only the
+    advertised demand changes; negotiation, materialization, and the
+    claims engine all flow through the same codec registry.
+    """
+    from market_alkahest.alkahest import get_trusted_oracle_arbiter
+
+    demands: list[dict[str, Any]] = []
+    for name in sorted(chain_names):
+        chain = chains.get(name)
+        if chain is None:
+            continue
+        arbiter = get_trusted_oracle_arbiter(
+            chain.name,
+            config_path=chain.alkahest_address_config_path,
+        )
+        demands.append({
+            "chain_name": chain.name,
+            "arbiter": arbiter.lower(),
+            "demand_data": {"oracle": oracle_address.lower(), "data": "0x"},
+        })
+    return demands
+
+
+def _demands_for_chains(
+    chains: dict[str, Any],
+    chain_names: set[str],
+    wallet_address: str,
+) -> list[dict[str, Any]]:
+    """Published demand set per the seller's settlement posture."""
+    from market_storefront.utils.config import settings
+
+    if getattr(settings, "oracle_gated_listings", False):
+        oracle = str(getattr(settings, "trusted_oracle_address", "") or "")
+        if not oracle:
+            raise ValueError(
+                "oracle_gated_listings requires trusted_oracle_address — a "
+                "third party both sides trust. The seller's own wallet is "
+                "not a valid oracle: the party collecting cannot also be "
+                "the party deciding collection."
+            )
+        if oracle.lower() == wallet_address.lower():
+            raise ValueError(
+                "trusted_oracle_address equals this storefront's wallet; "
+                "a self-oracle gates nothing — name a third party."
+            )
+        return _heartbeat_oracle_demands_for_chains(chains, chain_names, oracle)
+    return _recipient_demands_for_chains(chains, chain_names, wallet_address)
+
+
 def _publish_round(
     *,
     db_path: str,
@@ -552,11 +613,11 @@ def _publish_round(
                 if isinstance(e, dict) and e.get("chain_name")
             }
             try:
-                demands = _recipient_demands_for_chains(
+                demands = _demands_for_chains(
                     CHAINS, chain_names, wallet_address,
                 )
             except Exception as exc:
-                failed.append((res, f"recipient demands: {exc}"))
+                failed.append((res, f"listing demands: {exc}"))
                 continue
             raw_max_duration_seconds = (
                 res.get("max_duration_seconds")

@@ -193,6 +193,7 @@ def materialize_settlement_plan_from_proposal(
     agreed_amount: int | None,
     duration_seconds: int,
     addr_config_path: str | None = None,
+    service_terms: dict[str, Any] | None = None,
 ) -> SettlementPlan:
     """Derive the settlement plan from a negotiated escrow proposal.
 
@@ -213,6 +214,7 @@ def materialize_settlement_plan_from_proposal(
     )
     return SettlementPlan(
         obligations=[escrow_terms_to_settlement_obligation(t) for t in terms],
+        service_terms=dict(service_terms or {}),
     )
 
 
@@ -223,6 +225,7 @@ def settlement_plan_payload_from_proposal(
     agreed_amount: int | None,
     duration_seconds: int,
     addr_config_path: str | None = None,
+    service_terms: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """JSON-serializable variant of the plan materialization."""
     return materialize_settlement_plan_from_proposal(
@@ -231,4 +234,5 @@ def settlement_plan_payload_from_proposal(
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
         addr_config_path=addr_config_path,
+        service_terms=service_terms,
     ).model_dump()

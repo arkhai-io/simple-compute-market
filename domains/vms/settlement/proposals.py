@@ -36,6 +36,45 @@ def escrow_proposal_from_accepted_entry(
     )
 
 
+def proposal_is_oracle_gated(
+    proposal: EscrowProposal | dict[str, Any],
+    *,
+    chain_config_paths: dict[str, str | None] | None = None,
+) -> bool:
+    """True when the proposal's demand tree gates collection on a
+    trusted oracle (directly or inside an AllArbiter conjunction)."""
+    from market_alkahest.alkahest import address_to_slot
+    from market_alkahest.schemas import accepted_demands
+
+    chain = (
+        proposal.chain_name
+        if isinstance(proposal, EscrowProposal)
+        else proposal.get("chain_name")
+    )
+    config_path = (chain_config_paths or {}).get(chain)
+    for demand in accepted_demands(proposal):
+        arbiter = demand.get("arbiter")
+        if not arbiter:
+            continue
+        try:
+            slot = address_to_slot(chain, arbiter, config_path=config_path)
+        except Exception:
+            continue
+        if slot == "trusted_oracle_arbiter":
+            return True
+        if slot == "all_arbiter":
+            children = (demand.get("demand_data") or {}).get("arbiters") or []
+            for child in children:
+                try:
+                    if address_to_slot(
+                        chain, child, config_path=config_path
+                    ) == "trusted_oracle_arbiter":
+                        return True
+                except Exception:
+                    continue
+    return False
+
+
 def accepted_escrow_artifacts_from_proposal(
     *,
     proposal: EscrowProposal | dict[str, Any] | None,
@@ -44,6 +83,7 @@ def accepted_escrow_artifacts_from_proposal(
     uses_scalar_amount: bool = True,
     seller_wallet_address: str | None = None,
     chain_config_paths: dict[str, str | None] | None = None,
+    heartbeat_interval_seconds: int | None = None,
 ) -> dict[str, Any]:
     """Build accepted escrow response artifacts from a negotiated proposal.
 
@@ -80,12 +120,23 @@ def accepted_escrow_artifacts_from_proposal(
             materialize_settlement_plan_from_proposal,
         )
 
+        service_terms: dict[str, Any] = {}
+        if heartbeat_interval_seconds and proposal_is_oracle_gated(
+            accepted, chain_config_paths=chain_config_paths
+        ):
+            # Oracle-gated collection: the buyer's off-chain duty is the
+            # heartbeat cadence the oracle's evidence window assumes.
+            service_terms["heartbeat"] = {
+                "schema": "vms.heartbeat.v1",
+                "interval_seconds": int(heartbeat_interval_seconds),
+            }
         plan = materialize_settlement_plan_from_proposal(
             proposal=accepted,
             seller_wallet_address=seller_wallet_address,
             agreed_amount=int(agreed_amount),
             duration_seconds=int(duration_seconds),
             addr_config_path=(chain_config_paths or {}).get(accepted.chain_name),
+            service_terms=service_terms,
         )
         out["settlement_plan"] = plan.model_dump()
         # LEGACY mirror of the plan's alkahest obligations, kept for

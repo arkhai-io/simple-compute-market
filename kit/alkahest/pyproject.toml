@@ -8,6 +8,9 @@ dependencies = [
     "web3>=7.14.0",
 ]
 
+[project.scripts]
+alkahest-oracle = "market_alkahest.oracle_cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -59,3 +59,18 @@ def test_expiration_extraction_prefers_settlement_plan():
         settlement_plan = None
 
     assert service_cli._deal_expiration_unix(NoPlan()) is None
+
+
+def test_cadence_prefers_plan_service_terms():
+    class Deal:
+        settlement_plan = {
+            "obligations": [],
+            "service_terms": {"heartbeat": {"interval_seconds": 45}},
+        }
+
+    assert service_cli._plan_heartbeat_interval(Deal()) == 45.0
+
+    class Bare:
+        settlement_plan = {"obligations": []}
+
+    assert service_cli._plan_heartbeat_interval(Bare()) is None

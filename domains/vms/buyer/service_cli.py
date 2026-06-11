@@ -52,6 +52,20 @@ def send_heartbeat(
     )
 
 
+def _plan_heartbeat_interval(deal) -> Optional[float]:
+    """The cadence the seller's plan asks for, when it asks."""
+    plan = getattr(deal, "settlement_plan", None)
+    if isinstance(plan, dict):
+        hb = (plan.get("service_terms") or {}).get("heartbeat") or {}
+        interval = hb.get("interval_seconds")
+        if interval is not None:
+            try:
+                return float(interval)
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
 def _deal_expiration_unix(deal) -> Optional[float]:
     """Best-available collect-vs-reclaim boundary for the deal."""
     plan = getattr(deal, "settlement_plan", None)
@@ -161,9 +175,10 @@ def register(app: typer.Typer) -> None:
             ..., "--from", "--run", "-r",
             help="Buyer run-id of a settled deal (see `market logs runs`).",
         ),
-        interval: float = typer.Option(
-            60.0, "--interval", "-i",
-            help="Heartbeat cadence in seconds.",
+        interval: Optional[float] = typer.Option(
+            None, "--interval", "-i",
+            help="Heartbeat cadence in seconds. Default: the cadence the "
+                 "seller's settlement plan asks for, else 60.",
         ),
         once: bool = typer.Option(
             False, "--once",
@@ -209,11 +224,17 @@ def register(app: typer.Typer) -> None:
             require_ssh=False,
         )
 
+        effective_interval = (
+            interval
+            if interval is not None
+            else (_plan_heartbeat_interval(deal) or 60.0)
+        )
+
         log = RunLog.open(run_id)
         log.event(
             "service_started",
             escrow_uid=deal.escrow_uid,
-            interval_seconds=interval,
+            interval_seconds=effective_interval,
             once=once,
         )
         code = asyncio.run(
@@ -221,7 +242,7 @@ def register(app: typer.Typer) -> None:
                 log=log,
                 deal=deal,
                 chain_settings=chain_settings,
-                interval_seconds=interval,
+                interval_seconds=effective_interval,
                 once=once,
                 reclaim=reclaim and not once,
             )

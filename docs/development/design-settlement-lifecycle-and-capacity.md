@@ -148,9 +148,15 @@ natural transport is a new authenticated storefront endpoint (e.g.
 framework-free signed-request verification, so the endpoint shell,
 persistence, and replay protection are core mechanics; what a heartbeat
 attests and how evidence bundles are built/verified is domain policy.
-The seller persists heartbeats as evidence; the oracle (operated by
-either party or a third party) verifies bundles and calls
-`arbitrate()`. Oracle interaction lives in kit.
+The seller persists heartbeats as evidence; the oracle verifies bundles
+and calls `arbitrate()`. Oracle interaction lives in kit.
+
+**The oracle must be a party that doesn't benefit from the decision** —
+in practice a third party. A seller-operated oracle gates nothing (the
+collector authorizes its own collection); a buyer-operated oracle is a
+unilateral payment hold-up. Party-operated verification only works in
+shapes where the chain itself checks the evidence — see the
+heartbeat-verification alternatives under work item 5.
 
 ### Filing (core / kit / domain)
 
@@ -254,9 +260,33 @@ callable, so Part I does not block on Part II.
    the first payload vocabulary (`vms.heartbeat.v1`: bare liveness +
    status). Evidence-bundle construction for oracle arbitration is
    I.5's.
-5. **VM lifecycle policies.** Heartbeat-gated single escrow first, then
-   interval escrows, then penalty bonds. Each stays a *plan shape*, not
-   a code path.
+5. **VM lifecycle policies.** First instantiation done: the
+   **deferring-third-party-oracle single escrow**. A seller opts in via
+   `oracle_gated_listings` + `trusted_oracle_address` (the publish path
+   rejects a missing oracle and rejects the seller's own wallet — the
+   party collecting cannot also be the party deciding collection);
+   listings then advertise a `TrustedOracleArbiter(oracle)` demand,
+   which flows through the existing codec registry into materialized
+   escrows, and the claims engine requests arbitration once and polls.
+   The oracle is assumed to `arbitrate()` true at end of lease unless a
+   dispute was raised — manual for now via the kit's `alkahest-oracle`
+   CLI (arbitrate/status); the production follow-up is an oracle
+   *service* that auto-arbitrates true at lease end and parks disputes
+   for a human, with the buyer's signed heartbeats and the seller's
+   persisted evidence informing dispute handling. The accepted plan's
+   `service_terms.heartbeat` carries the cadence; the buyer's
+   `market service` follows it.
+
+   True *heartbeat-gated* collection (where missing heartbeats
+   mechanically block payment rather than ground a dispute) needs one
+   of: (a) a heartbeat-verifying **arbiter contract** checking buyer
+   signatures on-chain, with the deal split into per-interval escrows
+   so a dead buyer costs the seller at most one interval; or (b) the
+   **splitter contracts**
+   (`~/dev/arkhai/alkahest/contracts/src/utils/splitters/`, not yet
+   fully audited and under security patching) with an off-chain oracle
+   service. Both are future plan shapes, as are interval escrows and
+   penalty bonds generally.
 6. **Wire `request_arbitration` into the engine.** Done:
    `submit_compute_fulfillment` submits the fulfillment and nothing
    else; the claims engine owns arbitration (requested once per

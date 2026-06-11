@@ -59,6 +59,15 @@ claims_sweep_interval = 30
 # Advertised buyer-heartbeat cadence (seconds) echoed by the deals
 # endpoint; gating collection on heartbeats is lifecycle policy (I.5).
 heartbeat_interval_seconds = 60
+# Oracle-gated collection (lifecycle work item I.5): publish listings
+# whose escrow demand is TrustedOracleArbiter(trusted_oracle_address) so
+# collection waits for a third party both sides trust to arbitrate()
+# true — assumed at end of lease unless a dispute is raised. The
+# storefront's own wallet is rejected as the oracle: the party
+# collecting cannot also be the party deciding collection. Buyer
+# heartbeats (cadence above) are the dispute evidence.
+oracle_gated_listings = false
+trusted_oracle_address = ""
 default_vm_host               = "kvm1"
 
 [wallet]

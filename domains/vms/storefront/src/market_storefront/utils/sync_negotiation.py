@@ -153,6 +153,8 @@ def _accepted_escrow_artifacts(
     duration_seconds: int,
     uses_scalar_amount: bool = True,
 ) -> dict[str, Any]:
+    from market_storefront.utils.config import settings as _settings
+
     artifacts = accepted_escrow_artifacts_from_proposal(
         proposal=proposal,
         agreed_amount=agreed_amount,
@@ -160,6 +162,9 @@ def _accepted_escrow_artifacts(
         uses_scalar_amount=uses_scalar_amount,
         seller_wallet_address=None,
         chain_config_paths=_chain_config_paths(),
+        heartbeat_interval_seconds=int(
+            getattr(_settings, "heartbeat_interval_seconds", 60)
+        ),
     )
     error = artifacts.pop("accepted_escrow_terms_error", None)
     if error:
