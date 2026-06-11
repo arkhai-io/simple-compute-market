@@ -12,15 +12,17 @@ the only exception, and they leave with the client-wheel wire bump) and
 no dependencies beyond pydantic — the wheel must stay importable by
 every role without dragging in role or kit code.
 
-Known divergence: the escrow carriers below still bake the alkahest
-settlement mechanism into their required fields (``EscrowTerms`` is the
-``doObligation`` call shape; proposals key on chain + contract
-address). The target is lifecycle universals + a ``{mechanism, params}``
-envelope interpreted by kit codecs, so fiat escrow and other mechanisms
-fit without carrier surgery; that reshape deliberately rides the
-settlement-plan generalization (work item I.1 of
-``docs/development/design-settlement-lifecycle-and-capacity.md``) so
-the negotiation wire churns once, not twice.
+Settlement mechanisms: the negotiated outcome is carried as a
+``SettlementPlan`` — per obligation, lifecycle universals
+(payer/claimant, amount/asset, expiration, conditions) as typed fields
+and everything mechanism-specific behind a ``{mechanism, params}``
+envelope whose deterministic interpretation lives in kit codecs
+(``kit/alkahest`` first; fiat providers later). The flat alkahest
+shapes (``EscrowTerms``; proposals keyed on chain + contract address)
+predate the envelope: ``EscrowTerms`` survives as the typed params
+shape of the ``alkahest.v1`` mechanism and as a marked legacy wire
+coercion into the envelope (work item I.1 of
+``docs/development/design-settlement-lifecycle-and-capacity.md``).
 """
 
 from __future__ import annotations
@@ -238,10 +240,14 @@ class EscrowTerms(BaseModel):
         does not change this type — only the keys present in
         ``obligation_data`` differ.
 
-    A negotiation outcome carries ``list[EscrowTerms]`` so multi-escrow
-    designs (e.g. payment + seller penalty deposit) are expressible
-    without a separate plan wrapper. ``maker`` distinguishes who calls
-    ``doObligation`` for each entry.
+    Role since the settlement-plan generalization: the negotiated
+    outcome travels as a ``SettlementPlan`` whose obligations carry a
+    ``{mechanism, params}`` envelope; this type is the *typed params
+    shape* of the ``alkahest.v1`` mechanism (its fields minus ``maker``
+    are exactly that envelope's params) and the source shape of the
+    marked legacy coercions on ``SettlementObligation`` /
+    ``SettlementPlan``, which keep pre-plan artifacts (flat terms dicts
+    and bare terms lists) parsing.
     """
 
     maker: Literal["buyer", "seller"] = Field(
@@ -288,6 +294,194 @@ class EscrowTerms(BaseModel):
             "tolerance window."
         ),
     )
+
+
+_ALKAHEST_MECHANISM = "alkahest.v1"
+"""Mechanism tag for the legacy flat-``EscrowTerms`` wire coercions below.
+
+A legacy wire tag, not a core interpretation of the params — core never
+dispatches on it. The matching codec lives in ``kit/alkahest``.
+"""
+
+
+class SettlementObligation(BaseModel):
+    """One obligation in a settlement plan.
+
+    The lifecycle universals every settlement mechanism shares are typed
+    fields: who funds it, who collects it, how much of what, when the
+    collect-vs-reclaim boundary falls, and what conditions gate
+    collection. Everything needed to *materialize and verify* the
+    obligation under a particular mechanism — chain + contract address
+    and the ``ObligationData`` struct for alkahest; provider + payment
+    refs for a fiat escrow — rides in ``params``, interpreted by the kit
+    codec registered for ``mechanism``. Core code drives obligations
+    through injected per-mechanism hooks and never reads ``params``.
+
+    ``amount``/``asset`` are the *display/lifecycle* view of the
+    obligation's value (None when the mechanism's value isn't a scalar,
+    e.g. a token-bundle escrow); the mechanism params remain the
+    authoritative materialization input, and the codec's verification is
+    responsible for their consistency.
+
+    ``conditions`` carries declared condition descriptors for the deal
+    servicing engine (lifecycle doc work item I.3). Opaque to core;
+    empty means "whatever the mechanism params already encode" — for
+    alkahest the arbiter demand tree inside ``params`` is authoritative
+    and is decoded by the kit codec on demand.
+    """
+
+    payer: Literal["buyer", "seller"] = Field(
+        description=(
+            "Which side funds/materializes this obligation (calls "
+            "``doObligation`` for alkahest; creates the hold/intent for a "
+            "fiat mechanism)."
+        ),
+    )
+    claimant: Literal["buyer", "seller"] = Field(
+        description=(
+            "Which side collects when the condition set passes. The payer "
+            "reclaims after ``expiration_unix`` if the claimant never "
+            "collected. Payment escrow: buyer pays, seller claims; penalty "
+            "bond: seller posts, buyer claims."
+        ),
+    )
+    amount: int | None = Field(
+        default=None,
+        description=(
+            "Obligation value in the asset's base units (uint256-domain; "
+            "decimal-digit string on the wire, Python int internally). "
+            "None when the mechanism's value isn't a single scalar."
+        ),
+    )
+    asset: str | None = Field(
+        default=None,
+        description=(
+            "Mechanism-scoped asset identifier — ERC-20 contract address "
+            "for alkahest token escrows, a currency code for fiat. None "
+            "when not applicable (e.g. bundle escrows)."
+        ),
+    )
+    expiration_unix: int = Field(
+        gt=0,
+        description=(
+            "Absolute UTC unix-time collect-vs-reclaim boundary. Absolute "
+            "(not relative-to-creation) so both sides share one agreed "
+            "timestamp with no clock-drift window."
+        ),
+    )
+    conditions: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Declared condition descriptors gating collection. Opaque to "
+            "core; interpreted by the mechanism codec / domain policy."
+        ),
+    )
+    mechanism: str = Field(
+        description=(
+            "Settlement mechanism codec identifier (e.g. ``alkahest.v1``). "
+            "Selects the kit codec that interprets ``params``."
+        ),
+    )
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Mechanism-specific materialization/verification params. "
+            "Opaque to market core."
+        ),
+    )
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _parse_obligation_amount(cls, v: Any) -> int | None:
+        return _parse_uint256_str(v, "amount")
+
+    @field_serializer("amount")
+    def _serialize_obligation_amount(self, v: int | None) -> str | None:
+        return _serialize_uint256_str(v)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_escrow_terms(cls, value: Any) -> Any:
+        """LEGACY wire compatibility — not part of the carrier contract.
+
+        Pre-plan artifacts (run logs, negotiation threads, the current
+        client wheels) carry flat ``EscrowTerms`` dicts: ``{maker,
+        chain_name?, escrow_contract, obligation_data, expiration_unix}``.
+        Normalize that shape into the mechanism envelope here so old
+        artifacts keep parsing. Remove once no deployed client sends the
+        flat shape (leaves with the client-wheel wire bump).
+        """
+        if not isinstance(value, dict):
+            return value
+        if "mechanism" in value or "escrow_contract" not in value:
+            return value
+
+        data = dict(value)
+        maker = data.pop("maker", "buyer")
+        obligation_data = data.pop("obligation_data", {}) or {}
+        params: dict[str, Any] = {
+            "escrow_contract": data.pop("escrow_contract"),
+            "obligation_data": obligation_data,
+        }
+        if data.get("chain_name") is not None:
+            params["chain_name"] = data.pop("chain_name")
+        else:
+            data.pop("chain_name", None)
+
+        amount = obligation_data.get("amount")
+        return {
+            "payer": maker,
+            "claimant": "seller" if maker == "buyer" else "buyer",
+            "amount": amount if isinstance(amount, (int, str)) else None,
+            "asset": obligation_data.get("token"),
+            "expiration_unix": data.pop("expiration_unix", None),
+            "mechanism": _ALKAHEST_MECHANISM,
+            "params": params,
+            **data,
+        }
+
+
+class SettlementPlan(BaseModel):
+    """The negotiated settlement plan both sides derive identically.
+
+    Generalizes the single accepted-escrow handoff: a plan is N
+    obligations (payment escrows, interval escrows, penalty bonds —
+    possibly under different mechanisms) plus the off-chain duties each
+    party takes on while servicing the deal. The determinism contract
+    extends unchanged in kind: both sides must derive the same plan from
+    the shared message history; for mechanisms whose materialization is
+    not independently derivable (fiat), determinism covers the agreed
+    terms and the codec verifies the materialized object against them.
+
+    ``service_terms`` is the attachment point for heartbeat cadence and
+    schema, oracle identity, evidence format, and interval boundaries
+    (lifecycle doc work items I.4/I.5). Opaque to core; empty for plans
+    with no off-chain duties beyond the mechanism defaults.
+    """
+
+    obligations: list[SettlementObligation] = Field(
+        description="Every obligation the deal materializes.",
+    )
+    service_terms: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Off-chain servicing duties (heartbeat cadence/schema, oracle "
+            "identity, interval boundaries). Opaque to market core."
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_terms_list(cls, value: Any) -> Any:
+        """LEGACY wire compatibility — not part of the carrier contract.
+
+        Pre-plan artifacts carry a bare ``list[EscrowTerms]`` where the
+        plan now travels. Wrap it; the per-obligation legacy coercion
+        handles each entry. Remove with the client-wheel wire bump.
+        """
+        if isinstance(value, list):
+            return {"obligations": value}
+        return value
 
 
 # ---------------------------------------------------------------------------
