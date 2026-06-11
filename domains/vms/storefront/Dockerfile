@@ -35,15 +35,27 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     fi && \
     if [ "${INSTALL_RL_DEPS}" = "true" ]; then \
         uv sync --no-sources --no-dev --no-install-project --extra rl --find-links /.dist \
+            --refresh-package arkhai-core \
+            --refresh-package arkhai-core-storefront \
             --refresh-package arkhai-core-registry-client \
             --refresh-package arkhai-core-storefront-client \
             --refresh-package arkhai-kit-policy \
+            --refresh-package arkhai-kit-alkahest \
+            --refresh-package arkhai-kit-identity \
+            --refresh-package arkhai-kit-config \
+            --refresh-package arkhai-vms-storefront \
             --refresh-package arkhai-vms-provisioning; \
     else \
         uv sync --no-sources --no-dev --no-install-project --find-links /.dist \
+            --refresh-package arkhai-core \
+            --refresh-package arkhai-core-storefront \
             --refresh-package arkhai-core-registry-client \
             --refresh-package arkhai-core-storefront-client \
             --refresh-package arkhai-kit-policy \
+            --refresh-package arkhai-kit-alkahest \
+            --refresh-package arkhai-kit-identity \
+            --refresh-package arkhai-kit-config \
+            --refresh-package arkhai-vms-storefront \
             --refresh-package arkhai-vms-provisioning; \
     fi
 
@@ -110,9 +122,15 @@ COPY .dist/ /.dist/
 # /.dist wheel instead.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-sources --no-dev --find-links /.dist \
+        --refresh-package arkhai-core \
+        --refresh-package arkhai-core-storefront \
         --refresh-package arkhai-core-registry-client \
         --refresh-package arkhai-core-storefront-client \
         --refresh-package arkhai-kit-policy \
+        --refresh-package arkhai-kit-alkahest \
+        --refresh-package arkhai-kit-identity \
+        --refresh-package arkhai-kit-config \
+        --refresh-package arkhai-vms-storefront \
         --refresh-package arkhai-vms-provisioning
 
 ARG PORT=8080

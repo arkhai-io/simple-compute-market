@@ -29,11 +29,16 @@ COPY e2e-tests/pyproject.toml ./
 # 0.1.0 missing a newly-added module). Third-party deps still hit the cache.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --find-links /dist \
+        --refresh-package arkhai-core \
+        --refresh-package arkhai-core-storefront \
         --refresh-package arkhai-vms-buyer \
         --refresh-package arkhai-kit-policy \
         --refresh-package arkhai-vms-storefront \
         --refresh-package arkhai-vms-provisioning \
         --refresh-package arkhai-core-storefront-client \
+        --refresh-package arkhai-kit-alkahest \
+        --refresh-package arkhai-kit-identity \
+        --refresh-package arkhai-kit-config \
         --refresh-package arkhai-core-registry-client
 
 # Stage 2: Lean runtime image
