@@ -197,6 +197,20 @@ async def start_settlement_job(
         )
         return existing or {}
 
+    # Claim context for the deal-servicing engine: re-materialize the
+    # plan's payment obligation from the pinned proposal (deterministic,
+    # same derivation as the negotiated settlement_plan artifact).
+    from market_storefront.services.claims_runtime import derive_claim_obligation
+
+    claim_obligation = derive_claim_obligation(
+        proposal=proposal,
+        agreed_amount=int(thread["agreed_price"]),
+        duration_seconds=provision.duration_seconds,
+        chain_config_paths={
+            name: cfg.alkahest_address_config_path for name, cfg in CHAINS.items()
+        },
+    )
+
     asyncio.create_task(
         _run_settlement_job_bg(
             escrow_uid=escrow_uid,
@@ -205,6 +219,10 @@ async def start_settlement_job(
             order_dict=our_order_dict,
             sqlite_client=sqlite_client,
             alkahest_client=alkahest_client,
+            negotiation_id=negotiation_id,
+            claim_obligation=claim_obligation,
+            claim_chain_name=proposal_chain or chain_name,
+            claim_escrow_address=escrow_address,
         )
     )
 
@@ -223,6 +241,10 @@ async def _run_settlement_job_bg(
     order_dict: dict[str, Any],
     sqlite_client: Any,
     alkahest_client: Any,
+    negotiation_id: str | None = None,
+    claim_obligation: dict[str, Any] | None = None,
+    claim_chain_name: str | None = None,
+    claim_escrow_address: str | None = None,
 ) -> None:
     """Background coroutine: run fulfillment, patch the job row."""
     # Imported here so unit tests can mock fulfill_compute_obligation by
@@ -235,7 +257,6 @@ async def _run_settlement_job_bg(
             client=alkahest_client,
             escrow_uid=escrow_uid,
             ssh_public_key=provision.ssh_public_key,
-            oracle_address=settings.wallet.address,
             order=order_dict,
             duration_seconds=provision.duration_seconds,
             listing_id=listing_id,
@@ -260,6 +281,28 @@ async def _run_settlement_job_bg(
                 if result.get("tenant_credentials") is not None else None,
         )
         logger.info("[SETTLE_JOB] Escrow %s provisioning complete", escrow_uid)
+        # Hand the fulfilled deal to the claims engine: arbitration (when
+        # the demand needs it) and collection are its job from here.
+        if alkahest_client is not None:
+            from market_storefront.services.claims_runtime import submit_claim
+
+            try:
+                await submit_claim(
+                    sqlite_client=sqlite_client,
+                    escrow_uid=escrow_uid,
+                    fulfillment_uid=result.get("fulfillment_uid"),
+                    negotiation_id=negotiation_id,
+                    listing_id=listing_id,
+                    obligation=claim_obligation,
+                    chain_name=claim_chain_name,
+                    escrow_address=claim_escrow_address,
+                )
+            except Exception:
+                logger.exception(
+                    "[SETTLE_JOB] claim submission failed for %s — "
+                    "collection will not happen until resubmitted",
+                    escrow_uid,
+                )
     else:
         reason = (result or {}).get("message") or f"status={status!r}"
         await sqlite_client.update_escrow(

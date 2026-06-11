@@ -212,26 +212,46 @@ callable, so Part I does not block on Part II.
    has not yet generalized to advertising accepted mechanisms) — that
    churn rides whichever lifecycle policy first needs a second
    mechanism or plan shape proposed in-band (I.5).
-2. **kit/alkahest codecs.** AllArbiter demand-tree encode/decode; oracle
-   arbitrate/request/watch helpers; collect/reclaim primitives.
-   (`market_alkahest` already owns generic proposal/terms
-   materialization — this extends the same package, now explicitly as
-   the first *mechanism codec* behind the plan carrier's envelope.)
-3. **Core lifecycle engine.** Persisted deal state machine + scheduler +
-   event hook points; mechanism-generic — the engine drives injected
-   `materialize`/`check conditions`/`collect`/`reclaim` hooks supplied
-   by the mechanism codec. Seller engine embedded in the storefront
-   runtime, buyer engine runnable from the buyer CLI (`market service
-   --run <run-log>` or daemon mode) — run-log persistence already exists
-   as the handoff carrier.
+2. **kit/alkahest codecs.** Done: `market_alkahest.claims` adds
+   TrustedOracleArbiter and AllArbiter codecs to the arbiter registry
+   (explicit demand_data, both directions), oracle wrappers
+   (`request_arbitration`, oracle-side `arbitrate`, and a
+   timeout-bounded `arbitration_status` probe over the SDK's
+   `wait_for_arbitration`), and `collect_escrow_with_codec` — the
+   collection mirror of the existing reclaim dispatcher. Nothing in the
+   repo collected escrows before this.
+3. **Core lifecycle engine.** Seller half done:
+   `core_storefront.settlement_lifecycle.ClaimsEngine` is the persisted
+   claim state machine (awaiting_conditions → collectable → collected /
+   abandoned) with backoff scheduling, expiration-grace abandonment,
+   hook-owned `mechanism_state` scratch, and stage-event hook points;
+   it drives injected per-mechanism `check_conditions`/`collect` hooks
+   and never learns the mechanism. The alkahest hooks live in
+   `domains/vms/settlement/claims.py` (recipient → ready;
+   trusted-oracle → request-once + `ArbitrationMade` poll; all_arbiter
+   recurses); the storefront embeds the engine as a watchdog-style
+   startup task over a `settlement_claims` SQLite table, and settlement
+   jobs submit a claim (obligation re-materialized from the pinned
+   proposal — the plan carrier feeding the engine) on fulfillment.
+   Still open: the buyer-side engine (`market service --run <run-log>`
+   or daemon mode — reclaim expired escrows, heartbeats once I.4
+   lands), and `materialize`/`reclaim` hook driving (today the engine
+   services claimant-side collection only; materialization stays in the
+   settle phase until interval escrows need engine-driven
+   materialization).
 4. **Heartbeat endpoint.** Core endpoint shell + persistence; VM domain
    heartbeat schema/verification as the first instantiation.
 5. **VM lifecycle policies.** Heartbeat-gated single escrow first, then
    interval escrows, then penalty bonds. Each stays a *plan shape*, not
    a code path.
-6. **Wire `request_arbitration` into the engine.** Replace the
-   fire-and-forget call in `submit_compute_fulfillment` with a claims
-   step that owns retry and `ArbitrationMade` watching.
+6. **Wire `request_arbitration` into the engine.** Done:
+   `submit_compute_fulfillment` submits the fulfillment and nothing
+   else; the claims engine owns arbitration (requested once per
+   fulfillment, recorded in `mechanism_state`, polled via the bounded
+   `ArbitrationMade` probe with engine backoff) and collection. The
+   old call also pointed the oracle at the seller's own wallet with the
+   order JSON as demand — request theater that nothing answered; the
+   oracle now comes from the escrow's decoded demand tree.
 
 ## Part II — Shared capacity and the site authority
 

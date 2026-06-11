@@ -127,7 +127,6 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
         client=alkahest,
         escrow_uid="escrow-1",
         ssh_public_key="ssh-ed25519 AAAA",
-        oracle_address="0x" + "33" * 20,
         order=_compute_listing(),
         duration_seconds=3600,
         listing_id="listing-1",

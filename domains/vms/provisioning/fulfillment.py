@@ -30,7 +30,6 @@ async def fulfill_vm_obligation(
     client: Any | None,
     escrow_uid: str,
     ssh_public_key: str,
-    oracle_address: str | None = None,
     order: str | dict[str, Any] | None = None,
     duration_seconds: int = 3600,
     listing_id: str | None = None,
@@ -60,7 +59,6 @@ async def fulfill_vm_obligation(
         chain_configs=chain_configs,
     )
     order_id = plan.order_id
-    order_bytes = plan.order_bytes
     required_attributes = plan.required_attributes
 
     try:
@@ -266,8 +264,6 @@ async def fulfill_vm_obligation(
             client=client,
             escrow_uid=escrow_uid,
             connection_details=connection_details,
-            oracle_address=oracle_address,
-            demand_bytes=order_bytes,
         )
     except Exception as error:
         logger.error(

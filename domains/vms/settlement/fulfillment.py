@@ -14,11 +14,16 @@ async def submit_compute_fulfillment(
     client: Any | None,
     escrow_uid: str,
     connection_details: str | None,
-    oracle_address: str | None,
-    demand_bytes: bytes,
 ) -> str:
-    """Submit VM fulfillment on-chain, or return a simulated id in demo mode."""
-    if not client or not oracle_address:
+    """Submit VM fulfillment on-chain, or return a simulated id in demo mode.
+
+    Submission only: requesting arbitration, watching ``ArbitrationMade``,
+    and collecting are the claims agent's job (work item I.6 of the
+    settlement-lifecycle design replaced the fire-and-forget
+    ``request_arbitration`` that used to live here) — fulfillment is the
+    first step of the claim, not the last step of settlement.
+    """
+    if not client:
         fulfillment_uid = f"fulfill_{uuid.uuid4()}"
         logger.info(
             "[ALKAHEST] (Simulated) Fulfilled compute obligation without on-chain client."
@@ -33,10 +38,4 @@ async def submit_compute_fulfillment(
         "[ALKAHEST] Fulfilled compute obligation with on-chain client; "
         "machine provisioned."
     )
-    request_arbitration_result = await client.oracle.request_arbitration(
-        fulfillment_uid,
-        oracle_address,
-        demand_bytes,
-    )
-    logger.info("[ALKAHEST] Arbitration requested: %s", request_arbitration_result)
     return fulfillment_uid

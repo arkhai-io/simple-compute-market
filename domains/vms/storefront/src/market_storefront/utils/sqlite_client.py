@@ -806,6 +806,32 @@ class SQLiteClient:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_escrows_negotiation ON escrows(negotiation_id)"
             )
+            # Settlement claims — the deal-servicing engine's persisted
+            # state (core_storefront.settlement_lifecycle.ClaimRecord):
+            # one row per obligation the seller must drive to collection.
+            # JSON columns mirror the record's dict fields verbatim.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS settlement_claims (
+                  claim_ref TEXT PRIMARY KEY,
+                  state TEXT NOT NULL,
+                  deal_ref TEXT,
+                  obligation TEXT,
+                  fulfillment_ref TEXT,
+                  attempts INTEGER NOT NULL DEFAULT 0,
+                  next_attempt_unix REAL,
+                  mechanism_state TEXT,
+                  last_error TEXT,
+                  result TEXT,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_claims_state "
+                "ON settlement_claims(state, next_attempt_unix)"
+            )
             # Publications — record of which registries received which
             # payload for which listing. Updates and deletes consult this
             # to know what's where; per-registry payload mode (milestone b)
@@ -2735,6 +2761,141 @@ class SQLiteClient:
         d = dict(zip(self._ESCROW_COLS, row))
         d["is_primary"] = bool(d["is_primary"])
         return d
+
+    # ------------------------------------------------------------------
+    # Settlement claims (deal-servicing engine store)
+    # ------------------------------------------------------------------
+
+    _CLAIM_JSON_FIELDS = ("deal_ref", "obligation", "mechanism_state", "result")
+
+    def _claim_row_to_dict(self, row: tuple, columns: list[str]) -> dict:
+        out = dict(zip(columns, row))
+        for f in self._CLAIM_JSON_FIELDS:
+            raw = out.get(f)
+            out[f] = json.loads(raw) if raw else ({} if f != "result" else None)
+        out.pop("created_at", None)
+        out.pop("updated_at", None)
+        return out
+
+    async def due_claims(self, now_unix: float, limit: int = 50) -> list[dict]:
+        """Non-terminal claims whose next attempt is unset or due."""
+        def _load() -> list[dict]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.execute(
+                    """
+                    SELECT claim_ref, state, deal_ref, obligation,
+                           fulfillment_ref, attempts, next_attempt_unix,
+                           mechanism_state, last_error, result,
+                           created_at, updated_at
+                    FROM settlement_claims
+                    WHERE state NOT IN ('collected', 'abandoned')
+                      AND (next_attempt_unix IS NULL OR next_attempt_unix <= ?)
+                    ORDER BY created_at
+                    LIMIT ?
+                    """,
+                    (now_unix, limit),
+                )
+                columns = [d[0] for d in cur.description]
+                return [self._claim_row_to_dict(r, columns) for r in cur.fetchall()]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def upsert_claim(self, claim: dict) -> None:
+        """Insert the claim if new; no-op when claim_ref already exists."""
+        def _insert() -> None:
+            now = datetime.now().isoformat()
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO settlement_claims
+                      (claim_ref, state, deal_ref, obligation, fulfillment_ref,
+                       attempts, next_attempt_unix, mechanism_state,
+                       last_error, result, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        claim["claim_ref"],
+                        claim.get("state") or "awaiting_conditions",
+                        json.dumps(claim.get("deal_ref") or {}),
+                        json.dumps(claim.get("obligation") or {}),
+                        claim.get("fulfillment_ref"),
+                        int(claim.get("attempts") or 0),
+                        claim.get("next_attempt_unix"),
+                        json.dumps(claim.get("mechanism_state") or {}),
+                        claim.get("last_error"),
+                        json.dumps(claim["result"]) if claim.get("result") is not None else None,
+                        now, now,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_insert)
+
+    async def save_claim(self, claim: dict) -> None:
+        """Persist the full updated claim row."""
+        def _save() -> None:
+            now = datetime.now().isoformat()
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    """
+                    UPDATE settlement_claims
+                    SET state = ?, deal_ref = ?, obligation = ?,
+                        fulfillment_ref = ?, attempts = ?,
+                        next_attempt_unix = ?, mechanism_state = ?,
+                        last_error = ?, result = ?, updated_at = ?
+                    WHERE claim_ref = ?
+                    """,
+                    (
+                        claim["state"],
+                        json.dumps(claim.get("deal_ref") or {}),
+                        json.dumps(claim.get("obligation") or {}),
+                        claim.get("fulfillment_ref"),
+                        int(claim.get("attempts") or 0),
+                        claim.get("next_attempt_unix"),
+                        json.dumps(claim.get("mechanism_state") or {}),
+                        claim.get("last_error"),
+                        json.dumps(claim["result"]) if claim.get("result") is not None else None,
+                        now,
+                        claim["claim_ref"],
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def load_claim(self, claim_ref: str) -> dict | None:
+        """Load one claim row (None when absent)."""
+        def _load() -> dict | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.execute(
+                    """
+                    SELECT claim_ref, state, deal_ref, obligation,
+                           fulfillment_ref, attempts, next_attempt_unix,
+                           mechanism_state, last_error, result,
+                           created_at, updated_at
+                    FROM settlement_claims WHERE claim_ref = ?
+                    """,
+                    (claim_ref,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                columns = [d[0] for d in cur.description]
+                return self._claim_row_to_dict(row, columns)
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
 
     async def insert_escrow(
         self,

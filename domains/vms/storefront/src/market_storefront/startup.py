@@ -194,4 +194,12 @@ async def _startup_tasks() -> None:
         settings.negotiation_timeout_seconds,
     )
 
+    from market_storefront.services.claims_runtime import claims_engine_loop
+
+    asyncio.create_task(claims_engine_loop())
+    logger.info(
+        "[STARTUP] Claims engine started (interval=%ss)",
+        getattr(settings, "claims_sweep_interval", 30),
+    )
+
     await _preflight_provisioning()
