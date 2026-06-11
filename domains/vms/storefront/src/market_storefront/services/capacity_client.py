@@ -526,14 +526,46 @@ async def combined_held_by_resource(
 
     In remote mode deal reservations live in the site ledger, but
     operator reservations (the admin portfolio endpoints) still write
-    the local tables until the aggregator re-homes (work item II.5). A
-    hold is recorded in exactly one of the two, so the sum is the truth
-    the listing reconciler needs.
+    the local tables. A hold is recorded in exactly one of the two, so
+    the sum is the truth the listing reconciler needs. This is the
+    fallback keying (resource_id only) for members the site snapshots
+    don't cover — see ``member_availability_view`` for the primary,
+    ``(site, resource_id)``-keyed answer.
     """
     held = await site_held_by_resource(client)
     for resource_id, units in _local_held_by_resource(db_path).items():
         held[resource_id] = held.get(resource_id, 0) + units
     return held
+
+
+async def member_availability_view(
+    client: Any, db_path: str,
+) -> dict[tuple[str | None, str], int]:
+    """Available units per pool member, from the aggregated snapshots.
+
+    Keyed ``(site, resource_id)`` — the aggregator's member key. The
+    home site (the first configured one) is also keyed ``(None, rid)``,
+    matching members that carry no site tag, and has local operator
+    holds subtracted (those still live in the storefront's own tables).
+    """
+    view: dict[tuple[str | None, str], int] = {}
+    sites = remote_site_clients(client)
+    if not sites:
+        return view
+    home_site = next(iter(sites))
+    local_held = _local_held_by_resource(db_path)
+    for row in await client.snapshot():
+        resource_id = row.get("resource_id")
+        available = row.get("available_units")
+        if not resource_id or available is None:
+            continue
+        site = row.get("site") or home_site
+        available = max(int(available), 0)
+        if site == home_site:
+            available = max(available - local_held.get(str(resource_id), 0), 0)
+            view[(None, str(resource_id))] = available
+        view[(str(site), str(resource_id))] = available
+    return view
 
 
 def _make_remote_listing_subscriber(
@@ -556,25 +588,32 @@ def _make_remote_listing_subscriber(
 
         db_path = sqlite_client_factory().db_path
         held = await combined_held_by_resource(client, db_path)
+        availability = await member_availability_view(client, db_path)
         if delta.kind in _CONSUMING_DELTA_KINDS:
             closed = await close_stale_compute_listings_after_capacity_change(
-                db_path, held_by_resource=held,
+                db_path,
+                held_by_resource=held,
+                member_availability=availability,
             )
             if closed:
                 stage_event(
                     "provision", "stale_compute_listings_closed",
                     resource_id=delta.resource_id,
+                    site=delta.site,
                     capacity_version=delta.version,
                     closed_listing_ids=closed,
                 )
         elif delta.kind == "released":
             reopened = await reopen_available_compute_listings_after_capacity_change(
-                db_path, held_by_resource=held,
+                db_path,
+                held_by_resource=held,
+                member_availability=availability,
             )
             if reopened:
                 stage_event(
                     "provision", "compute_listings_reopened",
                     resource_id=delta.resource_id,
+                    site=delta.site,
                     capacity_version=delta.version,
                     reopened_listing_ids=reopened,
                 )
@@ -768,11 +807,16 @@ async def _site_events_poller(
         )
         db_path = get_sqlite_client().db_path
         held = await combined_held_by_resource(aggregate, db_path)
+        availability = await member_availability_view(aggregate, db_path)
         await close_stale_compute_listings_after_capacity_change(
-            db_path, held_by_resource=held,
+            db_path,
+            held_by_resource=held,
+            member_availability=availability,
         )
         await reopen_available_compute_listings_after_capacity_change(
-            db_path, held_by_resource=held,
+            db_path,
+            held_by_resource=held,
+            member_availability=availability,
         )
 
     last_applied: int | None = None

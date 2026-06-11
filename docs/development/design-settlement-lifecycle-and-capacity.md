@@ -528,9 +528,23 @@ consumer.
    than a job-kind queue keyed by `allocation_id` (revisit with the
    second executor, II.7); the owning storefront comes from service
    settings, not yet from the deal_ref recorded at reserve time.
-5. **Aggregator module.** Re-home pools/members/derived listings as a
-   storefront-side module over the client interface; pool members keyed
-   by `(site, resource_id)`; placement policy injectable.
+5. **Aggregator module.** Done: `core_storefront.aggregation` defines
+   `AggregateCapacityClient` — the soft-state view over N hard-state
+   site ledgers, implementing the same `CapacityClient` protocol it
+   consumes (site-tagged union reads; reserves walk sites in
+   placement-policy order and fall back on refusal, None only when
+   every member refuses; writes route to the owning site).
+   `[capacity.sites]` names the authorities (one site is the degenerate
+   aggregation; the first is the home site, where local inventory
+   mirrors), placement is selectable (`fill_first`, `most_available`),
+   one event poller per site feeds site-tagged deltas, and
+   `compute_pool_members` is keyed by `(site, resource_id)` (NULL =
+   home). Slice derivation takes consumption from the aggregated
+   snapshots per member key while totals and market attributes stay
+   local. Open edges: operator reservations and the publish CLI's
+   availability still read local tables; a second *physical* site in
+   the e2e topology waits for II.7, so multi-site routing is proven at
+   the unit level only.
 6. **Two-phase reserve.** TTL hold at terms acceptance, commit at
    settlement; wire the settlement lifecycle's early termination to
    lease truncation.

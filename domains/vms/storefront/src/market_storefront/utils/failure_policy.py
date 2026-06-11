@@ -259,6 +259,7 @@ async def _release_capacity(
     from market_storefront.services.capacity_client import (
         combined_held_by_resource,
         is_remote_capacity_client,
+        member_availability_view,
     )
 
     result = FulfillmentFailurePolicyResult(allocation_id=ctx.allocation_id)
@@ -278,9 +279,14 @@ async def _release_capacity(
             result.state = "released"
             result.resource_id = allocation.get("resource_id")
             result.gpu_count = allocation.get("allocated_gpu_count")
-            held = await combined_held_by_resource(capacity, db.db_path)
             reopened = closed_available_listing_ids(
-                db.db_path, held_by_resource=held,
+                db.db_path,
+                held_by_resource=await combined_held_by_resource(
+                    capacity, db.db_path,
+                ),
+                member_availability=await member_availability_view(
+                    capacity, db.db_path,
+                ),
             )
             for listing_id in reopened:
                 await db.update_listing(listing_id=listing_id, status="open")

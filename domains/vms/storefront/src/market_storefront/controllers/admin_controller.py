@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi_utils.cbv import cbv
@@ -412,31 +413,39 @@ class AdminController:
             reopened_listing_ids=reopened_listing_ids,
         )
 
-    async def _site_held_override(self) -> dict[str, int] | None:
-        """Held counts from the site authority when it owns the ledger.
+    async def _site_capacity_overrides(self) -> dict[str, Any]:
+        """Reconciler availability kwargs in remote-capacity mode.
 
-        None in embedded mode (local tables are authoritative) and on any
-        snapshot failure — the reconcile then works off local data, which
-        is the best available answer.
+        Empty in embedded mode (local tables are authoritative) and on
+        any snapshot failure — the reconcile then works off local data,
+        which is the best available answer.
         """
         from market_storefront.services.capacity_client import (
             build_capacity_client,
             combined_held_by_resource,
             is_remote_capacity_client,
+            member_availability_view,
             site_capacity_mode_active,
         )
 
         if not site_capacity_mode_active():
-            return None
+            return {}
         try:
             client = build_capacity_client(lambda: self._db)
             if is_remote_capacity_client(client):
-                return await combined_held_by_resource(client, self._db.db_path)
+                return {
+                    "held_by_resource": await combined_held_by_resource(
+                        client, self._db.db_path,
+                    ),
+                    "member_availability": await member_availability_view(
+                        client, self._db.db_path,
+                    ),
+                }
         except Exception as exc:
             logger.warning(
                 "[ADMIN] Could not snapshot site-authority capacity: %s", exc,
             )
-        return None
+        return {}
 
     async def _close_oversized_compute_listings(self) -> list[str]:
         from domains.vms.listings.reconciler import (
@@ -446,7 +455,7 @@ class AdminController:
 
         closed_listing_ids = stale_open_listing_ids(
             self._db.db_path,
-            held_by_resource=await self._site_held_override(),
+            **(await self._site_capacity_overrides()),
         )
         for listing_id in closed_listing_ids:
             await self._db.update_listing(listing_id=listing_id, status="closed")
@@ -461,7 +470,7 @@ class AdminController:
 
         reopened_listing_ids = closed_available_listing_ids(
             self._db.db_path,
-            held_by_resource=await self._site_held_override(),
+            **(await self._site_capacity_overrides()),
         )
         for listing_id in reopened_listing_ids:
             await self._db.update_listing(listing_id=listing_id, status="open")

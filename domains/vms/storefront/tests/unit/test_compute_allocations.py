@@ -450,3 +450,74 @@ async def test_fungible_pool_reserves_concrete_members_but_reconciles_pool(clien
         1,
         2,
     ]
+
+
+@pytest.mark.asyncio
+async def test_member_availability_view_governs_slices(client):
+    """Remote-capacity mode: consumption comes from the aggregated site
+    snapshots keyed (site, resource_id); totals and market attributes
+    stay local. Members without a site tag match the home-site (None)
+    key."""
+    await _seed_fungible_compute_pool(client)
+
+    # Site ledgers say one member is fully consumed, the other has 2 free.
+    rows = available_compute_slices(
+        client.db_path,
+        member_availability={
+            (None, "pool-h200-a"): 0,
+            (None, "pool-h200-b"): 2,
+        },
+    )
+    assert [row["gpu_count"] for row in rows] == [1, 2]
+    assert rows[0]["available_gpu_count"] == 2
+    assert rows[0]["total_gpu_count"] == 8  # totals are still local
+
+    # The view wins over the held fallback for members it covers, and is
+    # capped by the member's local total.
+    rows = available_compute_slices(
+        client.db_path,
+        held_by_resource={"pool-h200-a": 4, "pool-h200-b": 4},
+        member_availability={
+            (None, "pool-h200-a"): 99,   # capped to the member's 4
+            # pool-h200-b not covered → falls back to held (0 free)
+        },
+    )
+    assert [row["gpu_count"] for row in rows] == [1, 2, 3, 4]
+    assert rows[0]["available_gpu_count"] == 4
+
+
+@pytest.mark.asyncio
+async def test_member_at_another_site_keys_by_site_name(client):
+    """Members tagged with a site use (site, resource_id) — a same-named
+    resource at the home site must not satisfy them."""
+    await _seed_compute_pool(client)
+    # Tag the member as living at dc-b via the resource attributes.
+    await client.upsert_resource(
+        resource_id="pool-h200-1",
+        resource_type="compute.gpu",
+        resource_subtype="h200",
+        unit="count",
+        value=4,
+        state="available",
+        attributes={
+            "gpu_model": "H200",
+            "sla": 99.0,
+            "region": "California, US",
+            "vm_host": "host-1",
+            "site": "dc-b",
+        },
+    )
+
+    consumed_at_home = available_compute_slices(
+        client.db_path,
+        member_availability={(None, "pool-h200-1"): 4},  # wrong site
+        held_by_resource={"pool-h200-1": 4},
+    )
+    assert consumed_at_home == []  # falls back to held → fully consumed
+
+    free_at_dc_b = available_compute_slices(
+        client.db_path,
+        member_availability={("dc-b", "pool-h200-1"): 3},
+        held_by_resource={"pool-h200-1": 4},
+    )
+    assert [row["gpu_count"] for row in free_at_dc_b] == [1, 2, 3]

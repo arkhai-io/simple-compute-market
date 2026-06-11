@@ -347,12 +347,14 @@ async def test_remote_subscriber_closes_and_reopens_with_site_held(
 ):
     calls: list[tuple[str, dict | None]] = []
 
-    async def fake_close(db_path, *, held_by_resource=None):
-        calls.append(("close", held_by_resource))
+    async def fake_close(db_path, *, held_by_resource=None,
+                         member_availability=None):
+        calls.append(("close", held_by_resource, member_availability))
         return ["lst-1"]
 
-    async def fake_reopen(db_path, *, held_by_resource=None):
-        calls.append(("reopen", held_by_resource))
+    async def fake_reopen(db_path, *, held_by_resource=None,
+                          member_availability=None):
+        calls.append(("reopen", held_by_resource, member_availability))
         return []
 
     subscriber = cc._make_remote_listing_subscriber(
@@ -374,8 +376,10 @@ async def test_remote_subscriber_closes_and_reopens_with_site_held(
         await subscriber(CapacityDelta(kind="released", version=2))
 
     assert [c[0] for c in calls] == ["close", "reopen"]
-    # Held counts came from the site snapshot, not local tables.
+    # Held counts came from the site snapshot, not local tables…
     assert calls[0][1] == {"compute-kvm1-001": 2}
+    # …and the member-availability view keys it for the home site.
+    assert calls[0][2][(None, "compute-kvm1-001")] == 6
 
 
 @pytest.mark.asyncio
@@ -397,7 +401,8 @@ async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
 
     reconciles = 0
 
-    async def fake_reconcile(db_path, *, held_by_resource=None):
+    async def fake_reconcile(db_path, *, held_by_resource=None,
+                             member_availability=None):
         nonlocal reconciles
         reconciles += 1
         return []
