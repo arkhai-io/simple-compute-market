@@ -205,10 +205,15 @@ async def test_unsubscribe_stops_delivery(capacity, db):
 
 
 @pytest.mark.asyncio
-async def test_ttl_holds_are_explicitly_unimplemented(capacity, db):
+async def test_ttl_holds_pass_through_to_the_local_ledger(capacity, db):
+    """Two-phase reserve in embedded mode: the TTL lands on the
+    allocation row and the hold consumes capacity until it lapses."""
     await _seed_compute_pool(db)
-    with pytest.raises(NotImplementedError):
-        await capacity.reserve(claim={"gpu_model": "H200"}, ttl_seconds=60.0)
+    held = await capacity.reserve(
+        claim={"gpu_model": "H200"}, ttl_seconds=60.0,
+    )
+    assert held is not None
+    assert held["hold_expires_at"]
 
 
 @pytest.mark.asyncio

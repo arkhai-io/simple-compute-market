@@ -81,16 +81,12 @@ class EmbeddedCapacityClient:
         deal_ref: Mapping[str, Any] | None = None,
         ttl_seconds: float | None = None,
     ) -> dict[str, Any] | None:
-        if ttl_seconds is not None:
-            raise NotImplementedError(
-                "TTL soft holds (two-phase reserve) are not implemented by "
-                "the embedded adapter yet",
-            )
         deal = dict(deal_ref or {})
         reserved = await self._db_factory().reserve_available_compute_vm(
             required_attributes=dict(claim) if claim else None,
             listing_id=deal.get("listing_id"),
             escrow_uid=deal.get("escrow_uid"),
+            ttl_seconds=ttl_seconds,
         )
         if reserved:
             await self._emit(

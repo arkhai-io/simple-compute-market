@@ -728,6 +728,16 @@ def _migrate_pool_member_sites(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "compute_pool_members", "site", "TEXT")
 
 
+def _migrate_allocation_hold_expiry(conn: sqlite3.Connection) -> None:
+    """Two-phase reserve: TTL soft holds on the embedded ledger.
+
+    A reserved allocation with ``hold_expires_at`` in the past lapses
+    back to available (swept lazily ahead of reads and reserves) —
+    mirroring the site ledger's semantics.
+    """
+    _add_column_if_missing(conn, "compute_allocations", "hold_expires_at", "TEXT")
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_000_listing_resource_timestamps",
@@ -756,5 +766,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260611_006_pool_member_sites",
         _migrate_pool_member_sites,
+    ),
+    Migration(
+        "20260611_007_allocation_hold_expiry",
+        _migrate_allocation_hold_expiry,
     ),
 )

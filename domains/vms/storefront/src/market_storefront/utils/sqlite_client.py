@@ -7,7 +7,7 @@ import os
 import sqlite3
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -602,6 +602,7 @@ class SQLiteClient:
                   vm_host TEXT,
                   vm_target TEXT,
                   lease_end_utc TEXT,
+                  hold_expires_at TEXT,
                   failure_reason TEXT,
                   failure_message TEXT,
                   logs_ref TEXT,
@@ -610,6 +611,18 @@ class SQLiteClient:
                   updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
                   released_at TEXT,
                   FOREIGN KEY(resource_id) REFERENCES resources(resource_id)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS capacity_holds (
+                  negotiation_id TEXT PRIMARY KEY,
+                  listing_id TEXT,
+                  allocation_id TEXT NOT NULL,
+                  payload TEXT,
+                  expires_at TEXT,
+                  created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
                 )
                 """
             )
@@ -2000,7 +2013,9 @@ class SQLiteClient:
                 if row is None:
                     return None
                 found_allocation_id, pool_id, member_id, resource_id, gpu_count = row
-                updates = ["state = ?"]
+                # Any explicit state transition consumes a TTL soft hold:
+                # committing clears the deadline, releasing makes it moot.
+                updates = ["state = ?", "hold_expires_at = NULL"]
                 values: list[Any] = [state]
 
                 def add(field: str, value: Any) -> None:
@@ -2077,6 +2092,31 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_update)
 
+    @staticmethod
+    def _lapse_expired_holds(cur: sqlite3.Cursor) -> None:
+        """Lapse TTL'd reservations whose hold expired without a commit.
+
+        Run inside the caller's transaction ahead of availability math —
+        an expired hold must never block capacity. ISO-8601 strings
+        compare lexicographically, so the filter is plain SQL.
+        """
+        cur.execute(
+            """
+            UPDATE compute_allocations
+            SET state = 'released',
+                released_at = ?,
+                failure_reason = 'hold_expired',
+                hold_expires_at = NULL
+            WHERE state = 'reserved'
+              AND hold_expires_at IS NOT NULL
+              AND hold_expires_at <= ?
+            """,
+            (
+                datetime.now(timezone.utc).isoformat(),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+
     # TODO(refactor): Move compute-specific VM reservation logic to the Compute domain
     # as part of the resource portfolio refactor.
     async def reserve_available_compute_vm(
@@ -2085,6 +2125,7 @@ class SQLiteClient:
         required_attributes: dict[str, Any] | None = None,
         listing_id: str | None = None,
         escrow_uid: str | None = None,
+        ttl_seconds: float | None = None,
     ) -> dict[str, Any] | None:
         """Reserve one available compute resource.
 
@@ -2093,12 +2134,16 @@ class SQLiteClient:
                 {"region": "California, US", "gpu_model": "H200"}).
                 Keys are checked first in resource attributes, then in top-level
                 resource fields (resource_type/resource_subtype/unit/state/value).
+            ttl_seconds: Optional soft-hold TTL (two-phase reserve): the
+                reservation auto-lapses unless a state transition (commit,
+                provisioning) lands before the deadline.
         """
         def _reserve() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
                 cur.execute("BEGIN IMMEDIATE")
+                self._lapse_expired_holds(cur)
                 requested_gpu_count = self._requested_gpu_count(required_attributes)
                 rows = self._compute_candidate_rows(cur)
                 for (
@@ -2140,13 +2185,21 @@ class SQLiteClient:
 
                     now_iso = datetime.now().isoformat()
                     allocation_id = str(uuid.uuid4())
+                    hold_expires_at = (
+                        (
+                            datetime.now(timezone.utc)
+                            + timedelta(seconds=float(ttl_seconds))
+                        ).isoformat()
+                        if ttl_seconds is not None
+                        else None
+                    )
                     cur.execute(
                         """
                         INSERT INTO compute_allocations(
                           allocation_id, pool_id, member_id, resource_id, listing_id, escrow_uid,
-                          gpu_count, state, created_at, updated_at
+                          gpu_count, state, hold_expires_at, created_at, updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?, ?)
                         """,
                         (
                             allocation_id,
@@ -2156,6 +2209,7 @@ class SQLiteClient:
                             listing_id,
                             escrow_uid,
                             requested_gpu_count,
+                            hold_expires_at,
                             now_iso,
                             now_iso,
                         ),
@@ -2201,6 +2255,7 @@ class SQLiteClient:
                         "value": value,
                         "allocated_gpu_count": requested_gpu_count,
                         "available_gpu_count": total_gpu_count - held_gpu_count - requested_gpu_count,
+                        "hold_expires_at": hold_expires_at,
                         "attributes": attrs,
                     }
 
@@ -2234,6 +2289,8 @@ class SQLiteClient:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
+                self._lapse_expired_holds(cur)
+                conn.commit()
                 requested_gpu_count = self._requested_gpu_count(required_attributes)
                 rows = self._compute_candidate_rows(cur)
                 for (
@@ -2293,6 +2350,97 @@ class SQLiteClient:
                 conn.close()
 
         return await asyncio.to_thread(_select)
+
+    # ------------------------------------------------------------------
+    # Capacity holds — two-phase reserve bookkeeping. The hold itself
+    # lives in the capacity ledger (a TTL'd reserved allocation); this
+    # table only remembers which allocation a negotiation's acceptance
+    # placed, so settlement can commit it instead of reserving fresh.
+    # ------------------------------------------------------------------
+
+    async def save_capacity_hold(
+        self,
+        *,
+        negotiation_id: str,
+        listing_id: str | None,
+        allocation_id: str,
+        payload: dict[str, Any] | None = None,
+        expires_at: str | None = None,
+    ) -> None:
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO capacity_holds(
+                      negotiation_id, listing_id, allocation_id, payload, expires_at
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(negotiation_id) DO UPDATE SET
+                      listing_id=excluded.listing_id,
+                      allocation_id=excluded.allocation_id,
+                      payload=excluded.payload,
+                      expires_at=excluded.expires_at
+                    """,
+                    (
+                        negotiation_id,
+                        listing_id,
+                        allocation_id,
+                        json.dumps(payload) if payload is not None else None,
+                        expires_at,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_save)
+
+    async def load_capacity_hold(
+        self, *, negotiation_id: str,
+    ) -> dict[str, Any] | None:
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT negotiation_id, listing_id, allocation_id, payload, expires_at
+                    FROM capacity_holds
+                    WHERE negotiation_id = ?
+                    """,
+                    (negotiation_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            if row is None:
+                return None
+            try:
+                payload = json.loads(row[3]) if row[3] else {}
+            except (ValueError, TypeError):
+                payload = {}
+            return {
+                "negotiation_id": row[0],
+                "listing_id": row[1],
+                "allocation_id": row[2],
+                "payload": payload,
+                "expires_at": row[4],
+            }
+
+        return await asyncio.to_thread(_load)
+
+    async def delete_capacity_hold(self, *, negotiation_id: str) -> None:
+        def _delete() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    "DELETE FROM capacity_holds WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_delete)
 
     async def upsert_listing(
         self,

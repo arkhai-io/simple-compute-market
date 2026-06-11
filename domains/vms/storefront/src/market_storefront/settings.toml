@@ -122,10 +122,15 @@ root_path = ""
 # placement orders sites for reserves: "fill_first" (configuration
 # order — pack a site before touching the next) or "most_available"
 # (spread to the site with the most free units).
-mode          = ""
-authority_url = ""
-poll_interval = 5
-placement     = "fill_first"
+# hold_ttl_seconds: two-phase reserve — terms acceptance places a soft
+# hold that settlement commits into the lease; it auto-lapses if the
+# escrow never settles. 0 disables acceptance holds (settlement then
+# does the plain atomic reserve, racing other deals for the capacity).
+mode             = ""
+authority_url    = ""
+poll_interval    = 5
+placement        = "fill_first"
+hold_ttl_seconds = 900
 
 [provisioning]
 service_url            = "http://localhost:8085"

@@ -172,6 +172,76 @@ def _accepted_escrow_artifacts(
     return artifacts
 
 
+async def _place_capacity_hold(
+    sqlite_client: Any,
+    *,
+    negotiation_id: str,
+    listing_id: str | None,
+    order_dict: dict[str, Any] | None,
+) -> None:
+    """Two-phase reserve: a TTL'd soft hold at terms acceptance.
+
+    Closes the window where the escrow settles but the capacity is gone
+    (the capacity design's reservation-protocol step 2) — settlement
+    commits this hold instead of racing a fresh reserve. Best-effort by
+    design: a hold that can't be placed leaves acceptance untouched
+    (settlement then does the plain atomic reserve, exactly as before),
+    and a hold whose deal never settles auto-lapses at the ledger.
+    """
+    from core_storefront.stage_log import stage_event
+
+    from market_storefront.utils.config import settings as _settings
+
+    ttl = float(getattr(
+        getattr(_settings, "capacity", None), "hold_ttl_seconds", 0,
+    ) or 0)
+    if ttl <= 0:
+        return
+    try:
+        from domains.vms.provisioning.job_spec import required_compute_attributes
+        from market_storefront.services.capacity_client import build_capacity_client
+
+        claim = required_compute_attributes(order_dict)
+        capacity = build_capacity_client(lambda: sqlite_client)
+        held = await capacity.reserve(
+            claim=claim or None,
+            deal_ref={
+                "listing_id": listing_id,
+                "negotiation_id": negotiation_id,
+            },
+            ttl_seconds=ttl,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[NEGOTIATION] Could not place capacity hold for %s: %s",
+            negotiation_id, exc,
+        )
+        return
+    if not held:
+        stage_event(
+            "negotiation", "capacity_hold_unavailable",
+            negotiation_id=negotiation_id,
+            listing_id=listing_id,
+        )
+        return
+    await sqlite_client.save_capacity_hold(
+        negotiation_id=negotiation_id,
+        listing_id=listing_id,
+        allocation_id=str(held["allocation_id"]),
+        payload=held,
+        expires_at=held.get("hold_expires_at"),
+    )
+    stage_event(
+        "negotiation", "capacity_hold_placed",
+        negotiation_id=negotiation_id,
+        listing_id=listing_id,
+        allocation_id=held.get("allocation_id"),
+        resource_id=held.get("resource_id"),
+        site=held.get("site"),
+        hold_expires_at=held.get("hold_expires_at"),
+    )
+
+
 _LIVE_LISTING_STATUSES = LIVE_LISTING_STATUSES
 
 
@@ -374,6 +444,12 @@ async def start_sync_negotiation(
             agreed_price=int(agreed_amount),
             agreed_duration_seconds=int(agreed_duration_seconds),
         )
+        await _place_capacity_hold(
+            sqlite_client,
+            negotiation_id=neg_id,
+            listing_id=our_listing_id,
+            order_dict=our_order_dict,
+        )
     stage_event(
         "negotiation", "round_decided",
         negotiation_id=neg_id,
@@ -495,6 +571,12 @@ async def continue_sync_negotiation(
             agreed_price=int(last_seller_amount),
             agreed_duration_seconds=int(agreed_duration_seconds),
         )
+        await _place_capacity_hold(
+            sqlite_client,
+            negotiation_id=neg_id,
+            listing_id=our_listing_id,
+            order_dict=our_order_dict,
+        )
         stage_event(
             "negotiation", "accepted",
             negotiation_id=neg_id,
@@ -596,6 +678,12 @@ async def continue_sync_negotiation(
             negotiation_id=neg_id,
             agreed_price=int(agreed_amount),
             agreed_duration_seconds=int(agreed_duration_seconds),
+        )
+        await _place_capacity_hold(
+            sqlite_client,
+            negotiation_id=neg_id,
+            listing_id=our_listing_id,
+            order_dict=our_order_dict,
         )
     stage_event(
         "negotiation", "round_decided",

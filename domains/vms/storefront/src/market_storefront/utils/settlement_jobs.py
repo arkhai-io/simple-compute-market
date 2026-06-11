@@ -260,6 +260,7 @@ async def _run_settlement_job_bg(
             order=order_dict,
             duration_seconds=provision.duration_seconds,
             listing_id=listing_id,
+            negotiation_id=negotiation_id,
         )
     except Exception as exc:
         logger.exception("[SETTLE_JOB] fulfill_compute_obligation raised for %s", escrow_uid)

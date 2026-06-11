@@ -50,8 +50,12 @@ urls                      = ["http://registry:8080", "http://registry-b:8080"]
 # single-process fallback. Poll fast — the suite waits on
 # delta-driven listing reconciliation.
 [capacity]
-mode          = "site"
-poll_interval = 1
+mode             = "site"
+poll_interval    = 1
+# Two-phase reserve: acceptance holds capacity until the buyer settles
+# (the e2e deals settle within seconds; 900s is headroom, and unsettled
+# holds lapse on their own).
+hold_ttl_seconds = 900
 
 [provisioning]
 service_url = "http://provisioning:8081"

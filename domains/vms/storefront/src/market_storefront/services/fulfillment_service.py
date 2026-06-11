@@ -148,6 +148,7 @@ async def fulfill_compute_obligation(
     duration_seconds: int = 3600,
     listing_id: str | None = None,
     seller_order_id: str | None = None,
+    negotiation_id: str | None = None,
 ):
     """Provision compute and fulfill the obligation. Falls back to simulated flow if no client.
 
@@ -156,9 +157,24 @@ async def fulfill_compute_obligation(
     negotiation thread's `agreed_duration_seconds`. Falls back to 1h
     only if the caller didn't provide one (recovery / legacy paths).
 
+    When the negotiation's acceptance placed a TTL capacity hold
+    (two-phase reserve), it is consumed here: fulfillment commits the
+    held allocation instead of racing a fresh reserve.
+
     When fulfillment lands, pushes the fulfillment_uid to the registry's
     update endpoint.
     """
+    held_allocation: dict | None = None
+    if negotiation_id:
+        db = get_sqlite_client()
+        hold = await db.load_capacity_hold(negotiation_id=negotiation_id)
+        if hold:
+            held_allocation = dict(hold.get("payload") or {})
+            held_allocation.setdefault("allocation_id", hold.get("allocation_id"))
+            # Consume-once: whether the commit lands or falls back to a
+            # fresh reserve, this hold row's job is done.
+            await db.delete_capacity_hold(negotiation_id=negotiation_id)
+
     return await fulfill_vm_obligation(
         client=client,
         escrow_uid=escrow_uid,
@@ -178,4 +194,5 @@ async def fulfill_compute_obligation(
         schedule_shutdown=_do_shutdown,
         register_lease=_register_vm_lease_with_settings,
         apply_failure_policy=_apply_fulfillment_failure_policy_adapter,
+        held_allocation=held_allocation,
     )

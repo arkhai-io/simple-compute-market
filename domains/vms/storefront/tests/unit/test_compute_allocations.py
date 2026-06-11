@@ -521,3 +521,85 @@ async def test_member_at_another_site_keys_by_site_name(client):
         held_by_resource={"pool-h200-1": 4},
     )
     assert [row["gpu_count"] for row in free_at_dc_b] == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_ttl_hold_lapses_and_frees_capacity(client):
+    """Two-phase reserve, embedded half: a TTL'd reservation blocks
+    capacity until its deadline, then lapses back to available."""
+    await _seed_compute_pool(client, gpu_count=4)
+
+    held = await client.reserve_available_compute_vm(
+        required_attributes={"gpu_count": 4},
+        listing_id="lst-hold",
+        ttl_seconds=60,
+    )
+    assert held is not None and held["hold_expires_at"]
+    assert await client.select_available_compute_vm(
+        required_attributes={"gpu_count": 1},
+    ) is None  # the hold consumes everything
+
+    # Backdate the deadline; the next read sweeps the lapse.
+    conn = sqlite3.connect(client.db_path)
+    try:
+        conn.execute(
+            "UPDATE compute_allocations SET hold_expires_at = '2020-01-01T00:00:00+00:00' "
+            "WHERE allocation_id = ?",
+            (held["allocation_id"],),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert await client.select_available_compute_vm(
+        required_attributes={"gpu_count": 4},
+    ) is not None
+    conn = sqlite3.connect(client.db_path)
+    try:
+        state, reason = conn.execute(
+            "SELECT state, failure_reason FROM compute_allocations WHERE allocation_id = ?",
+            (held["allocation_id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert (state, reason) == ("released", "hold_expired")
+
+
+@pytest.mark.asyncio
+async def test_state_transition_consumes_the_hold(client):
+    """Committing (any explicit state change) clears the TTL — a leased
+    allocation must never lapse."""
+    await _seed_compute_pool(client, gpu_count=4)
+    held = await client.reserve_available_compute_vm(
+        required_attributes={"gpu_count": 2},
+        ttl_seconds=60,
+    )
+    await client.update_compute_allocation_state(
+        allocation_id=held["allocation_id"], state="leased",
+    )
+    conn = sqlite3.connect(client.db_path)
+    try:
+        row = conn.execute(
+            "SELECT state, hold_expires_at FROM compute_allocations WHERE allocation_id = ?",
+            (held["allocation_id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row == ("leased", None)
+
+
+@pytest.mark.asyncio
+async def test_capacity_hold_bookkeeping_round_trip(client):
+    await client.save_capacity_hold(
+        negotiation_id="neg-1",
+        listing_id="lst-1",
+        allocation_id="alloc-1",
+        payload={"resource_id": "r1", "vm_host": "kvm1"},
+        expires_at="2099-01-01T00:00:00+00:00",
+    )
+    hold = await client.load_capacity_hold(negotiation_id="neg-1")
+    assert hold["allocation_id"] == "alloc-1"
+    assert hold["payload"]["vm_host"] == "kvm1"
+
+    await client.delete_capacity_hold(negotiation_id="neg-1")
+    assert await client.load_capacity_hold(negotiation_id="neg-1") is None

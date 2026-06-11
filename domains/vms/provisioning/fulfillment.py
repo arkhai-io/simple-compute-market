@@ -16,6 +16,70 @@ logger = logging.getLogger(__name__)
 
 StageEventFn = Callable[..., Any]
 SQLiteClientFactory = Callable[[], Any]
+
+
+def _hold_lapsed(hold_expires_at: Any) -> bool:
+    """Whether a TTL hold's deadline has passed (unparseable → lapsed)."""
+    if not hold_expires_at:
+        return False  # no TTL recorded — the hold doesn't expire
+    text = str(hold_expires_at).strip().replace("Z", "+00:00")
+    try:
+        expires = datetime.fromisoformat(text)
+    except ValueError:
+        return True
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    return expires <= datetime.now(timezone.utc)
+
+
+async def _commit_capacity_hold(
+    *,
+    capacity: Any,
+    held_allocation: dict[str, Any] | None,
+    escrow_uid: str,
+    duration_seconds: int,
+    stage_event: StageEventFn,
+) -> dict[str, Any] | None:
+    """Secure an acceptance-time hold for this deal, or None to reserve fresh.
+
+    Committing before provisioning turns the soft hold into a lease
+    immediately, so it cannot lapse mid-provision; the lease window set
+    here starts at settlement and is refreshed to provision-complete +
+    duration by the normal post-provision commit.
+    """
+    if not held_allocation or not held_allocation.get("allocation_id"):
+        return None
+    if _hold_lapsed(held_allocation.get("hold_expires_at")):
+        logger.info(
+            "[CAPACITY] Hold %s lapsed before settlement — reserving fresh",
+            held_allocation.get("allocation_id"),
+        )
+        return None
+    lease_end_utc = (
+        datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
+    ).strftime("%Y-%m-%d %H:%M")
+    try:
+        await capacity.commit(
+            resource_id=str(held_allocation.get("resource_id")),
+            allocation_id=str(held_allocation["allocation_id"]),
+            lease_end_utc=lease_end_utc,
+            idempotency_ref=escrow_uid,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[CAPACITY] Could not commit hold %s (lapsed at the ledger?): "
+            "%s — reserving fresh",
+            held_allocation.get("allocation_id"), exc,
+        )
+        return None
+    stage_event(
+        "provision", "capacity_hold_committed",
+        escrow_uid=escrow_uid,
+        allocation_id=held_allocation.get("allocation_id"),
+        resource_id=held_allocation.get("resource_id"),
+        site=held_allocation.get("site"),
+    )
+    return dict(held_allocation)
 # Site-authority capacity client (core_storefront.capacity.CapacityClient
 # shape); duck-typed so this concept module needs no core import.
 CapacityClientLike = Any
@@ -43,8 +107,17 @@ async def fulfill_vm_obligation(
     schedule_shutdown: ScheduleShutdownFn,
     register_lease: RegisterLeaseFn,
     apply_failure_policy: ApplyFailurePolicyFn | None = None,
+    held_allocation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Provision VM capacity and submit settlement fulfillment."""
+    """Provision VM capacity and submit settlement fulfillment.
+
+    ``held_allocation`` is the TTL soft hold the negotiation's
+    acceptance placed (two-phase reserve). It is committed into a lease
+    *before* provisioning starts — that removes the
+    hold-expires-during-provisioning race entirely, and the post-provision
+    commit below simply refreshes the lease window. A hold that already
+    lapsed falls back to the plain atomic reserve.
+    """
     fulfillment_uid = None
     connection_details: str | None = None
     reserved_allocation_id: str | None = None
@@ -62,13 +135,21 @@ async def fulfill_vm_obligation(
     required_attributes = plan.required_attributes
 
     try:
-        reserved = await capacity.reserve(
-            claim=required_attributes or None,
-            deal_ref={
-                "listing_id": listing_id or order_id,
-                "escrow_uid": escrow_uid,
-            },
+        reserved = await _commit_capacity_hold(
+            capacity=capacity,
+            held_allocation=held_allocation,
+            escrow_uid=escrow_uid,
+            duration_seconds=duration_seconds,
+            stage_event=stage_event,
         )
+        if reserved is None:
+            reserved = await capacity.reserve(
+                claim=required_attributes or None,
+                deal_ref={
+                    "listing_id": listing_id or order_id,
+                    "escrow_uid": escrow_uid,
+                },
+            )
         if not reserved:
             raise RuntimeError("No available compute VM matched required attributes")
         reserved_allocation_id = (
