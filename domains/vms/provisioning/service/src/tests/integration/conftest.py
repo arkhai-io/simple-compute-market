@@ -354,6 +354,9 @@ async def client_and_queue(
         host_service=host_service,
     )
 
+    from services.capacity_ledger import CapacityLedgerService
+    capacity_ledger_service = CapacityLedgerService(session_factory=session_factory)
+
     from services.lease_service import LeaseService
     from services.lease_lifecycle_service import LeaseLifecycleService
     lease_service = LeaseService(session_factory=session_factory)
@@ -361,10 +364,8 @@ async def client_and_queue(
         lease_service=lease_service,
         settings=mock_settings,
         job_service=None,  # tests use direct-patch path; no real Ansible jobs
+        capacity_ledger=capacity_ledger_service,
     )
-
-    from services.capacity_ledger import CapacityLedgerService
-    capacity_ledger_service = CapacityLedgerService(session_factory=session_factory)
 
     # Override container providers
     app.container.ansible_service.override(fake_ansible)

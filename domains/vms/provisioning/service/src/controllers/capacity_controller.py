@@ -23,6 +23,7 @@ from fastapi_utils.cbv import cbv
 
 import container as _container_module
 from models.capacity_model import (
+    AllocationListResponse,
     AllocationResponse,
     CapacityEventsResponse,
     CommitRequest,
@@ -195,6 +196,43 @@ class CapacityController:
             allocation_id=allocation_id,
             lease_end_utc=body.lease_end_utc,
         ))
+
+    # ------------------------------------------------------------------
+    # Allocation reads (deal-side bookkeeping and operators)
+    # ------------------------------------------------------------------
+
+    @router.get(
+        "/allocations",
+        response_model=AllocationListResponse,
+        summary="List ledger allocations",
+    )
+    def list_allocations(
+        self,
+        state: str | None = Query(default=None),
+        escrow_uid: str | None = Query(default=None),
+    ) -> AllocationListResponse:
+        allocations = self._ledger.list_allocations(state=state)
+        if escrow_uid is not None:
+            allocations = [
+                a for a in allocations if a.get("escrow_uid") == escrow_uid
+            ]
+        return AllocationListResponse(
+            allocations=allocations, total=len(allocations),
+        )
+
+    @router.get(
+        "/allocations/{allocation_id}",
+        response_model=AllocationResponse,
+        summary="Get a ledger allocation",
+    )
+    def get_allocation(self, allocation_id: str) -> AllocationResponse:
+        allocation = self._ledger.get_allocation(allocation_id)
+        if allocation is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"allocation {allocation_id!r} not found",
+            )
+        return AllocationResponse(allocation=allocation)
 
     # ------------------------------------------------------------------
     # Event feed

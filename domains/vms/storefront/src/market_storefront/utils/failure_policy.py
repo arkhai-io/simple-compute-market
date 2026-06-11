@@ -258,7 +258,7 @@ async def _release_capacity(
 ) -> FulfillmentFailurePolicyResult:
     from market_storefront.services.capacity_client import (
         RemoteCapacityClient,
-        site_held_by_resource,
+        combined_held_by_resource,
     )
 
     result = FulfillmentFailurePolicyResult(allocation_id=ctx.allocation_id)
@@ -278,7 +278,7 @@ async def _release_capacity(
             result.state = "released"
             result.resource_id = allocation.get("resource_id")
             result.gpu_count = allocation.get("allocated_gpu_count")
-            held = await site_held_by_resource(capacity)
+            held = await combined_held_by_resource(capacity, db.db_path)
             reopened = closed_available_listing_ids(
                 db.db_path, held_by_resource=held,
             )

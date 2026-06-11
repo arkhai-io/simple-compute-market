@@ -17,6 +17,7 @@ Registered in main.py alongside the other controllers::
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi_utils.cbv import cbv
@@ -78,12 +79,51 @@ class LeasesController:
         """Register a new VM lease.
 
         Called by the storefront after provisioning a VM and scheduling its
-        expiry. The LeaseWatchdog polls this table and calls back to the
-        storefront's ``PATCH /api/v1/admin/portfolio/resources/{resource_id}``
-        endpoint when the lease expires.
+        expiry. When the allocation lives in this service's capacity ledger
+        (remote-capacity mode), the lease tail is recorded on the
+        allocation row itself — one record, so the watchdog releases in a
+        local transaction. Otherwise this falls back to the legacy
+        ``vm_leases`` table, whose expiry path PATCHes the storefront's
+        resource back to available.
 
-        Returns 409 if a lease for the given ``escrow_uid`` already exists.
+        Returns 409 if a legacy lease for the given ``escrow_uid`` already
+        exists.
         """
+        ledger = _container_module.resolved_capacity_ledger_service
+        if ledger is not None and body.allocation_id:
+            attached = ledger.attach_lease(
+                allocation_id=body.allocation_id,
+                escrow_uid=body.escrow_uid,
+                vm_host=body.vm_host,
+                vm_target=body.vm_target,
+                lease_start_utc=(
+                    body.lease_start_utc.isoformat() if body.lease_start_utc else None
+                ),
+                lease_end_utc=body.lease_end_utc.isoformat(),
+                create_job_id=body.create_job_id,
+            )
+            if attached is not None:
+                logger.info(
+                    "[LEASES] Attached lease to ledger allocation %s "
+                    "(resource=%s escrow=%s)",
+                    body.allocation_id, attached["resource_id"], body.escrow_uid,
+                )
+                now = datetime.now(timezone.utc)
+                return LeaseResponse(
+                    id=body.allocation_id,
+                    resource_id=attached["resource_id"],
+                    allocation_id=body.allocation_id,
+                    escrow_uid=body.escrow_uid,
+                    vm_host=body.vm_host,
+                    vm_target=body.vm_target,
+                    lease_start_utc=body.lease_start_utc,
+                    lease_end_utc=body.lease_end_utc,
+                    status="active",
+                    create_job_id=body.create_job_id,
+                    created_at=now,
+                    updated_at=now,
+                )
+
         try:
             lease = self._svc.create(body)
         except LeaseConflictError as exc:

@@ -437,6 +437,12 @@ def _capacity_settings() -> tuple[str, str, str]:
     return mode, url.rstrip("/"), admin_key
 
 
+def site_capacity_mode_active() -> bool:
+    """True when the authoritative ledger is the remote site authority."""
+    mode, url, _ = _capacity_settings()
+    return mode == "site" and bool(url)
+
+
 async def site_held_by_resource(client: RemoteCapacityClient) -> dict[str, int]:
     """Per-resource held units derived from a site snapshot.
 
@@ -452,6 +458,48 @@ async def site_held_by_resource(client: RemoteCapacityClient) -> dict[str, int]:
             continue
         total = int(row.get("value") or 0)
         held[str(resource_id)] = max(total - int(available), 0)
+    return held
+
+
+def _local_held_by_resource(db_path: str) -> dict[str, int]:
+    import sqlite3
+
+    from domains.vms.listings.reconciler import held_gpu_counts
+
+    try:
+        conn = sqlite3.connect(
+            f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5,
+        )
+    except sqlite3.Error as exc:
+        logger.warning(
+            "[CAPACITY] Could not read local holds from %s: %s", db_path, exc,
+        )
+        return {}
+    try:
+        return held_gpu_counts(conn)
+    except sqlite3.Error as exc:
+        logger.warning(
+            "[CAPACITY] Could not read local holds from %s: %s", db_path, exc,
+        )
+        return {}
+    finally:
+        conn.close()
+
+
+async def combined_held_by_resource(
+    client: RemoteCapacityClient, db_path: str,
+) -> dict[str, int]:
+    """Union of site-ledger and local holds, per resource.
+
+    In remote mode deal reservations live in the site ledger, but
+    operator reservations (the admin portfolio endpoints) still write
+    the local tables until the aggregator re-homes (work item II.5). A
+    hold is recorded in exactly one of the two, so the sum is the truth
+    the listing reconciler needs.
+    """
+    held = await site_held_by_resource(client)
+    for resource_id, units in _local_held_by_resource(db_path).items():
+        held[resource_id] = held.get(resource_id, 0) + units
     return held
 
 
@@ -473,8 +521,8 @@ def _make_remote_listing_subscriber(
             reopen_available_compute_listings_after_capacity_change,
         )
 
-        held = await site_held_by_resource(client)
         db_path = sqlite_client_factory().db_path
+        held = await combined_held_by_resource(client, db_path)
         if delta.kind in _CONSUMING_DELTA_KINDS:
             closed = await close_stale_compute_listings_after_capacity_change(
                 db_path, held_by_resource=held,
@@ -615,8 +663,8 @@ async def capacity_events_poller_loop() -> None:
             close_stale_compute_listings_after_capacity_change,
             reopen_available_compute_listings_after_capacity_change,
         )
-        held = await site_held_by_resource(client)
         db_path = get_sqlite_client().db_path
+        held = await combined_held_by_resource(client, db_path)
         await close_stale_compute_listings_after_capacity_change(
             db_path, held_by_resource=held,
         )

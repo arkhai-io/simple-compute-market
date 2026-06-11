@@ -88,6 +88,10 @@ def _resource_matches(
     attrs = resource.attributes or {}
     top_level = {
         "resource_id": resource.resource_id,
+        # Pools are an aggregator (storefront) concept; the degenerate
+        # single-resource pool is keyed by the resource_id, which is what
+        # claims carry for un-pooled inventory.
+        "pool_id": resource.resource_id,
         "resource_type": resource.resource_type,
         "resource_subtype": resource.resource_subtype,
         "value": resource.total_units,
@@ -301,6 +305,90 @@ class CapacityLedgerService:
             db.add(CapacityEvent(
                 kind="lease_truncated", resource_id=allocation.resource_id,
             ))
+            db.commit()
+            return self._allocation_payload(allocation)
+
+    # ------------------------------------------------------------------
+    # Lease tail (the merged vm_leases half of the allocation row)
+    # ------------------------------------------------------------------
+
+    def attach_lease(
+        self,
+        *,
+        allocation_id: str | None = None,
+        escrow_uid: str | None = None,
+        vm_host: str | None = None,
+        vm_target: str | None = None,
+        lease_start_utc: str | None = None,
+        lease_end_utc: str | None = None,
+        create_job_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Record the lease tail on an existing held allocation.
+
+        The ledger-mode replacement for registering a ``vm_leases`` row:
+        the allocation and its lease are one record, so the watchdog
+        tears down and releases in one local transaction. Emits no
+        capacity event — availability already moved at commit time.
+        Returns None when no held allocation matches (the caller falls
+        back to the legacy lease table).
+        """
+        with self._write_lock, self._session_factory() as db:
+            allocation = self._find_allocation(
+                db, allocation_id=allocation_id,
+                escrow_uid=None if allocation_id else escrow_uid,
+            )
+            if allocation is None or allocation.state not in HELD_ALLOCATION_STATES:
+                return None
+            if vm_host:
+                allocation.vm_host = vm_host
+            if vm_target:
+                allocation.vm_target = vm_target
+            if lease_start_utc:
+                allocation.lease_start_utc = str(lease_start_utc)
+            if lease_end_utc:
+                allocation.lease_end_utc = str(lease_end_utc)
+            if create_job_id:
+                allocation.create_job_id = create_job_id
+            if escrow_uid and not allocation.escrow_uid:
+                allocation.escrow_uid = escrow_uid
+            allocation.state = AllocationState.leased.value
+            db.commit()
+            return self._allocation_payload(allocation)
+
+    def list_lease_due(self, now: datetime) -> list[dict[str, Any]]:
+        """Leased allocations whose lease_end_utc has passed."""
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        due: list[dict[str, Any]] = []
+        with self._session_factory() as db:
+            rows = (
+                db.query(SiteAllocation)
+                .filter(
+                    SiteAllocation.state == AllocationState.leased.value,
+                    SiteAllocation.lease_end_utc.isnot(None),
+                )
+                .all()
+            )
+            for allocation in rows:
+                lease_end = _parse_utc(allocation.lease_end_utc)
+                if lease_end is not None and lease_end <= now:
+                    due.append(self._allocation_payload(allocation))
+        return due
+
+    def begin_releasing(
+        self, allocation_id: str, *, check_job_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Transition a leased allocation to releasing (teardown in flight).
+
+        No capacity event: releasing still holds the units — the workload
+        may not be torn down yet.
+        """
+        with self._write_lock, self._session_factory() as db:
+            allocation = db.get(SiteAllocation, allocation_id)
+            if allocation is None or allocation.state not in HELD_ALLOCATION_STATES:
+                return None
+            allocation.state = AllocationState.releasing.value
+            allocation.check_job_id = check_job_id
             db.commit()
             return self._allocation_payload(allocation)
 
@@ -527,6 +615,8 @@ class CapacityLedgerService:
             "vm_target": allocation.vm_target,
             "lease_start_utc": allocation.lease_start_utc,
             "lease_end_utc": allocation.lease_end_utc,
+            "create_job_id": allocation.create_job_id,
+            "check_job_id": allocation.check_job_id,
             "failure_reason": allocation.failure_reason,
             "released_at": allocation.released_at,
         }

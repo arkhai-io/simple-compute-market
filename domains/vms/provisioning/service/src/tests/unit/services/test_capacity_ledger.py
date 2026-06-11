@@ -185,10 +185,73 @@ def test_event_feed_is_versioned_and_anonymous(seeded: CapacityLedgerService):
     assert latest_again == latest
 
 
+def test_attach_lease_records_tail_on_allocation(seeded: CapacityLedgerService):
+    reserved = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xl"})
+    attached = seeded.attach_lease(
+        allocation_id=reserved["allocation_id"],
+        vm_host="kvm1",
+        vm_target="tenant-abcd",
+        lease_end_utc="2099-01-01 00:00",
+        create_job_id="job-1",
+    )
+    assert attached["state"] == "leased"
+    assert attached["vm_target"] == "tenant-abcd"
+    assert attached["create_job_id"] == "job-1"
+    # No availability change: attach emits no capacity event.
+    events, _ = seeded.events_after(0)
+    assert [e["kind"] for e in events] == ["released", "reserved"]
+
+    # Unknown / no-longer-held allocations fall back to the legacy table.
+    assert seeded.attach_lease(allocation_id="missing") is None
+    seeded.release(allocation_id=reserved["allocation_id"])
+    assert seeded.attach_lease(allocation_id=reserved["allocation_id"]) is None
+
+
+def test_list_lease_due_and_begin_releasing(seeded: CapacityLedgerService):
+    reserved = seeded.reserve(claim={}, deal_ref={"escrow_uid": "0xdue"})
+    seeded.commit(
+        resource_id=reserved["resource_id"],
+        allocation_id=reserved["allocation_id"],
+        lease_end_utc="2020-01-01 00:00",  # already expired
+    )
+    due = seeded.list_lease_due(datetime.now(timezone.utc))
+    assert [a["allocation_id"] for a in due] == [reserved["allocation_id"]]
+
+    releasing = seeded.begin_releasing(
+        reserved["allocation_id"], check_job_id="check-1",
+    )
+    assert releasing["state"] == "releasing"
+    assert releasing["check_job_id"] == "check-1"
+    # releasing still holds the units and is no longer "due".
+    assert seeded.snapshot()[0]["available_units"] == 7
+    assert seeded.list_lease_due(datetime.now(timezone.utc)) == []
+
+    # Future leases are not due.
+    future = seeded.reserve(claim={}, deal_ref={})
+    seeded.commit(
+        resource_id=future["resource_id"],
+        allocation_id=future["allocation_id"],
+        lease_end_utc="2099-01-01 00:00",
+    )
+    assert seeded.list_lease_due(datetime.now(timezone.utc)) == []
+
+
+def test_release_can_mark_forced(seeded: CapacityLedgerService):
+    reserved = seeded.reserve(claim={}, deal_ref={})
+    seeded.begin_releasing(reserved["allocation_id"])
+    forced = seeded.release(allocation_id=reserved["allocation_id"], state="forced")
+    assert forced["state"] == "forced"
+    assert seeded.snapshot()[0]["available_units"] == 8
+
+
 def test_claim_matches_top_level_fields(seeded: CapacityLedgerService):
     assert seeded.probe(claim={"resource_subtype": "h200"}) is not None
     assert seeded.probe(claim={"resource_id": "compute-kvm1-001"}) is not None
     assert seeded.probe(claim={"resource_id": "other"}) is None
+    # Un-pooled inventory: the degenerate pool is keyed by resource_id,
+    # which is what storefront claims carry as pool_id.
+    assert seeded.probe(claim={"pool_id": "compute-kvm1-001"}) is not None
+    assert seeded.probe(claim={"pool_id": "other-pool"}) is None
 
 
 def test_gpu_count_validation(seeded: CapacityLedgerService):

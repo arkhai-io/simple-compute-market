@@ -47,10 +47,23 @@ class LeaseLifecycleService:
     to LeaseWatchdog.
     """
 
-    def __init__(self, lease_service: LeaseService, settings, job_service=None) -> None:
+    def __init__(
+        self,
+        lease_service: LeaseService,
+        settings,
+        job_service=None,
+        capacity_ledger=None,
+    ) -> None:
         self._lease_svc = lease_service
         self._settings = settings
         self._job_svc = job_service  # AnsibleJobService | None; None disables check jobs
+        # CapacityLedgerService | None. When present, allocations whose
+        # lease tail lives in the site ledger are released *locally* (one
+        # transaction, capacity event emitted by the ledger) and the
+        # owning storefront gets a deal-scoped capacity-released event —
+        # the legacy PATCH /admin/portfolio/resources callback never runs
+        # for them.
+        self._ledger = capacity_ledger
         self._paused = False
         self._resume_event = asyncio.Event()
         self._resume_event.set()  # not paused initially
@@ -165,6 +178,14 @@ class LeaseLifecycleService:
                 )
                 skipped += 1
 
+        # Step 4: the site ledger's own lease tails (remote-capacity mode)
+        if self._ledger is not None:
+            ledger_summary = await self._run_ledger_cycle(now, grace_seconds)
+            checked += ledger_summary["checked"]
+            released += ledger_summary["released"]
+            forced += ledger_summary["forced"]
+            skipped += ledger_summary["skipped"]
+
         if activated or checked or direct_released or released or forced:
             logger.info(
                 "[LEASE_LIFECYCLE] Cycle: activated=%d checked=%d released=%d "
@@ -179,6 +200,203 @@ class LeaseLifecycleService:
             "forced": forced,
             "skipped": direct_skipped + skipped,
         }
+
+    # ------------------------------------------------------------------
+    # Ledger allocations (merged lease rows)
+    # ------------------------------------------------------------------
+
+    async def _run_ledger_cycle(self, now: datetime, grace_seconds: int) -> dict:
+        """Expire and release allocations whose lease lives in the ledger."""
+        checked = 0
+        released = 0
+        forced = 0
+        skipped = 0
+
+        for allocation in self._ledger.list_lease_due(now):
+            try:
+                if self._job_svc is None:
+                    if await self._finish_ledger_release(allocation, forced_release=False):
+                        released += 1
+                    else:
+                        skipped += 1
+                    continue
+                job_id = await self._submit_check_job(
+                    vm_host=allocation.get("vm_host"),
+                    vm_target=allocation.get("vm_target"),
+                )
+                if job_id is not None:
+                    self._ledger.begin_releasing(
+                        allocation["allocation_id"], check_job_id=job_id,
+                    )
+                    checked += 1
+                else:
+                    skipped += 1
+            except Exception as exc:
+                logger.exception(
+                    "[LEASE_LIFECYCLE] Failed to begin ledger release for "
+                    "allocation %s: %s", allocation.get("allocation_id"), exc,
+                )
+                skipped += 1
+
+        for allocation in self._ledger.list_allocations(state="releasing"):
+            try:
+                outcome = await self._process_releasing_allocation(
+                    allocation, now, grace_seconds,
+                )
+                if outcome == "released":
+                    released += 1
+                elif outcome == "forced":
+                    forced += 1
+                else:
+                    skipped += 1
+            except Exception as exc:
+                logger.exception(
+                    "[LEASE_LIFECYCLE] Unhandled error processing releasing "
+                    "allocation %s: %s", allocation.get("allocation_id"), exc,
+                )
+                skipped += 1
+
+        return {
+            "checked": checked, "released": released,
+            "forced": forced, "skipped": skipped,
+        }
+
+    async def _submit_check_job(self, *, vm_host, vm_target) -> Optional[str]:
+        """Submit a teardown-confirmation check job; None on failure."""
+        if not vm_host or not vm_target:
+            return None
+        try:
+            from models.jobs_model import AnsibleJobParams
+            import container as _container_module
+            job_queue = _container_module.resolved_job_queue
+            if job_queue is None:
+                raise RuntimeError("job_queue not initialised")
+            params = AnsibleJobParams(
+                vm_host=vm_host,
+                vm_action="check",
+                vm_target=vm_target,
+            )
+            submit = await self._job_svc.submit(params, job_queue=job_queue)
+            return submit.job_id
+        except Exception as exc:
+            logger.warning(
+                "[LEASE_LIFECYCLE] Failed to submit check job for %s/%s: %s — "
+                "will retry next cycle", vm_host, vm_target, exc,
+            )
+            return None
+
+    async def _process_releasing_allocation(
+        self, allocation: dict, now: datetime, grace_seconds: int
+    ) -> str:
+        """Poll the check job for a releasing ledger allocation.
+
+        Mirrors the legacy semantics: a finished check job (succeeded, or
+        failed — VM state unknown but we proceed) releases normally;
+        "forced" means the grace period elapsed without the teardown
+        check completing.
+        """
+        from services.capacity_ledger import _parse_utc
+
+        lease_end = _parse_utc(allocation.get("lease_end_utc")) or now
+        past_grace = now >= lease_end + timedelta(seconds=grace_seconds)
+
+        check_done = False
+        check_job_id = allocation.get("check_job_id")
+        if check_job_id and self._job_svc is not None:
+            try:
+                job = self._job_svc.get_job(check_job_id)
+                if job.status == "succeeded":
+                    check_done = True
+                elif job.status in ("failed", "cancelled"):
+                    logger.warning(
+                        "[LEASE_LIFECYCLE] Check job %s for allocation %s %s — "
+                        "proceeding with release",
+                        check_job_id, allocation["allocation_id"], job.status,
+                    )
+                    check_done = True
+            except Exception as exc:
+                logger.warning(
+                    "[LEASE_LIFECYCLE] Could not poll check job %s for "
+                    "allocation %s: %s", check_job_id,
+                    allocation["allocation_id"], exc,
+                )
+
+        if not check_done and not past_grace:
+            return "skipped"  # check still running — wait for it or the grace
+        force = not check_done
+        if not await self._finish_ledger_release(allocation, forced_release=force):
+            return "skipped"
+        return "forced" if force else "released"
+
+    async def _finish_ledger_release(
+        self, allocation: dict, *, forced_release: bool
+    ) -> bool:
+        """Release the allocation locally, then notify the owning storefront.
+
+        The release is the ledger's local transaction (capacity event
+        emitted there); the deal-scoped notification is best-effort —
+        the storefront also converges through the capacity-event feed.
+        """
+        state = "forced" if forced_release else "released"
+        released = self._ledger.release(
+            allocation_id=allocation["allocation_id"], state=state,
+        )
+        if released is None:
+            return False
+        log = logger.warning if forced_release else logger.info
+        log(
+            "[LEASE_LIFECYCLE] Ledger allocation %s %s (resource=%s escrow=%s)",
+            allocation["allocation_id"], state,
+            allocation.get("resource_id"), allocation.get("escrow_uid"),
+        )
+        await self._notify_storefront_capacity_released(released)
+        return True
+
+    async def _notify_storefront_capacity_released(self, allocation: dict) -> bool:
+        """POST the deal-scoped capacity-released event to the owner.
+
+        Point-to-point delivery per the capacity design's event model —
+        this carries deal context (allocation/escrow) and so is never
+        broadcast. One provisioning service still serves one storefront,
+        so the owner comes from settings; the deal_ref recorded at
+        reserve time is where per-deal routing will live.
+        """
+        from storefront_client import StorefrontClient, StorefrontClientError
+
+        storefront_url = str(getattr(self._settings, "storefront_url", "") or "").rstrip("/")
+        storefront_admin_key = str(getattr(self._settings, "storefront_admin_key", "") or "")
+        if not storefront_url:
+            logger.warning(
+                "[LEASE_LIFECYCLE] storefront_url not configured — skipping "
+                "capacity-released event for allocation %s",
+                allocation.get("allocation_id"),
+            )
+            return False
+        try:
+            async with StorefrontClient(
+                base_url=storefront_url,
+                admin_key=storefront_admin_key or None,
+            ) as sf:
+                await sf.notify_capacity_released(
+                    str(allocation["allocation_id"]),
+                    resource_id=allocation.get("resource_id"),
+                    released_at=allocation.get("released_at"),
+                )
+            return True
+        except StorefrontClientError as exc:
+            logger.warning(
+                "[LEASE_LIFECYCLE] capacity-released event rejected by "
+                "storefront for allocation %s: %s",
+                allocation.get("allocation_id"), exc,
+            )
+            return False
+        except Exception as exc:
+            logger.warning(
+                "[LEASE_LIFECYCLE] Could not deliver capacity-released event "
+                "for allocation %s: %s",
+                allocation.get("allocation_id"), exc,
+            )
+            return False
 
     async def _begin_release(self, lease: VmLease) -> bool:
         """Submit a check Ansible job and transition lease to 'releasing'.

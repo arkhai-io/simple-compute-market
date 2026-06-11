@@ -517,6 +517,25 @@ class TestFulfillmentEvents:
             )
         assert "404" in str(exc_info.value)
 
+    async def test_capacity_released_tolerates_ledger_owned_allocation(self, client):
+        """Remote-capacity mode: the allocation row lives in the site
+        authority's ledger, not locally — the deal event must still land
+        (staged + listing reconcile) instead of 404ing."""
+        from unittest.mock import patch
+
+        c, _ = client
+        with patch(
+            "market_storefront.services.capacity_client.site_capacity_mode_active",
+            return_value=True,
+        ):
+            response = await c.notify_capacity_released(
+                "ledger-only-alloc",
+                resource_id="compute-kvm1-001",
+                released_at="2026-06-10T00:00:00Z",
+            )
+        assert response["allocation_id"] == "ledger-only-alloc"
+        assert response["state"] == "released"
+
 
 # ---------------------------------------------------------------------------
 # GET /api/v1/system/events

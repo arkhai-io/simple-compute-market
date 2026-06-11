@@ -140,6 +140,8 @@ class AdminController:
                 row.get("resource_id") or "<no id>",
                 "; ".join(row.get("errors") or []),
             )
+        if report.get("imported_count"):
+            await self._mirror_resources_to_site_authority("import")
         return ImportResourcesResponse(
             imported_count=report.get("imported_count", 0),
             failed_count=report.get("failed_count", 0),
@@ -299,6 +301,8 @@ class AdminController:
                 resource_id=resource_id,
             )
 
+        await self._mirror_resources_to_site_authority("patch")
+
         # Re-fetch the updated row to return accurate state.
         updated_row = await self._db.get_resource(resource_id=resource_id)
         attrs_out = updated_row.get("attributes") or {}
@@ -313,6 +317,24 @@ class AdminController:
             attributes=attrs_out,
             updated=True,
         )
+
+    async def _mirror_resources_to_site_authority(self, source: str) -> None:
+        """Re-sync inventory to the site ledger after an admin mutation.
+
+        Remote-capacity mode only (no-op otherwise): resources imported or
+        patched mid-run must be reservable at the site authority, not just
+        present in the local market view. Best-effort — the admin call
+        already succeeded locally.
+        """
+        from market_storefront.services.capacity_client import sync_site_resources
+
+        try:
+            await sync_site_resources(lambda: self._db)
+        except Exception as exc:
+            logger.warning(
+                "[ADMIN] Site-authority resource sync after %s failed: %s",
+                source, exc,
+            )
 
     async def _apply_fulfillment_event(
         self,
@@ -352,10 +374,18 @@ class AdminController:
             released_at=released_at,
         )
         if result is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Allocation {allocation_id!r} not found",
-        )
+            from market_storefront.services.capacity_client import (
+                site_capacity_mode_active,
+            )
+            if not site_capacity_mode_active():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Allocation {allocation_id!r} not found",
+                )
+            # Remote-capacity mode: the allocation row lives in the site
+            # authority's ledger, not here — the event still carries deal
+            # context worth staging, and the listing reconcile still runs.
+            result = {"resource_id": provider_resource_id}
         closed_listing_ids = (
             await self._close_oversized_compute_listings() if close_oversized else []
         )
@@ -382,6 +412,32 @@ class AdminController:
             reopened_listing_ids=reopened_listing_ids,
         )
 
+    async def _site_held_override(self) -> dict[str, int] | None:
+        """Held counts from the site authority when it owns the ledger.
+
+        None in embedded mode (local tables are authoritative) and on any
+        snapshot failure — the reconcile then works off local data, which
+        is the best available answer.
+        """
+        from market_storefront.services.capacity_client import (
+            RemoteCapacityClient,
+            build_capacity_client,
+            combined_held_by_resource,
+            site_capacity_mode_active,
+        )
+
+        if not site_capacity_mode_active():
+            return None
+        try:
+            client = build_capacity_client(lambda: self._db)
+            if isinstance(client, RemoteCapacityClient):
+                return await combined_held_by_resource(client, self._db.db_path)
+        except Exception as exc:
+            logger.warning(
+                "[ADMIN] Could not snapshot site-authority capacity: %s", exc,
+            )
+        return None
+
     async def _close_oversized_compute_listings(self) -> list[str]:
         from domains.vms.listings.reconciler import (
             mark_derived_listings_closed,
@@ -390,6 +446,7 @@ class AdminController:
 
         closed_listing_ids = stale_open_listing_ids(
             self._db.db_path,
+            held_by_resource=await self._site_held_override(),
         )
         for listing_id in closed_listing_ids:
             await self._db.update_listing(listing_id=listing_id, status="closed")
@@ -404,6 +461,7 @@ class AdminController:
 
         reopened_listing_ids = closed_available_listing_ids(
             self._db.db_path,
+            held_by_resource=await self._site_held_override(),
         )
         for listing_id in reopened_listing_ids:
             await self._db.update_listing(listing_id=listing_id, status="open")

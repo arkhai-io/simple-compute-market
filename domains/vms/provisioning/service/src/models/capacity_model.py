@@ -105,6 +105,11 @@ class TruncateLeaseRequest(BaseModel):
     lease_end_utc: str
 
 
+class AllocationListResponse(BaseModel):
+    allocations: list[dict[str, Any]]
+    total: int
+
+
 class CapacityEventsResponse(BaseModel):
     """Versioned event page for ``GET /api/v1/capacity/events``.
 

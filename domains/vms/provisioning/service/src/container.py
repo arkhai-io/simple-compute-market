@@ -92,22 +92,23 @@ class Container(containers.DeclarativeContainer):
         session_factory=session_factory,
     )
 
+    capacity_ledger_service = providers.Singleton(
+        CapacityLedgerService,
+        session_factory=session_factory,
+    )
+
     lease_lifecycle_service = providers.Singleton(
         LeaseLifecycleService,
         lease_service=lease_service,
         settings=config,
         job_service=job_service,
+        capacity_ledger=capacity_ledger_service,
     )
 
     lease_watchdog = providers.Singleton(
         LeaseWatchdog,
         lease_lifecycle_service=lease_lifecycle_service,
         settings=config,
-    )
-
-    capacity_ledger_service = providers.Singleton(
-        CapacityLedgerService,
-        session_factory=session_factory,
     )
 
 

@@ -139,6 +139,65 @@ async def test_no_capacity_is_a_null_answer_not_an_error(capacity: CapacityApi):
 
 
 @pytest.mark.asyncio
+async def test_register_lease_attaches_to_ledger_allocation(capacity: CapacityApi):
+    """POST /leases with a ledger-held allocation records the lease tail
+    on the allocation row — no vm_leases row, so the legacy PATCH-callback
+    expiry path never engages for it."""
+    import container as _container_module
+
+    await capacity.register(
+        "compute-kvm1-001", total_units=8, attributes={"vm_host": "kvm1"},
+    )
+    reserved = await capacity.reserve({"gpu_count": 1}, {"escrow_uid": "0xlease"})
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        resp = await http.post("/api/v1/leases/", json={
+            "resource_id": reserved["resource_id"],
+            "allocation_id": reserved["allocation_id"],
+            "escrow_uid": "0xlease",
+            "vm_host": "kvm1",
+            "vm_target": "tenant-led1",
+            "lease_end_utc": "2099-01-01T00:00:00Z",
+        })
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["id"] == reserved["allocation_id"]
+        assert body["status"] == "active"
+
+        # No legacy lease row was created.
+        listing = await http.get("/api/v1/leases/")
+        assert listing.json()["total"] == 0
+
+    ledger = _container_module.resolved_capacity_ledger_service
+    row = ledger.get_allocation(reserved["allocation_id"])
+    assert row["vm_target"] == "tenant-led1"
+    assert row["state"] == "leased"
+    assert row["lease_end_utc"] == "2099-01-01T00:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_register_lease_without_ledger_row_uses_legacy_table(
+    capacity: CapacityApi,
+):
+    """Embedded-mode storefronts pass their local allocation ids; those
+    don't exist in the ledger, so the legacy vm_leases path still runs."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        resp = await http.post("/api/v1/leases/", json={
+            "resource_id": "compute-legacy-001",
+            "allocation_id": "local-alloc-1",
+            "escrow_uid": "0xlegacy",
+            "vm_host": "kvm1",
+            "vm_target": "tenant-leg1",
+            "lease_end_utc": "2099-01-01T00:00:00Z",
+        })
+        assert resp.status_code == 201, resp.text
+        listing = await http.get("/api/v1/leases/")
+        assert listing.json()["total"] == 1
+
+
+@pytest.mark.asyncio
 async def test_commit_unknown_allocation_404s(capacity: CapacityApi):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
