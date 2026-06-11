@@ -139,6 +139,18 @@ class FakeSite:
             self._emit("lease_truncated", allocation["resource_id"])
             return httpx.Response(200, json={"allocation": allocation})
 
+        if path == "/api/v1/capacity/allocations":
+            escrow = request.url.params.get("escrow_uid")
+            state = request.url.params.get("state")
+            rows = [
+                a for a in self.allocations.values()
+                if (escrow is None or a["deal_ref"].get("escrow_uid") == escrow)
+                and (state is None or a["state"] == state)
+            ]
+            return httpx.Response(200, json={
+                "allocations": rows, "total": len(rows),
+            })
+
         if path == "/api/v1/capacity/events":
             after = int(request.url.params.get("after", 0))
             limit = int(request.url.params.get("limit", 500))
@@ -264,6 +276,16 @@ async def test_site_held_by_resource_derives_consumption(
     await client.reserve(claim={"gpu_count": 3}, deal_ref={})
     held = await cc.site_held_by_resource(client)
     assert held == {"compute-kvm1-001": 3}
+
+
+@pytest.mark.asyncio
+async def test_list_allocations_filters(client: cc.RemoteCapacityClient):
+    reserved = await client.reserve(
+        claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xq"},
+    )
+    rows = await client.list_allocations(escrow_uid="0xq")
+    assert [a["allocation_id"] for a in rows] == [reserved["allocation_id"]]
+    assert await client.list_allocations(state="released") == []
 
 
 def test_build_dispatches_on_capacity_mode():

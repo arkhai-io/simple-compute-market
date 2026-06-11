@@ -143,13 +143,13 @@ wheels = [
 [[package]]
 name = "arkhai-core-storefront-client"
 version = "0.15.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "eth-account" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_core_storefront_client-0.15.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]

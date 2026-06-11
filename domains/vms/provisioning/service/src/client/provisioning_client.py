@@ -515,6 +515,42 @@ class ProvisioningClient(_ProvisioningClientBase):
         """DELETE /api/v1/leases/{lease_id}/cancel — cancel before expiry."""
         return await self._delete(f"/api/v1/leases/{lease_id}/cancel")
 
+    # ------------------------------------------------------------------
+    # Site-authority capacity ledger
+    # ------------------------------------------------------------------
+
+    async def capacity_snapshot(self) -> list[dict]:
+        """GET /api/v1/capacity/snapshot — advisory availability view."""
+        return (await self._get("/api/v1/capacity/snapshot")).get("resources") or []
+
+    async def list_capacity_allocations(
+        self,
+        state: Optional[str] = None,
+        escrow_uid: Optional[str] = None,
+    ) -> dict:
+        """GET /api/v1/capacity/allocations — ledger allocations."""
+        params: dict = {}
+        if state is not None:
+            params["state"] = state
+        if escrow_uid is not None:
+            params["escrow_uid"] = escrow_uid
+        return await self._get("/api/v1/capacity/allocations", params=params)
+
+    async def get_capacity_allocation(self, allocation_id: str) -> dict:
+        """GET /api/v1/capacity/allocations/{id} — one ledger allocation."""
+        return (await self._get(
+            f"/api/v1/capacity/allocations/{allocation_id}"
+        )).get("allocation") or {}
+
+    async def truncate_capacity_lease(
+        self, allocation_id: str, lease_end_utc: str,
+    ) -> dict:
+        """POST /api/v1/capacity/allocations/{id}/truncate-lease."""
+        return (await self._post(
+            f"/api/v1/capacity/allocations/{allocation_id}/truncate-lease",
+            {"lease_end_utc": lease_end_utc},
+        )).get("allocation") or {}
+
 
 class SyncProvisioningClient(_ProvisioningClientBase):
     """Synchronous HTTP client for the provisioning service REST API.
@@ -824,6 +860,42 @@ class SyncProvisioningClient(_ProvisioningClientBase):
     def cancel_lease(self, lease_id: str) -> dict:
         """DELETE /api/v1/leases/{lease_id}/cancel — cancel before expiry."""
         return self._delete(f"/api/v1/leases/{lease_id}/cancel")
+
+    # ------------------------------------------------------------------
+    # Site-authority capacity ledger
+    # ------------------------------------------------------------------
+
+    def capacity_snapshot(self) -> list[dict]:
+        """GET /api/v1/capacity/snapshot — advisory availability view."""
+        return self._get("/api/v1/capacity/snapshot").get("resources") or []
+
+    def list_capacity_allocations(
+        self,
+        state: Optional[str] = None,
+        escrow_uid: Optional[str] = None,
+    ) -> dict:
+        """GET /api/v1/capacity/allocations — ledger allocations."""
+        params: dict = {}
+        if state is not None:
+            params["state"] = state
+        if escrow_uid is not None:
+            params["escrow_uid"] = escrow_uid
+        return self._get("/api/v1/capacity/allocations", params=params)
+
+    def get_capacity_allocation(self, allocation_id: str) -> dict:
+        """GET /api/v1/capacity/allocations/{id} — one ledger allocation."""
+        return self._get(
+            f"/api/v1/capacity/allocations/{allocation_id}"
+        ).get("allocation") or {}
+
+    def truncate_capacity_lease(
+        self, allocation_id: str, lease_end_utc: str,
+    ) -> dict:
+        """POST /api/v1/capacity/allocations/{id}/truncate-lease."""
+        return self._post(
+            f"/api/v1/capacity/allocations/{allocation_id}/truncate-lease",
+            {"lease_end_utc": lease_end_utc},
+        ).get("allocation") or {}
 
     # ------------------------------------------------------------------
     # Lease watchdog control

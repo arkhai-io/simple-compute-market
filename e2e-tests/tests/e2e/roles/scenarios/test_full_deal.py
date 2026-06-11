@@ -93,6 +93,7 @@ import pytest
 from market_alkahest.alkahest import get_recipient_arbiter
 from src.settings import settings
 from tests.e2e.roles.scenarios.conftest import (
+    DealLease,
     DealState,
     delete_mock_rules_if_present,
     require_state,
@@ -1139,7 +1140,10 @@ class TestStage09c_LeaseRegistered:
             "provisioning_job_id",
         )
 
-        lease = provisioning_client.get_lease_by_escrow(deal_state.real_escrow_uid)
+        # DealLease resolves where this deal's lease lives: a site-ledger
+        # allocation (remote-capacity mode) or a vm_leases row (embedded).
+        lease_view = DealLease(provisioning_client, deal_state.real_escrow_uid)
+        lease = lease_view.refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
         assert lease.get("resource_id") == deal_state.reserved_resource_id
         assert lease.get("resource_id") == E2E_RESOURCE_ID
@@ -1149,14 +1153,16 @@ class TestStage09c_LeaseRegistered:
             f"Expected active/pending lease after happy-path settlement, got: {lease}"
         )
 
+        deal_state.deal_lease = lease_view
         deal_state.lease_id = lease.get("id")
         deal_state.lease_status = lease.get("status")
         log.info(
-            "[09c] Lease %s registered for escrow %s (resource=%s status=%s)",
+            "[09c] Lease %s registered for escrow %s (resource=%s status=%s mode=%s)",
             deal_state.lease_id,
             deal_state.real_escrow_uid,
             deal_state.reserved_resource_id,
             deal_state.lease_status,
+            "ledger" if lease_view.is_ledger else "legacy",
         )
 
 # ===========================================================================
@@ -1234,12 +1240,9 @@ class TestStage10a_LeaseExpirySetup:
         # Step 3 — back-date lease_end_utc so the next cycle sees an expired lease
         from datetime import datetime, timedelta, timezone as _tz
         past_end = (datetime.now(_tz.utc) - timedelta(seconds=30)).isoformat()
-        updated = provisioning_client.update_lease(
-            deal_state.lease_id,
-            lease_end_utc=past_end,
-        )
+        updated = deal_state.deal_lease.backdate(past_end)
         assert updated.get("id") == deal_state.lease_id, (
-            f"update_lease returned unexpected lease: {updated}"
+            f"backdate returned unexpected lease: {updated}"
         )
         log.info(
             "[10a] lease_end_utc back-dated to %s for lease %s",
@@ -1278,7 +1281,7 @@ class TestStage10b_WatchdogAdvancesToReleasing:
         log.info("[10b] check-leases result: %s", result)
 
         # Fetch updated lease — expect 'releasing' now that check job was submitted
-        lease = provisioning_client.get_lease(deal_state.lease_id)
+        lease = deal_state.deal_lease.refresh()
         assert lease.get("status") == "releasing", (
             f"Expected lease status='releasing' after check-leases cycle, "
             f"got {lease.get('status')!r}.\n"
@@ -1292,13 +1295,14 @@ class TestStage10b_WatchdogAdvancesToReleasing:
         log.info("[10b] Lease %s is releasing (check_job=%s)",
                  deal_state.lease_id, lease.get("check_job_id"))
 
-        # Storefront resource must still be leased — VM not yet confirmed gone
-        resource = storefront_admin_client.get_resource(deal_state.reserved_resource_id)
-        assert resource.get("state") == "leased", (
-            f"Storefront resource {deal_state.reserved_resource_id!r} should still be "
-            f"'leased' while check job is pending, got {resource.get('state')!r}."
+        # The deal's capacity must still be held — VM not yet confirmed gone
+        assert deal_state.deal_lease.resource_consumed(
+            storefront_admin_client, deal_state.reserved_resource_id,
+        ), (
+            f"Capacity for {deal_state.reserved_resource_id!r} should still be "
+            "held while the check job is pending."
         )
-        log.info("[10b] Storefront resource %s still leased (VM not yet confirmed gone)",
+        log.info("[10b] Capacity for %s still held (VM not yet confirmed gone)",
                  deal_state.reserved_resource_id)
 
         deal_state.check_job_id = lease.get("check_job_id")
@@ -1349,13 +1353,14 @@ class TestStage11a_VerifyReleasingState:
         log.info("[11a] Check job %s is %s (paused by mock gate — VM not yet confirmed gone)",
                  deal_state.check_job_id, job.status)
 
-        # Storefront resource must still be leased
-        resource = storefront_admin_client.get_resource(deal_state.reserved_resource_id)
-        assert resource.get("state") == "leased", (
-            f"Storefront resource {deal_state.reserved_resource_id!r} should remain "
-            f"'leased' while VM cleanup is in progress, got {resource.get('state')!r}."
+        # The deal's capacity must still be held
+        assert deal_state.deal_lease.resource_consumed(
+            storefront_admin_client, deal_state.reserved_resource_id,
+        ), (
+            f"Capacity for {deal_state.reserved_resource_id!r} should remain "
+            "held while VM cleanup is in progress."
         )
-        log.info("[11a] Storefront resource %s is leased — watchdog has not released it yet",
+        log.info("[11a] Capacity for %s still held — watchdog has not released it yet",
                  deal_state.reserved_resource_id)
 
 
@@ -1398,18 +1403,20 @@ class TestStage11b_WatchdogReleasesResource:
         )
         log.info("[11b] Check job %s succeeded", deal_state.check_job_id)
 
-        # Snapshot the storefront's latest lease_lifecycle event id
-        # before triggering the watchdog cycle. The cycle's PATCH back
-        # to the storefront (which flips state leased→available and
-        # emits lease_lifecycle.resource_released) lands *after*
+        # Snapshot the storefront's latest release-notification event id
+        # before triggering the watchdog cycle. Embedded mode delivers
+        # the release as a resource PATCH (lease_lifecycle.resource_released);
+        # ledger mode delivers a deal-scoped capacity-released event
+        # (fulfillment.capacity_released). Either lands *after*
         # check_leases() returns — we need a sync point below.
         #
         # Filter by stage so the row count stays small (one event per
         # past test run); the events endpoint orders ASC and caps at
         # 500, so an unfiltered snapshot would miss the latest events
         # once enough total stage events accumulate across runs.
+        sync_stage, sync_event = deal_state.deal_lease.released_stage_event
         existing_lifecycle = storefront_admin_client.get_events(
-            limit=500, stage="lease_lifecycle",
+            limit=500, stage=sync_stage,
         )
         since_id = max((ev.id for ev in existing_lifecycle.events), default=0)
 
@@ -1423,36 +1430,35 @@ class TestStage11b_WatchdogReleasesResource:
         log.info("[11b] check-leases result: %s", result)
 
         # Lease must be 'released'
-        lease = provisioning_client.get_lease(deal_state.lease_id)
+        lease = deal_state.deal_lease.refresh()
         assert lease.get("status") == "released", (
             f"Expected lease status='released', got {lease.get('status')!r}.\n"
             f"Full lease: {lease}"
         )
         log.info("[11b] Lease %s released", deal_state.lease_id)
 
-        # Wait for the storefront to confirm the resource is available.
-        # The watchdog PATCH races check_leases()'s response — the cycle
-        # marks the lease released *locally* before awaiting the
-        # storefront PATCH, so the GET below would otherwise see 'leased'
-        # for ~1-2s after this point.
+        # Wait for the storefront to confirm the release landed on its
+        # side. The notification races check_leases()'s response — the
+        # cycle finishes the release before the storefront call resolves.
         from tests.e2e.roles.scenarios.conftest import wait_for_stage_event as _wait
         _wait(
             storefront_admin_client,
-            "lease_lifecycle", "resource_released",
+            sync_stage, sync_event,
             since_id=since_id,
             timeout=10.0,
         )
 
-        # Storefront resource must be available — watchdog has patched it
-        resource = storefront_admin_client.get_resource(deal_state.reserved_resource_id)
-        assert resource.get("state") == "available", (
-            f"Storefront resource {deal_state.reserved_resource_id!r} should be 'available' "
-            f"after lease release, got {resource.get('state')!r}.\n"
-            "The watchdog may have failed to PATCH the storefront. Check provisioning "
-            "logs for [LEASE_LIFECYCLE] PATCH errors and verify storefront_url / "
+        # The deal's capacity must be back in the pool
+        assert not deal_state.deal_lease.resource_consumed(
+            storefront_admin_client, deal_state.reserved_resource_id,
+        ), (
+            f"Capacity for {deal_state.reserved_resource_id!r} should be available "
+            "after lease release.\n"
+            "The watchdog may have failed to release/notify. Check provisioning "
+            "logs for [LEASE_LIFECYCLE] errors and verify storefront_url / "
             "storefront_admin_key are configured in the provisioning service settings."
         )
-        log.info("[11b] Storefront resource %s is available — lease lifecycle complete",
+        log.info("[11b] Capacity for %s is available — lease lifecycle complete",
                  deal_state.reserved_resource_id)
 
         deal_state.lease_status = "released"

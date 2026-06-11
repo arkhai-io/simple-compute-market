@@ -43,6 +43,16 @@ urls                      = ["http://registry:8080", "http://registry-b:8080"]
 [registry.auth]
 "http://registry-b:8080"  = "test-buyer-token"
 
+# Remote-capacity topology: the authoritative ledger is the site
+# authority hosted by the provisioning service (authority_url defaults
+# to provisioning.service_url). This is the canonical e2e posture so
+# the suite proves the II.4 topology; flip back to "" for the embedded
+# single-process fallback. Poll fast — the suite waits on
+# delta-driven listing reconciliation.
+[capacity]
+mode          = "site"
+poll_interval = 1
+
 [provisioning]
 service_url = "http://provisioning:8081"
 # Compose-stack default. Tests override via PROVISIONING_MODE shell env

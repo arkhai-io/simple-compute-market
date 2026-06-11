@@ -111,7 +111,12 @@ class CapacityLedgerService:
 
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
-        self._write_lock = threading.Lock()
+        # Re-entrant and held across READS too: the service's SQLite
+        # engine is a StaticPool — every session shares one connection,
+        # so an unserialized read interleaving with a write transaction
+        # raises "cannot commit - no transaction is active". One site's
+        # ledger has exactly one serialization point; this is it.
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # Resource registry
@@ -134,7 +139,7 @@ class CapacityLedgerService:
         "released" for grows/registrations and "reserved" for shrinks so
         subscribers reconcile in the right direction without a new kind.
         """
-        with self._write_lock, self._session_factory() as db:
+        with self._lock, self._session_factory() as db:
             row = db.get(SiteResource, resource_id)
             grew = True
             if row is None:
@@ -162,7 +167,7 @@ class CapacityLedgerService:
             return self._resource_payload(db, db.get(SiteResource, resource_id))
 
     def list_resources(self) -> list[dict[str, Any]]:
-        with self._session_factory() as db:
+        with self._lock, self._session_factory() as db:
             self._expire_stale_holds(db)
             rows = (
                 db.query(SiteResource)
@@ -182,7 +187,7 @@ class CapacityLedgerService:
     def probe(self, *, claim: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
         """Dry-run match for ``claim`` — consumes nothing."""
         requested = _requested_units(claim)
-        with self._session_factory() as db:
+        with self._lock, self._session_factory() as db:
             self._expire_stale_holds(db)
             match = self._find_candidate(db, claim, requested)
             if match is None:
@@ -200,7 +205,7 @@ class CapacityLedgerService:
         """Atomically check-and-reserve capacity matching ``claim``."""
         requested = _requested_units(claim)
         deal = dict(deal_ref or {})
-        with self._write_lock, self._session_factory() as db:
+        with self._lock, self._session_factory() as db:
             self._expire_stale_holds(db)
             match = self._find_candidate(db, claim, requested)
             if match is None:
@@ -242,7 +247,7 @@ class CapacityLedgerService:
         Idempotent: committing an already-leased allocation refreshes the
         lease end and clears any TTL hold.
         """
-        with self._write_lock, self._session_factory() as db:
+        with self._lock, self._session_factory() as db:
             allocation = self._find_allocation(
                 db, allocation_id=allocation_id,
                 resource_id=None if allocation_id else resource_id,
@@ -274,7 +279,7 @@ class CapacityLedgerService:
     ) -> dict[str, Any] | None:
         """Return a held/leased allocation's capacity to the pool."""
         escrow_uid = dict(deal_ref or {}).get("escrow_uid")
-        with self._write_lock, self._session_factory() as db:
+        with self._lock, self._session_factory() as db:
             allocation = self._find_allocation(
                 db, allocation_id=allocation_id,
                 escrow_uid=None if allocation_id else escrow_uid,
@@ -296,7 +301,7 @@ class CapacityLedgerService:
         lease_end_utc: str,
     ) -> dict[str, Any] | None:
         """End a lease early; teardown stays with the ledger's watchdog."""
-        with self._write_lock, self._session_factory() as db:
+        with self._lock, self._session_factory() as db:
             allocation = self._find_allocation(db, allocation_id=allocation_id)
             if allocation is None or allocation.state not in HELD_ALLOCATION_STATES:
                 return None
@@ -332,7 +337,7 @@ class CapacityLedgerService:
         Returns None when no held allocation matches (the caller falls
         back to the legacy lease table).
         """
-        with self._write_lock, self._session_factory() as db:
+        with self._lock, self._session_factory() as db:
             allocation = self._find_allocation(
                 db, allocation_id=allocation_id,
                 escrow_uid=None if allocation_id else escrow_uid,
@@ -360,7 +365,7 @@ class CapacityLedgerService:
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
         due: list[dict[str, Any]] = []
-        with self._session_factory() as db:
+        with self._lock, self._session_factory() as db:
             rows = (
                 db.query(SiteAllocation)
                 .filter(
@@ -383,7 +388,7 @@ class CapacityLedgerService:
         No capacity event: releasing still holds the units — the workload
         may not be torn down yet.
         """
-        with self._write_lock, self._session_factory() as db:
+        with self._lock, self._session_factory() as db:
             allocation = db.get(SiteAllocation, allocation_id)
             if allocation is None or allocation.state not in HELD_ALLOCATION_STATES:
                 return None
@@ -405,7 +410,7 @@ class CapacityLedgerService:
         page, so pollers know to keep paging; a subscriber that finds a
         gap versus what it last applied resyncs from a snapshot.
         """
-        with self._session_factory() as db:
+        with self._lock, self._session_factory() as db:
             rows = (
                 db.query(CapacityEvent)
                 .filter(CapacityEvent.version > int(after_version))
@@ -437,19 +442,19 @@ class CapacityLedgerService:
     # ------------------------------------------------------------------
 
     def get_allocation(self, allocation_id: str) -> dict[str, Any] | None:
-        with self._session_factory() as db:
+        with self._lock, self._session_factory() as db:
             allocation = db.get(SiteAllocation, allocation_id)
             return self._allocation_payload(allocation) if allocation else None
 
     def get_allocation_by_escrow(self, escrow_uid: str) -> dict[str, Any] | None:
-        with self._session_factory() as db:
+        with self._lock, self._session_factory() as db:
             allocation = self._find_allocation(db, escrow_uid=escrow_uid)
             return self._allocation_payload(allocation) if allocation else None
 
     def list_allocations(
         self, *, state: str | None = None
     ) -> list[dict[str, Any]]:
-        with self._session_factory() as db:
+        with self._lock, self._session_factory() as db:
             q = db.query(SiteAllocation)
             if state is not None:
                 q = q.filter(SiteAllocation.state == state)

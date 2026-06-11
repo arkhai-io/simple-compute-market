@@ -505,12 +505,29 @@ consumer.
    subscriber instead of inline-after-reservation. Deal-scoped events
    still arrive as the provisioning service's admin HTTP callbacks and
    move behind the interface with item 4.
-4. **Stand up the site authority service.** Move
-   `hosts`/`compute_allocations` (merged with `vm_leases`) and the job
-   queue/watchdog into it; today's provisioning service becomes the
-   first executor (`vm.create`/`vm.teardown` job kinds) reporting to the
-   ledger instead of calling storefront admin endpoints. Retire the
-   `PATCH /admin/portfolio/resources` callback path.
+4. **Stand up the site authority service.** Done, hosted by the
+   provisioning service process (the executor stays an in-process
+   plugin, per the components table): `site_resources`/`site_allocations`
+   (the storefront's hold and the lease's temporal tail as one row,
+   TTL soft holds supported at the ledger) plus the `capacity_events`
+   pull feed, exposed at `/api/v1/capacity/*` mirroring the
+   `CapacityClient` contract. The storefront's `[capacity] mode="site"`
+   swaps in `RemoteCapacityClient` + an event-feed poller (embedded
+   stays the fallback and the default for single-process deployments);
+   inventory mirrors into the ledger at startup and after admin
+   imports/patches. Lease registration attaches to the ledger
+   allocation; at expiry the watchdog releases it in a local
+   transaction and posts a deal-scoped capacity-released event to the
+   owning storefront — the `PATCH /admin/portfolio/resources` callback
+   is retired for ledger-held allocations (it remains only as the
+   embedded-mode expiry path). The canonical e2e runs in remote mode.
+   Open edges: operator reservations (`/admin/portfolio/reservations`)
+   still write the local tables (listing reconciliation merges site +
+   local holds until II.5 re-homes the aggregator); job submission
+   still goes through the VM-specific `/hosts/{host}/vms` API rather
+   than a job-kind queue keyed by `allocation_id` (revisit with the
+   second executor, II.7); the owning storefront comes from service
+   settings, not yet from the deal_ref recorded at reserve time.
 5. **Aggregator module.** Re-home pools/members/derived listings as a
    storefront-side module over the client interface; pool members keyed
    by `(site, resource_id)`; placement policy injectable.
@@ -526,13 +543,15 @@ consumer.
 Part I and Part II proceed independently; item I.3's "deal is over"
 signal targets the site-authority client interface but degrades to the
 storefront-local tables until II.4 lands. Within Part II the client
-interface (II.1–II.3) deliberately precedes the physical service (II.4)
+interface (II.1–II.3) deliberately preceded the physical service (II.4)
 — same playbook as the extraction doc: make the code boundary express
 the target graph first, so the move is a move and not also a behavior
-change. Every step keeps the branch green and the e2e suite passing;
-II.4 additionally needs compose/e2e topology updates (new service, new
-callback wiring) and should land with the embedded adapter still
-available as a fallback.
+change. That paid off as intended: II.4 landed as four slices (ledger +
+API, remote client, watchdog/deal-event rewire, e2e topology flip),
+each keeping the branch green, with the embedded adapter retained as
+the single-process fallback and the full-deal e2e scenarios asserting
+the lease lifecycle through a mode-agnostic view so both topologies
+stay covered.
 
 ## Non-goals / deferred
 

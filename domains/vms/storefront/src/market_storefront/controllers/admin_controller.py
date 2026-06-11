@@ -673,6 +673,12 @@ class AdminController:
                 set_state="available",
             )
             released.append(resource_id)
+
+        # Remote-capacity mode: deal holds live in the site ledger, not
+        # the local tables — the sledgehammer must reach them too or
+        # mocked flows leak ledger capacity across runs.
+        released.extend(await self._release_site_ledger_holds())
+
         if released:
             logger.info(
                 "[ADMIN] Released %d held resource(s): %s",
@@ -682,3 +688,32 @@ class AdminController:
             released_count=len(released),
             resource_ids=released,
         )
+
+    async def _release_site_ledger_holds(self) -> list[str]:
+        from market_storefront.services.capacity_client import (
+            RemoteCapacityClient,
+            build_capacity_client,
+            site_capacity_mode_active,
+        )
+
+        if not site_capacity_mode_active():
+            return []
+        released: list[str] = []
+        try:
+            client = build_capacity_client(lambda: self._db)
+            if not isinstance(client, RemoteCapacityClient):
+                return []
+            for state in ("reserved", "provisioning", "leased", "releasing"):
+                for allocation in await client.list_allocations(state=state):
+                    done = await client.release(
+                        allocation_id=allocation.get("allocation_id"),
+                    )
+                    if done:
+                        released.append(
+                            f"ledger:{allocation.get('allocation_id')}",
+                        )
+        except Exception as exc:
+            logger.warning(
+                "[ADMIN] Could not release site-ledger holds: %s", exc,
+            )
+        return released

@@ -372,7 +372,10 @@ class TestStageB5_SellerAndLease:
             f"Primary escrow missing fulfillment_uid: {primary!r}"
         )
 
-        lease = provisioning_client.get_lease_by_escrow(deal_state.real_escrow_uid)
+        # DealLease resolves where the lease lives: a site-ledger
+        # allocation (remote-capacity mode) or a vm_leases row (embedded).
+        from tests.e2e.roles.scenarios.conftest import DealLease
+        lease = DealLease(provisioning_client, deal_state.real_escrow_uid).refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
         assert lease.get("resource_id") == BUY_RESOURCE_ID, (
             f"Lease bound to unexpected resource {lease.get('resource_id')!r}; "

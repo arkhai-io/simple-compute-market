@@ -379,6 +379,20 @@ class RemoteCapacityClient:
     # Beyond the protocol: the feed the poller tails and the registry
     # mirror used by inventory seeding.
 
+    async def list_allocations(
+        self,
+        *,
+        state: str | None = None,
+        escrow_uid: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {}
+        if state is not None:
+            params["state"] = state
+        if escrow_uid is not None:
+            params["escrow_uid"] = escrow_uid
+        data = await self._get("/api/v1/capacity/allocations", params=params)
+        return list(data.get("allocations") or [])
+
     async def events_after(
         self, after_version: int, *, limit: int = 500,
     ) -> tuple[list[dict[str, Any]], int]:

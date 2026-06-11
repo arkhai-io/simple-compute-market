@@ -71,8 +71,12 @@ COPY --chown=appuser:appuser .dist/ /dist/
 
 COPY --chown=appuser:appuser domains/vms/provisioning/service/pyproject.toml ./
 COPY --chown=appuser:appuser domains/vms/provisioning/service/src ./src
+# --refresh-package the internal wheels: they are rebuilt into /dist on
+# every `make dist` without a version bump, so the uv cache mount would
+# otherwise pin a stale copy from an earlier build.
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
-    uv sync --no-dev --no-install-project --find-links /dist
+    uv sync --no-dev --no-install-project --find-links /dist \
+        --refresh-package arkhai-core-storefront-client
 
 # Stage 2: Runtime
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime

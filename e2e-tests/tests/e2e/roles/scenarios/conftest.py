@@ -98,6 +98,10 @@ class DealState:
     # Phase 10-11 — lease expiry lifecycle
     _lease_expiry_armed: bool = False
     check_job_id: Optional[str] = None
+    # Mode-agnostic lease view (DealLease) resolved in 09c: a vm_leases
+    # row in embedded-capacity mode, a site-ledger allocation in remote
+    # mode. Phases 10-11 drive the expiry lifecycle through it.
+    deal_lease: Optional[Any] = None
 
 
 def require_state(deal_state: DealState, *fields: str) -> None:
@@ -414,3 +418,109 @@ def wait_for_stage_event(
         )
     except TimeoutError as exc:
         pytest.fail(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Mode-agnostic deal-lease view (embedded vm_leases vs site-ledger allocation)
+# ---------------------------------------------------------------------------
+
+class DealLease:
+    """One deal's lease, wherever it lives.
+
+    In embedded-capacity mode the lease is a provisioning ``vm_leases``
+    row whose expiry path PATCHes the storefront resource back to
+    available. In remote-capacity mode (storefront ``[capacity]
+    mode="site"``) the lease tail is recorded on the site-ledger
+    allocation, the watchdog releases it in the ledger's local
+    transaction, and the storefront receives a deal-scoped
+    capacity-released event instead of the PATCH. The full-deal
+    scenarios assert the same lifecycle through this view so the suite
+    passes in either topology.
+
+    ``status`` is normalized to the legacy vocabulary:
+    active / releasing / released / forced.
+    """
+
+    _LEDGER_STATUS = {"leased": "active"}
+
+    def __init__(self, provisioning_client, escrow_uid: str) -> None:
+        self._client = provisioning_client
+        self.escrow_uid = escrow_uid
+        self.is_ledger = False
+        self.lease_id: str | None = None
+        try:
+            allocations = (
+                provisioning_client.list_capacity_allocations(escrow_uid=escrow_uid)
+                .get("allocations") or []
+            )
+        except Exception:
+            allocations = []  # pre-ledger provisioning service
+        if allocations and allocations[0].get("lease_end_utc"):
+            self.is_ledger = True
+            self.lease_id = str(allocations[0]["allocation_id"])
+        else:
+            lease = provisioning_client.get_lease_by_escrow(escrow_uid)
+            self.lease_id = str(lease.get("id"))
+
+    def refresh(self) -> dict:
+        """Current lease fields, normalized across both modes."""
+        if self.is_ledger:
+            row = self._client.get_capacity_allocation(self.lease_id)
+            return {
+                "id": row.get("allocation_id"),
+                "escrow_uid": row.get("escrow_uid"),
+                "resource_id": row.get("resource_id"),
+                "vm_host": row.get("vm_host"),
+                "vm_target": row.get("vm_target"),
+                "status": self._LEDGER_STATUS.get(
+                    str(row.get("state")), str(row.get("state")),
+                ),
+                "check_job_id": row.get("check_job_id"),
+                "create_job_id": row.get("create_job_id"),
+            }
+        lease = self._client.get_lease(self.lease_id)
+        return {
+            "id": lease.get("id"),
+            "escrow_uid": lease.get("escrow_uid"),
+            "resource_id": lease.get("resource_id"),
+            "vm_host": lease.get("vm_host"),
+            "vm_target": lease.get("vm_target"),
+            "status": lease.get("status"),
+            "check_job_id": lease.get("check_job_id"),
+            "create_job_id": lease.get("create_job_id"),
+        }
+
+    def backdate(self, lease_end_utc: str) -> dict:
+        """Move the lease end into the past so the next watchdog cycle fires.
+
+        Returns the refreshed normalized lease view.
+        """
+        if self.is_ledger:
+            self._client.truncate_capacity_lease(self.lease_id, lease_end_utc)
+        else:
+            self._client.update_lease(self.lease_id, lease_end_utc=lease_end_utc)
+        return self.refresh()
+
+    def resource_consumed(self, storefront_admin_client, resource_id: str) -> bool:
+        """Whether the deal's capacity is still held, per the owning ledger.
+
+        Embedded: the storefront resource row is 'leased'. Remote: the
+        site snapshot shows fewer available units than the total.
+        """
+        if self.is_ledger:
+            for row in self._client.capacity_snapshot():
+                if str(row.get("resource_id")) == resource_id:
+                    total = int(row.get("value") or 0)
+                    return int(row.get("available_units") or 0) < total
+            pytest.fail(
+                f"Resource {resource_id!r} not found in site capacity snapshot"
+            )
+        resource = storefront_admin_client.get_resource(resource_id)
+        return resource.get("state") == "leased"
+
+    @property
+    def released_stage_event(self) -> tuple[str, str]:
+        """(stage, event) the storefront emits when this lease releases."""
+        if self.is_ledger:
+            return ("fulfillment", "capacity_released")
+        return ("lease_lifecycle", "resource_released")

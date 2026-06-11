@@ -8,10 +8,24 @@ from db.models import Base
 
 def create_db_engine(database_url: str, is_sqlite: bool) -> Engine:
     if is_sqlite:
+        if ":memory:" in database_url:
+            # A shared in-memory DB only exists on one connection — tests
+            # rely on every session seeing the same data.
+            return create_engine(
+                database_url,
+                connect_args={"check_same_thread": False},
+                poolclass=StaticPool,
+            )
+        # File-backed: one connection per session. A single shared
+        # connection (StaticPool) interleaves concurrent sessions'
+        # transactions on one sqlite handle ("cannot commit - no
+        # transaction is active") — rare under the old request rates,
+        # but the capacity ledger's event-feed polling made it routine.
+        # SQLite's file lock serializes writers; the busy timeout keeps
+        # contending sessions waiting instead of erroring.
         return create_engine(
             database_url,
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
+            connect_args={"check_same_thread": False, "timeout": 30},
         )
     return create_engine(database_url, pool_size=10, max_overflow=10)
 
