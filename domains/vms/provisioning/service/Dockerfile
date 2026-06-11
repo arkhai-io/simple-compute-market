@@ -8,7 +8,10 @@ ARG PYTHON_VERSION=3.12
 # Stage 1: Install Python deps and Ansible collections
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
 
-ENV UV_COMPILE_BYTECODE=1
+# No UV_COMPILE_BYTECODE here: this image builds under x86 emulation
+# (see the --platform pin) and uv's post-install bytecode-compile
+# python workers deadlock under Rosetta sporadically — a wedged build,
+# not a slow one. Cold starts pay a small first-import cost instead.
 ENV UV_LINK_MODE=copy
 # PyPI intermittently serves 5xx even for index lookups that should
 # 404 (internal package names resolved from /dist); back off through

@@ -620,9 +620,15 @@ class AdminController:
             escrow_uid=body.escrow_uid,
             closed_listing_ids=closed_listing_ids,
         )
+        # Pools are the aggregator's concept, not the ledger's — surface
+        # the membership from the resource attributes the sync mirrored.
+        pool_id = (
+            reserved.get("pool_id")
+            or (reserved.get("attributes") or {}).get("pool_id")
+        )
         return ReserveCapacityResponse(
             allocation_id=str(reserved["allocation_id"]),
-            pool_id=str(reserved["pool_id"]) if reserved.get("pool_id") else None,
+            pool_id=str(pool_id) if pool_id else None,
             member_id=str(reserved["member_id"]) if reserved.get("member_id") else None,
             resource_id=str(reserved["resource_id"]),
             gpu_count=int(reserved.get("allocated_gpu_count") or 1),

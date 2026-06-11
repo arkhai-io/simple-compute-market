@@ -476,12 +476,14 @@ count constrains the other.
 The ledger must be its own service the moment it does its job (it is the
 serialization point for reserves across processes, and allocations
 outlive any deal flow); the aggregator must *not* be one (soft state +
-per-seller policy; an HTTP hop to your own cache buys nothing). For the
-degenerate single-storefront deployment, keep the site-authority
-boundary as a client interface with an embedded same-process
-implementation — but never let storefront B reach the ledger through
-storefront A's process; embedded mode is for a provably single
-consumer.
+per-seller policy; an HTTP hop to your own cache buys nothing). An
+embedded same-process ledger implementation served as the transitional
+form while the client interface landed (II.1–II.3), and was deleted
+once the site authority stood: the storefront cannot fulfill without
+the provisioning service anyway, so there is no deployment where a
+local ledger is necessary — keeping one was a duplicated
+responsibility, not a fallback. The storefront's SQLite holds market
+state only.
 
 ### Work items
 
@@ -511,23 +513,25 @@ consumer.
    (the storefront's hold and the lease's temporal tail as one row,
    TTL soft holds supported at the ledger) plus the `capacity_events`
    pull feed, exposed at `/api/v1/capacity/*` mirroring the
-   `CapacityClient` contract. The storefront's `[capacity] mode="site"`
-   swaps in `RemoteCapacityClient` + an event-feed poller (embedded
-   stays the fallback and the default for single-process deployments);
-   inventory mirrors into the ledger at startup and after admin
-   imports/patches. Lease registration attaches to the ledger
-   allocation; at expiry the watchdog releases it in a local
-   transaction and posts a deal-scoped capacity-released event to the
-   owning storefront — the `PATCH /admin/portfolio/resources` callback
-   is retired for ledger-held allocations (it remains only as the
-   embedded-mode expiry path). The canonical e2e runs in remote mode.
-   Open edges: operator reservations (`/admin/portfolio/reservations`)
-   still write the local tables (listing reconciliation merges site +
-   local holds until II.5 re-homes the aggregator); job submission
-   still goes through the VM-specific `/hosts/{host}/vms` API rather
-   than a job-kind queue keyed by `allocation_id` (revisit with the
-   second executor, II.7); the owning storefront comes from service
-   settings, not yet from the deal_ref recorded at reserve time.
+   `CapacityClient` contract. The storefront reaches capacity only
+   through `RemoteCapacityClient` + a per-site event-feed poller
+   (the transitional embedded adapter, and later the whole embedded
+   mode plus the legacy `vm_leases`/`PATCH
+   /admin/portfolio/resources` machinery, were deleted once the
+   service stood — the storefront cannot fulfill without the
+   provisioning service anyway, so a local ledger was duplicated
+   responsibility, not a fallback); inventory mirrors into the ledger
+   at startup and after admin imports/patches, and operator
+   reservations land in the ledger like every other hold. Lease
+   registration attaches the lease tail to the ledger allocation
+   (`/api/v1/leases` is a view over the ledger); at expiry the
+   watchdog releases it in a local transaction and posts a
+   deal-scoped capacity-released event to the owning storefront.
+   Open edges: job submission still goes through the VM-specific
+   `/hosts/{host}/vms` API rather than a job-kind queue keyed by
+   `allocation_id` (revisit with the second executor, II.7); the
+   owning storefront comes from service settings, not yet from the
+   deal_ref recorded at reserve time.
 5. **Aggregator module.** Done: `core_storefront.aggregation` defines
    `AggregateCapacityClient` — the soft-state view over N hard-state
    site ledgers, implementing the same `CapacityClient` protocol it
@@ -541,10 +545,10 @@ consumer.
    `compute_pool_members` is keyed by `(site, resource_id)` (NULL =
    home). Slice derivation takes consumption from the aggregated
    snapshots per member key while totals and market attributes stay
-   local. Open edges: operator reservations and the publish CLI's
-   availability still read local tables; a second *physical* site in
-   the e2e topology waits for II.7, so multi-site routing is proven at
-   the unit level only.
+   local. Open edge: a second *physical* site in the e2e topology
+   waits for II.7, so multi-site routing is proven at the unit level
+   only (operator reservations and the publish CLI have since moved to
+   the ledger/snapshot path with the embedded-mode deletion).
 6. **Two-phase reserve.** Done: every accept chokepoint places a TTL'd
    soft hold (`capacity.reserve` with `ttl_seconds`; `hold_ttl_seconds`
    defaults to 900, 0 disables) and settlement consumes it by
@@ -552,12 +556,10 @@ consumer.
    securing capacity up front removes the lapse-mid-provision race, and
    the post-provision commit just refreshes the window. Lapsed/refused
    holds fall back to the plain atomic reserve; unsettled deals lapse
-   at the ledger (the embedded ledger gained the same TTL semantics:
-   `hold_expires_at` + lazy sweep). The lifecycle coupling is wired:
-   `claim_abandoned` truncates the deal's lease to now, handing teardown
-   to the ledger's expiry machinery. Embedded-mode limitation: the
-   legacy `vm_leases` teardown keeps its original schedule (no merged
-   lease row to truncate); remote mode ends the lease fully.
+   at the ledger. The lifecycle coupling is wired: `claim_abandoned`
+   truncates the deal's lease to now, handing teardown to the ledger's
+   expiry machinery (teardown check job, local release, capacity
+   event, deal notification).
 7. **Second executor.** The inference (or other) executor as the proof
    that job-kind dispatch and the neutral ledger hold; only then a
    second market-domain storefront sharing the pool end-to-end.
@@ -572,10 +574,11 @@ interface (II.1–II.3) deliberately preceded the physical service (II.4)
 the target graph first, so the move is a move and not also a behavior
 change. That paid off as intended: II.4 landed as four slices (ledger +
 API, remote client, watchdog/deal-event rewire, e2e topology flip),
-each keeping the branch green, with the embedded adapter retained as
-the single-process fallback and the full-deal e2e scenarios asserting
-the lease lifecycle through a mode-agnostic view so both topologies
-stay covered.
+each keeping the branch green. The embedded adapter was retained as a
+fallback through the transition and deleted afterwards (no release had
+shipped it): the storefront is strictly a capacity client, and the
+full-deal e2e scenarios assert the lease lifecycle through the ledger
+view.
 
 ## Non-goals / deferred
 

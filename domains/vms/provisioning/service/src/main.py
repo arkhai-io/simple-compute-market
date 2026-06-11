@@ -57,7 +57,6 @@ async def lifespan(_: FastAPI):
     _container_module.resolved_ansible_service = container.ansible_service()
     _container_module.resolved_system_service = container.system_service()
     _container_module.resolved_host_service = container.host_service()
-    _container_module.resolved_lease_service = container.lease_service()
     _container_module.resolved_lease_lifecycle_service = container.lease_lifecycle_service()
     _container_module.resolved_lease_watchdog = container.lease_watchdog()
     _container_module.resolved_capacity_ledger_service = container.capacity_ledger_service()

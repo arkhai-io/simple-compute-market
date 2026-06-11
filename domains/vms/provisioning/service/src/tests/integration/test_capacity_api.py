@@ -140,9 +140,8 @@ async def test_no_capacity_is_a_null_answer_not_an_error(capacity: CapacityApi):
 
 @pytest.mark.asyncio
 async def test_register_lease_attaches_to_ledger_allocation(capacity: CapacityApi):
-    """POST /leases with a ledger-held allocation records the lease tail
-    on the allocation row — no vm_leases row, so the legacy PATCH-callback
-    expiry path never engages for it."""
+    """POST /leases records the lease tail on the allocation row — the
+    leases surface is a view over the ledger."""
     import container as _container_module
 
     await capacity.register(
@@ -165,9 +164,9 @@ async def test_register_lease_attaches_to_ledger_allocation(capacity: CapacityAp
         assert body["id"] == reserved["allocation_id"]
         assert body["status"] == "active"
 
-        # No legacy lease row was created.
         listing = await http.get("/api/v1/leases/")
-        assert listing.json()["total"] == 0
+        assert listing.json()["total"] == 1
+        assert listing.json()["leases"][0]["id"] == reserved["allocation_id"]
 
     ledger = _container_module.resolved_capacity_ledger_service
     row = ledger.get_allocation(reserved["allocation_id"])
@@ -177,11 +176,11 @@ async def test_register_lease_attaches_to_ledger_allocation(capacity: CapacityAp
 
 
 @pytest.mark.asyncio
-async def test_register_lease_without_ledger_row_uses_legacy_table(
+async def test_register_lease_without_ledger_allocation_404s(
     capacity: CapacityApi,
 ):
-    """Embedded-mode storefronts pass their local allocation ids; those
-    don't exist in the ledger, so the legacy vm_leases path still runs."""
+    """Every reservation lives in the ledger; an unknown allocation means
+    the hold lapsed or was already released — registration refuses."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
         resp = await http.post("/api/v1/leases/", json={
@@ -192,9 +191,7 @@ async def test_register_lease_without_ledger_row_uses_legacy_table(
             "vm_target": "tenant-leg1",
             "lease_end_utc": "2099-01-01T00:00:00Z",
         })
-        assert resp.status_code == 201, resp.text
-        listing = await http.get("/api/v1/leases/")
-        assert listing.json()["total"] == 1
+        assert resp.status_code == 404, resp.text
 
 
 @pytest.mark.asyncio

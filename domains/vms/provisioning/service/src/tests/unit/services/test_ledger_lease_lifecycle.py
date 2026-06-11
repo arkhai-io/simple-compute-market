@@ -20,7 +20,6 @@ from sqlalchemy.pool import StaticPool
 from db.models import Base
 from services.capacity_ledger import CapacityLedgerService
 from services.lease_lifecycle_service import LeaseLifecycleService
-from services.lease_service import LeaseService
 
 
 @pytest.fixture
@@ -57,10 +56,9 @@ def _settings(**overrides):
 
 def _lifecycle(session_factory, ledger, **settings_overrides):
     return LeaseLifecycleService(
-        lease_service=LeaseService(session_factory=session_factory),
         settings=_settings(**settings_overrides),
-        job_service=None,  # direct-release path; check jobs covered elsewhere
         capacity_ledger=ledger,
+        job_service=None,  # direct-release path; check jobs covered elsewhere
     )
 
 
@@ -147,10 +145,9 @@ async def test_releasing_allocation_waits_for_check_then_grace_forces(
     job_svc.get_job.return_value = running
 
     svc = LeaseLifecycleService(
-        lease_service=LeaseService(session_factory=session_factory),
         settings=_settings(),
-        job_service=job_svc,
         capacity_ledger=ledger,
+        job_service=job_svc,
     )
 
     sf = MagicMock()
@@ -186,10 +183,9 @@ async def test_releasing_allocation_within_grace_skips(session_factory, ledger):
     job_svc.get_job.return_value = running
 
     svc = LeaseLifecycleService(
-        lease_service=LeaseService(session_factory=session_factory),
         settings=_settings(),
-        job_service=job_svc,
         capacity_ledger=ledger,
+        job_service=job_svc,
     )
     summary = await svc.force_check_leases()
     assert summary["skipped"] == 1
@@ -207,10 +203,9 @@ async def test_succeeded_check_releases_normally(session_factory, ledger):
     job_svc.get_job.return_value = done
 
     svc = LeaseLifecycleService(
-        lease_service=LeaseService(session_factory=session_factory),
         settings=_settings(),
-        job_service=job_svc,
         capacity_ledger=ledger,
+        job_service=job_svc,
     )
 
     sf = MagicMock()
@@ -251,10 +246,9 @@ async def test_due_leased_allocation_submits_check_job(session_factory, ledger):
     job_svc.get_job.return_value = running
 
     svc = LeaseLifecycleService(
-        lease_service=LeaseService(session_factory=session_factory),
         settings=_settings(),
-        job_service=job_svc,
         capacity_ledger=ledger,
+        job_service=job_svc,
     )
 
     import container as _container_module

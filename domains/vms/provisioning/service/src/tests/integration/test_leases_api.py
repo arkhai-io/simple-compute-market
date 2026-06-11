@@ -1,29 +1,29 @@
-"""Integration tests for the VM leases API.
+"""Integration tests for the VM leases API — a view over the ledger.
 
-All calls go through ProvisioningClient methods — no route strings in test code.
+The lease is the temporal tail of a capacity-ledger allocation; the
+``/api/v1/leases`` surface attaches lease tails to live allocations and
+reads them back in lease vocabulary.
 
 Coverage:
-  - POST /api/v1/leases: create round-trips through client
-  - GET /api/v1/leases: list with filters
-  - GET /api/v1/leases/{id}: get by id
-  - GET /api/v1/leases/by-escrow/{uid}: get by escrow UID
-  - PATCH /api/v1/leases/{id}: partial update
-  - DELETE /api/v1/leases/{id}/cancel: cancel
-  - POST /api/v1/system/check-leases: triggers immediate watchdog cycle
+  - POST /api/v1/leases: attaches to the reservation's allocation;
+    404 when no live allocation matches
+  - GET /api/v1/leases: list (only allocations carrying a lease tail)
+  - GET /api/v1/leases/{id} and /by-escrow/{uid}
+  - POST /api/v1/system/check-leases: one watchdog cycle over the ledger
 
 What is NOT covered here (unit test jurisdiction):
-  - LeaseService transition logic
+  - CapacityLedgerService transition logic
   - LeaseLifecycleService grace period and force logic
-  - _patch_storefront_resource HTTP interactions
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import container as _container_module
 import pytest
 
-from client.provisioning_client import ProvisioningClient, ProvisioningError
+from client.provisioning_client import ProvisioningError
 
 
 def _future_dt(hours: int = 2) -> str:
@@ -34,179 +34,131 @@ def _past_dt(seconds: int = 10) -> str:
     return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
 
 
-_SAMPLE_LEASE = {
-    "resource_id": "compute-kvm1-001",
-    "escrow_uid": "escrow-integ-001",
-    "vm_host": "kvm1",
-    "vm_target": "tenant-a1b2",
-}
+def _reserve(escrow_uid: str, *, gpu_count: int = 1) -> dict:
+    """Reserve capacity in the ledger the way a storefront deal does."""
+    ledger = _container_module.resolved_capacity_ledger_service
+    if "compute-kvm1-001" not in {
+        r["resource_id"] for r in ledger.list_resources()
+    }:
+        ledger.register_resource(
+            resource_id="compute-kvm1-001",
+            total_units=8,
+            attributes={"vm_host": "kvm1"},
+        )
+    reserved = ledger.reserve(
+        claim={"gpu_count": gpu_count}, deal_ref={"escrow_uid": escrow_uid},
+    )
+    assert reserved is not None
+    return reserved
 
 
-async def _create(client: ProvisioningClient, *, hours: int = 2, escrow_uid: str = "escrow-integ-001", **overrides) -> dict:
-    body = {**_SAMPLE_LEASE, "escrow_uid": escrow_uid, "lease_end_utc": _future_dt(hours=hours), **overrides}
+async def _register(client, escrow_uid: str, **overrides) -> dict:
+    reserved = _reserve(escrow_uid)
+    body = {
+        "resource_id": reserved["resource_id"],
+        "allocation_id": reserved["allocation_id"],
+        "escrow_uid": escrow_uid,
+        "vm_host": "kvm1",
+        "vm_target": f"tenant-{escrow_uid[-4:]}",
+        "lease_end_utc": _future_dt(),
+    }
+    body.update(overrides)
     return await client.register_lease(**body)
 
 
 class TestCreateLease:
-    async def test_create_returns_lease_data(self, client_and_queue):
+    async def test_create_attaches_to_the_allocation(self, client_and_queue):
         client, _ = client_and_queue
-        lease = await _create(client)
-        assert lease["resource_id"] == "compute-kvm1-001"
-        assert lease["escrow_uid"] == "escrow-integ-001"
-        assert lease["vm_host"] == "kvm1"
-        assert lease["status"] in ("active", "pending")
-        assert "id" in lease
-
-    async def test_create_status_active_when_no_start(self, client_and_queue):
-        client, _ = client_and_queue
-        lease = await _create(client)
+        lease = await _register(client, "escrow-attach-1")
         assert lease["status"] == "active"
+        assert lease["escrow_uid"] == "escrow-attach-1"
+        assert lease["vm_host"] == "kvm1"
 
-    async def test_create_conflict_on_duplicate_escrow(self, client_and_queue):
+        ledger = _container_module.resolved_capacity_ledger_service
+        allocation = ledger.get_allocation(lease["allocation_id"])
+        assert allocation["state"] == "leased"
+        assert allocation["vm_target"] == lease["vm_target"]
+
+    async def test_create_unknown_allocation_returns_404(self, client_and_queue):
         client, _ = client_and_queue
-        await _create(client, escrow_uid="esc-dup")
         with pytest.raises(ProvisioningError) as exc_info:
-            await _create(client, escrow_uid="esc-dup")
-        assert exc_info.value.status_code == 409
+            await client.register_lease(
+                resource_id="compute-kvm1-001",
+                allocation_id="not-a-ledger-allocation",
+                escrow_uid="escrow-ghost",
+                vm_host="kvm1",
+                vm_target="tenant-ghost",
+                lease_end_utc=_future_dt(),
+            )
+        assert exc_info.value.status_code == 404
 
 
 class TestListLeases:
     async def test_empty_returns_empty_list(self, client_and_queue):
         client, _ = client_and_queue
         result = await client.list_leases()
-        assert result["leases"] == []
         assert result["total"] == 0
+        assert result["leases"] == []
 
-    async def test_lists_created_leases(self, client_and_queue):
+    async def test_lists_attached_leases_only(self, client_and_queue):
         client, _ = client_and_queue
-        await _create(client, escrow_uid="e1")
-        await _create(client, escrow_uid="e2")
+        await _register(client, "escrow-list-1")
+        _reserve("escrow-no-lease")  # a bare hold has no lease tail
         result = await client.list_leases()
-        assert result["total"] == 2
-
-    async def test_filter_by_status(self, client_and_queue):
-        client, _ = client_and_queue
-        await _create(client, escrow_uid="ef1")
-        result = await client.list_leases(status="active")
-        assert all(l["status"] == "active" for l in result["leases"])
+        assert result["total"] == 1
+        assert result["leases"][0]["escrow_uid"] == "escrow-list-1"
 
     async def test_filter_by_escrow_uid(self, client_and_queue):
         client, _ = client_and_queue
-        await _create(client, escrow_uid="filter-target")
-        await _create(client, escrow_uid="filter-other")
-        result = await client.list_leases(escrow_uid="filter-target")
+        await _register(client, "escrow-filter-1")
+        await _register(client, "escrow-filter-2")
+        result = await client.list_leases(escrow_uid="escrow-filter-2")
         assert result["total"] == 1
-        assert result["leases"][0]["escrow_uid"] == "filter-target"
+        assert result["leases"][0]["escrow_uid"] == "escrow-filter-2"
 
 
 class TestGetLease:
     async def test_get_by_id(self, client_and_queue):
         client, _ = client_and_queue
-        created = await _create(client, escrow_uid="e-get")
-        fetched = await client.get_lease(created["id"])
-        assert fetched["id"] == created["id"]
-        assert fetched["escrow_uid"] == "e-get"
+        lease = await _register(client, "escrow-get-1")
+        fetched = await client.get_lease(lease["id"])
+        assert fetched["escrow_uid"] == "escrow-get-1"
+        assert fetched["status"] == "active"
 
     async def test_get_nonexistent_returns_404(self, client_and_queue):
         client, _ = client_and_queue
         with pytest.raises(ProvisioningError) as exc_info:
-            await client.get_lease("nonexistent-id")
+            await client.get_lease("missing-lease")
         assert exc_info.value.status_code == 404
 
     async def test_get_by_escrow(self, client_and_queue):
         client, _ = client_and_queue
-        await _create(client, escrow_uid="e-by-escrow")
-        fetched = await client.get_lease_by_escrow("e-by-escrow")
-        assert fetched["escrow_uid"] == "e-by-escrow"
+        lease = await _register(client, "escrow-by-escrow-1")
+        fetched = await client.get_lease_by_escrow("escrow-by-escrow-1")
+        assert fetched["id"] == lease["id"]
 
     async def test_get_by_escrow_nonexistent_returns_404(self, client_and_queue):
         client, _ = client_and_queue
         with pytest.raises(ProvisioningError) as exc_info:
-            await client.get_lease_by_escrow("no-such-escrow")
-        assert exc_info.value.status_code == 404
-
-
-class TestUpdateLease:
-    async def test_update_status(self, client_and_queue):
-        client, _ = client_and_queue
-        created = await _create(client, escrow_uid="e-update")
-        updated = await client.update_lease(created["id"], status="cancelled")
-        assert updated["status"] == "cancelled"
-
-    async def test_update_check_job_id(self, client_and_queue):
-        client, _ = client_and_queue
-        created = await _create(client, escrow_uid="e-cjid")
-        updated = await client.update_lease(created["id"], check_job_id="job-xyz")
-        assert updated["check_job_id"] == "job-xyz"
-
-    async def test_update_nonexistent_returns_404(self, client_and_queue):
-        client, _ = client_and_queue
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.update_lease("no-such-id", status="cancelled")
-        assert exc_info.value.status_code == 404
-
-
-class TestCancelLease:
-    async def test_cancel_transitions_to_cancelled(self, client_and_queue):
-        client, _ = client_and_queue
-        created = await _create(client, escrow_uid="e-cancel")
-        cancelled = await client.cancel_lease(created["id"])
-        assert cancelled["status"] == "cancelled"
-
-    async def test_cancel_nonexistent_returns_404(self, client_and_queue):
-        client, _ = client_and_queue
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.cancel_lease("no-such-id")
+            await client.get_lease_by_escrow("escrow-missing")
         assert exc_info.value.status_code == 404
 
 
 class TestCheckLeasesEndpoint:
-    async def test_check_leases_returns_summary(self, client_and_queue):
-        """POST /api/v1/system/check-leases returns the summary dict."""
-        from httpx import ASGITransport, AsyncClient as HttpxClient
-        from main import app
-        transport = ASGITransport(app=app)
-        async with HttpxClient(transport=transport, base_url="http://test") as http:
-            resp = await http.post("/api/v1/system/check-leases")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert "checked" in body
-        assert "released" in body
-        assert "forced" in body
-        assert "skipped" in body
-
-    async def test_check_leases_processes_expired_lease(self, client_and_queue):
-        """Expired active lease is released when storefront patch succeeds."""
-        from unittest.mock import AsyncMock, patch as mock_patch
-        from httpx import ASGITransport, AsyncClient as HttpxClient
-        from main import app
-        import container as _container_module
-
+    async def test_check_leases_releases_expired_ledger_lease(self, client_and_queue):
+        """The on-demand cycle releases an expired lease in the ledger and
+        emits the capacity event (deal notification is best-effort and the
+        test storefront is unreachable — that must not block the release)."""
         client, _ = client_and_queue
-
-        # Create a lease that is already expired
-        expired_lease = await client.register_lease(
-            resource_id="compute-kvm1-001",
-            escrow_uid="esc-check-test",
-            vm_host="kvm1",
-            vm_target="tenant-test",
-            lease_end_utc=(datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat(),
+        lease = await _register(
+            client, "escrow-expired-1", lease_end_utc=_past_dt(),
         )
-        assert expired_lease["status"] == "active"
 
-        lease_lifecycle_svc = _container_module.resolved_lease_lifecycle_service
-        transport = ASGITransport(app=app)
-        async with HttpxClient(transport=transport, base_url="http://test") as http:
-            with mock_patch.object(
-                lease_lifecycle_svc,
-                "_patch_storefront_resource",
-                new=AsyncMock(return_value=True),
-            ):
-                resp = await http.post("/api/v1/system/check-leases")
+        result = await client.check_leases()
+        assert result.get("released", 0) >= 1
 
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["released"] >= 1
-
-        fetched = await client.get_lease(expired_lease["id"])
-        assert fetched["status"] == "released"
+        ledger = _container_module.resolved_capacity_ledger_service
+        allocation = ledger.get_allocation(lease["allocation_id"])
+        assert allocation["state"] == "released"
+        events, _ = ledger.events_after(0)
+        assert events[-1]["kind"] == "released"

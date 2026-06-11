@@ -519,6 +519,10 @@ class ProvisioningClient(_ProvisioningClientBase):
     # Site-authority capacity ledger
     # ------------------------------------------------------------------
 
+    async def check_leases(self) -> dict:
+        """POST /api/v1/system/check-leases — run one lifecycle cycle now."""
+        return await self._post("/api/v1/system/check-leases", {})
+
     async def capacity_snapshot(self) -> list[dict]:
         """GET /api/v1/capacity/snapshot — advisory availability view."""
         return (await self._get("/api/v1/capacity/snapshot")).get("resources") or []
