@@ -6,6 +6,7 @@ from config import settings
 from db.database import create_db_engine, create_session_factory
 from services.ansible_service import AnsibleService
 from services.async_job_queue import AsyncJobQueue
+from services.capacity_ledger import CapacityLedgerService
 from services.host_service import HostService
 from services.job_service import AnsibleJobService
 from services.lease_lifecycle_service import LeaseLifecycleService
@@ -104,6 +105,11 @@ class Container(containers.DeclarativeContainer):
         settings=config,
     )
 
+    capacity_ledger_service = providers.Singleton(
+        CapacityLedgerService,
+        session_factory=session_factory,
+    )
+
 
 # Shared container instance — imported by main.py and all controllers.
 container = Container()
@@ -126,3 +132,4 @@ resolved_host_service: "HostService | None" = None
 resolved_lease_service: "LeaseService | None" = None
 resolved_lease_lifecycle_service: "LeaseLifecycleService | None" = None
 resolved_lease_watchdog: "LeaseWatchdog | None" = None
+resolved_capacity_ledger_service: "CapacityLedgerService | None" = None

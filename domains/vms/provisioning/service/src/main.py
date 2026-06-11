@@ -31,6 +31,7 @@ from controllers.jobs_controller import AnsibleJobsController  # noqa: E402
 from controllers.hosts_controller import HostController      # noqa: E402
 from controllers.vms_controller import VmController          # noqa: E402
 from controllers.leases_controller import LeasesController   # noqa: E402
+from controllers.capacity_controller import CapacityController  # noqa: E402
 
 
 @asynccontextmanager
@@ -59,6 +60,7 @@ async def lifespan(_: FastAPI):
     _container_module.resolved_lease_service = container.lease_service()
     _container_module.resolved_lease_lifecycle_service = container.lease_lifecycle_service()
     _container_module.resolved_lease_watchdog = container.lease_watchdog()
+    _container_module.resolved_capacity_ledger_service = container.capacity_ledger_service()
 
     # ------------------------------------------------------------------
     # Inventory seeding — runs once at startup if the hosts table is empty.
@@ -214,6 +216,13 @@ app = FastAPI(
             "name": "leases",
             "description": "VM lease lifecycle — register, query, and cancel leases.",
         },
+        {
+            "name": "capacity",
+            "description": (
+                "Site-authority capacity ledger — snapshot, probe, "
+                "reserve/commit/release, and the versioned event feed."
+            ),
+        },
     ],
     lifespan=lifespan,
 )
@@ -254,6 +263,7 @@ app.include_router(AnsibleJobsController.make_router(), prefix="/api/v1")       
 app.include_router(HostController.make_router(), prefix="/api/v1")                 # /api/v1/hosts/*
 app.include_router(VmController.make_router(), prefix="/api/v1")                   # /api/v1/hosts/{host}/vms/*
 app.include_router(LeasesController.make_router(), prefix="/api/v1")               # /api/v1/leases/*
+app.include_router(CapacityController.make_router(), prefix="/api/v1")             # /api/v1/capacity/*
 
 # Test controller — only mounted when mock profile is active.
 # Never present in production or staging.

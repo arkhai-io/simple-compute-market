@@ -363,6 +363,9 @@ async def client_and_queue(
         job_service=None,  # tests use direct-patch path; no real Ansible jobs
     )
 
+    from services.capacity_ledger import CapacityLedgerService
+    capacity_ledger_service = CapacityLedgerService(session_factory=session_factory)
+
     # Override container providers
     app.container.ansible_service.override(fake_ansible)
     app.container.job_service.override(job_service)
@@ -371,6 +374,7 @@ async def client_and_queue(
     app.container.host_service.override(host_service)
     app.container.lease_service.override(lease_service)
     app.container.lease_lifecycle_service.override(lease_lifecycle_service)
+    app.container.capacity_ledger_service.override(capacity_ledger_service)
 
     # Wire resolved module-level variables
     _container_module.resolved_job_service = job_service
@@ -380,6 +384,7 @@ async def client_and_queue(
     _container_module.resolved_host_service = host_service
     _container_module.resolved_lease_service = lease_service
     _container_module.resolved_lease_lifecycle_service = lease_lifecycle_service
+    _container_module.resolved_capacity_ledger_service = capacity_ledger_service
 
     # Fresh queue per test — caller can inject on_job_started via fixture params
     job_queue = AsyncJobQueue(max_concurrent=2)
@@ -422,6 +427,7 @@ async def client_and_queue(
     app.container.host_service.reset_override()
     app.container.lease_service.reset_override()
     app.container.lease_lifecycle_service.reset_override()
+    app.container.capacity_ledger_service.reset_override()
 
 
 @pytest_asyncio.fixture
