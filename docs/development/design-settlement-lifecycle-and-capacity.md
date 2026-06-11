@@ -545,9 +545,19 @@ consumer.
    availability still read local tables; a second *physical* site in
    the e2e topology waits for II.7, so multi-site routing is proven at
    the unit level only.
-6. **Two-phase reserve.** TTL hold at terms acceptance, commit at
-   settlement; wire the settlement lifecycle's early termination to
-   lease truncation.
+6. **Two-phase reserve.** Done: every accept chokepoint places a TTL'd
+   soft hold (`capacity.reserve` with `ttl_seconds`; `hold_ttl_seconds`
+   defaults to 900, 0 disables) and settlement consumes it by
+   committing the held allocation into a lease *before* provisioning —
+   securing capacity up front removes the lapse-mid-provision race, and
+   the post-provision commit just refreshes the window. Lapsed/refused
+   holds fall back to the plain atomic reserve; unsettled deals lapse
+   at the ledger (the embedded ledger gained the same TTL semantics:
+   `hold_expires_at` + lazy sweep). The lifecycle coupling is wired:
+   `claim_abandoned` truncates the deal's lease to now, handing teardown
+   to the ledger's expiry machinery. Embedded-mode limitation: the
+   legacy `vm_leases` teardown keeps its original schedule (no merged
+   lease row to truncate); remote mode ends the lease fully.
 7. **Second executor.** The inference (or other) executor as the proof
    that job-kind dispatch and the neutral ledger hold; only then a
    second market-domain storefront sharing the pool end-to-end.

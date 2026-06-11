@@ -2351,6 +2351,42 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_select)
 
+    async def find_held_compute_allocation(
+        self, *, escrow_uid: str,
+    ) -> dict[str, Any] | None:
+        """Read-only lookup of the deal's live allocation, newest first."""
+        def _find() -> dict[str, Any] | None:
+            conn = sqlite3.connect(
+                f"file:{self.db_path}?mode=ro&nolock=1", uri=True, timeout=5,
+            )
+            try:
+                placeholders = ", ".join(
+                    "?" for _ in self._COMPUTE_HELD_ALLOCATION_STATES
+                )
+                row = conn.execute(
+                    f"""
+                    SELECT allocation_id, resource_id, state, lease_end_utc
+                    FROM compute_allocations
+                    WHERE escrow_uid = ?
+                      AND state IN ({placeholders})
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (escrow_uid, *self._COMPUTE_HELD_ALLOCATION_STATES),
+                ).fetchone()
+            finally:
+                conn.close()
+            if row is None:
+                return None
+            return {
+                "allocation_id": row[0],
+                "resource_id": row[1],
+                "state": row[2],
+                "lease_end_utc": row[3],
+            }
+
+        return await asyncio.to_thread(_find)
+
     # ------------------------------------------------------------------
     # Capacity holds — two-phase reserve bookkeeping. The hold itself
     # lives in the capacity ledger (a TTL'd reserved allocation); this

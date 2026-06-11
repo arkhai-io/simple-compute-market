@@ -1,3 +1,8 @@
+# PyPI intermittently serves 5xx where internal package names should
+# 404 (they resolve from .dist); back off through the flap instead of
+# failing after uv's default 3 tries.
+export UV_HTTP_RETRIES ?= 10
+
 PYTHON      ?= python3
 
 # Default profile if none supplied

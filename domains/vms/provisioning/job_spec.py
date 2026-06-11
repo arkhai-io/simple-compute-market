@@ -18,11 +18,21 @@ _REQUIRED_COMPUTE_KEYS = (
 
 
 def required_compute_attributes(order_dict: dict[str, Any] | None) -> dict[str, Any]:
-    """Extract inventory-matching attributes from a VM listing."""
+    """Extract inventory-matching attributes from a VM listing.
+
+    ``offer_resource`` may arrive as a JSON string, a plain dict, or a
+    ``ComputeResource`` model instance — ``Listing.model_validate``
+    mutates rows it validates, replacing the dict in place, and several
+    callers (the negotiation accept paths) run after such a validation.
+    Silently returning ``{}`` for the model shape un-pins the claim and
+    makes capacity reservations grab the wrong resource.
+    """
     required_attributes: dict[str, Any] = {}
     if not order_dict:
         return required_attributes
     compute_resource = extract_compute_from_order(order_dict)
+    if hasattr(compute_resource, "model_dump"):
+        compute_resource = compute_resource.model_dump()
     if isinstance(compute_resource, dict):
         for key in _REQUIRED_COMPUTE_KEYS:
             if compute_resource.get(key) is not None:

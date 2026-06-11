@@ -7,6 +7,10 @@ FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS bui
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 ENV UV_HTTP_TIMEOUT=120
+# PyPI intermittently serves 5xx even for index lookups that should
+# 404 (internal package names resolved from /dist); back off through
+# the flap instead of failing the build after the default 3 tries.
+ENV UV_HTTP_RETRIES=10
 
 RUN apt-get update && apt-get install -y --no-install-recommends git g++ && rm -rf /var/lib/apt/lists/*
 
@@ -61,6 +65,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Stage 2: Lean runtime image
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS runtime
+
+# ENV does not cross FROM — this stage runs uv sync too (see the builder
+# stage for why the retries are raised).
+ENV UV_HTTP_RETRIES=10
 
 USER root
 

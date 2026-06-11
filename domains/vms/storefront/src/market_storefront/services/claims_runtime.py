@@ -13,7 +13,9 @@ handle on the engine task, and a restart loses nothing.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from core_storefront.settlement_lifecycle import ClaimRecord, ClaimsEngine
@@ -38,11 +40,100 @@ def build_claims_engine(sqlite_client: Any) -> ClaimsEngine:
         },
         default_chain=getattr(settings, "chain_name", None),
     )
+    def _on_event(event: str, **fields: Any) -> None:
+        stage_event("claims", event, **fields)
+        if event == "claim_abandoned":
+            # The settlement lifecycle's "deal is over" signal — the one
+            # coupling joint between the two halves of the capacity
+            # design. Fire-and-forget: truncation failure must not stall
+            # the claims sweep.
+            asyncio.get_running_loop().create_task(
+                truncate_lease_for_abandoned_claim(
+                    sqlite_client,
+                    escrow_uid=fields.get("claim_ref"),
+                    reason=fields.get("reason"),
+                ),
+            )
+
     return ClaimsEngine(
         sqlite_client,
         {ALKAHEST_MECHANISM: hooks},
-        on_event=lambda event, **fields: stage_event("claims", event, **fields),
+        on_event=_on_event,
     )
+
+
+async def truncate_lease_for_abandoned_claim(
+    sqlite_client: Any,
+    *,
+    escrow_uid: str | None,
+    reason: str | None = None,
+) -> dict[str, Any] | None:
+    """End the deal's lease now: the seller will not be paid past this point.
+
+    A claim abandoned before lease end (escrow reclaimed, conditions
+    terminally failed) means continuing to serve is donating compute.
+    Truncating the allocation's lease to *now* hands the rest to the
+    ledger's existing expiry machinery — teardown job, local release,
+    capacity event, deal notification — on its next watchdog cycle.
+    In embedded mode this shortens the local ledger row; the legacy
+    vm_leases teardown keeps its original schedule (recorded limitation
+    — the embedded fallback has no merged lease row to truncate).
+    """
+    if not escrow_uid:
+        return None
+    from market_storefront.services.capacity_client import (
+        build_capacity_client,
+        remote_site_clients,
+    )
+
+    try:
+        capacity = build_capacity_client(lambda: sqlite_client)
+        allocation_id: str | None = None
+        sites = remote_site_clients(capacity)
+        if sites:
+            for client in sites.values():
+                rows = await client.list_allocations(escrow_uid=escrow_uid)
+                held = [
+                    a for a in rows
+                    if a.get("state") in (
+                        "reserved", "provisioning", "leased", "releasing",
+                    )
+                ]
+                if held:
+                    allocation_id = str(held[0]["allocation_id"])
+                    break
+        else:
+            local = await sqlite_client.find_held_compute_allocation(
+                escrow_uid=escrow_uid,
+            )
+            if local:
+                allocation_id = str(local["allocation_id"])
+        if not allocation_id:
+            logger.info(
+                "[CLAIMS] No live allocation to truncate for abandoned "
+                "claim %s", escrow_uid,
+            )
+            return None
+
+        lease_end = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        truncated = await capacity.truncate_lease(
+            allocation_id=allocation_id, lease_end_utc=lease_end,
+        )
+        stage_event(
+            "claims", "lease_truncated_after_abandonment",
+            escrow_uid=escrow_uid,
+            allocation_id=allocation_id,
+            lease_end_utc=lease_end,
+            reason=reason,
+            site=(truncated or {}).get("site"),
+        )
+        return truncated
+    except Exception as exc:
+        logger.warning(
+            "[CLAIMS] Could not truncate lease for abandoned claim %s: %s",
+            escrow_uid, exc,
+        )
+        return None
 
 
 async def claims_engine_loop() -> None:

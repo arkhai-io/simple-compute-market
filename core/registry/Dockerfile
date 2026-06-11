@@ -6,6 +6,10 @@ FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookwor
 
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
+# PyPI intermittently serves 5xx even for index lookups that should
+# 404 (internal package names resolved from /dist); back off through
+# the flap instead of failing the build after the default 3 tries.
+ENV UV_HTTP_RETRIES=10
 
 WORKDIR /app
 

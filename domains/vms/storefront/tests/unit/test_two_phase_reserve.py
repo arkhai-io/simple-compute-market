@@ -141,6 +141,32 @@ ORDER = {
 }
 
 
+def test_claim_survives_listing_model_validation():
+    """Listing.model_validate mutates the row it validates, replacing
+    offer_resource with a ComputeResource instance — the accept paths run
+    after such a validation, and an un-pinned claim makes the hold grab
+    whatever resource is first in line (the e2e caught this as a deal
+    provisioned on the wrong machine)."""
+    from domains.vms.listings.models import Listing
+    from domains.vms.provisioning.job_spec import required_compute_attributes
+
+    row = {
+        "listing_id": "lst-1",
+        "status": "open",
+        "seller": "http://seller:8001",
+        "offer_resource": {
+            "resource_id": "res-pin", "gpu_model": "H200", "gpu_count": 2,
+            "sla": 99.0, "region": "California, US",
+        },
+        "accepted_escrows": [],
+    }
+    pinned = required_compute_attributes(row)
+    Listing.model_validate(row)
+    assert not isinstance(row["offer_resource"], dict)  # the mutation
+    assert required_compute_attributes(row) == pinned
+    assert pinned["resource_id"] == "res-pin"
+
+
 @pytest.mark.asyncio
 async def test_acceptance_places_and_records_the_hold(tmp_path):
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"))
