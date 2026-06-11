@@ -43,13 +43,16 @@ class CapacityDelta:
     caused it (deal context is point-to-point, not pub/sub; broadcasting
     it would leak one buyer's activity to every subscribed storefront).
     ``version`` increases monotonically per event source so subscribers
-    can detect gaps and fall back to a full snapshot resync.
+    can detect gaps and fall back to a full snapshot resync; with
+    multiple sites aggregated, ``(site, version)`` is the unique key —
+    versions from different sites are unrelated sequences.
     """
 
     kind: str  # "reserved" | "committed" | "released" | "lease_truncated"
     version: int
     resource_id: str | None = None
     pool_id: str | None = None
+    site: str | None = None  # which site authority's ledger moved
 
 
 CapacitySubscriber = Callable[[CapacityDelta], Awaitable[None]]
