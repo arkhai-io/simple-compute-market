@@ -107,14 +107,25 @@ root_path = ""
 [capacity]
 # Where the authoritative capacity ledger lives.
 #   ""     — embedded: this storefront's own tables (single-consumer only).
-#   "site" — remote: the site authority's /api/v1/capacity surface, at
-#            authority_url (defaults to provisioning.service_url — that
-#            process hosts the site authority), authenticated with
-#            admin_api_key. Capacity deltas arrive by polling the
-#            authority's versioned event feed.
+#   "site" — remote: site authorities' /api/v1/capacity surfaces,
+#            authenticated with admin_api_key, aggregated behind one
+#            client. Capacity deltas arrive by polling each authority's
+#            versioned event feed.
+# Sites come from a [capacity.sites] table of name → authority URL,
+# e.g.   [capacity.sites]
+#        dc-a = "http://prov-a:8081"
+#        dc-b = "http://prov-b:8081"
+# With no table, authority_url becomes the single site "default"
+# (and itself defaults to provisioning.service_url — that process
+# hosts the site authority). The first site is the storefront's home
+# site: local CSV inventory mirrors there.
+# placement orders sites for reserves: "fill_first" (configuration
+# order — pack a site before touching the next) or "most_available"
+# (spread to the site with the most free units).
 mode          = ""
 authority_url = ""
 poll_interval = 5
+placement     = "fill_first"
 
 [provisioning]
 service_url            = "http://localhost:8085"

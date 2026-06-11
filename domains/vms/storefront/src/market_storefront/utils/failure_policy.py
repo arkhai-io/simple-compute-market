@@ -257,13 +257,13 @@ async def _release_capacity(
     capacity: Any | None = None,
 ) -> FulfillmentFailurePolicyResult:
     from market_storefront.services.capacity_client import (
-        RemoteCapacityClient,
         combined_held_by_resource,
+        is_remote_capacity_client,
     )
 
     result = FulfillmentFailurePolicyResult(allocation_id=ctx.allocation_id)
 
-    if isinstance(capacity, RemoteCapacityClient):
+    if is_remote_capacity_client(capacity):
         # Remote-capacity mode: the hold lives in the site authority's
         # ledger, not the local tables — release it there and reconcile
         # listings against the site's availability.

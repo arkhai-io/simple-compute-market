@@ -718,6 +718,16 @@ def _migrate_listing_resource_timestamps(conn: sqlite3.Connection) -> None:
             )
 
 
+def _migrate_pool_member_sites(conn: sqlite3.Connection) -> None:
+    """Pool members reference ``(site, resource_id)`` — the aggregator key.
+
+    NULL means "the storefront's home site", so embedded deployments and
+    pre-aggregation databases need no config-coupled backfill; only
+    members of resources hosted at *other* sites carry a name.
+    """
+    _add_column_if_missing(conn, "compute_pool_members", "site", "TEXT")
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_000_listing_resource_timestamps",
@@ -742,5 +752,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_005_escrows_and_listings",
         _migrate_escrows_and_listings,
+    ),
+    Migration(
+        "20260611_006_pool_member_sites",
+        _migrate_pool_member_sites,
     ),
 )

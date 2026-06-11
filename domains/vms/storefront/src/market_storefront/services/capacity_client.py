@@ -26,6 +26,11 @@ from typing import Any, Callable, Mapping
 
 import httpx
 
+from core_storefront.aggregation import (
+    PLACEMENT_POLICIES,
+    AggregateCapacityClient,
+    fill_first,
+)
 from core_storefront.capacity import (
     CapacityDelta,
     CapacityEventBus,
@@ -430,34 +435,48 @@ class RemoteCapacityClient:
         await self._bus.emit(delta)
 
 
-def _capacity_settings() -> tuple[str, str, str]:
-    """Resolve (mode, authority_url, admin_key) from live settings.
+def _capacity_settings() -> tuple[str, dict[str, str], str, str]:
+    """Resolve (mode, sites{name→url}, admin_key, placement) from settings.
 
     Read at call time so tests that patch
-    ``market_storefront.utils.config.settings`` are honored. The
-    authority URL defaults to the provisioning service — that process
+    ``market_storefront.utils.config.settings`` are honored. Sites come
+    from the ``[capacity.sites]`` table (name → authority URL); with no
+    table, the single ``authority_url`` becomes the site named
+    "default", falling back to the provisioning service — that process
     hosts the site authority.
     """
     from market_storefront.utils import config
 
     cap = getattr(config.settings, "capacity", None)
     mode = str(getattr(cap, "mode", "") or "").strip().lower()
-    url = str(getattr(cap, "authority_url", "") or "").strip()
-    if mode == "site" and not url:
-        url = str(getattr(
-            getattr(config.settings, "provisioning", None), "service_url", "",
-        ) or "")
     admin_key = str(getattr(config.settings, "admin_api_key", "") or "")
-    return mode, url.rstrip("/"), admin_key
+    placement = str(getattr(cap, "placement", "") or "fill_first").strip()
+
+    sites: dict[str, str] = {}
+    raw_sites = getattr(cap, "sites", None)
+    if raw_sites:
+        for name, url in dict(raw_sites).items():
+            url = str(url or "").strip()
+            if url:
+                sites[str(name)] = url.rstrip("/")
+    if not sites and mode == "site":
+        url = str(getattr(cap, "authority_url", "") or "").strip()
+        if not url:
+            url = str(getattr(
+                getattr(config.settings, "provisioning", None), "service_url", "",
+            ) or "")
+        if url:
+            sites["default"] = url.rstrip("/")
+    return mode, sites, admin_key, placement
 
 
 def site_capacity_mode_active() -> bool:
-    """True when the authoritative ledger is the remote site authority."""
-    mode, url, _ = _capacity_settings()
-    return mode == "site" and bool(url)
+    """True when the authoritative ledger is in remote site authorities."""
+    mode, sites, _, _ = _capacity_settings()
+    return mode == "site" and bool(sites)
 
 
-async def site_held_by_resource(client: RemoteCapacityClient) -> dict[str, int]:
+async def site_held_by_resource(client: Any) -> dict[str, int]:
     """Per-resource held units derived from a site snapshot.
 
     The listing reconciler keeps totals and market attributes local (the
@@ -501,7 +520,7 @@ def _local_held_by_resource(db_path: str) -> dict[str, int]:
 
 
 async def combined_held_by_resource(
-    client: RemoteCapacityClient, db_path: str,
+    client: Any, db_path: str,
 ) -> dict[str, int]:
     """Union of site-ledger and local holds, per resource.
 
@@ -519,7 +538,7 @@ async def combined_held_by_resource(
 
 def _make_remote_listing_subscriber(
     sqlite_client_factory: SQLiteClientFactory,
-    client: RemoteCapacityClient,
+    client: Any,
 ) -> CapacitySubscriber:
     """Reconcile derived listings against site-authority availability.
 
@@ -563,10 +582,42 @@ def _make_remote_listing_subscriber(
     return _reconcile_listings
 
 
-# Remote mode shares one bus across client instances: deltas come from
-# the poller, not from whichever client instance happened to mutate.
-_remote_bus = CapacityEventBus()
-_remote_subscriber_attached = False
+# Remote mode keeps one aggregator per configuration: deltas come from
+# the per-site pollers (not from whichever client instance happened to
+# mutate), and the allocation→site routing cache must survive across
+# build calls within the process.
+_aggregate_state: dict[str, Any] = {"key": None, "client": None}
+
+
+def _aggregate_for(
+    sqlite_client_factory: SQLiteClientFactory,
+    sites: Mapping[str, str],
+    admin_key: str,
+    placement_name: str,
+) -> AggregateCapacityClient:
+    key = (tuple(sorted(sites.items())), admin_key, placement_name)
+    if _aggregate_state["key"] == key:
+        return _aggregate_state["client"]
+    placement = PLACEMENT_POLICIES.get(placement_name)
+    if placement is None:
+        logger.warning(
+            "[CAPACITY] Unknown placement policy %r — using fill_first "
+            "(known: %s)", placement_name, sorted(PLACEMENT_POLICIES),
+        )
+        placement = fill_first
+    aggregate = AggregateCapacityClient(
+        {
+            name: RemoteCapacityClient(url, admin_key)
+            for name, url in sites.items()
+        },
+        placement=placement,
+    )
+    aggregate.subscribe(
+        _make_remote_listing_subscriber(sqlite_client_factory, aggregate),
+    )
+    _aggregate_state["key"] = key
+    _aggregate_state["client"] = aggregate
+    return aggregate
 
 
 def build_capacity_client(
@@ -575,21 +626,40 @@ def build_capacity_client(
     """Assemble the storefront's capacity client with default subscribers.
 
     Mode comes from ``[capacity]`` in settings: "" → embedded (local
-    tables), "site" → remote ledger at the authority URL.
+    tables); "site" → an AggregateCapacityClient over the configured
+    site authorities (one site is just the degenerate aggregation).
     """
-    mode, url, admin_key = _capacity_settings()
-    if mode == "site" and url:
-        global _remote_subscriber_attached
-        client = RemoteCapacityClient(url, admin_key, bus=_remote_bus)
-        if not _remote_subscriber_attached:
-            _remote_bus.subscribe(
-                _make_remote_listing_subscriber(sqlite_client_factory, client),
-            )
-            _remote_subscriber_attached = True
-        return client
+    mode, sites, admin_key, placement_name = _capacity_settings()
+    if mode == "site" and sites:
+        return _aggregate_for(
+            sqlite_client_factory, sites, admin_key, placement_name,
+        )
     client = EmbeddedCapacityClient(sqlite_client_factory)
     client.subscribe(_make_stale_listing_subscriber(sqlite_client_factory))
     return client
+
+
+def remote_site_clients(client: Any) -> dict[str, RemoteCapacityClient]:
+    """The per-site remote clients behind a capacity client, by site name.
+
+    Empty for embedded clients. Used by callers that need the
+    beyond-the-protocol surface (allocation lists, event feeds) — those
+    are per-site conversations, not aggregate ones.
+    """
+    if isinstance(client, AggregateCapacityClient):
+        return {
+            name: client.site(name)
+            for name in client.site_names
+            if isinstance(client.site(name), RemoteCapacityClient)
+        }
+    if isinstance(client, RemoteCapacityClient):
+        return {"default": client}
+    return {}
+
+
+def is_remote_capacity_client(client: Any) -> bool:
+    """True when capacity writes land in site authorities, not local tables."""
+    return bool(remote_site_clients(client))
 
 
 async def sync_site_resources(
@@ -603,8 +673,8 @@ async def sync_site_resources(
     the authority stops matching them. Returns the number of rows
     synced.
     """
-    mode, url, admin_key = _capacity_settings()
-    if mode != "site" or not url:
+    mode, sites, admin_key, _ = _capacity_settings()
+    if mode != "site" or not sites:
         return 0
     if sqlite_client_factory is None:
         from market_storefront.utils.sqlite_client import get_sqlite_client
@@ -612,7 +682,11 @@ async def sync_site_resources(
 
     import json as _json
 
-    client = RemoteCapacityClient(url, admin_key, bus=_remote_bus)
+    # The storefront's local CSV inventory belongs to its home site —
+    # the first configured one. Other sites register their own
+    # inventory; the aggregator only ever *references* it.
+    default_site, url = next(iter(sites.items()))
+    client = RemoteCapacityClient(url, admin_key)
     rows = await sqlite_client_factory().list_resources() or []
     synced = 0
     for row in rows:
@@ -645,23 +719,24 @@ async def sync_site_resources(
         synced += 1
     if synced:
         logger.info(
-            "[CAPACITY] Synced %d compute resource(s) to site authority %s",
-            synced, url,
+            "[CAPACITY] Synced %d compute resource(s) to site authority "
+            "%r (%s)", synced, default_site, url,
         )
     return synced
 
 
 async def capacity_events_poller_loop() -> None:
-    """Tail the site authority's capacity-event feed into the local bus.
+    """Tail every site authority's capacity-event feed into the local bus.
 
-    Remote mode's delivery half: positions at the feed head, runs one
-    full listing reconcile to converge with anything missed while down,
-    then polls for new versions and emits each as a ``CapacityDelta``.
-    A feed head that moves backwards (ledger reset) re-runs the full
-    reconcile instead of replaying.
+    Remote mode's delivery half: one poller per configured site, each
+    positioning at its feed head, running one full listing reconcile to
+    converge with anything missed while down, then polling for new
+    versions and emitting each as a site-tagged ``CapacityDelta`` on the
+    aggregate bus. A feed head that moves backwards (ledger reset)
+    re-runs the full reconcile instead of replaying.
     """
-    mode, url, admin_key = _capacity_settings()
-    if mode != "site" or not url:
+    mode, sites, admin_key, _ = _capacity_settings()
+    if mode != "site" or not sites:
         return
 
     from market_storefront.utils import config
@@ -670,7 +745,21 @@ async def capacity_events_poller_loop() -> None:
     interval = float(getattr(
         getattr(config.settings, "capacity", None), "poll_interval", 5,
     ) or 5)
-    client = build_capacity_client(lambda: get_sqlite_client())
+    aggregate = build_capacity_client(lambda: get_sqlite_client())
+    site_clients = remote_site_clients(aggregate)
+    await asyncio.gather(*(
+        _site_events_poller(aggregate, name, client, interval)
+        for name, client in site_clients.items()
+    ))
+
+
+async def _site_events_poller(
+    aggregate: Any,
+    site_name: str,
+    client: RemoteCapacityClient,
+    interval: float,
+) -> None:
+    from market_storefront.utils.sqlite_client import get_sqlite_client
 
     async def _full_reconcile() -> None:
         from market_storefront.services.publication_service import (
@@ -678,7 +767,7 @@ async def capacity_events_poller_loop() -> None:
             reopen_available_compute_listings_after_capacity_change,
         )
         db_path = get_sqlite_client().db_path
-        held = await combined_held_by_resource(client, db_path)
+        held = await combined_held_by_resource(aggregate, db_path)
         await close_stale_compute_listings_after_capacity_change(
             db_path, held_by_resource=held,
         )
@@ -687,8 +776,10 @@ async def capacity_events_poller_loop() -> None:
         )
 
     last_applied: int | None = None
-    logger.info("[CAPACITY] Event poller started against %s (interval=%ss)",
-                client.base_url, interval)
+    logger.info(
+        "[CAPACITY] Event poller started for site %r at %s (interval=%ss)",
+        site_name, client.base_url, interval,
+    )
     while True:
         try:
             if last_applied is None:
@@ -697,15 +788,15 @@ async def capacity_events_poller_loop() -> None:
             events, latest = await client.events_after(last_applied)
             if latest < last_applied:
                 logger.warning(
-                    "[CAPACITY] Feed head moved backwards (%d -> %d) — "
-                    "ledger reset? Resyncing from snapshot.",
-                    last_applied, latest,
+                    "[CAPACITY] Site %r feed head moved backwards (%d -> %d) "
+                    "— ledger reset? Resyncing from snapshot.",
+                    site_name, last_applied, latest,
                 )
                 last_applied = latest
                 await _full_reconcile()
                 events = []
             for event in events:
-                await client.emit_local(CapacityDelta(
+                await aggregate.emit_site_delta(site_name, CapacityDelta(
                     kind=str(event.get("kind") or ""),
                     version=int(event.get("version") or 0),
                     resource_id=(
@@ -719,5 +810,7 @@ async def capacity_events_poller_loop() -> None:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.warning("[CAPACITY] Event poller cycle failed: %s", exc)
+            logger.warning(
+                "[CAPACITY] Site %r poller cycle failed: %s", site_name, exc,
+            )
         await asyncio.sleep(interval)

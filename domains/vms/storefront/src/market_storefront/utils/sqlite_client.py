@@ -1750,12 +1750,13 @@ class SQLiteClient:
         cur.execute(
             """
             INSERT INTO compute_pool_members(
-              member_id, pool_id, resource_id, provider_id, provider_resource_id,
+              member_id, pool_id, resource_id, site, provider_id, provider_resource_id,
               provider_host_id, gpu_count, status, attributes, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(resource_id) DO UPDATE SET
               pool_id=excluded.pool_id,
+              site=excluded.site,
               provider_id=excluded.provider_id,
               provider_resource_id=excluded.provider_resource_id,
               provider_host_id=excluded.provider_host_id,
@@ -1768,6 +1769,9 @@ class SQLiteClient:
                 f"resource:{resource_id}",
                 pool_id,
                 resource_id,
+                # (site, resource_id) is the aggregator's member key; NULL
+                # means the storefront's home site.
+                attrs.get("site"),
                 attrs.get("provider_id"),
                 attrs.get("provider_resource_id") or resource_id,
                 attrs.get("vm_host"),

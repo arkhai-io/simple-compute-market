@@ -420,9 +420,9 @@ class AdminController:
         is the best available answer.
         """
         from market_storefront.services.capacity_client import (
-            RemoteCapacityClient,
             build_capacity_client,
             combined_held_by_resource,
+            is_remote_capacity_client,
             site_capacity_mode_active,
         )
 
@@ -430,7 +430,7 @@ class AdminController:
             return None
         try:
             client = build_capacity_client(lambda: self._db)
-            if isinstance(client, RemoteCapacityClient):
+            if is_remote_capacity_client(client):
                 return await combined_held_by_resource(client, self._db.db_path)
         except Exception as exc:
             logger.warning(
@@ -691,8 +691,8 @@ class AdminController:
 
     async def _release_site_ledger_holds(self) -> list[str]:
         from market_storefront.services.capacity_client import (
-            RemoteCapacityClient,
             build_capacity_client,
+            remote_site_clients,
             site_capacity_mode_active,
         )
 
@@ -700,18 +700,18 @@ class AdminController:
             return []
         released: list[str] = []
         try:
-            client = build_capacity_client(lambda: self._db)
-            if not isinstance(client, RemoteCapacityClient):
-                return []
-            for state in ("reserved", "provisioning", "leased", "releasing"):
-                for allocation in await client.list_allocations(state=state):
-                    done = await client.release(
-                        allocation_id=allocation.get("allocation_id"),
-                    )
-                    if done:
-                        released.append(
-                            f"ledger:{allocation.get('allocation_id')}",
+            sites = remote_site_clients(build_capacity_client(lambda: self._db))
+            for site_name, client in sites.items():
+                for state in ("reserved", "provisioning", "leased", "releasing"):
+                    for allocation in await client.list_allocations(state=state):
+                        done = await client.release(
+                            allocation_id=allocation.get("allocation_id"),
                         )
+                        if done:
+                            released.append(
+                                f"ledger:{site_name}:"
+                                f"{allocation.get('allocation_id')}",
+                            )
         except Exception as exc:
             logger.warning(
                 "[ADMIN] Could not release site-ledger holds: %s", exc,

@@ -206,12 +206,27 @@ def client(site: FakeSite) -> cc.RemoteCapacityClient:
     )
 
 
-def _settings(mode: str = "site", url: str = "http://site-authority:8081"):
+def _settings(
+    mode: str = "site",
+    url: str = "http://site-authority:8081",
+    sites: dict | None = None,
+    placement: str = "fill_first",
+):
     return SimpleNamespace(
-        capacity=SimpleNamespace(mode=mode, authority_url=url, poll_interval=0.01),
+        capacity=SimpleNamespace(
+            mode=mode, authority_url=url, poll_interval=0.01,
+            sites=sites, placement=placement,
+        ),
         provisioning=SimpleNamespace(service_url="http://prov:8081"),
         admin_api_key="test-key",
     )
+
+
+@pytest.fixture(autouse=True)
+def _reset_aggregate_cache():
+    cc._aggregate_state.update(key=None, client=None)
+    yield
+    cc._aggregate_state.update(key=None, client=None)
 
 
 @pytest.mark.asyncio
@@ -289,32 +304,41 @@ async def test_list_allocations_filters(client: cc.RemoteCapacityClient):
 
 
 def test_build_dispatches_on_capacity_mode():
-    cc._remote_subscriber_attached = False
-    try:
-        with patch("market_storefront.utils.config.settings", _settings()):
-            built = cc.build_capacity_client(lambda: None)
-        assert isinstance(built, cc.RemoteCapacityClient)
-        assert built.base_url == "http://site-authority:8081"
+    with patch("market_storefront.utils.config.settings", _settings()):
+        built = cc.build_capacity_client(lambda: None)
+    assert isinstance(built, cc.AggregateCapacityClient)
+    assert built.site_names == ["default"]
+    assert built.site("default").base_url == "http://site-authority:8081"
+    assert cc.is_remote_capacity_client(built)
 
-        with patch("market_storefront.utils.config.settings", _settings(mode="")):
-            embedded = cc.build_capacity_client(lambda: None)
-        assert isinstance(embedded, cc.EmbeddedCapacityClient)
-    finally:
-        cc._remote_subscriber_attached = False
-        cc._remote_bus = type(cc._remote_bus)()
+    with patch("market_storefront.utils.config.settings", _settings(mode="")):
+        embedded = cc.build_capacity_client(lambda: None)
+    assert isinstance(embedded, cc.EmbeddedCapacityClient)
+    assert not cc.is_remote_capacity_client(embedded)
+
+
+def test_build_is_a_config_keyed_singleton():
+    """The aggregator (and its allocation→site routing cache) survives
+    across build calls until the site configuration changes."""
+    with patch("market_storefront.utils.config.settings", _settings()):
+        first = cc.build_capacity_client(lambda: None)
+        second = cc.build_capacity_client(lambda: None)
+    assert first is second
+
+    other = _settings(sites={"dc-a": "http://a:8081", "dc-b": "http://b:8081"})
+    with patch("market_storefront.utils.config.settings", other):
+        rebuilt = cc.build_capacity_client(lambda: None)
+    assert rebuilt is not first
+    assert rebuilt.site_names == ["dc-a", "dc-b"]
+    assert cc.remote_site_clients(rebuilt).keys() == {"dc-a", "dc-b"}
 
 
 def test_site_mode_defaults_authority_url_to_provisioning():
-    cc._remote_subscriber_attached = False
-    try:
-        with patch(
-            "market_storefront.utils.config.settings", _settings(url=""),
-        ):
-            built = cc.build_capacity_client(lambda: None)
-        assert built.base_url == "http://prov:8081"
-    finally:
-        cc._remote_subscriber_attached = False
-        cc._remote_bus = type(cc._remote_bus)()
+    with patch(
+        "market_storefront.utils.config.settings", _settings(url=""),
+    ):
+        built = cc.build_capacity_client(lambda: None)
+    assert built.site("default").base_url == "http://prov:8081"
 
 
 @pytest.mark.asyncio
@@ -356,17 +380,19 @@ async def test_remote_subscriber_closes_and_reopens_with_site_held(
 
 @pytest.mark.asyncio
 async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
-    """The poller skips history, reconciles once, then streams deltas."""
+    """Each site's poller skips history, reconciles once, then streams
+    site-tagged deltas onto the aggregate bus."""
     client = cc.RemoteCapacityClient(
         "http://site-authority:8081", "test-key",
         transport=site.transport(),
     )
+    aggregate = cc.AggregateCapacityClient({"dc-a": client})
     seen: list[CapacityDelta] = []
 
     async def record(delta: CapacityDelta) -> None:
         seen.append(delta)
 
-    client.subscribe(record)
+    aggregate.subscribe(record)
     site._emit("reserved", "compute-kvm1-001")  # history — must NOT replay
 
     reconciles = 0
@@ -376,7 +402,7 @@ async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
         reconciles += 1
         return []
 
-    with patch.object(cc, "build_capacity_client", return_value=client), patch(
+    with patch.object(cc, "build_capacity_client", return_value=aggregate), patch(
         "market_storefront.utils.config.settings", _settings(),
     ), patch(
         "market_storefront.utils.sqlite_client.get_sqlite_client",
@@ -411,3 +437,4 @@ async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
     assert reconciles >= 2
     assert [d.kind for d in seen] == ["committed"]
     assert seen[0].resource_id == "compute-kvm1-001"
+    assert seen[0].site == "dc-a"
