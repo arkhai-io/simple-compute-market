@@ -233,14 +233,27 @@ callable, so Part I does not block on Part II.
    startup task over a `settlement_claims` SQLite table, and settlement
    jobs submit a claim (obligation re-materialized from the pinned
    proposal — the plan carrier feeding the engine) on fulfillment.
-   Still open: the buyer-side engine (`market service --run <run-log>`
-   or daemon mode — reclaim expired escrows, heartbeats once I.4
-   lands), and `materialize`/`reclaim` hook driving (today the engine
-   services claimant-side collection only; materialization stays in the
-   settle phase until interval escrows need engine-driven
-   materialization).
-4. **Heartbeat endpoint.** Core endpoint shell + persistence; VM domain
-   heartbeat schema/verification as the first instantiation.
+   The buyer-side engine is `market service --from <run-id>`
+   (domains/vms/buyer/service_cli.py): a foreground loop over the deal
+   run-log that emits signed heartbeats at the agreed cadence until the
+   plan obligation's expiration, then attempts post-expiry reclaim when
+   the seller never collected (`--once` for single-shot, `--no-reclaim`
+   to opt out). Still open: `materialize`/`reclaim` hook driving on the
+   seller engine (today it services claimant-side collection only;
+   materialization stays in the settle phase until interval escrows
+   need engine-driven materialization).
+4. **Heartbeat endpoint.** Done: `core_storefront.heartbeats` owns the
+   mechanics (per-deal strict monotonicity on the signed timestamp —
+   replay protection covering exactly what the request signature
+   covers — skew bounds, store protocol, and the
+   `heartbeat_gap_seconds` primitive lifecycle policies will read);
+   `POST /api/v1/deals/{escrow_uid}/heartbeat` rides the standard
+   signed-request verification plus a binding check against the deal's
+   recorded buyer, persists to a `deal_heartbeats` table, and emits
+   `service`-stage events. `domains/vms/settlement/heartbeats.py` is
+   the first payload vocabulary (`vms.heartbeat.v1`: bare liveness +
+   status). Evidence-bundle construction for oracle arbitration is
+   I.5's.
 5. **VM lifecycle policies.** Heartbeat-gated single escrow first, then
    interval escrows, then penalty bonds. Each stays a *plan shape*, not
    a code path.

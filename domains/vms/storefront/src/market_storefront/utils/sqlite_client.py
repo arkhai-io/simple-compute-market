@@ -832,6 +832,25 @@ class SQLiteClient:
                 "CREATE INDEX IF NOT EXISTS idx_claims_state "
                 "ON settlement_claims(state, next_attempt_unix)"
             )
+            # Deal heartbeats — buyer-signed liveness attestations
+            # persisted as evidence (core_storefront.heartbeats owns
+            # validation/replay semantics).
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS deal_heartbeats (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  deal_ref TEXT NOT NULL,
+                  signer TEXT,
+                  sent_at_unix REAL NOT NULL,
+                  payload TEXT,
+                  received_at_unix REAL NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_heartbeats_deal "
+                "ON deal_heartbeats(deal_ref, sent_at_unix)"
+            )
             # Publications — record of which registries received which
             # payload for which listing. Updates and deletes consult this
             # to know what's where; per-registry payload mode (milestone b)
@@ -2761,6 +2780,75 @@ class SQLiteClient:
         d = dict(zip(self._ESCROW_COLS, row))
         d["is_primary"] = bool(d["is_primary"])
         return d
+
+    # ------------------------------------------------------------------
+    # Deal heartbeats (core_storefront.heartbeats store)
+    # ------------------------------------------------------------------
+
+    async def latest_heartbeat(self, deal_ref: str) -> dict | None:
+        def _load() -> dict | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.execute(
+                    """
+                    SELECT deal_ref, signer, sent_at_unix, payload, received_at_unix
+                    FROM deal_heartbeats WHERE deal_ref = ?
+                    ORDER BY sent_at_unix DESC LIMIT 1
+                    """,
+                    (deal_ref,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                return {
+                    "deal_ref": row[0],
+                    "signer": row[1],
+                    "sent_at_unix": row[2],
+                    "payload": json.loads(row[3]) if row[3] else {},
+                    "received_at_unix": row[4],
+                }
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def insert_heartbeat(self, record: dict) -> None:
+        def _insert() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO deal_heartbeats
+                      (deal_ref, signer, sent_at_unix, payload, received_at_unix)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record["deal_ref"],
+                        record.get("signer"),
+                        float(record["sent_at_unix"]),
+                        json.dumps(record.get("payload") or {}),
+                        float(record["received_at_unix"]),
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_insert)
+
+    async def count_heartbeats(self, deal_ref: str) -> int:
+        def _count() -> int:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.execute(
+                    "SELECT COUNT(*) FROM deal_heartbeats WHERE deal_ref = ?",
+                    (deal_ref,),
+                )
+                return int(cur.fetchone()[0])
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_count)
 
     # ------------------------------------------------------------------
     # Settlement claims (deal-servicing engine store)

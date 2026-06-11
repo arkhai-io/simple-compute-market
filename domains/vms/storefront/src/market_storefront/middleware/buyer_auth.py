@@ -91,6 +91,14 @@ def settle_escrow_auth(escrow_uid: str, body, request: Request) -> None:
     _verify(request, "settle_escrow", escrow_uid, body.buyer_address)
 
 
+def deal_heartbeat_auth(escrow_uid: str, body, request: Request) -> None:
+    """Depends for POST /deals/{escrow_uid}/heartbeat."""
+    from core_storefront.models.deal_models import DealHeartbeatRequest
+    if not isinstance(body, DealHeartbeatRequest):
+        raise HTTPException(status_code=400, detail="Invalid request body type")
+    _verify(request, "deal_heartbeat", escrow_uid, body.buyer_address)
+
+
 def settle_status_auth(escrow_uid: str, buyer_address: str, request: Request) -> None:
     """Depends for GET /settle/{escrow_uid}/status.
 

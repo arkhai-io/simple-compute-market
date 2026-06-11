@@ -90,6 +90,7 @@ dev-mode-dirs = ["../../.."]
 "network_cli.py" = "domains/vms/buyer/network_cli.py"
 "run_log.py" = "domains/vms/buyer/run_log.py"
 "settle_cli.py" = "domains/vms/buyer/settle_cli.py"
+"service_cli.py" = "domains/vms/buyer/service_cli.py"
 "../listings/__init__.py" = "domains/vms/listings/__init__.py"
 "../listings/buyer_cli.py" = "domains/vms/listings/buyer_cli.py"
 "../listings/host_csv_importer.py" = "domains/vms/listings/host_csv_importer.py"

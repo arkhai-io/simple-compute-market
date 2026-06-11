@@ -22,6 +22,7 @@ from .logs_cli import logs_app
 from .network_cli import network_app
 from . import negotiate_cli as negotiate_module
 from . import settle_cli as settle_module
+from . import service_cli as service_module
 from .escrow_cli import escrow_app
 from .listing_cli import listing_app
 
@@ -42,6 +43,7 @@ def register(app: typer.Typer) -> None:
     buy_module.register(app)
     negotiate_module.register(app)
     settle_module.register(app)
+    service_module.register(app)
 
 
 #: Loaded by the core CLI via
