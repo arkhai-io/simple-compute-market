@@ -64,9 +64,9 @@ def test_get_arbiter_codec_returns_recipient_impl():
 
 def test_get_arbiter_codec_raises_for_unknown_kind():
     with pytest.raises(ValueError) as exc:
-        get_arbiter_codec("trusted_oracle_arbiter")
+        get_arbiter_codec("nonexistent_arbiter")
     msg = str(exc.value)
-    assert "trusted_oracle_arbiter" in msg
+    assert "nonexistent_arbiter" in msg
     # Diagnostic includes the registered kinds so the operator can spot typos.
     assert "recipient_arbiter" in msg
 
@@ -201,14 +201,14 @@ def test_build_payment_obligation_data_dispatches_through_codec(restore_registry
 
 
 def test_build_payment_obligation_data_raises_for_unknown_arbiter_kind():
-    with pytest.raises(ValueError, match="trusted_oracle_arbiter"):
+    with pytest.raises(ValueError, match="nonexistent_arbiter"):
         build_payment_obligation_data(
             seller_wallet=_SELLER_WALLET,
             agreed_amount=1000,
             duration_seconds=3600,
             token_contract_address=_TOKEN,
             chain_name="some_chain",
-            arbiter_kind="trusted_oracle_arbiter",  # not registered
+            arbiter_kind="nonexistent_arbiter",  # not registered
         )
 
 
