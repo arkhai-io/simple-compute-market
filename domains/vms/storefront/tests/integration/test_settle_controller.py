@@ -184,12 +184,15 @@ class TestEvaluateSettle:
         """Known listing but empty inventory → would_submit=False with reason."""
         c, db = admin_client
         await _seed_listing(db, "settle-eval-no-inv")
-        result = await c.evaluate_settle(
-            "eval-escrow-1",
-            listing_id="settle-eval-no-inv",
-            ssh_public_key="",
-            duration_seconds=3600,
-        )
+        from tests.fake_site import FakeSite, site_capacity
+
+        with site_capacity(FakeSite()):
+            result = await c.evaluate_settle(
+                "eval-escrow-1",
+                listing_id="settle-eval-no-inv",
+                ssh_public_key="",
+                duration_seconds=3600,
+            )
         assert isinstance(result, dict)
         # No inventory registered → no host matches
         assert result.get("would_submit") is False
@@ -254,12 +257,23 @@ class TestEvaluateSettle:
             attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-match"},
         )
 
-        result = await c.evaluate_settle(
-            "match-escrow-uid",
-            listing_id="settle-eval-match",
-            ssh_public_key="ssh-ed25519 AAAAC3 test@test",
-            duration_seconds=3600,
+        from tests.fake_site import FakeSite, site_capacity
+
+        fake = FakeSite()
+        fake.add_resource(
+            "r-eval-match", 1,
+            attributes={
+                "gpu_model": "H200", "region": "California, US",
+                "vm_host": "host-match",
+            },
         )
+        with site_capacity(fake):
+            result = await c.evaluate_settle(
+                "match-escrow-uid",
+                listing_id="settle-eval-match",
+                ssh_public_key="ssh-ed25519 AAAAC3 test@test",
+                duration_seconds=3600,
+            )
 
         assert result.get("would_submit") is True, (
             f"Expected would_submit=True with matching inventory. reason={result.get('reason')!r}"

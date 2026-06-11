@@ -75,9 +75,6 @@ async def truncate_lease_for_abandoned_claim(
     Truncating the allocation's lease to *now* hands the rest to the
     ledger's existing expiry machinery — teardown job, local release,
     capacity event, deal notification — on its next watchdog cycle.
-    In embedded mode this shortens the local ledger row; the legacy
-    vm_leases teardown keeps its original schedule (recorded limitation
-    — the embedded fallback has no merged lease row to truncate).
     """
     if not escrow_uid:
         return None
@@ -89,25 +86,17 @@ async def truncate_lease_for_abandoned_claim(
     try:
         capacity = build_capacity_client(lambda: sqlite_client)
         allocation_id: str | None = None
-        sites = remote_site_clients(capacity)
-        if sites:
-            for client in sites.values():
-                rows = await client.list_allocations(escrow_uid=escrow_uid)
-                held = [
-                    a for a in rows
-                    if a.get("state") in (
-                        "reserved", "provisioning", "leased", "releasing",
-                    )
-                ]
-                if held:
-                    allocation_id = str(held[0]["allocation_id"])
-                    break
-        else:
-            local = await sqlite_client.find_held_compute_allocation(
-                escrow_uid=escrow_uid,
-            )
-            if local:
-                allocation_id = str(local["allocation_id"])
+        for client in remote_site_clients(capacity).values():
+            rows = await client.list_allocations(escrow_uid=escrow_uid)
+            held = [
+                a for a in rows
+                if a.get("state") in (
+                    "reserved", "provisioning", "leased", "releasing",
+                )
+            ]
+            if held:
+                allocation_id = str(held[0]["allocation_id"])
+                break
         if not allocation_id:
             logger.info(
                 "[CLAIMS] No live allocation to truncate for abandoned "

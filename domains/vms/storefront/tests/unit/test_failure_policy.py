@@ -14,22 +14,14 @@ from market_storefront.utils.sqlite_client import SQLiteClient
 
 @pytest.mark.asyncio
 async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monkeypatch):
+    from tests.fake_site import FakeSite, site_capacity
+
     db = SQLiteClient(db_path=str(tmp_path / "failure-policy.db"))
-    await db.upsert_resource(
-        resource_id="gpu-host-1",
-        resource_type="compute.gpu",
-        resource_subtype="h200",
-        unit="count",
-        value=2,
-        state="available",
+    fake = FakeSite()
+    fake.add_resource(
+        "gpu-host-1", 2,
         attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "kvm1"},
     )
-    reserved = await db.reserve_available_compute_vm(
-        required_attributes={"resource_id": "gpu-host-1", "gpu_count": 1},
-        listing_id="listing-1x",
-        escrow_uid="escrow-1",
-    )
-    assert reserved is not None
 
     async def fake_webhook(payload):
         assert payload["allocation_id"] == reserved["allocation_id"]
@@ -44,16 +36,23 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
     webhook = AsyncMock(side_effect=fake_webhook)
     monkeypatch.setattr("market_storefront.utils.failure_policy._send_webhook", webhook)
 
-    result = await apply_fulfillment_failure_policy(
-        db,
-        FulfillmentFailureContext(
-            allocation_id=reserved["allocation_id"],
-            escrow_uid="escrow-1",
-            reason="provisioning_error",
-            message="host rejected request",
-            source="test",
-        ),
-    )
+    with site_capacity(fake) as capacity:
+        reserved = await capacity.reserve(
+            claim={"resource_id": "gpu-host-1", "gpu_count": 1},
+            deal_ref={"listing_id": "listing-1x", "escrow_uid": "escrow-1"},
+        )
+        assert reserved is not None
+
+        result = await apply_fulfillment_failure_policy(
+            db,
+            FulfillmentFailureContext(
+                allocation_id=reserved["allocation_id"],
+                escrow_uid="escrow-1",
+                reason="provisioning_error",
+                message="host rejected request",
+                source="test",
+            ),
+        )
 
     assert result.state == "released"
     assert result.resource_id == "gpu-host-1"
@@ -63,12 +62,11 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
     ]
     webhook.assert_awaited_once()
 
-    allocation = await db.update_compute_allocation_state(
-        allocation_id=reserved["allocation_id"],
-        state="released",
-    )
-    assert allocation is not None
+    # The ledger holds the failure metadata; the capacity came back.
+    allocation = fake.allocations[reserved["allocation_id"]]
     assert allocation["state"] == "released"
+    assert allocation["failure_reason"] == "provisioning_error"
+    assert fake._available("gpu-host-1") == 2
 
 
 @pytest.mark.asyncio

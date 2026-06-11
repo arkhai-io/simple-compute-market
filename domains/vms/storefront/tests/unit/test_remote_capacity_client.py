@@ -18,184 +18,16 @@ import pytest
 
 from core_storefront.capacity import CapacityClient, CapacityDelta
 from market_storefront.services import capacity_client as cc
-
-
-class FakeSite:
-    """In-memory site authority behind an httpx.MockTransport."""
-
-    def __init__(self) -> None:
-        self.resources: dict[str, dict] = {}
-        self.allocations: dict[str, dict] = {}
-        self.events: list[dict] = []
-        self._versions = itertools.count(1)
-        self._ids = itertools.count(1)
-        self.seen_admin_keys: list[str | None] = []
-
-    def transport(self) -> httpx.MockTransport:
-        return httpx.MockTransport(self._handle)
-
-    def _emit(self, kind: str, resource_id: str | None) -> None:
-        self.events.append({
-            "version": next(self._versions),
-            "kind": kind,
-            "resource_id": resource_id,
-            "occurred_at": "2026-01-01T00:00:00Z",
-        })
-
-    def _available(self, rid: str) -> int:
-        held = sum(
-            a["units"] for a in self.allocations.values()
-            if a["resource_id"] == rid
-            and a["state"] in ("reserved", "provisioning", "leased", "releasing")
-        )
-        return self.resources[rid]["total_units"] - held
-
-    def _handle(self, request: httpx.Request) -> httpx.Response:
-        self.seen_admin_keys.append(request.headers.get("X-Admin-Key"))
-        path = request.url.path
-        body = json.loads(request.content) if request.content else {}
-
-        if request.method == "PUT" and path.startswith("/api/v1/capacity/resources/"):
-            rid = path.rsplit("/", 1)[1]
-            self.resources[rid] = {
-                "resource_id": rid,
-                "total_units": body["total_units"],
-                "attributes": body.get("attributes") or {},
-                "enabled": body.get("enabled", True),
-            }
-            self._emit("released", rid)
-            return httpx.Response(200, json=self.resources[rid])
-
-        if path == "/api/v1/capacity/snapshot":
-            return httpx.Response(200, json={"resources": [
-                {
-                    "resource_id": rid,
-                    "resource_type": "compute.gpu",
-                    "value": row["total_units"],
-                    "available_units": self._available(rid),
-                    "attributes": row["attributes"],
-                    "enabled": True,
-                }
-                for rid, row in self.resources.items() if row["enabled"]
-            ]})
-
-        if path == "/api/v1/capacity/probe":
-            return httpx.Response(200, json={"match": self._match(body["claim"])})
-
-        if path == "/api/v1/capacity/reservations":
-            match = self._match(body["claim"])
-            if match is None:
-                return httpx.Response(200, json={"allocation": None})
-            allocation_id = f"alloc-{next(self._ids)}"
-            self.allocations[allocation_id] = {
-                "allocation_id": allocation_id,
-                "resource_id": match["resource_id"],
-                "units": match["allocated_gpu_count"],
-                "state": "reserved",
-                "deal_ref": body.get("deal_ref") or {},
-            }
-            self._emit("reserved", match["resource_id"])
-            return httpx.Response(200, json={"allocation": {
-                **match,
-                "allocation_id": allocation_id,
-                "hold_expires_at": None,
-            }})
-
-        if path.endswith("/commit"):
-            allocation_id = path.split("/")[-2]
-            allocation = self.allocations.get(allocation_id)
-            if allocation is None:
-                return httpx.Response(404, json={"detail": "not found"})
-            allocation["state"] = "leased"
-            allocation["lease_end_utc"] = body["lease_end_utc"]
-            self._emit("committed", allocation["resource_id"])
-            return httpx.Response(200, json={"allocation": allocation})
-
-        if path == "/api/v1/capacity/releases":
-            allocation = None
-            if body.get("allocation_id"):
-                allocation = self.allocations.get(body["allocation_id"])
-            else:
-                escrow = (body.get("deal_ref") or {}).get("escrow_uid")
-                allocation = next(
-                    (a for a in self.allocations.values()
-                     if a["deal_ref"].get("escrow_uid") == escrow
-                     and a["state"] != "released"),
-                    None,
-                )
-            if allocation is None or allocation["state"] == "released":
-                return httpx.Response(200, json={"allocation": None})
-            allocation["state"] = "released"
-            allocation["failure_reason"] = body.get("failure_reason")
-            self._emit("released", allocation["resource_id"])
-            return httpx.Response(200, json={"allocation": allocation})
-
-        if path.endswith("/truncate-lease"):
-            allocation_id = path.split("/")[-2]
-            allocation = self.allocations.get(allocation_id)
-            if allocation is None:
-                return httpx.Response(200, json={"allocation": None})
-            allocation["lease_end_utc"] = body["lease_end_utc"]
-            self._emit("lease_truncated", allocation["resource_id"])
-            return httpx.Response(200, json={"allocation": allocation})
-
-        if path == "/api/v1/capacity/allocations":
-            escrow = request.url.params.get("escrow_uid")
-            state = request.url.params.get("state")
-            rows = [
-                a for a in self.allocations.values()
-                if (escrow is None or a["deal_ref"].get("escrow_uid") == escrow)
-                and (state is None or a["state"] == state)
-            ]
-            return httpx.Response(200, json={
-                "allocations": rows, "total": len(rows),
-            })
-
-        if path == "/api/v1/capacity/events":
-            after = int(request.url.params.get("after", 0))
-            limit = int(request.url.params.get("limit", 500))
-            page = [e for e in self.events if e["version"] > after][:limit]
-            latest = self.events[-1]["version"] if self.events else 0
-            return httpx.Response(200, json={
-                "events": page, "latest_version": latest,
-            })
-
-        return httpx.Response(404, json={"detail": f"unhandled {path}"})
-
-    def _match(self, claim: dict) -> dict | None:
-        requested = int(claim.get("gpu_count") or 1)
-        for rid, row in self.resources.items():
-            if not row["enabled"]:
-                continue
-            attrs = row["attributes"]
-            if any(
-                attrs.get(k) != v for k, v in claim.items() if k != "gpu_count"
-            ):
-                continue
-            available = self._available(rid)
-            if available < requested:
-                continue
-            return {
-                "resource_id": rid,
-                "pool_id": None,
-                "member_id": None,
-                "vm_host": attrs.get("vm_host"),
-                "allocated_gpu_count": requested,
-                "available_gpu_count": available,
-                "attributes": attrs,
-            }
-        return None
+from tests.fake_site import FakeSite
 
 
 @pytest.fixture
 def site() -> FakeSite:
     fake = FakeSite()
-    fake.resources["compute-kvm1-001"] = {
-        "resource_id": "compute-kvm1-001",
-        "total_units": 8,
-        "attributes": {"vm_host": "kvm1", "gpu_model": "H200"},
-        "enabled": True,
-    }
+    fake.add_resource(
+        "compute-kvm1-001", 8,
+        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+    )
     return fake
 
 
@@ -207,14 +39,13 @@ def client(site: FakeSite) -> cc.RemoteCapacityClient:
 
 
 def _settings(
-    mode: str = "site",
     url: str = "http://site-authority:8081",
     sites: dict | None = None,
     placement: str = "fill_first",
 ):
     return SimpleNamespace(
         capacity=SimpleNamespace(
-            mode=mode, authority_url=url, poll_interval=0.01,
+            authority_url=url, poll_interval=0.01,
             sites=sites, placement=placement,
         ),
         provisioning=SimpleNamespace(service_url="http://prov:8081"),
@@ -285,12 +116,13 @@ async def test_commit_without_allocation_id_is_an_error(
 
 
 @pytest.mark.asyncio
-async def test_site_held_by_resource_derives_consumption(
+async def test_member_availability_view_reflects_consumption(
     client: cc.RemoteCapacityClient,
 ):
     await client.reserve(claim={"gpu_count": 3}, deal_ref={})
-    held = await cc.site_held_by_resource(client)
-    assert held == {"compute-kvm1-001": 3}
+    view = await cc.member_availability_view(client)
+    assert view[(None, "compute-kvm1-001")] == 5
+    assert view[("default", "compute-kvm1-001")] == 5
 
 
 @pytest.mark.asyncio
@@ -303,18 +135,13 @@ async def test_list_allocations_filters(client: cc.RemoteCapacityClient):
     assert await client.list_allocations(state="released") == []
 
 
-def test_build_dispatches_on_capacity_mode():
+def test_build_always_aggregates_site_authorities():
     with patch("market_storefront.utils.config.settings", _settings()):
         built = cc.build_capacity_client(lambda: None)
     assert isinstance(built, cc.AggregateCapacityClient)
     assert built.site_names == ["default"]
     assert built.site("default").base_url == "http://site-authority:8081"
-    assert cc.is_remote_capacity_client(built)
-
-    with patch("market_storefront.utils.config.settings", _settings(mode="")):
-        embedded = cc.build_capacity_client(lambda: None)
-    assert isinstance(embedded, cc.EmbeddedCapacityClient)
-    assert not cc.is_remote_capacity_client(embedded)
+    assert cc.remote_site_clients(built).keys() == {"default"}
 
 
 def test_build_is_a_config_keyed_singleton():
@@ -342,28 +169,24 @@ def test_site_mode_defaults_authority_url_to_provisioning():
 
 
 @pytest.mark.asyncio
-async def test_remote_subscriber_closes_and_reopens_with_site_held(
+async def test_subscriber_closes_and_reopens_with_site_availability(
     client: cc.RemoteCapacityClient,
 ):
     calls: list[tuple[str, dict | None]] = []
 
-    async def fake_close(db_path, *, held_by_resource=None,
-                         member_availability=None):
-        calls.append(("close", held_by_resource, member_availability))
+    async def fake_close(db_path, *, member_availability=None):
+        calls.append(("close", None, member_availability))
         return ["lst-1"]
 
-    async def fake_reopen(db_path, *, held_by_resource=None,
-                          member_availability=None):
-        calls.append(("reopen", held_by_resource, member_availability))
+    async def fake_reopen(db_path, *, member_availability=None):
+        calls.append(("reopen", None, member_availability))
         return []
 
-    subscriber = cc._make_remote_listing_subscriber(
+    subscriber = cc._make_listing_reconcile_subscriber(
         lambda: SimpleNamespace(db_path="/tmp/x.db"), client,
     )
     await client.reserve(claim={"gpu_count": 2}, deal_ref={})
-    with patch.object(
-        cc, "site_held_by_resource", wraps=cc.site_held_by_resource,
-    ), patch(
+    with patch(
         "market_storefront.services.publication_service."
         "close_stale_compute_listings_after_capacity_change",
         fake_close,
@@ -376,9 +199,7 @@ async def test_remote_subscriber_closes_and_reopens_with_site_held(
         await subscriber(CapacityDelta(kind="released", version=2))
 
     assert [c[0] for c in calls] == ["close", "reopen"]
-    # Held counts came from the site snapshot, not local tables…
-    assert calls[0][1] == {"compute-kvm1-001": 2}
-    # …and the member-availability view keys it for the home site.
+    # Availability came from the site snapshot, keyed for the home site.
     assert calls[0][2][(None, "compute-kvm1-001")] == 6
 
 
@@ -401,8 +222,7 @@ async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
 
     reconciles = 0
 
-    async def fake_reconcile(db_path, *, held_by_resource=None,
-                             member_availability=None):
+    async def fake_reconcile(db_path, *, member_availability=None):
         nonlocal reconciles
         reconciles += 1
         return []

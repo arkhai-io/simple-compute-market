@@ -79,7 +79,7 @@ async def _build_provisioning_job_spec(
         order_dict=order_dict,
         ssh_public_key=ssh_public_key,
         duration_seconds=duration_seconds,
-        sqlite_client=db,
+        capacity=build_capacity_client(lambda: db),
     )
 
 

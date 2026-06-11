@@ -345,48 +345,40 @@ class AdminController:
         state: str,
         close_oversized: bool = False,
         reopen_available: bool = False,
-        provider_id: str | None = None,
-        provider_job_id: str | None = None,
-        provider_lease_id: str | None = None,
+        release_allocation: bool = False,
         provider_resource_id: str | None = None,
-        vm_host: str | None = None,
-        vm_target: str | None = None,
-        lease_end_utc: str | None = None,
         failure_reason: str | None = None,
         failure_message: str | None = None,
-        logs_ref: str | None = None,
-        check_job_id: str | None = None,
-        released_at: str | None = None,
+        **_extra: Any,
     ) -> FulfillmentEventResponse:
-        result = await self._db.update_compute_allocation_state(
-            allocation_id=allocation_id,
-            state=state,
-            provider_id=provider_id,
-            provider_job_id=provider_job_id,
-            provider_lease_id=provider_lease_id,
-            provider_resource_id=provider_resource_id,
-            vm_host=vm_host,
-            vm_target=vm_target,
-            lease_end_utc=lease_end_utc,
-            failure_reason=failure_reason,
-            failure_message=failure_message,
-            logs_ref=logs_ref,
-            check_job_id=check_job_id,
-            released_at=released_at,
-        )
-        if result is None:
-            from market_storefront.services.capacity_client import (
-                site_capacity_mode_active,
-            )
-            if not site_capacity_mode_active():
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Allocation {allocation_id!r} not found",
+        """Record a deal-scoped event and reconcile derived listings.
+
+        The allocation itself lives in the site authority's ledger.
+        Progress events (started / usage-started / release-started) carry
+        no capacity effect — a held allocation is held in every one of
+        those states — so they only stage and reconcile;
+        ``release_allocation`` (capacity-released, failed) returns the
+        units through the capacity client. A release that finds nothing
+        is tolerated: the watchdog or failure policy usually got there
+        first, and these events must stay idempotent.
+        """
+        result: dict[str, Any] = {"resource_id": provider_resource_id}
+        if release_allocation:
+            try:
+                released = await self._capacity().release(
+                    allocation_id=allocation_id,
+                    failure_reason=failure_reason,
+                    failure_message=failure_message,
                 )
-            # Remote-capacity mode: the allocation row lives in the site
-            # authority's ledger, not here — the event still carries deal
-            # context worth staging, and the listing reconcile still runs.
-            result = {"resource_id": provider_resource_id}
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Could not release allocation {allocation_id!r} "
+                           f"at the site authority: {exc}",
+                )
+            if released is not None:
+                result = released
+                result.setdefault("gpu_count", released.get("allocated_gpu_count"))
         closed_listing_ids = (
             await self._close_oversized_compute_listings() if close_oversized else []
         )
@@ -399,7 +391,6 @@ class AdminController:
             allocation_id=allocation_id,
             resource_id=result.get("resource_id"),
             gpu_count=result.get("gpu_count"),
-            resource_state=result.get("resource_state"),
             closed_listing_ids=closed_listing_ids,
             reopened_listing_ids=reopened_listing_ids,
         )
@@ -413,39 +404,31 @@ class AdminController:
             reopened_listing_ids=reopened_listing_ids,
         )
 
-    async def _site_capacity_overrides(self) -> dict[str, Any]:
-        """Reconciler availability kwargs in remote-capacity mode.
+    def _capacity(self) -> Any:
+        from market_storefront.services.capacity_client import build_capacity_client
 
-        Empty in embedded mode (local tables are authoritative) and on
-        any snapshot failure — the reconcile then works off local data,
-        which is the best available answer.
+        return build_capacity_client(lambda: self._db)
+
+    async def _member_availability(self) -> dict | None:
+        """Aggregated site availability, or None when unobtainable.
+
+        None makes the close path a no-op and the reopen path skip — a
+        transient authority outage must not close (or worse, reopen)
+        everything on ignorance.
         """
         from market_storefront.services.capacity_client import (
-            build_capacity_client,
-            combined_held_by_resource,
-            is_remote_capacity_client,
             member_availability_view,
-            site_capacity_mode_active,
         )
 
-        if not site_capacity_mode_active():
-            return {}
         try:
-            client = build_capacity_client(lambda: self._db)
-            if is_remote_capacity_client(client):
-                return {
-                    "held_by_resource": await combined_held_by_resource(
-                        client, self._db.db_path,
-                    ),
-                    "member_availability": await member_availability_view(
-                        client, self._db.db_path,
-                    ),
-                }
+            return await member_availability_view(
+                self._capacity(), self._db.db_path,
+            )
         except Exception as exc:
             logger.warning(
                 "[ADMIN] Could not snapshot site-authority capacity: %s", exc,
             )
-        return {}
+            return None
 
     async def _close_oversized_compute_listings(self) -> list[str]:
         from domains.vms.listings.reconciler import (
@@ -453,9 +436,11 @@ class AdminController:
             stale_open_listing_ids,
         )
 
+        availability = await self._member_availability()
+        if availability is None:
+            return []
         closed_listing_ids = stale_open_listing_ids(
-            self._db.db_path,
-            **(await self._site_capacity_overrides()),
+            self._db.db_path, member_availability=availability,
         )
         for listing_id in closed_listing_ids:
             await self._db.update_listing(listing_id=listing_id, status="closed")
@@ -468,9 +453,11 @@ class AdminController:
             mark_derived_listings_open,
         )
 
+        availability = await self._member_availability()
+        if availability is None:
+            return []
         reopened_listing_ids = closed_available_listing_ids(
-            self._db.db_path,
-            **(await self._site_capacity_overrides()),
+            self._db.db_path, member_availability=availability,
         )
         for listing_id in reopened_listing_ids:
             await self._db.update_listing(listing_id=listing_id, status="open")
@@ -547,6 +534,7 @@ class AdminController:
             state="released",
             close_oversized=False,
             reopen_available=True,
+            release_allocation=True,
             provider_lease_id=body.provider_lease_id,
             provider_resource_id=body.resource_id,
             released_at=body.released_at,
@@ -600,15 +588,18 @@ class AdminController:
     ) -> ReserveCapacityResponse:
         """Force-reserve compute capacity using the allocation model.
 
-        This is an operator/test hook for manual holds and recovery workflows.
-        It intentionally uses ``compute_allocations`` rather than mutating the
-        legacy aggregate ``resources.state`` directly, so partial GPU capacity
-        accounting and derived listing reconciliation stay consistent.
+        This is an operator/test hook for manual holds and recovery
+        workflows. The hold lands in the site authority's ledger like
+        every other reservation, so partial GPU capacity accounting and
+        derived-listing reconciliation stay consistent across consumers.
         """
-        reserved = await self._db.reserve_available_compute_vm(
-            required_attributes=body.required_attributes or None,
-            listing_id=body.listing_id,
-            escrow_uid=body.escrow_uid,
+        reserved = await self._capacity().reserve(
+            claim=body.required_attributes or None,
+            deal_ref={
+                "listing_id": body.listing_id,
+                "escrow_uid": body.escrow_uid,
+                "reserved_by": "admin",
+            },
         )
         if not reserved:
             raise HTTPException(
@@ -635,7 +626,7 @@ class AdminController:
             member_id=str(reserved["member_id"]) if reserved.get("member_id") else None,
             resource_id=str(reserved["resource_id"]),
             gpu_count=int(reserved.get("allocated_gpu_count") or 1),
-            resource_state=reserved.get("state"),
+            resource_state=reserved.get("state") or "available",
             closed_listing_ids=closed_listing_ids,
         )
 
@@ -669,9 +660,11 @@ class AdminController:
         Does not touch resources in any other state (e.g. ``available`` or
         ``deleted``). Idempotent — safe to call repeatedly.
         """
-        resources = await self._db.list_resources()
-        released = []
-        for r in resources:
+        released = list(await self._release_site_ledger_holds())
+
+        # Normalize any legacy aggregate state left on local rows so the
+        # market view doesn't advertise stale "leased" resources.
+        for r in await self._db.list_resources():
             if r.get("state") not in _HELD_STATES:
                 continue
             resource_id = str(r["resource_id"])
@@ -682,11 +675,6 @@ class AdminController:
                 set_state="available",
             )
             released.append(resource_id)
-
-        # Remote-capacity mode: deal holds live in the site ledger, not
-        # the local tables — the sledgehammer must reach them too or
-        # mocked flows leak ledger capacity across runs.
-        released.extend(await self._release_site_ledger_holds())
 
         if released:
             logger.info(
@@ -700,16 +688,12 @@ class AdminController:
 
     async def _release_site_ledger_holds(self) -> list[str]:
         from market_storefront.services.capacity_client import (
-            build_capacity_client,
             remote_site_clients,
-            site_capacity_mode_active,
         )
 
-        if not site_capacity_mode_active():
-            return []
         released: list[str] = []
         try:
-            sites = remote_site_clients(build_capacity_client(lambda: self._db))
+            sites = remote_site_clients(self._capacity())
             for site_name, client in sites.items():
                 for state in ("reserved", "provisioning", "leased", "releasing"):
                     for allocation in await client.list_allocations(state=state):

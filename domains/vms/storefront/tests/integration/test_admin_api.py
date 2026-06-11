@@ -301,39 +301,62 @@ async def _seed_dynamic_listing_pool_rows(db: SQLiteClient) -> None:
         )
 
 
-async def _seed_dynamic_listing_pool(db: SQLiteClient) -> str:
-    await _seed_dynamic_listing_pool_rows(db)
-    reserved = await db.reserve_available_compute_vm(
-        required_attributes={"resource_id": "pool-h200-1", "gpu_count": 2},
-        listing_id="listing-2x",
-        escrow_uid="escrow-2x",
+def _fake_pool_site():
+    from tests.fake_site import FakeSite
+
+    fake = FakeSite()
+    fake.add_resource(
+        "pool-h200-1", 4,
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "host-1",
+        },
+    )
+    return fake
+
+
+async def _ledger_hold(capacity, *, gpu_count: int = 2) -> str:
+    reserved = await capacity.reserve(
+        claim={"resource_id": "pool-h200-1", "gpu_count": gpu_count},
+        deal_ref={"listing_id": "listing-2x", "escrow_uid": "escrow-2x"},
     )
     assert reserved is not None
     return str(reserved["allocation_id"])
 
 
 class TestFulfillmentEvents:
+    """Deal-scoped event endpoints over the site-authority ledger.
+
+    The allocation rows live in the ledger; these endpoints stage deal
+    context, reconcile derived listings against the aggregated
+    availability, and (for capacity-released / failed) return the units
+    through the capacity client.
+    """
+
     async def test_admin_reserve_capacity_closes_oversized_listings(self, client):
+        from tests.fake_site import site_capacity
+
         c, db = client
         await _seed_dynamic_listing_pool_rows(db)
 
-        response = await c._post(
-            "/api/v1/admin/portfolio/reservations",
-            {
-                "required_attributes": {
-                    "resource_id": "pool-h200-1",
-                    "gpu_count": 2,
+        with site_capacity(_fake_pool_site()):
+            response = await c._post(
+                "/api/v1/admin/portfolio/reservations",
+                {
+                    "required_attributes": {
+                        "resource_id": "pool-h200-1",
+                        "gpu_count": 2,
+                    },
+                    "listing_id": "listing-2x-manual",
+                    "escrow_uid": "manual-escrow-2x",
                 },
-                "listing_id": "listing-2x-manual",
-                "escrow_uid": "manual-escrow-2x",
-            },
-            extra_headers=c._admin_headers(),
-        )
+                extra_headers=c._admin_headers(),
+            )
 
         assert response["allocation_id"]
         assert response["resource_id"] == "pool-h200-1"
         assert response["gpu_count"] == 2
-        assert response["resource_state"] == "available"
         assert sorted(response["closed_listing_ids"]) == ["listing-3x", "listing-4x"]
         statuses = {
             gpu_count: (await db.load_listing(listing_id=f"listing-{gpu_count}x"))[
@@ -349,101 +372,84 @@ class TestFulfillmentEvents:
         }
 
     async def test_admin_reserve_capacity_returns_409_when_no_capacity(self, client):
-        c, db = client
-        await _seed_dynamic_listing_pool(db)
+        from tests.fake_site import site_capacity
 
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await c._post(
-                "/api/v1/admin/portfolio/reservations",
-                {
-                    "required_attributes": {
-                        "resource_id": "pool-h200-1",
-                        "gpu_count": 3,
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+
+        with site_capacity(_fake_pool_site()) as capacity:
+            await _ledger_hold(capacity, gpu_count=2)
+            with pytest.raises(StorefrontClientError) as exc_info:
+                await c._post(
+                    "/api/v1/admin/portfolio/reservations",
+                    {
+                        "required_attributes": {
+                            "resource_id": "pool-h200-1",
+                            "gpu_count": 3,
+                        },
+                        "listing_id": "listing-3x-manual",
+                        "escrow_uid": "manual-escrow-3x",
                     },
-                    "listing_id": "listing-3x-manual",
-                    "escrow_uid": "manual-escrow-3x",
+                    extra_headers=c._admin_headers(),
+                )
+
+        assert "409" in str(exc_info.value)
+
+    async def test_usage_started_closes_oversized_listings(self, client):
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+        fake = _fake_pool_site()
+
+        with site_capacity(fake) as capacity:
+            allocation_id = await _ledger_hold(capacity, gpu_count=2)
+            response = await c._post(
+                "/api/v1/admin/fulfillment/events/usage-started",
+                {
+                    "allocation_id": allocation_id,
+                    "escrow_uid": "escrow-2x",
+                    "provider_id": "provider-a",
+                    "provider_lease_id": "lease-2x",
+                    "resource_id": "provider-resource-2x",
+                    "vm_host": "kvm1",
+                    "vm_target": "tenant-2x",
+                    "lease_end_utc": "2026-01-01T00:00:00Z",
                 },
                 extra_headers=c._admin_headers(),
             )
 
-        assert "409" in str(exc_info.value)
-
-    async def test_usage_started_marks_leased_and_closes_oversized_listings(self, client):
-        c, db = client
-        allocation_id = await _seed_dynamic_listing_pool(db)
-
-        response = await c._post(
-            "/api/v1/admin/fulfillment/events/usage-started",
-            {
-                "allocation_id": allocation_id,
-                "escrow_uid": "escrow-2x",
-                "provider_id": "provider-a",
-                "provider_lease_id": "lease-2x",
-                "resource_id": "provider-resource-2x",
-                "vm_host": "kvm1",
-                "vm_target": "tenant-2x",
-                "lease_end_utc": "2026-01-01T00:00:00Z",
-            },
-            extra_headers=c._admin_headers(),
-        )
-
         assert response["allocation_id"] == allocation_id
         assert response["state"] == "leased"
         assert sorted(response["closed_listing_ids"]) == ["listing-3x", "listing-4x"]
-        statuses = {
-            gpu_count: (await db.load_listing(listing_id=f"listing-{gpu_count}x"))[
-                "status"
-            ]
-            for gpu_count in range(1, 5)
-        }
-        assert statuses == {
-            1: "open",
-            2: "open",
-            3: "closed",
-            4: "closed",
-        }
-        conn = sqlite3.connect(db.db_path)
-        try:
-            row = conn.execute(
-                """
-                SELECT provider_id, provider_lease_id, provider_resource_id,
-                       vm_host, vm_target, lease_end_utc
-                FROM compute_allocations
-                WHERE allocation_id = ?
-                """,
-                (allocation_id,),
-            ).fetchone()
-        finally:
-            conn.close()
-        assert row == (
-            "provider-a",
-            "lease-2x",
-            "provider-resource-2x",
-            "kvm1",
-            "tenant-2x",
-            "2026-01-01T00:00:00Z",
-        )
+        # Progress events carry no capacity effect: a held allocation is
+        # held in every progress state, and the ledger row is the
+        # provisioning service's to advance.
+        assert fake.allocations[allocation_id]["state"] == "reserved"
 
-    async def test_capacity_released_marks_allocation_released(self, client):
+    async def test_capacity_released_releases_and_reopens(self, client):
+        from tests.fake_site import site_capacity
+
         c, db = client
-        allocation_id = await _seed_dynamic_listing_pool(db)
-        conn = sqlite3.connect(db.db_path)
-        try:
-            conn.execute("DELETE FROM derived_compute_listings")
-            conn.commit()
-        finally:
-            conn.close()
-        await c._post(
-            "/api/v1/admin/fulfillment/events/usage-started",
-            {"allocation_id": allocation_id, "escrow_uid": "escrow-2x"},
-            extra_headers=c._admin_headers(),
-        )
+        await _seed_dynamic_listing_pool_rows(db)
+        fake = _fake_pool_site()
 
-        response = await c._post(
-            "/api/v1/admin/fulfillment/events/capacity-released",
-            {"allocation_id": allocation_id},
-            extra_headers=c._admin_headers(),
-        )
+        with site_capacity(fake) as capacity:
+            allocation_id = await _ledger_hold(capacity, gpu_count=2)
+            closed = await c._post(
+                "/api/v1/admin/fulfillment/events/usage-started",
+                {"allocation_id": allocation_id, "escrow_uid": "escrow-2x"},
+                extra_headers=c._admin_headers(),
+            )
+            assert sorted(closed["closed_listing_ids"]) == [
+                "listing-3x", "listing-4x",
+            ]
+
+            response = await c._post(
+                "/api/v1/admin/fulfillment/events/capacity-released",
+                {"allocation_id": allocation_id},
+                extra_headers=c._admin_headers(),
+            )
 
         assert response["allocation_id"] == allocation_id
         assert response["state"] == "released"
@@ -460,74 +466,47 @@ class TestFulfillmentEvents:
             3: "open",
             4: "open",
         }
-        selected = await db.select_available_compute_vm(
-            required_attributes={"resource_id": "pool-h200-1", "gpu_count": 4},
-        )
-        assert selected is not None
+        assert fake.allocations[allocation_id]["state"] == "released"
+        assert fake._available("pool-h200-1") == 4
 
-    async def test_fulfillment_failed_persists_failure_metadata(self, client):
+    async def test_fulfillment_failed_releases_with_failure_metadata(self, client):
+        from tests.fake_site import site_capacity
+
         c, db = client
-        allocation_id = await _seed_dynamic_listing_pool(db)
+        await _seed_dynamic_listing_pool_rows(db)
+        fake = _fake_pool_site()
 
-        response = await c._post(
-            "/api/v1/admin/fulfillment/events/failed",
-            {
-                "allocation_id": allocation_id,
-                "provider_id": "provider-a",
-                "provider_job_id": "job-create-1",
-                "resource_id": "provider-resource-2x",
-                "reason": "provisioning_error",
-                "message": "host rejected request",
-                "logs_ref": "s3://logs/job-create-1",
-            },
-            extra_headers=c._admin_headers(),
-        )
+        with site_capacity(fake) as capacity:
+            allocation_id = await _ledger_hold(capacity, gpu_count=2)
+            response = await c._post(
+                "/api/v1/admin/fulfillment/events/failed",
+                {
+                    "allocation_id": allocation_id,
+                    "provider_id": "provider-a",
+                    "provider_job_id": "job-create-1",
+                    "resource_id": "provider-resource-2x",
+                    "reason": "provisioning_error",
+                    "message": "host rejected request",
+                    "logs_ref": "s3://logs/job-create-1",
+                },
+                extra_headers=c._admin_headers(),
+            )
 
         assert response["allocation_id"] == allocation_id
         assert response["state"] == "released"
-        conn = sqlite3.connect(db.db_path)
-        try:
-            row = conn.execute(
-                """
-                SELECT provider_id, provider_job_id, provider_resource_id,
-                       failure_reason, failure_message, logs_ref
-                FROM compute_allocations
-                WHERE allocation_id = ?
-                """,
-                (allocation_id,),
-            ).fetchone()
-        finally:
-            conn.close()
-        assert row == (
-            "provider-a",
-            "job-create-1",
-            "provider-resource-2x",
-            "provisioning_error",
-            "host rejected request",
-            "s3://logs/job-create-1",
-        )
+        allocation = fake.allocations[allocation_id]
+        assert allocation["state"] == "released"
+        assert allocation["failure_reason"] == "provisioning_error"
+        assert allocation["failure_message"] == "host rejected request"
+        assert fake._available("pool-h200-1") == 4
 
-    async def test_fulfillment_event_unknown_allocation_returns_404(self, client):
-        c, _ = client
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await c._post(
-                "/api/v1/admin/fulfillment/events/usage-started",
-                {"allocation_id": "missing"},
-                extra_headers=c._admin_headers(),
-            )
-        assert "404" in str(exc_info.value)
-
-    async def test_capacity_released_tolerates_ledger_owned_allocation(self, client):
-        """Remote-capacity mode: the allocation row lives in the site
-        authority's ledger, not locally — the deal event must still land
-        (staged + listing reconcile) instead of 404ing."""
-        from unittest.mock import patch
+    async def test_release_of_unknown_allocation_is_idempotent(self, client):
+        """The watchdog usually released first; a second capacity-released
+        for the same (or an unknown) allocation must land cleanly."""
+        from tests.fake_site import FakeSite, site_capacity
 
         c, _ = client
-        with patch(
-            "market_storefront.services.capacity_client.site_capacity_mode_active",
-            return_value=True,
-        ):
+        with site_capacity(FakeSite()):
             response = await c.notify_capacity_released(
                 "ledger-only-alloc",
                 resource_id="compute-kvm1-001",

@@ -9,6 +9,7 @@ from market_storefront.services import publication_service
 from market_storefront.services import fulfillment_service
 from domains.vms.listings.reconciler import record_derived_listing
 from market_storefront.utils.sqlite_client import SQLiteClient
+from tests.fake_site import FakeSite, pump_events, site_capacity
 
 
 @pytest.fixture
@@ -103,6 +104,11 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
             return {"id": "lease-1", **kwargs}
 
     await _seed_compute_pool(client)
+    fake = FakeSite()
+    fake.add_resource(
+        "pool-h200-1", 1,
+        attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},
+    )
     monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(
@@ -123,27 +129,26 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
     )
     alkahest.oracle.request_arbitration = AsyncMock()
 
-    result = await fulfillment_service.fulfill_compute_obligation(
-        client=alkahest,
-        escrow_uid="escrow-1",
-        ssh_public_key="ssh-ed25519 AAAA",
-        order=_compute_listing(),
-        duration_seconds=3600,
-        listing_id="listing-1",
-    )
+    with site_capacity(fake, sqlite_client_factory=lambda: client):
+        result = await fulfillment_service.fulfill_compute_obligation(
+            client=alkahest,
+            escrow_uid="escrow-1",
+            ssh_public_key="ssh-ed25519 AAAA",
+            order=_compute_listing(),
+            duration_seconds=3600,
+            listing_id="listing-1",
+        )
 
     assert result["status"] == "error"
     assert "contract reverted" in result["message"]
     assert result["connection_details"] is None
     alkahest.oracle.request_arbitration.assert_not_called()
 
-    selected = await client.select_available_compute_vm(
-        required_attributes={"resource_id": "pool-h200-1", "gpu_count": 1},
-    )
-    assert selected is None
-    resource = await client.get_resource(resource_id="pool-h200-1")
-    assert resource is not None
-    assert resource["state"] == "leased"
+    # The VM exists and the lease was committed before the on-chain step
+    # failed — the ledger keeps the capacity held.
+    assert fake._available("pool-h200-1") == 0
+    states = {a["state"] for a in fake.allocations.values()}
+    assert states == {"leased"}
 
 
 @pytest.mark.asyncio
@@ -176,6 +181,11 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         },
     )
     await _seed_compute_listings(client, max_gpu_count=4)
+    fake = FakeSite()
+    fake.add_resource(
+        "pool-h200-1", 4,
+        attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},
+    )
     monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(
@@ -190,14 +200,17 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
     )
     monkeypatch.setattr(fulfillment_service, "_do_shutdown", AsyncMock())
 
-    result = await fulfillment_service.fulfill_compute_obligation(
-        client=None,
-        escrow_uid="escrow-2x",
-        ssh_public_key="ssh-ed25519 AAAA",
-        order=_compute_listing(gpu_count=2),
-        duration_seconds=3600,
-        listing_id="listing-2x",
-    )
+    with site_capacity(fake, sqlite_client_factory=lambda: client) as aggregate:
+        result = await fulfillment_service.fulfill_compute_obligation(
+            client=None,
+            escrow_uid="escrow-2x",
+            ssh_public_key="ssh-ed25519 AAAA",
+            order=_compute_listing(gpu_count=2),
+            duration_seconds=3600,
+            listing_id="listing-2x",
+        )
+        # The poller delivers deltas in production; pump them here.
+        await pump_events(aggregate, fake)
 
     assert result["status"] == "fulfilled"
     statuses = {

@@ -52,21 +52,18 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
 async def close_stale_compute_listings_after_capacity_change(
     db_path: str,
     *,
-    held_by_resource: dict[str, int] | None = None,
     member_availability: dict[tuple[str | None, str], int] | None = None,
 ) -> list[str]:
     """Close open derived compute listings whose GPU slice no longer fits.
 
-    In remote-capacity mode ``member_availability`` carries the
-    aggregated site snapshots keyed ``(site, resource_id)`` and
-    ``held_by_resource`` the merged-holds fallback (the local allocation
-    table is empty there).
+    ``member_availability`` carries the aggregated site snapshots keyed
+    ``(site, resource_id)``. ``None`` (availability unknown — the
+    authority was unreachable) closes nothing: members are assumed
+    fully available, and the next delta/reconcile converges.
     """
     closed_listing_ids: list[str] = []
     for listing_id in stale_open_listing_ids(
-        db_path,
-        held_by_resource=held_by_resource,
-        member_availability=member_availability,
+        db_path, member_availability=member_availability,
     ):
         result = await close_order({"listing_id": listing_id})
         if str(result.get("status", "?")) in ("closed", "skipped", "queued"):
@@ -82,24 +79,25 @@ async def close_stale_compute_listings_after_capacity_change(
 async def reopen_available_compute_listings_after_capacity_change(
     db_path: str,
     *,
-    held_by_resource: dict[str, int] | None = None,
     member_availability: dict[tuple[str | None, str], int] | None = None,
 ) -> list[str]:
     """Reopen closed derived listings whose slice fits capacity again.
 
     The freeing counterpart of the close path above, run for "released"
     capacity deltas — same mechanics as the admin fulfillment-event
-    handlers' reopen step.
+    handlers' reopen step. ``None`` availability (authority unreachable)
+    reopens nothing: with no consumption information everything would
+    look free, and reopening on ignorance over-sells.
     """
     from domains.vms.listings.reconciler import (
         closed_available_listing_ids,
         mark_derived_listings_open,
     )
 
+    if member_availability is None:
+        return []
     reopened_listing_ids = closed_available_listing_ids(
-        db_path,
-        held_by_resource=held_by_resource,
-        member_availability=member_availability,
+        db_path, member_availability=member_availability,
     )
     for listing_id in reopened_listing_ids:
         await get_sqlite_client().update_listing(listing_id=listing_id, status="open")

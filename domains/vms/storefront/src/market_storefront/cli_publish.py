@@ -92,8 +92,56 @@ def _import_csv(csv_path: str, db: Optional[str]) -> None:
     subprocess.run(cmd, cwd=str(package_root), check=True)
 
 
+def _member_availability_sync() -> dict[tuple[str | None, str], int] | None:
+    """Aggregated site availability, fetched synchronously for CLI flows.
+
+    Keyed ``(site, resource_id)`` like ``member_availability_view``;
+    ``None`` when no authority answers — publishing then assumes
+    members are fully available and the reserve path corrects it.
+    """
+    import httpx
+
+    from market_storefront.services.capacity_client import _capacity_settings
+
+    try:
+        sites, admin_key, _ = _capacity_settings()
+    except Exception:
+        return None
+    headers = {"X-Admin-Key": admin_key} if admin_key else {}
+    view: dict[tuple[str | None, str], int] = {}
+    answered = False
+    home_site = next(iter(sites))
+    for site_name, url in sites.items():
+        try:
+            with httpx.Client(timeout=10) as http:
+                resp = http.get(
+                    f"{url}/api/v1/capacity/snapshot", headers=headers,
+                )
+                resp.raise_for_status()
+                rows = resp.json().get("resources") or []
+        except Exception as exc:
+            typer.echo(
+                f"[capacity] site {site_name!r} snapshot failed: {exc}",
+                err=True,
+            )
+            continue
+        answered = True
+        for row in rows:
+            resource_id = row.get("resource_id")
+            available = row.get("available_units")
+            if not resource_id or available is None:
+                continue
+            available = max(int(available), 0)
+            if site_name == home_site:
+                view[(None, str(resource_id))] = available
+            view[(str(site_name), str(resource_id))] = available
+    return view if answered else None
+
+
 def _available_resources(db_path: str) -> list[dict]:
-    return available_compute_slices(db_path)
+    return available_compute_slices(
+        db_path, member_availability=_member_availability_sync(),
+    )
 
 
 def _open_listing_resource_keys(db_path: str) -> set[str]:
@@ -101,7 +149,11 @@ def _open_listing_resource_keys(db_path: str) -> set[str]:
 
 
 def _stale_open_listing_ids(db_path: str) -> list[str]:
-    return stale_open_listing_ids(db_path)
+    availability = _member_availability_sync()
+    if availability is None:
+        # No authority answered — closing on ignorance over-closes.
+        return []
+    return stale_open_listing_ids(db_path, member_availability=availability)
 
 
 def _open_order_resource_ids(db_path: str) -> set[str]:

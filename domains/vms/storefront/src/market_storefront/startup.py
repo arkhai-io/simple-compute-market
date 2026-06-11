@@ -204,10 +204,10 @@ async def _startup_tasks() -> None:
 
     await _preflight_provisioning()
 
-    # Remote-capacity mode: mirror inventory into the site authority's
-    # ledger and start tailing its capacity-event feed. Both no-op in
-    # embedded mode. Runs after the provisioning preflight because that
-    # process hosts the site authority.
+    # Mirror inventory into the home site authority's ledger and start
+    # tailing every authority's capacity-event feed. Runs after the
+    # provisioning preflight because that process hosts the site
+    # authority.
     from market_storefront.services.capacity_client import (
         capacity_events_poller_loop,
         sync_site_resources,

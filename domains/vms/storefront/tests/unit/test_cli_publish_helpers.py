@@ -19,6 +19,7 @@ import sqlite3
 
 import pytest
 
+from market_storefront import cli_publish
 from market_storefront.cli_publish import (
     _available_resources,
     _open_listing_ids,
@@ -384,7 +385,9 @@ def test_available_resources_derives_slices_from_gpu_capacity(tmp_path):
     }
 
 
-def test_available_resources_closes_oversized_slices_when_capacity_held(tmp_path):
+def test_available_resources_closes_oversized_slices_when_capacity_held(
+    tmp_path, monkeypatch,
+):
     db = str(tmp_path / "agent.db")
     _init_db(db)
     _insert_resource(
@@ -392,7 +395,11 @@ def test_available_resources_closes_oversized_slices_when_capacity_held(tmp_path
         {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
         gpu_count=4,
     )
-    _insert_allocation(db, "alloc-1", "compute-4x", 2, "leased")
+    # The site authority says 2 of 4 units are consumed.
+    monkeypatch.setattr(
+        cli_publish, "_member_availability_sync",
+        lambda: {(None, "compute-4x"): 2, ("default", "compute-4x"): 2},
+    )
 
     rows = _available_resources(db)
 
@@ -445,7 +452,7 @@ def test_publish_round_publishes_one_listing_per_available_slice(tmp_path, monke
     ]
 
 
-def test_stale_open_listing_ids_finds_slices_above_available_capacity(tmp_path):
+def test_stale_open_listing_ids_finds_slices_above_available_capacity(tmp_path, monkeypatch):
     db = str(tmp_path / "agent.db")
     _init_db(db)
     _insert_resource(
@@ -473,9 +480,16 @@ def test_stale_open_listing_ids_finds_slices_above_available_capacity(tmp_path):
             conn.commit()
         finally:
             conn.close()
-    _insert_allocation(db, "alloc-1", "compute-4x", 2, "leased")
+    monkeypatch.setattr(
+        cli_publish, "_member_availability_sync",
+        lambda: {(None, "compute-4x"): 2, ("default", "compute-4x"): 2},
+    )
 
     assert _stale_open_listing_ids(db) == ["listing-3x", "listing-4x"]
+
+    # No authority answer → never close on ignorance.
+    monkeypatch.setattr(cli_publish, "_member_availability_sync", lambda: None)
+    assert _stale_open_listing_ids(db) == []
 
 
 def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch):

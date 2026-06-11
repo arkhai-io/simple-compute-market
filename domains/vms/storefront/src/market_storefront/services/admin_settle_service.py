@@ -115,7 +115,7 @@ class AdminSettleService:
         """Resolve a host from inventory and build the provisioning job spec.
 
         Tests doWork in isolation — no chain reads, no DB writes, no provisioning.
-        Uses select_available_compute_vm (read-only, reserve=False).
+        Uses the capacity ledger probe (read-only — consumes nothing).
 
         Returns:
             {"would_submit": True, "escrow_uid": ..., "vm_host": ..., "vm_target": ..., "required_attributes": {...}}

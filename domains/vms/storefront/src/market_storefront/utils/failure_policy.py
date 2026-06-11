@@ -256,87 +256,38 @@ async def _release_capacity(
     ctx: FulfillmentFailureContext,
     capacity: Any | None = None,
 ) -> FulfillmentFailurePolicyResult:
+    """Return the failed deal's capacity through the site authority.
+
+    The hold lives in the ledger; release it there (by allocation_id
+    when the fulfillment flow knows it, else by the deal ref) and
+    reopen derived listings against the refreshed availability.
+    """
     from market_storefront.services.capacity_client import (
-        combined_held_by_resource,
-        is_remote_capacity_client,
+        build_capacity_client,
         member_availability_view,
     )
 
     result = FulfillmentFailurePolicyResult(allocation_id=ctx.allocation_id)
+    if capacity is None:
+        capacity = build_capacity_client(lambda: db)
 
-    if is_remote_capacity_client(capacity):
-        # Remote-capacity mode: the hold lives in the site authority's
-        # ledger, not the local tables — release it there and reconcile
-        # listings against the site's availability.
-        allocation = await capacity.release(
-            allocation_id=ctx.allocation_id,
-            deal_ref={"escrow_uid": ctx.escrow_uid} if ctx.escrow_uid else None,
-            failure_reason=ctx.reason,
-            failure_message=ctx.message,
-        )
-        if allocation is not None:
-            result.allocation_id = allocation.get("allocation_id")
-            result.state = "released"
-            result.resource_id = allocation.get("resource_id")
-            result.gpu_count = allocation.get("allocated_gpu_count")
-            reopened = closed_available_listing_ids(
-                db.db_path,
-                held_by_resource=await combined_held_by_resource(
-                    capacity, db.db_path,
-                ),
-                member_availability=await member_availability_view(
-                    capacity, db.db_path,
-                ),
-            )
-            for listing_id in reopened:
-                await db.update_listing(listing_id=listing_id, status="open")
-            mark_derived_listings_open(db.db_path, reopened)
-            result.reopened_listing_ids = reopened
-        return result
-
-    allocation = None
-    if ctx.allocation_id and hasattr(db, "update_compute_allocation_state"):
-        allocation = await db.update_compute_allocation_state(
-            allocation_id=ctx.allocation_id,
-            state="released",
-            provider_id=ctx.provider_id,
-            provider_job_id=ctx.provider_job_id,
-            provider_resource_id=ctx.provider_resource_id,
-            failure_reason=ctx.reason,
-            failure_message=ctx.message,
-            logs_ref=ctx.logs_ref,
-        )
-    elif ctx.escrow_uid and hasattr(db, "update_compute_allocation_state"):
-        allocation = await db.update_compute_allocation_state(
-            escrow_uid=ctx.escrow_uid,
-            state="released",
-            provider_id=ctx.provider_id,
-            provider_job_id=ctx.provider_job_id,
-            provider_resource_id=ctx.provider_resource_id,
-            failure_reason=ctx.reason,
-            failure_message=ctx.message,
-            logs_ref=ctx.logs_ref,
-        )
-
+    allocation = await capacity.release(
+        allocation_id=ctx.allocation_id,
+        deal_ref={"escrow_uid": ctx.escrow_uid} if ctx.escrow_uid else None,
+        failure_reason=ctx.reason,
+        failure_message=ctx.message,
+    )
     if allocation is not None:
         result.allocation_id = allocation.get("allocation_id")
         result.state = "released"
         result.resource_id = allocation.get("resource_id")
-        result.gpu_count = allocation.get("gpu_count")
-        result.resource_state = allocation.get("resource_state")
-    elif ctx.resource_id and hasattr(db, "apply_resource_set_transition"):
-        row = await db.apply_resource_set_transition(
-            resource_id=ctx.resource_id,
-            event_type="reservation_released_after_fulfillment_failure",
-            idempotency_key=f"failure-release:{ctx.escrow_uid or ctx.resource_id}",
-            set_state="available",
+        result.gpu_count = allocation.get("allocated_gpu_count")
+        reopened = closed_available_listing_ids(
+            db.db_path,
+            member_availability=await member_availability_view(
+                capacity, db.db_path,
+            ),
         )
-        result.resource_id = ctx.resource_id
-        result.state = "released"
-        result.resource_state = (row or {}).get("state")
-
-    if result.state == "released":
-        reopened = closed_available_listing_ids(db.db_path)
         for listing_id in reopened:
             await db.update_listing(listing_id=listing_id, status="open")
         mark_derived_listings_open(db.db_path, reopened)

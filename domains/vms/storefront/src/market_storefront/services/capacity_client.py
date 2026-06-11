@@ -1,21 +1,20 @@
-"""Site-authority capacity clients: embedded and remote.
+"""Site-authority capacity client wiring.
 
-Two implementations of ``core_storefront.capacity.CapacityClient``
-(docs/development/design-settlement-lifecycle-and-capacity.md, Part II),
-selected by ``[capacity] mode`` in settings:
+The authoritative capacity ledger lives in site authorities (hosted by
+the provisioning service —
+docs/development/design-settlement-lifecycle-and-capacity.md, Part II);
+the storefront is strictly a client. ``RemoteCapacityClient`` speaks
+one authority's ``/api/v1/capacity`` HTTP surface;
+``build_capacity_client`` assembles the configured authorities behind
+one ``AggregateCapacityClient``. Capacity deltas arrive by tailing each
+authority's versioned event feed (``capacity_events_poller_loop``) —
+the client verbs themselves emit nothing locally, so a *different*
+storefront's reservation triggers exactly the same listing
+reconciliation ours does.
 
-- ``EmbeddedCapacityClient`` (default): the single-storefront degenerate
-  deployment — the ``hosts``/``compute_allocations`` ledger still lives
-  in this storefront's SQLite. Embedded mode is for a provably single
-  consumer; another storefront must never reach this ledger through
-  this process.
-- ``RemoteCapacityClient`` (``mode = "site"``): the ledger lives in the
-  site authority (hosted by the provisioning service) and this client
-  speaks its ``/api/v1/capacity`` HTTP surface. Capacity deltas arrive
-  by tailing the authority's versioned event feed
-  (``capacity_events_poller_loop``) — the remote verbs themselves emit
-  nothing locally, so a *different* storefront's reservation triggers
-  exactly the same listing reconciliation ours does.
+The storefront's own SQLite holds market state only (listings, pricing,
+pools, negotiations, deals); physical truth — allocations and their
+lease tails — is the ledger's.
 """
 
 from __future__ import annotations
@@ -40,203 +39,6 @@ from core_storefront.capacity import (
 logger = logging.getLogger(__name__)
 
 SQLiteClientFactory = Callable[[], Any]
-
-
-class EmbeddedCapacityClient:
-    """``CapacityClient`` over the storefront's local allocation tables.
-
-    Takes a factory rather than a client so it always sees the same
-    SQLite handle its caller would have used directly (tests monkeypatch
-    the module-level ``get_sqlite_client`` and expect every code path to
-    follow it).
-    """
-
-    def __init__(
-        self,
-        sqlite_client_factory: SQLiteClientFactory,
-        *,
-        bus: CapacityEventBus | None = None,
-    ) -> None:
-        self._db_factory = sqlite_client_factory
-        self._bus = bus or CapacityEventBus()
-
-    @property
-    def db_path(self) -> str:
-        return self._db_factory().db_path
-
-    async def snapshot(self) -> list[dict[str, Any]]:
-        return await self._db_factory().list_resources() or []
-
-    async def probe(
-        self, *, claim: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any] | None:
-        return await self._db_factory().select_available_compute_vm(
-            required_attributes=dict(claim) if claim else None,
-        )
-
-    async def reserve(
-        self,
-        *,
-        claim: Mapping[str, Any] | None = None,
-        deal_ref: Mapping[str, Any] | None = None,
-        ttl_seconds: float | None = None,
-    ) -> dict[str, Any] | None:
-        deal = dict(deal_ref or {})
-        reserved = await self._db_factory().reserve_available_compute_vm(
-            required_attributes=dict(claim) if claim else None,
-            listing_id=deal.get("listing_id"),
-            escrow_uid=deal.get("escrow_uid"),
-            ttl_seconds=ttl_seconds,
-        )
-        if reserved:
-            await self._emit(
-                kind="reserved",
-                resource_id=reserved.get("resource_id"),
-                pool_id=reserved.get("pool_id"),
-            )
-        return reserved
-
-    async def commit(
-        self,
-        *,
-        resource_id: str,
-        allocation_id: str | None = None,
-        lease_end_utc: str,
-        idempotency_ref: str | None = None,
-    ) -> None:
-        db = self._db_factory()
-        ref = idempotency_ref or (allocation_id or resource_id)
-        if allocation_id:
-            await db.update_compute_allocation_state(
-                allocation_id=allocation_id,
-                state="leased",
-            )
-            await db.apply_resource_set_transition(
-                resource_id=resource_id,
-                event_type="lease_started_after_provisioning",
-                idempotency_key=f"lease-attrs:{ref}:{resource_id}",
-                set_attribute={"$.lease_end_utc": lease_end_utc},
-            )
-        else:
-            # Legacy aggregate-state path for rows without an allocation.
-            await db.apply_resource_set_transition(
-                resource_id=resource_id,
-                event_type="lease_started_after_provisioning",
-                idempotency_key=f"lease:{ref}:{resource_id}",
-                set_state="leased",
-                set_attribute={"$.lease_end_utc": lease_end_utc},
-            )
-        await self._emit(kind="committed", resource_id=resource_id)
-
-    async def release(
-        self,
-        *,
-        allocation_id: str | None = None,
-        deal_ref: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any] | None:
-        deal = dict(deal_ref or {})
-        released = await self._db_factory().update_compute_allocation_state(
-            allocation_id=allocation_id,
-            escrow_uid=None if allocation_id else deal.get("escrow_uid"),
-            state="released",
-        )
-        if released:
-            await self._emit(
-                kind="released",
-                resource_id=released.get("resource_id"),
-                pool_id=released.get("pool_id"),
-            )
-        return released
-
-    async def truncate_lease(
-        self,
-        *,
-        allocation_id: str,
-        lease_end_utc: str,
-    ) -> dict[str, Any] | None:
-        """Shorten an active lease; teardown stays with the lease watchdog.
-
-        The settlement lifecycle's early-termination signal lands here;
-        until the site authority owns the job queue (work item II.4), the
-        watchdog picks the new ``lease_end_utc`` up through the existing
-        expiry path.
-        """
-        truncated = await self._db_factory().update_compute_allocation_state(
-            allocation_id=allocation_id,
-            state="leased",
-            lease_end_utc=lease_end_utc,
-        )
-        if truncated and truncated.get("resource_id"):
-            await self._db_factory().apply_resource_set_transition(
-                resource_id=str(truncated["resource_id"]),
-                event_type="lease_truncated",
-                idempotency_key=f"truncate:{allocation_id}:{lease_end_utc}",
-                set_attribute={"$.lease_end_utc": lease_end_utc},
-            )
-            await self._emit(
-                kind="lease_truncated",
-                resource_id=truncated.get("resource_id"),
-                pool_id=truncated.get("pool_id"),
-            )
-        return truncated
-
-    def subscribe(self, subscriber: CapacitySubscriber) -> Callable[[], None]:
-        return self._bus.subscribe(subscriber)
-
-    async def _emit(
-        self,
-        *,
-        kind: str,
-        resource_id: Any = None,
-        pool_id: Any = None,
-    ) -> None:
-        await self._bus.emit(CapacityDelta(
-            kind=kind,
-            version=self._bus.next_version(),
-            resource_id=str(resource_id) if resource_id else None,
-            pool_id=str(pool_id) if pool_id else None,
-        ))
-
-
-# Delta kinds that shrink availability and can strand open derived
-# listings whose GPU slice no longer fits.
-_CONSUMING_DELTA_KINDS = frozenset({"reserved", "committed", "lease_truncated"})
-
-
-def _make_stale_listing_subscriber(
-    sqlite_client_factory: SQLiteClientFactory,
-) -> CapacitySubscriber:
-    """Close stale derived listings whenever capacity shrinks.
-
-    This is the storefront's *reaction* to a capacity delta, not part of
-    the reserving deal's flow — in the multi-storefront topology another
-    seller's reservation invalidates our listings just the same, so the
-    reconcile must hang off the event channel.
-    """
-
-    async def _close_stale_listings(delta: CapacityDelta) -> None:
-        if delta.kind not in _CONSUMING_DELTA_KINDS:
-            return
-        # Late imports: publication machinery pulls registry/config
-        # wiring this module shouldn't load just to snapshot capacity.
-        from core_storefront.stage_log import stage_event
-        from market_storefront.services.publication_service import (
-            close_stale_compute_listings_after_capacity_change,
-        )
-
-        closed_listing_ids = await close_stale_compute_listings_after_capacity_change(
-            sqlite_client_factory().db_path,
-        )
-        if closed_listing_ids:
-            stage_event(
-                "provision", "stale_compute_listings_closed",
-                resource_id=delta.resource_id,
-                pool_id=delta.pool_id,
-                capacity_version=delta.version,
-                closed_listing_ids=closed_listing_ids,
-            )
-
-    return _close_stale_listings
 
 
 class RemoteCapacityClient:
@@ -431,20 +233,19 @@ class RemoteCapacityClient:
         await self._bus.emit(delta)
 
 
-def _capacity_settings() -> tuple[str, dict[str, str], str, str]:
-    """Resolve (mode, sites{name→url}, admin_key, placement) from settings.
+def _capacity_settings() -> tuple[dict[str, str], str, str]:
+    """Resolve (sites{name→url}, admin_key, placement) from settings.
 
     Read at call time so tests that patch
     ``market_storefront.utils.config.settings`` are honored. Sites come
     from the ``[capacity.sites]`` table (name → authority URL); with no
-    table, the single ``authority_url`` becomes the site named
-    "default", falling back to the provisioning service — that process
-    hosts the site authority.
+    table, ``authority_url`` becomes the single site named "default",
+    falling back to the provisioning service — that process hosts the
+    site authority.
     """
     from market_storefront.utils import config
 
     cap = getattr(config.settings, "capacity", None)
-    mode = str(getattr(cap, "mode", "") or "").strip().lower()
     admin_key = str(getattr(config.settings, "admin_api_key", "") or "")
     placement = str(getattr(cap, "placement", "") or "fill_first").strip()
 
@@ -455,7 +256,7 @@ def _capacity_settings() -> tuple[str, dict[str, str], str, str]:
             url = str(url or "").strip()
             if url:
                 sites[str(name)] = url.rstrip("/")
-    if not sites and mode == "site":
+    if not sites:
         url = str(getattr(cap, "authority_url", "") or "").strip()
         if not url:
             url = str(getattr(
@@ -463,93 +264,30 @@ def _capacity_settings() -> tuple[str, dict[str, str], str, str]:
             ) or "")
         if url:
             sites["default"] = url.rstrip("/")
-    return mode, sites, admin_key, placement
-
-
-def site_capacity_mode_active() -> bool:
-    """True when the authoritative ledger is in remote site authorities."""
-    mode, sites, _, _ = _capacity_settings()
-    return mode == "site" and bool(sites)
-
-
-async def site_held_by_resource(client: Any) -> dict[str, int]:
-    """Per-resource held units derived from a site snapshot.
-
-    The listing reconciler keeps totals and market attributes local (the
-    aggregator view) but must take consumption from the authority's
-    ledger in remote mode.
-    """
-    held: dict[str, int] = {}
-    for row in await client.snapshot():
-        resource_id = row.get("resource_id")
-        available = row.get("available_units")
-        if not resource_id or available is None:
-            continue
-        total = int(row.get("value") or 0)
-        held[str(resource_id)] = max(total - int(available), 0)
-    return held
-
-
-def _local_held_by_resource(db_path: str) -> dict[str, int]:
-    import sqlite3
-
-    from domains.vms.listings.reconciler import held_gpu_counts
-
-    try:
-        conn = sqlite3.connect(
-            f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5,
+    if not sites:
+        raise RuntimeError(
+            "No capacity site authority configured: set "
+            "[capacity].authority_url / [capacity.sites], or "
+            "[provisioning].service_url (the provisioning service hosts "
+            "the site authority).",
         )
-    except sqlite3.Error as exc:
-        logger.warning(
-            "[CAPACITY] Could not read local holds from %s: %s", db_path, exc,
-        )
-        return {}
-    try:
-        return held_gpu_counts(conn)
-    except sqlite3.Error as exc:
-        logger.warning(
-            "[CAPACITY] Could not read local holds from %s: %s", db_path, exc,
-        )
-        return {}
-    finally:
-        conn.close()
-
-
-async def combined_held_by_resource(
-    client: Any, db_path: str,
-) -> dict[str, int]:
-    """Union of site-ledger and local holds, per resource.
-
-    In remote mode deal reservations live in the site ledger, but
-    operator reservations (the admin portfolio endpoints) still write
-    the local tables. A hold is recorded in exactly one of the two, so
-    the sum is the truth the listing reconciler needs. This is the
-    fallback keying (resource_id only) for members the site snapshots
-    don't cover — see ``member_availability_view`` for the primary,
-    ``(site, resource_id)``-keyed answer.
-    """
-    held = await site_held_by_resource(client)
-    for resource_id, units in _local_held_by_resource(db_path).items():
-        held[resource_id] = held.get(resource_id, 0) + units
-    return held
+    return sites, admin_key, placement
 
 
 async def member_availability_view(
-    client: Any, db_path: str,
+    client: Any, db_path: str | None = None,
 ) -> dict[tuple[str | None, str], int]:
     """Available units per pool member, from the aggregated snapshots.
 
     Keyed ``(site, resource_id)`` — the aggregator's member key. The
     home site (the first configured one) is also keyed ``(None, rid)``,
-    matching members that carry no site tag, and has local operator
-    holds subtracted (those still live in the storefront's own tables).
+    matching members that carry no site tag.
     """
     view: dict[tuple[str | None, str], int] = {}
     sites = remote_site_clients(client)
     if not sites:
         return view
     home_site = next(iter(sites))
-    local_held = _local_held_by_resource(db_path)
     for row in await client.snapshot():
         resource_id = row.get("resource_id")
         available = row.get("available_units")
@@ -558,21 +296,26 @@ async def member_availability_view(
         site = row.get("site") or home_site
         available = max(int(available), 0)
         if site == home_site:
-            available = max(available - local_held.get(str(resource_id), 0), 0)
             view[(None, str(resource_id))] = available
         view[(str(site), str(resource_id))] = available
     return view
 
 
-def _make_remote_listing_subscriber(
+# Delta kinds that shrink availability and can strand open derived
+# listings whose GPU slice no longer fits.
+_CONSUMING_DELTA_KINDS = frozenset({"reserved", "committed", "lease_truncated"})
+
+
+def _make_listing_reconcile_subscriber(
     sqlite_client_factory: SQLiteClientFactory,
     client: Any,
 ) -> CapacitySubscriber:
     """Reconcile derived listings against site-authority availability.
 
-    Handles both directions — consuming deltas close stranded listings,
-    "released" reopens ones that fit again (in embedded mode the reopen
-    leg is driven by the admin fulfillment-event handlers instead).
+    This is the storefront's *reaction* to a capacity delta, not part of
+    the moving deal's flow — another seller's reservation invalidates
+    our listings just the same. Consuming deltas close stranded
+    listings, "released" reopens ones that fit again.
     """
 
     async def _reconcile_listings(delta: CapacityDelta) -> None:
@@ -583,13 +326,10 @@ def _make_remote_listing_subscriber(
         )
 
         db_path = sqlite_client_factory().db_path
-        held = await combined_held_by_resource(client, db_path)
         availability = await member_availability_view(client, db_path)
         if delta.kind in _CONSUMING_DELTA_KINDS:
             closed = await close_stale_compute_listings_after_capacity_change(
-                db_path,
-                held_by_resource=held,
-                member_availability=availability,
+                db_path, member_availability=availability,
             )
             if closed:
                 stage_event(
@@ -601,9 +341,7 @@ def _make_remote_listing_subscriber(
                 )
         elif delta.kind == "released":
             reopened = await reopen_available_compute_listings_after_capacity_change(
-                db_path,
-                held_by_resource=held,
-                member_availability=availability,
+                db_path, member_availability=availability,
             )
             if reopened:
                 stage_event(
@@ -617,10 +355,10 @@ def _make_remote_listing_subscriber(
     return _reconcile_listings
 
 
-# Remote mode keeps one aggregator per configuration: deltas come from
-# the per-site pollers (not from whichever client instance happened to
-# mutate), and the allocation→site routing cache must survive across
-# build calls within the process.
+# One aggregator per configuration: deltas come from the per-site
+# pollers (not from whichever client instance happened to mutate), and
+# the allocation→site routing cache must survive across build calls
+# within the process.
 _aggregate_state: dict[str, Any] = {"key": None, "client": None}
 
 
@@ -648,7 +386,7 @@ def _aggregate_for(
         placement=placement,
     )
     aggregate.subscribe(
-        _make_remote_listing_subscriber(sqlite_client_factory, aggregate),
+        _make_listing_reconcile_subscriber(sqlite_client_factory, aggregate),
     )
     _aggregate_state["key"] = key
     _aggregate_state["client"] = aggregate
@@ -657,29 +395,22 @@ def _aggregate_for(
 
 def build_capacity_client(
     sqlite_client_factory: SQLiteClientFactory,
-) -> Any:
+) -> AggregateCapacityClient:
     """Assemble the storefront's capacity client with default subscribers.
 
-    Mode comes from ``[capacity]`` in settings: "" → embedded (local
-    tables); "site" → an AggregateCapacityClient over the configured
-    site authorities (one site is just the degenerate aggregation).
+    Always an ``AggregateCapacityClient`` over the configured site
+    authorities (one site is just the degenerate aggregation).
     """
-    mode, sites, admin_key, placement_name = _capacity_settings()
-    if mode == "site" and sites:
-        return _aggregate_for(
-            sqlite_client_factory, sites, admin_key, placement_name,
-        )
-    client = EmbeddedCapacityClient(sqlite_client_factory)
-    client.subscribe(_make_stale_listing_subscriber(sqlite_client_factory))
-    return client
+    sites, admin_key, placement_name = _capacity_settings()
+    return _aggregate_for(sqlite_client_factory, sites, admin_key, placement_name)
 
 
 def remote_site_clients(client: Any) -> dict[str, RemoteCapacityClient]:
     """The per-site remote clients behind a capacity client, by site name.
 
-    Empty for embedded clients. Used by callers that need the
-    beyond-the-protocol surface (allocation lists, event feeds) — those
-    are per-site conversations, not aggregate ones.
+    Used by callers that need the beyond-the-protocol surface
+    (allocation lists, event feeds) — those are per-site conversations,
+    not aggregate ones.
     """
     if isinstance(client, AggregateCapacityClient):
         return {
@@ -692,34 +423,26 @@ def remote_site_clients(client: Any) -> dict[str, RemoteCapacityClient]:
     return {}
 
 
-def is_remote_capacity_client(client: Any) -> bool:
-    """True when capacity writes land in site authorities, not local tables."""
-    return bool(remote_site_clients(client))
-
-
 async def sync_site_resources(
     sqlite_client_factory: SQLiteClientFactory | None = None,
 ) -> int:
-    """Mirror local compute inventory into the site authority's ledger.
+    """Mirror local compute inventory into the home site's ledger.
 
-    Remote mode only (no-op otherwise). Local rows keep the market view
-    (pricing, escrows, pools); the ledger gets the resource-domain core:
-    unit totals and attributes. Deleted rows are mirrored as disabled so
-    the authority stops matching them. Returns the number of rows
-    synced.
+    Local rows keep the market view (pricing, escrows, pools); the
+    ledger gets the resource-domain core: unit totals and attributes.
+    The storefront's local CSV inventory belongs to its home site — the
+    first configured one; other sites register their own inventory and
+    the aggregator only ever *references* it. Deleted rows are mirrored
+    as disabled so the authority stops matching them. Returns the
+    number of rows synced.
     """
-    mode, sites, admin_key, _ = _capacity_settings()
-    if mode != "site" or not sites:
-        return 0
+    sites, admin_key, _ = _capacity_settings()
     if sqlite_client_factory is None:
         from market_storefront.utils.sqlite_client import get_sqlite_client
         sqlite_client_factory = get_sqlite_client
 
     import json as _json
 
-    # The storefront's local CSV inventory belongs to its home site —
-    # the first configured one. Other sites register their own
-    # inventory; the aggregator only ever *references* it.
     default_site, url = next(iter(sites.items()))
     client = RemoteCapacityClient(url, admin_key)
     rows = await sqlite_client_factory().list_resources() or []
@@ -735,7 +458,7 @@ async def sync_site_resources(
                 attrs_raw = {}
         attrs = {
             k: v for k, v in dict(attrs_raw or {}).items()
-            if k != "lease_end_utc"  # lease tail belongs to the ledger now
+            if k != "lease_end_utc"  # lease tail belongs to the ledger
         }
         total = row.get("value")
         if total is None:
@@ -763,17 +486,14 @@ async def sync_site_resources(
 async def capacity_events_poller_loop() -> None:
     """Tail every site authority's capacity-event feed into the local bus.
 
-    Remote mode's delivery half: one poller per configured site, each
-    positioning at its feed head, running one full listing reconcile to
-    converge with anything missed while down, then polling for new
-    versions and emitting each as a site-tagged ``CapacityDelta`` on the
-    aggregate bus. A feed head that moves backwards (ledger reset)
-    re-runs the full reconcile instead of replaying.
+    The delivery half of capacity-scoped events: one poller per
+    configured site, each positioning at its feed head, running one full
+    listing reconcile to converge with anything missed while down, then
+    polling for new versions and emitting each as a site-tagged
+    ``CapacityDelta`` on the aggregate bus. A feed head that moves
+    backwards (ledger reset) re-runs the full reconcile instead of
+    replaying.
     """
-    mode, sites, admin_key, _ = _capacity_settings()
-    if mode != "site" or not sites:
-        return
-
     from market_storefront.utils import config
     from market_storefront.utils.sqlite_client import get_sqlite_client
 
@@ -802,17 +522,12 @@ async def _site_events_poller(
             reopen_available_compute_listings_after_capacity_change,
         )
         db_path = get_sqlite_client().db_path
-        held = await combined_held_by_resource(aggregate, db_path)
         availability = await member_availability_view(aggregate, db_path)
         await close_stale_compute_listings_after_capacity_change(
-            db_path,
-            held_by_resource=held,
-            member_availability=availability,
+            db_path, member_availability=availability,
         )
         await reopen_available_compute_listings_after_capacity_change(
-            db_path,
-            held_by_resource=held,
-            member_availability=availability,
+            db_path, member_availability=availability,
         )
 
     last_applied: int | None = None

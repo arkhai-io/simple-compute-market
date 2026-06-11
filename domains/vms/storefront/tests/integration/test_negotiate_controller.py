@@ -104,8 +104,24 @@ async def client(db):
     app = FastAPI()
     app.include_router(negotiate_router)
 
+    # The seller's round-start availability snapshot and acceptance-time
+    # capacity holds run against the site authority; route them at an
+    # in-memory ledger with a matching resource.
+    from tests.fake_site import FakeSite, site_capacity
+
+    fake_site = FakeSite()
+    fake_site.add_resource(
+        "res-fake-site", 8,
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "kvm1",
+        },
+    )
+
     transport = httpx.ASGITransport(app=app)
-    with patch.object(buyer_auth, "_verify", return_value=None):
+    with patch.object(buyer_auth, "_verify", return_value=None), \
+            site_capacity(fake_site):
         async with StorefrontClient(
             "http://test",
             transport=transport,
@@ -237,8 +253,10 @@ class TestNegotiateNew:
             status="open",
             created_at=datetime.now().isoformat(),
             updated_at=datetime.now().isoformat(),
+            # A model the fixture's fake site doesn't carry — the
+            # availability snapshot has nothing matching.
             offer_resource={
-                "gpu_model": "H200", "gpu_count": 1, "sla": 99.9,
+                "gpu_model": "B300", "gpu_count": 1, "sla": 99.9,
                 "region": "California, US",
             },
             accepted_escrows=[{

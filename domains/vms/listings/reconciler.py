@@ -85,22 +85,19 @@ def held_gpu_counts_by_resource(conn: sqlite3.Connection) -> dict[str, int]:
 def available_compute_slices(
     db_path: str,
     *,
-    held_by_resource: dict[str, int] | None = None,
     member_availability: dict[tuple[str | None, str], int] | None = None,
 ) -> list[dict[str, Any]]:
     """Return publishable compute listing slices from current storefront state.
 
-    Pool membership and market attributes (pricing, escrows) are always
-    local — the aggregator view. Consumption comes from one of three
-    sources, in precedence order per member:
-
-    - ``member_availability``: available units keyed by
-      ``(site, resource_id)`` from the aggregated site snapshots —
-      remote-capacity mode's authoritative answer (``site=None`` is the
-      storefront's home site, matching members with no site tag);
-    - ``held_by_resource``: held counts keyed by resource_id, supplied
-      by callers that already merged site and local holds;
-    - the local ``compute_allocations`` table (embedded mode).
+    Pool membership and market attributes (pricing, escrows) are local —
+    the aggregator view. Consumption is the site authorities' answer:
+    ``member_availability`` holds available units keyed by
+    ``(site, resource_id)`` from the aggregated snapshots (``site=None``
+    is the storefront's home site, matching members with no site tag); a
+    member the snapshots don't cover is not reservable and counts as 0.
+    ``None`` means the caller has no consumption information (publish
+    flows when the authority is unreachable) — members are then assumed
+    fully available, which the reserve path corrects authoritatively.
     """
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
@@ -111,8 +108,6 @@ def available_compute_slices(
         has_members = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_pool_members'"
         ).fetchone() is not None
-        if held_by_resource is None:
-            held_by_resource = held_gpu_counts_by_resource(conn)
         if has_pools and has_members:
             member_cols = {
                 row[1] for row in conn.execute(
@@ -156,19 +151,15 @@ def available_compute_slices(
                 member_total = int(row["gpu_count"] or 0)
                 member_site = str(row["site"]) if row["site"] else None
                 member_key = (member_site, str(row["resource_id"]))
-                if (
-                    member_availability is not None
-                    and member_key in member_availability
-                ):
-                    member_available = max(
-                        0,
-                        min(member_total, int(member_availability[member_key])),
-                    )
+                if member_availability is None:
+                    member_available = member_total
                 else:
                     member_available = max(
                         0,
-                        member_total
-                        - held_by_resource.get(str(row["resource_id"]), 0),
+                        min(
+                            member_total,
+                            int(member_availability.get(member_key, 0)),
+                        ),
                     )
                 pool["total_gpu_count"] += member_total
                 pool["available_gpu_count"] += member_available
@@ -206,10 +197,18 @@ def available_compute_slices(
                 except json.JSONDecodeError:
                     attrs = {}
                 total_gpu_count = int(row["value"]) if row["value"] is not None else 1
-                available_gpu_count = max(
-                    0,
-                    total_gpu_count - held_by_resource.get(str(row["resource_id"]), 0),
-                )
+                if member_availability is None:
+                    available_gpu_count = total_gpu_count
+                else:
+                    available_gpu_count = max(
+                        0,
+                        min(
+                            total_gpu_count,
+                            int(member_availability.get(
+                                (None, str(row["resource_id"])), 0,
+                            )),
+                        ),
+                    )
                 pool_rows.append({
                     "pool_id": str(attrs.get("pool_id") or row["resource_id"]),
                     "single_resource_id": str(row["resource_id"]),
@@ -275,14 +274,11 @@ def available_compute_slices(
 def current_available_resource_keys(
     db_path: str,
     *,
-    held_by_resource: dict[str, int] | None = None,
     member_availability: dict[tuple[str | None, str], int] | None = None,
 ) -> set[str]:
     keys: set[str] = set()
     for row in available_compute_slices(
-        db_path,
-        held_by_resource=held_by_resource,
-        member_availability=member_availability,
+        db_path, member_availability=member_availability,
     ):
         if row.get("resource_key"):
             keys.add(str(row["resource_key"]))
@@ -324,14 +320,11 @@ def open_listing_resource_keys(db_path: str) -> set[str]:
 def stale_open_listing_ids(
     db_path: str,
     *,
-    held_by_resource: dict[str, int] | None = None,
     member_availability: dict[tuple[str | None, str], int] | None = None,
 ) -> list[str]:
     """Open listing IDs whose requested slice no longer fits capacity."""
     available_keys = current_available_resource_keys(
-        db_path,
-        held_by_resource=held_by_resource,
-        member_availability=member_availability,
+        db_path, member_availability=member_availability,
     )
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     try:
@@ -368,14 +361,11 @@ def stale_open_listing_ids(
 def closed_available_listing_ids(
     db_path: str,
     *,
-    held_by_resource: dict[str, int] | None = None,
     member_availability: dict[tuple[str | None, str], int] | None = None,
 ) -> list[str]:
     """Closed derived listing IDs whose requested slice fits capacity again."""
     available_keys = current_available_resource_keys(
-        db_path,
-        held_by_resource=held_by_resource,
-        member_availability=member_availability,
+        db_path, member_availability=member_availability,
     )
     if not available_keys:
         return []

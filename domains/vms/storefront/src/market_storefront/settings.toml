@@ -105,12 +105,8 @@ discovery_timeout = 5.0
 root_path = ""
 
 [capacity]
-# Where the authoritative capacity ledger lives.
-#   ""     — embedded: this storefront's own tables (single-consumer only).
-#   "site" — remote: site authorities' /api/v1/capacity surfaces,
-#            authenticated with admin_api_key, aggregated behind one
-#            client. Capacity deltas arrive by polling each authority's
-#            versioned event feed.
+# The authoritative capacity ledger lives in site authorities (hosted
+# by the provisioning service); the storefront is strictly a client.
 # Sites come from a [capacity.sites] table of name → authority URL,
 # e.g.   [capacity.sites]
 #        dc-a = "http://prov-a:8081"
@@ -118,7 +114,9 @@ root_path = ""
 # With no table, authority_url becomes the single site "default"
 # (and itself defaults to provisioning.service_url — that process
 # hosts the site authority). The first site is the storefront's home
-# site: local CSV inventory mirrors there.
+# site: local CSV inventory mirrors there. Authentication rides
+# admin_api_key, and capacity deltas arrive by polling each
+# authority's versioned event feed.
 # placement orders sites for reserves: "fill_first" (configuration
 # order — pack a site before touching the next) or "most_available"
 # (spread to the site with the most free units).
@@ -126,7 +124,6 @@ root_path = ""
 # hold that settlement commits into the lease; it auto-lapses if the
 # escrow never settles. 0 disables acceptance holds (settlement then
 # does the plain atomic reserve, racing other deals for the capacity).
-mode             = ""
 authority_url    = ""
 poll_interval    = 5
 placement        = "fill_first"

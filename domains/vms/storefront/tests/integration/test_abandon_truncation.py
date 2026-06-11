@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -20,6 +19,7 @@ from market_storefront.services.claims_runtime import (
     truncate_lease_for_abandoned_claim,
 )
 from market_storefront.utils.sqlite_client import SQLiteClient
+from tests.fake_site import FakeSite, site_capacity
 
 
 @pytest.fixture
@@ -27,46 +27,26 @@ def db(tmp_path):
     return SQLiteClient(db_path=str(tmp_path / "abandon-test.db"))
 
 
-def _embedded_settings():
-    return SimpleNamespace(
-        capacity=SimpleNamespace(mode="", sites=None),
-        admin_api_key="",
-    )
-
-
-async def _leased_allocation(db: SQLiteClient, escrow_uid: str) -> dict:
-    await db.upsert_resource(
-        resource_id="res-trunc",
-        resource_type="compute.gpu",
-        resource_subtype="h200",
-        unit="count",
-        value=2,
-        state="available",
-        attributes={"gpu_model": "H200", "vm_host": "kvm1"},
-    )
-    reserved = await db.reserve_available_compute_vm(escrow_uid=escrow_uid)
-    await db.update_compute_allocation_state(
-        allocation_id=reserved["allocation_id"],
-        state="leased",
-        lease_end_utc="2099-01-01 00:00",
-    )
-    return reserved
-
-
 @pytest.mark.asyncio
-async def test_truncates_the_embedded_lease_to_now(db):
-    reserved = await _leased_allocation(db, "0xabandoned")
+async def test_truncates_the_ledger_lease_to_now(db):
+    fake = FakeSite()
+    fake.add_resource("res-trunc", 2, attributes={"vm_host": "kvm1"})
 
-    with patch(
-        "market_storefront.utils.config.settings", _embedded_settings(),
-    ):
+    with site_capacity(fake) as capacity:
+        reserved = await capacity.reserve(
+            claim={}, deal_ref={"escrow_uid": "0xabandoned"},
+        )
+        await capacity.commit(
+            resource_id=reserved["resource_id"],
+            allocation_id=reserved["allocation_id"],
+            lease_end_utc="2099-01-01 00:00",
+        )
         truncated = await truncate_lease_for_abandoned_claim(
             db, escrow_uid="0xabandoned", reason="expiration window passed",
         )
 
     assert truncated is not None
-    row = await db.find_held_compute_allocation(escrow_uid="0xabandoned")
-    assert row["allocation_id"] == reserved["allocation_id"]
+    row = fake.allocations[reserved["allocation_id"]]
     assert row["state"] == "leased"
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     assert str(row["lease_end_utc"]).startswith(today)
@@ -74,9 +54,7 @@ async def test_truncates_the_embedded_lease_to_now(db):
 
 @pytest.mark.asyncio
 async def test_no_live_allocation_is_a_quiet_noop(db):
-    with patch(
-        "market_storefront.utils.config.settings", _embedded_settings(),
-    ):
+    with site_capacity(FakeSite()):
         assert await truncate_lease_for_abandoned_claim(
             db, escrow_uid="0xunknown",
         ) is None

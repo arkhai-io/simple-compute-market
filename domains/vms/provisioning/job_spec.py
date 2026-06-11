@@ -45,14 +45,12 @@ async def build_provisioning_job_spec(
     order_dict: dict[str, Any] | None,
     ssh_public_key: str,
     duration_seconds: int,
-    sqlite_client: Any,
+    capacity: Any,
     vm_target_factory: Callable[[], str] | None = None,
 ) -> dict[str, Any] | None:
-    """Select a host read-only and build a VM provisioning job spec."""
+    """Probe the capacity ledger (read-only) and build a VM job spec."""
     required_attributes = required_compute_attributes(order_dict)
-    selected = await sqlite_client.select_available_compute_vm(
-        required_attributes=required_attributes or None,
-    )
+    selected = await capacity.probe(claim=required_attributes or None)
     if not selected:
         return None
 
