@@ -62,7 +62,10 @@ graph expresses the core/kit/domain split, distribution names mirror it
 Current-state layout and decisions: `ARCHITECTURE.md` → "Organizing
 Principle" / "Package layout". The remaining architectural items are
 planned with their design context in
-[`design-remaining-work.md`](design-remaining-work.md).
+[`design-remaining-work.md`](design-remaining-work.md). The active
+next milestone — the API-tokens market domain (second schema plugin,
+second storefront, tokens service + middlewares) — is designed in
+[`design-api-tokens-domain.md`](design-api-tokens-domain.md).
 
 **This list is the single aggregation of what remains**, in rough
 dependency order:
