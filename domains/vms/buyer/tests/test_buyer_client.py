@@ -19,6 +19,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from market_policy.negotiation_middleware import load_negotiation_chain
+
 from market_core.schemas import EscrowProposal
 from domains.vms.buyer.buyer_client import NegotiationOutcome, negotiate_with_seller
 from domains.vms.provisioning import VmProvisionTerms, make_vm_provision_terms
@@ -276,8 +278,43 @@ def test_counter_loop_converges_to_accept(mock_urlopen):
 
 
 @patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
+def test_default_listed_price_buyer_exits_above_bound(mock_urlopen):
+    """The listed_price default never haggles: a seller counter above the
+    buyer's bound ends the negotiation with the buyer's exit."""
+    mock_urlopen.side_effect = _urlopen_fake([
+        # Round 0: seller counters at 150 (buyer bound 100 → buyer exits)
+        {"negotiation_id": "neg-1", "action": "counter", "proposal": _seller_proposal(150)},
+        # Round 1: the buyer's exit POST gets an ack
+        {"action": "exit", "reason": "buyer_exit"},
+    ])
+    outcome = negotiate_with_seller(
+        seller_url="http://seller:8001",
+        buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK, listing_id="seller-1",
+        initial_price=50, max_price=100, provision_terms=_provision(3600), escrow_proposal=_escrow_proposal(),
+    )
+    assert outcome.status == "exited"
+    assert outcome.reason == "price_above_bound"
+
+
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
+def test_default_listed_price_accepts_counter_within_bound(mock_urlopen):
+    """A seller counter at/under the bound is accepted immediately."""
+    mock_urlopen.side_effect = _urlopen_fake([
+        {"negotiation_id": "neg-1", "action": "counter", "proposal": _seller_proposal(90)},
+        {"action": "accept", "proposal": _seller_proposal(90)},
+    ])
+    outcome = negotiate_with_seller(
+        seller_url="http://seller:8001",
+        buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK, listing_id="seller-1",
+        initial_price=50, max_price=100, provision_terms=_provision(3600), escrow_proposal=_escrow_proposal(),
+    )
+    assert outcome.status == "agreed"
+    assert outcome.agreed_amount == 90
+
+
+@patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")
 def test_counter_loop_seller_walks_away(mock_urlopen):
-    """Buyer counters, seller exits."""
+    """Opt-in bisection haggles: buyer counters, seller exits."""
     mock_urlopen.side_effect = _urlopen_fake([
         # Round 0: seller counters at 150 (buyer ceiling 100 → buyer counters at 100 clamp)
         {"negotiation_id": "neg-1", "action": "counter", "proposal": _seller_proposal(150)},
@@ -288,6 +325,7 @@ def test_counter_loop_seller_walks_away(mock_urlopen):
         seller_url="http://seller:8001",
         buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK, listing_id="seller-1",
         initial_price=50, max_price=100, provision_terms=_provision(3600), escrow_proposal=_escrow_proposal(),
+        chain=load_negotiation_chain(["buyer_escrow_shape_guard", "bisection"]),
     )
     assert outcome.status == "exited"
     assert outcome.reason == "price_unreasonable"
@@ -308,8 +346,8 @@ def test_buyer_exits_when_seller_unreasonable(mock_urlopen):
         initial_price=50, max_price=100, provision_terms=_provision(3600), escrow_proposal=_escrow_proposal(),
     )
     assert outcome.status == "exited"
-    # Exit was buyer-initiated (we detected unreasonable seller price).
-    assert outcome.reason == "price_unreasonable"
+    # Exit was buyer-initiated (seller priced above the buyer's bound).
+    assert outcome.reason == "price_above_bound"
 
 
 @patch("domains.vms.buyer.buyer_client.urllib.request.urlopen")

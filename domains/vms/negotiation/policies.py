@@ -212,6 +212,69 @@ def amount_bisection_middleware(
     return bisection_middleware(history, context)
 
 
+@register_negotiation_middleware("listed_price")
+def listed_price_middleware(
+    history: list[NegotiationRound],
+    context: NegotiationContext,
+) -> NegotiationStep:
+    """Pay the published price: accept within the bound, never haggle.
+
+    The buyer-side default terminal (design-negotiation-policy-surface.md).
+    Haggling rounds carry no information today — neither side exchanges
+    *reasons* for a new number, so counter-rounds against a seller whose
+    floor is already published are wasted traffic. The buyer opens at
+    the listing's advertised price (or the caller's explicit bid);
+    ``our_reference_amount`` is the bound. Any side that wants actual
+    bargaining configures ``bisection`` (or richer) explicitly.
+
+    minimize: accept the counterparty's amount iff it is at or under the
+    bound, exit otherwise. maximize mirrors it. An amountless proposal
+    from the other side (exact escrows) is accepted as-proposed — the
+    pinned-shape guard upstream already vetoed any mutation.
+    """
+    their_proposal = their_last_proposal(history)
+    if their_proposal is None:
+        # Nothing from the other side yet (resume edge): restate our bound.
+        base = context.our_escrow_proposal or {}
+        return (
+            NegotiationDecision(
+                action="counter",
+                proposal=_set_proposal_amount(base, context.our_reference_amount),
+            ),
+            context,
+        )
+
+    their_amount = their_proposed_amount(history)
+    if their_amount is None:
+        return (
+            NegotiationDecision(
+                action="accept", proposal=dict(their_proposal),
+                reason="listed_price_amountless",
+            ),
+            context,
+        )
+
+    bound = context.our_reference_amount
+    within = (
+        their_amount <= bound
+        if context.direction == "minimize"
+        else their_amount >= bound
+    )
+    if within:
+        return (
+            NegotiationDecision(
+                action="accept",
+                proposal=_set_proposal_amount(dict(their_proposal), their_amount),
+                reason="listed_price",
+            ),
+            context,
+        )
+    return (
+        NegotiationDecision(action="exit", reason="price_above_bound"),
+        context,
+    )
+
+
 def _escrow_kind_lookup_keys(kind: str) -> list[str]:
     keys = [kind]
     for prefix in (

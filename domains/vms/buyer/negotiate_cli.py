@@ -207,19 +207,18 @@ def register(app: typer.Typer) -> None:
                         err=True, fg=typer.colors.RED,
                     )
                     raise typer.Exit(2)
-            # Auto-derive prices from the listing's min_price when caller
-            # didn't supply them. Same precedent as `market buy`.
+            # Fill missing prices from the listing's advertised rate —
+            # same listed-price default as `market buy`.
             if initial_price is None or max_price is None:
-                derived_initial, derived_max = resolve_prices_from_matches(
+                initial_price, max_price = resolve_prices_from_matches(
                     matches=[listing_dict],
                     console=console,
-                    assume_yes=assume_yes,
                     price_markup=price_markup,
+                    initial_price=initial_price,
+                    max_price=max_price,
                 )
-                if derived_initial is None or derived_max is None:
+                if initial_price is None or max_price is None:
                     raise typer.Exit(2)
-                initial_price = initial_price if initial_price is not None else derived_initial
-                max_price = max_price if max_price is not None else derived_max
 
         if not seller_url or not listing_id:
             typer.secho(

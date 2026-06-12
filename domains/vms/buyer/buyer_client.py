@@ -39,7 +39,7 @@ from market_core.schemas import ProvisionTerms, SettlementPlan
 
 
 DEFAULT_MAX_ROUNDS = 10
-DEFAULT_TERMINAL = "bisection"
+DEFAULT_TERMINAL = "listed_price"
 _RL_POLICY_NAMES = {"rl", "erc20_rl", "native_token_rl", "erc1155_rl"}
 
 
@@ -79,7 +79,9 @@ def _load_buyer_chain(
     — the shape guard vetoes if the seller silently mutates a buyer-pinned
     field of the EscrowProposal (token swap, expiration push, escrow
     contract swap). ``<terminal>`` is `policy_mode` if set, else
-    ``DEFAULT_TERMINAL`` (`"bisection"`).
+    ``DEFAULT_TERMINAL`` (`"listed_price"`: pay the published price,
+    accept within the bound, never counter — configure `bisection` or
+    richer in `[negotiation] policies` to actually haggle).
     """
     policies_by_kind = normalize_policies_by_escrow_kind_config(policies)
     if policies_by_kind:

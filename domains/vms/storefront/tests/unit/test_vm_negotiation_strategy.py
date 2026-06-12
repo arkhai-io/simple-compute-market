@@ -12,6 +12,7 @@ from market_policy.negotiation_middleware import (
     run_negotiation_chain,
 )
 from domains.vms.negotiation.policies import (
+    listed_price_middleware,
     accept_exact_listing_middleware,
     amount_bisection_middleware,
     bisection_middleware,
@@ -322,3 +323,77 @@ def test_escrow_kind_dispatch_rejects_unmapped_kind(monkeypatch):
 def test_minimize_boundaries(their, expected):
     d = _decide_minimize(their=their)
     assert d.action == expected
+
+
+# ---------------------------------------------------------------------------
+# listed_price — the buyer-side default terminal: pay the published price,
+# accept within the bound, never counter.
+# ---------------------------------------------------------------------------
+
+def _decide_listed_price(their, our_amount=100, direction="minimize"):
+    history = []
+    if their is not None:
+        history.append(NegotiationRound(
+            round_number=0,
+            sender="them",
+            action="counter",
+            proposal=_proposal_with_amount(their),
+        ))
+    ctx = NegotiationContext(
+        direction=direction,
+        our_reference_amount=our_amount,
+        our_escrow_proposal=_proposal_with_amount(our_amount),
+    )
+    return run_negotiation_chain([listed_price_middleware], history, ctx)
+
+
+def test_listed_price_accepts_at_the_bound():
+    d = _decide_listed_price(their=100)
+    assert d.action == "accept"
+    assert _decision_amount(d) == 100
+
+
+def test_listed_price_accepts_under_the_bound():
+    d = _decide_listed_price(their=90)
+    assert d.action == "accept"
+    assert _decision_amount(d) == 90
+
+
+def test_listed_price_never_counters_above_the_bound():
+    d = _decide_listed_price(their=101)
+    assert d.action == "exit"
+    assert d.reason == "price_above_bound"
+
+
+def test_listed_price_maximize_mirrors():
+    assert _decide_listed_price(their=100, direction="maximize").action == "accept"
+    assert _decide_listed_price(their=99, direction="maximize").action == "exit"
+
+
+def test_listed_price_accepts_amountless_proposals():
+    """Exact escrows carry no scalar amount; the pinned-shape guard
+    upstream is the protection, the price policy just accepts."""
+    history = [NegotiationRound(
+        round_number=0, sender="them", action="counter",
+        proposal={"chain_name": "anvil", "escrow_address": "0x" + "11" * 20,
+                  "fields": {"token": "0x" + "22" * 20, "tokenId": "7"}},
+    )]
+    ctx = NegotiationContext(
+        direction="minimize",
+        our_reference_amount=100,
+        our_escrow_proposal=None,
+    )
+    d = run_negotiation_chain([listed_price_middleware], history, ctx)
+    assert d.action == "accept"
+    assert d.reason == "listed_price_amountless"
+
+
+def test_listed_price_restates_bound_when_nothing_from_them():
+    d = _decide_listed_price(their=None)
+    assert d.action == "counter"
+    assert _decision_amount(d) == 100
+
+
+def test_load_negotiation_chain_resolves_listed_price():
+    chain = load_negotiation_chain(["listed_price"])
+    assert chain == [listed_price_middleware]

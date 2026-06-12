@@ -284,22 +284,23 @@ def register(app: typer.Typer) -> None:
             help="Opening bid per negotiation in human / whole-token units, "
                  "per-hour rate. Scaled by the token's on-chain decimals "
                  "before being sent (so --initial-price 2 against 6-decimal "
-                 "USDC means $2/hr). Optional — when omitted, prices are "
-                 "derived from the seller's advertised min_price (interactively "
-                 "confirmed in TTY runs, derived silently with --yes).",
+                 "USDC means $2/hr). Optional — when omitted, opens at the "
+                 "seller's advertised price (the default listed_price "
+                 "policy pays what's published, no haggling).",
         ),
         max_price: Optional[float] = typer.Option(
             None, "--max-price",
             help="Ceiling per negotiation in human / whole-token units, "
                  "per-hour rate. Scaled by the token's on-chain decimals "
-                 "before being sent. Optional — when omitted, derived as "
-                 "min_price × --price-markup (interactively confirmed in TTY "
-                 "runs, derived silently with --yes).",
+                 "before being sent. Optional — when omitted, equals the "
+                 "advertised price (the default listed_price policy accepts "
+                 "anything within this bound and never counters).",
         ),
         price_markup: float = typer.Option(
             1.5, "--price-markup",
-            help="Multiplier applied to seller min_price when auto-deriving "
-                 "max-price. Default 1.5 (50%% headroom).",
+            help="Ceiling headroom for opt-in haggling policies: applies "
+                 "only when --initial-price alone is given (max = initial × "
+                 "markup). The default listed_price policy needs none.",
         ),
         assume_yes: bool = typer.Option(
             False, "--yes", "-y",
@@ -624,17 +625,18 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(0)
 
-        # Interactive vs auto-price: when the buyer hasn't pinned both prices
-        # explicitly, anchor on the seller's advertised min_price per match.
+        # Listed-price default: when the buyer hasn't pinned both prices
+        # explicitly, both anchor on the cheapest advertised rate — open
+        # there, bound there (no markup headroom; the default policy
+        # never counters).
         if not explicit_prices:
             initial_price, max_price = _resolve_prices_from_matches(
                 matches=matches,
                 console=console,
-                assume_yes=assume_yes,
                 price_markup=price_markup,
             )
             if initial_price is None or max_price is None:
-                # User aborted, or no listing carried a min_price.
+                # No listing carried an advertised price.
                 raise typer.Exit(2)
 
         # Resolve aggregation policy: --aggregate-by > [aggregation].policy > default.
