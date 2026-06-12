@@ -29,7 +29,7 @@ def register(app: typer.Typer) -> None:
     """Register the top-level `market negotiate` command.
 
     Pricing flags come from the configured negotiation policy
-    (design-negotiation-policy-surface.md), injected at app assembly —
+    (ARCHITECTURE.md, "Buyer negotiation policy surface"), injected at app assembly —
     the scalar policies contribute --initial-price/--max-price/
     --price-markup, plus the --policy-param escape hatch.
     """

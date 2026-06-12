@@ -4,9 +4,11 @@ Four pluggable hooks in the marketplace:
 
 1. **Seller negotiation policies** (`storefront.toml` →
    `[negotiation] policies`) — what the seller does each round.
-2. **Buyer negotiation policies** (`buyer.toml` →
-   `[negotiation] policies`) — what the buyer does each round. Same
-   middleware shape as the seller; different bundled defaults.
+2. **Buyer negotiation policy** (`buyer.toml` →
+   `[negotiation] policy`, or an explicit `[negotiation] policies`
+   chain) — what the buyer does each round, plus the pricing flags
+   `buy`/`negotiate` expose. Same middleware shape as the seller;
+   different bundled defaults.
 3. **Buyer aggregation policy** (`buyer.toml` → `[aggregation] policy`) —
    how the buyer iterates across candidate listings.
 4. **Storefront fulfillment failure policy** (`storefront.toml` →
@@ -50,8 +52,11 @@ policies = [
 
 As an ordered list, the storefront runs entries in sequence at every
 `/negotiate/new` and `/negotiate/{id}` call. The **first** non-`None`
-decision returned terminates the chain. The **last** policy must always
-return a decision (it's the terminal); guards may return `None` to defer.
+decision returned terminates the chain; guards may return `None` to
+defer. There is no separate "terminal" policy type — every policy has
+the same shape — but a chain whose every entry defers raises
+`NegotiationChainExhausted` rather than substituting a default, so the
+**last** policy in a chain must always decide.
 
 As a table, the storefront keeps the default seller guards
 (`has_matching_inventory_guard`, `escrow_shape_guard`) and dispatches
@@ -81,16 +86,17 @@ or `policy = "..."` is used when one escrow kind needs its own sequence.
 | `has_matching_inventory_guard` | Guard | 0 | Rejects with `no_matching_inventory` if the seller's portfolio has no available resource matching the listing's `offer_resource`. |
 | `escrow_shape_guard` | Guard | every | Rejects with `escrow_field_mismatch` if any seller-pinned key on `accepted_escrows[i].literal_fields` doesn't equal the buyer's value in `escrow_proposal.literal_fields`. |
 | `max_rounds_guard` | Guard | every | Exits with `max_rounds_reached` once `len(history) >= [negotiation].max_rounds` (default 5). |
-| `bisection` | Terminal | every | Bisects between the seller's floor (`accepted_escrows[0]` primary rate × duration) and the peer's latest offer; accepts within ~1% convergence, counters at midpoint, exits with `price_unreasonable` when the peer's offer is below `floor / 1.5`. No ML dependencies. |
-| `rl` | Terminal | every | Loads the trained pufferlib checkpoint at `domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt` and produces the next move. Requires the `[rl]` extra (torch + pufferlib). Exits with `torch_unavailable` if torch isn't installed; exits with `model_missing` if the checkpoint isn't at the configured path. |
-| `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Terminal | every | Escrow-family names for the same scalar-`amount` bisection policy. Useful in `[negotiation.policies]` dispatch tables. |
-| `erc20_rl`, `native_token_rl`, `erc1155_rl` | Terminal | every | Escrow-family names for the same scalar-`amount` RL policy. Requires the same torch/checkpoint setup as `rl`. |
-| `accept_exact_listing` | Terminal | every | Accepts only when the buyer proposal exactly matches the selected listing escrow entry, listing-level demands, and concrete amount; rejects all mismatches and never counters. |
+| `bisection` | Decider | every | Bisects between the seller's floor (`accepted_escrows[0]` primary rate × duration) and the peer's latest offer; accepts within ~1% convergence, counters at midpoint, exits with `price_unreasonable` when the peer's offer is below `floor / 1.5`. No ML dependencies. |
+| `listed_price` | Decider | every | Accepts the peer's proposal when its amount is within the side's bound (≥ the floor in `maximize`, ≤ the ceiling in `minimize`); exits with `price_above_bound` otherwise. Never counters beyond the opening; accepts amountless escrow shapes as proposed. |
+| `rl` | Decider | every | Loads the trained pufferlib checkpoint at `domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt` and produces the next move. Requires the `[rl]` extra (torch + pufferlib). Exits with `torch_unavailable` if torch isn't installed; exits with `model_missing` if the checkpoint isn't at the configured path. |
+| `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Decider | every | Escrow-family names for the same scalar-`amount` bisection policy. Useful in `[negotiation.policies]` dispatch tables. |
+| `erc20_rl`, `native_token_rl`, `erc1155_rl` | Decider | every | Escrow-family names for the same scalar-`amount` RL policy. Requires the same torch/checkpoint setup as `rl`. |
+| `accept_exact_listing` | Decider | every | Accepts only when the buyer proposal exactly matches the selected listing escrow entry, listing-level demands, and concrete amount; rejects all mismatches and never counters. |
 | `buyer_escrow_shape_guard` | Guard | every | Buyer-side mirror of `escrow_shape_guard`: rejects when the seller's counter changes a field the buyer pinned at round 0 (excludes `amount`, which is what's being negotiated). |
 
-`bisection` is the safe default terminal. `rl` is opt-in — keep it out
-of the list unless torch is installed and the model file exists; the
-`/api/v1/system/status` `negotiation_strategy` check will catch a
+`bisection` is the seller's safe default decider. `rl` is opt-in — keep
+it out of the list unless torch is installed and the model file exists;
+the `/api/v1/system/status` `negotiation_strategy` check will catch a
 broken `rl` setup at startup.
 
 ## Storefront: fulfillment failure policy
@@ -180,29 +186,58 @@ policy name listed in `[negotiation] policies`.
 
 ---
 
-## Buyer: negotiation policies
+## Buyer: negotiation policy
 
 The buyer runs the **same middleware shape** as the seller — same
 `(history, context) -> (Maybe<Response>, Context)` contract, same
-`load_negotiation_chain()` registry. The difference is which middlewares
-make sense on each side: the buyer's default ships with a
-`buyer_escrow_shape_guard` (rejects seller counters that mutate buyer-
-pinned fields) plus a terminal (`bisection` or `rl`).
+`load_negotiation_chain()` registry. But the buyer's primary config
+surface is one level up: a named **buyer policy** (a `BuyerPolicy`
+object) that bundles the middleware chain with everything around it —
+which escrow formats it can negotiate (escrow tuple selection offers
+the policy only formats it claims), which pricing flags `buy` and
+`negotiate` expose, and how omitted flags are derived from the listing.
+The policy, not the verb, owns the pricing vocabulary: `--initial-price`
+/ `--max-price` / `--price-markup` are the scalar policies' flags, and a
+policy with no scalar notion would surface different ones (or none).
 
 ### Config
 
 ```toml
 [negotiation]
-policies = ["buyer_escrow_shape_guard", "bisection"]
+# The named buyer policy. Default "listed_price".
+# policy = "listed_price"
+
+# Explicit chain override — bypasses the policy's middleware list but
+# keeps the policy's CLI/derivation surface:
+# policies = ["buyer_escrow_shape_guard", "bisection"]
 
 # Legacy back-compat key (synthesized into
 # `["buyer_escrow_shape_guard", <policy_mode>]` when `policies` is absent):
 # policy_mode = "bisection"
 ```
 
-`policies` and `policy_mode` work the same way as on the seller — if
-both are unset, `negotiate_with_seller` falls through to its default
-chain (the same default the synthesis produces).
+With only `policy` set (or nothing), the chain is
+`["buyer_escrow_shape_guard", *policy.middlewares]`. An unknown `policy`
+name is an error — it never silently becomes the default. Per-verb
+overrides without a named flag go through the escape hatch
+`--policy-param name=value` (repeatable; values reach the chain's
+context verbatim).
+
+### Bundled buyer policies
+
+| Name | Behavior |
+|---|---|
+| `listed_price` *(default)* | Opens at the listing's advertised price and accepts anything at or under the buyer's bound; never counters. When flags are omitted, derives initial = max = the advertised rate (interactively confirmed under `buy`, where the user is approving the aggregation policy's pick; `--yes` or no TTY skips the prompt). `--price-markup` applies only when `--initial-price` alone is given. |
+| `bisection` | Haggles: opens below the ceiling (markup headroom) and bisects toward agreement. Opt-in — haggling rounds carry no information until proposals carry reasons for a new number. |
+
+Both scalar policies declare compatibility with scalar-`amount` escrow
+shapes (ERC20, native-token, ERC1155-style); a listing offering only
+exact-match formats is refused with "no compatible escrow format"
+rather than negotiated blindly.
+
+The run-log records the policy name and parameters at run start, and
+`--from <run_id>` resumes rebuild the chain under the recorded policy —
+not whatever the config says today.
 
 The buyer also supports the per-kind table form. It keeps
 `buyer_escrow_shape_guard` first and dispatches the terminal by the
@@ -216,20 +251,22 @@ erc1155 = "erc1155_bisection"
 default = "accept_exact_listing"
 ```
 
-### Bundled policies usable on the buyer side
+### Bundled middlewares usable on the buyer side
 
 The same registry serves both sides — every middleware listed in the
-seller's "Bundled policies" table above is importable here too. The
-ones that make sense buyer-side:
+seller's "Bundled policies" table above is importable in an explicit
+`[negotiation] policies` chain here too. The ones that make sense
+buyer-side:
 
 | Name | Why on the buyer side |
 |---|---|
 | `buyer_escrow_shape_guard` | Rejects any seller counter that diverges from a buyer-pinned escrow field (token, arbiter, escrow contract, expiration). Default first entry. |
 | `max_rounds_guard` | Same as seller — exits after `[negotiation].max_rounds`. |
-| `bisection` *(default terminal)* | Symmetric — bisects from the buyer's side (`minimize` direction). |
+| `listed_price` *(default decider)* | Accepts any seller number within the buyer's ceiling (`minimize` direction); exits otherwise. |
+| `bisection` | Symmetric — bisects from the buyer's side (`minimize` direction). |
 | `rl` | Symmetric — loads the buyer's trained checkpoint at `domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt`. |
-| `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Symmetric aliases for the scalar-`amount` bisection terminal. |
-| `erc20_rl`, `native_token_rl`, `erc1155_rl` | Symmetric aliases for the scalar-`amount` RL terminal. |
+| `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Symmetric aliases for the scalar-`amount` bisection decider. |
+| `erc20_rl`, `native_token_rl`, `erc1155_rl` | Symmetric aliases for the scalar-`amount` RL decider. |
 | `accept_exact_listing` | Useful for non-negotiated exact-match escrow kinds. |
 
 The seller-only guards (`has_matching_inventory_guard`,

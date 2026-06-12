@@ -429,7 +429,7 @@ domains/vms/storefront/src/market_storefront/
 │  │    │   ◦ has_matching_inventory_guard   │                    │ │
 │  │    │   ◦ escrow_shape_guard             │                    │ │
 │  │    │   ◦ max_rounds_guard               │                    │ │
-│  │    │   ◦ bisection (or rl) ← terminal   │                    │ │
+│  │    │   ◦ bisection (or rl) ← decides    │                    │ │
 │  │    └─────────┬──────────────────────────┘                    │ │
 │  │              ▼                                                 │ │
 │  │    NegotiationDecision {action, price, reason}                │ │
@@ -590,8 +590,8 @@ policy plugs in are:
 - **Seller-side per-round negotiation policies** (seller-only) — an
   ordered list of middlewares with signature
   `(history, context) -> (Maybe<Response>, Context)`. Guards short-
-  circuit with `reject`/`exit` when their preconditions fail; the
-  terminal policy (`bisection` or `rl`) always returns
+  circuit with `reject`/`exit` when their preconditions fail; the last
+  middleware (`bisection`, `listed_price`, or `rl`) always returns
   `counter`/`accept`/`exit`. Configured per-storefront in
   `[negotiation] policies = [...]` in `storefront.toml`.
 - **Storefront fulfillment failure policy** (seller-only) — a configured
@@ -627,12 +627,22 @@ refunds, and operator alerting.
   `escrow_not_in_accepted_set` or `escrow_field_mismatch` otherwise.
 - `max_rounds_guard` — exits with `max_rounds_reached` once
   `len(history) >= [negotiation].max_rounds` (default 5).
-- `bisection_middleware` — terminal. Bisects between `our_price` (the
+- `listed_price_middleware` — the buyer-side default. Accepts the
+  peer's proposal when its amount is within the bound
+  (`our_reference_amount`; ≤ in `minimize`, ≥ in `maximize`), exits
+  with `price_above_bound` otherwise; never counters beyond the
+  opening (when nothing has come from the peer it counters once at the
+  opening proposal). Amountless escrow shapes are accepted as
+  proposed. Rationale: haggling rounds carry no information today —
+  neither side exchanges *reasons* for a new number, so bisection
+  against a published floor is wasted network traffic; richer policies
+  return when proposals carry justification.
+- `bisection_middleware` — bisects between `our_price` (the
   listing's primary rate) and `their_price` (the peer's latest offer);
   accepts within ~1% convergence, counters at midpoint when feasible,
   exits with `price_unreasonable` when `their_price < our_price / 1.5`
   (maximize) or symmetrically (minimize).
-- `rl_middleware` — terminal (optional). Lazy-imports torch + the
+- `rl_middleware` — optional. Lazy-imports torch + the
   pufferlib checkpoint at
   `domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt`
   (or `_buyer.pt`). Exits with `torch_unavailable` if torch isn't
@@ -640,8 +650,15 @@ refunds, and operator alerting.
 
 **Chain runner:** `run_negotiation_chain(chain, history, context)` in
 `kit/policy/src/market_policy/negotiation_middleware.py`. Loops middlewares in order;
-returns the first `Some<Response>`; raises if the chain exhausts (the
-terminal middleware must always return `Some`).
+returns the first `Some<Response>`. There is no separate "terminal"
+middleware type — every middleware has the same shape, and whether one
+decides is not externally knowable, so nothing is ever appended to a
+chain *because* it passed (that would just run a different chain than
+the one configured). A chain whose every middleware passes raises
+`NegotiationChainExhausted`; the last middleware in a configured chain
+must therefore always decide. On the buyer side a mid-negotiation
+exhaustion releases the seller's live thread with a protocol-level exit
+(`buyer_chain_no_decision`) before the error propagates.
 
 **Negotiation direction:** determined by
 `domains.vms.listings.strategy.determine_strategy_from_resources()`.
@@ -1007,10 +1024,51 @@ is the same loop bound to a single known seller; both share
 
 The negotiation chain the buyer runs is built from the same
 `arkhai-kit-policy` middlewares the seller uses — both sides instantiate
-the chain via `load_negotiation_chain([...])`, with `bisection` as the
-default terminal (or `rl` behind the optional torch extra). Round-by-
-round events land in a per-run JSONL log under
+the chain via `load_negotiation_chain([...])`. Round-by-round events
+land in a per-run JSONL log under
 `$XDG_STATE_HOME/arkhai/buy-runs/<run_id>.jsonl` rather than a database.
+
+**Buyer negotiation policy surface.** The configured negotiation policy
+— not the schema plugin's CLI, not the round loop — is the interface to
+a deal's concrete escrow parameters. `market_policy.buyer_policy`
+defines `BuyerPolicy`: a named object declaring (a) which escrow formats
+it can negotiate (`compatible`, judged per `accepted_escrows` entry —
+tuple selection offers the policy only formats it claims, refusing with
+"no compatible escrow format" rather than taking `accepted_escrows[0]`
+and hoping), (b) its CLI parameter surface (`cli_params`, materialized
+as typer options on `buy`/`negotiate` at app-assembly time via
+`inject_policy_cli_params`, plus a `--policy-param key=value` escape
+hatch whose values reach the chain's context verbatim), (c) the
+middleware chain that runs the rounds, and (d) `derive_prices` — how raw
+parameter values plus the candidate listings become the chain's numeric
+inputs. The VM domain registers `listed_price` (default) and `bisection`
+in `domains/vms/buyer/policy_surface.py`; `[negotiation] policy` in
+`buyer.toml` names the configured one. This gives a three-way CLI split:
+core owns the verb skeleton, run-log chaining, and identity; the schema
+plugin owns *what* is bought (`--gpu-model` is plugin vocabulary); the
+policy owns *how it is paid for* (`--max-price` is policy vocabulary —
+the scalar trio `--initial-price`/`--max-price`/`--price-markup` belongs
+to the scalar policies and is hardcoded nowhere else).
+
+Conventions the surface enforces: a policy hook receives its own
+collected values as one `params` mapping, structurally separate from the
+canonical caller kwargs (`matches`, `console`, `interactive`) — no
+collisions, no reserved prefixes. `interactive` is computed once by
+core (`core_buyer.cli.interactive_disposition`: not `--yes` and stdin is
+a TTY); a policy never re-derives it. `buy` passes it (the user is
+confirming the listing the *aggregation* policy picked, since `buy`
+bundles discovery they never saw); `negotiate` passes False (the user
+chose the listing explicitly). Resolution is strict where it matters: a
+typo'd `[negotiation] policy` name errors instead of silently becoming
+the default. The round-0 opening is chain-driven (the chain runs on an
+empty history; an exit/reject opening means the seller is never
+contacted), and the run-log records the policy name + params at
+`run_started` so `--from` resumes rebuild the chain under the policy
+that opened the run, not whatever the config says today. When Part I's
+settlement-plan carrier lands, an interval-plan or bonded policy
+contributes its vocabulary (`--interval`, bond sizes) through this same
+seam — `listed_price` and the scalar flags are the degenerate
+single-scalar case.
 
 **Key source layout:**
 ```
@@ -1020,6 +1078,7 @@ domains/vms/buyer/
 │                           # network, config, logs
 ├── buy_orchestrator.py     # the one-shot buy flow
 ├── buyer_client.py         # signed HTTP client for /negotiate, /api/v1/settle
+├── policy_surface.py       # BuyerPolicy objects: listed_price + bisection
 ├── deal_helpers.py         # run-log recovery + chain settings helpers
 ├── aggregation.py          # across-seller aggregation policies
 ├── run_log.py              # JSONL run logs under XDG_STATE_HOME
@@ -1030,12 +1089,15 @@ domains/vms/buyer/
 reads the agreed terms from the run-log JSONL, creates the on-chain escrow
 under the buyer's wallet via `make_create_escrow_fn`, then POSTs
 `/api/v1/settle/{uid}` and polls for fulfillment. Both buyer and seller
-configure the negotiation chain via `[negotiation].policies` (ordered
-list, or per-kind table) in their respective TOMLs; the buyer's default
-(`["buyer_escrow_shape_guard", "bisection"]`) and the seller's
-(`["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]`)
-differ in the appropriate guards. Both honour the legacy
-`policy_mode = "bisection"|"rl"` key for back-compat.
+can configure the negotiation chain explicitly via
+`[negotiation] policies` (ordered list, or per-kind table) in their
+respective TOMLs; absent that, the buyer's chain is
+`["buyer_escrow_shape_guard", *policy.middlewares]` from the configured
+`[negotiation] policy` (default `listed_price`), and the seller's
+default is
+`["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]`.
+Both honour the legacy `policy_mode = "bisection"|"rl"` key for
+back-compat.
 
 ---
 
@@ -1044,17 +1106,21 @@ differ in the appropriate guards. Both honour the legacy
 Shared negotiation machinery + the RL training/eval tool. Two surfaces:
 
 - **Library**: `market_policy.{negotiation_middleware,
-  negotiation_thread, identity, ports}` — imported by both buyer and
-  seller. The middleware shape (`NegotiationContext`,
+  negotiation_thread, buyer_policy, identity, ports}` — imported by
+  both buyer and seller. The middleware shape (`NegotiationContext`,
   `NegotiationDecision`, `register_negotiation_middleware`,
   `load_negotiation_chain`, `run_negotiation_chain`) is the public
-  surface; built-in middlewares (`bisection_middleware`,
-  `has_matching_inventory_guard`, `escrow_shape_guard`,
-  `max_rounds_guard`, `buyer_escrow_shape_guard`,
+  surface; built-in middlewares (`listed_price_middleware`,
+  `bisection_middleware`, `has_matching_inventory_guard`,
+  `escrow_shape_guard`, `max_rounds_guard`, `buyer_escrow_shape_guard`,
   `accept_exact_listing`, and amount-policy aliases for ERC20,
   native-token, and ERC1155) ship registered. The shared
   escrow-kind dispatcher is constructed from config rather than
-  registered as a plain global middleware.
+  registered as a plain global middleware. `buyer_policy` owns the
+  `BuyerPolicy`/`PolicyParam` protocol + registry and
+  `inject_policy_cli_params` (see "Buyer negotiation policy surface"
+  above); concrete policy objects are registered by domain packages,
+  exactly like middlewares.
 - **CLI**: `market-policy train / eval / export` — invoked by policy
   authors to produce RL checkpoints that the `rl` terminal middleware
   loads at inference time.

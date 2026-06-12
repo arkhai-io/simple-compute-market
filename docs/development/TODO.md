@@ -118,6 +118,21 @@ dependency order:
    wherever listing detail should expose payment constraints; keep
    old-run-log compatibility code clearly marked legacy.
 
+   Deferred remainders from the buyer policy-surface work
+   (`ARCHITECTURE.md` → "Buyer negotiation policy surface"), each
+   parked behind an explicit trigger:
+   - hoist the `--yes` flag definition (and `inject_policy_cli_params`
+     invocation) from the schema plugin's `register()` into core's
+     `build_app` — when a second schema plugin shows what is invariant
+     (same criterion as the server scaffold);
+   - move the per-hour→absolute translation and token-decimals scaling
+     out of the CLI bodies into the policy object — when a policy with
+     non-per-hour semantics arrives;
+   - a `BuyerPolicy.prefer(candidates)` hook for policy-driven escrow
+     tuple choice among compatible entries — when policies need
+     different preferences (today selection takes the first compatible
+     entry).
+
 6. **PyPI re-setup after the rename:** the four published packages
    (`arkhai-kit-policy`, `arkhai-vms-provisioning`,
    `arkhai-core-storefront-client`, `arkhai-core-registry-client`) need
@@ -217,7 +232,7 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 
 - **Negotiation orphans:** The existence of `negotiation_watchdog.py` implies negotiations can get stuck. The trigger conditions and recovery behavior need documentation.
 
-- **Buyer's initial offer must meet the seller's floor price:** `domains.vms.listings.pricing.extract_initial_price_from_order()` returns `primary_rate_value(accepted_escrows[0])` (already in uint256-domain base units) as the seller's `our_price`. The `BisectionStrategy` in `maximize` direction exits with `"price_unreasonable"` if `their_price < our_price / 1.5`, and does not counter. If the buyer's `BUYER_INITIAL_PRICE` in the e2e test is below this floor, the seller exits at round 0 and `force-accept` returns 409. **Rule:** `BUYER_INITIAL_PRICE >= primary_rate_value(accepted_escrows[0])` in the e2e test constants.
+- **Buyer's initial offer must meet the seller's floor price:** `domains.vms.listings.pricing.extract_initial_price_from_order()` returns `primary_rate_value(accepted_escrows[0])` (already in uint256-domain base units) as the seller's `our_price`. The `BisectionStrategy` in `maximize` direction exits with `"price_unreasonable"` if `their_price < our_price / 1.5`, and does not counter. If the buyer's `BUYER_INITIAL_PRICE` in the e2e test is below this floor, the seller exits at round 0 and `force-accept` returns 409. **Rule:** `BUYER_INITIAL_PRICE >= primary_rate_value(accepted_escrows[0])` in the e2e test constants. Note this only bites where an opening below the listed price is possible — an explicit `--initial-price` or the opt-in `bisection` buyer policy; the default `listed_price` policy opens at the advertised rate, which satisfies the floor by construction.
 
 - **Global pause state persists across e2e test runs:** The storefront's `_GLOBALLY_PAUSED` flag (toggled by `POST /admin/pause` — distinct from per-listing `paused=True`) is in-process memory, not reset between `pytest` sessions. Neither full-deal scenario currently calls global `admin_pause` (storefront integration tests do, but those have their own teardown). The risk is a developer or external script having toggled it manually; the next `/negotiate/new` then 503s with `{"reason": "global"}` regardless of any per-listing state. The `ensure_storefront_resumed` autouse fixture in `e2e-tests/tests/e2e/roles/scenarios/conftest.py` mitigates this by calling `admin_resume()` in module teardown. If running against a live environment that may have been left paused, execute `curl -X POST http://localhost:8001/admin/resume -H "X-Admin-Key: <key>"` before running.
 

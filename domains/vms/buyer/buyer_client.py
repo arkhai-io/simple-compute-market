@@ -418,7 +418,7 @@ def negotiate_with_seller(
         ceiling_amount = float(max_price) * scale
 
         # Pin the buyer's first proposal: the policy chain owns the
-        # round-0 opening (design-negotiation-policy-surface.md) — run it
+        # round-0 opening (ARCHITECTURE.md, "Buyer negotiation policy surface") — run it
         # on an empty history and pin its proposal. Whether and where an
         # opening amount lands in the fields is the configured policy's
         # compatibility knowledge, not this loop's.

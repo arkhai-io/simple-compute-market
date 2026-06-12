@@ -286,7 +286,7 @@ def register(app: typer.Typer) -> None:
 
     Pricing flags are not defined here: the configured negotiation
     policy contributes its own parameter surface at app-assembly time
-    (design-negotiation-policy-surface.md) — the scalar policies
+    (ARCHITECTURE.md, "Buyer negotiation policy surface") — the scalar policies
     contribute --initial-price/--max-price/--price-markup, so the
     default surface is unchanged; a different policy contributes
     different knobs, plus the --policy-param escape hatch.

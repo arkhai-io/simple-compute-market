@@ -78,7 +78,7 @@ def select_escrow_entry(
     """Return one accepted escrow entry to negotiate against.
 
     ``compatible`` is the configured buyer policy's format predicate
-    (design-negotiation-policy-surface.md): entries the policy cannot
+    (ARCHITECTURE.md, "Buyer negotiation policy surface"): entries the policy cannot
     negotiate are never offered, so an incompatible-only listing yields
     None ("no compatible escrow format") instead of a tuple the
     strategy would mangle.

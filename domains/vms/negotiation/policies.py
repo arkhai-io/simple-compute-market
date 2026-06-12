@@ -124,7 +124,7 @@ def escrow_shape_uses_scalar_amount(proposal: dict[str, Any] | None) -> bool:
     """Whether this escrow shape is negotiated through a scalar ``amount``.
 
     The scalar policies' own compatibility knowledge
-    (design-negotiation-policy-surface.md): payment escrows carry
+    (ARCHITECTURE.md, "Buyer negotiation policy surface"): payment escrows carry
     ``fields.amount`` (or a fungible token without a tokenId, or a rate
     on the ``amount`` field); exact escrows (a specific NFT) do not, and
     a scalar policy leaves their fields untouched — take-it-or-leave.
@@ -260,7 +260,8 @@ def listed_price_middleware(
 ) -> NegotiationStep:
     """Pay the published price: accept within the bound, never haggle.
 
-    The buyer-side default terminal (design-negotiation-policy-surface.md).
+    The buyer-side default decider (ARCHITECTURE.md, "Buyer negotiation
+    policy surface").
     Haggling rounds carry no information today — neither side exchanges
     *reasons* for a new number, so counter-rounds against a seller whose
     floor is already published are wasted traffic. The buyer opens at

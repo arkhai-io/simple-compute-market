@@ -3,7 +3,7 @@
 A negotiation *middleware* (negotiation_middleware.py) is just the
 per-round decision function. A buyer **policy** is the whole interface
 to a deal's concrete escrow parameters
-(design-negotiation-policy-surface.md): it declares which escrow
+(ARCHITECTURE.md, "Buyer negotiation policy surface"): it declares which escrow
 formats it can negotiate, which middleware chain runs the rounds, what
 CLI parameters exist (and whether they are transparent like
 ``--max-price`` or opaque like ``--budget``), and how raw parameter

@@ -1,7 +1,7 @@
 """The VM domain's buyer policy objects.
 
 Concrete ``BuyerPolicy`` registrations for the scalar-amount escrow
-formats the VM market trades in (design-negotiation-policy-surface.md).
+formats the VM market trades in (ARCHITECTURE.md, "Buyer negotiation policy surface").
 Both scalar policies share the same parameter surface and format
 compatibility; they differ only in the middleware terminal:
 
