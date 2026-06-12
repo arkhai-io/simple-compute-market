@@ -294,10 +294,18 @@ second scheme (the buyer pass-through middleware can ship from day one
    tables + router and re-exports the model names through `db.models`.
    Pure move otherwise — payload shapes byte-identical, ledger unit
    tests moved to `core/site/tests`.
-3. **Tokens service.** Keys/grants/balance/consumption schema, quota
-   ledger mount, issuance job (idempotent on `escrow_uid`, with the
-   authoritative ownership re-check at grant time), consume/verify/
-   batch API, admin surface, key→owner lookup for the seller guards.
+3. **Tokens service.** *(Done.)* `arkhai-apitokens-service`
+   (`domains/apitokens/service/`, provisioning-service shape: FastAPI +
+   SQLite + dynaconf + X-Admin-Key gate, router factories instead of a
+   DI framework). Keys/grants/balance/consumption schema; the quota
+   ledger mounted from `core_site` (which grew the generic `units`
+   claim key, per-host `required_attributes`, and open-ended commits
+   for it); `POST /issuance` idempotent on `escrow_uid` with the
+   authoritative ownership re-check at grant time (deterministic
+   new-key ids per escrow; secret rotation on retry of an unused key so
+   a lost response can't strand the buyer); consume/verify/batch API;
+   admin surface; `GET /keys/{id}` is the seller guards' key→owner
+   lookup. Dockerfile/compose wiring rides the e2e topology (item 6).
 4. **Concept modules + storefront.** `domains/apitokens/{listings,
    negotiation,settlement}` hooks (quota guard,
    `key_owned_by_buyer_wallet` guard, issuance submission, failure
