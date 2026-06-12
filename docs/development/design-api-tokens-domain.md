@@ -279,15 +279,21 @@ second scheme (the buyer pass-through middleware can ship from day one
 ## Work items
 
 1. **Schema identity in the filter-spec + second registry.**
-   `schema: {id, version}` header in `filter-spec.yaml`, surfaced by
-   the registry client; plugins declare their schema id; buyer fan-in
-   matches plugins to registries. Deploy the api-tokens registry in
-   compose/e2e. (Retires TODO item 4's minimal core.)
-2. **Site-authority ledger extraction.** Lift the quota/allocation
-   ledger + `/api/v1/capacity/*` controller out of the VM provisioning
-   service into a shared package; the VM service re-mounts it
-   unchanged (pure move, gated on its suites + canonical e2e before
-   any tokens code exists).
+   *(Mechanics done.)* `schema: {id, version}` header in
+   `filter-spec.yaml` (shipped spec declares `vms.compute`; etag
+   participation only when declared), surfaced by the registry client;
+   `resolve_indexer_urls_for_schema` drops registries declaring a
+   *different* id (lenient on undeclared/unreachable; singleton lists
+   skip the fetch); VM plugin discovery verbs resolve through it.
+   Remaining: deploy the api-tokens registry in compose/e2e — rides
+   with the domain (items 4/6). (Retires TODO item 4's minimal core.)
+2. **Site-authority ledger extraction.** *(Done.)* `arkhai-core-site`
+   (`core/site/`, import `core_site`): ledger, tables (own metadata),
+   and a `make_capacity_router(get_ledger)` factory replacing the
+   container-coupled controller; the VM provisioning service mounts
+   tables + router and re-exports the model names through `db.models`.
+   Pure move otherwise — payload shapes byte-identical, ledger unit
+   tests moved to `core/site/tests`.
 3. **Tokens service.** Keys/grants/balance/consumption schema, quota
    ledger mount, issuance job (idempotent on `escrow_uid`, with the
    authoritative ownership re-check at grant time), consume/verify/

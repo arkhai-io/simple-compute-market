@@ -83,7 +83,8 @@ COPY --chown=appuser:appuser domains/vms/provisioning/service/src ./src
 # otherwise pin a stale copy from an earlier build.
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
     uv sync --no-dev --no-install-project --find-links /dist \
-        --refresh-package arkhai-core-storefront-client
+        --refresh-package arkhai-core-storefront-client \
+        --refresh-package arkhai-core-site
 
 # Stage 2: Runtime
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime

@@ -141,6 +141,19 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-core-site"
+version = "0.1.0"
+source = { registry = "../../../../.dist" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "pydantic" },
+    { name = "sqlalchemy" },
+]
+wheels = [
+    { path = "arkhai_core_site-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-core-storefront-client"
 version = "0.15.0"
 source = { registry = "../../../../.dist" }
@@ -158,6 +171,7 @@ version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
+    { name = "arkhai-core-site" },
     { name = "arkhai-core-storefront-client" },
     { name = "cachetools" },
     { name = "cryptography" },
@@ -184,6 +198,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
+    { name = "arkhai-core-site", specifier = ">=0.1.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.11.0" },
     { name = "cachetools", specifier = ">=5.3" },
     { name = "cryptography", specifier = ">=42.0" },

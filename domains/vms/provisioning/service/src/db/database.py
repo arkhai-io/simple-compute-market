@@ -37,4 +37,8 @@ def create_session_factory(engine: Engine) -> sessionmaker[Session]:
 def init_db(engine: Engine) -> None:
     """Create all tables. Called once during application startup."""
     Base.metadata.create_all(bind=engine)
+    # Site-authority ledger tables ride the shared core_site
+    # metadata (db.models re-exports the classes).
+    from core_site.db import Base as SiteBase
+    SiteBase.metadata.create_all(bind=engine)
     apply_schema_migrations(engine)

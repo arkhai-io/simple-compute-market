@@ -6,7 +6,7 @@ from config import settings
 from db.database import create_db_engine, create_session_factory
 from services.ansible_service import AnsibleService
 from services.async_job_queue import AsyncJobQueue
-from services.capacity_ledger import CapacityLedgerService
+from core_site.ledger import CapacityLedgerService
 from services.host_service import HostService
 from services.job_service import AnsibleJobService
 from services.lease_lifecycle_service import LeaseLifecycleService

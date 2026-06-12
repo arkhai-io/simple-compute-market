@@ -33,7 +33,7 @@ from models.lease_model import (
     LeaseListResponse,
     LeaseResponse,
 )
-from services.capacity_ledger import CapacityLedgerService, _parse_utc
+from core_site.ledger import CapacityLedgerService, parse_utc as _parse_utc
 
 logger = logging.getLogger(__name__)
 

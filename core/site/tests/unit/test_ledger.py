@@ -9,8 +9,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from db.models import Base
-from services.capacity_ledger import CapacityConflictError, CapacityLedgerService
+from core_site.db import Base
+from core_site.ledger import CapacityConflictError, CapacityLedgerService
 
 
 @pytest.fixture
@@ -114,7 +114,7 @@ def test_ttl_hold_expires_without_commit(seeded: CapacityLedgerService):
     assert seeded.reserve(claim={"gpu_count": 1}, deal_ref={}) is None
 
     # Backdate the hold past its TTL; the next read lapses it.
-    from db.models import SiteAllocation
+    from core_site.db import SiteAllocation
     with seeded._session_factory() as db:
         row = db.get(SiteAllocation, reserved["allocation_id"])
         row.hold_expires_at = (

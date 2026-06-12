@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from db.models import Base
-from services.capacity_ledger import CapacityLedgerService
+from core_site.ledger import CapacityLedgerService
 from services.lease_lifecycle_service import LeaseLifecycleService
 
 
@@ -30,6 +30,9 @@ def session_factory():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
+    # Site-ledger tables ride core_site's own metadata.
+    from core_site.db import Base as SiteBase
+    SiteBase.metadata.create_all(bind=engine)
     return sessionmaker(bind=engine)
 
 

@@ -32,7 +32,7 @@ from typing import Any, Mapping, Optional
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from db.models import (
+from .db import (
     HELD_ALLOCATION_STATES,
     AllocationState,
     CapacityEvent,
@@ -47,7 +47,7 @@ class CapacityConflictError(Exception):
     """Raised when a mutation references a row in an incompatible state."""
 
 
-def _parse_utc(value: str | None) -> Optional[datetime]:
+def parse_utc(value: str | None) -> Optional[datetime]:
     """Tolerantly parse the ISO-ish timestamp strings the ledger stores.
 
     Accepts ``YYYY-MM-DD HH:MM[:SS]`` (the storefront's lease format) and
@@ -375,7 +375,7 @@ class CapacityLedgerService:
                 .all()
             )
             for allocation in rows:
-                lease_end = _parse_utc(allocation.lease_end_utc)
+                lease_end = parse_utc(allocation.lease_end_utc)
                 if lease_end is not None and lease_end <= now:
                     due.append(self._allocation_payload(allocation))
         return due
@@ -483,7 +483,7 @@ class CapacityLedgerService:
         )
         lapsed = False
         for allocation in stale:
-            expires = _parse_utc(allocation.hold_expires_at)
+            expires = parse_utc(allocation.hold_expires_at)
             if expires is None or expires > now:
                 continue
             allocation.state = AllocationState.released.value

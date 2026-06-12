@@ -200,7 +200,7 @@ class LeaseLifecycleService:
         but we proceed) releases normally; "forced" means the grace
         period elapsed without the teardown check completing.
         """
-        from services.capacity_ledger import _parse_utc
+        from core_site.ledger import parse_utc as _parse_utc
 
         lease_end = _parse_utc(allocation.get("lease_end_utc")) or now
         past_grace = now >= lease_end + timedelta(seconds=grace_seconds)

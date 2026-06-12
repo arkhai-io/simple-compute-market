@@ -99,6 +99,7 @@ scripts (`market`, `market-storefront`, `market-policy`) are unchanged.
 | core | `arkhai-core-storefront` (`core/storefront/`) | storefront role shell (library, framework-free): sync-negotiation protocol, registry publication, stage log, auth, HTTP models, capacity-client contract |
 | core | `arkhai-core-registry` (`core/registry/`) | registry service; schema injected as `filter-spec.yaml` config |
 | core | `arkhai-core-registry-client`, `arkhai-core-storefront-client` | protocol clients |
+| core | `arkhai-core-site` (`core/site/`) | site-authority scaffold: capacity ledger, ledger tables, `/api/v1/capacity/*` router — mounted by a hosting service per site |
 | kit | `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-alkahest`, `arkhai-kit-config` | from-below capabilities; alkahest is the first *settlement-mechanism codec* |
 | domain | `arkhai-vms-buyer` (`domains/vms/buyer/`) | no console script — publishes the `vms.compute` plugin the core `market` CLI discovers |
 | domain | `arkhai-vms-storefront` (`domains/vms/storefront/`) | the VM storefront executable/composition root (FastAPI adapters over core) |
@@ -1946,13 +1947,18 @@ service stood; the storefront's SQLite holds market state only).
 
 ### Current implementation
 
-The site authority is hosted by the provisioning service:
-`site_resources` / `site_allocations` (the storefront's hold and the
-lease's temporal tail as one row, TTL soft holds supported at the
-ledger) plus the `capacity_events` pull feed, exposed at
-`/api/v1/capacity/*` (resources PUT/GET, `snapshot`, `probe`,
-`reservations`, `allocations/{id}/commit`, `releases`,
-`allocations/{id}/truncate-lease`, `allocations`, `events`) mirroring
+The site-authority scaffold is the shared `arkhai-core-site` package
+(`core/site/`, import `core_site`): the ledger
+(`CapacityLedgerService`), its tables — `site_resources` /
+`site_allocations` (the storefront's hold and the lease's temporal
+tail as one row, TTL soft holds supported at the ledger) plus the
+`capacity_events` pull feed — and the `/api/v1/capacity/*` router
+(resources PUT/GET, `snapshot`, `probe`, `reservations`,
+`allocations/{id}/commit`, `releases`,
+`allocations/{id}/truncate-lease`, `allocations`, `events`). A hosting
+service mounts the tables on its engine and the router on its app; the
+VM provisioning service is the first host (the API-tokens service is
+the second). The surface mirrors
 the `CapacityClient` contract defined in `core_storefront.capacity`
 (snapshot/probe/reserve(+TTL)/commit/release/truncate-lease/subscribe,
 plus the anonymous versioned `CapacityDelta` carrier and in-process

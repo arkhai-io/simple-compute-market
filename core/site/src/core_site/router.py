@@ -1,28 +1,30 @@
-"""Site-authority capacity API.
+"""Site-authority capacity API router.
 
-All endpoints are under ``/api/v1/capacity`` and mirror the
-``core_storefront.capacity.CapacityClient`` contract verb for verb, plus
-the resource registry and the versioned event feed (pull model with
-snapshot resync — see the design doc's event-model section).
+All endpoints are under ``/capacity`` (mount with ``prefix="/api/v1"``)
+and mirror the ``core_storefront.capacity.CapacityClient`` contract verb
+for verb, plus the resource registry and the versioned event feed (pull
+model with snapshot resync).
 
-Authentication rides the existing service-wide ``X-Admin-Key``
-middleware: capacity is the same trust domain as job submission — a
-caller that may create VMs may also reserve the capacity they run on.
+Authentication is the mounting service's concern: capacity is the same
+trust domain as job submission — a caller that may create workloads may
+also reserve the capacity they run on — so the host service's existing
+admin middleware covers this router when mounted on the same app.
 
-Router registration (main.py)::
+Router registration::
 
-    app.include_router(CapacityController.make_router(), prefix="/api/v1")
+    app.include_router(
+        make_capacity_router(lambda: resolved_ledger), prefix="/api/v1",
+    )
 """
 
 from __future__ import annotations
 
 import logging
+from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi_utils.cbv import cbv
 
-import container as _container_module
-from models.capacity_model import (
+from .http_models import (
     AllocationListResponse,
     AllocationResponse,
     CapacityEventsResponse,
@@ -36,22 +38,20 @@ from models.capacity_model import (
     SnapshotResponse,
     TruncateLeaseRequest,
 )
-from services.capacity_ledger import CapacityConflictError, CapacityLedgerService
+from .ledger import CapacityConflictError, CapacityLedgerService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/capacity", tags=["capacity"])
 
+def make_capacity_router(
+    get_ledger: Callable[[], CapacityLedgerService],
+) -> APIRouter:
+    """Build the ``/capacity`` router over a ledger provider.
 
-@cbv(router)
-class CapacityController:
-    def __init__(
-        self,
-        ledger: CapacityLedgerService = Depends(
-            lambda: _container_module.resolved_capacity_ledger_service
-        ),
-    ) -> None:
-        self._ledger = ledger
+    ``get_ledger`` is called per request (FastAPI dependency), so the
+    mounting service may resolve the ledger from its own container.
+    """
+    router = APIRouter(prefix="/capacity", tags=["capacity"])
 
     # ------------------------------------------------------------------
     # Resource registry
@@ -62,14 +62,16 @@ class CapacityController:
         summary="Register or update a ledger resource",
     )
     def register_resource(
-        self, resource_id: str, body: ResourceRegisterRequest
+        resource_id: str,
+        body: ResourceRegisterRequest,
+        ledger: CapacityLedgerService = Depends(get_ledger),
     ) -> dict:
         """Upsert a resource row in the site ledger.
 
         Called by the storefront when inventory is registered (remote
         capacity mode) or by operators/seeding directly.
         """
-        resource = self._ledger.register_resource(
+        resource = ledger.register_resource(
             resource_id=resource_id,
             total_units=body.total_units,
             resource_type=body.resource_type,
@@ -88,8 +90,10 @@ class CapacityController:
         response_model=ResourceListResponse,
         summary="List ledger resources with availability",
     )
-    def list_resources(self) -> ResourceListResponse:
-        resources = self._ledger.list_resources()
+    def list_resources(
+        ledger: CapacityLedgerService = Depends(get_ledger),
+    ) -> ResourceListResponse:
+        resources = ledger.list_resources()
         return ResourceListResponse(resources=resources, total=len(resources))
 
     # ------------------------------------------------------------------
@@ -101,18 +105,23 @@ class CapacityController:
         response_model=SnapshotResponse,
         summary="Advisory availability snapshot",
     )
-    def snapshot(self) -> SnapshotResponse:
+    def snapshot(
+        ledger: CapacityLedgerService = Depends(get_ledger),
+    ) -> SnapshotResponse:
         """Negotiation-time policy input; consumes nothing."""
-        return SnapshotResponse(resources=self._ledger.snapshot())
+        return SnapshotResponse(resources=ledger.snapshot())
 
     @router.post(
         "/probe",
         response_model=MatchResponse,
         summary="Dry-run claim match",
     )
-    def probe(self, body: ProbeRequest) -> MatchResponse:
+    def probe(
+        body: ProbeRequest,
+        ledger: CapacityLedgerService = Depends(get_ledger),
+    ) -> MatchResponse:
         try:
-            return MatchResponse(match=self._ledger.probe(claim=body.claim))
+            return MatchResponse(match=ledger.probe(claim=body.claim))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
@@ -121,7 +130,10 @@ class CapacityController:
         response_model=AllocationResponse,
         summary="Atomically check-and-reserve capacity",
     )
-    def reserve(self, body: ReserveRequest) -> AllocationResponse:
+    def reserve(
+        body: ReserveRequest,
+        ledger: CapacityLedgerService = Depends(get_ledger),
+    ) -> AllocationResponse:
         """Reserve capacity matching the claim.
 
         Returns ``allocation: null`` (not an error status) when nothing
@@ -129,7 +141,7 @@ class CapacityController:
         around, not an exceptional condition.
         """
         try:
-            allocation = self._ledger.reserve(
+            allocation = ledger.reserve(
                 claim=body.claim,
                 deal_ref=body.deal_ref,
                 ttl_seconds=body.ttl_seconds,
@@ -143,9 +155,13 @@ class CapacityController:
         response_model=AllocationResponse,
         summary="Confirm a reservation into an active lease",
     )
-    def commit(self, allocation_id: str, body: CommitRequest) -> AllocationResponse:
+    def commit(
+        allocation_id: str,
+        body: CommitRequest,
+        ledger: CapacityLedgerService = Depends(get_ledger),
+    ) -> AllocationResponse:
         try:
-            allocation = self._ledger.commit(
+            allocation = ledger.commit(
                 resource_id=body.resource_id,
                 allocation_id=allocation_id,
                 lease_end_utc=body.lease_end_utc,
@@ -165,13 +181,16 @@ class CapacityController:
         response_model=AllocationResponse,
         summary="Return held capacity to the pool",
     )
-    def release(self, body: ReleaseRequest) -> AllocationResponse:
+    def release(
+        body: ReleaseRequest,
+        ledger: CapacityLedgerService = Depends(get_ledger),
+    ) -> AllocationResponse:
         """Release by allocation_id or by deal ref (escrow_uid).
 
         Idempotent: releasing an already-released or unknown allocation
         returns ``allocation: null``.
         """
-        return AllocationResponse(allocation=self._ledger.release(
+        return AllocationResponse(allocation=ledger.release(
             allocation_id=body.allocation_id,
             deal_ref=body.deal_ref,
             failure_reason=body.failure_reason,
@@ -184,7 +203,9 @@ class CapacityController:
         summary="End a lease early",
     )
     def truncate_lease(
-        self, allocation_id: str, body: TruncateLeaseRequest
+        allocation_id: str,
+        body: TruncateLeaseRequest,
+        ledger: CapacityLedgerService = Depends(get_ledger),
     ) -> AllocationResponse:
         """Shorten an active lease (settlement decided the deal is over).
 
@@ -192,7 +213,7 @@ class CapacityController:
         lease-end path; returns ``allocation: null`` when the allocation
         is unknown or no longer held.
         """
-        return AllocationResponse(allocation=self._ledger.truncate_lease(
+        return AllocationResponse(allocation=ledger.truncate_lease(
             allocation_id=allocation_id,
             lease_end_utc=body.lease_end_utc,
         ))
@@ -207,11 +228,11 @@ class CapacityController:
         summary="List ledger allocations",
     )
     def list_allocations(
-        self,
         state: str | None = Query(default=None),
         escrow_uid: str | None = Query(default=None),
+        ledger: CapacityLedgerService = Depends(get_ledger),
     ) -> AllocationListResponse:
-        allocations = self._ledger.list_allocations(state=state)
+        allocations = ledger.list_allocations(state=state)
         if escrow_uid is not None:
             allocations = [
                 a for a in allocations if a.get("escrow_uid") == escrow_uid
@@ -225,8 +246,11 @@ class CapacityController:
         response_model=AllocationResponse,
         summary="Get a ledger allocation",
     )
-    def get_allocation(self, allocation_id: str) -> AllocationResponse:
-        allocation = self._ledger.get_allocation(allocation_id)
+    def get_allocation(
+        allocation_id: str,
+        ledger: CapacityLedgerService = Depends(get_ledger),
+    ) -> AllocationResponse:
+        allocation = ledger.get_allocation(allocation_id)
         if allocation is None:
             raise HTTPException(
                 status_code=404,
@@ -244,18 +268,16 @@ class CapacityController:
         summary="Versioned capacity-change feed",
     )
     def events(
-        self,
         after: int = Query(default=0, ge=0, description="Last applied version."),
         limit: int = Query(default=500, ge=1, le=5000),
+        ledger: CapacityLedgerService = Depends(get_ledger),
     ) -> CapacityEventsResponse:
         """Anonymous availability deltas newer than ``after``.
 
         Events carry *that* availability changed and where — never whose
         deal caused it.
         """
-        events, latest = self._ledger.events_after(after, limit=limit)
+        events, latest = ledger.events_after(after, limit=limit)
         return CapacityEventsResponse(events=events, latest_version=latest)
 
-    @classmethod
-    def make_router(cls) -> APIRouter:
-        return router
+    return router
