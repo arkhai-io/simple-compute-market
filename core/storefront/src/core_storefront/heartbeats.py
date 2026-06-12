@@ -1,7 +1,8 @@
 """Deal heartbeat mechanics: validation, replay protection, persistence.
 
-Work item I.4 of ``docs/development/design-settlement-lifecycle-and-
-capacity.md``. Heartbeats are off-chain signed messages from buyer to
+The heartbeat channel of the settlement lifecycle
+(``docs/development/ARCHITECTURE.md``, "Settlement Lifecycle").
+Heartbeats are off-chain signed messages from buyer to
 seller attesting "the service is healthy, keep collecting": the buyer
 emits them while satisfied, the seller persists them as evidence for
 oracle bundles, and missing heartbeats are how a deal ends early.

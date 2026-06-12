@@ -2,7 +2,7 @@
 
 The authoritative capacity ledger lives in site authorities (hosted by
 the provisioning service —
-docs/development/design-settlement-lifecycle-and-capacity.md, Part II);
+docs/development/ARCHITECTURE.md, "Capacity and the Site Authority");
 the storefront is strictly a client. ``RemoteCapacityClient`` speaks
 one authority's ``/api/v1/capacity`` HTTP surface;
 ``build_capacity_client`` assembles the configured authorities behind

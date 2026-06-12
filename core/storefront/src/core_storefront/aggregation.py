@@ -2,7 +2,7 @@
 
 The aggregator answers the design doc's "two machines in two
 datacenters, one listing, depletes only when both are depleted"
-(docs/development/design-settlement-lifecycle-and-capacity.md, Part II):
+(docs/development/ARCHITECTURE.md, "Capacity and the Site Authority"):
 a soft-state view over N hard-state site ledgers, reached only through
 their ``CapacityClient`` interfaces. It holds no capacity itself —
 availability is a union over member sites, a reserve is routed to one

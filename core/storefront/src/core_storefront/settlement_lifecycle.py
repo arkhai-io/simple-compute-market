@@ -1,12 +1,12 @@
 """Deal-servicing engine mechanics: persisted claims driven to terminal.
 
-Work item I.3 of ``docs/development/design-settlement-lifecycle-and-
-capacity.md``. A claim is the claimant-side servicing record for one
-settlement-plan obligation: once the deal is fulfilled, someone must
-check the obligation's conditions, collect when they pass, retry when
-they don't yet, and give up cleanly when the window closes. Today that
-someone is nobody — fulfillment fires ``request_arbitration`` and
-forgets, and nothing ever collects.
+The seller half of the settlement lifecycle engine
+(``docs/development/ARCHITECTURE.md``, "Settlement Lifecycle"). A
+claim is the claimant-side servicing record for one settlement-plan
+obligation: once the deal is fulfilled, someone must check the
+obligation's conditions, collect when they pass, retry when they
+don't yet, and give up cleanly when the window closes. That someone
+is this engine — fulfillment submits a claim and nothing else.
 
 Core owns the mechanics only: the claim state machine, the
 retry/backoff scheduler, and the event hook points. The engine drives

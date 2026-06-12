@@ -1,7 +1,7 @@
 """Site-authority capacity ledger.
 
 The authoritative resource ledger for this site
-(docs/development/design-settlement-lifecycle-and-capacity.md, Part II):
+(docs/development/ARCHITECTURE.md, "Capacity and the Site Authority"):
 unit-counted resources, allocation holds with their lease tail, and the
 anonymous versioned capacity-event feed. Storefronts reach it through
 the ``/api/v1/capacity`` HTTP surface, which mirrors the

@@ -20,7 +20,7 @@ The README frames this as a market for "anything"; the structural test that make
 
 > **A behavior belongs in the market core (composed "from above") if and only if it is invariant across every possible listing schema. If it varies by schema, it is a utility composed "from below" that the core invokes through an injected hook** — and "requiring the hook" is the from-above part; "implementing it" is from-below.
 
-- **From above** — the role contracts (buyer, seller, indexer) and the three market processes (discovery, negotiation/aggregation, settlement), expressed purely in terms of injected dependencies and schema-opaque primitives. `core_buyer.run_buy(...)` is already this shape: a linear discover→negotiate→settle flow with high-level `negotiate` and `settle` hooks. The current compute instantiation still adapts legacy finer-grained hooks (`build_escrow_proposal`, `build_escrow_terms`, `create_escrow`, …) into that surface.
+- **From above** — the role contracts (buyer, seller, indexer) and the four market processes (discovery, negotiation/aggregation, settlement, servicing), expressed purely in terms of injected dependencies and schema-opaque primitives. `core_buyer.run_buy(...)` is already this shape: a linear discover→negotiate→settle flow with high-level `negotiate` and `settle` hooks (servicing runs as separate long-lived engines — see "Settlement Lifecycle"). The current compute instantiation still adapts legacy finer-grained hooks (`build_escrow_proposal`, `build_escrow_terms`, `create_escrow`, …) into that surface.
 - **From below** — concrete, mutually-independent utilities: negotiation middlewares (`arkhai-kit-policy`), identity schemes (`arkhai-kit-identity`), generic schemas (`arkhai-core`), settlement kits (`arkhai-kit-alkahest`), shared config (`arkhai-kit-config`), infra clients (chain, registry-client). The defining property is "depended on, never depending up into the skeleton" — not "packaged as one wheel."
 - **A market instantiation** for a given asset class / listing schema wires from-below implementations into the from-above hooks, and *uses* the from-below utilities inside those implementations.
 
@@ -28,15 +28,26 @@ Negotiation is an exchange of **messages** — opaque, schema-defined units pass
 
 ```
 terms   = negotiate(messages…)
-receipt = settle(terms)
+plan    = settle(terms)          # materialize the settlement plan (escrows/bonds)
+receipt = service(plan)          # drive obligations + claims to completion
 ```
 
-Negotiation reduces a message history to a `Terms` value; settlement consumes that `Terms` to produce a `Receipt`. That is the whole of what the core knows about the exchange:
+Negotiation reduces a message history to a `Terms` value; settlement materializes that `Terms` into an active **settlement plan**; servicing drives the plan's obligations and claims to a `Receipt`. That is the whole of what the core knows about the exchange:
 
 1. messages flow between participants (opaque content);
 2. a negotiation terminates by reducing its history to `Terms`;
-3. `settle(Terms) → Receipt`;
-4. settlement runs and reports success or failure.
+3. `settle(Terms) → Plan` materializes the agreed obligations;
+4. `service(Plan) → Receipt` is the long-running part: conditions are
+   checked, claims collected, defaults reacted to — possibly long after
+   fulfillment, possibly repeatedly (per interval).
+
+Servicing is a separate phase, not a fattening of `settle`, by the
+merge-vs-separate test below: core machinery (persistence, scheduling,
+chain watching) sits in the gap between "escrows materialized" and
+"funds collected". The degenerate case is current single-escrow
+behavior — a plan with one escrow whose condition is immediately true
+collapses servicing to a single collect, so the simple flow is the
+trivial instance of the engine, not a parallel code path.
 
 Everything else is schema-defined: message content (offer, counter, bid, acceptance are schema vocabulary), how a participant chooses its next message, and how `Terms` are validated. Seller-advertised fields (`accepted_escrows`, `min_price`, `max_duration_seconds`, …) are listing data; a policy decides whether to read them as a whitelist, a floor, a ceiling, or a soft predicate, and whether a mismatched message draws a rejection, a counter, a correction, or an acceptance. Every dimension of a message — price, escrow shape, duration — is handled the same way: by the negotiation chain, against the advertised data.
 
@@ -83,7 +94,7 @@ scripts (`market`, `market-storefront`, `market-policy`) are unchanged.
 
 | Layer | Distribution (path) | Role |
 |---|---|---|
-| core | `arkhai-core` (`core/`) | protocol-carrier wheel: negotiation/settlement wire shapes both roles must derive identically. Stdlib + pydantic only. |
+| core | `arkhai-core` (`core/`) | protocol-carrier wheel: negotiation/settlement wire shapes both roles must derive identically. Stdlib + pydantic only; zero domain vocabulary and zero settlement-mechanism vocabulary (lifecycle universals + `{mechanism, params}` envelope — see "Settlement Lifecycle"). |
 | core | `arkhai-core-buyer` (`core/buyer/`) | buyer role shell: `market` console script, verb skeleton, `market.buyer_plugins` entry-point discovery, `run_buy` orchestration, registry fan-in |
 | core | `arkhai-core-storefront` (`core/storefront/`) | storefront role shell (library, framework-free): sync-negotiation protocol, registry publication, stage log, auth, HTTP models, capacity-client contract |
 | core | `arkhai-core-registry` (`core/registry/`) | registry service; schema injected as `filter-spec.yaml` config |
@@ -111,15 +122,18 @@ kit and concept modules import no core/composition packages
 `market_core` imports nothing beyond stdlib + pydantic
 (`core/tests/unit/test_carrier_purity.py`); core never imports
 `domains.*` (plugin inversion on the buyer, injected hooks on the
-storefront).
+storefront — `core/buyer/tests/unit/test_cli.py` asserts the no-plugin
+core CLI has no concrete market behavior, and
+`domains/vms/buyer/tests/test_plugin_export.py` asserts the VM plugin
+is discovered through real entry-point metadata).
 
 Remaining divergences are aggregated in [`TODO.md`](TODO.md) → "Core
-Stack"; the two design records are
-[`design-market-core-extraction.md`](design-market-core-extraction.md)
-(decisions behind the split) and
-[`design-settlement-lifecycle-and-capacity.md`](design-settlement-lifecycle-and-capacity.md)
-(the follow-on behavior work: settlement lifecycles, mechanism-neutral
-plan carrier, site authority).
+Stack"; the architectural items still open (plan shapes, mechanism
+vocabulary, multi-domain capacity dispatch) are planned with their
+design context in
+[`design-remaining-work.md`](design-remaining-work.md). The
+extraction and settlement/capacity design docs that preceded this
+state are retired — their decisions are folded into this file.
 
 ### Technology Anchors
 
@@ -315,16 +329,19 @@ listing (the registry creates its publisher row lazily).
 **Compute inventory and dynamic listings:**
 
 For compute resources, the storefront owns the market-facing inventory
-projection and allocation ledger. The provisioning service owns execution
-facts about VMs and leases; it does not decide what should be advertised
-to buyers.
+projection; the authoritative capacity ledger lives in the **site
+authority** (hosted by the provisioning service — see "Capacity and the
+Site Authority"). The storefront is strictly a capacity *client*: every
+hold, commit, release, and lease truncation goes through the
+`CapacityClient` boundary, and its SQLite holds market state only.
 
 The storefront stores concrete imported resources in `resources`. Those
 rows are grouped into `compute_inventory_pools`, with
-`compute_pool_members` linking each concrete `resource_id` to a pool.
-Existing resources are backfilled into one-member pools. Multiple rows
-can opt into fungible capacity by sharing `attribute.pool_id` in the CSV
-or import payload; listings can then represent capacity across equivalent
+`compute_pool_members` linking each member — keyed by
+`(site, resource_id)`, NULL site = the home site — to a pool. Existing
+resources are backfilled into one-member pools. Multiple rows can opt
+into fungible capacity by sharing `attribute.pool_id` in the CSV or
+import payload; listings can then represent capacity across equivalent
 machines without exposing which machine will satisfy the lease.
 
 `derived_compute_listings` records generated listing identity for each
@@ -333,21 +350,30 @@ advertised GPU slice. Single-resource pools keep the legacy
 `pool:{pool_id}:gpus:{N}`. Reconciliation closes and reopens derived
 listings from pool/member feasibility, not just aggregate capacity: a
 slice is advertised only when at least one remaining member can satisfy
-that slice after current holds are subtracted.
+that slice after current holds are subtracted — with consumption taken
+from the capacity client's aggregated snapshots while totals and market
+attributes stay local. When no site authority answers, the reconciler
+**skips** rather than closing or reopening listings: ignorance is not
+evidence of capacity change.
 
-`compute_allocations` is the storefront-side capacity ledger. It records
-the market correlation (`listing_id`, `order_id`, `negotiation_id`,
-`escrow_uid`), selected capacity (`pool_id`, `member_id`, concrete
-`resource_id`, GPU count), and fulfillment callback metadata. A
-negotiated offer may pin either a concrete `resource_id` or a fungible
-`pool_id`; reservation resolves fungible pool terms to a concrete member
-at allocation time.
+Allocation records (the market correlation `listing_id` / `order_id` /
+`negotiation_id` / `escrow_uid`, selected `pool_id`/member, GPU count)
+live on the site authority's ledger rows; a negotiated offer may pin
+either a concrete `resource_id` or a fungible `pool_id`, and
+reservation resolves pool terms to a concrete member at allocation
+time. The local `compute_allocations` table is retained schema-only
+(pre-flip legacy, like provisioning's `vm_leases`); `capacity_holds`
+keeps per-negotiation hold metadata between accept and settlement.
 
-Execution lifecycle facts come back through admin-boundary fulfillment
-callbacks: `/api/v1/admin/fulfillment/events/started`,
-`/usage-started`, `/release-started`, `/capacity-released`, and
-`/failed`. Those callbacks advance `compute_allocations`; the reconciler
-then updates dynamic listings from the allocation ledger.
+Execution lifecycle facts arrive as events, not callbacks: the site
+authority posts deal-scoped events to the owning storefront and
+publishes anonymous versioned capacity deltas that each storefront's
+event-feed poller consumes; the reconciler runs as a delta subscriber.
+The `/api/v1/admin/fulfillment/events/*` endpoints remain as the
+admin-boundary reporting surface for *external* fulfillment flows —
+progress events are stage-log-only (a held allocation is held in every
+progress state), and `capacity-released`/`failed` release capacity
+through the client, idempotent on unknown allocations.
 
 **Key source layout:**
 ```
@@ -412,7 +438,8 @@ domains/vms/storefront/src/market_storefront/
 │  │  listings · negotiation_threads · negotiation_messages        │ │
 │  │  stage_events · policy_config · resources                     │ │
 │  │  compute_inventory_pools · compute_pool_members               │ │
-│  │  derived_compute_listings · compute_allocations               │ │
+│  │  derived_compute_listings · capacity_holds                    │ │
+│  │  settlement_claims · deal_heartbeats · escrows                │ │
 │  └──────────────────────────────────────────────────────────────┘ │
 │                                                                     │
 │  ┌───────────────────────────────────────────────────────────────┐ │
@@ -439,19 +466,21 @@ domains/vms/storefront/src/market_storefront/
 │  └───────────────────────────────────────────────────────────────┘ │
 │                                                                     │
 │  Background tasks                                                   │
-│  ┌─────────────────────┐                                           │
-│  │ negotiation_watchdog│                                           │
-│  └─────────────────────┘                                           │
+│  ┌─────────────────────┐ ┌──────────────────┐ ┌──────────────────┐ │
+│  │ negotiation_watchdog│ │ claims_engine    │ │ capacity event   │ │
+│  │                     │ │ loop (claims)    │ │ pollers (per site│ │
+│  └─────────────────────┘ └──────────────────┘ └──────────────────┘ │
 │                                                                     │
-│  Compute allocation/listing lifecycle owned by storefront pools,    │
-│  allocations, and fulfillment callbacks from provisioning           │
+│  Capacity is reached only through the CapacityClient boundary       │
+│  (aggregator over per-site ledgers); listing reconcile reacts to    │
+│  capacity deltas, never to local allocation state                   │
 │                                                                     │
 │  Outbound                                                           │
-│  ┌─────────────────────┐  ┌──────────────────┐                     │
-│  │   RegistryClient    │  │ProvisioningClient│                     │
-│  │ (arkhai-registry-   │  │(provisioning-    │                     │
-│  │  client wheel)      │  │ service wheel)   │                     │
-│  └─────────────────────┘  └──────────────────┘                     │
+│  ┌─────────────────────┐  ┌──────────────────┐ ┌────────────────┐  │
+│  │   RegistryClient    │  │ProvisioningClient│ │RemoteCapacity- │  │
+│  │ (arkhai-registry-   │  │(provisioning-    │ │Client(s) → site│  │
+│  │  client wheel)      │  │ service wheel)   │ │authorities     │  │
+│  └─────────────────────┘  └──────────────────┘ └────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1243,100 +1272,72 @@ All actions are submitted as `ProvisionRequest` jobs with a `vm_action` field. T
 
 ---
 
-#### Lease Lifecycle — execution facts and storefront callbacks
+#### Lease Lifecycle — ledger-driven watchdog
 
-The provisioning service owns VM execution lifecycle via the `vm_leases`
-table and the `LeaseWatchdog` background task. The storefront owns
-negotiation, market-facing listings, and compute allocation state. When
-settlement reserves capacity, the storefront records a
-`compute_allocations` row with the selected `pool_id`, `member_id`, and
-concrete `resource_id`; after the VM create job succeeds, provisioning
-registers the execution lease via `POST /api/v1/leases`.
+A lease is the temporal tail of a capacity allocation: one
+`site_allocations` row on the site authority's ledger carries both the
+hold and the lease timing (`lease_end_utc`, `provider_lease_id`, VM/job
+coordinates). There is no separate lease store — the legacy `vm_leases`
+table is retained schema-only, and the `/api/v1/leases` API is a *view*
+over the ledger (`LeaseLifecycleService` maps allocation states onto
+the lease-status vocabulary: `pending`/`active`/`releasing`/`released`/
+`forced`/`cancelled`). Registering a lease (`POST /api/v1/leases`)
+attaches the lease tail to the deal's live ledger allocation and 404s
+when no live allocation exists.
 
 The host-side `lease_end` `at` job is best-effort and must not block
-settlement readiness. The `LeaseWatchdog` is the authoritative
-provisioning release path, but it reports lifecycle facts to the
-storefront through `/api/v1/admin/fulfillment/events/*` callbacks. The
-storefront updates `compute_allocations` from those callbacks and derives
-listing open/closed state from pool availability. The older
-`PATCH /api/v1/admin/portfolio/resources/{resource_id}` path remains an
-operator/compatibility resource-state mutation, not the normal dynamic
-listing release mechanism.
-
-**`vm_leases` table:**
-
-| Column | Type | Description |
-|---|---|---|
-| `id` | UUID PK | Internal lease ID |
-| `resource_id` | TEXT | Storefront-assigned concrete resource identifier selected for this lease (e.g. `compute-kvm1-001`). Application-level FK — unvalidated by the provisioning service. |
-| `escrow_uid` | TEXT UNIQUE | On-chain escrow UID. One deal = one lease. |
-| `vm_host` | TEXT | KVM host alias (Ansible inventory name) |
-| `vm_target` | TEXT | Libvirt domain name of the provisioned VM |
-| `lease_start_utc` | DATETIME nullable | Null = lease active immediately on creation |
-| `lease_end_utc` | DATETIME | When the lease expires |
-| `status` | TEXT | See `LeaseStatus` enum below |
-| `create_job_id` | TEXT nullable | Provisioning job_id of the VM creation job. Allows tracing from lease back to the original create job. |
-| `check_job_id` | TEXT nullable | Provisioning job_id for the most recent watchdog check job (set during `releasing` phase) |
-
-**`LeaseStatus` values:**
-
-| Status | Meaning |
-|---|---|
-| `pending` | `lease_start_utc` is in the future; VM may not yet be running |
-| `active` | Lease is running; `lease_end_utc` is in the future |
-| `releasing` | `lease_end_utc` passed; watchdog submitted a check job to confirm VM cleanup |
-| `released` | Capacity release reported to the storefront successfully |
-| `forced` | Grace period elapsed; release was reported without VM confirmation |
-| `cancelled` | Lease cancelled before expiry |
-
-**Lease flow:**
+settlement readiness. The watchdog
+(`LeaseLifecycleService(settings, capacity_ledger, job_service)`) is
+the ledger's own scheduler and the authoritative release path:
 
 ```
-Storefront (after provisioning succeeds)
-  │
-  └── POST /api/v1/leases  →  vm_leases row created (status=active or pending)
-
 LeaseWatchdog (every 60s, or on-demand via POST /api/v1/system/check-leases)
   │
-  ├── list_pending_to_activate(now)  →  advance pending leases whose start has passed
-  ├── list_due(now)  →  active leases with lease_end_utc < now
+  ├── due leases — lease_end_utc < now, or truncated early by the
+  │   settlement lifecycle (truncate-lease):
+  │   └── submit check Ansible job (vm_action=check) → releasing
   │
-  ├── For each due lease:
-  │   ├── Submit check Ansible job (vm_action=check, vm_host, vm_target)
-  │   └── begin_releasing(check_job_id) → status=releasing
-  │
-  ├── list_releasing()  →  leases with check jobs in flight
-  │   ├── Poll check job status
-  │   ├── On succeeded / failed+past-grace:
-  │   │   ├── POST {settings.storefront_url}/api/v1/admin/fulfillment/events/capacity-released
-  │   │   │     body: { escrow_uid, resource_id, provider_lease_id?, ... }
-  │   │   │     headers: X-Admin-Key: {settings.storefront_admin_key}
-  │   │   ├── On callback success: mark_released()
-  │   │   └── On callback failure within grace: skip (retry next cycle)
-  │   │       On callback failure past grace: mark_forced()
-  │   └── On still-running + within grace: skip (wait next cycle)
+  ├── releasing leases (check job in flight):
+  │   ├── on succeeded / failed+past-grace:
+  │   │   ├── release the allocation in a local ledger transaction
+  │   │   │   (publishes an anonymous capacity delta to subscribers)
+  │   │   └── post a deal-scoped capacity-released event to the
+  │   │       owning storefront (X-Admin-Key) — failure within grace
+  │   │       retries next cycle; past grace the release is forced
+  │   └── on still-running within grace: wait next cycle
 ```
+
+Everything downstream is event-driven: the storefront's reconciler
+reacts to the capacity delta; the deal-scoped event feeds its stage log
+and failure policy. The old executor→storefront callback pattern
+(`PATCH /api/v1/admin/portfolio/resources/{id}` and per-transition
+fulfillment callbacks from this service) is retired — notifications
+route through the ledger so each is consistent with a snapshot.
 
 **Watchdog configuration** (`settings.toml` → dynaconf):
 ```toml
 lease_watchdog_enabled = true
 lease_watchdog_poll_interval_seconds = 60
 lease_watchdog_grace_period_seconds = 300
-storefront_url = ""          # base URL of the storefront (global, not per-lease)
-storefront_admin_key = ""    # X-Admin-Key for storefront admin endpoints
+storefront_url = ""          # owning storefront for deal-scoped events
+storefront_admin_key = ""    # X-Admin-Key for the event POST
                              # inject via provisioning-secrets profile in production
 ```
 
-`storefront_url` and `storefront_admin_key` are global settings on the provisioning service — one provisioning service instance serves one storefront. They are not stored per-lease.
+`storefront_url` and `storefront_admin_key` are global service settings
+— one provisioning service instance currently serves one storefront.
+Routing deal events by the `deal_ref` recorded at reserve time instead
+(one site, many storefronts) is an open edge tracked in
+`design-remaining-work.md` § 3.
 
-**On-demand trigger:** `POST /api/v1/system/check-leases` runs one watchdog cycle immediately. Used by operators and tests to avoid waiting for the 60-second timer. Returns `{ activated, checked, released, forced, skipped }`.
+**On-demand trigger:** `POST /api/v1/system/check-leases` runs one watchdog cycle immediately. Used by operators and tests to avoid waiting for the 60-second timer.
 
-**Leases API:**
+**Leases API (view over the ledger):**
 ```
-POST   /api/v1/leases                  Register a new lease (called by storefront)
+POST   /api/v1/leases                  Attach lease tail to the deal's live allocation
 GET    /api/v1/leases                  List leases (filter: status, vm_host, escrow_uid)
-GET    /api/v1/leases/{lease_id}       Get one lease by internal ID
-PATCH  /api/v1/leases/{lease_id}       Partial update (status, check_job_id, lease_end_utc)
+GET    /api/v1/leases/{lease_id}       Get one lease by ID
+PATCH  /api/v1/leases/{lease_id}       Partial update (lease_end_utc, …)
 GET    /api/v1/leases/by-escrow/{uid}  Lookup by escrow_uid (storefront recovery path)
 DELETE /api/v1/leases/{lease_id}/cancel  Cancel a lease before expiry
 ```
@@ -1777,6 +1778,276 @@ integration or e2e test can run.
 
 See `docs/cli-redesign-plan.md` for the rationale behind the current
 4-CLI surface.
+
+---
+
+## Settlement Lifecycle — plans, claims engine, heartbeats
+
+Settlement is a lifecycle, not an event. A `Receipt` is not terminal:
+collection can depend on conditions that flip long after fulfillment,
+possibly repeatedly. The machinery below is the current state of that
+model; future plan shapes (interval escrows, penalty bonds, true
+heartbeat-gating, fiat) are planned in `design-remaining-work.md`.
+
+### Arbiters are microconditions
+
+Alkahest escrow demands are arbiter trees
+(`~/dev/arkhai/alkahest/contracts/src/arbiters/`):
+
+- `attestation-properties/RecipientArbiter.sol` — synchronous: checks a
+  property of the fulfillment attestation; collection can succeed in
+  the same flow that created the fulfillment. This was the only arbiter
+  the original flow knew, which is why it assumed immediate settlement.
+- `TrustedOracleArbiter.sol` — asynchronous: `checkObligation` returns
+  whatever the named oracle last `arbitrate()`d for the
+  `(obligation, demand)` key; collection is impossible until an
+  off-chain actor acts.
+- `logical/AllArbiter.sol` — conjunction: the obligation passes only
+  when every microcondition passes.
+
+### The plan carrier (mechanism-neutral)
+
+`market_core.schemas.SettlementObligation`/`SettlementPlan` carry the
+lifecycle universals as typed fields — payer/claimant, amount/asset,
+expiration, condition set — plus a `{mechanism, params}` envelope
+whose deterministic interpretation lives in kit codecs, the same
+pattern as the `ProvisionTerms` `{kind, payload}` envelope. Alkahest is
+the first mechanism, not a structural assumption: a fiat escrow follows
+the same lifecycle with a different identifier scheme (provider +
+payment refs instead of chain + contract) and different verification
+semantics (provider-API check instead of byte-compare), so the carrier
+must not bake in the alkahest call shapes. The flat `EscrowTerms`
+shapes survive as marked legacy coercions into the envelope and leave
+with the client-wheel wire bump.
+
+The determinism contract extends unchanged in kind: both sides derive
+the same *plan* from the shared message history. The `/negotiate/*`
+responses, seller artifacts, buyer outcome, deal context, and run-log
+all carry `settlement_plan` (the flat terms list remains as a legacy
+wire mirror). `kit/alkahest/plans.py` is the first mechanism codec:
+structural carrier mirror, envelope↔terms converters, deterministic
+plan materialization.
+
+### kit/alkahest claims machinery
+
+`market_alkahest.claims` extends the arbiter registry with
+TrustedOracleArbiter and AllArbiter codecs (explicit demand data, both
+directions), oracle wrappers (`request_arbitration`, oracle-side
+`arbitrate`, a timeout-bounded `arbitration_status` probe), and
+`collect_escrow_with_codec` — the collection mirror of the reclaim
+dispatcher. `market_alkahest.txlock.chain_tx_lock(chain)` serializes
+all of a process's same-wallet submissions per `(event loop, chain)`:
+alkahest_py fetches the account's transaction count per submission with
+no cross-call coordination, so concurrent submitters (settlement
+fulfillment, the claims sweep, arbitration requests, admin reclaims,
+oracle arbitration) hold the lock across each submission to avoid
+`nonce too low` races.
+
+### Seller engine: the claims engine
+
+`core_storefront.settlement_lifecycle.ClaimsEngine` is the persisted
+claim state machine (`awaiting_conditions → collectable → collected /
+abandoned`) with backoff scheduling, expiration-grace abandonment,
+hook-owned `mechanism_state` scratch, and stage-event hook points. It
+drives injected per-mechanism `check_conditions`/`collect` hooks and
+never learns which mechanism it is driving — same altitude as
+`negotiation_sync`/`stage_log`: mechanics, no vocabulary. The alkahest
+hooks live in `domains/vms/settlement/claims.py` (recipient → ready;
+trusted-oracle → request-once + `ArbitrationMade` poll; all_arbiter
+recurses). The storefront embeds the engine as a watchdog-style startup
+task (`claims_engine_loop`) over the `settlement_claims` table;
+settlement jobs submit a claim on fulfillment, with the obligation
+re-materialized from the pinned proposal. Arbitration is engine-owned:
+`submit_compute_fulfillment` submits the fulfillment and nothing else —
+the engine requests arbitration once per fulfillment (recorded in
+`mechanism_state`), with the oracle taken from the escrow's decoded
+demand tree.
+
+### Buyer engine: `market service`
+
+`market service --from <run-id>`
+(`domains/vms/buyer/service_cli.py`) is the buyer-side servicing loop
+over the deal run-log: it emits signed heartbeats at the plan's agreed
+cadence (`service_terms.heartbeat`) until the obligation's expiration,
+then attempts post-expiry reclaim when the seller never collected
+(`--once` for single-shot, `--no-reclaim` to opt out).
+
+### Heartbeat channel
+
+`core_storefront.heartbeats` owns the mechanics: per-deal strict
+monotonicity on the signed timestamp (replay protection covering
+exactly what the request signature covers), skew bounds, the store
+protocol, and the `heartbeat_gap_seconds` primitive lifecycle policies
+read. `POST /api/v1/deals/{escrow_uid}/heartbeat` rides the standard
+signed-request verification plus a binding check against the deal's
+recorded buyer, persists to `deal_heartbeats`, and emits
+`service`-stage events. `domains/vms/settlement/heartbeats.py` defines
+the first payload vocabulary (`vms.heartbeat.v1`: bare liveness +
+status). What a heartbeat attests and how evidence bundles are built is
+domain policy; the endpoint shell is core mechanics.
+
+### First lifecycle policy: oracle-gated single escrow
+
+A seller opts in via `oracle_gated_listings` +
+`trusted_oracle_address`; listings then advertise a
+`TrustedOracleArbiter(oracle)` demand, which flows through the codec
+registry into materialized escrows, and the claims engine requests
+arbitration once and polls. The publish path rejects a missing oracle
+and rejects the seller's own wallet: **the oracle must be a party that
+does not benefit from the decision** — a seller-operated oracle gates
+nothing (the collector would authorize its own collection), a
+buyer-operated one is a unilateral payment hold-up. The oracle is
+assumed to `arbitrate()` true at end of lease unless a dispute was
+raised — manual for now via the kit's `alkahest-oracle` CLI
+(arbitrate/status); the oracle *service* is future work.
+
+### Filing and the capacity coupling
+
+Core owns the lifecycle engine mechanics and the heartbeat shell; kit
+owns one codec package per settlement mechanism; the domain owns which
+conditions a deal uses, the heartbeat schema, and oracle/mechanism
+selection. The lifecycle is also what ends a deal early: on
+`claim_abandoned` the storefront truncates the deal's lease to now
+through the capacity client, handing teardown to the ledger's expiry
+machinery (next section).
+
+---
+
+## Capacity and the Site Authority
+
+One hardware pool can sell through multiple market domains, and one
+storefront can aggregate multiple sites. Both require the authoritative
+capacity ledger to live outside any storefront. "Domain" splits into
+two deliberately decoupled axes: the **market schema domain** (VM
+listings vs inference listings — vocabulary of listings, negotiation,
+plans; chosen per storefront) and the **resource domain** (compute
+hosts: GPUs/RAM/disk/region — what the ledger counts; chosen per site).
+Market-domain coupling appears at exactly two pluggable joints:
+offer → claim conversion (a domain hook on the storefront side) and
+job-kind → executor (a plugin at the site).
+
+### Components and authority
+
+| Component        | Owns (authoritative) | Domain axis | Deployment |
+| ---------------- | -------------------- | ----------- | ---------- |
+| Site authority   | per-site resource ledger: resources, allocations (incl. lease timing), job queue, watchdog/scheduler; emits all events | resource domain only; no market schema | hosted by the provisioning service process; one per datacenter / failure domain |
+| Executor         | nothing durable — pulls jobs, drives infra, reports status to the ledger | one per fulfillment kind | in-process plugin of the site authority |
+| Aggregator       | nothing authoritative — fungible pool view over N sites, placement/routing, listing derivation | follows its storefront's market domain | library module inside the storefront process |
+| Storefront       | market state: listings, pricing/terms, negotiation threads, deals, settlement lifecycle | one market schema domain per process | domain-owned executable |
+
+The ledger is its own service boundary because it is the serialization
+point for reserves across processes and allocations outlive any deal
+flow; the aggregator is deliberately *not* one (soft state + per-seller
+policy — an HTTP hop to your own cache buys nothing). The storefront
+has no embedded ledger fallback: it cannot fulfill without the
+provisioning service anyway, so a local ledger would be duplicated
+responsibility (the transitional embedded mode was deleted once the
+service stood; the storefront's SQLite holds market state only).
+
+### Current implementation
+
+The site authority is hosted by the provisioning service:
+`site_resources` / `site_allocations` (the storefront's hold and the
+lease's temporal tail as one row, TTL soft holds supported at the
+ledger) plus the `capacity_events` pull feed, exposed at
+`/api/v1/capacity/*` (resources PUT/GET, `snapshot`, `probe`,
+`reservations`, `allocations/{id}/commit`, `releases`,
+`allocations/{id}/truncate-lease`, `allocations`, `events`) mirroring
+the `CapacityClient` contract defined in `core_storefront.capacity`
+(snapshot/probe/reserve(+TTL)/commit/release/truncate-lease/subscribe,
+plus the anonymous versioned `CapacityDelta` carrier and in-process
+event bus). The storefront reaches it through
+`market_storefront.services.capacity_client.RemoteCapacityClient` with
+a per-site event-feed poller; storefront inventory mirrors into the
+ledger at startup and after admin imports/patches, and operator
+reservations land in the ledger like every other hold.
+
+`core_storefront.aggregation.AggregateCapacityClient` is the soft-state
+view over N hard-state site ledgers, implementing the same
+`CapacityClient` protocol it consumes: site-tagged union reads;
+reserves walk sites in placement-policy order (`fill_first`,
+`most_available`) and fall back on refusal — `None` only when every
+member refuses; writes route to the owning site. `[capacity.sites]` in
+storefront.toml names the authorities (the default/first site comes
+from `provisioning.service_url` and is the home site, where local
+inventory mirrors); one site is the degenerate aggregation.
+
+**Fungibility rule:** resources may share a pool exactly when no
+attribute advertised or negotiable in the listing schema distinguishes
+them (if `region` is in the listing, two regions cannot pool). Pooling
+is therefore a market-domain decision — which is why the aggregator
+belongs to the storefront, not to a site (a site cannot know it is
+interchangeable with another) and not to a neutral shared service
+(interchangeability is a commercial judgment per seller).
+
+### Event model
+
+Two kinds of notification with different delivery semantics:
+
+- **Deal-scoped events** (provisioning failed / capacity released *for
+  allocation X*): point-to-point to the storefront that owns the deal.
+  They carry deal context and feed the stage log, failure policy, and
+  the claims engine. Never broadcast — noise at best, a cross-seller
+  leak at worst.
+- **Capacity-scoped events** (availability for a host/pool changed, for
+  *any* reason): pub/sub to all subscribed storefronts, **anonymous** —
+  new availability plus a version number, never whose deal caused it.
+  Aggregators refresh a view (versioned deltas, pull-snapshot resync on
+  version gap); they do not reconstruct a ledger.
+
+```
+executor ──job status──▶ site authority (ledger txn)
+                              ├─ deal event ────────▶ owning storefront
+                              └─ capacity delta ────▶ all subscribed storefronts
+                                                       └ aggregator refresh →
+                                                         derived-listing reconcile →
+                                                         publish/close to registries
+```
+
+Stale-listing closure is each storefront's *reaction to capacity
+deltas*, not an inline step after its own reservation — necessarily so,
+because another storefront's sale also invalidates your listings.
+
+### Reservation protocol
+
+Negotiation-time availability is advisory; reservation is
+authoritative (the inventory guard works off a round-start snapshot and
+tolerates staleness):
+
+1. **Round start:** the seller round hook feeds the inventory guard
+   from `capacity.snapshot()`.
+2. **Terms accepted:** a TTL'd soft hold (`capacity.reserve` with
+   `ttl_seconds`; `hold_ttl_seconds` defaults to 900, 0 disables)
+   closes the window where escrow settles but capacity is gone.
+   Unsettled deals lapse at the ledger.
+3. **Settlement:** commits the held allocation into a lease *before*
+   provisioning — securing capacity up front removes the
+   lapse-mid-provision race; the post-provision commit refreshes the
+   window. Lapsed/refused holds fall back to a plain atomic reserve.
+   Cross-storefront contention resolves here, in one site's local
+   transaction.
+4. **Fulfillment:** the job runs against the allocation; the lease tail
+   attaches to the ledger row; teardown at expiry or early termination
+   (lease truncation from the settlement lifecycle).
+
+### Topology
+
+```
+VM storefront ────┐                 ┌── site authority, DC-A
+  [aggregator:VM] ├──── claims ─────┤   [ledger+jobs | vm-exec, …]
+inference sf ─────┤    (neutral)    ├── site authority, DC-B
+  [aggregator:inf]┘                 └   [ledger+jobs | vm-exec, …]
+```
+
+M storefronts × N sites; each aggregator subscribes to its seller's
+sites; each site serves whichever storefronts sell from it; neither
+count constrains the other. The second executor kind and the second
+market-domain storefront are the remaining proof of this topology
+(`design-remaining-work.md` § 3), along with its open edges: job
+submission still uses the VM-specific `/hosts/{host}/vms` API rather
+than a job-kind queue keyed by `allocation_id`, and deal-scoped events
+route to the storefront named in service settings rather than the
+`deal_ref` recorded at reserve time.
 
 ---
 

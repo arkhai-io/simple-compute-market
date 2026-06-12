@@ -1,8 +1,9 @@
 """Claims-side alkahest primitives: oracle interaction, demand trees,
 collection.
 
-Work item I.2 of ``docs/development/design-settlement-lifecycle-and-
-capacity.md``: everything the deal-servicing engine needs to drive an
+The alkahest claims half of the settlement lifecycle
+(``docs/development/ARCHITECTURE.md``, "Settlement Lifecycle"):
+everything the deal-servicing engine needs to drive an
 alkahest obligation from fulfilled to collected —
 
 * the two arbiter codecs beyond RecipientArbiter that the lifecycle

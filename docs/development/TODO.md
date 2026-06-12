@@ -59,55 +59,44 @@ Infrastructure-side (compute-market-internal-infra):
 graph expresses the core/kit/domain split, distribution names mirror it
 (`arkhai-{core,kit,vms}-*`), and the boundaries are enforced by tests
 (dependency-direction guardrail, carrier purity, no-plugin buyer CLI).
-Current-state layout: `ARCHITECTURE.md` → "Package layout". Decision
-record: [`design-market-core-extraction.md`](design-market-core-extraction.md).
-Follow-on design: [`design-settlement-lifecycle-and-capacity.md`](design-settlement-lifecycle-and-capacity.md).
+Current-state layout and decisions: `ARCHITECTURE.md` → "Organizing
+Principle" / "Package layout". The remaining architectural items are
+planned with their design context in
+[`design-remaining-work.md`](design-remaining-work.md).
 
 **This list is the single aggregation of what remains**, in rough
 dependency order:
 
-1. **Settlement lifecycles** (lifecycle doc, Part I — items I.1–I.6):
-   generalize the accepted-proposal/terms handoff to a
-   **mechanism-neutral settlement plan** (lifecycle universals as typed
-   fields + `{mechanism, params}` envelope; this is also where the
-   alkahest-shaped escrow carriers in `market_core.schemas` shed their
-   baked-in field skeleton, and where the `EscrowProposal` →
-   message/terms naming aligns — one `/negotiate/*` wire change, not
-   two); `kit/alkahest` extended into the first mechanism codec
-   (AllArbiter demand trees, `TrustedOracleArbiter`
-   arbitrate/request/watch, collect/reclaim); the core lifecycle engine
-   (persisted deal state machine driving injected
-   materialize/check-conditions/collect/reclaim hooks; buyer engine as
-   `market service`, seller engine in the storefront runtime); the
-   heartbeat endpoint (core shell + persistence, VM schema); VM
-   lifecycle policies (heartbeat-gated single escrow → interval escrows
-   → penalty bonds, each a plan shape); and wiring `request_arbitration`
-   into the engine instead of fire-and-forget. A `kit/fiat-<provider>`
-   mechanism codec is deferred until a committed customer/provider
-   pairing.
+1. **Settlement plan shapes** (`design-remaining-work.md` § 2). The
+   lifecycle machinery is landed — mechanism-neutral plan carrier,
+   `kit/alkahest` claims codecs, seller claims engine, buyer
+   `market service`, heartbeat channel, and the
+   deferring-third-party-oracle policy (current state:
+   `ARCHITECTURE.md` → "Settlement Lifecycle"). What remains are the
+   next plan shapes: the oracle *service*, true heartbeat-gated
+   collection, interval escrows + penalty bonds (and with them
+   engine-driven materialize/reclaim), and eventually a
+   `kit/fiat-<provider>` mechanism codec (deferred until a committed
+   customer/provider pairing).
 
-2. **Capacity / site authority** (lifecycle doc, Part II — items
-   II.4–II.7; II.1–II.3 are done — the storefront already reaches
-   capacity only through the `core_storefront.capacity` client
-   boundary, with event-driven stale-listing closure): stand up the
-   site-authority service (move `hosts`/`compute_allocations` merged
-   with `vm_leases` + job queue/watchdog into it; today's provisioning
-   service becomes the first executor; **retire the
-   `PATCH /admin/portfolio/resources` and fulfillment-event callback
-   endpoints** — deal events and anonymous versioned capacity deltas
-   replace them); re-home pools/members/derived listings as the
-   storefront-side aggregator module keyed by `(site, resource_id)`;
-   two-phase TTL reserve (hold at terms acceptance, commit at
-   settlement; early termination → lease truncation); a second executor
-   kind, then a second market-domain storefront sharing the pool.
+2. **Capacity: second executor / second market domain**
+   (`design-remaining-work.md` § 3). The site authority, aggregator,
+   event split, and two-phase TTL reserve are landed (current state:
+   `ARCHITECTURE.md` → "Capacity and the Site Authority"). What
+   remains is the multi-domain proof: a job-kind queue keyed by
+   `allocation_id`, deal-event routing by recorded `deal_ref`, a
+   second executor kind, then a second market-domain storefront
+   sharing the pool — plus the parked deployment follow-ons
+   (parameterized storefront chart, per-domain build targets).
 
 3. **`storefront-client` wire genericization:** the client wheel still
    sends the flat legacy provision-terms shape
    (`{duration_seconds, ssh_public_key, compute_resource}`) and exposes
    compute-vocabulary parameters. Genericizing it retires the marked
    legacy shim in `market_core.schemas.ProvisionTerms`. Wire-compat
-   change; bump client wheels. Pairs naturally with the plan-carrier
-   work in item 1.
+   change; bump client wheels. Rides the carrier-vocabulary
+   generalization (`design-remaining-work.md` § 1) so `/negotiate/*`
+   churns once.
 
 4. **Schema identity/version for plugins:** the registry advertises its
    schema via `filter-spec.yaml`, but there is no stable schema
@@ -280,9 +269,9 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 
 ### Lease expiry watchdog — check job result interpretation
 
-See `ARCHITECTURE.md` "Lease Lifecycle — DB-driven watchdog" for current architecture.
+See `ARCHITECTURE.md` "Lease Lifecycle — ledger-driven watchdog" for current architecture.
 
-**Remaining gap:** `LeaseLifecycleService._process_releasing_lease` polls the check job status but treats `succeeded` and `failed` uniformly (both proceed to patch the storefront). A future iteration should parse the check job result's `available_gpus` field: if `available_gpus > 0` the VM is confirmed gone and the patch proceeds normally; if `available_gpus == 0` the VM may still be running (late `at` daemon, cleanup race) and the watchdog should wait another cycle before forcing. This requires `AnsibleJobService._build_result_payload` to consistently expose `result.available.gpus` for the `check` action.
+**Remaining gap:** `LeaseLifecycleService._process_releasing_lease` polls the check job status but treats `succeeded` and `failed` uniformly (both proceed to release the allocation). A future iteration should parse the check job result's `available_gpus` field: if `available_gpus > 0` the VM is confirmed gone and the release proceeds normally; if `available_gpus == 0` the VM may still be running (late `at` daemon, cleanup race) and the watchdog should wait another cycle before forcing. This requires `AnsibleJobService._build_result_payload` to consistently expose `result.available.gpus` for the `check` action.
 
 The `at`-based scheduling on the KVM host runs in parallel — the check job is a verification step, not a replacement for the `at` cleanup.
 
@@ -431,9 +420,9 @@ creates real VMs, and that teardown is Compute-API-based (no SSH key required on
 
 **Status:** Conditional — only do this if the dependency direction becomes a maintenance problem.
 
-**Problem:** The provisioning service depends on `arkhai-core-storefront-client` for two call sites — `lease_lifecycle_service._patch_storefront_resource()` and `system_service.get_status()`. This inverts the conceptual layer (provisioning is infrastructure; storefront is a consumer). Not a circular import — `storefront-client` doesn't depend on `arkhai-vms-provisioning` — but the direction is inverted.
+**Problem:** The provisioning service depends on `arkhai-core-storefront-client` for two call sites — the deal-scoped capacity-released notification in `lease_lifecycle_service` (`notify_capacity_released`) and `system_service.get_status()`. This inverts the conceptual layer (provisioning is infrastructure; storefront is a consumer). Not a circular import — `storefront-client` doesn't depend on `arkhai-vms-provisioning` — but the direction is inverted.
 
-**Planned fix (if triggered):** extract the two call sites into a thin `StorefrontCallbackClient` inside `domains/vms/provisioning/service/src/client/storefront_callback_client.py` wrapping `httpx` directly for `GET /health` and `PATCH /api/v1/admin/portfolio/resources/{id}`. Keeps `arkhai-vms-provisioning` self-contained without a wheel dependency on the storefront layer.
+**Planned fix (if triggered):** extract the two call sites into a thin client inside the provisioning service wrapping `httpx` directly for the health probe and the deal-event POST. Keeps `arkhai-vms-provisioning` self-contained without a wheel dependency on the storefront layer. May dissolve naturally when deal events route by recorded `deal_ref` (`design-remaining-work.md` § 3).
 
 ---
 

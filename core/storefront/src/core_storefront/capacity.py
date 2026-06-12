@@ -1,7 +1,7 @@
 """Site-authority capacity client contract.
 
 In the target topology
-(docs/development/design-settlement-lifecycle-and-capacity.md, Part II)
+(docs/development/ARCHITECTURE.md, "Capacity and the Site Authority")
 the storefront does not own capacity: a per-site *site authority* keeps
 the authoritative resource ledger (hosts, allocations, lease timing) and
 the storefront reaches it only through this client interface —

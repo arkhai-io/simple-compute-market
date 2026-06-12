@@ -1,6 +1,6 @@
 """Dependency-direction guardrail for the core/kit/domain split.
 
-The target graph (docs/development/design-market-core-extraction.md):
+The target graph (docs/development/ARCHITECTURE.md, "Organizing Principle"):
 kit packages and the VM domain *concept* modules (listings, negotiation,
 settlement, provisioning hooks) are composed from below — they implement
 core hook shapes without importing core. Only composition roots (the VM

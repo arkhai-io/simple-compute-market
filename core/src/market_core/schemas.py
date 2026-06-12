@@ -22,7 +22,7 @@ shapes (``EscrowTerms``; proposals keyed on chain + contract address)
 predate the envelope: ``EscrowTerms`` survives as the typed params
 shape of the ``alkahest.v1`` mechanism and as a marked legacy wire
 coercion into the envelope (work item I.1 of
-``docs/development/design-settlement-lifecycle-and-capacity.md``).
+``docs/development/ARCHITECTURE.md, "Settlement Lifecycle"``).
 """
 
 from __future__ import annotations
