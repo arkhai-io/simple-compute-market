@@ -36,10 +36,13 @@ exercised, but one pool selling through two market domains is not.
   threshold is the bound; documented per middleware). One source of
   truth; revocation is immediate; middlewares stay thin clients in all
   three languages.
-- **Usage identity and market identity are separate concepts**
-  (decision recorded below in "Key ownership"; the v1 default is
-  wallet-bound top-ups, with ownership as a pluggable scheme-tagged
-  claim so the coupling is a default, not a structural assumption).
+- **Usage identity and market identity are separate concepts**, and
+  **ownership enforcement is negotiation middleware** (decision
+  recorded below in "Key ownership"): seller guards validate the
+  buyer's existing-key claim per the key's recorded ownership scheme —
+  the v1 default `key_owned_by_buyer_wallet` is free because the
+  negotiation is already wallet-signed — and open top-up is simply a
+  chain with no ownership guard, not a mode flag.
 - **Vocabulary:** the sold asset is an "API token" in listings and
   prose; the consumable count in code/DB/middleware vocabulary is
   **credits/balance** — "token" unqualified is already ERC20 vocabulary
@@ -88,9 +91,10 @@ deferred remainder from the VM domain (the VM plugin's per-hour scaling
 moves to the same seam as part of this work). `listed_price` is the
 default and needs nothing new: the bound is quantity × advertised rate.
 Seller-side guards: a quota guard (inventory-guard analog against the
-capacity snapshot: requested quantity ≤ available) and a key guard for
-`existing` mode (key exists, is active, and the ownership claim admits
-the buyer — reject reasons `key_not_found` / `key_not_owned`).
+capacity snapshot: requested quantity ≤ available) and the ownership
+middlewares for `existing` mode (key exists, is active, and the
+ownership claim admits the buyer — reject reasons `key_not_found` /
+`key_not_owned` / `key_proof_invalid`; see "Key ownership").
 
 **Settlement.** Unchanged machinery: scalar escrow for the absolute
 amount, RecipientArbiter immediate settlement by default (oracle-gated
@@ -207,26 +211,70 @@ when secrets are high-entropy and hashed (a leaked table of hashes of
 256-bit random keys is not crackable); the residual advantage is
 secret transit at issuance.
 
-**Recommendation:** bearer usage keys, with ownership as a
-**pluggable scheme-tagged claim** on the key record —
-`owner: (scheme, identifier)`, the same shape as the registry's
-publisher identity and resolved through `arkhai-kit-identity`'s scheme
-registry:
+**Decision:** bearer usage keys, with a **scheme-tagged ownership
+claim** on the key record — `owner: (scheme, identifier)`, the same
+shape as the registry's publisher identity — and **enforcement
+implemented as negotiation middleware**, the same way every other
+dimension of a buyer message is validated (the architecture's rule:
+price, escrow shape, duration, and now key ownership are all decided
+by the chain against advertised data plus captured side inputs).
 
-- v1 ships scheme `wallet`: bound automatically from the signed
-  purchase; top-up requires the same signing wallet (one equality
-  check at the key guard). Zero UX, zero new secrets.
-- `ed25519` is the planned second scheme: the buyer supplies an owner
-  public key at purchase (the CLI can generate and keep it beside the
-  run-logs); top-ups prove possession by signing the negotiation
-  payload. This is the wallet-decoupled mode — market identity and
-  token identity coincide only if the buyer doesn't care.
-- `open` is a seller-policy mode (anyone may credit any key id —
-  gifting/team pooling), explicitly opted into per listing, with the
-  mistyped-key-id risk on the seller's terms.
+- `key_owned_by_buyer_wallet` *(seller default)* — a round-0 guard,
+  structurally identical to `has_matching_inventory_guard`: consults a
+  captured key→owner lookup (the tokens-service query, captured behind
+  the round hook exactly like the inventory snapshot) and rejects with
+  `key_not_owned` unless the key's `wallet` owner equals the
+  negotiation's signing wallet. **Free**: no extra round, no buyer
+  configuration, no new secrets — the wallet-signed negotiation *is*
+  the possession proof. New keys auto-bind `owner = purchasing wallet`.
+- `key_possession_challenge` — a seller middleware for asymmetric
+  owners (`ed25519`): on an existing-key claim it *counters* with a
+  nonce (`key_challenge` in the message — message content is schema
+  vocabulary), then verifies the returned signature against the key's
+  registered owner pubkey before deferring to the pricing middleware;
+  `key_proof_invalid` rejects. The proof signs
+  `(nonce, negotiation_id, terms hash)` so it cannot replay across
+  negotiations. Costs one round trip. The buyer mirror,
+  `answer_key_challenge`, ships in the buyer's default chain as a
+  pass-through: `None` unless the seller's last message carries a
+  challenge; when challenged it signs with the configured owner key
+  and counters with otherwise-unchanged terms — and when challenged
+  *without* an owner key configured it **exits with a clear reason**
+  rather than passing (an unanswerable challenge must not surface as
+  chain exhaustion). The owner keypair is buyer-generated at purchase
+  time (kept by the CLI beside the run-logs); this is the
+  wallet-decoupled mode — market identity and token identity coincide
+  only if the buyer doesn't care.
+- **Open top-up is the absence of an ownership guard** in the seller's
+  chain — not a mode flag. A seller who wants gifting/team pooling
+  omits the guard (per listing or per escrow kind via the existing
+  `[negotiation.policies]` dispatch table), accepting the
+  mistyped-key-id risk on their own terms.
 
-The schema carries the claim from day one so adding schemes is
-additive; only `wallet` ships in v1.
+Filing: `arkhai-kit-identity` owns the per-scheme signature
+verification primitives; the domain middlewares are thin policy shells
+over them; core chain mechanics are untouched.
+
+**The guard is the interface, not the enforcement.** Negotiation-time
+checks are advisory in this architecture (the inventory guard works
+off a snapshot; reservation is authoritative), and ownership can
+change between accept and fulfillment. The issuance job in the tokens
+service re-checks the ownership claim authoritatively at grant time;
+the middleware exists for early, well-reasoned rejection and to carry
+the interactive challenge protocol.
+
+Default rationale: wallet binding is the only scheme that costs
+nothing, it is the safe default (a mistyped `key_id` rejects instead
+of silently crediting a stranger), it makes the dominant flow — buy
+more with the wallet you bought with — zero-ceremony, and it matches
+the system's existing trust anchor: every other authorization (escrow
+creation, reclaim) is already wallet-keyed, so a different default
+identity would make wallet rotation the default UX problem rather than
+an opt-in trade-off. The schema carries the claim from day one so
+adding schemes is additive; `wallet` ships in v1, `ed25519` +
+`key_possession_challenge`/`answer_key_challenge` are the planned
+second scheme (the buyer pass-through middleware can ship from day one
+— it is inert against v1 sellers).
 
 ## Work items
 
@@ -241,16 +289,19 @@ additive; only `wallet` ships in v1.
    unchanged (pure move, gated on its suites + canonical e2e before
    any tokens code exists).
 3. **Tokens service.** Keys/grants/balance/consumption schema, quota
-   ledger mount, issuance job (idempotent on `escrow_uid`),
-   consume/verify/batch API, admin surface, ownership-claim check.
+   ledger mount, issuance job (idempotent on `escrow_uid`, with the
+   authoritative ownership re-check at grant time), consume/verify/
+   batch API, admin surface, key→owner lookup for the seller guards.
 4. **Concept modules + storefront.** `domains/apitokens/{listings,
-   negotiation,settlement}` hooks (quota guard, key guard, issuance
-   submission, failure action), quota-backed publish/reconcile,
+   negotiation,settlement}` hooks (quota guard,
+   `key_owned_by_buyer_wallet` guard, issuance submission, failure
+   action), quota-backed publish/reconcile,
    `arkhai-apitokens-storefront` composition root.
 5. **Buyer plugin.** Schema plugin + verbs/flags/rendering;
    per-unit→absolute scaling in the policy surface (and the VM
-   plugin's per-hour scaling moves to the same seam); credentials to
-   run-log.
+   plugin's per-hour scaling moves to the same seam);
+   `answer_key_challenge` pass-through in the default buyer chain;
+   credentials to run-log.
 6. **Middlewares + e2e.** Python middleware first (it gates the e2e's
    sample service), then TypeScript and Rust to the same behavioral
    spec (shared conformance fixtures: a recorded consume/verify
