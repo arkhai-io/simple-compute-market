@@ -2,10 +2,9 @@
 
 The scalar/escrow vocabulary (bisection, listed_price, escrow shape
 guards, escrow-kind dispatch, the buyer counter guard) is shared with
-the VM domain — those middlewares are alkahest-scalar policies that
-happen to live in ``domains.vms.negotiation.policies`` today; work
-items 5/7 hoist them to a neutral home. Importing that module also
-registers them, so an apitokens chain can name them directly.
+the VM domain and lives in ``market_policy.scalar_policies``.
+Importing that module also registers them, so an apitokens chain can
+name them directly.
 
 This module owns what is genuinely API-tokens vocabulary:
 
@@ -29,7 +28,7 @@ from __future__ import annotations
 import logging
 
 from domains.apitokens.listings.models import coerce_resource_dict
-from domains.vms.negotiation.policies import (  # shared alkahest-scalar vocabulary
+from market_policy.scalar_policies import (  # shared alkahest-scalar vocabulary
     _amount_from_proposal,
     _loads_json_list,
     proposal_uses_scalar_amount,

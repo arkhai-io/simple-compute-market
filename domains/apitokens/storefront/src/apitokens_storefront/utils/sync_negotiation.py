@@ -42,8 +42,8 @@ from domains.apitokens.negotiation.terms import (
     provision_key_mode,
     provision_quantity,
 )
-from domains.vms.negotiation.policies import _amount_from_proposal
-from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
+from market_policy.scalar_policies import _amount_from_proposal
+from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
 from market_core.schemas import EscrowProposal
 from market_policy.negotiation_middleware import NegotiationRound
 

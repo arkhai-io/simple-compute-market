@@ -8,7 +8,7 @@ import os
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Protocol
+from typing import Any, Iterable, Mapping
 
 from domains.vms.listings import (
     determine_strategy_from_order,
@@ -20,7 +20,6 @@ from domains.vms.negotiation.policies import (
 )
 from market_policy.negotiation_middleware import (
     NegotiationContext,
-    NegotiationDecision,
     NegotiationMiddleware,
     NegotiationRound,
     load_negotiation_chain,
@@ -32,26 +31,12 @@ from market_policy.negotiation_middleware import (
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class SellerRoundResult:
-    our_amount: int
-    strategy_label: str
-    direction: str
-    chain_label: str
-    decision: NegotiationDecision
-    intermediate: dict[str, Any] | None = None
-
-
-class SellerRoundHook(Protocol):
-    async def __call__(
-        self,
-        *,
-        listing: Any,
-        history: list[NegotiationRound],
-        requested_duration_seconds: int | None = None,
-        strategy_label: str | None = None,
-    ) -> SellerRoundResult:
-        ...
+# The result carrier and hook protocol are domain-invariant and live in
+# the policy kit; re-exported here so existing import paths keep working.
+from market_policy.seller_round import (  # noqa: E402,F401
+    SellerRoundHook,
+    SellerRoundResult,
+)
 
 
 async def _default_seller_policy_inputs(capacity: Any) -> dict[str, Any]:

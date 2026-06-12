@@ -6,8 +6,8 @@ lookup), computes the seller's absolute reference amount — here
 ``quantity × unit rate``, the per-unit→absolute translation living in
 the domain's policy seam — and runs the configured middleware chain.
 
-``SellerRoundResult`` is reused from the VM module; the result shape is
-domain-neutral and consolidates with work item 7.
+``SellerRoundResult`` is the domain-invariant carrier from
+``market_policy.seller_round``.
 """
 
 from __future__ import annotations
@@ -21,11 +21,11 @@ from domains.apitokens.listings.pricing import (
     determine_strategy_from_order,
     extract_unit_price_from_order,
 )
-from domains.vms.negotiation.policies import (
+from market_policy.scalar_policies import (
     make_escrow_kind_dispatch_middleware,
     proposal_uses_scalar_amount,
 )
-from domains.vms.negotiation.storefront_round import SellerRoundResult
+from market_policy.seller_round import SellerRoundResult
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationMiddleware,
