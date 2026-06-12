@@ -6,8 +6,19 @@
 #
 # Bump `version` on backwards-incompatible changes.  Add filters
 # without bumping (etag changes; clients re-fetch).
+#
+# `schema.id` is the registry's stable schema identity — the name a
+# buyer schema plugin declares compatibility with
+# (BuyerSchemaPlugin.schema_id). With several registries configured,
+# the buyer offers each plugin only registries whose declared id
+# matches; registries without the header match any plugin
+# (pre-identity deployments).
 
 version: 4
+
+schema:
+  id: vms.compute
+  version: 1
 
 listing_shape:
   $schema: "https://json-schema.org/draft/2020-12/schema"

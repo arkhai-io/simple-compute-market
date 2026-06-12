@@ -247,7 +247,14 @@ from core_buyer.registry_config import (  # noqa: E402,F401
     resolve_discovery_timeout,
     resolve_indexer_auth,
     resolve_indexer_urls,
+    resolve_indexer_urls_for_schema,
 )
+
+#: The registry schema this plugin implements (mirrors the
+#: BuyerSchemaPlugin declaration in `.cli`). Discovery verbs resolve
+#: registries through `resolve_indexer_urls_for_schema(VMS_SCHEMA_ID, …)`
+#: so registries declaring a different schema are skipped.
+VMS_SCHEMA_ID = "vms.compute"
 
 
 def resolve_chain_id(rpc_url: str) -> int:

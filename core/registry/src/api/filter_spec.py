@@ -58,12 +58,33 @@ class FilterDecl(BaseModel):
     indexed: bool = False  # reserved for (a2); registry ignores today
 
 
-class FilterSpec(BaseModel):
-    """Parsed filter spec ready to serve."""
+class SchemaIdentity(BaseModel):
+    """Stable identity of the listing schema this registry serves.
+
+    ``id`` is the name a buyer schema plugin declares compatibility
+    with (``BuyerSchemaPlugin.schema_id``, e.g. ``"vms.compute"``) —
+    with several registries configured, the buyer offers each plugin
+    only the registries whose declared id matches. ``version`` is the
+    schema-contract version; plugins match on id alone today and the
+    version is advisory until a second schema version exists.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
+    id: str = Field(min_length=1)
+    version: int = Field(default=1, ge=1)
+
+
+class FilterSpec(BaseModel):
+    """Parsed filter spec ready to serve."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
     version: int = Field(ge=1)
+    #: Optional schema identity (YAML key ``schema``). Absent on legacy
+    #: specs — buyers treat an undeclared registry as matching any
+    #: plugin, so adding the header is opt-in per deployment.
+    schema_identity: SchemaIdentity | None = Field(default=None, alias="schema")
     listing_shape: dict[str, Any]
     filters: list[FilterDecl]
 
@@ -81,13 +102,20 @@ def _resolve_spec_path() -> Path:
 
 
 def compute_etag(spec: FilterSpec) -> str:
-    """sha256 hex over canonical-JSON encoding of the spec body."""
+    """sha256 hex over canonical-JSON encoding of the spec body.
+
+    The schema identity participates only when declared, so etags of
+    pre-identity specs are unchanged by this code knowing about it.
+    """
+    body: dict[str, Any] = {
+        "version": spec.version,
+        "listing_shape": spec.listing_shape,
+        "filters": [f.model_dump(exclude_none=False) for f in spec.filters],
+    }
+    if spec.schema_identity is not None:
+        body["schema"] = spec.schema_identity.model_dump()
     payload = json.dumps(
-        {
-            "version": spec.version,
-            "listing_shape": spec.listing_shape,
-            "filters": [f.model_dump(exclude_none=False) for f in spec.filters],
-        },
+        body,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -133,12 +161,15 @@ router = APIRouter(tags=["filter-spec"])
 
 
 def _spec_body(spec: FilterSpec) -> dict[str, Any]:
-    return {
+    body: dict[str, Any] = {
         "version": spec.version,
         "etag": compute_etag(spec),
         "listing_shape": spec.listing_shape,
         "filters": [f.model_dump(exclude_none=False) for f in spec.filters],
     }
+    if spec.schema_identity is not None:
+        body["schema"] = spec.schema_identity.model_dump()
+    return body
 
 
 @router.get(

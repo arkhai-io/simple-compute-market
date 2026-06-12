@@ -496,8 +496,9 @@ def register(app: typer.Typer) -> None:
 
         # Resolution: CLI flag > config.toml > derivation > default.
         from .common import (
+            VMS_SCHEMA_ID,
             resolve_buyer_wallet,
-            resolve_ssh_public_key, resolve_indexer_urls,
+            resolve_ssh_public_key, resolve_indexer_urls_for_schema,
             resolve_discovery_timeout, resolve_indexer_auth,
             select_chain_for_listing,
         )
@@ -505,7 +506,7 @@ def register(app: typer.Typer) -> None:
             override_addr=buyer_address, override_pk=buyer_private_key,
         )
         ssh = resolve_ssh_public_key(override=ssh_public_key)
-        reg_urls = resolve_indexer_urls(override=registry_urls)
+        reg_urls = resolve_indexer_urls_for_schema(VMS_SCHEMA_ID, override=registry_urls)
         deadline = resolve_discovery_timeout(override=discovery_timeout)
         reg_auth = resolve_indexer_auth()
         # Pick a chain up-front when there's no listing context yet; the

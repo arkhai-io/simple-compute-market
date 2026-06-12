@@ -176,9 +176,10 @@ def register(app: typer.Typer) -> None:
 
         # Resolve registry URLs + per-registry deadline + auth once.
         from .common import (
-            resolve_indexer_urls, resolve_discovery_timeout, resolve_indexer_auth,
+            VMS_SCHEMA_ID, resolve_indexer_urls_for_schema,
+            resolve_discovery_timeout, resolve_indexer_auth,
         )
-        reg_urls = resolve_indexer_urls(override=registry_urls)
+        reg_urls = resolve_indexer_urls_for_schema(VMS_SCHEMA_ID, override=registry_urls)
         deadline = resolve_discovery_timeout(override=discovery_timeout)
         reg_auth = resolve_indexer_auth()
 

@@ -351,14 +351,26 @@ class FilterSpecResponse:
     etag: str
     listing_shape: dict
     filters: list[dict]
+    #: Declared schema identity (``schema.id``/``schema.version`` in the
+    #: spec). None on pre-identity registries — buyers treat those as
+    #: matching any schema plugin.
+    schema_id: str | None = None
+    schema_version: int | None = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "FilterSpecResponse":
+        schema = d.get("schema") or {}
+        if not isinstance(schema, dict):
+            schema = {}
+        raw_id = schema.get("id")
+        raw_version = schema.get("version")
         return cls(
             version=int(d.get("version", 0)),
             etag=str(d.get("etag", "")),
             listing_shape=dict(d.get("listing_shape") or {}),
             filters=list(d.get("filters") or []),
+            schema_id=str(raw_id) if raw_id else None,
+            schema_version=int(raw_version) if raw_version is not None else None,
         )
 
 

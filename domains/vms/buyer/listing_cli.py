@@ -123,9 +123,13 @@ def listing_list(
     listings up to ``--limit``.
     """
     from .common import (
-        resolve_indexer_urls, resolve_discovery_timeout, resolve_indexer_auth,
+        VMS_SCHEMA_ID, resolve_indexer_urls_for_schema,
+        resolve_discovery_timeout, resolve_indexer_auth,
     )
-    urls = [_normalize_registry_url(u) for u in resolve_indexer_urls(override=registry_urls)]
+    urls = [
+        _normalize_registry_url(u)
+        for u in resolve_indexer_urls_for_schema(VMS_SCHEMA_ID, override=registry_urls)
+    ]
     deadline = resolve_discovery_timeout(override=discovery_timeout)
     auth = resolve_indexer_auth()
     if limit < 1 or limit > 200:
@@ -246,10 +250,14 @@ def listing_show(
     """Show a single listing by ID, fetched from the configured
     registry indexers — the first one that knows the listing wins."""
     from .common import (
-        resolve_indexer_urls, resolve_discovery_timeout, resolve_indexer_auth,
+        VMS_SCHEMA_ID, resolve_indexer_urls_for_schema,
+        resolve_discovery_timeout, resolve_indexer_auth,
     )
     from .buy_orchestrator import fetch_listing_dict_multi
-    urls = [_normalize_registry_url(u) for u in resolve_indexer_urls(override=registry_urls)]
+    urls = [
+        _normalize_registry_url(u)
+        for u in resolve_indexer_urls_for_schema(VMS_SCHEMA_ID, override=registry_urls)
+    ]
     deadline = resolve_discovery_timeout(override=discovery_timeout)
     auth = resolve_indexer_auth()
     try:

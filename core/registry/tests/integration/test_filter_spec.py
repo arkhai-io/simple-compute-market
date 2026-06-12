@@ -42,6 +42,11 @@ async def test_filter_spec_endpoint_returns_loaded_spec(registry_client) -> None
     token = next(f for f in body["filters"] if f["name"] == "token")
     assert token["on_missing"] == "pass"
 
+    # The shipped spec declares its schema identity; the buyer matches
+    # plugins to registries on this id.
+    assert body["schema"]["id"] == "vms.compute"
+    assert body["schema"]["version"] >= 1
+
 
 @pytest.mark.asyncio
 async def test_filter_spec_etag_stable_across_requests(registry_client) -> None:

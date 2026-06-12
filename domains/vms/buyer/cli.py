@@ -17,6 +17,7 @@ from core_buyer.plugins import BuyerSchemaPlugin
 
 from . import buy_cli as buy_module
 from .chain_cli import chain_app
+from .common import VMS_SCHEMA_ID
 from .config_cli import config_app
 from .logs_cli import logs_app
 from .network_cli import network_app
@@ -49,7 +50,7 @@ def register(app: typer.Typer) -> None:
 #: Loaded by the core CLI via
 #: [project.entry-points."market.buyer_plugins"] vms = "domains.vms.buyer.cli:plugin"
 plugin = BuyerSchemaPlugin(
-    schema_id="vms.compute",
+    schema_id=VMS_SCHEMA_ID,
     register=register,
     distribution="arkhai-vms-buyer",
 )
