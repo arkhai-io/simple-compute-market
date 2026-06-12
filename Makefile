@@ -7,7 +7,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-dev build-seller dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-apitokens-service dist-apitokens-storefront dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: build build-dev build-seller dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -22,7 +22,7 @@ DIST_DIR := ${CURDIR}/.dist
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-storefront dist-policy dist-provisioning dist-apitokens-service dist-apitokens-storefront dist-registry dist-buyer
+dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-storefront dist-policy dist-provisioning dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-registry dist-buyer
 
 dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -59,6 +59,12 @@ dist-apitokens-storefront: ## Build arkhai-apitokens-storefront wheel into .dist
 	cd domains/apitokens/storefront && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_apitokens_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-apitokens-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+dist-apitokens-buyer: ## Build arkhai-apitokens-buyer wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd domains/apitokens/buyer && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_apitokens_buyer-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-apitokens-buyer produced a platform-specific wheel — must build inside Docker" && exit 1)
 
 dist-registry: ## Build arkhai-core-registry-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)

@@ -33,6 +33,10 @@ dependencies = [
     # arkhai-kit-policy is the buyer's sibling negotiation-strategy dep,
     # resolved from .dist alongside the other internal wheels.
     "arkhai-vms-buyer>=0.1.0",
+    # The API-tokens schema plugin, discovered by the same `market`
+    # binary (one binary, many registry schemas); its verbs are
+    # namespaced under `market tokens …`.
+    "arkhai-apitokens-buyer>=0.1.0",
     "arkhai-kit-policy>=0.1.0",
 ]
 
