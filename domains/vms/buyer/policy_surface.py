@@ -177,14 +177,21 @@ BISECTION_POLICY = register_buyer_policy(BuyerPolicy(
 ))
 
 
-def configured_buyer_policy() -> BuyerPolicy:
+def configured_buyer_policy(*, strict: bool = False) -> BuyerPolicy:
     """The policy named by ``[negotiation] policy`` in buyer.toml.
 
-    Falls back to the default (``listed_price``). An explicit
-    ``[negotiation] policies = [...]`` chain still overrides the
-    policy's middleware list in ``_load_buyer_chain`` — the policy
-    object then only contributes the parameter surface and format
-    compatibility.
+    Default ``listed_price``. An explicit ``[negotiation] policies``
+    chain still overrides the policy's middleware list in
+    ``_load_buyer_chain`` — the policy object then only contributes the
+    parameter surface and format compatibility.
+
+    ``strict`` distinguishes the two call sites: app assembly
+    (``strict=False``) tolerates a missing/corrupt config and an
+    unknown name so ``market --help`` always renders — the default
+    surface is shown and the command body surfaces the real error;
+    chain loading (``strict=True``) propagates both, because silently
+    negotiating under a policy the user never chose is worse than
+    failing.
     """
     from market_policy.buyer_policy import DEFAULT_BUYER_POLICY, get_buyer_policy
 
@@ -195,8 +202,12 @@ def configured_buyer_policy() -> BuyerPolicy:
             toml_path="negotiation.policy", default=DEFAULT_BUYER_POLICY,
         ).strip() or DEFAULT_BUYER_POLICY
     except Exception:
-        # Policy resolution runs at app assembly — a missing or corrupt
-        # config must not kill `market --help`; command bodies surface
-        # the config error themselves.
+        if strict:
+            raise
         name = DEFAULT_BUYER_POLICY
-    return get_buyer_policy(name)
+    try:
+        return get_buyer_policy(name)
+    except KeyError:
+        if strict:
+            raise
+        return get_buyer_policy(DEFAULT_BUYER_POLICY)

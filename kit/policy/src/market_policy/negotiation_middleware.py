@@ -82,6 +82,19 @@ class NegotiationContext:
 
 NegotiationStep = tuple[Optional[NegotiationDecision], NegotiationContext]
 
+
+class NegotiationChainExhausted(RuntimeError):
+    """Every middleware in the chain passed (returned ``None``).
+
+    There is no "terminal" middleware type — any middleware may decide
+    or pass, and a chain either produces a decision or it doesn't. A
+    chain that can exhaust is misconfigured: its last middleware must be
+    one that always decides. Callers should treat this as an error (and
+    tell the counterparty the negotiation is over), never silently
+    append a fallback decider — that would just be running a different
+    chain than the one configured.
+    """
+
 NegotiationMiddleware = Callable[
     [list[NegotiationRound], NegotiationContext],
     NegotiationStep,
@@ -124,9 +137,10 @@ def run_negotiation_chain_with_context(
         decision, context = middleware(history, context)
         if decision is not None:
             return decision, context
-    raise RuntimeError(
-        "Negotiation chain exhausted without a decision. The terminal "
-        "middleware must always return Some. Check [negotiation].chain config."
+    raise NegotiationChainExhausted(
+        "Negotiation chain produced no decision (every middleware passed). "
+        "The chain's last middleware must always decide — check the "
+        "[negotiation] policies/policy configuration."
     )
 
 

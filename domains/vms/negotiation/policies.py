@@ -793,9 +793,21 @@ def accept_exact_listing_middleware(
     history: list[NegotiationRound],
     context: NegotiationContext,
 ) -> NegotiationStep:
-    """Terminal policy: accept only the exact advertised listing escrow."""
+    """Accept only the exact advertised listing escrow (take-it-or-leave).
+
+    With no peer proposal yet (the buyer-side round-0 opening), proposes
+    our pinned escrow unchanged — exactly what the listing advertised.
+    """
     proposal = _peer_proposal(history)
     if not isinstance(proposal, dict):
+        if isinstance(context.our_escrow_proposal, dict):
+            return (
+                NegotiationDecision(
+                    action="counter",
+                    proposal=dict(context.our_escrow_proposal),
+                ),
+                context,
+            )
         return (
             NegotiationDecision(action="reject", reason="exact_listing:no_proposal"),
             context,

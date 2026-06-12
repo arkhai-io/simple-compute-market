@@ -112,10 +112,12 @@ def test_chain_threads_context_when_middleware_defers():
     assert d.reason == "by_first"
 
 
-def test_chain_exhausted_raises():
+def test_chain_exhaustion_raises_the_typed_error():
+    from market_policy.negotiation_middleware import NegotiationChainExhausted
+
     def mw_defer(history, context):
         return None, context
 
     ctx = NegotiationContext(direction="maximize", our_reference_amount=100)
-    with pytest.raises(RuntimeError, match="exhausted"):
+    with pytest.raises(NegotiationChainExhausted, match="no decision"):
         run_negotiation_chain([mw_defer], [], ctx)

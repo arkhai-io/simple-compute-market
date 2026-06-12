@@ -144,3 +144,103 @@ def test_resume_point_carries_the_recorded_policy(tmp_path, monkeypatch):
 
     point = deal_helpers.load_negotiation_resume_point("run-1")
     assert point.policy == "bisection"
+
+
+def test_unknown_configured_policy_errors_instead_of_substituting():
+    """A typo'd policy name must not silently become some other policy."""
+    import pytest
+
+    from domains.vms.buyer.buyer_client import _load_buyer_chain
+
+    with patch(
+        "domains.vms.buyer.common.resolve_config_value",
+        return_value="haggle-3000",
+    ):
+        with pytest.raises(RuntimeError, match="haggle-3000"):
+            _load_buyer_chain()
+
+
+def test_round_0_exit_never_contacts_the_seller():
+    """The opening decision is honored: a chain that exits before
+    opening means no negotiation — the seller is never contacted."""
+    from market_policy.negotiation_middleware import NegotiationDecision
+
+    from domains.vms.buyer.buyer_client import negotiate_with_seller
+    from domains.vms.buyer.tests.test_buyer_client import (
+        _BUYER_ADDR, _BUYER_PK, _escrow_proposal, _provision,
+    )
+
+    def refusing(history, context):
+        return NegotiationDecision(action="exit", reason="not_today"), context
+
+    with patch(
+        "domains.vms.buyer.buyer_client.urllib.request.urlopen",
+    ) as urlopen:
+        outcome = negotiate_with_seller(
+            seller_url="http://seller:8001",
+            buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK,
+            listing_id="lst-1",
+            initial_price=50, max_price=100,
+            provision_terms=_provision(3600),
+            escrow_proposal=_escrow_proposal(),
+            chain=[refusing],
+        )
+
+    assert outcome.status == "exited"
+    assert outcome.reason == "not_today"
+    urlopen.assert_not_called()
+
+
+def test_chain_exhaustion_errors_and_releases_the_seller():
+    """All-None mid-loop is a local error — but the seller's live thread
+    gets a protocol-level exit before the error propagates."""
+    import json
+
+    import pytest
+
+    from market_policy.negotiation_middleware import (
+        NegotiationChainExhausted,
+        NegotiationDecision,
+    )
+
+    from domains.vms.buyer.buyer_client import negotiate_with_seller
+    from domains.vms.buyer.tests.test_buyer_client import (
+        _BUYER_ADDR, _BUYER_PK, _MockResponse, _escrow_proposal,
+        _provision, _seller_proposal,
+    )
+
+    def opens_then_passes(history, context):
+        if not any(r.sender == "them" for r in history):
+            return NegotiationDecision(
+                action="counter",
+                proposal=dict(context.our_escrow_proposal or {}),
+            ), context
+        return None, context  # passes once the seller has countered
+
+    posted_bodies = []
+
+    def fake_urlopen(req, timeout=None):
+        posted_bodies.append(json.loads(req.data.decode("utf-8")))
+        return _MockResponse(status=200, text=json.dumps({
+            "negotiation_id": "neg-1",
+            "action": "counter",
+            "proposal": _seller_proposal(80),
+        }))
+
+    with patch(
+        "domains.vms.buyer.buyer_client.urllib.request.urlopen",
+        side_effect=fake_urlopen,
+    ):
+        with pytest.raises(NegotiationChainExhausted):
+            negotiate_with_seller(
+                seller_url="http://seller:8001",
+                buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK,
+                listing_id="lst-1",
+                initial_price=50, max_price=100,
+                provision_terms=_provision(3600),
+                escrow_proposal=_escrow_proposal(),
+                chain=[opens_then_passes],
+            )
+
+    assert posted_bodies[-1]["action"] == "exit"
+    assert posted_bodies[-1]["reason"] == "buyer_chain_no_decision"

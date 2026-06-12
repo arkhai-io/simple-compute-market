@@ -74,6 +74,19 @@ opening, tuple selection, derivation.
   (`[negotiation] policies`), and becomes interesting again only when
   proposals carry justification (load, duration discounts, plan-shape
   trade-offs) — at which point richer policies join it.
+- **There is no "terminal" middleware type, and exhaustion is an
+  error.** Every middleware has the same shape — return a decision or
+  pass with ``None`` — and whether one decides is not externally
+  knowable, so nothing may be appended to a chain *because* it returned
+  ``None``: that would just be running a different chain than the one
+  configured (you should have configured that chain). A chain that
+  exhausts raises ``NegotiationChainExhausted``; the buyer's round loop
+  releases the seller's live thread with a protocol-level exit
+  (``buyer_chain_no_decision``) before the error propagates. The same
+  no-substitution rule applies to resolution: a typo'd
+  ``[negotiation] policy`` name errors instead of silently becoming the
+  default, and the chain's round-0 decision is honored — exit/reject
+  before opening means the seller is never contacted.
 - **Settlement plans slot in as policies.** When Part I's plan carrier
   lands, an interval-plan or bonded policy contributes its vocabulary
   (`--interval`, bond sizes) through the same seam; `listed_price` and

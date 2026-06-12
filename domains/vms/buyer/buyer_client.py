@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from market_policy.negotiation_middleware import (
+    NegotiationChainExhausted,
     NegotiationContext,
     NegotiationMiddleware,
     NegotiationRound,
@@ -42,8 +43,6 @@ from market_core.schemas import ProvisionTerms, SettlementPlan
 
 DEFAULT_MAX_ROUNDS = 10
 logger = logging.getLogger(__name__)
-
-DEFAULT_TERMINAL = "listed_price"
 _RL_POLICY_NAMES = {"rl", "erc20_rl", "native_token_rl", "erc1155_rl"}
 
 
@@ -78,14 +77,14 @@ def _load_buyer_chain(
     """Load the buyer's negotiation chain.
 
     If ``policies`` is provided (from `[negotiation] policies = [...]`
-    in `buyer.toml`), uses the explicit ordered list. Otherwise
-    synthesizes the default chain `[buyer_escrow_shape_guard, <terminal>]`
-    — the shape guard vetoes if the seller silently mutates a buyer-pinned
+    in `buyer.toml`), uses the explicit ordered list. Otherwise the
+    chain is `[buyer_escrow_shape_guard, *policy.middlewares]` — the
+    shape guard vetoes if the seller silently mutates a buyer-pinned
     field of the EscrowProposal (token swap, expiration push, escrow
-    contract swap). ``<terminal>`` is `policy_mode` if set, else
-    ``DEFAULT_TERMINAL`` (`"listed_price"`: pay the published price,
-    accept within the bound, never counter — configure `bisection` or
-    richer in `[negotiation] policies` to actually haggle).
+    contract swap); the policy is `policy_mode` if set, else the one
+    buyer.toml `[negotiation] policy` names (default `listed_price`).
+    Resolution failures raise — a typo'd policy name must not silently
+    become some other policy.
     """
     policies_by_kind = normalize_policies_by_escrow_kind_config(policies)
     if policies_by_kind:
@@ -112,19 +111,18 @@ def _load_buyer_chain(
     elif (policy_mode or "").strip():
         names = ["buyer_escrow_shape_guard", (policy_mode or "").strip()]
     else:
-        # The configured BuyerPolicy object names the terminal chain
+        # The configured BuyerPolicy names the rest of the chain
         # (buyer.toml [negotiation] policy, default listed_price).
-        try:
-            from .policy_surface import configured_buyer_policy
+        # Resolution failures propagate: silently substituting a
+        # default here would negotiate under a policy the user never
+        # chose.
+        from .policy_surface import configured_buyer_policy
 
-            names = [
-                "buyer_escrow_shape_guard",
-                *configured_buyer_policy().middlewares,
-            ]
-        except Exception as exc:
-            logger.debug("Buyer policy resolution failed (%s); using %s",
-                         exc, DEFAULT_TERMINAL)
-            names = ["buyer_escrow_shape_guard", DEFAULT_TERMINAL]
+        try:
+            policy = configured_buyer_policy(strict=True)
+        except KeyError as exc:
+            raise RuntimeError(str(exc)) from exc
+        names = ["buyer_escrow_shape_guard", *policy.middlewares]
     if _policy_names_need_rl(names):
         _maybe_register_rl_middleware()
     return load_negotiation_chain(names)
@@ -447,17 +445,24 @@ def negotiate_with_seller(
             max_rounds=max_rounds,
             intermediate=dict(policy_params or {}),
         ))
-        if opening.action == "counter" and opening.proposal is not None:
-            pinned_proposal = opening.proposal
-        else:
-            # A terminal that refuses to open (or a custom chain without
-            # an opening branch) falls back to the unmodified base — the
-            # seller sees exactly what the listing advertised.
-            logger.debug(
-                "Policy chain produced %r for the round-0 opening; "
-                "pinning the base proposal unchanged.", opening.action,
+        # The decision is honored, not second-guessed: a chain that
+        # exits/rejects before opening means this buyer does not open
+        # this negotiation — the seller is never contacted.
+        if opening.action in ("exit", "reject"):
+            return NegotiationOutcome(
+                status="exited",
+                negotiation_id=None,
+                reason=opening.reason or f"buyer_{opening.action}_at_opening",
+                duration_seconds=duration_seconds,
+                rounds=0,
             )
-            pinned_proposal = base_proposal
+        if opening.action != "counter" or opening.proposal is None:
+            raise RuntimeError(
+                f"Policy chain produced {opening.action!r} as the round-0 "
+                f"opening — only counter (with a proposal), exit, or "
+                f"reject make sense before the seller has said anything."
+            )
+        pinned_proposal = opening.proposal
 
         new_body = {
             "listing_id": listing_id,
@@ -553,7 +558,30 @@ def negotiate_with_seller(
             max_rounds=max_rounds,
             intermediate=dict(policy_params or {}),
         )
-        next_move = run_negotiation_chain(chain, round_history, ctx)
+        try:
+            next_move = run_negotiation_chain(chain, round_history, ctx)
+        except NegotiationChainExhausted:
+            # Local misconfiguration — but the seller's thread is live.
+            # Release it with a protocol-level exit before erroring, so
+            # the seller isn't left holding state until a watchdog.
+            try:
+                sig, ts = _sign(f"negotiate_continue:{neg_id}", buyer_private_key)
+                _post(
+                    f"{seller_url}/api/v1/negotiate/{neg_id}",
+                    {
+                        "action": "exit",
+                        "reason": "buyer_chain_no_decision",
+                        "buyer_address": buyer_address,
+                    },
+                    signature=sig, timestamp=ts,
+                    identity_identifier=buyer_address,
+                )
+            except Exception as notify_exc:
+                logger.warning(
+                    "Could not deliver the no-decision exit to the "
+                    "seller: %s", notify_exc,
+                )
+            raise
 
         body: dict[str, Any] = {
             "action": next_move.action,
