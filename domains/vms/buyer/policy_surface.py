@@ -16,7 +16,6 @@ registration works; the buyer CLI imports it during app assembly.
 
 from __future__ import annotations
 
-import os
 from typing import Any, Optional
 
 import typer
@@ -91,13 +90,18 @@ def derive_scalar_prices(
     price_markup: float,
     initial_price: Optional[int] = None,
     max_price: Optional[int] = None,
+    interactive: bool = False,
 ) -> tuple[Optional[int], Optional[int]]:
     """Fill missing (initial_price, max_price) from the advertised price.
 
     The scalar policies' shared derivation: with no explicit flags both
     prices ARE the cheapest candidate's advertised per-hour rate — open
-    there, bound there, done. There is nothing to confirm interactively
-    when the answer is "pay what's listed".
+    there, bound there. ``interactive`` (the caller's canonical
+    disposition, ``core_buyer.cli.interactive_disposition``) asks for
+    one confirmation before proceeding: not because the *price* needs
+    deriving — it doesn't — but because in a bundled flow like ``buy``
+    this table is the user's first sight of what discovery and the
+    aggregation policy picked. Declining returns ``(None, None)``.
 
     Derivation reads only the advertised rate, never the explicit
     flags: advertised rates are base units while explicit flags are
@@ -139,7 +143,7 @@ def derive_scalar_prices(
         )
         return None, None
 
-    if priced and os.isatty(0):
+    if priced and interactive:
         table = Table(title="Matched listings (per-hour rates)", show_header=True)
         table.add_column("#", justify="right", style="dim")
         table.add_column("Listing ID", overflow="fold")
@@ -157,6 +161,10 @@ def derive_scalar_prices(
         f"Prices: --initial-price={initial_price} --max-price={max_price}"
         + (f" (anchored on advertised={anchor})" if anchor is not None else "")
     )
+    if interactive and not typer.confirm(
+        "Proceed with these listings at these prices?", default=True,
+    ):
+        return None, None
     return initial_price, max_price
 
 

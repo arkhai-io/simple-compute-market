@@ -134,3 +134,43 @@ def test_policy_without_derivation_passes_explicit_values_through():
             matches=[], console=Console(), price_markup=1.5,
             initial_price=7, max_price=9,
         ) == (7, 9)
+
+
+def test_interactive_derivation_confirms_and_honors_decline():
+    from rich.console import Console
+
+    from domains.vms.buyer.policy_surface import derive_scalar_prices
+
+    listing = {"listing_id": "lst-1", "seller": "http://s:8001",
+               "accepted_escrows": [_scalar_entry()]}
+
+    with patch("typer.confirm", return_value=True) as confirm:
+        assert derive_scalar_prices(
+            matches=[listing], console=Console(), price_markup=1.5,
+            interactive=True,
+        ) == (100, 100)
+    confirm.assert_called_once()
+
+    with patch("typer.confirm", return_value=False):
+        assert derive_scalar_prices(
+            matches=[listing], console=Console(), price_markup=1.5,
+            interactive=True,
+        ) == (None, None)
+
+    # Non-interactive runs never prompt.
+    with patch("typer.confirm") as confirm:
+        derive_scalar_prices(
+            matches=[listing], console=Console(), price_markup=1.5,
+        )
+    confirm.assert_not_called()
+
+
+def test_interactive_disposition_is_yes_and_tty():
+    from core_buyer.cli import interactive_disposition
+
+    with patch("sys.stdin") as stdin:
+        stdin.isatty.return_value = True
+        assert interactive_disposition(assume_yes=False) is True
+        assert interactive_disposition(assume_yes=True) is False
+        stdin.isatty.return_value = False
+        assert interactive_disposition(assume_yes=False) is False

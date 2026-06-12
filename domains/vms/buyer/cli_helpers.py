@@ -19,6 +19,7 @@ def resolve_prices_from_matches(
     price_markup: float,
     initial_price: Optional[int] = None,
     max_price: Optional[int] = None,
+    interactive: bool = False,
 ) -> tuple[Optional[int], Optional[int]]:
     """Fill missing prices via the configured buyer policy's derivation.
 
@@ -38,6 +39,7 @@ def resolve_prices_from_matches(
         price_markup=price_markup,
         initial_price=initial_price,
         max_price=max_price,
+        interactive=interactive,
     )
 
 

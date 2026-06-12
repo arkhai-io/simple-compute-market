@@ -637,13 +637,19 @@ def register(app: typer.Typer) -> None:
         # there, bound there (no markup headroom; the default policy
         # never counters).
         if not explicit_prices:
+            from core_buyer.cli import interactive_disposition
+
             initial_price, max_price = _resolve_prices_from_matches(
                 matches=matches,
                 console=console,
                 price_markup=price_markup,
+                # buy bundles discovery + negotiation: this is the
+                # user's first sight of what the aggregation policy
+                # picked, so an interactive run confirms it.
+                interactive=interactive_disposition(assume_yes),
             )
             if initial_price is None or max_price is None:
-                # No listing carried an advertised price.
+                # No advertised price, or the user declined the picks.
                 raise typer.Exit(2)
 
         # Resolve aggregation policy: --aggregate-by > [aggregation].policy > default.

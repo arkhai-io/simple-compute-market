@@ -45,13 +45,16 @@ class PolicyParam:
 class BuyerPolicy:
     """A named buyer negotiation policy.
 
-    ``middlewares`` is the terminal chain (the loader prepends the
-    pinned-shape guard). ``compatible`` judges one listing
+    ``middlewares`` is the rest of the chain after the pinned-shape
+    guard the loader prepends. ``compatible`` judges one listing
     ``accepted_escrows`` entry — tuple selection offers the policy only
     formats it claims. ``derive_prices`` turns raw CLI parameter values
     plus the candidate listings into the per-hour (initial, max) pair
-    in base units, or ``(None, None)`` when underivable; policies with
-    no scalar notion may leave it None.
+    in base units, or ``(None, None)`` when underivable or declined;
+    policies with no scalar notion may leave it None. It receives the
+    caller's canonical interactivity disposition as ``interactive=``
+    (core computes it from --yes + TTY; a policy never re-derives it
+    from the environment) and may prompt only when it is True.
     """
 
     name: str

@@ -72,6 +72,24 @@ def _config_path_callback(value: str | None) -> str | None:
     return value
 
 
+def interactive_disposition(assume_yes: bool) -> bool:
+    """Canonical answer to "may this run prompt the user?".
+
+    True only when the user did not pass ``--yes`` AND stdin is a TTY —
+    the same disposition every prompt in the pipeline must follow, and
+    the form policy hooks receive (``derive_prices(interactive=...)``)
+    so a policy never re-derives it from the environment.
+    """
+    import os
+    import sys
+
+    try:
+        is_tty = sys.stdin.isatty()
+    except Exception:
+        is_tty = False
+    return (not assume_yes) and is_tty
+
+
 # ---------------------------------------------------------------------------
 # Generic (no-plugin) fallback commands
 # ---------------------------------------------------------------------------
