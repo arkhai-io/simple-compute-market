@@ -13,15 +13,20 @@ from core_site.db import Base
 from core_site.ledger import CapacityConflictError, CapacityLedgerService
 
 
-@pytest.fixture
-def ledger() -> CapacityLedgerService:
+def _make_ledger(**kwargs) -> CapacityLedgerService:
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
-    return CapacityLedgerService(sessionmaker(bind=engine))
+    return CapacityLedgerService(sessionmaker(bind=engine), **kwargs)
+
+
+@pytest.fixture
+def ledger() -> CapacityLedgerService:
+    # VM-flavored: the provisioning service's eligibility invariant.
+    return _make_ledger(required_attributes=("vm_host",))
 
 
 @pytest.fixture
@@ -61,6 +66,38 @@ def test_resource_without_vm_host_is_ineligible(ledger: CapacityLedgerService):
         resource_id="hostless", total_units=8, attributes={"gpu_model": "H200"},
     )
     assert ledger.probe(claim=None) is None
+
+
+def test_generic_ledger_has_no_attribute_requirement():
+    # A host without an eligibility invariant (the tokens service)
+    # matches attribute-less resources and speaks the generic unit key.
+    generic = _make_ledger()
+    generic.register_resource(
+        resource_id="svc-quota", total_units=1000, resource_type="api_tokens",
+    )
+    match = generic.probe(claim={"units": 250})
+    assert match is not None
+    assert match["allocated_units"] == 250
+    assert match["available_units"] == 1000  # probe consumes nothing
+
+    reserved = generic.reserve(
+        claim={"units": 250}, deal_ref={"escrow_uid": "0xq"},
+    )
+    assert reserved["allocated_units"] == 250
+    assert reserved["available_units"] == 750
+    assert generic.snapshot()[0]["available_units"] == 750
+
+    # Open-ended commit: leased with no lease tail, never watchdog-due.
+    committed = generic.commit(
+        resource_id=reserved["resource_id"],
+        allocation_id=reserved["allocation_id"],
+    )
+    assert committed["state"] == "leased"
+    assert committed["lease_end_utc"] is None
+    assert generic.list_lease_due(datetime.now(timezone.utc)) == []
+
+    with pytest.raises(ValueError):
+        generic.probe(claim={"units": 0})
 
 
 def test_reserve_decrements_and_releases_restore(seeded: CapacityLedgerService):

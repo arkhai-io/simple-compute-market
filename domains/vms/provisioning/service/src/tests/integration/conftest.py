@@ -358,7 +358,9 @@ async def client_and_queue(
     )
 
     from core_site.ledger import CapacityLedgerService
-    capacity_ledger_service = CapacityLedgerService(session_factory=session_factory)
+    capacity_ledger_service = CapacityLedgerService(
+        session_factory=session_factory, required_attributes=("vm_host",),
+    )
 
     from services.lease_lifecycle_service import LeaseLifecycleService
     lease_lifecycle_service = LeaseLifecycleService(

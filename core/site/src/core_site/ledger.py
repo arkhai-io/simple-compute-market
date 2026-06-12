@@ -7,13 +7,14 @@ anonymous versioned capacity-event feed. Storefronts reach it through
 the ``/api/v1/capacity`` HTTP surface, which mirrors the
 ``core_storefront.capacity.CapacityClient`` contract verb for verb.
 
-Matching semantics deliberately mirror the storefront's embedded ledger
-(``reserve_available_compute_vm``): a claim is an exact-match attribute
-mapping plus a ``gpu_count`` unit request, checked first against the
-resource's attributes JSON and then against its top-level fields, and a
-resource is eligible only when its attributes name a ``vm_host``. The
-remote client must behave byte-for-byte like the embedded adapter it
-replaces — the move is a move, not a behavior change.
+Matching semantics: a claim is an exact-match attribute mapping plus a
+``units`` request (``gpu_count`` is the VM domain's alias), checked
+first against the resource's attributes JSON and then against its
+top-level fields. Domain-specific eligibility — the VM domain requires
+that a resource's attributes name a ``vm_host``, mirroring the
+storefront's embedded ledger (``reserve_available_compute_vm``) — is
+declared by the hosting service via ``required_attributes``; a host
+with no such invariant (the tokens service) passes none.
 
 Mutations serialize on a process-level lock: the site authority is the
 serialization point for reserves across storefronts, and that point is
@@ -28,7 +29,7 @@ import logging
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Sequence
 
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -67,16 +68,23 @@ def parse_utc(value: str | None) -> Optional[datetime]:
     return None
 
 
+# Claim keys that request a unit count rather than matching an attribute.
+# "units" is the generic key; "gpu_count" is the VM domain's alias.
+_UNIT_CLAIM_KEYS = ("units", "gpu_count")
+
+
 def _requested_units(claim: Mapping[str, Any] | None) -> int:
-    raw = (claim or {}).get("gpu_count")
-    if raw is None:
+    claim = claim or {}
+    key = next((k for k in _UNIT_CLAIM_KEYS if claim.get(k) is not None), None)
+    if key is None:
         return 1
+    raw = claim[key]
     try:
         requested = int(raw)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"gpu_count must be an integer, got {raw!r}") from exc
+        raise ValueError(f"{key} must be an integer, got {raw!r}") from exc
     if requested < 1:
-        raise ValueError(f"gpu_count must be >= 1, got {requested}")
+        raise ValueError(f"{key} must be >= 1, got {requested}")
     return requested
 
 
@@ -95,10 +103,11 @@ def _resource_matches(
         "resource_type": resource.resource_type,
         "resource_subtype": resource.resource_subtype,
         "value": resource.total_units,
+        "units": resource.total_units,
         "gpu_count": resource.total_units,
     }
     for key, expected in claim.items():
-        if key == "gpu_count":
+        if key in _UNIT_CLAIM_KEYS:
             continue
         actual = attrs.get(key, top_level.get(key))
         if actual != expected:
@@ -109,8 +118,20 @@ def _resource_matches(
 class CapacityLedgerService:
     """Authoritative capacity operations over the site ledger tables."""
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker[Session],
+        *,
+        required_attributes: Sequence[str] = (),
+    ) -> None:
+        """``required_attributes`` is the hosting domain's eligibility
+        invariant: a resource matches only when its attributes give each
+        named key a non-empty string (the VM provisioning service passes
+        ``("vm_host",)`` — a slice that names no host can't be
+        fulfilled). Domains without such an invariant pass none.
+        """
         self._session_factory = session_factory
+        self._required_attributes = tuple(required_attributes)
         # Re-entrant and held across READS too: the service's SQLite
         # engine is a StaticPool — every session shares one connection,
         # so an unserialized read interleaving with a write transaction
@@ -239,13 +260,15 @@ class CapacityLedgerService:
         *,
         resource_id: str,
         allocation_id: str | None = None,
-        lease_end_utc: str,
+        lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
     ) -> dict[str, Any] | None:
         """Confirm a reservation into an active lease.
 
         Idempotent: committing an already-leased allocation refreshes the
-        lease end and clears any TTL hold.
+        lease end and clears any TTL hold. ``lease_end_utc=None`` commits
+        an open-ended hold (no lease tail — the watchdog never sees it);
+        re-committing without a lease end leaves any existing end alone.
         """
         with self._lock, self._session_factory() as db:
             allocation = self._find_allocation(
@@ -260,7 +283,8 @@ class CapacityLedgerService:
                     f"{allocation.state}; cannot commit"
                 )
             allocation.state = AllocationState.leased.value
-            allocation.lease_end_utc = str(lease_end_utc)
+            if lease_end_utc is not None:
+                allocation.lease_end_utc = str(lease_end_utc)
             allocation.hold_expires_at = None
             if not allocation.lease_start_utc:
                 allocation.lease_start_utc = datetime.now(timezone.utc).isoformat()
@@ -526,8 +550,11 @@ class CapacityLedgerService:
         for resource in rows:
             if not _resource_matches(resource, claim):
                 continue
-            vm_host = (resource.attributes or {}).get("vm_host")
-            if not isinstance(vm_host, str) or not vm_host.strip():
+            attrs = resource.attributes or {}
+            if any(
+                not isinstance(attrs.get(key), str) or not attrs[key].strip()
+                for key in self._required_attributes
+            ):
                 continue
             available = int(resource.total_units or 0) - self._held_units(
                 db, resource.resource_id
@@ -599,6 +626,10 @@ class CapacityLedgerService:
             "unit": "count",
             "state": "available",
             "value": int(resource.total_units or 0),
+            "allocated_units": requested,
+            "available_units": available,
+            # VM-domain aliases, kept so the remote client stays
+            # byte-compatible with the embedded adapter it replaced.
             "allocated_gpu_count": requested,
             "available_gpu_count": available,
             "attributes": attrs,

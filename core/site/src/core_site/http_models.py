@@ -79,8 +79,12 @@ class AllocationResponse(BaseModel):
 
 class CommitRequest(BaseModel):
     resource_id: str
-    lease_end_utc: str = Field(
-        description="When the lease ends (ISO-8601 or 'YYYY-MM-DD HH:MM')."
+    lease_end_utc: Optional[str] = Field(
+        default=None,
+        description=(
+            "When the lease ends (ISO-8601 or 'YYYY-MM-DD HH:MM'). "
+            "Omit for an open-ended commit (no lease tail)."
+        ),
     )
     idempotency_ref: Optional[str] = None
 
