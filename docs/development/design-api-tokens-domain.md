@@ -306,11 +306,34 @@ second scheme (the buyer pass-through middleware can ship from day one
    a lost response can't strand the buyer); consume/verify/batch API;
    admin surface; `GET /keys/{id}` is the seller guards' key→owner
    lookup. Dockerfile/compose wiring rides the e2e topology (item 6).
-4. **Concept modules + storefront.** `domains/apitokens/{listings,
-   negotiation,settlement}` hooks (quota guard,
-   `key_owned_by_buyer_wallet` guard, issuance submission, failure
-   action), quota-backed publish/reconcile,
-   `arkhai-apitokens-storefront` composition root.
+4. **Concept modules + storefront.** *(Done.)* Landed in two layers.
+   First, the domain-neutral storefront glue the second root would
+   otherwise have duplicated was hoisted: market-state SQLite
+   persistence + versioned migrations (`core_storefront.sqlite_client` /
+   `sqlite_migrations`, with `_ensure_domain_tables` /
+   `_domain_migrations` subclass hooks the VM client now uses for its
+   inventory tables), registry fan-out (`multi_registry_client`),
+   settle-time escrow verification, refund + ERC-20 transfer, the
+   remote capacity client + event poller
+   (`core_storefront.capacity_remote`, with the domain's listing
+   reconcile injected), and the alkahest claim hooks
+   (`market_alkahest.claim_hooks`). Then the domain:
+   `domains/apitokens/{listings,negotiation,settlement}` (offer schema +
+   per-token pricing, `api_tokens_round_zero_guard` /
+   `token_quota_guard` / `key_owned_by_buyer_wallet` + the seller round
+   hook with quantity×rate reference amounts, issuance client +
+   fulfillment orchestration with inline rollback) and
+   `arkhai-apitokens-storefront` (`domains/apitokens/storefront/`,
+   import `apitokens_storefront`): quota-backed publish/reconcile
+   (listings derive from a quota resource, close on exhaustion and
+   reopen on release via the capacity event feed), sync negotiation
+   persisting `token_deal_terms` per thread, settlement jobs submitting
+   issuance with the negotiation-time hold and returning
+   `{key_id, secret?}` once through `tenant_credentials`, claims-engine
+   collection, and a `serve`/`publish`/`listings` CLI. The scalar
+   policies and `SellerRoundResult` are still imported from
+   `domains.vms.negotiation` — they are alkahest vocabulary, not VM
+   vocabulary; items 5/7 relocate them. Dockerfile/compose rides item 6.
 5. **Buyer plugin.** Schema plugin + verbs/flags/rendering;
    per-unit→absolute scaling in the policy surface (and the VM
    plugin's per-hour scaling moves to the same seam);

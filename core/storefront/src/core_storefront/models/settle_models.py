@@ -8,7 +8,9 @@ from pydantic import BaseModel, Field
 
 class SettleRequest(BaseModel):
     negotiation_id: str
-    ssh_public_key: str
+    # Domain payload: the VM domain delivers against it; token deals
+    # send "" (their deliverable is keyed by the negotiation's terms).
+    ssh_public_key: str = ""
     buyer_address: str
     chain_name: str = Field(
         description=(

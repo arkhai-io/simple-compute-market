@@ -96,7 +96,7 @@ scripts (`market`, `market-storefront`, `market-policy`) are unchanged.
 |---|---|---|
 | core | `arkhai-core` (`core/`) | protocol-carrier wheel: negotiation/settlement wire shapes both roles must derive identically. Stdlib + pydantic only; zero domain vocabulary and zero settlement-mechanism vocabulary (lifecycle universals + `{mechanism, params}` envelope — see "Settlement Lifecycle"). |
 | core | `arkhai-core-buyer` (`core/buyer/`) | buyer role shell: `market` console script, verb skeleton, `market.buyer_plugins` entry-point discovery, `run_buy` orchestration, registry fan-in |
-| core | `arkhai-core-storefront` (`core/storefront/`) | storefront role shell (library, framework-free): sync-negotiation protocol, registry publication, stage log, auth, HTTP models, capacity-client contract |
+| core | `arkhai-core-storefront` (`core/storefront/`) | storefront role shell (library, framework-free): sync-negotiation protocol, registry publication + multi-registry fan-out client, market-state SQLite persistence + versioned migrations (domain tables via subclass hooks), settle-time escrow verification, refund/ERC-20 transfer, stage log, auth, HTTP models, capacity-client contract + remote site client/event poller, claims engine |
 | core | `arkhai-core-registry` (`core/registry/`) | registry service; schema injected as `filter-spec.yaml` config |
 | core | `arkhai-core-registry-client`, `arkhai-core-storefront-client` | protocol clients |
 | core | `arkhai-core-site` (`core/site/`) | site-authority scaffold: capacity ledger, ledger tables, `/api/v1/capacity/*` router — mounted by a hosting service per site |
@@ -104,10 +104,16 @@ scripts (`market`, `market-storefront`, `market-policy`) are unchanged.
 | domain | `arkhai-vms-buyer` (`domains/vms/buyer/`) | no console script — publishes the `vms.compute` plugin the core `market` CLI discovers |
 | domain | `arkhai-vms-storefront` (`domains/vms/storefront/`) | the VM storefront executable/composition root (FastAPI adapters over core) |
 | domain | `arkhai-vms-provisioning` (`domains/vms/provisioning/service/`) | the VM fulfillment executor service |
+| domain | `arkhai-apitokens-service` (`domains/apitokens/service/`) | the tokens service: API keys/credit grants/consumption + the quota ledger (mounts `core_site`) |
+| domain | `arkhai-apitokens-storefront` (`domains/apitokens/storefront/`) | the API-tokens storefront executable/composition root: quota-backed listings, quantity/key-ownership negotiation guards, issuance-backed settlement |
 
-The VM *concept* modules (`domains/vms/{listings,negotiation,settlement,provisioning}`)
-are not separate wheels: they ship inside the buyer/storefront wheels
-and implement core hook shapes by injection, without importing core.
+The *concept* modules (`domains/vms/{listings,negotiation,settlement,provisioning}`,
+`domains/apitokens/{listings,negotiation,settlement}`) are not separate
+wheels: they ship inside the buyer/storefront wheels and implement core
+hook shapes by injection, without importing core. The API-tokens
+negotiation modules still import the scalar/escrow policies from
+`domains.vms.negotiation` — alkahest vocabulary awaiting its neutral
+home (design-api-tokens-domain.md, items 5/7).
 
 Executable ownership splits by role: the buyer binary is core-owned
 with domain schema plugins (one binary, many registry schemas; without
