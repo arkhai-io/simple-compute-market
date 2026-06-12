@@ -669,6 +669,10 @@ def register(app: typer.Typer) -> None:
         # on the buyer's chain or matches --token-contract.
         from domains.vms.settlement import select_escrow_entry
 
+        from .policy_surface import (
+            configured_buyer_policy as _configured_buyer_policy,
+        )
+
         def build_escrow_proposal_for_match(match: dict) -> EscrowProposal | None:
             entry = select_escrow_entry(
                 match,
@@ -678,6 +682,7 @@ def register(app: typer.Typer) -> None:
                 rpc_url=rpc,
                 buyer_address=addr,
                 console=console,
+                compatible=_configured_buyer_policy().compatible,
             )
             if entry is None:
                 return None

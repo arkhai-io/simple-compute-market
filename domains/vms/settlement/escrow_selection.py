@@ -25,6 +25,7 @@ def _filter_entries(
     *,
     chain_name: str,
     token_contract_filter: Optional[str],
+    compatible: Optional[Any] = None,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     token_filter = token_contract_filter.lower() if token_contract_filter else None
@@ -34,6 +35,8 @@ def _filter_entries(
         if entry.get("chain_name") != chain_name:
             continue
         if token_filter is not None and _entry_token(entry) != token_filter:
+            continue
+        if compatible is not None and not compatible(entry):
             continue
         out.append(entry)
     return out
@@ -70,8 +73,16 @@ def select_escrow_entry(
     rpc_url: str,
     buyer_address: str,
     console: Optional[Console] = None,
+    compatible: Optional[Any] = None,
 ) -> Optional[dict[str, Any]]:
-    """Return one accepted escrow entry to negotiate against."""
+    """Return one accepted escrow entry to negotiate against.
+
+    ``compatible`` is the configured buyer policy's format predicate
+    (design-negotiation-policy-surface.md): entries the policy cannot
+    negotiate are never offered, so an incompatible-only listing yields
+    None ("no compatible escrow format") instead of a tuple the
+    strategy would mangle.
+    """
     accepted = listing.get("accepted_escrows") or []
     if isinstance(accepted, str):
         import json
@@ -87,6 +98,7 @@ def select_escrow_entry(
         accepted,
         chain_name=chain_name,
         token_contract_filter=token_contract_filter,
+        compatible=compatible,
     )
     if not candidates:
         return None

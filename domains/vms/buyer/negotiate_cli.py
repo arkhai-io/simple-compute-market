@@ -256,6 +256,8 @@ def register(app: typer.Typer) -> None:
             chain_cfg = select_chain_for_listing(
                 listing=listing_dict, override=chain_name, yes=assume_yes,
             )
+            from .policy_surface import configured_buyer_policy
+
             picked_entry = select_escrow_entry(
                 listing_dict,
                 chain_name=chain_cfg.name,
@@ -264,6 +266,7 @@ def register(app: typer.Typer) -> None:
                 rpc_url=chain_cfg.rpc_url,
                 buyer_address=addr,
                 console=console,
+                compatible=configured_buyer_policy().compatible,
             )
             if picked_entry is None:
                 msg = (

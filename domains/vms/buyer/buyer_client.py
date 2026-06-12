@@ -109,9 +109,22 @@ def _load_buyer_chain(
 
     if policies:
         names = [str(p).strip() for p in policies if str(p).strip()]
+    elif (policy_mode or "").strip():
+        names = ["buyer_escrow_shape_guard", (policy_mode or "").strip()]
     else:
-        terminal = (policy_mode or "").strip() or DEFAULT_TERMINAL
-        names = ["buyer_escrow_shape_guard", terminal]
+        # The configured BuyerPolicy object names the terminal chain
+        # (buyer.toml [negotiation] policy, default listed_price).
+        try:
+            from .policy_surface import configured_buyer_policy
+
+            names = [
+                "buyer_escrow_shape_guard",
+                *configured_buyer_policy().middlewares,
+            ]
+        except Exception as exc:
+            logger.debug("Buyer policy resolution failed (%s); using %s",
+                         exc, DEFAULT_TERMINAL)
+            names = ["buyer_escrow_shape_guard", DEFAULT_TERMINAL]
     if _policy_names_need_rl(names):
         _maybe_register_rl_middleware()
     return load_negotiation_chain(names)
