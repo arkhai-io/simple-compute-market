@@ -198,7 +198,7 @@ def test_round_0_request_omits_amount_for_amountless_escrow(mock_urlopen):
             rates=[],
             expiration_unix=1_800_000_000,
         ),
-        chain=["accept_exact_listing"],
+        chain=load_negotiation_chain(["accept_exact_listing"]),
     )
 
     proposal = seen_body["proposal"]

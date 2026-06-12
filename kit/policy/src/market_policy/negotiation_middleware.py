@@ -69,6 +69,10 @@ class NegotiationContext:
 
     direction: Literal["minimize", "maximize"]
     our_reference_amount: float
+    # Round-0 opening when it differs from the bound (a haggler opens low
+    # and concedes toward the bound). None means "open at the bound" —
+    # the listed_price default, where the two coincide.
+    our_opening_amount: Optional[float] = None
     listing: dict[str, Any] = field(default_factory=dict)
     our_escrow_proposal: dict[str, Any] | None = None
     available_resources: dict[str, Any] = field(default_factory=dict)

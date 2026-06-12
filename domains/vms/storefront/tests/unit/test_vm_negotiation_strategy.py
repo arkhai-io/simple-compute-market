@@ -397,3 +397,34 @@ def test_listed_price_restates_bound_when_nothing_from_them():
 def test_load_negotiation_chain_resolves_listed_price():
     chain = load_negotiation_chain(["listed_price"])
     assert chain == [listed_price_middleware]
+
+
+def test_opening_amount_differs_from_bound_for_hagglers():
+    """Round-0 runs through the chain: a haggler opens at
+    our_opening_amount, not the bound (which would give the ceiling away)."""
+    ctx = NegotiationContext(
+        direction="minimize",
+        our_reference_amount=100,
+        our_opening_amount=50,
+        our_escrow_proposal=_proposal_with_amount(0),
+    )
+    d = run_negotiation_chain([bisection_middleware], [], ctx)
+    assert d.action == "counter"
+    assert _decision_amount(d) == 50
+
+
+def test_opening_leaves_exact_escrows_untouched():
+    """A scalar policy never injects an amount into an exact-escrow shape."""
+    exact = {
+        "chain_name": "anvil",
+        "escrow_address": "0x" + "11" * 20,
+        "fields": {"token": "0x" + "22" * 20, "tokenId": "7"},
+    }
+    ctx = NegotiationContext(
+        direction="minimize",
+        our_reference_amount=100,
+        our_escrow_proposal=exact,
+    )
+    d = run_negotiation_chain([listed_price_middleware], [], ctx)
+    assert d.action == "counter"
+    assert "amount" not in d.proposal["fields"]

@@ -120,6 +120,51 @@ def _set_proposal_amount(proposal: dict[str, Any], amount: float) -> dict[str, A
     return out
 
 
+def escrow_shape_uses_scalar_amount(proposal: dict[str, Any] | None) -> bool:
+    """Whether this escrow shape is negotiated through a scalar ``amount``.
+
+    The scalar policies' own compatibility knowledge
+    (design-negotiation-policy-surface.md): payment escrows carry
+    ``fields.amount`` (or a fungible token without a tokenId, or a rate
+    on the ``amount`` field); exact escrows (a specific NFT) do not, and
+    a scalar policy leaves their fields untouched — take-it-or-leave.
+    """
+    if not isinstance(proposal, dict):
+        return False
+    fields = proposal.get("fields") or {}
+    if "amount" in fields:
+        return True
+    if (
+        "token" in fields
+        and "tokenId" not in fields
+        and "token_id" not in fields
+    ):
+        return True
+    return any(
+        (r.get("field") if isinstance(r, dict) else getattr(r, "field", None))
+        == "amount"
+        for r in (proposal.get("rates") or [])
+    )
+
+
+def _opening_amount(context: NegotiationContext) -> float:
+    opening = getattr(context, "our_opening_amount", None)
+    return opening if opening is not None else context.our_reference_amount
+
+
+def _opening_proposal(context: NegotiationContext) -> dict[str, Any]:
+    """The scalar policies' round-0 proposal from a bare context.
+
+    Injects the opening amount only into scalar-amount shapes; exact
+    escrows pass through unchanged (the pinned-shape guard is what
+    protects them from seller mutation).
+    """
+    base = context.our_escrow_proposal or {}
+    if escrow_shape_uses_scalar_amount(base):
+        return _set_proposal_amount(base, _opening_amount(context))
+    return dict(base)
+
+
 @register_negotiation_middleware("bisection")
 def bisection_middleware(
     history: list[NegotiationRound],
@@ -138,12 +183,8 @@ def bisection_middleware(
     their_proposal = their_last_proposal(history)
 
     if their_amount is None:
-        base = context.our_escrow_proposal or {}
         return (
-            NegotiationDecision(
-                action="counter",
-                proposal=_set_proposal_amount(base, our_amount),
-            ),
+            NegotiationDecision(action="counter", proposal=_opening_proposal(context)),
             context,
         )
 
@@ -234,13 +275,9 @@ def listed_price_middleware(
     """
     their_proposal = their_last_proposal(history)
     if their_proposal is None:
-        # Nothing from the other side yet (resume edge): restate our bound.
-        base = context.our_escrow_proposal or {}
+        # Round-0 opening (or resume edge with nothing from them yet).
         return (
-            NegotiationDecision(
-                action="counter",
-                proposal=_set_proposal_amount(base, context.our_reference_amount),
-            ),
+            NegotiationDecision(action="counter", proposal=_opening_proposal(context)),
             context,
         )
 

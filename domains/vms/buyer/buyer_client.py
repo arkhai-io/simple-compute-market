@@ -17,6 +17,8 @@ inventory match are seller-side.
 
 from __future__ import annotations
 
+import logging
+
 import json
 import time
 import urllib.error
@@ -39,6 +41,8 @@ from market_core.schemas import ProvisionTerms, SettlementPlan
 
 
 DEFAULT_MAX_ROUNDS = 10
+logger = logging.getLogger(__name__)
+
 DEFAULT_TERMINAL = "listed_price"
 _RL_POLICY_NAMES = {"rl", "erc20_rl", "native_token_rl", "erc1155_rl"}
 
@@ -401,30 +405,15 @@ def negotiate_with_seller(
         initial_amount = int(round(float(initial_price) * scale))
         ceiling_amount = float(max_price) * scale
 
-        # Pin the buyer's first proposal. Scalar payment escrows carry the
-        # round-0 absolute opening bid in fields.amount; amountless exact
-        # escrows leave fields unchanged.
-        pinned_fields = dict(escrow_proposal.fields or {})
-        uses_scalar_amount = (
-            "amount" in pinned_fields
-            or (
-                "token" in pinned_fields
-                and "tokenId" not in pinned_fields
-                and "token_id" not in pinned_fields
-            )
-            or any(
-                (
-                    r.get("field") if isinstance(r, dict) else getattr(r, "field", None)
-                ) == "amount"
-                for r in (escrow_proposal.rates or [])
-            )
-        )
-        if uses_scalar_amount:
-            pinned_fields["amount"] = initial_amount
-        pinned_proposal = {
+        # Pin the buyer's first proposal: the policy chain owns the
+        # round-0 opening (design-negotiation-policy-surface.md) — run it
+        # on an empty history and pin its proposal. Whether and where an
+        # opening amount lands in the fields is the configured policy's
+        # compatibility knowledge, not this loop's.
+        base_proposal = {
             "chain_name": escrow_proposal.chain_name,
             "escrow_address": escrow_proposal.escrow_address,
-            "fields": pinned_fields,
+            "fields": dict(escrow_proposal.fields or {}),
             "literal_fields": dict(escrow_proposal.literal_fields or escrow_proposal.fields or {}),
             "rates": [
                 r.model_dump() if hasattr(r, "model_dump") else dict(r)
@@ -436,6 +425,24 @@ def negotiate_with_seller(
             ],
             "expiration_unix": escrow_proposal.expiration_unix,
         }
+        opening = run_negotiation_chain(chain, [], NegotiationContext(
+            direction="minimize",
+            our_reference_amount=ceiling_amount,
+            our_opening_amount=initial_amount,
+            our_escrow_proposal=base_proposal,
+            max_rounds=max_rounds,
+        ))
+        if opening.action == "counter" and opening.proposal is not None:
+            pinned_proposal = opening.proposal
+        else:
+            # A terminal that refuses to open (or a custom chain without
+            # an opening branch) falls back to the unmodified base — the
+            # seller sees exactly what the listing advertised.
+            logger.debug(
+                "Policy chain produced %r for the round-0 opening; "
+                "pinning the base proposal unchanged.", opening.action,
+            )
+            pinned_proposal = base_proposal
 
         new_body = {
             "listing_id": listing_id,
@@ -520,6 +527,11 @@ def negotiate_with_seller(
         ctx = NegotiationContext(
             direction="minimize",
             our_reference_amount=ceiling_amount,
+            our_opening_amount=(
+                float(initial_price) * float(duration_seconds) / 3600.0
+                if duration_seconds is not None
+                else float(initial_price)
+            ),
             listing={},
             our_escrow_proposal=pinned_proposal,
             available_resources={},
