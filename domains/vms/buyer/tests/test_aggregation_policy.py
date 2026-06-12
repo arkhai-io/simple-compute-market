@@ -225,7 +225,7 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
     }
 
     with patch(
-        "domains.vms.buyer.buy_orchestrator.urllib.request.urlopen",
+        "core_buyer.orchestration.urllib.request.urlopen",
         side_effect=_route_by_url(routes),
     ):
         result = _run_buy_with_legacy_hooks(
@@ -281,7 +281,7 @@ def test_cheapest_first_preserves_first_agreed_semantics():
     }
 
     with patch(
-        "domains.vms.buyer.buy_orchestrator.urllib.request.urlopen",
+        "core_buyer.orchestration.urllib.request.urlopen",
         side_effect=_route_by_url(routes),
     ):
         result = _run_buy_with_legacy_hooks(
@@ -341,7 +341,7 @@ def test_custom_policy_can_short_circuit():
     }
 
     with patch(
-        "domains.vms.buyer.buy_orchestrator.urllib.request.urlopen",
+        "core_buyer.orchestration.urllib.request.urlopen",
         side_effect=_route_by_url(routes),
     ):
         result = _run_buy_with_legacy_hooks(
@@ -365,7 +365,7 @@ def test_policy_returning_none_yields_exited():
         return None
 
     with patch(
-        "domains.vms.buyer.buy_orchestrator.urllib.request.urlopen",
+        "core_buyer.orchestration.urllib.request.urlopen",
         side_effect=_route_by_url({
             "registry": [
                 {"items": [{"listing_id": "x", "seller": "http://seller-a:8001"}]},

@@ -137,7 +137,7 @@ class TestNegotiateFrom:
 
         # Seller's accept response to our resumed continue.
         monkeypatch.setattr(
-            "domains.vms.buyer.buyer_client.urllib.request.urlopen",
+            "core_buyer.negotiation_client.urllib.request.urlopen",
             _urlopen_for([{"action": "accept", "proposal": {"fields": {"amount": 70}}}]),
         )
         result = runner.invoke(app, [
@@ -168,7 +168,7 @@ class TestNegotiateFrom:
         original_run = _seed_partial_negotiation("http://seller:8001", "L-1")
 
         monkeypatch.setattr(
-            "domains.vms.buyer.buyer_client.urllib.request.urlopen",
+            "core_buyer.negotiation_client.urllib.request.urlopen",
             _urlopen_for([{"action": "accept", "proposal": {"fields": {"amount": 70}}}]),
         )
         result = runner.invoke(app, [
@@ -210,7 +210,7 @@ class TestBuyFrom:
         run_id = _seed_partial_negotiation("http://seller:8001", "L-1")
 
         monkeypatch.setattr(
-            "domains.vms.buyer.buyer_client.urllib.request.urlopen",
+            "core_buyer.negotiation_client.urllib.request.urlopen",
             _urlopen_for([{"action": "accept", "proposal": {"fields": {"amount": 70}}}]),
         )
 
@@ -255,7 +255,7 @@ class TestBuyFrom:
         def _fail_urlopen(*a, **k):
             raise AssertionError("urlopen called on already-agreed --from path")
         monkeypatch.setattr(
-            "domains.vms.buyer.buyer_client.urllib.request.urlopen",
+            "core_buyer.negotiation_client.urllib.request.urlopen",
             _fail_urlopen,
         )
 
@@ -284,7 +284,7 @@ class TestBuyFrom:
 
         # Seller exits when we counter.
         monkeypatch.setattr(
-            "domains.vms.buyer.buyer_client.urllib.request.urlopen",
+            "core_buyer.negotiation_client.urllib.request.urlopen",
             _urlopen_for([{"action": "exit", "reason": "price_unreasonable"}]),
         )
 
@@ -373,11 +373,11 @@ class TestBuyFrom:
             lambda **kw: (100, 150),
         )
         monkeypatch.setattr(
-            "domains.vms.settlement.escrow_client.make_buyer_payment_escrow_terms_fn",
+            "core_buyer.escrow_client.make_buyer_payment_escrow_terms_fn",
             lambda **kw: lambda *a, **inner_kw: [],
         )
         monkeypatch.setattr(
-            "domains.vms.settlement.escrow_client.make_create_escrow_fn",
+            "core_buyer.escrow_client.make_create_escrow_fn",
             lambda **kw: lambda escrows: [],
         )
 

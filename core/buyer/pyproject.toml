@@ -6,9 +6,25 @@ requires-python = ">=3.12"
 dependencies = [
   # The `market` verb skeleton + plugin assembly (core_buyer.cli).
   "typer>=0.12.0",
+  # Candidate tables + price-confirmation rendering in the scalar
+  # policy surface and escrow-entry selection.
+  "rich>=13.7.0",
   # Generic registry discovery config (registry.urls/auth/discovery_timeout)
   # comes from the shared buyer TOML loader in kit.
   "arkhai-kit-config",
+  # Negotiation chain framework + buyer-policy registry; the scalar
+  # policies themselves (listed_price/bisection middlewares) also live
+  # in kit-policy and register on import.
+  "arkhai-kit-policy",
+  # EscrowProposal/EscrowTerms schemas + settlement-plan carriers used
+  # by the negotiation and escrow clients. alkahest-py (the native
+  # on-chain client) stays a lazy import inside escrow creation —
+  # domain buyer wheels that actually create escrows depend on it.
+  "arkhai-kit-alkahest",
+  # ProvisionTerms/SettlementPlan carriers.
+  "arkhai-core",
+  # EIP-191 request signing for negotiate/settle calls.
+  "eth-account>=0.13.0",
 ]
 
 [project.scripts]
@@ -16,6 +32,9 @@ market = "core_buyer.cli:main"
 
 [tool.uv.sources]
 arkhai-kit-config = { path = "../../kit/config", editable = true }
+arkhai-kit-policy = { path = "../../kit/policy", editable = true }
+arkhai-kit-alkahest = { path = "../../kit/alkahest", editable = true }
+arkhai-core = { path = "../", editable = true }
 
 [build-system]
 requires = ["hatchling"]

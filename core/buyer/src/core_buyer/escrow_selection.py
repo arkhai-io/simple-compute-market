@@ -1,4 +1,4 @@
-"""Pick an ``accepted_escrows`` entry from a VM listing."""
+"""Pick an ``accepted_escrows`` entry from a listing."""
 
 from __future__ import annotations
 
@@ -125,7 +125,7 @@ def select_escrow_entry(
     table.add_column("#", justify="right", style="dim")
     table.add_column("Escrow contract", overflow="fold")
     table.add_column("Token", overflow="fold")
-    table.add_column("Price/hr", justify="right")
+    table.add_column("Unit price", justify="right")
     from market_alkahest.schemas import primary_rate_value
 
     for i, entry in enumerate(candidates, start=1):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from market_core.schemas import EscrowProposal
-from domains.vms.settlement.escrow_client import make_buyer_payment_escrow_terms_fn
+from core_buyer.escrow_client import make_buyer_payment_escrow_terms_fn
 
 
 _CHAIN = "anvil"

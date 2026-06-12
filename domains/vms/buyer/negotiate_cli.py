@@ -256,7 +256,7 @@ def register(app: typer.Typer) -> None:
         # Pick one accepted_escrows entry — token, escrow contract, and
         # chain all come from the listing. ``--token-contract`` (when
         # set) filters entries to one ERC-20.
-        from domains.vms.settlement import select_escrow_entry
+        from core_buyer.escrow_selection import select_escrow_entry
         from .common import select_chain_for_listing
         picked_entry: Optional[dict] = None
         chain_cfg = None

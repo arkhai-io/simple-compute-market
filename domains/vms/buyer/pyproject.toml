@@ -11,7 +11,7 @@ dependencies = [
   "eth-account>=0.13.0",
   # Needed by the buyer orchestrator (market buy-sync) for in-process
   # on-chain escrow creation. Imported lazily from
-  # domains.vms.settlement.escrow_client so loading the CLI does not pay the
+  # core_buyer.escrow_client so loading the CLI does not pay the
   # native-binary cost unless the orchestrator actually runs.
   "alkahest-py>=0.4.0",
   "arkhai-core-buyer",
@@ -118,8 +118,6 @@ dev-mode-dirs = ["../../.."]
 "../provisioning/terms.py" = "domains/vms/provisioning/terms.py"
 "../settlement/__init__.py" = "domains/vms/settlement/__init__.py"
 "../settlement/compute_lease.py" = "domains/vms/settlement/compute_lease.py"
-"../settlement/escrow_client.py" = "domains/vms/settlement/escrow_client.py"
-"../settlement/escrow_selection.py" = "domains/vms/settlement/escrow_selection.py"
 "../settlement/fulfillment.py" = "domains/vms/settlement/fulfillment.py"
 "../settlement/proposals.py" = "domains/vms/settlement/proposals.py"
 

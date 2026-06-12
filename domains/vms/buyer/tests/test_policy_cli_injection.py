@@ -104,7 +104,7 @@ def test_negotiate_with_seller_delivers_policy_params_to_the_chain():
         }))
 
     with patch(
-        "domains.vms.buyer.buyer_client.urllib.request.urlopen",
+        "core_buyer.negotiation_client.urllib.request.urlopen",
         side_effect=fake_urlopen,
     ):
         negotiate_with_seller(
@@ -127,7 +127,7 @@ def test_negotiate_with_seller_delivers_policy_params_to_the_chain():
 def test_resume_point_carries_the_recorded_policy(tmp_path, monkeypatch):
     import json
 
-    from domains.vms.buyer import deal_helpers, run_log
+    from core_buyer import deal_helpers, run_log
 
     monkeypatch.setattr(run_log, "runs_dir", lambda: tmp_path)
     run_file = tmp_path / "run-1.jsonl"
@@ -153,7 +153,7 @@ def test_unknown_configured_policy_errors_instead_of_substituting():
     from domains.vms.buyer.buyer_client import _load_buyer_chain
 
     with patch(
-        "domains.vms.buyer.common.resolve_config_value",
+        "core_buyer.buyer_config.resolve_config_value",
         return_value="haggle-3000",
     ):
         with pytest.raises(RuntimeError, match="haggle-3000"):
@@ -174,7 +174,7 @@ def test_round_0_exit_never_contacts_the_seller():
         return NegotiationDecision(action="exit", reason="not_today"), context
 
     with patch(
-        "domains.vms.buyer.buyer_client.urllib.request.urlopen",
+        "core_buyer.negotiation_client.urllib.request.urlopen",
     ) as urlopen:
         outcome = negotiate_with_seller(
             seller_url="http://seller:8001",
@@ -228,7 +228,7 @@ def test_chain_exhaustion_errors_and_releases_the_seller():
         }))
 
     with patch(
-        "domains.vms.buyer.buyer_client.urllib.request.urlopen",
+        "core_buyer.negotiation_client.urllib.request.urlopen",
         side_effect=fake_urlopen,
     ):
         with pytest.raises(NegotiationChainExhausted):

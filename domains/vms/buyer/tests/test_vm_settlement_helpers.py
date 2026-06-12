@@ -1,5 +1,6 @@
 from domains.vms.provisioning import make_vm_provision_terms
-from domains.vms.settlement import escrow_proposal_from_accepted_entry, select_escrow_entry
+from core_buyer.escrow_selection import select_escrow_entry
+from domains.vms.settlement import escrow_proposal_from_accepted_entry
 
 
 _ESCROW = "0x" + "11" * 20

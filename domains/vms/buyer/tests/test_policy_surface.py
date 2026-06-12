@@ -18,7 +18,7 @@ from domains.vms.buyer.policy_surface import (
     configured_buyer_policy,
     entry_uses_scalar_amount,
 )
-from domains.vms.settlement import select_escrow_entry
+from core_buyer.escrow_selection import select_escrow_entry
 
 
 _TOKEN = "0x" + "22" * 20
@@ -59,7 +59,7 @@ def test_configured_policy_defaults_to_listed_price():
 
 def test_configured_policy_reads_buyer_toml():
     with patch(
-        "domains.vms.buyer.common.resolve_config_value",
+        "core_buyer.buyer_config.resolve_config_value",
         return_value="bisection",
     ):
         assert configured_buyer_policy().name == "bisection"
@@ -115,7 +115,7 @@ def test_chain_terminal_follows_the_configured_policy():
 
     assert _load_buyer_chain()[-1] is listed_price_middleware
     with patch(
-        "domains.vms.buyer.common.resolve_config_value",
+        "core_buyer.buyer_config.resolve_config_value",
         return_value="bisection",
     ):
         assert _load_buyer_chain()[-1] is bisection_middleware

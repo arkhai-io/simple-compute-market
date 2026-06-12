@@ -1,4 +1,9 @@
-"""VM buyer-side on-chain escrow creation via Alkahest."""
+"""Buyer-side on-chain escrow creation via Alkahest.
+
+Domain-neutral: terms come from the negotiated proposal via the codec
+layer. ``alkahest_py`` is a lazy import inside the create hook so the
+core wheel does not pay the native-binary dependency; domain buyer
+packages that actually create escrows depend on it."""
 
 from __future__ import annotations
 

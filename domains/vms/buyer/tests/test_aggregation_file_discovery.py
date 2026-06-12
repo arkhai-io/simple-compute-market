@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import pytest
 
-from domains.vms.buyer import aggregation as agg
+import core_buyer.aggregation as agg
 
 
 # Trivial factory: returns a policy that records its own marker and exits

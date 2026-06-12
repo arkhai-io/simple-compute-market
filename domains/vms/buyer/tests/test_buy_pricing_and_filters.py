@@ -157,7 +157,7 @@ class TestQueryRegistryFilters:
                 __exit__=lambda *a: False,
             )
 
-        monkeypatch.setattr("domains.vms.buyer.buy_orchestrator.urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr("core_buyer.orchestration.urllib.request.urlopen", fake_urlopen)
         return captured
 
     def test_no_filters_sends_only_status(self, monkeypatch):
@@ -225,7 +225,7 @@ class TestRunBuyDerivePrices:
             )
 
         monkeypatch.setattr(
-            "domains.vms.buyer.buy_orchestrator.negotiate_with_seller",
+            "core_buyer.orchestration.negotiate_with_seller",
             fake_negotiate,
         )
 
@@ -271,7 +271,7 @@ class TestRunBuyDerivePrices:
             return NegotiationOutcome(status="exited", rounds=0)
 
         monkeypatch.setattr(
-            "domains.vms.buyer.buy_orchestrator.negotiate_with_seller", fake_negotiate,
+            "core_buyer.orchestration.negotiate_with_seller", fake_negotiate,
         )
 
         constraints = BuyConstraints()
@@ -323,7 +323,7 @@ def _agree_negotiate_factory(price: int = 100):
 class TestConfirmSettlementGate:
     def _setup_orchestrator(self, monkeypatch, agree_price: int = 100):
         monkeypatch.setattr(
-            "domains.vms.buyer.buy_orchestrator.negotiate_with_seller",
+            "core_buyer.orchestration.negotiate_with_seller",
             _agree_negotiate_factory(agree_price),
         )
 
@@ -377,11 +377,11 @@ class TestConfirmSettlementGate:
 
         # Settlement submit + poll need stubbing too — short-circuit to "ready".
         monkeypatch.setattr(
-            "domains.vms.buyer.buy_orchestrator.submit_settlement",
+            "core_buyer.orchestration.submit_settlement",
             lambda **kw: {"status": "queued"},
         )
         monkeypatch.setattr(
-            "domains.vms.buyer.buy_orchestrator.wait_for_settlement",
+            "core_buyer.orchestration.wait_for_settlement",
             lambda **kw: {"status": "ready", "result": {"connection_details": "ssh ..."}},
         )
 
@@ -405,11 +405,11 @@ class TestConfirmSettlementGate:
         """Default behavior (no callback) doesn't add a confirmation step."""
         self._setup_orchestrator(monkeypatch)
         monkeypatch.setattr(
-            "domains.vms.buyer.buy_orchestrator.submit_settlement",
+            "core_buyer.orchestration.submit_settlement",
             lambda **kw: {"status": "queued"},
         )
         monkeypatch.setattr(
-            "domains.vms.buyer.buy_orchestrator.wait_for_settlement",
+            "core_buyer.orchestration.wait_for_settlement",
             lambda **kw: {"status": "ready", "result": {}},
         )
         escrow_count = {"n": 0}

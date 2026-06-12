@@ -232,7 +232,7 @@ def run_settle_from_log(
         from market_alkahest.alkahest import (
             get_erc20_escrow_obligation_nontierable,
         )
-        from domains.vms.settlement import (
+        from core_buyer.escrow_client import (
             make_buyer_payment_escrow_terms_fn,
             make_create_escrow_fn,
         )

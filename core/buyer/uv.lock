@@ -143,11 +143,30 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-core"
+version = "0.1.0"
+source = { editable = "../" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
+
+[[package]]
 name = "arkhai-core-buyer"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "arkhai-core" },
+    { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-policy" },
+    { name = "eth-account" },
+    { name = "rich" },
     { name = "typer" },
 ]
 
@@ -158,7 +177,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arkhai-core", editable = "../" },
+    { name = "arkhai-kit-alkahest", editable = "../../kit/alkahest" },
     { name = "arkhai-kit-config", editable = "../../kit/config" },
+    { name = "arkhai-kit-policy", editable = "../../kit/policy" },
+    { name = "eth-account", specifier = ">=0.13.0" },
+    { name = "rich", specifier = ">=13.7.0" },
     { name = "typer", specifier = ">=0.12.0" },
 ]
 
@@ -204,6 +228,30 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
+
+[[package]]
+name = "arkhai-kit-policy"
+version = "0.1.0"
+source = { editable = "../../kit/policy" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "typer" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pufferlib", marker = "extra == 'training'", git = "https://github.com/arkhai-io/ArkhaiPufferEnv?rev=f18e3b42c0ae22e8aec5e8d26a26f424e6b18a30" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "torch", marker = "extra == 'training'", specifier = ">=2.7.0", index = "https://download.pytorch.org/whl/cpu" },
+    { name = "typer", specifier = ">=0.12.0" },
+]
+provides-extras = ["training"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
+]
 
 [[package]]
 name = "attrs"

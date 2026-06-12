@@ -5,7 +5,7 @@ storefront's pre-settlement verifier (commit 03e47bf) can resolve. A
 placeholder uid would be rejected by alkahest's ``get_obligation``
 call. So we drive alkahest-py against the local Anvil from the
 buyer's wallet, the same way
-``domains.vms.settlement.escrow_client.make_create_escrow_fn`` does in
+``core_buyer.escrow_client.make_create_escrow_fn`` does in
 production — but inlined here because e2e-tests doesn't
 depend on the buyer wheel.
 
