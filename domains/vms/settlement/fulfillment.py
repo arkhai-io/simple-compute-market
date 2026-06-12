@@ -30,10 +30,15 @@ async def submit_compute_fulfillment(
         )
         return fulfillment_uid
 
-    fulfillment_uid = await client.string_obligation.do_obligation(
-        connection_details,
-        escrow_uid,
-    )
+    from market_alkahest.txlock import chain_tx_lock
+
+    # One wallet, many concurrent submitters (this settlement task, the
+    # claims sweep, admin reclaims): serialize or race nonces.
+    async with chain_tx_lock(None):
+        fulfillment_uid = await client.string_obligation.do_obligation(
+            connection_details,
+            escrow_uid,
+        )
     logger.info(
         "[ALKAHEST] Fulfilled compute obligation with on-chain client; "
         "machine provisioned."

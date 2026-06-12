@@ -101,14 +101,17 @@ class AlkahestClaimHooks:
             # address and resolve the real contract elsewhere): fall back
             # to the dispatcher's try-every-codec scan.
             escrow_address = None
-        codec, receipt = await collect_escrow_with_codec(
-            client,
-            claim.claim_ref,
-            claim.fulfillment_ref,
-            chain_name=chain,
-            config_path=self._config_paths.get(chain),
-            escrow_address=escrow_address,
-        )
+        from market_alkahest.txlock import chain_tx_lock
+
+        async with chain_tx_lock(None):
+            codec, receipt = await collect_escrow_with_codec(
+                client,
+                claim.claim_ref,
+                claim.fulfillment_ref,
+                chain_name=chain,
+                config_path=self._config_paths.get(chain),
+                escrow_address=escrow_address,
+            )
         return {"escrow_kind": codec.kind, "receipt": str(receipt)}
 
     # -- classification ----------------------------------------------------
@@ -181,12 +184,15 @@ class AlkahestClaimHooks:
 
         requested_for = claim.mechanism_state.get("arbitration_requested_for")
         if requested_for != claim.fulfillment_ref:
-            await request_arbitration(
-                client,
-                fulfillment_uid=claim.fulfillment_ref,
-                oracle=oracle,
-                demand=decoded["data"],
-            )
+            from market_alkahest.txlock import chain_tx_lock
+
+            async with chain_tx_lock(None):
+                await request_arbitration(
+                    client,
+                    fulfillment_uid=claim.fulfillment_ref,
+                    oracle=oracle,
+                    demand=decoded["data"],
+                )
             claim.mechanism_state["arbitration_requested_for"] = claim.fulfillment_ref
             logger.info(
                 "[CLAIMS] arbitration requested for %s (oracle=%s)",

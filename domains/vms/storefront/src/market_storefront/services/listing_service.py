@@ -519,7 +519,10 @@ class ListingService:
                 ),
             }
         try:
-            reclaim_result = await codec.reclaim_expired(alkahest, payload.escrow_uid)
+            from market_alkahest.txlock import chain_tx_lock
+
+            async with chain_tx_lock(None):
+                reclaim_result = await codec.reclaim_expired(alkahest, payload.escrow_uid)
         except Exception as exc:
             return 502, {"error": "Escrow reclaim failed on-chain", "detail": str(exc),
                          "listing_id": listing_id}
@@ -552,7 +555,10 @@ class ListingService:
         try:
             from alkahest_py import ArbitrationMode
             async def decision_function(_a, _d): return bool(payload.decision)
-            decisions = await alkahest.oracle.arbitrate_many(
+            from market_alkahest.txlock import chain_tx_lock
+
+            async with chain_tx_lock(None):
+                decisions = await alkahest.oracle.arbitrate_many(
                 decision_function, lambda _d: None,
                 ArbitrationMode.PastUnarbitrated, timeout_seconds=5.0)
         except Exception as exc:
