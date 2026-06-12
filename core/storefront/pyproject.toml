@@ -9,6 +9,7 @@ dependencies = [
     "arkhai-kit-config",
     "arkhai-kit-identity",
     "arkhai-kit-policy",
+    "httpx>=0.27",
     "pydantic>=2",
 ]
 

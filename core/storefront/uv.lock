@@ -194,6 +194,7 @@ dependencies = [
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
+    { name = "httpx" },
     { name = "pydantic" },
 ]
 
@@ -210,6 +211,7 @@ requires-dist = [
     { name = "arkhai-kit-config", editable = "../../kit/config" },
     { name = "arkhai-kit-identity", editable = "../../kit/identity" },
     { name = "arkhai-kit-policy", editable = "../../kit/policy" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2" },
 ]
 
