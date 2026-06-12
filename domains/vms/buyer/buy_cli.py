@@ -446,13 +446,17 @@ def register(app: typer.Typer) -> None:
         from .cli_helpers import parse_filter_options
 
         # The configured policy's parameters arrive through the injected
-        # flags; the scalar policies' names are unpacked for the body.
-        initial_price: Optional[float] = policy_values.get("initial_price")
-        max_price: Optional[float] = policy_values.get("max_price")
-        price_markup: float = float(policy_values.get("price_markup") or 1.5)
-        extra_policy_params = parse_filter_options(
+        # flags. They live in one policy-owned namespace: declared flag
+        # values merged with parsed --policy-param pairs.
+        policy_params_all: dict[str, Any] = {
+            k: v for k, v in policy_values.items() if k != "policy_param"
+        }
+        policy_params_all.update(parse_filter_options(
             policy_values.get("policy_param") or [],
-        )
+        ))
+        # The scalar names the rest of this body needs:
+        initial_price: Optional[float] = policy_params_all.get("initial_price")
+        max_price: Optional[float] = policy_params_all.get("max_price")
 
         if from_run:
             _run_resume_from(
@@ -488,9 +492,6 @@ def register(app: typer.Typer) -> None:
                 "(in which case prices are derived from seller min_price).",
                 err=True, fg=typer.colors.RED,
             )
-            raise typer.Exit(2)
-        if price_markup <= 0:
-            typer.secho("--price-markup must be positive.", err=True, fg=typer.colors.RED)
             raise typer.Exit(2)
 
         # Resolution: CLI flag > config.toml > derivation > default.
@@ -642,7 +643,7 @@ def register(app: typer.Typer) -> None:
             initial_price, max_price = _resolve_prices_from_matches(
                 matches=matches,
                 console=console,
-                price_markup=price_markup,
+                params=policy_params_all,
                 # buy bundles discovery + negotiation: this is the
                 # user's first sight of what the aggregation policy
                 # picked, so an interactive run confirms it.
@@ -668,7 +669,7 @@ def register(app: typer.Typer) -> None:
         constraints = BuyConstraints(
             max_price=max_price,
             initial_price=initial_price,
-            policy_params=extra_policy_params,
+            policy_params=policy_params_all,
         )
         provision = make_vm_provision_terms(
             duration_seconds=duration_seconds,
@@ -711,7 +712,7 @@ def register(app: typer.Typer) -> None:
             buyer_address=addr,
             registry_urls=reg_urls,
             policy=_policy.name,
-            policy_params=extra_policy_params,
+            policy_params=policy_params_all,
             initial_price=initial_price,
             max_price=max_price,
             duration_seconds=duration_seconds,

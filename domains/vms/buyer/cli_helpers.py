@@ -16,29 +16,26 @@ def resolve_prices_from_matches(
     *,
     matches: list[dict],
     console: Console,
-    price_markup: float,
-    initial_price: Optional[int] = None,
-    max_price: Optional[int] = None,
+    params: dict | None = None,
     interactive: bool = False,
 ) -> tuple[Optional[int], Optional[int]]:
     """Fill missing prices via the configured buyer policy's derivation.
 
-    Thin dispatch: the derivation itself is the policy's
-    (``policy_surface.derive_scalar_prices`` for the scalar policies) —
-    a policy with no scalar notion derives nothing and the explicit
-    values pass through.
+    Thin dispatch carrying only the canonical hook arguments — the
+    policy's own values travel inside ``params`` (its namespace), so
+    this dispatcher knows no policy's vocabulary. A policy with no
+    derivation hook passes its explicit values through.
     """
     from .policy_surface import configured_buyer_policy
 
+    params = dict(params or {})
     policy = configured_buyer_policy()
     if policy.derive_prices is None:
-        return initial_price, max_price
+        return params.get("initial_price"), params.get("max_price")
     return policy.derive_prices(
+        params=params,
         matches=matches,
         console=console,
-        price_markup=price_markup,
-        initial_price=initial_price,
-        max_price=max_price,
         interactive=interactive,
     )
 

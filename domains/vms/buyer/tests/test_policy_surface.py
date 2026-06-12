@@ -131,8 +131,8 @@ def test_policy_without_derivation_passes_explicit_values_through():
         return_value=opaque,
     ):
         assert resolve_prices_from_matches(
-            matches=[], console=Console(), price_markup=1.5,
-            initial_price=7, max_price=9,
+            matches=[], console=Console(),
+            params={"initial_price": 7, "max_price": 9},
         ) == (7, 9)
 
 
@@ -146,21 +146,21 @@ def test_interactive_derivation_confirms_and_honors_decline():
 
     with patch("typer.confirm", return_value=True) as confirm:
         assert derive_scalar_prices(
-            matches=[listing], console=Console(), price_markup=1.5,
+            params={}, matches=[listing], console=Console(),
             interactive=True,
         ) == (100, 100)
     confirm.assert_called_once()
 
     with patch("typer.confirm", return_value=False):
         assert derive_scalar_prices(
-            matches=[listing], console=Console(), price_markup=1.5,
+            params={}, matches=[listing], console=Console(),
             interactive=True,
         ) == (None, None)
 
     # Non-interactive runs never prompt.
     with patch("typer.confirm") as confirm:
         derive_scalar_prices(
-            matches=[listing], console=Console(), price_markup=1.5,
+            params={}, matches=[listing], console=Console(),
         )
     confirm.assert_not_called()
 

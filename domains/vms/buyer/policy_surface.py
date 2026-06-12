@@ -85,11 +85,9 @@ _SCALAR_PARAMS = (
 
 def derive_scalar_prices(
     *,
+    params: dict[str, Any],
     matches: list[dict],
     console: Console,
-    price_markup: float,
-    initial_price: Optional[int] = None,
-    max_price: Optional[int] = None,
     interactive: bool = False,
 ) -> tuple[Optional[int], Optional[int]]:
     """Fill missing (initial_price, max_price) from the advertised price.
@@ -114,6 +112,10 @@ def derive_scalar_prices(
     because no candidate carries a usable advertised rate
     (hidden-reserve listings).
     """
+    initial_price: Optional[float] = params.get("initial_price")
+    max_price: Optional[float] = params.get("max_price")
+    price_markup = float(params.get("price_markup") or 1.5)
+
     if initial_price is not None and max_price is not None:
         return initial_price, max_price
 

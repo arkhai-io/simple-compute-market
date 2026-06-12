@@ -124,13 +124,16 @@ def register(app: typer.Typer) -> None:
         from core_buyer.cli import parse_filter_options
 
         # The configured policy's parameters arrive through the injected
-        # flags; the scalar policies' names are unpacked for the body.
-        initial_price: Optional[float] = policy_values.get("initial_price")
-        max_price: Optional[float] = policy_values.get("max_price")
-        price_markup: float = float(policy_values.get("price_markup") or 1.5)
-        extra_policy_params = parse_filter_options(
+        # flags. One policy-owned namespace: declared flag values merged
+        # with parsed --policy-param pairs.
+        policy_params_all: dict[str, Any] = {
+            k: v for k, v in policy_values.items() if k != "policy_param"
+        }
+        policy_params_all.update(parse_filter_options(
             policy_values.get("policy_param") or [],
-        )
+        ))
+        initial_price: Optional[float] = policy_params_all.get("initial_price")
+        max_price: Optional[float] = policy_params_all.get("max_price")
 
         # Capture which prices the user passed explicitly — auto-derived
         # values (from the listing's advertised min_price) are already
@@ -213,12 +216,13 @@ def register(app: typer.Typer) -> None:
             # Fill missing prices from the listing's advertised rate —
             # same listed-price default as `market buy`.
             if initial_price is None or max_price is None:
+                # Non-interactive even in a TTY: the listing here was
+                # the user's own explicit choice — there is no unseen
+                # discovery pick to confirm.
                 initial_price, max_price = resolve_prices_from_matches(
                     matches=[listing_dict],
                     console=console,
-                    price_markup=price_markup,
-                    initial_price=initial_price,
-                    max_price=max_price,
+                    params=policy_params_all,
                 )
                 if initial_price is None or max_price is None:
                     raise typer.Exit(2)
@@ -331,7 +335,7 @@ def register(app: typer.Typer) -> None:
             listing_id=listing_id,
             buyer_address=addr,
             policy=_policy.name,
-            policy_params=extra_policy_params,
+            policy_params=policy_params_all,
             initial_price=initial_price,
             max_price=max_price,
             max_rounds=max_rounds,
@@ -439,7 +443,7 @@ def register(app: typer.Typer) -> None:
                 on_round=_observe,
                 resume=resume_state,
                 chain=chain,
-                policy_params=extra_policy_params,
+                policy_params=policy_params_all,
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))

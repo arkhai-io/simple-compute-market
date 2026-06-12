@@ -87,6 +87,15 @@ opening, tuple selection, derivation.
   ``[negotiation] policy`` name errors instead of silently becoming the
   default, and the chain's round-0 decision is honored — exit/reject
   before opening means the seller is never contacted.
+- **Hook calling convention: the policy's values are namespaced.** A
+  policy hook receives its own collected values (declared ``cli_params``
+  plus parsed ``--policy-param`` pairs) as one ``params`` mapping;
+  everything else is a canonical keyword the caller always provides
+  (``matches``, ``console``, ``interactive``). The two namespaces are
+  structurally separate, so a policy parameter can never collide with a
+  canonical argument — no reserved-prefix convention needed — and the
+  dispatch layer knows no policy's vocabulary (the scalar trio is no
+  longer hardcoded anywhere outside the scalar policies).
 - **Settlement plans slot in as policies.** When Part I's plan carrier
   lands, an interval-plan or bonded policy contributes its vocabulary
   (`--interval`, bond sizes) through the same seam; `listed_price` and
