@@ -5,6 +5,8 @@ description = "Core storefront role shell and protocol helpers"
 requires-python = ">=3.12"
 dependencies = [
     "arkhai-core",
+    "arkhai-core-registry-client",
+    "arkhai-kit-config",
     "arkhai-kit-identity",
     "arkhai-kit-policy",
     "pydantic>=2",
@@ -24,6 +26,8 @@ asyncio_mode = "auto"
 
 [tool.uv.sources]
 arkhai-core = { path = "..", editable = true }
+arkhai-core-registry-client = { path = "../registry-client", editable = true }
+arkhai-kit-config = { path = "../../kit/config", editable = true }
 arkhai-kit-identity = { path = "../../kit/identity", editable = true }
 arkhai-kit-policy = { path = "../../kit/policy", editable = true }
 

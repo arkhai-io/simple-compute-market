@@ -88,7 +88,7 @@ def _patch_registry_client():
     the fake for every test in this module."""
     _FakeRegistry.responses = {}
     with patch(
-        "market_storefront.utils.multi_registry_client.RegistryClient",
+        "core_storefront.multi_registry_client.RegistryClient",
         _FakeRegistry,
     ):
         yield
@@ -219,7 +219,7 @@ class TestDiscoveryTimeout:
             return _SlowFake(url) if url == "http://slow" else _FastFake(url)
 
         with patch(
-            "market_storefront.utils.multi_registry_client.RegistryClient",
+            "core_storefront.multi_registry_client.RegistryClient",
             _factory,
         ):
             async with MultiRegistryClient(
@@ -257,7 +257,7 @@ class TestPerRegistryAuth:
                 seen[url] = api_key
 
         with patch(
-            "market_storefront.utils.multi_registry_client.RegistryClient",
+            "core_storefront.multi_registry_client.RegistryClient",
             _SpyFake,
         ):
             async with MultiRegistryClient(
