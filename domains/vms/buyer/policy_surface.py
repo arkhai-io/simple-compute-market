@@ -190,7 +190,13 @@ def configured_buyer_policy() -> BuyerPolicy:
 
     from .common import resolve_config_value
 
-    name = resolve_config_value(
-        toml_path="negotiation.policy", default=DEFAULT_BUYER_POLICY,
-    ).strip() or DEFAULT_BUYER_POLICY
+    try:
+        name = resolve_config_value(
+            toml_path="negotiation.policy", default=DEFAULT_BUYER_POLICY,
+        ).strip() or DEFAULT_BUYER_POLICY
+    except Exception:
+        # Policy resolution runs at app assembly — a missing or corrupt
+        # config must not kill `market --help`; command bodies surface
+        # the config error themselves.
+        name = DEFAULT_BUYER_POLICY
     return get_buyer_policy(name)

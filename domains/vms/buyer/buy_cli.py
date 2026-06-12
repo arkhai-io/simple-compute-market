@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Optional
+from typing import Any, Optional
 
 import typer
 from rich.console import Console
@@ -188,6 +188,12 @@ def _run_resume_from(
                 f"{their.get('action', '-')} @ {their.get('price', '-')}"
             )
 
+        resume_chain = None
+        if getattr(resume_point, "policy", None):
+            from .buyer_client import _load_buyer_chain
+            resume_chain = _load_buyer_chain(
+                policy_mode=str(resume_point.policy),
+            )
         try:
             outcome = negotiate_with_seller(
                 seller_url=resume_point.seller_url,
@@ -197,6 +203,7 @@ def _run_resume_from(
                 initial_price=0,
                 max_price=max_price,
                 max_rounds=max_rounds,
+                chain=resume_chain,
                 on_round=_observe,
                 resume=ResumeState(
                     negotiation_id=resume_point.negotiation_id,
@@ -275,33 +282,22 @@ def _run_resume_from(
 
 
 def register(app: typer.Typer) -> None:
-    """Register the top-level `market buy` command."""
+    """Register the top-level `market buy` command.
 
-    @app.command("buy")
-    def buy(
-        initial_price: Optional[float] = typer.Option(
-            None, "--initial-price",
-            help="Opening bid per negotiation in human / whole-token units, "
-                 "per-hour rate. Scaled by the token's on-chain decimals "
-                 "before being sent (so --initial-price 2 against 6-decimal "
-                 "USDC means $2/hr). Optional — when omitted, opens at the "
-                 "seller's advertised price (the default listed_price "
-                 "policy pays what's published, no haggling).",
-        ),
-        max_price: Optional[float] = typer.Option(
-            None, "--max-price",
-            help="Ceiling per negotiation in human / whole-token units, "
-                 "per-hour rate. Scaled by the token's on-chain decimals "
-                 "before being sent. Optional — when omitted, equals the "
-                 "advertised price (the default listed_price policy accepts "
-                 "anything within this bound and never counters).",
-        ),
-        price_markup: float = typer.Option(
-            1.5, "--price-markup",
-            help="Ceiling headroom for opt-in haggling policies: applies "
-                 "only when --initial-price alone is given (max = initial × "
-                 "markup). The default listed_price policy needs none.",
-        ),
+    Pricing flags are not defined here: the configured negotiation
+    policy contributes its own parameter surface at app-assembly time
+    (design-negotiation-policy-surface.md) — the scalar policies
+    contribute --initial-price/--max-price/--price-markup, so the
+    default surface is unchanged; a different policy contributes
+    different knobs, plus the --policy-param escape hatch.
+    """
+    from market_policy.buyer_policy import inject_policy_cli_params
+
+    from .policy_surface import configured_buyer_policy
+
+    _policy = configured_buyer_policy()
+
+    def buy(  # registered below after policy-param injection
         assume_yes: bool = typer.Option(
             False, "--yes", "-y",
             help="Skip ALL interactive prompts (price defaults + "
@@ -433,6 +429,7 @@ def register(app: typer.Typer) -> None:
             None, "--ssh-public-key",
             help="SSH public key for provisioning (default: wallet.ssh_public_key).",
         ),
+        **policy_values: Any,
     ) -> None:
         """Run a buy end-to-end as a pure HTTP/web3 client.
 
@@ -445,6 +442,17 @@ def register(app: typer.Typer) -> None:
         mid-stream, then drives stages 3-5 (escrow → submit → poll).
         """
         console = Console()
+
+        from .cli_helpers import parse_filter_options
+
+        # The configured policy's parameters arrive through the injected
+        # flags; the scalar policies' names are unpacked for the body.
+        initial_price: Optional[float] = policy_values.get("initial_price")
+        max_price: Optional[float] = policy_values.get("max_price")
+        price_markup: float = float(policy_values.get("price_markup") or 1.5)
+        extra_policy_params = parse_filter_options(
+            policy_values.get("policy_param") or [],
+        )
 
         if from_run:
             _run_resume_from(
@@ -589,7 +597,6 @@ def register(app: typer.Typer) -> None:
         # Filter-aware discovery: pre-fetch matches with spec filters applied
         # so we can (a) show them to the user in interactive mode, (b) anchor
         # auto-price derivation on each listing's seller-advertised min_price.
-        from .cli_helpers import parse_filter_options
         active_filters = build_vm_filter_params(
             gpu_model=gpu_model,
             gpu_count_min=gpu_count_min,
@@ -655,6 +662,7 @@ def register(app: typer.Typer) -> None:
         constraints = BuyConstraints(
             max_price=max_price,
             initial_price=initial_price,
+            policy_params=extra_policy_params,
         )
         provision = make_vm_provision_terms(
             duration_seconds=duration_seconds,
@@ -696,6 +704,8 @@ def register(app: typer.Typer) -> None:
             command="market buy",
             buyer_address=addr,
             registry_urls=reg_urls,
+            policy=_policy.name,
+            policy_params=extra_policy_params,
             initial_price=initial_price,
             max_price=max_price,
             duration_seconds=duration_seconds,
@@ -886,3 +896,5 @@ def register(app: typer.Typer) -> None:
 
         if result.status != "ready":
             raise typer.Exit(4)
+
+    app.command("buy")(inject_policy_cli_params(buy, _policy))

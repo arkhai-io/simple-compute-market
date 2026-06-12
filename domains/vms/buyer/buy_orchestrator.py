@@ -432,6 +432,7 @@ def _legacy_negotiate_matches(
                 max_rounds=max_negotiation_rounds,
                 on_round=_on_round,
                 chain=chain,
+                policy_params=constraints.policy_params,
             )
         except RuntimeError as exc:
             _emit_neg("negotiation_failed", error=f"http_error: {exc}")

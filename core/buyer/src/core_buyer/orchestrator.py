@@ -41,6 +41,10 @@ class BuyConstraints:
 
     max_price: Optional[float] = None
     initial_price: Optional[float] = None
+    # Opaque --policy-param key=value pairs for the configured
+    # negotiation policy; delivered verbatim to the policy chain's
+    # context (design-negotiation-policy-surface.md).
+    policy_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

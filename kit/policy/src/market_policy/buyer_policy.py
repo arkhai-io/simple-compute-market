@@ -90,3 +90,48 @@ def get_buyer_policy(name: str) -> BuyerPolicy:
 
 def buyer_policy_names() -> list[str]:
     return sorted(_REGISTRY)
+
+
+def inject_policy_cli_params(fn: Any, policy: BuyerPolicy) -> Any:
+    """Materialize the policy's parameters as CLI flags on a verb.
+
+    Replaces ``fn.__signature__`` so the CLI framework (typer inspects
+    signatures) surfaces one option per ``PolicyParam`` plus the
+    ``--policy-param name=value`` escape hatch; collected values land in
+    the function's ``**kwargs``. Parameters whose names the verb already
+    defines are skipped — the verb's own definition wins.
+    """
+    import inspect
+
+    import typer
+
+    sig = inspect.signature(fn)
+    params = [
+        p for p in sig.parameters.values()
+        if p.kind is not inspect.Parameter.VAR_KEYWORD
+    ]
+    taken = {p.name for p in params}
+    for pp in policy.cli_params:
+        if pp.name in taken:
+            continue
+        params.append(inspect.Parameter(
+            pp.name,
+            inspect.Parameter.KEYWORD_ONLY,
+            default=typer.Option(pp.default, pp.cli_flag, help=pp.help),
+            annotation=pp.annotation,
+        ))
+    if "policy_param" not in taken:
+        params.append(inspect.Parameter(
+            "policy_param",
+            inspect.Parameter.KEYWORD_ONLY,
+            default=typer.Option(
+                None, "--policy-param", "-P",
+                help="Extra negotiation-policy parameter as name=value. "
+                     "Repeatable — the escape hatch for policy knobs "
+                     "without a named flag; values reach the policy "
+                     "chain's context verbatim.",
+            ),
+            annotation=Optional[list[str]],
+        ))
+    fn.__signature__ = sig.replace(parameters=params)
+    return fn

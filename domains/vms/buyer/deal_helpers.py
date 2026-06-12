@@ -341,6 +341,10 @@ class NegotiationResumePoint:
     last_seller_proposal: Optional[dict]
     rounds_completed: int
     last_status: Optional[str]
+    # Negotiation policy recorded at run start — a resume continues
+    # under the policy that opened the negotiation, not whatever the
+    # config says today.
+    policy: Optional[str] = None
 
 
 def is_negotiation_complete(run_id: str) -> bool:
@@ -382,11 +386,13 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
     last_status: Optional[str] = None
     rounds_completed = 0
 
+    policy: Optional[str] = None
     for ev in events:
         et = ev.get("event")
         if et == "run_started":
             seller_url = ev.get("seller_url") or seller_url
             listing_id = ev.get("listing_id") or listing_id
+            policy = ev.get("policy") or policy
         elif et == "run_ended":
             last_status = ev.get("status") or last_status
             if ev.get("negotiation_id"):
@@ -442,4 +448,5 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
         last_seller_proposal=last_seller_proposal,
         rounds_completed=rounds_completed,
         last_status=last_status,
+        policy=policy,
     )

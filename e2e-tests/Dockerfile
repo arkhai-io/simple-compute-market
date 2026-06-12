@@ -34,6 +34,7 @@ COPY e2e-tests/pyproject.toml ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --find-links /dist \
         --refresh-package arkhai-core \
+        --refresh-package arkhai-core-buyer \
         --refresh-package arkhai-core-storefront \
         --refresh-package arkhai-vms-buyer \
         --refresh-package arkhai-kit-policy \

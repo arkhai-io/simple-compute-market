@@ -94,29 +94,39 @@ opening, tuple selection, derivation.
    compat for opt-in hagglers). Explicit flags keep their meaning: the
    bound is the user's, and `listed_price` accepts any seller number
    within it.
-2. **Policy objects with a registration surface.** Extend the
-   `kit/policy` registry entry from a bare middleware callable to a
-   policy object: `{middleware, compatible_formats, cli_params,
-   build_context}` (a `BuyerPolicyPlugin`, mirroring
-   `BuyerSchemaPlugin`). `build_app` resolves the configured policy
-   from buyer.toml and lets it register its flags on `buy`/`negotiate`;
-   `--policy-param` lands in `context.intermediate`.
-3. **Round-0 moves into the chain.** `negotiate_with_seller` asks the
-   policy for the opening proposal (the chain already has an
-   `"initial"` action in its vocabulary) instead of injecting
-   `fields.amount` behind the `uses_scalar_amount` heuristic. The
-   per-hour→absolute translation and token-decimals scaling move into
-   the scalar policies' `build_context`.
-4. **Tuple selection by declared compatibility.** Replace
-   `accepted_escrows[0]` + shape sniffing with policy-driven matching;
-   `extract_seller_min_price` becomes the scalar policies' anchor
-   helper rather than a free function the orchestrator owns.
-5. **CLI/test migration.** `buy`/`negotiate` lose the hardcoded pricing
-   flags (re-contributed by the default policy, so the surface is
-   unchanged for users); resume paths read the policy from the run-log
-   so a run resumes under the policy that started it; buyer + e2e
-   suites updated.
+2. **Policy objects with a registration surface.** *(Done.)*
+   `market_policy.buyer_policy` defines `BuyerPolicy`
+   (`{middlewares, compatible, cli_params, derive_prices}`) + the
+   registry; the VM domain registers `listed_price` and `bisection` in
+   `domains/vms/buyer/policy_surface.py`; buyer.toml
+   `[negotiation] policy` names the configured one. Variance from the
+   sketch: flag injection happens in the schema plugin's `register()`
+   (via `inject_policy_cli_params`, `__signature__`-based), not in
+   core's `build_app` — core stays free of a kit/policy dependency
+   until a second schema plugin shows what is invariant, the same
+   criterion as the server scaffold. `--policy-param key=value` lands
+   in `context.intermediate` verbatim.
+3. **Round-0 moves into the chain.** *(Done.)* The chain runs on an
+   empty history to produce the pinned opening; `NegotiationContext`
+   carries `our_opening_amount` separately from the bound; the scalar
+   policies own the shape test (`escrow_shape_uses_scalar_amount`) —
+   exact escrows pass through untouched, and the
+   `uses_scalar_amount` heuristic in `negotiate_with_seller` is gone.
+   Deferred remainder: the per-hour→absolute translation and
+   token-decimals scaling still live in the CLI bodies, not the policy
+   object — move them when a policy with non-per-hour semantics
+   arrives.
+4. **Tuple selection by declared compatibility.** *(Done.)*
+   `select_escrow_entry` filters by the configured policy's
+   `compatible` predicate; an incompatible-only listing yields "no
+   compatible escrow format". Derivation (`derive_scalar_prices`,
+   anchored on `extract_seller_min_price`) is the scalar policies' own.
+5. **CLI/test migration.** *(Done.)* `buy`/`negotiate` define no
+   pricing flags; the configured policy contributes them at app
+   assembly (the default surface is byte-for-byte the old one). The
+   run-log records the policy name at run start and resume paths
+   rebuild the chain from it — a run resumes under the policy that
+   opened it, not whatever the config says today.
 
-Items 2–4 land together or not at all (the seam is one cut); item 5
-follows. Each lands gated on the buyer/storefront suites and the
-canonical e2e, like every reorganization slice.
+All five items landed gated on the buyer/storefront suites and the
+canonical e2e.

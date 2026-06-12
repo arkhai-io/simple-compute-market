@@ -318,6 +318,7 @@ def negotiate_with_seller(
     on_round: Optional[Callable[[int, dict, dict], None]] = None,
     chain: Optional[list[NegotiationMiddleware]] = None,
     resume: Optional[ResumeState] = None,
+    policy_params: Optional[dict[str, Any]] = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
@@ -444,6 +445,7 @@ def negotiate_with_seller(
             our_opening_amount=initial_amount,
             our_escrow_proposal=base_proposal,
             max_rounds=max_rounds,
+            intermediate=dict(policy_params or {}),
         ))
         if opening.action == "counter" and opening.proposal is not None:
             pinned_proposal = opening.proposal
@@ -549,6 +551,7 @@ def negotiate_with_seller(
             our_escrow_proposal=pinned_proposal,
             available_resources={},
             max_rounds=max_rounds,
+            intermediate=dict(policy_params or {}),
         )
         next_move = run_negotiation_chain(chain, round_history, ctx)
 

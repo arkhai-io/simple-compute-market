@@ -88,6 +88,7 @@ dev-mode-dirs = ["../../.."]
 "logs_cli.py" = "domains/vms/buyer/logs_cli.py"
 "negotiate_cli.py" = "domains/vms/buyer/negotiate_cli.py"
 "network_cli.py" = "domains/vms/buyer/network_cli.py"
+"policy_surface.py" = "domains/vms/buyer/policy_surface.py"
 "run_log.py" = "domains/vms/buyer/run_log.py"
 "settle_cli.py" = "domains/vms/buyer/settle_cli.py"
 "service_cli.py" = "domains/vms/buyer/service_cli.py"

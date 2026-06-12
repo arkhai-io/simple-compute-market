@@ -11,7 +11,7 @@ exists to exercise /negotiate/new + /negotiate/{id} directly.
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Any, Optional
 
 import typer
 from rich.console import Console
@@ -26,10 +26,20 @@ from .run_log import RunLog
 
 
 def register(app: typer.Typer) -> None:
-    """Register the top-level `market negotiate` command."""
+    """Register the top-level `market negotiate` command.
 
-    @app.command("negotiate")
-    def negotiate(
+    Pricing flags come from the configured negotiation policy
+    (design-negotiation-policy-surface.md), injected at app assembly —
+    the scalar policies contribute --initial-price/--max-price/
+    --price-markup, plus the --policy-param escape hatch.
+    """
+    from market_policy.buyer_policy import inject_policy_cli_params
+
+    from .policy_surface import configured_buyer_policy
+
+    _policy = configured_buyer_policy()
+
+    def negotiate(  # registered below after policy-param injection
         seller_url: Optional[str] = typer.Option(
             None, "--seller", "-s",
             help="Seller agent base URL. Optional — resolved from the "
@@ -52,25 +62,6 @@ def register(app: typer.Typer) -> None:
             None, "--discovery-timeout",
             help="Per-registry deadline in seconds (default: "
                  "registry.discovery_timeout from config.toml, fallback 5).",
-        ),
-        initial_price: Optional[float] = typer.Option(
-            None, "--initial-price",
-            help="Opening bid in human / whole-token units, per-hour rate. "
-                 "Scaled by the token's on-chain decimals before being sent "
-                 "(--initial-price 2 against 6-decimal USDC = $2/hr). "
-                 "Optional — when omitted, anchored on the listing's advertised min_price.",
-        ),
-        max_price: Optional[float] = typer.Option(
-            None, "--max-price",
-            help="Ceiling in human / whole-token units, per-hour rate. "
-                 "Scaled by the token's on-chain decimals before being sent. "
-                 "Optional — when omitted, derived as min_price * --price-markup. "
-                 "Resumed runs reuse the original ceiling.",
-        ),
-        price_markup: float = typer.Option(
-            1.5, "--price-markup",
-            help="Multiplier on the listing's min_price for the auto-derived "
-                 "--max-price. Ignored when --max-price is explicit.",
         ),
         assume_yes: bool = typer.Option(
             False, "--yes", "-y",
@@ -119,15 +110,27 @@ def register(app: typer.Typer) -> None:
                  "omitted the buyer prompts; required when --yes is set "
                  "and the listing accepts more than one chain you have configured.",
         ),
+        **policy_values: Any,
     ) -> None:
         """Drive a synchronous negotiation with one seller, round-by-round.
 
         Each round is a signed HTTP POST to the seller. The seller's
         policy decides counter/accept/exit and returns the decision
-        inline. The buyer's policy (simple ceiling + midpoint counter)
-        runs locally in this process.
+        inline. The buyer's policy decides locally in this process
+        (default: listed_price — pay what's published).
         """
         console = Console()
+
+        from core_buyer.cli import parse_filter_options
+
+        # The configured policy's parameters arrive through the injected
+        # flags; the scalar policies' names are unpacked for the body.
+        initial_price: Optional[float] = policy_values.get("initial_price")
+        max_price: Optional[float] = policy_values.get("max_price")
+        price_markup: float = float(policy_values.get("price_markup") or 1.5)
+        extra_policy_params = parse_filter_options(
+            policy_values.get("policy_param") or [],
+        )
 
         # Capture which prices the user passed explicitly — auto-derived
         # values (from the listing's advertised min_price) are already
@@ -327,6 +330,8 @@ def register(app: typer.Typer) -> None:
             seller_url=seller_url,
             listing_id=listing_id,
             buyer_address=addr,
+            policy=_policy.name,
+            policy_params=extra_policy_params,
             initial_price=initial_price,
             max_price=max_price,
             max_rounds=max_rounds,
@@ -409,6 +414,13 @@ def register(app: typer.Typer) -> None:
         chain = None
         from .common import resolve_negotiation_config
         policies, policy_mode = resolve_negotiation_config()
+        if resume_state is not None and not (policies or policy_mode):
+            # A resume continues under the policy that opened the
+            # negotiation (recorded at run start), not whatever the
+            # config resolves to today.
+            policy_mode_from_log = getattr(resume_point, "policy", None)
+            if policy_mode_from_log:
+                policy_mode = str(policy_mode_from_log)
         if policies or policy_mode:
             from .buyer_client import _load_buyer_chain
             chain = _load_buyer_chain(policies=policies, policy_mode=policy_mode)
@@ -427,6 +439,7 @@ def register(app: typer.Typer) -> None:
                 on_round=_observe,
                 resume=resume_state,
                 chain=chain,
+                policy_params=extra_policy_params,
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))
@@ -475,3 +488,5 @@ def register(app: typer.Typer) -> None:
 
         if outcome.status != "agreed":
             raise typer.Exit(4)
+
+    app.command("negotiate")(inject_policy_cli_params(negotiate, _policy))
