@@ -331,14 +331,39 @@ second scheme (the buyer pass-through middleware can ship from day one
    issuance with the negotiation-time hold and returning
    `{key_id, secret?}` once through `tenant_credentials`, claims-engine
    collection, and a `serve`/`publish`/`listings` CLI. The scalar
-   policies and `SellerRoundResult` are still imported from
-   `domains.vms.negotiation` — they are alkahest vocabulary, not VM
-   vocabulary; items 5/7 relocate them. Dockerfile/compose rides item 6.
-5. **Buyer plugin.** Schema plugin + verbs/flags/rendering;
-   per-unit→absolute scaling in the policy surface (and the VM
-   plugin's per-hour scaling moves to the same seam);
-   `answer_key_challenge` pass-through in the default buyer chain;
-   credentials to run-log.
+   policies and `SellerRoundResult` were imported from
+   `domains.vms.negotiation` as a documented leftover; item 5 relocated
+   them to the kits. Dockerfile/compose rides item 6.
+5. **Buyer plugin.** *(Done.)* Landed in two layers, like item 4.
+   First the relocations the second plugin forced: the alkahest-scalar
+   negotiation vocabulary left `domains.vms` for the kits
+   (`market_policy.scalar_policies` / `.seller_round`,
+   `market_alkahest.proposals` — retiring item 4's documented
+   leftover), and the schema-invariant buyer machinery was hoisted to
+   `core_buyer` (negotiation client, scalar policy surface —
+   registered once, since two plugins re-registering `listed_price`
+   would silently shadow each other — settle/escrow clients,
+   aggregation, run-log, deal recovery). The per-unit→absolute seam
+   moved with it: `negotiate_with_seller` scales per-unit prices by an
+   explicit `unit_count`; the VM shim supplies `duration_seconds/3600`
+   and the tokens plugin the requested quantity. Then the plugin:
+   `arkhai-apitokens-buyer` (`domains/apitokens/buyer/`) publishes the
+   `api_tokens` schema plugin with its verbs namespaced under one
+   `market tokens …` group (buy/negotiate/settle/listing) so both
+   plugins compose in one binary without shadowing the VM plugin's
+   bare verbs (bare-verb dispatch by listing schema is item-7
+   territory); `--quantity` + key disposition (`--new-key` |
+   `--key-id`) fixed at round 0 in the `api_tokens.v1` provision
+   terms; listing rendering (service name, per-token unit price,
+   OpenAPI URL); `answer_key_challenge` rides the default chain as the
+   pass-through (inert vs v1 wallet-bound sellers; clean
+   `key_challenge_unanswerable` exit when challenged — signing lands
+   with the ed25519 scheme); issued credentials land once in the
+   run-log (`credentials_delivered`, the buyer's durable copy of the
+   secret). The wheel ships the apitokens concept modules without
+   `domains/__init__.py` (vms-buyer owns the file; alone, the
+   namespace-package fallback resolves it). Dockerfile/compose rides
+   item 6.
 6. **Middlewares + e2e.** Python middleware first (it gates the e2e's
    sample service), then TypeScript and Rust to the same behavioral
    spec (shared conformance fixtures: a recorded consume/verify

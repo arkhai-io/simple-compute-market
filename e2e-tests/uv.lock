@@ -162,6 +162,25 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-apitokens-buyer"
+version = "0.1.0"
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+dependencies = [
+    { name = "alkahest-py" },
+    { name = "arkhai-core" },
+    { name = "arkhai-core-buyer" },
+    { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-policy" },
+    { name = "eth-account" },
+    { name = "rich" },
+    { name = "typer" },
+]
+wheels = [
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_apitokens_buyer-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-core"
 version = "0.1.0"
 source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
@@ -177,7 +196,12 @@ name = "arkhai-core-buyer"
 version = "0.1.0"
 source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
 dependencies = [
+    { name = "arkhai-core" },
+    { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-policy" },
+    { name = "eth-account" },
+    { name = "rich" },
     { name = "typer" },
 ]
 wheels = [
@@ -243,6 +267,7 @@ name = "arkhai-e2e-tests"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "arkhai-apitokens-buyer" },
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-core-storefront-client" },
     { name = "arkhai-kit-alkahest" },
@@ -274,6 +299,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arkhai-apitokens-buyer", specifier = ">=0.1.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.6.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.11.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.1.0" },

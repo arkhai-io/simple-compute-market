@@ -95,13 +95,14 @@ scripts (`market`, `market-storefront`, `market-policy`) are unchanged.
 | Layer | Distribution (path) | Role |
 |---|---|---|
 | core | `arkhai-core` (`core/`) | protocol-carrier wheel: negotiation/settlement wire shapes both roles must derive identically. Stdlib + pydantic only; zero domain vocabulary and zero settlement-mechanism vocabulary (lifecycle universals + `{mechanism, params}` envelope — see "Settlement Lifecycle"). |
-| core | `arkhai-core-buyer` (`core/buyer/`) | buyer role shell: `market` console script, verb skeleton, `market.buyer_plugins` entry-point discovery, `run_buy` orchestration, registry fan-in |
+| core | `arkhai-core-buyer` (`core/buyer/`) | buyer role shell: `market` console script, verb skeleton, `market.buyer_plugins` entry-point discovery, registry fan-in, the sync negotiation client (per-unit→absolute scaling by an explicit `unit_count`), scalar buyer-policy surface (`listed_price`/`bisection` registrations), buy orchestration stages, settle/escrow clients, aggregation policies, run-log, deal-recovery helpers |
 | core | `arkhai-core-storefront` (`core/storefront/`) | storefront role shell (library, framework-free): sync-negotiation protocol, registry publication + multi-registry fan-out client, market-state SQLite persistence + versioned migrations (domain tables via subclass hooks), settle-time escrow verification, refund/ERC-20 transfer, stage log, auth, HTTP models, capacity-client contract + remote site client/event poller, claims engine |
 | core | `arkhai-core-registry` (`core/registry/`) | registry service; schema injected as `filter-spec.yaml` config |
 | core | `arkhai-core-registry-client`, `arkhai-core-storefront-client` | protocol clients |
 | core | `arkhai-core-site` (`core/site/`) | site-authority scaffold: capacity ledger, ledger tables, `/api/v1/capacity/*` router — mounted by a hosting service per site |
 | kit | `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-alkahest`, `arkhai-kit-config` | from-below capabilities; alkahest is the first *settlement-mechanism codec* |
 | domain | `arkhai-vms-buyer` (`domains/vms/buyer/`) | no console script — publishes the `vms.compute` plugin the core `market` CLI discovers |
+| domain | `arkhai-apitokens-buyer` (`domains/apitokens/buyer/`) | no console script — publishes the `api_tokens` plugin; verbs namespaced under `market tokens …` so both plugins compose in one binary |
 | domain | `arkhai-vms-storefront` (`domains/vms/storefront/`) | the VM storefront executable/composition root (FastAPI adapters over core) |
 | domain | `arkhai-vms-provisioning` (`domains/vms/provisioning/service/`) | the VM fulfillment executor service |
 | domain | `arkhai-apitokens-service` (`domains/apitokens/service/`) | the tokens service: API keys/credit grants/consumption + the quota ledger (mounts `core_site`) |
@@ -110,10 +111,12 @@ scripts (`market`, `market-storefront`, `market-policy`) are unchanged.
 The *concept* modules (`domains/vms/{listings,negotiation,settlement,provisioning}`,
 `domains/apitokens/{listings,negotiation,settlement}`) are not separate
 wheels: they ship inside the buyer/storefront wheels and implement core
-hook shapes by injection, without importing core. The API-tokens
-negotiation modules still import the scalar/escrow policies from
-`domains.vms.negotiation` — alkahest vocabulary awaiting its neutral
-home (design-api-tokens-domain.md, items 5/7).
+hook shapes by injection, without importing core. The alkahest-scalar
+negotiation vocabulary both domains share (bisection, listed_price, the
+escrow shape guards, the per-kind dispatch, `SellerRoundResult`) lives
+in the kits (`market_policy.scalar_policies` / `.seller_round`,
+`market_alkahest.proposals`); each domain module keeps only what
+interprets its own market content.
 
 Executable ownership splits by role: the buyer binary is core-owned
 with domain schema plugins (one binary, many registry schemas; without
@@ -1077,12 +1080,17 @@ as typer options on `buy`/`negotiate` at app-assembly time via
 hatch whose values reach the chain's context verbatim), (c) the
 middleware chain that runs the rounds, and (d) `derive_prices` — how raw
 parameter values plus the candidate listings become the chain's numeric
-inputs. The VM domain registers `listed_price` (default) and `bisection`
-in `domains/vms/buyer/policy_surface.py`; `[negotiation] policy` in
-`buyer.toml` names the configured one. This gives a three-way CLI split:
+inputs. The scalar policies `listed_price` (default) and `bisection` are
+registered once in `core_buyer.policy_surface` — they are escrow
+vocabulary shared by every scalar domain, and two plugins re-registering
+the same names would silently shadow each other; `[negotiation] policy`
+in `buyer.toml` names the configured one. Their prices are **per unit**;
+the schema plugin's verb supplies the unit count that scales them to the
+absolute amounts a negotiation runs on (lease hours for `vms.compute`,
+token quantity for `api_tokens`). This gives a three-way CLI split:
 core owns the verb skeleton, run-log chaining, and identity; the schema
-plugin owns *what* is bought (`--gpu-model` is plugin vocabulary); the
-policy owns *how it is paid for* (`--max-price` is policy vocabulary —
+plugin owns *what* is bought (`--gpu-model` and `--quantity` are plugin
+vocabulary); the policy owns *how it is paid for* (`--max-price` is policy vocabulary —
 the scalar trio `--initial-price`/`--max-price`/`--price-markup` belongs
 to the scalar policies and is hardcoded nowhere else).
 
