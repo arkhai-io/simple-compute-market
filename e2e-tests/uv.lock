@@ -197,6 +197,19 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-core-site"
+version = "0.1.0"
+source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "pydantic" },
+    { name = "sqlalchemy" },
+]
+wheels = [
+    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_core_site-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-core-storefront"
 version = "0.1.0"
 source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
@@ -359,6 +372,7 @@ version = "0.4.0"
 source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
 dependencies = [
     { name = "aiohttp" },
+    { name = "arkhai-core-site" },
     { name = "arkhai-core-storefront-client" },
     { name = "cachetools" },
     { name = "cryptography" },
