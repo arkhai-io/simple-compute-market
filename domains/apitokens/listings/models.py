@@ -1,8 +1,8 @@
 """API-tokens listing resource schema.
 
 The listing's ``offer_resource`` is opaque to the registry and
-schema-typed by the domain plugin (design-api-tokens-domain.md, "The
-market shape"). ``resource_id`` names the quota resource in the tokens
+schema-typed by the domain plugin (ARCHITECTURE.md, "API-tokens market
+domain — Market shape"). ``resource_id`` names the quota resource in the tokens
 service's ledger that the listing derives from — seller-internal
 bookkeeping the reconciler and quota guard key on; buyers ignore it.
 """

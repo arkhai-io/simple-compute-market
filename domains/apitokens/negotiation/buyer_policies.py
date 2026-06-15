@@ -1,8 +1,9 @@
 """API-tokens buyer-side negotiation middlewares.
 
 ``answer_key_challenge`` is the buyer mirror of the seller's planned
-``key_possession_challenge`` middleware (design-api-tokens-domain.md,
-"Key ownership"): a seller enforcing an asymmetric (``ed25519``) key
+``key_possession_challenge`` middleware (ARCHITECTURE.md, "API-tokens
+market domain — Key ownership"): a seller enforcing an asymmetric
+(``ed25519``) key
 ownership claim *counters* with a nonce — ``key_challenge`` in the
 message; message content is schema vocabulary — and expects the buyer
 to sign ``(nonce, negotiation_id, terms hash)`` with the key's

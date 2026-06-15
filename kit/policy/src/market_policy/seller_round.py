@@ -9,8 +9,8 @@ captures inventory snapshots, the API-tokens hook quota + key records);
 this module owns only the carrier.
 
 History: extracted from ``domains.vms.negotiation.storefront_round``
-(design-api-tokens-domain.md, work item 5); the VM module re-exports
-both names.
+when the API-tokens domain became the second plugin; the VM module
+re-exports both names.
 """
 
 from __future__ import annotations

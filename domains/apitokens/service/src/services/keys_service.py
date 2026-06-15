@@ -1,7 +1,7 @@
 """Keys, credit grants, and consumption — the tokens service's core.
 
 Issuance is the settlement-side fulfillment job
-(docs/development/design-api-tokens-domain.md): it re-checks the
+(ARCHITECTURE.md, "API-tokens market domain — Market shape"): it re-checks the
 ownership claim authoritatively (the negotiation guard is advisory —
 it works off a snapshot, and force-accept bypasses the chain), commits
 the quota hold in the site ledger, creates or locates the key, and
@@ -42,7 +42,7 @@ from core_site.ledger import CapacityConflictError, CapacityLedgerService
 from db.models import ApiKey, ConsumptionEvent, CreditGrant
 
 #: Reject vocabulary shared with the negotiation guards
-#: (design-api-tokens-domain.md, "Key ownership").
+#: (ARCHITECTURE.md, "API-tokens market domain — Key ownership").
 KEY_NOT_FOUND = "key_not_found"
 KEY_NOT_OWNED = "key_not_owned"
 KEY_REVOKED = "key_revoked"

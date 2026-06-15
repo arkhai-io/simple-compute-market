@@ -1,6 +1,6 @@
 """Full API-tokens deal, driven by `market tokens buy`.
 
-The design's item-6 end-to-end (design-api-tokens-domain.md, item 6):
+The domain's end-to-end (ARCHITECTURE.md, "API-tokens market domain"):
 
     discover → negotiate (new key) → settle → consume to 402
              → buy again into the existing key → consume succeeds

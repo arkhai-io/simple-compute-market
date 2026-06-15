@@ -14,8 +14,8 @@ call-path import — kit-policy does not hard-depend on kit-alkahest; the
 composition roots that load these chains always ship both.
 
 History: extracted verbatim from ``domains.vms.negotiation.policies``
-(design-api-tokens-domain.md, work item 5); the VM module re-exports
-every name from here, so existing import paths keep working.
+when the API-tokens domain became the second plugin; the VM module
+re-exports every name from here, so existing import paths keep working.
 """
 
 from __future__ import annotations

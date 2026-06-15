@@ -2088,6 +2088,132 @@ route to the storefront named in service settings rather than the
 
 ---
 
+## API-tokens market domain
+
+The second market schema: **prepaid API credits** sold against a
+token-gated service. A listing advertises a service at a unit price per
+token; the buyer picks a quantity and whether the credits land on a new
+API key or top up an existing one; settlement is the standard escrow
+flow; the deliverable is a credit grant in a seller-side tokens service,
+enforced by drop-in middlewares (Python / TypeScript / Rust) in the
+gated service. It is the second instance that made the "wait for a
+second schema" seams concrete: schema identity for registries
+(`filter-spec.yaml`'s `schema: {id, version}` header), the second
+storefront composition root, non-per-hour price scaling, and the
+site-authority ledger extraction (`core_site`). Concept modules live in
+`domains/apitokens/{listings,negotiation,settlement}`; the packages are
+in the layout table above (`arkhai-apitokens-{buyer,storefront,service,
+middleware,sample-app}`).
+
+### Decisions
+
+- **A token is a prepaid credit.** A key carries a balance; the gated
+  service's middleware decrements it per request (or per request-cost).
+  Quantity is the unit of purchase; price is per token.
+- **Vocabulary.** The sold asset is an "API token" in listings and
+  prose; the consumable count in code/DB/middleware is **credits /
+  balance** — "token" unqualified is already ERC-20 vocabulary, and the
+  payment side of an API-token deal *is* an ERC-20/native escrow, so the
+  split keeps "token" from meaning two things in one wire message.
+- **Quota is sellable inventory**, capacity-managed through the existing
+  `/api/v1/capacity/*` contract: the seller configures sellable credit
+  inventory, terms acceptance places a TTL hold for the quantity,
+  settlement commits it, fulfillment issues the grant. v1 quota is a
+  finite supply that selling decrements — not an outstanding-liability
+  cap that consumption replenishes (a later seller-policy upgrade over
+  the same ledger).
+- **Middlewares consume online** against the tokens service, with a
+  short-TTL verify cache and batched decrements (batching bounds a small
+  overdraft window; the flush threshold is the bound). One source of
+  truth; revocation is immediate; the gate is thin in all three
+  languages and pinned by `middleware/conformance/session.json`.
+- **Usage identity and market identity are separate** (see Key
+  ownership): a gated-service request authenticates by the bearer API
+  key alone, while top-up rights bind to the purchasing wallet.
+
+### Market shape
+
+**Listing.** `offer_resource` is opaque to the registry, schema-typed by
+the plugin: `{kind: "api_tokens.v1", service_name, description,
+openapi_url, base_url}`. `accepted_escrows` carries the unit price as a
+rate with a `per: "token"` unit. The buyer renders `openapi_url` in
+listing detail so it can inspect what the tokens gate.
+
+**Negotiation.** Same round/chain model. The plugin owns *what* is
+bought — `--quantity N` and the key disposition (`--new-key` |
+`--key-id <id>`), fixed at round 0 in
+`ProvisionTerms{kind: "api_tokens.v1", payload: {quantity, key}}`. The
+policy owns *how it is paid*: the negotiated scalar is `quantity × unit
+rate`, and the per-unit→absolute translation lives in the buyer's
+negotiation client (`negotiate_with_seller` scales by an explicit
+`unit_count`), not the CLI bodies — the non-per-hour trigger that also
+moved the VM plugin's per-hour scaling to the same seam. `listed_price`
+is the default (bound = quantity × advertised rate). Seller guards:
+`token_quota_guard` (requested quantity ≤ available units in the
+captured capacity snapshot) and `key_owned_by_buyer_wallet` for
+existing-key claims (see Key ownership).
+
+**Settlement.** Standard scalar escrow for the absolute amount,
+RecipientArbiter immediate settlement by default. Fulfillment is an
+issuance job against the tokens service: commit the quota hold, create
+the key (new) or locate it (existing), write the credit grant
+(`escrow_uid` UNIQUE → idempotent under retry), and return
+`{key_id, secret?}` once through the settle-status / run-log channel
+(the bearer secret only for new keys, delivered once). The storefront's
+quota-backed listings derive from a quota resource the way VM slices
+derive from pool members, closing on exhaustion and reopening on release
+via the capacity event feed. **No lease tail:** credits don't expire in
+v1, so committed allocations carry no `lease_end_utc` and the ledger's
+expiry/watchdog machinery is dormant for this domain (credit expiry, if
+wanted later, maps onto lease truncation — which is why the shared
+ledger is reused rather than a bespoke quota table).
+
+### Key ownership
+
+Two operations, only one of which touches the marketplace: **usage**
+(every request to the gated service) authenticates by the API key alone;
+**top-up** (assigning credits to an existing key) is a marketplace
+negotiation, which is already wallet-signed. So binding top-up rights to
+the purchasing wallet adds zero new key-management burden in the
+purchase path.
+
+The decision: **bearer usage keys**, with a **scheme-tagged ownership
+claim** on the key record (`owner: (scheme, identifier)`, the same shape
+as the registry's publisher identity), and **enforcement as negotiation
+middleware** — key ownership is validated by the chain against captured
+side inputs, exactly like price, escrow shape, and duration.
+
+- `key_owned_by_buyer_wallet` *(seller default, shipped)* — a round-0
+  guard structurally identical to the inventory guard: it consults a
+  captured key→owner lookup (the tokens-service `GET /keys/{id}`) and
+  rejects with `key_not_owned` unless the key's `wallet` owner equals
+  the negotiation's signing wallet. **Free** — the wallet-signed
+  negotiation *is* the possession proof; no extra round, no buyer
+  config. New keys auto-bind `owner = purchasing wallet`.
+- `key_possession_challenge` / `answer_key_challenge` *(ed25519,
+  planned)* — for asymmetric owners the seller *counters* with a nonce
+  (`key_challenge` in the message — message content is schema
+  vocabulary), then verifies the buyer's signature over
+  `(nonce, negotiation_id, terms hash)` (so it cannot replay across
+  negotiations) before deferring to pricing; `key_proof_invalid`
+  rejects. The buyer mirror ships now as an inert pass-through — `None`
+  unless challenged, and a clean `key_challenge_unanswerable` exit (not
+  chain exhaustion) when challenged with no owner key configured.
+- **Open top-up is the absence of an ownership guard** in the seller's
+  chain, not a mode flag — a seller wanting gifting/team pooling omits
+  the guard per listing or per escrow kind.
+
+**The guard is the interface, not the enforcement.** Negotiation-time
+checks are advisory (they work off a snapshot, and force-accept bypasses
+the chain); the issuance job re-checks the ownership claim
+authoritatively at grant time. The reject vocabulary
+(`key_not_found` / `key_not_owned` / `key_revoked` /
+`key_proof_invalid`) is shared between the negotiation guards and the
+service. `arkhai-kit-identity` owns the per-scheme signature primitives;
+core chain mechanics are untouched.
+
+---
+
 ## Deployment Topology
 
 ### Local Dev (compose)

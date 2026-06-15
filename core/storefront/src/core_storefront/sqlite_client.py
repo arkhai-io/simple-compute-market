@@ -11,8 +11,8 @@ singleton factory stays with each composition root.
 
 Hoisted from ``market_storefront.utils.sqlite_client`` when the
 API-tokens domain became the second composition root. A few VM-era
-column names (e.g. ``ssh_commands`` on credentials) ride along until the
-cross-root consolidation pass (design-api-tokens-domain.md, work item 7).
+column names (e.g. ``ssh_commands`` on credentials) ride along until a
+future cross-root consolidation pass.
 """
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 """Tokens-service tables: keys, credit grants, and the consumption log.
 
-The schema is the credit model from
-docs/development/design-api-tokens-domain.md: a key carries a balance
+The schema is the credit model from ARCHITECTURE.md, "API-tokens market
+domain — Decisions": a key carries a balance
 (grants − consumption, maintained transactionally as a column for O(1)
 consume checks), grants are one-per-deal (``escrow_uid`` UNIQUE makes
 issuance idempotent under job retry; NULL for admin adjustments, which

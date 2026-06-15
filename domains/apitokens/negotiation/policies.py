@@ -16,7 +16,7 @@ This module owns what is genuinely API-tokens vocabulary:
   capacity snapshot. Advisory, like every negotiation-time check —
   issuance re-reserves authoritatively.
 * ``key_owned_by_buyer_wallet`` — the seller-default ownership guard
-  (design-api-tokens-domain.md, "Key ownership"): for an existing-key
+  (ARCHITECTURE.md, "API-tokens market domain — Key ownership"): for an existing-key
   claim, the captured key record's ``wallet`` owner must equal the
   negotiation's signing wallet. Free — the wallet-signed negotiation is
   the possession proof. The guard is the interface, not the

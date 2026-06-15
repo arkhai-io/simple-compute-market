@@ -1,7 +1,7 @@
 """ListingService — quota-backed listing lifecycle.
 
 A token listing derives from a quota resource in the tokens service's
-ledger (design-api-tokens-domain.md, "Storefront"): ``publish_from_quota``
+ledger (ARCHITECTURE.md, "API-tokens market domain — Market shape"): ``publish_from_quota``
 reads the resource's availability, writes the local listing row with an
 ``api_tokens.v1`` offer naming that resource, and fans out to the
 registries. Closing goes through the shared publication path.

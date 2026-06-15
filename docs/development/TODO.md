@@ -62,10 +62,10 @@ graph expresses the core/kit/domain split, distribution names mirror it
 Current-state layout and decisions: `ARCHITECTURE.md` → "Organizing
 Principle" / "Package layout". The remaining architectural items are
 planned with their design context in
-[`design-remaining-work.md`](design-remaining-work.md). The active
-next milestone — the API-tokens market domain (second schema plugin,
-second storefront, tokens service + middlewares) — is designed in
-[`design-api-tokens-domain.md`](design-api-tokens-domain.md).
+[`design-remaining-work.md`](design-remaining-work.md). The API-tokens
+market domain (second schema plugin, second storefront, tokens service +
+middlewares) has since shipped — current state in `ARCHITECTURE.md` →
+"API-tokens market domain".
 
 **This list is the single aggregation of what remains**, in rough
 dependency order:
@@ -101,25 +101,27 @@ dependency order:
    generalization (`design-remaining-work.md` § 1) so `/negotiate/*`
    churns once.
 
-4. **Schema identity/version for plugins:** the registry advertises its
-   schema via `filter-spec.yaml`, but there is no stable schema
-   identity/version letting a buyer plugin prove compatibility with a
-   registry. Needed before second-schema plugins ship.
+4. **Schema identity/version for plugins:** *(Done — shipped with the
+   API-tokens domain.)* `filter-spec.yaml` gained a `schema: {id,
+   version}` header surfaced by the registry client, and
+   `resolve_indexer_urls_for_schema` offers each plugin only the
+   registries whose declared id matches (lenient on undeclared/
+   unreachable). See `ARCHITECTURE.md` → "API-tokens market domain".
 
 5. **Buyer CLI residue (small):** render top-level listing `demands`
    wherever listing detail should expose payment constraints; keep
    old-run-log compatibility code clearly marked legacy.
 
    Deferred remainders from the buyer policy-surface work
-   (`ARCHITECTURE.md` → "Buyer negotiation policy surface"), each
-   parked behind an explicit trigger:
-   - hoist the `--yes` flag definition (and `inject_policy_cli_params`
-     invocation) from the schema plugin's `register()` into core's
-     `build_app` — when a second schema plugin shows what is invariant
-     (same criterion as the server scaffold);
-   - move the per-hour→absolute translation and token-decimals scaling
-     out of the CLI bodies into the policy object — when a policy with
-     non-per-hour semantics arrives;
+   (`ARCHITECTURE.md` → "Buyer negotiation policy surface"):
+   - *(Done — the API-tokens domain fired both triggers.)* The `--yes`
+     flag and the `inject_policy_cli_params` invocation moved into core
+     (`core_buyer.cli.assume_yes_option` / `register_policy_verb`); the
+     per-unit→absolute price translation moved out of the CLI bodies into
+     the buyer's negotiation client (`negotiate_with_seller` scales by an
+     explicit `unit_count`). The ERC-20 **token-decimals** scaling still
+     rides in the VM `buy` body and could follow the same path when
+     wanted.
    - a `BuyerPolicy.prefer(candidates)` hook for policy-driven escrow
      tuple choice among compatible entries — when policies need
      different preferences (today selection takes the first compatible
@@ -226,7 +228,7 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 
 - **Buyer's initial offer must meet the seller's floor price:** `domains.vms.listings.pricing.extract_initial_price_from_order()` returns `primary_rate_value(accepted_escrows[0])` (already in uint256-domain base units) as the seller's `our_price`. The `BisectionStrategy` in `maximize` direction exits with `"price_unreasonable"` if `their_price < our_price / 1.5`, and does not counter. If the buyer's `BUYER_INITIAL_PRICE` in the e2e test is below this floor, the seller exits at round 0 and `force-accept` returns 409. **Rule:** `BUYER_INITIAL_PRICE >= primary_rate_value(accepted_escrows[0])` in the e2e test constants. Note this only bites where an opening below the listed price is possible — an explicit `--initial-price` or the opt-in `bisection` buyer policy; the default `listed_price` policy opens at the advertised rate, which satisfies the floor by construction.
 
-- **Global pause state persists across e2e test runs:** The storefront's `_GLOBALLY_PAUSED` flag (toggled by `POST /admin/pause` — distinct from per-listing `paused=True`) is in-process memory, not reset between `pytest` sessions. Neither full-deal scenario currently calls global `admin_pause` (storefront integration tests do, but those have their own teardown). The risk is a developer or external script having toggled it manually; the next `/negotiate/new` then 503s with `{"reason": "global"}` regardless of any per-listing state. The `ensure_storefront_resumed` autouse fixture in `e2e-tests/tests/e2e/roles/scenarios/conftest.py` mitigates this by calling `admin_resume()` in module teardown. If running against a live environment that may have been left paused, execute `curl -X POST http://localhost:8001/admin/resume -H "X-Admin-Key: <key>"` before running.
+- **Global pause state persists across e2e test runs:** The storefront's `_GLOBALLY_PAUSED` flag (toggled by `POST /admin/pause` — distinct from per-listing `paused=True`) is in-process memory, not reset between `pytest` sessions. Neither full-deal scenario currently calls global `admin_pause` (storefront integration tests do, but those have their own teardown). The risk is a developer or external script having toggled it manually; the next `/negotiate/new` then 503s with `{"reason": "global"}` regardless of any per-listing state. The `ensure_storefront_resumed` autouse fixture in `e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py` mitigates this by calling `admin_resume()` in module teardown. If running against a live environment that may have been left paused, execute `curl -X POST http://localhost:8001/admin/resume -H "X-Admin-Key: <key>"` before running.
 
 - **Resource CSV importer DB path:** `scripts/import_resources_csv.py` resolves the target SQLite path via `--db-path` CLI arg → `STOREFRONT_DB_PATH` env var → `CONFIG.db_path`, in that order. If the importer writes to a different path than the server reads (e.g. via an unset `STOREFRONT_DB_PATH` falling through to a wrong default), the server starts with zero resources and rejects all `/negotiate/new` calls with `409 no_matching_inventory`. `compose/seller.yml` pins `--db-path src/market_storefront/data/storefront/agent.db` explicitly. **Detection:** `GET /api/v1/system/status` exposes `resource_count` as a top-level field; a value of `0` signals this misconfiguration. The smoke test `test_resource_portfolio_seeded` in `test_storefront_smoke.py` asserts `resource_count > 0` and fails with a remediation command.
 
