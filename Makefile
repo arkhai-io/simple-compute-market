@@ -7,7 +7,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-dev build-seller dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-apitokens-middleware dist-apitokens-sample-app dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: build build-dev build-seller build-apitokens-service build-apitokens-storefront build-apitokens-sample-app dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-apitokens-middleware dist-apitokens-sample-app dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -155,6 +155,7 @@ test-storefront:
 # adds the test chain + integration-test image needed for the local e2e stack.
 build: init-prerequisites dist build-buyer
 	$(MAKE) -j3 build-registry build-storefront build-provisioning
+	$(MAKE) -j3 build-apitokens-service build-apitokens-storefront build-apitokens-sample-app
 
 build-dev: build build-dev-env build-test-image
 
@@ -194,6 +195,19 @@ build-storefront:
 
 build-provisioning:
 	cd domains/vms/provisioning/service && make build
+
+# API-tokens domain images (item 6). Built from the repo root so each
+# Dockerfile's `COPY .dist/` + `COPY domains/` resolve. The api-tokens
+# registry reuses arkhai:registry (built by build-registry) with a
+# different filter-spec mounted at runtime.
+build-apitokens-service:
+	docker build --ulimit nofile=65536:65536 -f domains/apitokens/service/Dockerfile -t arkhai:apitokens-service .
+
+build-apitokens-storefront:
+	docker build --ulimit nofile=65536 -f domains/apitokens/storefront/Dockerfile -t arkhai:apitokens-storefront .
+
+build-apitokens-sample-app:
+	docker build --ulimit nofile=65536:65536 -f domains/apitokens/sample-app/Dockerfile -t arkhai:apitokens-sample-app .
 
 build-test-image:
 	cd e2e-tests && make build

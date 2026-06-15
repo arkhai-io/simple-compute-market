@@ -58,3 +58,12 @@ e2e_poll_interval_s = 3
 # ---------------------------------------------------------------------------
 [default.provisioning]
 api_url = ""
+
+# ---------------------------------------------------------------------------
+# API-tokens topology (item 6)
+# ---------------------------------------------------------------------------
+[default.api_tokens]
+registry_url    = ""   # second registry, api_tokens schema
+service_url     = ""   # tokens service (keys/credits/quota)
+storefront_url  = ""   # tokens seller storefront
+

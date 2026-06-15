@@ -25,3 +25,8 @@ seller:
 
 provisioning:
   api_url: "http://provisioning:8081"
+
+api_tokens:
+  registry_url:   "http://api-tokens-registry:8080"
+  service_url:    "http://tokens-service:8082"
+  storefront_url: "http://tokens-storefront:8000"

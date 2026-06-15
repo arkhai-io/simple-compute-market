@@ -91,9 +91,131 @@ async def _startup_tasks() -> None:
 
     await _preflight_tokens_service()
 
+    await _seed_demo_listing()
+
     from apitokens_storefront.services.capacity_client import (
         capacity_events_poller_loop,
     )
 
     asyncio.create_task(capacity_events_poller_loop())
     logger.info("[STARTUP] Quota capacity event poller started")
+
+
+def _capacity_authority_url() -> str:
+    """Where the quota ledger lives — capacity.authority_url, else the
+    tokens service (which hosts the ledger in the single-seller setup)."""
+    return str(
+        settings.get("capacity.authority_url", "") or config.tokens_service_url()
+    ).rstrip("/")
+
+
+async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
+    """Register the demo quota resource in the tokens-service ledger.
+
+    The ledger is the tokens service's; the storefront is a client, so
+    registration is a direct admin-gated PUT (RemoteCapacityClient only
+    reads/commits). A re-PUT on restart re-asserts the resource.
+    """
+    import httpx
+
+    authority = _capacity_authority_url()
+    url = f"{authority}/api/v1/capacity/resources/{resource_id}"
+    headers = {}
+    admin = config.tokens_admin_key()
+    if admin:
+        headers["X-Admin-Key"] = admin
+    body = {
+        "total_units": int(total_units),
+        "resource_type": "api.tokens",
+        "enabled": True,
+    }
+    async with httpx.AsyncClient(timeout=10) as http:
+        resp = await http.put(url, json=body, headers=headers)
+    if resp.status_code >= 400:
+        raise RuntimeError(
+            f"quota register PUT {url} -> HTTP {resp.status_code}: {resp.text[:200]}"
+        )
+    logger.info(
+        "[STARTUP] Seeded quota resource %s (total_units=%d) in the ledger",
+        resource_id, total_units,
+    )
+
+
+async def _seed_demo_listing() -> None:
+    """Self-seed one quota-backed listing from a ``[seed]`` config block.
+
+    Demo/e2e convenience, mirroring the VM storefront's CSV inventory
+    seed: with a ``[seed]`` block present, register the quota resource
+    and publish a listing from it on startup, so a fresh ``compose up``
+    has something to discover without an out-of-band admin step. Omit
+    the block in production — operators seed quota and publish via the
+    admin API / CLI. Seed failures are logged, not fatal: the storefront
+    still serves, and the cause is visible in its logs.
+    """
+    seed = settings.get("seed")
+    if not isinstance(seed, dict) or not seed.get("resource_id"):
+        return
+    resource_id = str(seed["resource_id"])
+    try:
+        import apitokens_storefront.container as _container
+        from apitokens_storefront.services.listing_service import ListingService
+        from apitokens_storefront.utils.config import CHAINS
+
+        db = _container.resolved_sqlite_client
+        # Idempotent: skip if a listing already derives from this resource.
+        existing = await db.list_listings(status="open", limit=500)
+        for row in existing or []:
+            offer = row.get("offer_resource") or {}
+            if isinstance(offer, str):
+                import json as _json
+                try:
+                    offer = _json.loads(offer)
+                except (ValueError, TypeError):
+                    offer = {}
+            if isinstance(offer, dict) and offer.get("resource_id") == resource_id:
+                logger.info(
+                    "[STARTUP] Demo listing for resource %s already present; "
+                    "skipping seed", resource_id,
+                )
+                return
+
+        await _register_seed_quota(
+            resource_id=resource_id,
+            total_units=int(seed.get("total_units", 100)),
+        )
+
+        chain = str(seed.get("chain", "anvil"))
+        chain_cfg = CHAINS.get(chain)
+        if chain_cfg is None:
+            raise RuntimeError(f"seed chain {chain!r} is not configured")
+        escrow_address = seed.get("escrow_address")
+        if not escrow_address:
+            from market_alkahest.alkahest import (
+                get_erc20_escrow_obligation_nontierable,
+            )
+            escrow_address = get_erc20_escrow_obligation_nontierable(
+                chain, config_path=chain_cfg.alkahest_address_config_path,
+            )
+        price = str(seed.get("price_per_token", "1"))
+        accepted_escrows = [{
+            "chain_name": chain,
+            "escrow_address": str(escrow_address).lower(),
+            "literal_fields": {"token": str(seed["token"])},
+            "rates": [{"field": "amount", "per": "token", "value": price}],
+        }]
+
+        result = await ListingService(sqlite_client=db).publish_from_quota(
+            resource_id=resource_id,
+            service_name=str(seed.get("service_name", "service")),
+            accepted_escrows=accepted_escrows,
+            description=seed.get("description"),
+            openapi_url=seed.get("openapi_url"),
+            base_url=seed.get("base_url"),
+        )
+        logger.info(
+            "[STARTUP] Seeded demo listing %s (service=%s, registry=%s)",
+            result.get("listing_id"), seed.get("service_name"),
+            result.get("registry_status"),
+        )
+    except Exception as exc:  # noqa: BLE001 — seed must not crash the storefront
+        logger.error("[STARTUP] Demo listing seed failed: %s", exc, exc_info=True)
