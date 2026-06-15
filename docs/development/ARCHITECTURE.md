@@ -2092,20 +2092,43 @@ route to the storefront named in service settings rather than the
 
 ### Local Dev (compose)
 
+Compose is organized by domain — each market domain owns its runtime
+topology next to its code, and the chain is a separate, dev-only layer.
+The pieces assemble with Compose `include:`:
+
 ```
-compose/external.yml     — Anvil node + one-shot contract deployer (the "external"
-                           chain layer; in prod this is a live RPC, not run here)
-compose/registry.dev.yml — arkhai-core-registry against the dev chain
-                           (compose/registry.yml is the operator-facing variant)
-compose/seller.yml       — storefront server + provisioning service (unified)
+compose.dev.yml                  — the shared dev chain: an Anvil node with the
+                                   Alkahest contracts pre-baked. Dev-only; a real
+                                   deployment points at a live RPC (and uses Helm,
+                                   not compose). The one thing every domain shares.
+domains/vms/compose.yml          — the VM compute market: two registry instances,
+                                   Bob's + Alice's storefronts, Redis, provisioning.
+domains/apitokens/compose.yml    — the API-tokens market: the api_tokens registry
+                                   instance, tokens service, sample gated app,
+                                   tokens storefront.
+docker-compose.yml               — full multi-domain stack (includes compose.dev.yml
+                                   + every domains/<d>/compose.yml). Bare
+                                   `docker compose up` — what the e2e expects.
+compose.vms.yml / compose.apitokens.yml
+                                 — single-domain wrappers (compose.dev.yml + one
+                                   domain), so a domain runs without the others:
+                                   `docker compose -f compose.vms.yml up`.
 ```
 
-There is no `compose/buyer.yml` — the buyer is the `market`
-CLI invoked from the host or another container, not a long-running
-service. The seller container reads its config from a TOML file
-mounted at `/etc/arkhai/storefront.toml` (set via `XDG_CONFIG_HOME=/etc`);
-the `.env` flow used by the previous symmetric topology has been
-retired.
+Domains are independent at runtime, mirroring the package split — you can
+sell VMs without the token-gated-API market and vice versa; each domain
+ships its own registry instance (its filter-spec *is* its published
+schema), storefront, and services. A domain's compose file is
+chain-agnostic except that its chain-touching services gate on a service
+named `anvil`, which the dev layer supplies; the per-file relative paths
+resolve against each file's own directory (Compose `include:` semantics).
+
+There is no buyer compose service — the buyer is the `market` CLI invoked
+from the host or another container, not a long-running service. The
+seller container reads its config from a TOML mounted at
+`/etc/arkhai/storefront.toml` (set via `XDG_CONFIG_HOME=/etc`); override
+`$VMS_BOB_STOREFRONT_CONFIG` / `$APITOKENS_STOREFRONT_CONFIG` to point a
+storefront at a different chain's config without editing the compose file.
 
 ### Production / Staging — Helm (`helm/`)
 

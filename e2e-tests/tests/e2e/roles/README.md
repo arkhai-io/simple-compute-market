@@ -84,7 +84,12 @@ roles/
 ## Running
 
 Docker-compose must be up with all four layers running. For local
-development, the root `docker-compose.yml` bundles them:
+development, the root `docker-compose.yml` bundles every domain on one
+shared dev chain (it `include:`s `compose.dev.yml` + each
+`domains/<domain>/compose.yml`). A single domain can be brought up on its
+own via its wrapper — `docker compose -f compose.vms.yml up` or
+`docker compose -f compose.apitokens.yml up` — but the role tests below
+expect the full stack:
 
 ```bash
 # All role tests, mock provisioning (fast)
