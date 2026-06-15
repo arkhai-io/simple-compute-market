@@ -7,7 +7,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-dev build-seller build-apitokens-service build-apitokens-storefront build-apitokens-sample-app dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-apitokens-middleware dist-apitokens-sample-app dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: build build-dev build-seller build-apitokens-service build-apitokens-storefront build-apitokens-sample-app test test-provisioning test-registry test-storefront test-apitokens-middleware dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-apitokens-middleware dist-apitokens-sample-app dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -138,7 +138,7 @@ dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-provisioning test-registry test-storefront
+test: test-provisioning test-registry test-storefront test-apitokens-middleware
 
 test-provisioning:
 	cd domains/vms/provisioning/service && make reinit && make test
@@ -148,6 +148,15 @@ test-registry:
 
 test-storefront:
 	cd domains/vms/storefront && make reinit && make test
+
+# Cross-language middleware parity: all three implementations replay the
+# shared conformance/session.json. Python is the reference; TS runs under
+# Node's native type-stripping; Rust drives reqwest against an in-process
+# axum mock. Each needs its own toolchain (uv / node+npm / cargo).
+test-apitokens-middleware: ## Run the Python/TS/Rust middleware conformance suites
+	cd domains/apitokens/middleware/python && uv run pytest -q
+	cd domains/apitokens/middleware/typescript && npm install --no-audit --no-fund --silent && npm run check
+	cd domains/apitokens/middleware/rust && cargo test
 
 #Basic flow: build (optional), init (downloads if not built), run
 # `build` produces the production artifacts: the three runtime images

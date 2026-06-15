@@ -107,7 +107,9 @@ scripts (`market`, `market-storefront`, `market-policy`) are unchanged.
 | domain | `arkhai-vms-provisioning` (`domains/vms/provisioning/service/`) | the VM fulfillment executor service |
 | domain | `arkhai-apitokens-service` (`domains/apitokens/service/`) | the tokens service: API keys/credit grants/consumption + the quota ledger (mounts `core_site`) |
 | domain | `arkhai-apitokens-storefront` (`domains/apitokens/storefront/`) | the API-tokens storefront executable/composition root: quota-backed listings, quantity/key-ownership negotiation guards, issuance-backed settlement |
-| domain | `arkhai-apitokens-middleware` (`domains/apitokens/middleware/python/`) | seller-side ASGI gate that meters a downstream app on prepaid credits (verify cache + synchronous/batched consume + 402-with-purchase-pointer); the TS/Rust ports satisfy `middleware/conformance/session.json` |
+| domain | `arkhai-apitokens-middleware` (`domains/apitokens/middleware/python/`) | seller-side ASGI gate that meters a downstream app on prepaid credits (verify cache + synchronous/batched consume + 402-with-purchase-pointer); the reference implementation |
+| domain | `@arkhai/apitokens-middleware` (`domains/apitokens/middleware/typescript/`) | TypeScript port of the gate (Connect/Express + Web-fetch adapters); reproduces `middleware/conformance/session.json` |
+| domain | `arkhai-apitokens-middleware` crate (`domains/apitokens/middleware/rust/`) | Rust port of the gate (tower/axum layer); reproduces `middleware/conformance/session.json` |
 | domain | `arkhai-apitokens-sample-app` (`domains/apitokens/sample-app/`) | a one-endpoint gated service for the e2e — the metered API the deal consumes to 402 and back |
 
 The *concept* modules (`domains/vms/{listings,negotiation,settlement,provisioning}`,

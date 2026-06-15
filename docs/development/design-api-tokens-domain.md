@@ -364,8 +364,8 @@ second scheme (the buyer pass-through middleware can ship from day one
    `domains/__init__.py` (vms-buyer owns the file; alone, the
    namespace-package fallback resolves it). Dockerfile/compose rides
    item 6.
-6. **Middlewares + e2e.** *(Python + e2e done; TS/Rust are the
-   follow-up.)* The Python gating middleware landed first:
+6. **Middlewares + e2e.** *(Done — all three middlewares + the full
+   e2e.)* The Python gating middleware landed first:
    `arkhai-apitokens-middleware` (`domains/apitokens/middleware/python/`)
    — a framework-neutral `TokenGate` (verify cache, per-key balance
    estimate, synchronous-near-exhaustion / optionally-batched charging)
@@ -389,8 +389,14 @@ second scheme (the buyer pass-through middleware can ship from day one
    bringing it up: the storefront must stamp its wallet as the escrow
    recipient in the accepted artifacts, and the service image must
    `--refresh-package arkhai-core-site` (a stale same-version wheel
-   predated the generic `units` capacity claim). **Remaining:** the
-   TypeScript and Rust middlewares against the conformance fixtures.
+   predated the generic `units` capacity claim). The TypeScript
+   (`middleware/typescript/`, npm) and Rust (`middleware/rust/`, crate)
+   middlewares then followed, each reproducing the same
+   `conformance/session.json` over a real HTTP client against an
+   in-process scripted service (Node `node:http` / Rust `axum`) —
+   `TokenGate` + a `TokensClient`/`TokensApi` seam in every language,
+   with framework adapters (Connect/Express + Web-fetch in TS, a
+   tower/axum layer in Rust). All three conformance suites are green.
 7. **Core consolidations that ride along** (each parked on "second
    plugin shows what is invariant", now showable): hoist `--yes` and
    `inject_policy_cli_params` into core `build_app`; extract whatever

@@ -1,9 +1,10 @@
 # Middleware conformance fixtures
 
 `session.json` is the shared behavioral contract for the API-tokens
-gating middleware. Python ships first and gates the e2e sample service;
-TypeScript and Rust follow, and each must reproduce this recorded
-session exactly. Keeping the trace in data (not in each language's test
+gating middleware. All three implementations reproduce this recorded
+session exactly: Python (`../python`, the reference, which also gates
+the e2e sample service), TypeScript (`../typescript`), and Rust
+(`../rust`). Keeping the trace in data (not in each language's test
 code) is what makes "identical behavior across three languages" a
 checkable claim rather than a hope.
 
@@ -39,14 +40,18 @@ synchronous consume and the call trace is deterministic.
 ## Implementing a harness
 
 1. Stand up a mock tokens service that records `verify`/`consume` calls
-   per key and replays the scripted responses (HTTP-level mock — e.g.
-   `httpx.MockTransport` in Python, `nock` in TS, `wiremock`/a tiny
-   in-process server in Rust). Driving the real HTTP client, not a stub,
-   is the point: it validates request shape and response parsing too.
+   per key and replays the scripted responses, and drive the **real**
+   HTTP client against it (not a stub) so request shape and response
+   parsing are validated too. The three reference harnesses do this with
+   `httpx.MockTransport` (Python) and a real in-process HTTP server
+   (`node:http` in TypeScript, `axum` in Rust).
 2. Build the gate from `config`.
 3. For each step: snapshot the call counters, call the gate with the
    step's `Authorization`, then assert the decision and the per-step
    call deltas.
 
-The Python reference harness is
-`domains/apitokens/middleware/python/tests/conformance_runner.py`.
+The reference harnesses (identical structure in each language):
+
+- Python — `python/tests/conformance_runner.py`
+- TypeScript — `typescript/test/conformanceRunner.ts`
+- Rust — `rust/tests/conformance.rs` (+ `rust/tests/common/mod.rs`)
