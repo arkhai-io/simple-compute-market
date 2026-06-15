@@ -364,13 +364,33 @@ second scheme (the buyer pass-through middleware can ship from day one
    `domains/__init__.py` (vms-buyer owns the file; alone, the
    namespace-package fallback resolves it). Dockerfile/compose rides
    item 6.
-6. **Middlewares + e2e.** Python middleware first (it gates the e2e's
-   sample service), then TypeScript and Rust to the same behavioral
-   spec (shared conformance fixtures: a recorded consume/verify
-   session each implementation must satisfy). e2e topology: second
-   registry, tokens storefront, tokens service, a sample gated app;
-   full deal: discover → negotiate (new key) → settle → consume to
-   402 → buy again into the existing key → consume succeeds.
+6. **Middlewares + e2e.** *(Python + e2e done; TS/Rust are the
+   follow-up.)* The Python gating middleware landed first:
+   `arkhai-apitokens-middleware` (`domains/apitokens/middleware/python/`)
+   — a framework-neutral `TokenGate` (verify cache, per-key balance
+   estimate, synchronous-near-exhaustion / optionally-batched charging)
+   behind a one-file ASGI binding; a drained key gets a 402 whose body
+   carries a `purchase` pointer (the re-purchase loop). The behavioral
+   contract — status codes + machine-readable bodies + per-step
+   service-call counts — is recorded in
+   `domains/apitokens/middleware/conformance/session.json`, the shared
+   fixture the TypeScript and Rust middlewares will satisfy (their
+   harnesses mirror the Python reference runner at the HTTP layer).
+   `arkhai-apitokens-sample-app` is the one-endpoint gated service.
+   The e2e topology (`docker-compose.yml`): a second registry serving
+   the `api_tokens` filter-spec (the shared registry image +
+   `REGISTRY_FILTER_SPEC_PATH`), the tokens service, the tokens
+   storefront (self-seeds one quota-backed listing on startup from a
+   `[seed]` config block), and the sample app. The full deal is green
+   under the `e2e_tokens_deal` marker: discover (the buyer's schema
+   filter picks the api-tokens registry, skips vms.compute) → negotiate
+   a new key → settle → consume to 402 → buy again into the existing
+   key → consume succeeds. Two settlement bugs surfaced and were fixed
+   bringing it up: the storefront must stamp its wallet as the escrow
+   recipient in the accepted artifacts, and the service image must
+   `--refresh-package arkhai-core-site` (a stale same-version wheel
+   predated the generic `units` capacity claim). **Remaining:** the
+   TypeScript and Rust middlewares against the conformance fixtures.
 7. **Core consolidations that ride along** (each parked on "second
    plugin shows what is invariant", now showable): hoist `--yes` and
    `inject_policy_cli_params` into core `build_app`; extract whatever
