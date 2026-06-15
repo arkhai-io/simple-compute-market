@@ -248,3 +248,27 @@ async def test_bisection_counter_round_scales_by_quantity(db, fake_capacity, key
     thread = await db.load_negotiation_thread_row(negotiation_id=neg_id)
     assert thread["terminal_state"] == "success"
     assert int(thread["agreed_price"]) == 275
+
+
+def test_accepted_artifacts_stamp_the_seller_recipient(monkeypatch):
+    """The accepted escrow artifacts must carry the seller's wallet as
+    the escrow recipient — without it the buyer can't materialize a
+    funded escrow ("must carry ... a recipient fallback"). Regression
+    guard: the assembly once passed seller_wallet_address=None.
+    """
+    import apitokens_storefront.utils.sync_negotiation as sn
+
+    captured: dict = {}
+
+    def _fake_artifacts(**kwargs):
+        captured.update(kwargs)
+        return {"proposal": {}, "accepted_escrow_proposal": {}}
+
+    monkeypatch.setattr(sn, "accepted_escrow_artifacts_from_proposal", _fake_artifacts)
+    monkeypatch.setattr(sn, "_seller_wallet_address", lambda: "0xSeLLeR0000")
+
+    sn._accepted_escrow_artifacts(
+        proposal={"chain_name": "anvil", "escrow_address": _ESCROW},
+        agreed_amount=300,
+    )
+    assert captured["seller_wallet_address"] == "0xSeLLeR0000"
