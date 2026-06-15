@@ -16,6 +16,10 @@ ENV UV_LINK_MODE=copy
 # PyPI intermittently serves 5xx even for index lookups that should
 # 404 (internal package names resolved from /dist); back off through
 # the flap instead of failing the build after the default 3 tries.
+# Cap each request: a wedged connection (podman's gvproxy can leave a
+# socket ESTABLISHED with no data and no RST) must time out for the
+# retries to fire — without this uv blocks indefinitely at 0% CPU.
+ENV UV_HTTP_TIMEOUT=120
 ENV UV_HTTP_RETRIES=10
 
 # UID/GID of the in-container `appuser`. Override at build time to match

@@ -5,6 +5,10 @@ ARG PYTHON_VERSION=3.13
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
 
 ENV UV_LINK_MODE=copy
+# Cap each request so a wedged connection (podman's gvproxy can leave a
+# socket open with no data) times out and the retries fire, instead of
+# uv hanging the build indefinitely at 0% CPU.
+ENV UV_HTTP_TIMEOUT=120
 ENV UV_HTTP_RETRIES=10
 
 WORKDIR /app

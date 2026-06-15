@@ -6,7 +6,10 @@ FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookwor
 
 ENV UV_LINK_MODE=copy
 # Internal package names resolve from /.dist; PyPI intermittently 5xxs on
-# the index lookups that should 404, so back off through the flap.
+# the index lookups that should 404, so back off through the flap. The
+# timeout caps a wedged connection (podman's gvproxy can leave a socket
+# open with no data) so the retries fire instead of hanging at 0% CPU.
+ENV UV_HTTP_TIMEOUT=120
 ENV UV_HTTP_RETRIES=10
 
 WORKDIR /app
