@@ -96,6 +96,14 @@ def _chain_config_paths() -> dict[str, str | None]:
     }
 
 
+def _seller_wallet_address() -> str | None:
+    """The seller's wallet — the escrow recipient stamped into the
+    accepted artifacts so the buyer can materialize a funded escrow."""
+    from apitokens_storefront.utils.config import settings
+
+    return str(settings.get("wallet.address", "") or "") or None
+
+
 def _seller_reference_amount(listing: dict[str, Any], quantity: int | None) -> int:
     unit = Decimal(str(
         extract_unit_price_from_order(
@@ -116,7 +124,7 @@ def _accepted_escrow_artifacts(
         agreed_amount=agreed_amount,
         duration_seconds=_NO_LEASE_DURATION_SECONDS,
         uses_scalar_amount=uses_scalar_amount,
-        seller_wallet_address=None,
+        seller_wallet_address=_seller_wallet_address(),
         chain_config_paths=_chain_config_paths(),
         heartbeat_interval_seconds=None,
     )

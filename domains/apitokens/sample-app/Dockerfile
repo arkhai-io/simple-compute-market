@@ -19,6 +19,8 @@ RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1000 \
     uv venv /home/appuser/.venv && \
     uv pip install --python /home/appuser/.venv/bin/python \
         --find-links /home/appuser/dist \
+        --refresh-package arkhai-apitokens-sample-app \
+        --refresh-package arkhai-apitokens-middleware \
         arkhai-apitokens-sample-app arkhai-apitokens-middleware
 
 # Stage 2: lean runtime.
