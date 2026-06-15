@@ -40,7 +40,7 @@ from market_alkahest.alkahest import (
     resolve_alkahest_address_config,
 )
 from src.settings import settings
-from tests.e2e.roles.scenarios.conftest import (
+from tests.e2e.roles.scenarios.vms.conftest import (
     DealState,
     delete_mock_rules_if_present,
     require_state,
@@ -374,7 +374,7 @@ class TestStageB5_SellerAndLease:
 
         # DealLease resolves where the lease lives: a site-ledger
         # allocation (remote-capacity mode) or a vm_leases row (embedded).
-        from tests.e2e.roles.scenarios.conftest import DealLease
+        from tests.e2e.roles.scenarios.vms.conftest import DealLease
         lease = DealLease(provisioning_client, deal_state.real_escrow_uid).refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
         assert lease.get("resource_id") == BUY_RESOURCE_ID, (

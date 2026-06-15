@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.e2e.roles.scenarios.escrow_helper import _ensure_ws_rpc_url
+from tests.e2e.roles.scenarios.vms.escrow_helper import _ensure_ws_rpc_url
 
 
 @pytest.mark.parametrize(

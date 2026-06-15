@@ -93,7 +93,7 @@ from market_alkahest.alkahest import (
     resolve_alkahest_address_config,
 )
 from src.settings import settings
-from tests.e2e.roles.scenarios.conftest import (
+from tests.e2e.roles.scenarios.vms.conftest import (
     DealLease,
     DealState,
     delete_mock_rules_if_present,
@@ -920,7 +920,7 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
         log.info("[08b] settle_submitted event body: %s",
                  {k: submitted.get(k) for k in ("ts", "body")})
 
-        from tests.e2e.roles.scenarios.conftest import wait_for_stage_event as _wait
+        from tests.e2e.roles.scenarios.vms.conftest import wait_for_stage_event as _wait
         event = _wait(
             storefront_admin_client,
             "provision", "job_submitted",
@@ -1377,7 +1377,7 @@ class TestStage11b_WatchdogReleasesResource:
         # Wait for the storefront to confirm the release landed on its
         # side. The notification races check_leases()'s response — the
         # cycle finishes the release before the storefront call resolves.
-        from tests.e2e.roles.scenarios.conftest import wait_for_stage_event as _wait
+        from tests.e2e.roles.scenarios.vms.conftest import wait_for_stage_event as _wait
         _wait(
             storefront_admin_client,
             sync_stage, sync_event,

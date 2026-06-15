@@ -92,7 +92,7 @@ import pytest
 
 from market_alkahest.alkahest import get_recipient_arbiter
 from src.settings import settings
-from tests.e2e.roles.scenarios.conftest import (
+from tests.e2e.roles.scenarios.vms.conftest import (
     DealLease,
     DealState,
     delete_mock_rules_if_present,
@@ -814,7 +814,7 @@ class TestStage07_OnChainEscrowAndProvGate:
         require_state(deal_state, "negotiation_terminal_state", "agreed_amount",
                       "_provisioning_mock_mode")
 
-        from tests.e2e.roles.scenarios.escrow_helper import create_buyer_escrow
+        from tests.e2e.roles.scenarios.vms.escrow_helper import create_buyer_escrow
 
         escrow_uid = create_buyer_escrow(
             buyer_private_key=buyer_config["private_key"],
@@ -994,7 +994,7 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
 
         # job_submitted fires after the DB row is updated; resource_reserved
         # would race because it fires before the job_id exists.
-        from tests.e2e.roles.scenarios.conftest import wait_for_stage_event as _wait
+        from tests.e2e.roles.scenarios.vms.conftest import wait_for_stage_event as _wait
         event = _wait(
             storefront_admin_client,
             "provision", "job_submitted",
@@ -1440,7 +1440,7 @@ class TestStage11b_WatchdogReleasesResource:
         # Wait for the storefront to confirm the release landed on its
         # side. The notification races check_leases()'s response — the
         # cycle finishes the release before the storefront call resolves.
-        from tests.e2e.roles.scenarios.conftest import wait_for_stage_event as _wait
+        from tests.e2e.roles.scenarios.vms.conftest import wait_for_stage_event as _wait
         _wait(
             storefront_admin_client,
             sync_stage, sync_event,

@@ -23,11 +23,11 @@ from market_alkahest.alkahest import (
     resolve_alkahest_address_config,
 )
 from src.settings import settings
-from tests.e2e.roles.scenarios.conftest import (
+from tests.e2e.roles.scenarios.vms.conftest import (
     delete_mock_rules_if_present,
     wait_for_stage_event,
 )
-from tests.e2e.roles.scenarios.escrow_helper import _ensure_ws_rpc_url
+from tests.e2e.roles.scenarios.vms.escrow_helper import _ensure_ws_rpc_url
 
 log = logging.getLogger(__name__)
 

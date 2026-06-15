@@ -93,7 +93,7 @@ import httpx
 import pytest
 
 from src.settings import settings
-from tests.e2e.roles.scenarios.conftest import _require_setting
+from tests.e2e.roles.scenarios.vms.conftest import _require_setting
 
 log = logging.getLogger(__name__)
 

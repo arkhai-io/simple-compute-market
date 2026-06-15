@@ -37,24 +37,39 @@ cross-role test depends on all four.
 
 ```
 roles/
-├── layers/                      # Layer verification + fixtures
+├── conftest.py                  # shared role fixtures (buyer_cli + the layer fixtures)
+├── buyer_cli.py                 # BuyerCli subprocess wrapper + buyer_cli fixtures
+├── layers/                      # Layer liveness + fixtures
 │   ├── test_external.py         # Chain + contracts → external_world
 │   ├── test_registry.py         # Registry/indexer → registry_layer
-│   ├── test_seller.py           # Seller's agent + provisioning → seller_node
-│   └── test_buyer.py            # Buyer's agent → buyer_node
+│   └── test_seller.py           # Seller's storefront + provisioning → seller_node
 │
-├── stages/                      # Five marketplace stages
-│   ├── discovery/               # Seller publishes, buyer finds matches
-│   │   ├── conftest.py          # Input: layers ready. Output: published order.
-│   │   ├── test_seller.py
-│   │   └── test_buyer.py
-│   ├── negotiation/             # Price agreement
-│   ├── settlement/              # Escrow + acceptance
-│   ├── provision/               # Machine provisioned, credentials delivered
-│   └── post_settlement/         # Lease expiry, token settlement, resource freed
-│
-└── scenarios/                   # Cross-stage tests that don't decompose cleanly
+└── scenarios/                   # Full multi-step deals, organized by domain
+    ├── vms/                     # VM compute market — most scenarios live here, and
+    │   ├── conftest.py          #   they share its conftest (VM autouse fixtures:
+    │   ├── escrow_helper.py     #   host registration, storefront resume, resource
+    │   ├── test_full_deal.py    #   release) + escrow_helper.
+    │   ├── test_full_deal_buyer_cli.py
+    │   ├── test_buy_oneshot_buyer_cli.py
+    │   ├── test_compute_dynamic_listings.py
+    │   ├── test_multi_registry.py        # registry fan-out, on the VM vehicle
+    │   └── test_non_erc20_settlement.py  # settlement variants, on the VM vehicle
+    ├── apitokens/               # API-tokens market (its own bring-up; no VM conftest)
+    │   └── test_tokens_deal_buyer_cli.py
+    └── core/                    # settlement-mechanism scenarios with no domain service
+        └── test_alkahest_escrow_codecs.py
 ```
+
+Scenarios are grouped by domain because most are single-domain. The
+domain a scenario lives under is decided by what it actually needs: a
+scenario sits in `vms/` if it drives the VM storefront/provisioning
+(so it shares that conftest's fixtures), in `apitokens/` if it drives
+the tokens stack, and in `core/` if it touches no domain service at all
+(e.g. round-tripping Alkahest codecs against the chain). `multi_registry`
+and `non_erc20_settlement` are really core capabilities — registry
+fan-out, non-ERC20 settlement — but ride the VM domain as their test
+vehicle, so they live in `vms/`. Selection is by pytest marker, so this
+grouping is purely navigational and does not change how tests are run.
 
 ## Design principles
 
@@ -92,16 +107,16 @@ own via its wrapper — `docker compose -f compose.vms.yml up` or
 expect the full stack:
 
 ```bash
-# All role tests, mock provisioning (fast)
+# Bring the stack up (mock provisioning, fast)
 PROVISIONING_MODE=mock docker compose up -d
-uv run pytest tests/roles/ -v
 
-# Just the layer verification
-uv run pytest tests/roles/layers/ -v
+# Tests select by marker (see the markers table in pyproject.toml); the
+# Makefile wraps this as `make test-module MODULE=<marker>`.
+uv run pytest -m e2e_deal_buyer_cli -v     # a VM deal scenario
+uv run pytest -m e2e_tokens_deal -v        # the API-tokens deal scenario
 
-# A single stage
-uv run pytest tests/roles/stages/discovery/ -v
-
-# Just the seller side of discovery
-uv run pytest tests/roles/stages/discovery/test_seller.py -v
+# Or by path — the layer liveness checks, or one domain's scenarios:
+uv run pytest tests/e2e/roles/layers/ -v
+uv run pytest tests/e2e/roles/scenarios/apitokens/ -v
+uv run pytest tests/e2e/roles/scenarios/vms/ -v
 ```

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from src.settings import settings
-from tests.e2e.roles.scenarios.conftest import require_state
+from tests.e2e.roles.scenarios.vms.conftest import require_state
 
 log = logging.getLogger(__name__)
 
