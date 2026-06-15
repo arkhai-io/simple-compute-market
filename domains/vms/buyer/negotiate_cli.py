@@ -33,7 +33,7 @@ def register(app: typer.Typer) -> None:
     the scalar policies contribute --initial-price/--max-price/
     --price-markup, plus the --policy-param escape hatch.
     """
-    from market_policy.buyer_policy import inject_policy_cli_params
+    from core_buyer.cli import assume_yes_option, register_policy_verb
 
     from .policy_surface import configured_buyer_policy
 
@@ -63,9 +63,8 @@ def register(app: typer.Typer) -> None:
             help="Per-registry deadline in seconds (default: "
                  "registry.discovery_timeout from config.toml, fallback 5).",
         ),
-        assume_yes: bool = typer.Option(
-            False, "--yes", "-y",
-            help="Skip interactive confirmations on auto-derived prices.",
+        assume_yes: bool = assume_yes_option(
+            "Skip interactive confirmations on auto-derived prices.",
         ),
         max_rounds: int = typer.Option(
             10, "--max-rounds",
@@ -494,4 +493,4 @@ def register(app: typer.Typer) -> None:
         if outcome.status != "agreed":
             raise typer.Exit(4)
 
-    app.command("negotiate")(inject_policy_cli_params(negotiate, _policy))
+    register_policy_verb(app, "negotiate", negotiate, _policy)

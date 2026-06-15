@@ -19,9 +19,9 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.openapi.utils import get_openapi
 
 import market_storefront.container as _container
+from core_storefront.openapi import install_admin_key_openapi
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_storefront.utils.config import settings, AGENT_ID
@@ -120,35 +120,7 @@ app = FastAPI(
 )
 
 
-def _custom_openapi():
-    if app.openapi_schema:
-        return app.openapi_schema
-    schema = get_openapi(
-        title=app.title,
-        version=app.version,
-        description=app.description,
-        routes=app.routes,
-    )
-    schema.setdefault("components", {})
-    schema["components"]["securitySchemes"] = {
-        "AdminKey": {
-            "type": "apiKey",
-            "in": "header",
-            "name": "X-Admin-Key",
-            "description": "Admin API key — required for all /api/v1/admin/* endpoints.",
-        }
-    }
-    # Inject the gateway path prefix as the OpenAPI server URL so Swagger UI
-    # generates correct curl examples. The FastAPI app root_path above drives
-    # the docs page's OpenAPI URL; this servers block drives "try it out".
-    root_path = settings.gateway.root_path
-    if root_path:
-        schema["servers"] = [{"url": root_path}]
-    app.openapi_schema = schema
-    return schema
-
-
-app.openapi = _custom_openapi
+install_admin_key_openapi(app, root_path=settings.gateway.root_path)
 
 # Controller imports after module-level app exists.
 from market_storefront.controllers.system_controller import router as system_router           # noqa: E402

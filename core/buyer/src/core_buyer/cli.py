@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import typer
 
@@ -31,6 +31,9 @@ from core_buyer.registry_config import (
     resolve_indexer_auth,
     resolve_indexer_urls,
 )
+
+if TYPE_CHECKING:
+    from market_policy.buyer_policy import BuyerPolicy
 
 
 def parse_filter_options(raw_filters: list[str] | None) -> dict[str, str]:
@@ -88,6 +91,35 @@ def interactive_disposition(assume_yes: bool) -> bool:
     except Exception:
         is_tty = False
     return (not assume_yes) and is_tty
+
+
+def assume_yes_option(help: str) -> Any:
+    """The shared ``--yes/-y`` flag every policy verb declares.
+
+    Core owns the flag spelling and short option so ``buy``/``negotiate``
+    across schema plugins stay in lockstep; the help text remains
+    per-verb (``buy`` skips *all* prompts, ``negotiate`` only the
+    auto-derived-price confirmation). Feed the collected value to
+    :func:`interactive_disposition`.
+    """
+    return typer.Option(False, "--yes", "-y", help=help)
+
+
+def register_policy_verb(
+    app: typer.Typer, name: str, fn: Any, policy: "BuyerPolicy",
+) -> None:
+    """Bind a policy-bearing verb (``buy``/``negotiate``) onto the app.
+
+    Materializes the configured negotiation policy's CLI flags onto the
+    verb (ARCHITECTURE.md, "Buyer negotiation policy surface") and
+    registers it under ``name``. Core owns the inject-then-register
+    pairing so every schema plugin's buy/negotiate surfaces the policy
+    flags identically — the plugin only supplies the verb function and
+    the policy it fetched.
+    """
+    from market_policy.buyer_policy import inject_policy_cli_params
+
+    app.command(name)(inject_policy_cli_params(fn, policy))
 
 
 # ---------------------------------------------------------------------------

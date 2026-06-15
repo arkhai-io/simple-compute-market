@@ -12,12 +12,12 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.openapi.utils import get_openapi
 
 import apitokens_storefront.container as _container
 from apitokens_storefront.utils.config import AGENT_ID, settings
 from apitokens_storefront.utils.sqlite_client import get_sqlite_client
 from apitokens_storefront.utils.sync_negotiation import continue_sync_negotiation
+from core_storefront.openapi import install_admin_key_openapi
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
 
@@ -95,32 +95,7 @@ app = FastAPI(
 )
 
 
-def _custom_openapi():
-    if app.openapi_schema:
-        return app.openapi_schema
-    schema = get_openapi(
-        title=app.title,
-        version=app.version,
-        description=app.description,
-        routes=app.routes,
-    )
-    schema.setdefault("components", {})
-    schema["components"]["securitySchemes"] = {
-        "AdminKey": {
-            "type": "apiKey",
-            "in": "header",
-            "name": "X-Admin-Key",
-            "description": "Admin API key — required for all /api/v1/admin/* endpoints.",
-        }
-    }
-    root_path = settings.gateway.root_path
-    if root_path:
-        schema["servers"] = [{"url": root_path}]
-    app.openapi_schema = schema
-    return schema
-
-
-app.openapi = _custom_openapi
+install_admin_key_openapi(app, root_path=settings.gateway.root_path)
 
 # Controller imports after module-level app exists.
 from apitokens_storefront.controllers.system_controller import router as system_router          # noqa: E402

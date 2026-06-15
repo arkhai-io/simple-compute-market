@@ -291,19 +291,18 @@ def register(app: typer.Typer) -> None:
     default surface is unchanged; a different policy contributes
     different knobs, plus the --policy-param escape hatch.
     """
-    from market_policy.buyer_policy import inject_policy_cli_params
+    from core_buyer.cli import assume_yes_option, register_policy_verb
 
     from .policy_surface import configured_buyer_policy
 
     _policy = configured_buyer_policy()
 
     def buy(  # registered below after policy-param injection
-        assume_yes: bool = typer.Option(
-            False, "--yes", "-y",
-            help="Skip ALL interactive prompts (price defaults + "
-                 "pre-settlement confirmation). Same effect as running "
-                 "without a TTY — defaults are accepted automatically. "
-                 "Set this for scripts, CI, or non-interactive runs.",
+        assume_yes: bool = assume_yes_option(
+            "Skip ALL interactive prompts (price defaults + "
+            "pre-settlement confirmation). Same effect as running "
+            "without a TTY — defaults are accepted automatically. "
+            "Set this for scripts, CI, or non-interactive runs.",
         ),
         quiet: bool = typer.Option(
             False, "--quiet", "-q",
@@ -905,4 +904,4 @@ def register(app: typer.Typer) -> None:
         if result.status != "ready":
             raise typer.Exit(4)
 
-    app.command("buy")(inject_policy_cli_params(buy, _policy))
+    register_policy_verb(app, "buy", buy, _policy)

@@ -1096,7 +1096,13 @@ core owns the verb skeleton, run-log chaining, and identity; the schema
 plugin owns *what* is bought (`--gpu-model` and `--quantity` are plugin
 vocabulary); the policy owns *how it is paid for* (`--max-price` is policy vocabulary —
 the scalar trio `--initial-price`/`--max-price`/`--price-markup` belongs
-to the scalar policies and is hardcoded nowhere else).
+to the scalar policies and is hardcoded nowhere else). Core owns the
+inject-then-register pairing so this surface is identical across plugins:
+a plugin hands its verb function and the configured policy to
+`core_buyer.cli.register_policy_verb`, which applies
+`inject_policy_cli_params` and binds the command — the plugin never
+spells the injection out itself, and the shared `--yes/-y` flag comes
+from `core_buyer.cli.assume_yes_option` for the same reason.
 
 Conventions the surface enforces: a policy hook receives its own
 collected values as one `params` mapping, structurally separate from the

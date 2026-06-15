@@ -83,18 +83,16 @@ def register(tokens_app: typer.Typer) -> None:
     """
     import os
 
-    from market_policy.buyer_policy import inject_policy_cli_params
-
+    from core_buyer.cli import assume_yes_option, register_policy_verb
     from core_buyer.policy_surface import configured_buyer_policy
 
     _policy = configured_buyer_policy()
 
     def buy(  # registered below after policy-param injection
-        assume_yes: bool = typer.Option(
-            False, "--yes", "-y",
-            help="Skip ALL interactive prompts (price defaults + "
-                 "pre-settlement confirmation). Set this for scripts, CI, "
-                 "or non-interactive runs.",
+        assume_yes: bool = assume_yes_option(
+            "Skip ALL interactive prompts (price defaults + "
+            "pre-settlement confirmation). Set this for scripts, CI, "
+            "or non-interactive runs.",
         ),
         quantity: Optional[int] = typer.Option(
             None, "--quantity", "-n",
@@ -607,4 +605,4 @@ def register(tokens_app: typer.Typer) -> None:
         if result.status != "ready":
             raise typer.Exit(4)
 
-    tokens_app.command("buy")(inject_policy_cli_params(buy, _policy))
+    register_policy_verb(tokens_app, "buy", buy, _policy)

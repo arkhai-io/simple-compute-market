@@ -397,10 +397,21 @@ second scheme (the buyer pass-through middleware can ship from day one
    `TokenGate` + a `TokensClient`/`TokensApi` seam in every language,
    with framework adapters (Connect/Express + Web-fetch in TS, a
    tower/axum layer in Rust). All three conformance suites are green.
-7. **Core consolidations that ride along** (each parked on "second
-   plugin shows what is invariant", now showable): hoist `--yes` and
-   `inject_policy_cli_params` into core `build_app`; extract whatever
-   the two storefront composition roots actually share.
+7. **Core consolidations that ride along** *(Done — the second plugin
+   made the invariants showable.)* On the buyer side, `core_buyer.cli`
+   now owns the two things every schema plugin's `buy`/`negotiate` was
+   re-declaring: `assume_yes_option()` (the shared `--yes/-y` flag, with
+   per-verb help kept) and `register_policy_verb()` (the
+   inject-then-register pairing — core applies `inject_policy_cli_params`
+   so the policy flag surface is identical across plugins). The four
+   domain verbs (VM + api-tokens × buy/negotiate) call these instead of
+   spelling the flag and the injection out themselves. On the seller
+   side, the one piece the two storefront composition roots genuinely
+   shared — the admin-key OpenAPI customization (the `X-Admin-Key`
+   security scheme + the gateway `servers` block) — moved to
+   `core_storefront.openapi.install_admin_key_openapi`; both `server.py`
+   roots call it, their domain-specific lifespan and router wiring left
+   alone.
 
 Items 1–2 are pure-infrastructure and land first, each gated green on
 the existing suites; 3–5 are the domain; 6 proves it end to end; 7 is
