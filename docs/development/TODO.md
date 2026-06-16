@@ -4,6 +4,43 @@ Pending architectural work and known operational issues for the Arkhai market st
 
 ---
 
+## Index
+
+| Item | Section | Status |
+|------|---------|--------|
+| [Init container migration & schema drift guard](#init-container-migration-pattern-and-schema-drift-guard) | State Management | Planned |
+| [Registry: Postgres migration](#registry-postgres-migration) | State Management | Planned |
+| [Market Core Extraction follow-ons](#market-core-extraction--done-remaining-follow-on-work) | Core Stack | In progress |
+| [Native Launch CLI for Provisioning Service](#native-launch-cli-for-provisioning-service) | Core Stack | Planned |
+| [Escrow Kind Codec Expansion](#escrow-kind-codec-expansion) | Core Stack | Done |
+| [Storefront DB Pruning](#storefront-db-pruning) | Core Stack | Planned |
+| [Registry Filter-Spec side indexes](#registry-filter-spec-indexed-true-side-indexes) | Core Stack | Deferred |
+| [Shared Dynaconf Bootstrap](#shared-dynaconf-bootstrap) | Core Stack | Planned |
+| [Storefront Admin CLI Test Coverage](#storefront-admin-cli-test-coverage) | Core Stack | Planned |
+| [Move e2e Tests to Separate Project](#move-e2e-tests-to-a-separate-project) | Core Stack | Planned, no timeline |
+| [Shared marketplace registry (not per-node)](#shared-marketplace-infrastructure-not-per-node) | Registry Service | Planned |
+| [Golden image configuration](#golden-image-configuration-management-varsyaml) | Provisioning Service | Needs review |
+| [`HostController.check_capacity` filters](#hostcontrollercheck_capacity-resource-filters) | Provisioning Service | Needs review |
+| [Lease expiry watchdog: check job interpretation](#lease-expiry-watchdog--check-job-result-interpretation) | Provisioning Service | Needs review |
+| [Multi-Provider Resource Pool Architecture](#multi-provider-resource-pool-architecture) | Provisioning Service | Needs review |
+| [Flat `client.*` package namespace](#flat-client-package-namespace) | Provisioning Service | Planned |
+| [Provisioning smoke tests: use typed client](#provisioning-smoke-tests-use-raw-httpx) | Provisioning Service | Planned |
+| [`StorefrontCallbackClient` extraction](#storefrontcallbackclient-extraction-conditional) | Provisioning Service | Conditional |
+| [Alkahest contracts in baked state](#alkahest-contracts-in-the-baked-state) | Documentation Gaps | Needs review |
+| [Symmetric Order Concept](#symmetric-order-concept) | Documentation Gaps | Needs review |
+| [Alkahest Escrow Mechanics](#alkahest-escrow-mechanics) | Documentation Gaps | Needs review |
+| [SQLite Schema](#sqlite-schema) | Documentation Gaps | Needs review |
+| [`negotiation_watchdog`](#negotiation_watchdog) | Documentation Gaps | Needs review |
+| [GPU Passthrough Setup](#gpu-passthrough-setup) | Documentation Gaps | Needs review |
+
+> **Structural notes for next TODO pass:**
+> - **"Latent Bug Fixes"** section below is an empty placeholder — no items have been filed under it yet. Either populate or remove.
+> - **"Known Issues & Areas of Concern"** is a list of operational gotchas, not trackable work items with acceptance criteria. It doesn't map cleanly to table rows (no owner, no completion state). Consider splitting into a separate `KNOWN_ISSUES.md` or converting each entry to a proper task.
+> - **"Market Core Extraction follow-ons"** is a single heading containing a numbered list of sub-items with mixed statuses (some done, some planned). Each sub-item is really its own row — worth breaking out as individual `###` entries so their statuses can be tracked independently.
+> - **Provisioning Service** and **Documentation Gaps** items lack explicit `**Status:**` fields, making their state harder to scan. Should be consistent with the rest of the file.
+
+---
+
 ## State Management & Schema Migrations
 
 ### Init container migration pattern and schema drift guard
@@ -252,6 +289,8 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 
 ### Golden image configuration (`management-vars.yaml`)
 
+**Status:** Needs review.
+
 **Problem:** The `golden-image-build` Ansible role writes `management-vars.yaml` to the operator's local machine with root SSH credentials for the golden image. The provisioning service reads these credentials through the standard dynaconf profile system, but the key names in `management-vars.yaml` do not match the names in `settings.toml`.
 
 **What the provisioning service needs from `management-vars.yaml`:**
@@ -268,11 +307,15 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 
 ### `HostController.check_capacity` resource filters
 
+**Status:** Needs review.
+
 `HostController.check_capacity` should eventually accept optional resource filter parameters (`vcpus`, `ram_mb`, `gpu_count`) and return ranked hosts with sufficient capacity — useful for the storefront's pre-flight check before a `create` job.
 
 ---
 
 ### Lease expiry watchdog — check job result interpretation
+
+**Status:** Needs review.
 
 See `ARCHITECTURE.md` "Lease Lifecycle — ledger-driven watchdog" for current architecture.
 
@@ -283,6 +326,8 @@ The `at`-based scheduling on the KVM host runs in parallel — the check job is 
 ---
 
 ### Multi-Provider Resource Pool Architecture
+
+**Status:** Needs review.
 
 This section documents architectural decisions reached for the provisioning service multi-provider refactor. Items are sequenced and cross-referenced with the `compute-market-internal-infra` ops repo `ARCHITECTURE.md` planned work section.
 
@@ -437,24 +482,36 @@ Items where `ARCHITECTURE.md` has a "TODO: Document X" placeholder. Fill in as p
 
 ### Alkahest Contracts in the Baked State
 
+**Status:** Needs review.
+
 The exact set of Alkahest contracts deployed in the `dev-env` baked state and their addresses — so operators can wire integrations without reading the deploy scripts.
 
 ### Symmetric Order Concept
+
+**Status:** Needs review.
 
 `e2e-tests/.../test_symmetric_orders.py` exercises a "symmetric order" pattern that isn't documented in ARCHITECTURE.md. Document what it is and why it exists.
 
 ### Alkahest Escrow Mechanics
 
+**Status:** Needs review.
+
 What on-chain calls Alkahest makes at each point in the negotiation lifecycle: escrow lock, attestation submission, release. Currently the doc only points at the function names.
 
 ### SQLite Schema
+
+**Status:** Needs review.
 
 Storefront table definitions, indexes, statefulness/concurrency constraints (single-writer SQLite, negotiation message ordering). The "Storefront DB Pruning" entry assumes a future writer already knows the current layout.
 
 ### `negotiation_watchdog`
 
+**Status:** Needs review.
+
 Trigger conditions (staleness threshold), what it writes to the DB, how it interacts with in-flight `/advance` calls. The watchdog's existence is noted but its semantics are not.
 
 ### GPU Passthrough Setup
+
+**Status:** Needs review.
 
 Host-hardware constraints, BIOS / kernel module / `iommu` requirements, and the IaC role responsibilities for getting GPU passthrough working on a KVM host.
