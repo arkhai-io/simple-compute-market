@@ -32,8 +32,9 @@ permissions:
 #        Repository        = simple-compute-market
 #        Workflow filename = publish-npm.yml
 #   Trusted publishing requires npm >= 11.5.1 (installed below). Provenance
-#   is generated automatically (publishConfig.provenance + id-token), giving
-#   a verifiable link from the published tarball back to this commit.
+#   is requested via `npm publish --provenance` in the publish step (kept out
+#   of publishConfig so a local bootstrap publish still works), giving a
+#   verifiable link from the published tarball back to this commit.
 
 jobs:
   publish:
@@ -70,4 +71,6 @@ jobs:
         run: npm run build
       - name: Publish to npm
         if: steps.check.outputs.skip == 'false'
-        run: npm publish
+        # --provenance works only in CI (OIDC); it's intentionally NOT in
+        # publishConfig so a local `npm publish` bootstrap still works.
+        run: npm publish --provenance
