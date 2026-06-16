@@ -2,13 +2,13 @@
 
 This project uses `ArkhaiPufferEnv` via `pufferlib` directly. Training produces `.pt` checkpoint files that are released as GitHub Release assets and downloaded at deployment time.
 
-Training pulls in pufferlib's C-backed env + trainer (heavy build, Python 3.12 only). **Inference does not** — the storefront and buyer load the trained `.pt` files into a small inline `ArkhaiInferencePolicy` (see `domains/vms/negotiation/rl/arkhai_common.py`) with just `torch` as a dep. The two paths are explicitly separate extras so a seller / buyer install doesn't drag in pufferlib.
+Training pulls in pufferlib's C-backed env + trainer (heavy build, Python 3.12 only). **Inference does not** — the storefront and buyer load the trained `.pt` files into a small inline `ArkhaiInferencePolicy` (see `domains/vms/negotiation/rl/arkhai_common.py`) with just `torch` as a dep. The two paths are explicitly separate — training in a dev dependency group, inference in an `[rl]` extra — so a seller / buyer install doesn't drag in pufferlib. (Training is a dependency group rather than a published extra because its `pufferlib @ git+…` direct reference can't go in PyPI wheel metadata.)
 
 ## Install
 
 ```bash
 # Training (this folder + market-policy train/eval CLI)
-cd kit/policy && uv pip install -e ".[training]"
+cd kit/policy && uv sync --group training
 
 # Inference only (storefront / buyer at runtime)
 cd domains/vms/storefront && uv pip install -e ".[rl]"   # torch only, no pufferlib
@@ -20,7 +20,7 @@ On macOS with uv-managed Python the pufferlib C extension build can pick up stal
 ```bash
 LDCXXSHARED="clang++ -bundle -undefined dynamic_lookup -arch arm64 \
     -mmacosx-version-min=11.0 -isysroot $(xcrun --sdk macosx --show-sdk-path)" \
-  uv pip install -e ".[training]"
+  uv sync --group training
 ```
 
 ## Source of Truth
