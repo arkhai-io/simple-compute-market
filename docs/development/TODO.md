@@ -24,7 +24,7 @@ Pending architectural work and known operational issues for the Arkhai market st
 | [Lease expiry watchdog: check job interpretation](#lease-expiry-watchdog--check-job-result-interpretation) | Provisioning Service | Needs review |
 | [Multi-Provider Resource Pool Architecture](#multi-provider-resource-pool-architecture) | Provisioning Service | Needs review |
 | [Flat `client.*` package namespace](#flat-client-package-namespace) | Provisioning Service | Planned |
-| [Provisioning smoke tests: use typed client](#provisioning-smoke-tests-use-raw-httpx) | Provisioning Service | Planned |
+| [Provisioning smoke tests: use typed client](#provisioning-smoke-tests-use-raw-httpx) | Provisioning Service | Done |
 | [`StorefrontCallbackClient` extraction](#storefrontcallbackclient-extraction-conditional) | Provisioning Service | Conditional |
 | [Alkahest contracts in baked state](#alkahest-contracts-in-the-baked-state) | Documentation Gaps | Needs review |
 | [Symmetric Order Concept](#symmetric-order-concept) | Documentation Gaps | Needs review |
@@ -458,11 +458,14 @@ creates real VMs, and that teardown is Compute-API-based (no SSH key required on
 
 ### Provisioning Smoke Tests Use Raw `httpx`
 
-**Status:** Planned.
+**Status:** Done.
 
-**Problem:** The provisioning smoke tests in `e2e-tests/tests/smoke/test_provisioning_smoke.py` call raw `httpx` rather than going through `SyncProvisioningClient`. The integration tests already established the pattern of routing all calls through the canonical client.
-
-**Planned fix:** update the smoke tests to use `SyncProvisioningClient` for every endpoint they hit.
+The smoke test file (`e2e-tests/tests/smoke/test_provisioning_smoke.py`) already
+routes all calls through `SyncProvisioningClient`. Two methods that were
+also duplicated on `ProvisioningTestClient` (`pause_watchdog` /
+`resume_watchdog`) have been removed from that class; call sites in the
+e2e deal scenarios now use `provisioning_client.pause_lease_watchdog()` /
+`resume_lease_watchdog()` directly.
 
 ---
 

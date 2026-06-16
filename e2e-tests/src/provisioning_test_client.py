@@ -228,21 +228,4 @@ class ProvisioningTestClient:
             timeout=http_timeout,
         )
 
-    # ------------------------------------------------------------------
-    # Watchdog control (thin wrappers over system controller endpoints)
-    # ------------------------------------------------------------------
 
-    def pause_watchdog(self) -> dict:
-        """POST /api/v1/system/lease-watchdog/pause — pause timer-driven cycles.
-
-        After this call the background LeaseWatchdog will block at the pause gate.
-        Force-triggered cycles (check_leases on SyncProvisioningClient) bypass
-        the gate and always run.
-
-        Always call resume_watchdog() in test teardown to leave the system clean.
-        """
-        return self._post("/api/v1/system/lease-watchdog/pause")
-
-    def resume_watchdog(self) -> dict:
-        """POST /api/v1/system/lease-watchdog/resume — resume timer-driven cycles."""
-        return self._post("/api/v1/system/lease-watchdog/resume")

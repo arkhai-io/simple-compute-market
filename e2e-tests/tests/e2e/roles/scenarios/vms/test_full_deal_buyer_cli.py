@@ -1137,7 +1137,7 @@ class TestStage10a_LeaseExpirySetup:
                       "vm_host", "_provisioning_storefront_ok")
 
         # Step 1 — pause the watchdog timer
-        result = provisioning_test_client.pause_watchdog()
+        result = provisioning_client.pause_lease_watchdog()
         assert result.get("paused") is True, (
             f"Failed to pause watchdog: {result}"
         )
@@ -1401,5 +1401,5 @@ class TestStage11b_WatchdogReleasesResource:
         deal_state.lease_status = "released"
 
         # Teardown — resume watchdog so background timer cycles work normally
-        provisioning_test_client.resume_watchdog()
+        provisioning_client.resume_lease_watchdog()
         log.info("[11b] Watchdog resumed — lease lifecycle test complete")
