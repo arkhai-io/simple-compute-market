@@ -1,6 +1,7 @@
 [project]
 name = "scm-issue-discovery"
 version = "0.1.0"
+license = "MIT"
 description = "Issue discovery harness for Simple Compute Market local and clean-room validation"
 requires-python = ">=3.11"
 dependencies = [

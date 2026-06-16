@@ -1,6 +1,7 @@
 [project]
 name = "arkhai-apitokens-storefront"
 version = "0.1.0"
+license = "MIT"
 description = "Seller-side storefront for the API-tokens domain: quota-backed listings, sync negotiation with ownership/quota guards, issuance-backed settlement."
 requires-python = ">=3.12"
 dependencies = [

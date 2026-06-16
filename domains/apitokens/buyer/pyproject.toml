@@ -1,6 +1,7 @@
 [project]
 name = "arkhai-apitokens-buyer"
 version = "0.1.0"
+license = "MIT"
 description = "API-tokens buyer schema plugin for the core `market` CLI: discover token listings, negotiate quantity x rate, settle into issued keys."
 requires-python = ">=3.12"
 dependencies = [

@@ -1,6 +1,7 @@
 [project]
 name = "arkhai-apitokens-middleware"
 version = "0.1.0"
+license = "MIT"
 description = "Seller-side ASGI middleware gating a downstream app on prepaid API credits from the arkhai tokens service."
 requires-python = ">=3.12"
 dependencies = [

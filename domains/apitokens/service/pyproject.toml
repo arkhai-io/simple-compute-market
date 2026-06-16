@@ -5,6 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "arkhai-apitokens-service"
 version = "0.1.0"
+license = "MIT"
 description = "API-tokens service: keys, credit grants, consumption, and the site quota ledger"
 requires-python = ">=3.12"
 dependencies = [

@@ -1,6 +1,7 @@
 [project]
 name = "arkhai-kit-identity"
 version = "0.1.0"
+license = "MIT"
 description = "Pluggable identity models and signature verifiers for the market"
 requires-python = ">=3.10,<3.14"
 dependencies = [
