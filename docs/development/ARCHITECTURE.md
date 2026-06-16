@@ -1323,13 +1323,13 @@ LeaseWatchdog (every 60s, or on-demand via POST /api/v1/system/check-leases)
   │   └── submit check Ansible job (vm_action=check) → releasing
   │
   ├── releasing leases (check job in flight):
-  │   ├── on succeeded / failed+past-grace:
+  │   ├── on succeeded or failed/cancelled:
   │   │   ├── release the allocation in a local ledger transaction
   │   │   │   (publishes an anonymous capacity delta to subscribers)
   │   │   └── post a deal-scoped capacity-released event to the
-  │   │       owning storefront (X-Admin-Key) — failure within grace
-  │   │       retries next cycle; past grace the release is forced
-  │   └── on still-running within grace: wait next cycle
+  │   │       owning storefront (X-Admin-Key)
+  │   ├── on still-running within grace: wait next cycle
+  │   └── on still-running past grace: force-release without confirmation
 ```
 
 Everything downstream is event-driven: the storefront's reconciler
@@ -2027,10 +2027,13 @@ Two kinds of notification with different delivery semantics:
   the claims engine. Never broadcast — noise at best, a cross-seller
   leak at worst.
 - **Capacity-scoped events** (availability for a host/pool changed, for
-  *any* reason): pub/sub to all subscribed storefronts, **anonymous** —
-  new availability plus a version number, never whose deal caused it.
-  Aggregators refresh a view (versioned deltas, pull-snapshot resync on
-  version gap); they do not reconstruct a ledger.
+  *any* reason): fanned to all subscribed storefronts via a versioned
+  pull feed, **anonymous** — new availability plus a version number,
+  never whose deal caused it. (Poll-based subscription, not a message
+  broker — storefronts tail `GET /api/v1/capacity/events?after=N` and
+  resync from a full snapshot on version gap.) Aggregators refresh a
+  view (versioned deltas, pull-snapshot resync on version gap); they do
+  not reconstruct a ledger.
 
 ```
 executor ──job status──▶ site authority (ledger txn)
