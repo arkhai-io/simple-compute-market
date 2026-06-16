@@ -47,7 +47,7 @@ jobs:
           - { name: core-buyer,             dir: core/buyer }
           - { name: core-storefront,        dir: core/storefront }
           - { name: core-storefront-client, dir: core/storefront-client }
-          - { name: core-registry,          dir: core/registry }
+          - { name: core-registry,          dir: core/registry, predist: true }
           - { name: core-site,              dir: core/site }
           # The deselected tests assert that injected/static option flags
           # appear in `typer --help` output; under headless pytest capture
@@ -57,10 +57,10 @@ jobs:
           # test_alkahest parity tests spawn node via alkahest_py (needs the
           # JS impl); cross-language parity is covered by the ts/rust jobs.
           - { name: vms-storefront,         dir: domains/vms/storefront, pytest_args: "--deselect tests/unit/test_alkahest.py::test_rust --deselect tests/unit/test_alkahest.py::test_python" }
-          - { name: vms-provisioning,       dir: domains/vms/provisioning/service, pythonpath: src }
+          - { name: vms-provisioning,       dir: domains/vms/provisioning/service, pythonpath: src, predist: true }
           - { name: apitokens-buyer,        dir: domains/apitokens/buyer, pytest_args: "--deselect tests/test_plugin_export.py::test_buy_surface_has_quantity_key_and_scalar_price_flags --deselect tests/test_plugin_export.py::test_listing_surface_is_token_rendering_not_generic_fallback" }
           - { name: apitokens-storefront,   dir: domains/apitokens/storefront }
-          - { name: apitokens-service,      dir: domains/apitokens/service }
+          - { name: apitokens-service,      dir: domains/apitokens/service, predist: true }
           - { name: apitokens-middleware,   dir: domains/apitokens/middleware/python }
           - { name: apitokens-sample-app,   dir: domains/apitokens/sample-app }
     steps:
@@ -68,16 +68,21 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           version: "0.11.17"
+      - name: Build sibling wheels into .dist
+        # Some lockfiles resolve sibling arkhai-* wheels from the repo's
+        # .dist/ (the `make dist` output dir), which isn't in a fresh
+        # checkout — build the referenced wheels into place.
+        if: matrix.predist
+        run: |
+          uv build --no-sources --out-dir .dist core/site
+          uv build --no-sources --out-dir .dist core/storefront-client
+          uv build --no-sources --out-dir .dist core/registry-client
       - name: pytest
         working-directory: ${{ matrix.dir }}
         env:
           PYTHONPATH: ${{ matrix.pythonpath }}
           PYTEST_ARGS: ${{ matrix.pytest_args }}
-        # --no-cache: setup-uv points UV_CACHE_DIR at a temp dir that uv
-        # can't reliably read back for PyPI-resolved sibling deps
-        # ("failed to read from the distribution cache"); resolving without
-        # the persistent cache avoids it.
-        run: uv run --no-cache --with pytest --with pytest-asyncio pytest -q $PYTEST_ARGS
+        run: uv run --with pytest --with pytest-asyncio pytest -q $PYTEST_ARGS
 
   ts-middleware:
     name: ts · apitokens-middleware
