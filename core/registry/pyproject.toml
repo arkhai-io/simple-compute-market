@@ -1,6 +1,7 @@
 [project]
 name = "arkhai-core-registry"
 version = "0.1.0"
+license = "MIT"
 description = "Listing discovery/index service (registry role)"
 requires-python = ">=3.12"
 dependencies = [

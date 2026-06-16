@@ -1,6 +1,7 @@
 [project]
 name = "arkhai-core-buyer"
 version = "0.1.0"
+license = "MIT"
 description = "Core buyer role shell and orchestration contracts"
 requires-python = ">=3.12"
 dependencies = [

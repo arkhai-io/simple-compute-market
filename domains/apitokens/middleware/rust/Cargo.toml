@@ -2,7 +2,7 @@
 name = "arkhai-apitokens-middleware"
 version = "0.1.0"
 edition = "2021"
-license = "UNLICENSED"
+license = "MIT"
 publish = false
 description = "Seller-side API-tokens gating middleware: verify + meter prepaid API credits against the tokens service, map exhaustion to a 402 with a purchase pointer. Behavioral parity with the Python and TypeScript middlewares (../conformance)."
 

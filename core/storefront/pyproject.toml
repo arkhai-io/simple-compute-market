@@ -1,6 +1,7 @@
 [project]
 name = "arkhai-core-storefront"
 version = "0.1.0"
+license = "MIT"
 description = "Core storefront role shell and protocol helpers"
 requires-python = ">=3.12"
 dependencies = [

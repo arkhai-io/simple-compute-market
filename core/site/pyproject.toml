@@ -1,6 +1,7 @@
 [project]
 name = "arkhai-core-site"
 version = "0.1.0"
+license = "MIT"
 description = "Site-authority scaffold: capacity ledger, tables, and HTTP surface"
 requires-python = ">=3.12"
 dependencies = [

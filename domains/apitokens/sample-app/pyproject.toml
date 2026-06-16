@@ -1,6 +1,7 @@
 [project]
 name = "arkhai-apitokens-sample-app"
 version = "0.1.0"
+license = "MIT"
 description = "Minimal token-gated HTTP service for the API-tokens e2e topology."
 requires-python = ">=3.12"
 dependencies = [

@@ -5,6 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "arkhai-e2e-tests"
 version = "0.1.0"
+license = "MIT"
 description = "End-to-end integration tests for Arkhai deployed blockchain environments"
 requires-python = ">=3.13,<3.15"
 dependencies = [

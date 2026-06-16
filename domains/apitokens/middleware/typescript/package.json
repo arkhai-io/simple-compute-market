@@ -1,9 +1,9 @@
 {
   "name": "@arkhai/apitokens-middleware",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Seller-side API-tokens gating middleware: verify + meter prepaid API credits against the tokens service, map exhaustion to a 402 with a purchase pointer. Behavioral parity with the Python and Rust middlewares (../conformance).",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/arkhai-io/simple-compute-market.git",

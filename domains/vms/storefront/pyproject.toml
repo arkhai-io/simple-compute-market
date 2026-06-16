@@ -1,6 +1,7 @@
 [project]
 name = "arkhai-vms-storefront"
 version = "0.1.0"
+license = "MIT"
 description = "Provider-side storefront server: hosts /orders, /negotiate, /settle, /alerts/resource endpoints. The provider-side counterpart to arkhai-vms-buyer."
 authors = [
     {name = "Your Name", email = "your@email.com"},

@@ -1,6 +1,7 @@
 [project]
 name = "arkhai-core"
 version = "0.1.0"
+license = "MIT"
 description = "Core market wire models and orchestration-neutral helpers"
 requires-python = ">=3.10,<3.14"
 # Carriers only: the wheel must stay importable by every role package
