@@ -88,9 +88,12 @@ The indexer registry plays the platform role of existing compute markets: it is 
 
 The core/kit/domain extraction is complete; the package graph expresses
 the principle, and distribution names mirror it
-(`arkhai-{core,kit,vms}-*`; the `arkhai-` prefix drops once publishing
-moves under the organization's PyPI scope). Import names and console
-scripts (`market`, `market-storefront`, `market-policy`) are unchanged.
+(`arkhai-{core,kit,vms}-*`). The `arkhai-` prefix is kept as the project
+namespace: PyPI organizations group projects at the account level but do
+not namespace distribution names, so the prefix is the only real
+namespace (and several bare names like `core` are already taken on PyPI).
+Import names and console scripts (`market`, `market-storefront`,
+`market-policy`) are unchanged.
 
 | Layer | Distribution (path) | Role |
 |---|---|---|

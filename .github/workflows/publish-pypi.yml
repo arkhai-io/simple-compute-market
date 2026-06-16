@@ -4,10 +4,10 @@ on:
   push:
     branches: [main]
     paths:
-      - 'kit/policy/**'
-      - 'domains/vms/provisioning/service/**'
-      - 'core/storefront-client/**'
-      - 'core/registry-client/**'
+      - 'kit/**'
+      - 'core/**'
+      - 'domains/vms/**'
+      - 'domains/apitokens/**'
       - '.github/workflows/publish-pypi.yml'
   workflow_dispatch:
 
@@ -20,196 +20,168 @@ permissions:
   id-token: write
   attestations: write
 
-# Trusted publishing (OIDC, no secrets needed). Configure each package's
-# publisher at https://pypi.org/manage/project/<pkg>/settings/publishing/
-# with:
+# Trusted publishing (OIDC, no secrets needed). One PyPI project + GitHub
+# environment per package; configure each at
+# https://pypi.org/manage/project/<dist>/settings/publishing/ with:
 #   Owner       = arkhai-io
 #   Repo        = simple-compute-market
 #   Workflow    = publish-pypi.yml
-#   Environment = pypi-<pkg>            (matches `environment.name` below)
+#   Environment = pypi-<dist>            (matches `environment.name` below)
+# and create the matching repo environment under Settings -> Environments.
+# See docs/development/RELEASING.md for the full package table.
 #
-# Distribution names follow the core/kit/domain split with an `arkhai-`
-# prefix (to be dropped once published under the organization's PyPI
-# scope):
-#   arkhai-kit-policy, arkhai-vms-provisioning,
-#   arkhai-core-storefront-client, arkhai-core-registry-client
-# None of the published packages has internal deps on another published
-# package, so there is no sequencing inside one run.
+# Distribution names keep the `arkhai-` prefix: PyPI organizations group
+# projects at the account level but do NOT namespace distribution names,
+# so the prefix is the project's de-facto namespace (and several bare
+# names like `core` are already taken by unrelated projects).
+#
+# This workflow publishes every consumable library / SDK / plugin. The
+# package set is a single source of truth: the PACKAGES table in
+# build-matrix below and the per-package path filters above it. Service
+# apps deployed only via Docker/Helm (the registry indexer), the e2e
+# harness, the sample app, and internal tooling are intentionally absent.
+#
+# Internal build order does not matter: each wheel is built with
+# `uv build --no-sources` in an isolated build env that installs only the
+# build backend, never the project's own (arkhai-*) dependencies, so no
+# sibling package needs to be on PyPI first. A full `workflow_dispatch`
+# publishes the whole set in one run; because deps use lower-bound
+# constraints, the brief window where a downstream wheel is on PyPI before
+# its dependency is self-heals once the run finishes.
 
 jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
-      policy:               ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.policy }}
-      vms-provisioning:     ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.vms-provisioning }}
-      storefront-client:    ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.storefront-client }}
-      registry-client:      ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.registry-client }}
+      matrix: ${{ steps.build-matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter
         if: github.event_name != 'workflow_dispatch'
         with:
+          # Each filter watches its package directory plus the workflow
+          # file (so editing the pipeline re-evaluates every package).
+          # A publish only happens when the version isn't yet on PyPI,
+          # and a version bump always lands in <path>/pyproject.toml, so
+          # watching the package's own directory is sufficient — changes
+          # to shared sibling modules without a bump would skip anyway.
           filters: |
-            policy:
-              - 'kit/policy/**'
-            vms-provisioning:
-              - 'domains/vms/provisioning/service/**'
-            storefront-client:
-              - 'core/storefront-client/**'
-            registry-client:
-              - 'core/registry-client/**'
+            kit-alkahest: ['kit/alkahest/**', '.github/workflows/publish-pypi.yml']
+            kit-config: ['kit/config/**', '.github/workflows/publish-pypi.yml']
+            kit-identity: ['kit/identity/**', '.github/workflows/publish-pypi.yml']
+            kit-policy: ['kit/policy/**', '.github/workflows/publish-pypi.yml']
+            core: ['core/src/**', 'core/pyproject.toml', 'core/README.md', '.github/workflows/publish-pypi.yml']
+            core-buyer: ['core/buyer/**', '.github/workflows/publish-pypi.yml']
+            core-storefront: ['core/storefront/**', '.github/workflows/publish-pypi.yml']
+            core-storefront-client: ['core/storefront-client/**', '.github/workflows/publish-pypi.yml']
+            core-registry-client: ['core/registry-client/**', '.github/workflows/publish-pypi.yml']
+            core-registry: ['core/registry/**', '.github/workflows/publish-pypi.yml']
+            core-site: ['core/site/**', '.github/workflows/publish-pypi.yml']
+            vms-buyer: ['domains/vms/buyer/**', '.github/workflows/publish-pypi.yml']
+            vms-provisioning: ['domains/vms/provisioning/service/**', '.github/workflows/publish-pypi.yml']
+            vms-storefront: ['domains/vms/storefront/**', '.github/workflows/publish-pypi.yml']
+            apitokens-buyer: ['domains/apitokens/buyer/**', '.github/workflows/publish-pypi.yml']
+            apitokens-middleware: ['domains/apitokens/middleware/python/**', '.github/workflows/publish-pypi.yml']
+            apitokens-storefront: ['domains/apitokens/storefront/**', '.github/workflows/publish-pypi.yml']
+            apitokens-service: ['domains/apitokens/service/**', '.github/workflows/publish-pypi.yml']
+      - name: Build publish matrix
+        id: build-matrix
+        env:
+          DISPATCH: ${{ github.event_name == 'workflow_dispatch' }}
+          CHANGES: ${{ steps.filter.outputs.changes }}
+        run: |
+          set -euo pipefail
+          # Single source of truth: key (must match a filter name above),
+          # package directory, and PyPI distribution name.
+          cat > packages.json <<'JSON'
+          [
+            {"key": "kit-alkahest",           "path": "kit/alkahest",                     "dist": "arkhai-kit-alkahest"},
+            {"key": "kit-config",             "path": "kit/config",                       "dist": "arkhai-kit-config"},
+            {"key": "kit-identity",           "path": "kit/identity",                     "dist": "arkhai-kit-identity"},
+            {"key": "kit-policy",             "path": "kit/policy",                       "dist": "arkhai-kit-policy"},
+            {"key": "core",                   "path": "core",                             "dist": "arkhai-core"},
+            {"key": "core-buyer",             "path": "core/buyer",                       "dist": "arkhai-core-buyer"},
+            {"key": "core-storefront",        "path": "core/storefront",                  "dist": "arkhai-core-storefront"},
+            {"key": "core-storefront-client", "path": "core/storefront-client",           "dist": "arkhai-core-storefront-client"},
+            {"key": "core-registry-client",   "path": "core/registry-client",             "dist": "arkhai-core-registry-client"},
+            {"key": "core-registry",          "path": "core/registry",                    "dist": "arkhai-core-registry"},
+            {"key": "core-site",              "path": "core/site",                        "dist": "arkhai-core-site"},
+            {"key": "vms-buyer",              "path": "domains/vms/buyer",                "dist": "arkhai-vms-buyer", "wheel_only": true},
+            {"key": "vms-provisioning",       "path": "domains/vms/provisioning/service", "dist": "arkhai-vms-provisioning"},
+            {"key": "vms-storefront",         "path": "domains/vms/storefront",           "dist": "arkhai-vms-storefront"},
+            {"key": "apitokens-buyer",        "path": "domains/apitokens/buyer",          "dist": "arkhai-apitokens-buyer", "wheel_only": true},
+            {"key": "apitokens-middleware",   "path": "domains/apitokens/middleware/python", "dist": "arkhai-apitokens-middleware"},
+            {"key": "apitokens-storefront",   "path": "domains/apitokens/storefront",     "dist": "arkhai-apitokens-storefront"},
+            {"key": "apitokens-service",      "path": "domains/apitokens/service",        "dist": "arkhai-apitokens-service"}
+          ]
+          JSON
 
-  publish-policy:
+          if [ "${DISPATCH}" = "true" ]; then
+            # Manual run: consider every package (the per-package version
+            # check then skips anything already on PyPI).
+            selected=$(jq -c '.' packages.json)
+          else
+            # Push: select only packages whose filter matched.
+            selected=$(jq -c --argjson ch "${CHANGES:-[]}" \
+              '[ .[] | select(.key as $k | $ch | index($k)) ]' packages.json)
+          fi
+
+          echo "matrix={\"include\":${selected}}" >> "$GITHUB_OUTPUT"
+          echo "Selected for publish:"
+          echo "${selected}" | jq -r 'if length == 0 then "  (none)" else .[].dist end'
+
+  publish:
     needs: detect-changes
-    if: needs.detect-changes.outputs.policy == 'true'
+    if: ${{ fromJson(needs.detect-changes.outputs.matrix).include[0] != null }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
     environment:
-      name: pypi-arkhai-kit-policy
-      url: https://pypi.org/p/arkhai-kit-policy
+      name: pypi-${{ matrix.dist }}
+      url: https://pypi.org/p/${{ matrix.dist }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
         with:
           version: "0.8.13"
-      - name: Check version not yet on PyPI
+      - name: Skip if version already on PyPI
         id: check
         env:
-          PKG_DIR: kit/policy
+          PKG_DIR: ${{ matrix.path }}
+          DIST: ${{ matrix.dist }}
         run: |
           set -euo pipefail
           version=$(awk -F'"' '/^version *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
-          name=$(awk -F'"' '/^name *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
-          echo "name=${name}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-          if curl -sSL "https://pypi.org/pypi/${name}/json" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if '${version}' in d.get('releases', {}) else 1)"; then
+          if curl -sSL "https://pypi.org/pypi/${DIST}/json" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if '${version}' in d.get('releases', {}) else 1)"; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::${name} ${version} already on PyPI; skipping"
+            echo "::notice::${DIST} ${version} already on PyPI; skipping"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::publishing ${DIST} ${version}"
           fi
-      - name: Build wheel + sdist
+      - name: Build distribution
         if: steps.check.outputs.skip == 'false'
-        working-directory: kit/policy
+        working-directory: ${{ matrix.path }}
         # --no-sources strips tool.uv.sources overrides so the wheel records
         # plain PyPI deps instead of workspace paths.
-        run: uv build --no-sources
-      - name: Publish to PyPI
-        if: steps.check.outputs.skip == 'false'
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: kit/policy/dist
-
-  publish-vms-provisioning:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.vms-provisioning == 'true'
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi-arkhai-vms-provisioning
-      url: https://pypi.org/p/arkhai-vms-provisioning
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-        with:
-          version: "0.8.13"
-      - name: Check version not yet on PyPI
-        id: check
-        env:
-          PKG_DIR: domains/vms/provisioning/service
+        #
+        # wheel_only packages (the buyer plugins) force-include sibling
+        # concept modules via ../ paths, which an sdist tarball can't carry
+        # — `uv build`'s default sdist->wheel rebuild would fail — so they
+        # publish a wheel built directly from source. Everything else ships
+        # sdist + wheel.
         run: |
-          set -euo pipefail
-          version=$(awk -F'"' '/^version *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
-          name=$(awk -F'"' '/^name *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
-          echo "name=${name}" >> "$GITHUB_OUTPUT"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          if curl -sSL "https://pypi.org/pypi/${name}/json" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if '${version}' in d.get('releases', {}) else 1)"; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::${name} ${version} already on PyPI; skipping"
+          if [ "${{ matrix.wheel_only }}" = "true" ]; then
+            uv build --wheel --no-sources
           else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            uv build --no-sources
           fi
-      - name: Build wheel + sdist
-        if: steps.check.outputs.skip == 'false'
-        working-directory: domains/vms/provisioning/service
-        run: uv build --no-sources
       - name: Publish to PyPI
         if: steps.check.outputs.skip == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: domains/vms/provisioning/service/dist
-
-  publish-storefront-client:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.storefront-client == 'true'
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi-arkhai-core-storefront-client
-      url: https://pypi.org/p/arkhai-core-storefront-client
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-        with:
-          version: "0.8.13"
-      - name: Check version not yet on PyPI
-        id: check
-        env:
-          PKG_DIR: core/storefront-client
-        run: |
-          set -euo pipefail
-          version=$(awk -F'"' '/^version *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
-          name=$(awk -F'"' '/^name *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
-          echo "name=${name}" >> "$GITHUB_OUTPUT"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          if curl -sSL "https://pypi.org/pypi/${name}/json" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if '${version}' in d.get('releases', {}) else 1)"; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::${name} ${version} already on PyPI; skipping"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Build wheel + sdist
-        if: steps.check.outputs.skip == 'false'
-        working-directory: core/storefront-client
-        run: uv build --no-sources
-      - name: Publish to PyPI
-        if: steps.check.outputs.skip == 'false'
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: core/storefront-client/dist
-
-  publish-registry-client:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.registry-client == 'true'
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi-arkhai-core-registry-client
-      url: https://pypi.org/p/arkhai-core-registry-client
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-        with:
-          version: "0.8.13"
-      - name: Check version not yet on PyPI
-        id: check
-        env:
-          PKG_DIR: core/registry-client
-        run: |
-          set -euo pipefail
-          version=$(awk -F'"' '/^version *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
-          name=$(awk -F'"' '/^name *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
-          echo "name=${name}" >> "$GITHUB_OUTPUT"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          if curl -sSL "https://pypi.org/pypi/${name}/json" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if '${version}' in d.get('releases', {}) else 1)"; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::${name} ${version} already on PyPI; skipping"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Build wheel + sdist
-        if: steps.check.outputs.skip == 'false'
-        working-directory: core/registry-client
-        run: uv build --no-sources
-      - name: Publish to PyPI
-        if: steps.check.outputs.skip == 'false'
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: core/registry-client/dist
+          packages-dir: ${{ matrix.path }}/dist

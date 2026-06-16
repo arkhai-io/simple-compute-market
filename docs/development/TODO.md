@@ -164,11 +164,15 @@ dependency order:
      different preferences (today selection takes the first compatible
      entry).
 
-6. **PyPI re-setup after the rename:** the four published packages
-   (`arkhai-kit-policy`, `arkhai-vms-provisioning`,
-   `arkhai-core-storefront-client`, `arkhai-core-registry-client`) need
-   new PyPI projects + trusted-publisher environments per
-   `RELEASING.md`; the old-name projects stay frozen.
+6. **PyPI trusted-publishing one-time setup:** the publish CI
+   (`.github/workflows/publish-pypi.yml`) now covers all 18 consumable
+   packages (kit/core libraries, SDK clients, buyer/storefront plugins,
+   the registry indexer, provisioning + tokens services, the tokens
+   middleware) — every userland role, not the e2e harness/demo/tooling. Names keep the
+   `arkhai-` prefix — PyPI orgs don't namespace distribution names, so the
+   prefix is the namespace. Each package still needs its PyPI project +
+   trusted-publisher environment created per `RELEASING.md` before its
+   first publish succeeds (nothing is on PyPI yet).
 
 ---
 
