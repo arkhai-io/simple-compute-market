@@ -1,0 +1,43 @@
+{
+  "name": "@arkhai/apitokens-middleware",
+  "version": "0.1.1",
+  "description": "Seller-side API-tokens gating middleware: verify + meter prepaid API credits against the tokens service, map exhaustion to a 402 with a purchase pointer. Behavioral parity with the Python and Rust middlewares (../conformance).",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arkhai-io/simple-compute-market.git",
+    "directory": "domains/apitokens/middleware/typescript"
+  },
+  "homepage": "https://github.com/arkhai-io/simple-compute-market/tree/main/domains/apitokens/middleware/typescript#readme",
+  "bugs": "https://github.com/arkhai-io/simple-compute-market/issues",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "files": [
+    "dist/src",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test 'test/*.test.ts'",
+    "check": "npm run typecheck && npm run test",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

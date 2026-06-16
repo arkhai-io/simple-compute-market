@@ -48,6 +48,7 @@ tar czf "$TARBALL" \
     --exclude='.claude' \
     --exclude='Dockerfile' \
     --exclude='docker-compose*.yml' \
+    --exclude='compose*.yml' \
     --exclude='market-installer.sh' \
     --exclude='.DS_Store' \
     "$(basename "$REPO_ROOT")"

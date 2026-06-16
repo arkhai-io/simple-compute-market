@@ -44,6 +44,13 @@ def test_redacts_home_path_usernames() -> None:
     assert redacted == "/home/<user>/project/.ssh/id_ed25519"
 
 
+def test_redacts_macos_home_path_usernames() -> None:
+    redacted = tracked_redactor().redact("/Users/levi/project/.ssh/id_ed25519")
+
+    assert "levi" not in redacted
+    assert redacted == "/Users/<user>/project/.ssh/id_ed25519"
+
+
 def test_redacts_nested_mapping_values() -> None:
     private_key = "b" * 64
     redacted = tracked_redactor().redact_mapping(

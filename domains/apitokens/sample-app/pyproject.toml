@@ -1,0 +1,35 @@
+[project]
+name = "arkhai-apitokens-sample-app"
+version = "0.1.0"
+license = "MIT"
+description = "Minimal token-gated HTTP service for the API-tokens e2e topology."
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "arkhai-apitokens-middleware",
+]
+
+[project.scripts]
+apitokens-sample-app = "apitokens_sample_app.app:main"
+
+[tool.uv.sources]
+arkhai-apitokens-middleware = { path = "../middleware/python", editable = true }
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.0",
+  "httpx>=0.27",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/apitokens_sample_app"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+asyncio_mode = "auto"

@@ -1,0 +1,76 @@
+[project]
+name = "arkhai-apitokens-buyer"
+version = "0.1.0"
+license = "MIT"
+description = "API-tokens buyer schema plugin for the core `market` CLI: discover token listings, negotiate quantity x rate, settle into issued keys."
+requires-python = ">=3.12"
+dependencies = [
+  "typer>=0.12.0",
+  "rich>=13.7.0",
+  "eth-account>=0.13.0",
+  # Needed by the buy/settle path for in-process on-chain escrow
+  # creation. Imported lazily from core_buyer.escrow_client so loading
+  # the CLI does not pay the native-binary cost unless a deal settles.
+  "alkahest-py>=0.4.0",
+  "arkhai-core-buyer",
+  "arkhai-core",
+  "arkhai-kit-alkahest",
+  "arkhai-kit-config",
+  "arkhai-kit-policy",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0.0",
+]
+
+# The `market` console script ships from arkhai-core-buyer; this package only
+# contributes the API-tokens schema plugin the core CLI discovers.
+[project.entry-points."market.buyer_plugins"]
+apitokens = "domains.apitokens.buyer.cli:plugin"
+
+[tool.uv.sources]
+arkhai-core = { path = "../../../core", editable = true }
+arkhai-core-buyer = { path = "../../../core/buyer", editable = true }
+arkhai-kit-alkahest = { path = "../../../kit/alkahest", editable = true }
+arkhai-kit-config = { path = "../../../kit/config", editable = true }
+arkhai-kit-policy = { path = "../../../kit/policy", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+only-include = ["__init__.py"]
+dev-mode-dirs = ["../../.."]
+
+# Ships the buyer modules plus the concept modules they compose
+# (listings, negotiation). `domains/__init__.py` is deliberately NOT
+# included: arkhai-vms-buyer ships it, and installing both wheels in
+# one venv must not collide on the file. Installed alone, `domains`
+# resolves as an implicit namespace package.
+[tool.hatch.build.targets.wheel.force-include]
+"../__init__.py" = "domains/apitokens/__init__.py"
+"__init__.py" = "domains/apitokens/buyer/__init__.py"
+"buy_cli.py" = "domains/apitokens/buyer/buy_cli.py"
+"cli.py" = "domains/apitokens/buyer/cli.py"
+"cli_helpers.py" = "domains/apitokens/buyer/cli_helpers.py"
+"common.py" = "domains/apitokens/buyer/common.py"
+"listing_cli.py" = "domains/apitokens/buyer/listing_cli.py"
+"negotiate_cli.py" = "domains/apitokens/buyer/negotiate_cli.py"
+"settle_cli.py" = "domains/apitokens/buyer/settle_cli.py"
+"../listings/__init__.py" = "domains/apitokens/listings/__init__.py"
+"../listings/models.py" = "domains/apitokens/listings/models.py"
+"../listings/pricing.py" = "domains/apitokens/listings/pricing.py"
+"../listings/reconciler.py" = "domains/apitokens/listings/reconciler.py"
+"../negotiation/__init__.py" = "domains/apitokens/negotiation/__init__.py"
+"../negotiation/buyer_policies.py" = "domains/apitokens/negotiation/buyer_policies.py"
+"../negotiation/policies.py" = "domains/apitokens/negotiation/policies.py"
+"../negotiation/storefront_round.py" = "domains/apitokens/negotiation/storefront_round.py"
+"../negotiation/terms.py" = "domains/apitokens/negotiation/terms.py"
+
+[tool.pytest.ini_options]
+pythonpath = ["../../..", "."]

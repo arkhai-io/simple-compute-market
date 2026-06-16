@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from issue_discovery.artifacts import ArtifactStore
+from issue_discovery.collectors import CollectorRunner, CollectorSpec
 from issue_discovery.commands import run_shell_command
 from issue_discovery.phases import CommandSpec
 from issue_discovery.redaction import Redactor
@@ -30,6 +34,38 @@ def test_shell_command_writes_logs_and_metadata(tmp_path: Path) -> None:
     assert result.ok
     assert result.stdout_path.read_text(encoding="utf-8") == "hello\n"
     assert json.loads(result.meta_path.read_text(encoding="utf-8"))["exit_code"] == 0
+
+
+def test_collector_context_includes_stderr(tmp_path: Path) -> None:
+    store = ArtifactStore.create(tmp_path / "runs", run_id="run-1")
+    runner = CollectorRunner(
+        repo_root=tmp_path,
+        store=store,
+        collectors={
+            "stderr_only": CollectorSpec(
+                id="stderr_only",
+                command="python -c 'import sys; print(\"diagnostic\", file=sys.stderr)'",
+                output=Path("context/stderr.txt"),
+            )
+        },
+        redactor=Redactor(),
+    )
+
+    record = runner.collect("stderr_only", "test")
+
+    assert record["status"] == "passed"
+    context = (store.run_dir / "context" / "stderr.txt").read_text(encoding="utf-8")
+    assert "## stderr" in context
+    assert "diagnostic" in context
+
+
+def test_exact_artifact_dir_refuses_existing_contents(tmp_path: Path) -> None:
+    run_dir = tmp_path / "existing-run"
+    run_dir.mkdir()
+    (run_dir / "manifest.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        ArtifactStore.use_exact_dir(run_dir)
 
 
 def test_runner_continues_after_nonblocking_failure(tmp_path: Path) -> None:

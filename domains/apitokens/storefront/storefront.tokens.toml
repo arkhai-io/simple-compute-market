@@ -1,0 +1,72 @@
+# API-tokens seller — local docker-compose stack.
+# Anvil default account #3; deterministic local chain. DO NOT use these
+# keys on any public network.
+#
+# Mounted into the tokens-storefront container at
+# /etc/arkhai/storefront.toml (XDG_CONFIG_HOME=/etc).
+
+agent_id      = "tokenseller"
+port          = 8000
+base_url      = "http://tokens-storefront:8000/"
+db_path       = "./src/apitokens_storefront/data/storefront/agent.db"
+admin_api_key = "test-api-key"
+
+[wallet]
+address     = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+private_key = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6"
+
+[chains.anvil]
+rpc_url  = "ws://anvil:8545"
+chain_id = 31337
+# The same Alkahest address book the VM storefront uses (one anvil
+# deployment), bind-mounted into this container.
+alkahest_address_config_path = "/app/alkahest_anvil_addresses.json"
+
+[registry]
+# Only the api-tokens registry: this seller's listings speak the
+# api_tokens schema, and the buyer plugin's schema filter routes its
+# discovery to this registry. (The public vms.compute registry is also
+# in the buyer's config — that's what makes the schema filter
+# load-bearing.)
+urls              = ["http://api-tokens-registry:8080"]
+discovery_timeout = 5.0
+
+[tokens]
+# The tokens service this storefront sells for. It hosts both the quota
+# ledger ([capacity] authority defaults to it) and the issuance/keys API.
+service_url         = "http://tokens-service:8082"
+admin_key           = "test-api-key"
+preflight_timeout   = 60
+fail_on_unreachable = true
+
+[capacity]
+# Authority defaults to tokens.service_url. Poll fast — the suite waits
+# on delta-driven listing reconciliation (close on exhaustion).
+poll_interval    = 1
+hold_ttl_seconds = 900
+
+[negotiation]
+# Empty: the api-tokens guards (api_tokens_round_zero_guard,
+# buyer_counter_guard, token_quota_guard, key_owned_by_buyer_wallet,
+# escrow_shape_guard) prepend automatically; the terminal default is
+# listed_price.
+policies = []
+
+[pricing]
+# Fallback only — the seeded listing carries its own per-token rate.
+default_min_price = "1"
+
+[seed]
+# Demo self-seed (e2e): on startup, register this quota resource in the
+# tokens-service ledger and publish a listing from it, so a fresh
+# `compose up` has something to discover. The listing's base_url points
+# at the gated sample app the buyer will consume.
+resource_id     = "weather-quota"
+total_units     = 100
+service_name    = "weather-api"
+price_per_token = "1"
+token           = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+chain           = "anvil"
+base_url        = "http://sample-app:8085"
+openapi_url     = "http://sample-app:8085/openapi.json"
+description     = "Prepaid weather-API credits"

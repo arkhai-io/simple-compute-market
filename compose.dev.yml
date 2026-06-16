@@ -1,0 +1,26 @@
+# Local dev chain.
+#
+# The domain stacks (domains/vms/compose.yml, domains/apitokens/compose.yml)
+# gate their chain-touching services on a service named `anvil` but do not
+# define it — this file supplies it: an Anvil chain with the Alkahest
+# contracts + mock tokens pre-baked into its state snapshot. Every assembly
+# (the root docker-compose.yml and the per-domain compose.<domain>.yml
+# wrappers) `include:`s this file, so a single shared dev chain backs
+# whatever domains are brought up. A real deployment uses Helm, not compose.
+services:
+  # Local test chain (Anvil). The arkhai:dev-env image boots anvil with
+  # the Alkahest contracts + mock tokens pre-baked into its state snapshot
+  # (dev-env/state/state.json), so no separate deploy step is needed.
+  anvil:
+    image: arkhai:dev-env
+    container_name: anvil
+    ports:
+      - "8545:8545"
+    environment:
+      - ANVIL_IP_ADDR=0.0.0.0
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -X POST http://localhost:8545 -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' | grep -q result || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s

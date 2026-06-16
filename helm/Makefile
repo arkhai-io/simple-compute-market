@@ -23,8 +23,8 @@ EXTRA_SET_FILE_ARGS ?=
 ## into the storefront agent on first deploy. Left empty by default — the
 ## storefront starts with no inventory and the operator seeds via the API.
 ## Example:
-##   make deploy RESOURCES_CSV_FILE=./storefront/src/market_storefront/data/kvm1-machine.csv
-RESOURCES_CSV_FILE ?=../storefront/src/market_storefront/data/kvm1-machine.csv
+##   make deploy RESOURCES_CSV_FILE=./domains/vms/storefront/src/market_storefront/data/kvm1-machine.csv
+RESOURCES_CSV_FILE ?=../domains/vms/storefront/src/market_storefront/data/kvm1-machine.csv
 
 ## Render the full parent chart (and all enabled subcharts) to stdout
 template:
@@ -45,7 +45,7 @@ test-render:
 	@./scripts/test-render.sh
 
 ## Render a single subchart in isolation.
-## Requires MODULE=<subchart-name>, e.g. make template-module MODULE=test-env
+## Requires MODULE=<subchart-name>, e.g. make template-module MODULE=dev-env
 template-module:
 ifndef MODULE
 	$(error MODULE is not set. Usage: make template-module MODULE=<subchart-name>)
@@ -110,7 +110,7 @@ FORWARD_PID_FILE := .port-forward.pids
 forward: unforward
 	@echo "Starting port-forwards..."
 	@kubectl port-forward --namespace $(NAMESPACE) \
-		svc/$(RELEASE)-test-env 8545:8545 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
+		svc/$(RELEASE)-dev-env 8545:8545 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
 	@kubectl port-forward --namespace $(NAMESPACE) \
 		svc/$(RELEASE)-registry 8080:8080 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
 	@kubectl port-forward --namespace $(NAMESPACE) \

@@ -1,0 +1,76 @@
+name: Publish npm package
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'domains/apitokens/middleware/typescript/**'
+      - '.github/workflows/publish-npm.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write   # OIDC: tokenless trusted publishing + provenance
+
+# Publishes @arkhai/apitokens-middleware to npm via OIDC trusted publishing
+# (no NPM_TOKEN secret), the npm analog of the PyPI trusted publishing used
+# by publish-pypi.yml.
+#
+# One-time setup on npmjs.com:
+#   1. Create the `arkhai` org/scope (the package is @arkhai/...).
+#   2. The package must exist before a trusted publisher can be attached.
+#      First publish: `npm publish` once locally (npm login + `npm publish
+#      --access public` from the package dir), OR configure the trusted
+#      publisher first if your npm plan allows pre-registration.
+#   3. On the package's npmjs.com page -> Settings -> Trusted Publisher, add a
+#      GitHub Actions publisher:
+#        Organization/User = arkhai-io
+#        Repository        = simple-compute-market
+#        Workflow filename = publish-npm.yml
+#   Trusted publishing requires npm >= 11.5.1 (installed below). Provenance
+#   is requested via `npm publish --provenance` in the publish step (kept out
+#   of publishConfig so a local bootstrap publish still works), giving a
+#   verifiable link from the published tarball back to this commit.
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: domains/apitokens/middleware/typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Use npm with trusted-publishing support
+        run: npm install -g npm@latest   # needs >= 11.5.1
+      - name: Skip if version already on npm
+        id: check
+        run: |
+          set -euo pipefail
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${name}@${version} already on npm; skipping"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::publishing ${name}@${version}"
+          fi
+      - name: Install dependencies
+        if: steps.check.outputs.skip == 'false'
+        run: npm ci
+      - name: Build
+        if: steps.check.outputs.skip == 'false'
+        run: npm run build
+      - name: Publish to npm
+        if: steps.check.outputs.skip == 'false'
+        # --provenance works only in CI (OIDC); it's intentionally NOT in
+        # publishConfig so a local `npm publish` bootstrap still works.
+        run: npm publish --provenance

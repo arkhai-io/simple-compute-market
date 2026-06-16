@@ -1,0 +1,50 @@
+[project]
+name = "arkhai-core-registry"
+version = "0.1.0"
+license = "MIT"
+description = "Listing discovery/index service (registry role)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.12.0",
+    "psycopg2-binary>=2.9.9",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "eth-account>=0.9.0",
+    "python-dotenv>=1.0.0",
+    "aiohttp>=3.9.0",
+    "pyyaml>=6.0",
+    "jsonschema>=4.20",
+    "jsonpath-ng>=1.6",
+    "arkhai-kit-identity",
+]
+
+[tool.uv.sources]
+arkhai-kit-identity = { path = "../../kit/identity", editable = true }
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.27.0",
+    "arkhai-core-registry-client>=0.6.0",
+    "black>=23.11.0",
+    "ruff>=0.1.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = ["--tb=short", "-v"]

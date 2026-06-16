@@ -47,6 +47,11 @@ agents:
       # RESOURCES_CSV_FILE=/path/to/resources.csv to set this via --set-file.
       # Leave empty to start with no inventory (seed via the import API later).
       resourcesCsvInline: ""
+      # Write-scoped API key for the indexer registry, rendered into the
+      # secrets TOML as [registry.auth] keyed by the composed registry URL.
+      # Required when the registry sets requireWriteApiKey. Never commit a
+      # real token; inject via --set at render/deploy time.
+      registryAuthToken: ""
     # config.* lands in the rendered storefront.toml. Keys map 1:1 to the
     # storefront schema in market_storefront.utils.config (which reads top-level
     # keys + [provisioning] / [negotiation] / [pricing] sections — no [seller] prefix).
@@ -148,6 +153,10 @@ persistence:
   # file under this directory; the chart does not enforce this — it's
   # the operator's responsibility to keep the two aligned.
   mountPath: /var/lib/arkhai
+  # existingClaim: when set, the chart mounts this pre-existing PVC
+  # and does not create one of its own. Leave empty to let the
+  # chart create a PVC (requires persistence.enabled: true).
+  existingClaim: ""
 
 # ---------------------------------------------------------------------------
 # zerotierEnabled: controls whether ZeroTier networking infrastructure is

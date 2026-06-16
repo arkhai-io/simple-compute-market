@@ -1,0 +1,28 @@
+# ---------------------------------------------------------------------------
+# Profile: docker
+# Loaded automatically when the container image runs standalone
+# (ACTIVE_PROFILES=docker is baked into the Dockerfile).
+#
+# Provides the IaC paths that match the image's baked-in directory layout
+# and sets ANSIBLE_CONFIG to point at the bundled ansible.cfg.
+# Override specific values at runtime via PROVISIONING_* env vars.
+# ---------------------------------------------------------------------------
+
+playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
+inventory_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/hosts"
+management_vars_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
+ansible_cfg: "/opt/domains/vms/provisioning/iac/ansible/ansible.cfg"
+
+# ---------------------------------------------------------------------------
+# Storefront callback target for the lease watchdog.
+#
+# The watchdog PATCHes this URL when a lease expires to mark the storefront
+# resource back to available. Defaults to the storefront service name on the
+# shared docker network (matches docker-compose.yml's bob-storefront).
+#
+# Override at runtime:
+#   PROVISIONING_STOREFRONT_URL=http://<host>:<port>
+#   PROVISIONING_STOREFRONT_ADMIN_KEY=<key>
+# ---------------------------------------------------------------------------
+storefront_url: "http://bob-storefront:8001"
+storefront_admin_key: "test-api-key"

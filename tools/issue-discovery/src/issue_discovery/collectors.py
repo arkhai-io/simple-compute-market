@@ -76,7 +76,16 @@ class CollectorRunner:
             env=self.env,
             redactor=self.redactor if spec.redact else Redactor(),
         )
-        output_text = result.stdout_path.read_text(encoding="utf-8")
+        stdout_text = result.stdout_path.read_text(encoding="utf-8")
+        stderr_text = result.stderr_path.read_text(encoding="utf-8")
+        output_text = stdout_text
+        if stderr_text:
+            output_text = (
+                stdout_text
+                + ("\n" if stdout_text and not stdout_text.endswith("\n") else "")
+                + "## stderr\n"
+                + stderr_text
+            )
         output_path = self.store.write_text(spec.output, output_text)
         record = {
             "id": spec.id,

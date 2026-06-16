@@ -1,0 +1,29 @@
+[project]
+name = "arkhai-core"
+version = "0.1.0"
+license = "MIT"
+description = "Core market wire models and orchestration-neutral helpers"
+requires-python = ">=3.10,<3.14"
+# Carriers only: the wheel must stay importable by every role package
+# without dragging in role or kit code (see schemas.py module docstring;
+# enforced by tests/unit/test_carrier_purity.py).
+dependencies = [
+    "pydantic>=2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/market_core"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+testpaths = ["tests/unit"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4,<9.0.0",
+]

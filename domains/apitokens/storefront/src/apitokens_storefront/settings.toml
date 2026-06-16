@@ -1,0 +1,99 @@
+# ---------------------------------------------------------------------------
+# API-tokens storefront base defaults.
+# This file documents every supported key and its default. Do NOT put
+# environment-specific values here.
+#
+# Override via (highest priority first):
+#   1. APITOKENS_STOREFRONT_* environment variables (separator __)
+#   2. $XDG_CONFIG_HOME/arkhai/storefront.secrets.toml  (Secret overlay)
+#   3. $XDG_CONFIG_HOME/arkhai/storefront.toml          (ConfigMap base)
+#   4. This file
+#
+# The overlay files are shared with the VM storefront's loader on
+# purpose: a deployment runs one storefront per container, each with its
+# own mounted storefront.toml.
+# ---------------------------------------------------------------------------
+
+# Identity
+agent_id   = ""        # must be a Python identifier; empty → "root_agent"
+agent_name = ""        # display name; falls back to agent_id
+
+# HTTP server
+port     = 8002
+base_url = "http://localhost:8002"  # advertised in registry publications
+
+# Storage / logging
+db_path       = "./src/apitokens_storefront/data/storefront/agent.db"
+log_level     = "INFO"
+
+# Admin API key — protects /admin/* routes. Empty means unprotected (local dev).
+admin_api_key = ""
+
+# Registry discovery (seller-side)
+enable_registry_discovery = true
+
+# Negotiation watchdog
+negotiation_timeout_seconds   = 1800
+negotiation_watchdog_interval = 60
+# Deal-servicing engine sweep cadence (seconds).
+claims_sweep_interval = 30
+
+[wallet]
+# Sensitive — populated by Secret overlay in k8s, by local file otherwise.
+address     = ""
+private_key = ""
+
+# [chains.<name>] tables — one per chain the operator transacts on, same
+# schema as the VM storefront (rpc_url required; chain_id and
+# alkahest_address_config_path optional).
+
+[registry]
+urls              = []
+discovery_timeout = 5.0
+
+[registry.auth]
+# Free-form table of {url = "bearer-token"} pairs for private registries.
+
+[gateway]
+root_path = ""
+
+[tokens]
+# The tokens service (arkhai-apitokens-service) this storefront sells
+# for. It hosts both the quota ledger (the [capacity] authority below
+# defaults to it) and the issuance/keys API. admin_key falls back to
+# admin_api_key when empty.
+service_url       = "http://localhost:8082"
+admin_key         = ""
+preflight_timeout = 30
+fail_on_unreachable = true
+
+[capacity]
+# The authoritative quota ledger lives in the tokens service; the
+# storefront is strictly a client. Same site vocabulary as the VM
+# storefront ([capacity.sites] table or authority_url single site);
+# authority_url defaults to tokens.service_url.
+authority_url    = ""
+poll_interval    = 5
+placement        = "fill_first"
+hold_ttl_seconds = 900
+
+[fulfillment.failure_policy]
+# Actions applied when issuance/fulfillment fails. `release_capacity`
+# releases the quota hold at the ledger and reopens exhausted listings;
+# `emit_event` writes to stage_events; `webhook` POSTs the failure
+# payload to webhook_url. Issuance rollback (clawback + revoke of a
+# deal-created key) is inline in the fulfillment flow, not an action.
+actions         = ["release_capacity", "emit_event"]
+webhook_url     = ""
+webhook_timeout = 5.0
+
+[negotiation]
+# Ordered policies run per round; the api-tokens guards are prepended
+# automatically (api_tokens_round_zero_guard, buyer_counter_guard,
+# token_quota_guard, key_owned_by_buyer_wallet, escrow_shape_guard).
+# A seller who wants open top-up overrides this list without
+# key_owned_by_buyer_wallet. The terminal default is listed_price.
+policies = []
+
+[pricing]
+default_min_price = ""

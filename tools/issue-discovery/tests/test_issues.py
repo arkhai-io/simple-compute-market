@@ -110,6 +110,45 @@ def test_issue_generator_uses_generic_fingerprint_when_classifier_evidence_does_
     assert candidates[0].confidence == "low"
 
 
+def test_preexisting_stack_classifier_does_not_match_service_name_only(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_run(
+        run_dir,
+        stderr_text="registry failed readiness while provisioning was starting",
+        classifiers=["preexisting_compose_stack"],
+    )
+
+    candidates = IssuePacketGenerator(run_dir).generate()
+
+    assert [candidate.fingerprint for candidate in candidates] == [
+        "compose-start-strict-compose-up"
+    ]
+
+
+def test_preexisting_stack_classifier_matches_container_name_collision(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    write_run(
+        run_dir,
+        stderr_text=(
+            'Error response from daemon: Conflict. The container name "/registry" '
+            "is already in use by container abc123."
+        ),
+        classifiers=["preexisting_compose_stack"],
+    )
+
+    candidates = IssuePacketGenerator(run_dir).generate()
+
+    assert [candidate.fingerprint for candidate in candidates] == [
+        "preexisting-compose-stack"
+    ]
+
+
 def test_issue_generator_uses_matching_classifier_for_known_root_cause(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -524,6 +563,7 @@ def test_issue_create_skips_duplicate_issue(tmp_path: Path, monkeypatch, capsys)
 
     assert code == 0
     assert len(calls) == 1
+    assert "--state" not in calls[0]
     assert "duplicate issue exists" in capsys.readouterr().out
 
 

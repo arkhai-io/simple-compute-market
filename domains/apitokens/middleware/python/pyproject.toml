@@ -1,0 +1,26 @@
+[project]
+name = "arkhai-apitokens-middleware"
+version = "0.1.0"
+license = "MIT"
+description = "Seller-side ASGI middleware gating a downstream app on prepaid API credits from the arkhai tokens service."
+requires-python = ">=3.12"
+dependencies = [
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/apitokens_middleware"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+asyncio_mode = "auto"
