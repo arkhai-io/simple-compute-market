@@ -1,0 +1,57 @@
+name: E2E
+
+on:
+  schedule:
+    - cron: '0 7 * * *'   # nightly, ~07:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# The docker-compose end-to-end suite: builds the runtime + dev images,
+# brings up the full stack on a shared dev chain, and runs the buyer-machine
+# scenarios from inside the compose network (the `make test-e2e` flow). Far
+# heavier than the per-push Tests workflow, so it runs nightly / on demand.
+#
+# COMPOSE_PROJECT_NAME is pinned so the compose network is
+# `simple-market-service_default`, which the e2e Makefile's test-buyer-machine
+# target expects regardless of the checkout directory name. PROVISIONING_MODE
+# is mock (no real VM hosts).
+env:
+  COMPOSE_PROJECT_NAME: simple-market-service
+  PROVISIONING_MODE: mock
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.11.17"
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1   # matches FOUNDRY_VERSION in the Makefile
+      - name: Build dev stack + run e2e scenarios
+        # `make test-e2e` = compose down -v -> build-dev (wheels, buyer CLI,
+        # runtime/anvil/test images) -> compose up -d --wait -> run the e2e
+        # markers from a one-shot container on the compose network.
+        run: make -C e2e-tests test-e2e
+      - name: Collect compose logs
+        if: always()
+        run: docker compose logs --no-color > compose-logs.txt 2>&1 || true
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: compose-logs.txt
+          if-no-files-found: ignore
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v --remove-orphans || true
