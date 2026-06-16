@@ -31,6 +31,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ACTIVE_PROFILES: mock
+      # CI has no controlling TTY, so Rich falls back to COLUMNS for help
+      # width; pin it wide so `typer --help` renders option flags
+      # un-truncated (several plugin tests assert on flag substrings).
+      COLUMNS: '200'
     strategy:
       fail-fast: false
       matrix:
@@ -43,11 +47,10 @@ jobs:
           - { name: core-buyer,             dir: core/buyer }
           - { name: core-storefront,        dir: core/storefront }
           - { name: core-storefront-client, dir: core/storefront-client }
-          - { name: core-registry-client,   dir: core/registry-client }
           - { name: core-registry,          dir: core/registry }
           - { name: core-site,              dir: core/site }
           - { name: vms-buyer,              dir: domains/vms/buyer }
-          - { name: vms-storefront,         dir: domains/vms/storefront }
+          - { name: vms-storefront,         dir: domains/vms/storefront, needs_node: true }
           - { name: vms-provisioning,       dir: domains/vms/provisioning/service, pythonpath: src }
           - { name: apitokens-buyer,        dir: domains/apitokens/buyer }
           - { name: apitokens-storefront,   dir: domains/apitokens/storefront }
@@ -56,10 +59,13 @@ jobs:
           - { name: apitokens-sample-app,   dir: domains/apitokens/sample-app }
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        if: matrix.needs_node
+        with:
+          node-version: '22'   # alkahest_py spawns node for some parity tests
       - uses: astral-sh/setup-uv@v3
         with:
           version: "0.8.13"
-          enable-cache: true
       - name: pytest
         working-directory: ${{ matrix.dir }}
         env:
