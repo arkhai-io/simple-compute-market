@@ -164,7 +164,7 @@ wheels = [
 [[package]]
 name = "arkhai-apitokens-buyer"
 version = "0.1.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
     { name = "arkhai-core" },
@@ -177,24 +177,24 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_apitokens_buyer-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_apitokens_buyer-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core"
 version = "0.1.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_core-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-buyer"
 version = "0.1.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-kit-alkahest" },
@@ -205,38 +205,38 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_core_buyer-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_core_buyer-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-registry-client"
 version = "0.10.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "eth-account" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_core_registry_client-0.10.0-py3-none-any.whl" },
+    { path = "arkhai_core_registry_client-0.10.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-site"
 version = "0.1.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_core_site-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_core_site-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-storefront"
 version = "0.1.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-core-registry-client" },
@@ -247,19 +247,19 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_core_storefront-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-storefront-client"
 version = "0.15.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "eth-account" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_core_storefront_client-0.15.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -329,55 +329,55 @@ provides-extras = ["dev"]
 [[package]]
 name = "arkhai-kit-alkahest"
 version = "0.1.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "pydantic" },
     { name = "web3" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_kit_alkahest-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_alkahest-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-config"
 version = "0.1.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
     { name = "eth-account" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_kit_config-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-identity"
 version = "0.1.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "eth-account" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_kit_identity-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-policy"
 version = "0.1.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "pydantic" },
     { name = "typer" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_kit_policy-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_policy-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-vms-buyer"
 version = "0.1.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
     { name = "arkhai-core" },
@@ -392,13 +392,13 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_vms_buyer-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_vms_buyer-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-vms-provisioning"
 version = "0.4.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "aiohttp" },
     { name = "arkhai-core-site" },
@@ -419,13 +419,13 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_vms_provisioning-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_vms_provisioning-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-vms-storefront"
 version = "0.1.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service/.dist" }
+source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
     { name = "arkhai-core" },
@@ -452,7 +452,7 @@ dependencies = [
     { name = "websockets" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service/.dist/arkhai_vms_storefront-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_vms_storefront-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
