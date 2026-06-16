@@ -25,6 +25,14 @@ For the seller side see [`seller-quickstart.md`](./seller-quickstart.md).
 
 ## 1. Install
 
+From PyPI (lightest — just the buyer CLI). The `market` console script
+ships in `arkhai-core-buyer`; `arkhai-vms-buyer` adds the VM-compute
+plugin:
+
+```bash
+uv tool install arkhai-core-buyer --with arkhai-vms-buyer
+```
+
 Released build (latest):
 
 ```bash
