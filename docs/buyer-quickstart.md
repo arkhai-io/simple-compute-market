@@ -13,7 +13,7 @@ For the seller side see [`seller-quickstart.md`](./seller-quickstart.md).
   plus whatever ERC-20 the seller accepts. Examples below use Base
   Sepolia + USDC at `0x036CbD53842c5426634e7929541eC2318f3dCF7e` (test
   funds from [faucet.circle.com](https://faucet.circle.com)); any EVM
-  chain with ERC-8004 + Alkahest deployed works.
+  chain with Alkahest deployed works.
 - An RPC URL for that chain.
 - An SSH keypair for leased VMs:
 
@@ -50,7 +50,7 @@ Or from the repo:
 git clone https://github.com/arkhai-io/simple-compute-market.git
 cd simple-compute-market
 make build-buyer
-export PATH="$PWD/buyer/.venv/bin:$PATH"
+export PATH="$PWD/domains/vms/buyer/.venv/bin:$PATH"
 market --version
 ```
 
@@ -69,19 +69,25 @@ chain_id = 84532
 rpc_url  = "https://sepolia.base.org"   # public RPC; or your own provider
 
 [registry]
-urls = ["http://<INDEXER_HOST>:8080"]
+# The Arkhai public indexer registry (preprod, Base Sepolia listings):
+urls = ["http://34.41.205.175/registry"]
+# Or point at any other indexer, e.g. a self-hosted one:
+# urls = ["http://<INDEXER_HOST>:8080"]
 
 [registry.auth]
 # Required when the indexer gates reads (REGISTRY_REQUIRE_READ_API_KEY=true).
+# The public preprod indexer is currently read-open — no token needed.
 # Keys must match the URLs in [registry] urls exactly (scheme, host,
 # port, no trailing slash).
-"http://<INDEXER_HOST>:8080" = "<your-token>"
+# "http://<INDEXER_HOST>:8080" = "<your-token>"
 
 [negotiation]
 # Ordered policy chain run per round. The buyer's default chain pairs
 # `buyer_escrow_shape_guard` (vetoes if the seller mutates a buyer-
 # pinned field) with the `bisection` terminal. Switch the terminal to
 # `"rl"` for the trained pufferlib checkpoint (~1GB torch download).
+# For per-escrow-kind dispatch, replace this list with a
+# [negotiation.policies] table; see docs/configuration.md.
 # See docs/configuration.md for the full reference.
 policies = ["buyer_escrow_shape_guard", "bisection"]
 ```
@@ -102,7 +108,8 @@ market listing show <listing_id>
 market buy \
   --gpu-model H200 \
   --duration-hours 1 \
-  --price-markup 1.5 \
+  --initial-price 1 \
+  --max-price 2 \
   --settlement-timeout 1800 \
   --yes
 ```
@@ -113,9 +120,9 @@ escrow on chain, and polls until the seller returns
 
 Useful flags:
 
-- `--initial-price` / `--max-price` — both required if either given;
-  bid range in human / whole-token units per hour (USDC: `--max-price 2`
-  = $2/hr; the CLI scales by the token's on-chain `decimals()`).
+- `--initial-price` / `--max-price` — bid range in human / whole-token
+  units per hour (USDC: `--max-price 2` = $2/hr; the CLI scales by the
+  token's on-chain `decimals()`).
 - `--gpu-count-min`, `--region`, `--vcpu-min`, `--ram-gb-min`,
   `--disk-gb-min` — additional listing filters.
 - `--settlement-timeout` — default 600s. Real cloud-init can take 5-10

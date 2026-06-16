@@ -1,0 +1,148 @@
+# API-tokens (api_tokens) market — domain stack.
+#
+# The seller side of the token-gated-API market: a registry/indexer instance
+# speaking the api_tokens schema, the tokens service (keys / prepaid credits /
+# quota ledger), the tokens storefront (self-seeds one quota-backed listing on
+# startup), and a sample gated app behind the Python token-gating middleware.
+# The buyer drives it with `market tokens buy`; its schema filter routes
+# discovery to the api-tokens registry and leaves the vms.compute registry
+# alone.
+#
+# Chain-touching services gate on a service named `anvil` (the local dev
+# chain) which this file does NOT define — the root `compose.dev.yml` supplies
+# it. Bring this domain up with that overlay via the repo-root wrapper:
+#   docker compose -f compose.apitokens.yml up
+# (compose.apitokens.yml just `include:`s compose.dev.yml + this file.) The
+# full multi-domain stack is the root `docker-compose.yml`.
+#
+# Paths below are relative to THIS file's directory (domains/apitokens/) —
+# Compose `include:` resolves an included file's relative paths against its
+# own location.
+
+services:
+  # 1. Registry for the api_tokens schema — same image as the vms.compute
+  # registry, different filter-spec (selected via REGISTRY_FILTER_SPEC_PATH).
+  api-tokens-registry:
+    image: arkhai:registry
+    depends_on:
+      anvil:
+        condition: service_healthy
+    ports:
+      - "8090:8080"
+    env_file:
+      - ../../core/registry/.env.docker-compose
+    environment:
+      - REGISTRY_FILTER_SPEC_PATH=/app/filter-spec-apitokens.yaml
+    volumes:
+      - ../../shared-env:/app/shared-env
+      - ./registry/filter-spec.yaml:/app/filter-spec-apitokens.yaml:ro
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # 2. Tokens service — keys, prepaid credit grants, consumption, and the
+  # quota ledger. Admin-gated (X-Admin-Key); no chain dependency.
+  tokens-service:
+    image: arkhai:apitokens-service
+    ports:
+      - "8092:8082"
+    environment:
+      - APITOKENS_STOREFRONT_ADMIN_KEY=test-api-key
+    volumes:
+      - tokens-service-data:/app/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 384m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8082/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  # 3. Sample gated app — one metered endpoint (/api/forecast) behind the
+  # Python token-gating middleware. Verifies/consumes against tokens-service.
+  sample-app:
+    image: arkhai:apitokens-sample-app
+    depends_on:
+      tokens-service:
+        condition: service_healthy
+    ports:
+      - "8095:8085"
+    environment:
+      - APITOKENS_MIDDLEWARE_SERVICE_URL=http://tokens-service:8082
+      - APITOKENS_MIDDLEWARE_ADMIN_KEY=test-api-key
+      - APITOKENS_MIDDLEWARE_AMOUNT_PER_REQUEST=1
+      # Short verify cache so a re-purchase (top-up) becomes visible to
+      # the gate quickly — the e2e polls through this window.
+      - APITOKENS_MIDDLEWARE_VERIFY_TTL_SECONDS=3
+      - APITOKENS_MIDDLEWARE_PURCHASE_SERVICE_NAME=weather-api
+      - APITOKENS_MIDDLEWARE_PURCHASE_STOREFRONT_URL=http://tokens-storefront:8000
+      - APITOKENS_MIDDLEWARE_PURCHASE_REGISTRY_URL=http://api-tokens-registry:8080
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8085/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  # 4. Tokens storefront — quota-backed listings + issuance-backed
+  # settlement. Self-seeds one listing on startup (storefront.tokens.toml
+  # [seed] block) pointing at the sample app.
+  tokens-storefront:
+    image: arkhai:apitokens-storefront
+    platform: linux/amd64
+    depends_on:
+      anvil:
+        condition: service_healthy
+      api-tokens-registry:
+        condition: service_healthy
+      tokens-service:
+        condition: service_healthy
+      sample-app:
+        condition: service_healthy
+    ports:
+      - "8093:8000"
+    environment:
+      - XDG_CONFIG_HOME=/etc
+      - PYTHONPATH=/app
+    volumes:
+      # Chain-/seller-specific config is the one environment-supplied mount;
+      # override $APITOKENS_STOREFRONT_CONFIG to point at a different chain's
+      # TOML (the default is the dev/anvil seller config).
+      - ${APITOKENS_STOREFRONT_CONFIG:-./storefront/storefront.tokens.toml}:/etc/arkhai/storefront.toml:ro
+      # The dev chain's deployed Alkahest contract addresses, borrowed from
+      # the VM storefront's data tree (the canonical anvil address book). A
+      # non-Anvil deployment supplies its own address book here.
+      - ../vms/storefront/src/market_storefront/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
+      - tokens-storefront-data:/app/src/apitokens_storefront/data/storefront
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  tokens-service-data:
+  tokens-storefront-data:

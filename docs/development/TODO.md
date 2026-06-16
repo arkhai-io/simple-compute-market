@@ -4,23 +4,44 @@ Pending architectural work and known operational issues for the Arkhai market st
 
 ---
 
+## Index
+
+| Item | Section | Status |
+|------|---------|--------|
+| [Init container migration & schema drift guard](#init-container-migration-pattern-and-schema-drift-guard) | State Management | Planned |
+| [Registry: Postgres migration](#registry-postgres-migration) | State Management | Planned |
+| [Market Core Extraction follow-ons](#market-core-extraction--done-remaining-follow-on-work) | Core Stack | In progress |
+| [Native Launch CLI for Provisioning Service](#native-launch-cli-for-provisioning-service) | Core Stack | Planned |
+| [Escrow Kind Codec Expansion](#escrow-kind-codec-expansion) | Core Stack | Done |
+| [Storefront DB Pruning](#storefront-db-pruning) | Core Stack | Planned |
+| [Registry Filter-Spec side indexes](#registry-filter-spec-indexed-true-side-indexes) | Core Stack | Deferred |
+| [Shared Dynaconf Bootstrap](#shared-dynaconf-bootstrap) | Core Stack | Planned |
+| [Storefront Admin CLI Test Coverage](#storefront-admin-cli-test-coverage) | Core Stack | Planned |
+| [Move e2e Tests to Separate Project](#move-e2e-tests-to-a-separate-project) | Core Stack | Planned, no timeline |
+| [Shared marketplace registry (not per-node)](#shared-marketplace-infrastructure-not-per-node) | Registry Service | Planned |
+| [Golden image configuration](#golden-image-configuration-management-varsyaml) | Provisioning Service | Needs review |
+| [`HostController.check_capacity` filters](#hostcontrollercheck_capacity-resource-filters) | Provisioning Service | Needs review |
+| [Lease expiry watchdog: check job interpretation](#lease-expiry-watchdog--check-job-result-interpretation) | Provisioning Service | Needs review |
+| [Multi-Provider Resource Pool Architecture](#multi-provider-resource-pool-architecture) | Provisioning Service | Needs review |
+| [Flat `client.*` package namespace](#flat-client-package-namespace) | Provisioning Service | Planned |
+| [Provisioning smoke tests: use typed client](#provisioning-smoke-tests-use-raw-httpx) | Provisioning Service | Done |
+| [`StorefrontCallbackClient` extraction](#storefrontcallbackclient-extraction-conditional) | Provisioning Service | Conditional |
+| [Alkahest contracts in baked state](#alkahest-contracts-in-the-baked-state) | Documentation Gaps | Needs review |
+| [Symmetric Order Concept](#symmetric-order-concept) | Documentation Gaps | Needs review |
+| [Alkahest Escrow Mechanics](#alkahest-escrow-mechanics) | Documentation Gaps | Needs review |
+| [SQLite Schema](#sqlite-schema) | Documentation Gaps | Needs review |
+| [`negotiation_watchdog`](#negotiation_watchdog) | Documentation Gaps | Needs review |
+| [GPU Passthrough Setup](#gpu-passthrough-setup) | Documentation Gaps | Needs review |
+
+> **Structural notes for next TODO pass:**
+> - **"Latent Bug Fixes"** section below is an empty placeholder — no items have been filed under it yet. Either populate or remove.
+> - **"Known Issues & Areas of Concern"** is a list of operational gotchas, not trackable work items with acceptance criteria. It doesn't map cleanly to table rows (no owner, no completion state). Consider splitting into a separate `KNOWN_ISSUES.md` or converting each entry to a proper task.
+> - **"Market Core Extraction follow-ons"** is a single heading containing a numbered list of sub-items with mixed statuses (some done, some planned). Each sub-item is really its own row — worth breaking out as individual `###` entries so their statuses can be tracked independently.
+> - **Provisioning Service** and **Documentation Gaps** items lack explicit `**Status:**` fields, making their state harder to scan. Should be consistent with the rest of the file.
+
+---
+
 ## State Management & Schema Migrations
-
-### Fix registry startup: apply Alembic migrations on boot
-
-**Problem:** `registry-service/src/db/database.py::init_db()` calls `Base.metadata.create_all(bind=engine)` but never runs `alembic upgrade head`. Fresh installs get the correct schema via `create_all`. Existing installs upgrading from an older image version do not have Alembic migrations applied — operators must run `alembic upgrade head` manually, and nothing tells them to. The `alembic_version` table exists and tracks state correctly; the startup path simply does not consult it.
-
-**Planned fix:** Add an `alembic upgrade head` call in the registry lifespan hook (or inside `init_db()`) before the service begins serving traffic. Alembic's upgrade is idempotent — on a fresh DB it applies all migrations in sequence; on a current DB it is a no-op. This should be the only startup migration mechanism once implemented; the `create_all` call becomes redundant and can be removed.
-
----
-
-### Consolidate storefront inline migrations
-
-**Problem:** `storefront/src/market_storefront/utils/sqlite_client.py` contains `_migrate_escrows_and_listings` and `_migrate_negotiation_amount_columns`, which run inline during table creation outside the `schema_migrations` tracking framework. These are real schema transformations with no version record, making it impossible to determine the precise schema version of a running storefront database from the `schema_migrations` table alone.
-
-**Planned fix:** Move both inline migration functions into `storefront/src/market_storefront/utils/migrations.py` with entries in `_MIGRATIONS` and corresponding version IDs in `schema_migrations`. Both already use `IF NOT EXISTS` and column-presence guards so they can be re-run safely; the only change is registering them. This is a prerequisite for accurate schema drift detection.
-
----
 
 ### Init container migration pattern and schema drift guard
 
@@ -45,16 +66,6 @@ For the registry (once on Postgres):
 
 4. Implement the Helm pre-upgrade hook Job pattern: a Kubernetes Job runs `alembic upgrade head` as a `helm.sh/hook: pre-upgrade,pre-install` before any Deployment pod sees the new image. If the Job fails, `helm upgrade` errors and the running Deployment is untouched.
 
-**Depends on:** Storefront inline migration consolidation (`schema_migrations` must be complete before the drift guard can be reliable for that service).
-
----
-
-### Helm charts: `persistence.existingClaim` parameter
-
-**Problem:** All three service Helm subcharts create a PVC when `persistence.enabled: true`. For production GCP deployments where Terraform owns the PVC lifecycle, the chart creating its own PVC conflicts with or duplicates the Terraform-managed resource, and a release-name change would silently provision a new empty volume.
-
-**Planned fix:** Add `persistence.existingClaim: ""` to each subchart's `values.yaml` (storefront, registry, provisioning). When set, the Deployment mounts the named PVC; no PVC resource is rendered by the chart. When empty, existing behaviour is unchanged. The production GCP values overlay in the ops repo sets `existingClaim` to the Terraform-managed PVC name. Document in `values.yaml` that `existingClaim` and `persistence.enabled` are mutually exclusive.
-
 ---
 
 ### Registry: Postgres migration
@@ -66,8 +77,8 @@ For the registry (once on Postgres):
 **Planned fix:**
 
 Application-side (`simple-compute-market`):
-- Connect `registry-service/src/db/database.py` to Cloud SQL when `database_url` contains a Postgres DSN (the branch already exists; wire the URL from the Helm values)
-- Replace the startup `create_all` with `alembic upgrade head` (same fix as above, applied in the correct Postgres context)
+- Connect `core/registry/src/db/database.py` to Cloud SQL when `database_url` contains a Postgres DSN (the branch already exists; wire the URL from the Helm values)
+- Replace the startup `create_all`/stamp bootstrap with an explicit migration-only path suitable for Postgres rollout
 - Implement the Helm pre-upgrade hook Job for `alembic upgrade head`
 
 Infrastructure-side (compute-market-internal-infra):
@@ -77,74 +88,119 @@ Infrastructure-side (compute-market-internal-infra):
 
 ---
 
----
 ## Core Stack
 
-### Market Core Extraction (from-above / from-below packaging)
+### Market Core Extraction — done; remaining follow-on work
 
-**Status:** Planned. Full scope in [`design-market-core-extraction.md`](design-market-core-extraction.md); principle documented in `ARCHITECTURE.md` → "Organizing Principle".
+**Status:** Done (branch `reorg-market-core-extraction`). The package
+graph expresses the core/kit/domain split, distribution names mirror it
+(`arkhai-{core,kit,vms}-*`), and the boundaries are enforced by tests
+(dependency-direction guardrail, carrier purity, no-plugin buyer CLI).
+Current-state layout and decisions: `ARCHITECTURE.md` → "Organizing
+Principle" / "Package layout". The remaining architectural items are
+planned with their design context in
+[`design-remaining-work.md`](design-remaining-work.md). The API-tokens
+market domain (second schema plugin, second storefront, tokens service +
+middlewares) has since shipped — current state in `ARCHITECTURE.md` →
+"API-tokens market domain".
 
-**Principle (the filing test):** a behavior belongs in the market core (composed *from above*) iff it is invariant across every possible listing schema; otherwise it is a from-below utility the core invokes through an injected hook. The core's universal surface is thin: negotiation is an exchange of opaque, schema-defined **messages**, and the only structural requirement is that `terms = negotiate(messages…); receipt = settle(terms)` is well-typed — negotiation reduces a message history to `Terms`, settlement consumes exactly that `Terms`. The core knows nothing about message content (offers/counters/bids/acceptances are schema vocabulary), how a participant picks its next message, an "acceptance set," floor/ceiling semantics, or how a mismatched message is answered; all of that is policy. Price and escrow shape are the same kind of thing (message content constrained by advertised data) and flow through the same negotiation chain.
+**This list is the single aggregation of what remains**, in rough
+dependency order:
 
-**Motivation:** the realistic first driver is heterogeneous listing schemas *within* compute that don't share a registry — not a different asset class. The registry is the schema-centralizing/platform point; per-schema instantiations (filter-spec + typed client + storefront/buyer plugins) become the registry operator's deliverable, depending on the core's from-above skeleton and from-below kit.
+1. **Settlement plan shapes** (`design-remaining-work.md` § 2). The
+   lifecycle machinery is landed — mechanism-neutral plan carrier,
+   `kit/alkahest` claims codecs, seller claims engine, buyer
+   `market service`, heartbeat channel, and the
+   deferring-third-party-oracle policy (current state:
+   `ARCHITECTURE.md` → "Settlement Lifecycle"). What remains are the
+   next plan shapes: the oracle *service*, true heartbeat-gated
+   collection, interval escrows + penalty bonds (and with them
+   engine-driven materialize/reclaim), and eventually a
+   `kit/fiat-<provider>` mechanism codec (deferred until a committed
+   customer/provider pairing).
 
-**Concrete seams to fix** (each filed against the principle today):
-- **Buyer CLI run-log/proposal repair (independent first slice):** `market buy` can settle from the seller-echoed `EscrowProposal` in memory, but split flows (`market negotiate` → `market settle --from` / `market escrow create --run`) persist only scalar fragments and reconstruct an ERC20-shaped proposal from token/chain config. Persist the accepted `EscrowProposal` + accepted delivery terms on agreement, make split settlement commands consume that canonical handoff, and treat token/chain flags as legacy overrides or remove them. Add generic repeatable `--filter name=value` to `market buy` / `market listing list` while keeping compute flags as convenience aliases; improve listing rendering to show accepted escrow shape and top-level `demands`.
-- **Buyer CLI schema-plugin boundary:** the registry backend is already filter-spec-driven, but the buyer CLI is still a compute-schema instantiation with hardcoded `--gpu-*`, `--ram-*`, `--region`, etc. Long term, core CLI owns orchestration and generic passthrough; schema plugins own named filter flags, listing/resource rendering, price extraction, schema-specific prompts, and accepted-escrow selection UX. Until plugin discovery exists, keep compute behavior embedded but file it as from-below schema behavior.
-- Escrow-shape validation runs as a pre-chain hard gate (`sync_negotiation._validate_escrow_proposal` raises before the chain) → demote to a negotiation middleware that may reject *or* counter-correct, symmetric with `bisection`.
-- **Minimal hook surface:** `run_buy` injects six behavior hooks (`build_escrow_proposal`, `derive_prices`, `build_escrow_terms`, `create_escrow`, `confirm_settlement`, `chain`); the well-typed `terms = negotiate(); receipt = settle(terms)` surface wants two. Collapse consecutive/bundled hooks — `negotiate` absorbs `chain` + `derive_prices` + opening-message construction + commit; `settle` absorbs `build_escrow_terms` + `create_escrow`. Further factoring is the implementation's business, not the core contract.
-- `ProvisionTerms` is compute-flavored (`ssh_public_key`/`duration_seconds`/`compute_resource`) → make the core carry delivery terms as an opaque schema blob (as the registry already does with `offer_resource`).
-- The market skeleton lives inside `buyer/` + `storefront/` tangled with compute code → extract `market-core` so the package graph expresses the joint the `run_buy(...)` signature already implies.
+2. **Capacity: second executor / second market domain**
+   (`design-remaining-work.md` § 3). The site authority, aggregator,
+   event split, and two-phase TTL reserve are landed (current state:
+   `ARCHITECTURE.md` → "Capacity and the Site Authority"). What
+   remains is the multi-domain proof: a job-kind queue keyed by
+   `allocation_id`, deal-event routing by recorded `deal_ref`, a
+   second executor kind, then a second market-domain storefront
+   sharing the pool — plus the parked deployment follow-ons
+   (parameterized storefront chart, per-domain build targets).
 
-**Not an immediate target** — this is the filing principle for *where new behavior goes*, captured so the next non-trivial change to negotiation/settlement is filed correctly rather than by precedent. The packaging extraction is the eventual payoff; the cheap wins (escrow guard → middleware, `derive_prices` placement) can land independently.
+3. **`storefront-client` wire genericization:** the client wheel still
+   sends the flat legacy provision-terms shape
+   (`{duration_seconds, ssh_public_key, compute_resource}`) and exposes
+   compute-vocabulary parameters. Genericizing it retires the marked
+   legacy shim in `market_core.schemas.ProvisionTerms`. Wire-compat
+   change; bump client wheels. Rides the carrier-vocabulary
+   generalization (`design-remaining-work.md` § 1) so `/negotiate/*`
+   churns once.
+
+4. **Schema identity/version for plugins:** *(Done — shipped with the
+   API-tokens domain.)* `filter-spec.yaml` gained a `schema: {id,
+   version}` header surfaced by the registry client, and
+   `resolve_indexer_urls_for_schema` offers each plugin only the
+   registries whose declared id matches (lenient on undeclared/
+   unreachable). See `ARCHITECTURE.md` → "API-tokens market domain".
+
+5. **Buyer CLI residue (small):** render top-level listing `demands`
+   wherever listing detail should expose payment constraints; keep
+   old-run-log compatibility code clearly marked legacy.
+
+   Deferred remainders from the buyer policy-surface work
+   (`ARCHITECTURE.md` → "Buyer negotiation policy surface"):
+   - *(Done — the API-tokens domain fired both triggers.)* The `--yes`
+     flag and the `inject_policy_cli_params` invocation moved into core
+     (`core_buyer.cli.assume_yes_option` / `register_policy_verb`); the
+     per-unit→absolute price translation moved out of the CLI bodies into
+     the buyer's negotiation client (`negotiate_with_seller` scales by an
+     explicit `unit_count`). The ERC-20 **token-decimals** scaling still
+     rides in the VM `buy` body and could follow the same path when
+     wanted.
+   - a `BuyerPolicy.prefer(candidates)` hook for policy-driven escrow
+     tuple choice among compatible entries — when policies need
+     different preferences (today selection takes the first compatible
+     entry).
+
+6. **PyPI trusted-publishing one-time setup:** the publish CI
+   (`.github/workflows/publish-pypi.yml`) now covers all 18 consumable
+   packages (kit/core libraries, SDK clients, buyer/storefront plugins,
+   the registry indexer, provisioning + tokens services, the tokens
+   middleware) — every userland role, not the e2e harness/demo/tooling. Names keep the
+   `arkhai-` prefix — PyPI orgs don't namespace distribution names, so the
+   prefix is the namespace. Each package still needs its PyPI project +
+   trusted-publisher environment created per `RELEASING.md` before its
+   first publish succeeds (nothing is on PyPI yet).
 
 ---
 
 ### Native Launch CLI for Provisioning Service
 
-**Status:** Planned. The registry is launched directly via `registry-service` (`make serve`); provisioning has no native launch path.
+**Status:** Planned. The registry is launched directly via `arkhai-core-registry` (`make serve`); provisioning has no native launch path.
 
-**Problem:** The provisioning service is launched today only via raw `uvicorn` in its Dockerfile (`provisioning-service/Dockerfile:105`). There is no native, `pip install …` + run path — running it without docker-compose requires manually invoking uvicorn against the right module and managing the worker process separately. This blocks the "provider runs a provisioning service" half of the four-parties topology: a provider should be able to install and run the service on their own machine without inheriting the dev stack's container assumptions.
+**Problem:** The provisioning service is launched today only via raw `uvicorn` in its Dockerfile (`domains/vms/provisioning/service/Dockerfile:105`). There is no native, `pip install …` + run path — running it without docker-compose requires manually invoking uvicorn against the right module and managing the worker process separately. This blocks the "provider runs a provisioning service" half of the four-parties topology: a provider should be able to install and run the service on their own machine without inheriting the dev stack's container assumptions.
 
-**Planned fix:** add a `provisioning-service` console script that wraps both the API uvicorn process and the worker process (likely as two subcommands: `provisioning-service serve` and `provisioning-service worker`). Compose / Helm configs then invoke the console script instead of `uvicorn …` directly.
+**Planned fix:** add a `arkhai-vms-provisioning` console script that wraps both the API uvicorn process and the worker process (likely as two subcommands: `arkhai-vms-provisioning serve` and `arkhai-vms-provisioning worker`). Compose / Helm configs then invoke the console script instead of `uvicorn …` directly.
 
-The `provisioning-service` wheel stays its own distributable — it's operated by providers, who already install `market-storefront` from a separate wheel, and the existing Helm chart structure already treats it as a separate workload.
+The `arkhai-vms-provisioning` wheel stays its own distributable — it's operated by providers, who already install `arkhai-vms-storefront` from a separate wheel, and the existing Helm chart structure already treats it as a separate workload.
 
 ---
 
 ### Escrow Kind Codec Expansion
 
-**Status:** Planned. Full scope in [`design-escrow-kind-codecs.md`](design-escrow-kind-codecs.md).
+**Status:** Done.
 
-**Problem:** The escrow codec registry is architected to dispatch by `(chain, escrow_address)`, but current buyer creation and seller verification only support `erc20_escrow_obligation_nontierable`. Alkahest ships native-token, ERC721, ERC1155, token-bundle, attestation-request, and attestation-UID escrow obligations in both tierable and non-tierable variants. Supporting those is more than registering ABI layouts: buyer proposal construction, listing templates, rate/literal-field semantics, SDK create paths, verifier decoding, and e2e coverage all need to agree.
+**Current state:** settlement consumes concrete `EscrowTerms` on accept, and every tierable/non-tierable escrow obligation under `alkahest/contracts/src/obligations/escrow` is registered with codec-boundary tests: ERC20, native-token, ERC721, ERC1155, token-bundle, attestation-request, and attestation-UID. Packaged policies include exact-match behavior for non-default formats, and scalar policies cover ERC20, native-token, and ERC1155. Representative compose-backed settlement e2e coverage exists for native-token and ERC1155 escrows.
 
-**Planned fix:** expand codecs in phases: first add registry/ABI/SDK adapters and unit tests for straightforward token escrows, then update listing/proposal semantics and templates, then add representative e2e coverage, with attestation escrows handled after their product semantics are nailed down.
-
----
-
-### Compute Dynamic Listings from Inventory and Leases
-
-**Status:** Implemented. Compute inventory now has explicit storefront-side pools and pool members. Existing compute resources are backfilled into single-member pools, and resources can opt into fungible capacity by sharing `attribute.pool_id`. Pool-level derived listings use held `compute_allocations` to suppress oversized slices, close stale open listings, reopen listings after capacity release, and persist provisioning callback correlation metadata. The focused e2e scenario is `e2e_compute_dynamic_listings`.
-
-**Problem:** Listings are currently static rows, while GPU VM capacity is partly
-managed through resource state and provisioning leases. This does not support
-partial-capacity offers such as deriving 1x, 2x, 3x, and 4x listings from one
-4x GPU machine, nor does it support closing/reopening oversized listings as
-capacity is reserved, leased, and released.
-
-**Implemented fix:** compute-specific storefront inventory pools, pool members,
-capacity allocations, deterministic derived listings, and provisioning lifecycle
-callbacks. The storefront owns market-facing inventory, listing reconciliation,
-and seller policy refund/dispute/failure decisions; the provisioning service
-owns execution facts and reports lifecycle callbacks.
-
----
+Follow-up work around schema-packaged registry filters and buyer CLI plugins is tracked under Market Core Extraction.
 
 ### Storefront DB Pruning
 
 **Status:** Planned. Needs dormant-code verification before any DROP.
 
-**Problem:** The seller-side storefront DB still carries tables that were introduced for the event-driven dispatcher model and may no longer be exercised after the buyer rewrite and the settlement decoupling from `ACCEPT_OFFER`. Candidates in `storefront/.../sqlite_client.py`:
+**Problem:** The seller-side storefront DB still carries tables that were introduced for the event-driven dispatcher model and may no longer be exercised after the buyer rewrite and the settlement decoupling from `ACCEPT_OFFER`. Candidates in `domains/vms/storefront/.../sqlite_client.py`:
 
 - `decisions` (line 254) and `resource_transition_events` (line 621) — both started life as audit logs; if nothing reads them in production paths they belong in structured logs, not SQLite.
 - `policies` (line 229) and `policy_composites` (line 241) — only needed if policies are user-configurable at runtime. If policy is just code (the file-policy discovery flow now in `sync_negotiation._discover_file_policies`), these tables disappear.
@@ -156,23 +212,11 @@ The `orders → listings` rename is already done; the plan's older framing of "d
 
 ---
 
-### "Agent" → "Storefront" Internal Naming Mop-Up
-
-**Status:** Planned. The user-facing rename (CLI flags, wire JSON keys, table names, doc surfaces) is done; internal terminology has residue.
-
-**Context:** "agent" in this codebase used to refer to two distinct things — the ERC-8004 protocol concept and historical references to the seller's runtime process from the ADK era. With ERC-8004 deleted in Phase 4 of the pluggable-identity refactor, the term now only ever means "seller's runtime process", which should be `storefront`. The user-facing rename is done; internal residue:
-
-- **`storefront/src/market_storefront/agent.py`** — residual startup-helpers module (docstring: "Storefront startup hooks"). A sibling `server.py` already exists; this file should be folded into `server.py` or renamed to something purpose-named (e.g. `startup.py`). Importers: `server.py` (lifespan).
-
-**Not worth chasing:** the internal `agent_url` parameter name in `cli_publish.py`, `groups/escrow.py`, `action_executor.py`, `sync_negotiation.py`, `negotiation_models.py` (`buyer_agent_url`), etc. It's pervasive, internal-only (no wire surface), and the value plumbed through is consistently a storefront URL. Rename opportunistically; don't sweep.
-
----
-
 ### Registry Filter-Spec `indexed: true` Side Indexes
 
 **Status:** Deferred until query latency on `/listings` demands it.
 
-**Problem:** The registry's filter-spec YAML supports an `indexed: bool` annotation per filter (`registry-service/src/api/filter_spec.py:58` — `indexed: bool = False  # reserved for (a2); registry ignores today`). The intent was that hot filter axes (`token`, `gpu_model`) could opt into a registry-side denormalized index — generated column + index for scalar paths, side table for array-projection paths — populated at publish/update time. Today every filter evaluates in-memory via `jsonpath-ng` over the full row set; no side indexes exist, and no filter in `registry-service/filter-spec.yaml` declares `indexed: true`.
+**Problem:** The registry's filter-spec YAML supports an `indexed: bool` annotation per filter (`core/registry/src/api/filter_spec.py:58` — `indexed: bool = False  # reserved for (a2); registry ignores today`). The intent was that hot filter axes (`token`, `gpu_model`) could opt into a registry-side denormalized index — generated column + index for scalar paths, side table for array-projection paths — populated at publish/update time. Today every filter evaluates in-memory via `jsonpath-ng` over the full row set; no side indexes exist, and no filter in `core/registry/filter-spec.yaml` declares `indexed: true`.
 
 **Planned fix:** when query latency on `/listings` starts mattering, wire the `indexed: true` path:
 - For scalar JSONPath filters (e.g. `$.offer_resource.gpu_model`): generated column + B-tree index, maintained by the publish/update writer.
@@ -187,9 +231,9 @@ Until then: the `indexed: bool` field stays as a no-op in the loader so the YAML
 
 **Status:** Planned. Two copies in the tree today.
 
-**Problem:** `provisioning-service/src/config.py` (~100 LOC) and `integration-tests/src/settings.py` (~80 LOC) each carry their own near-identical Dynaconf bootstrap (profile selection from `ACTIVE_PROFILES`, `CONFIG_DIRECTORY` resolution, deep-merged `settings.toml` → `.secrets.toml` → `config.yml` → `config-<profile>.yml` → env vars layering). The storefront has since gained its own dynaconf loader at `storefront/src/market_storefront/utils/config.py` with the `STOREFRONT_*` prefix — that one is structurally similar but profile-free, so isn't part of the duplication.
+**Problem:** `domains/vms/provisioning/service/src/config.py` (~100 LOC) and `e2e-tests/src/settings.py` (~80 LOC) each carry their own near-identical Dynaconf bootstrap (profile selection from `ACTIVE_PROFILES`, `CONFIG_DIRECTORY` resolution, deep-merged `settings.toml` → `.secrets.toml` → `config.yml` → `config-<profile>.yml` → env vars layering). The storefront has since gained its own dynaconf loader at `domains/vms/storefront/src/market_storefront/utils/config.py` with the `STOREFRONT_*` prefix — that one is structurally similar but profile-free, so isn't part of the duplication.
 
-**Planned fix:** lift the shared bootstrap (profile resolution + layered loader factory) into `service/` (the `market-service` wheel), where `config_loader.py` already lives. `provisioning-service` and `integration-tests` import from there and pass in their per-service prefix (`PROVISIONING_*` / `ARKHAI_*`) + defaults path. No behavior change; pure dedup.
+**Planned fix:** lift the shared bootstrap (profile resolution + layered loader factory) into `kit/config` alongside `market_config.config_loader`. `arkhai-vms-provisioning` and `e2e-tests` import from there and pass in their per-service prefix (`PROVISIONING_*` / `ARKHAI_*`) + defaults path. No behavior change; pure dedup.
 
 ---
 
@@ -197,9 +241,9 @@ Until then: the `indexed: bool` field stays as a no-op in the loader so the YAML
 
 **Status:** Planned. Test file was on the original split-plan TODO and never landed.
 
-**Problem:** When the provider subcommands moved from the buyer CLI to `market_storefront.cli`, the provider-side command tests were dropped from `buyer/tests/` and not re-added on the storefront side. `storefront/tests/unit/test_cli_publish_helpers.py` and `test_cli_serve.py` cover slices, but there's no umbrella `test_cli_admin.py` exercising the full subcommand surface.
+**Problem:** When the provider subcommands moved from the buyer CLI to `market_storefront.cli`, the provider-side command tests were dropped from `buyer/tests/` and not re-added on the storefront side. `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py` and `test_cli_serve.py` cover slices, but there's no umbrella `test_cli_admin.py` exercising the full subcommand surface.
 
-**Planned fix:** add `storefront/tests/unit/test_cli_admin.py` covering each `market_storefront.cli` subcommand: argument parsing, config-file resolution, the `serve` → `publish` happy path against a mocked storefront, and the error cases for missing wallet / missing config / unreachable chain.
+**Planned fix:** add `domains/vms/storefront/tests/unit/test_cli_admin.py` covering each `market_storefront.cli` subcommand: argument parsing, config-file resolution, the `serve` → `publish` happy path against a mocked storefront, and the error cases for missing wallet / missing config / unreachable chain.
 
 ---
 
@@ -207,19 +251,9 @@ Until then: the `indexed: bool` field stays as a no-op in the loader so the YAML
 
 **Status:** Planned, no timeline.
 
-**Problem:** `integration-tests/tests/e2e/` is currently part of this repo. As the stack matures, the e2e suite should move to its own project so it can be run against arbitrary deployments without dragging in the simple-compute-market repo.
+**Problem:** `e2e-tests/tests/e2e/` is currently part of this repo. As the stack matures, the e2e suite should move to its own project so it can be run against arbitrary deployments without dragging in the simple-compute-market repo.
 
-**Planned fix:** extract `integration-tests/` (or just the `e2e/` subtree) to a separate repo. No urgency until external operators want to run the test suite.
-
----
-
-### Smoke-Test Client Re-Export Shim Cleanup
-
-**Status:** Planned. Cleanup, low priority.
-
-**Problem:** `integration-tests/src/registry_client.py` re-exports `SyncRegistryClient as RegistryClient` from the canonical wheel, preserved for the smoke-test import path `from src.registry_client import RegistryClient`. A similar `agent_client.py` adapter wraps `SyncStorefrontClient` with a constructor-level `agent_wallet_address` and single-arg `create_order()` to match the older shape the smoke tests expect.
-
-**Planned fix:** update the smoke-test imports to use the canonical clients directly and delete both shims. The `agent_client.py` docstring lists the removal steps.
+**Planned fix:** extract `e2e-tests/` (or just the `e2e/` subtree) to a separate repo. No urgency until external operators want to run the test suite.
 
 ---
 
@@ -231,13 +265,11 @@ Genuine pending fixes — distinct from the operational gotchas in the [Known Is
 
 Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes](#latent-bug-fixes) above (which need code changes) and from [Planned Rework](#core-stack) (which needs design + code). Expand as investigation proceeds.
 
-- **Storefront schema_migrations incomplete:** Some storefront schema transformations (`_migrate_escrows_and_listings`, `_migrate_negotiation_amount_columns`) run outside the `schema_migrations` tracking framework, so the `schema_migrations` table does not reflect the full applied schema version. The migrations are idempotent and run correctly regardless; the risk is operational visibility. A schema drift guard (planned in TODO) would give a false-negative until this is resolved. See the consolidation item in State Management & Schema Migrations above.
-
 - **Negotiation orphans:** The existence of `negotiation_watchdog.py` implies negotiations can get stuck. The trigger conditions and recovery behavior need documentation.
 
-- **Buyer's initial offer must meet the seller's floor price:** `_extract_initial_price_from_order()` returns `primary_rate_value(accepted_escrows[0])` (already in uint256-domain base units) as the seller's `our_price`. The `BisectionStrategy` in `maximize` direction exits with `"price_unreasonable"` if `their_price < our_price / 1.5`, and does not counter. If the buyer's `BUYER_INITIAL_PRICE` in the e2e test is below this floor, the seller exits at round 0 and `force-accept` returns 409. **Rule:** `BUYER_INITIAL_PRICE >= primary_rate_value(accepted_escrows[0])` in the e2e test constants.
+- **Buyer's initial offer must meet the seller's floor price:** `domains.vms.listings.pricing.extract_initial_price_from_order()` returns `primary_rate_value(accepted_escrows[0])` (already in uint256-domain base units) as the seller's `our_price`. The `BisectionStrategy` in `maximize` direction exits with `"price_unreasonable"` if `their_price < our_price / 1.5`, and does not counter. If the buyer's `BUYER_INITIAL_PRICE` in the e2e test is below this floor, the seller exits at round 0 and `force-accept` returns 409. **Rule:** `BUYER_INITIAL_PRICE >= primary_rate_value(accepted_escrows[0])` in the e2e test constants. Note this only bites where an opening below the listed price is possible — an explicit `--initial-price` or the opt-in `bisection` buyer policy; the default `listed_price` policy opens at the advertised rate, which satisfies the floor by construction.
 
-- **Global pause state persists across e2e test runs:** The storefront's `_GLOBALLY_PAUSED` flag (toggled by `POST /admin/pause` — distinct from per-listing `paused=True`) is in-process memory, not reset between `pytest` sessions. Neither full-deal scenario currently calls global `admin_pause` (storefront integration tests do, but those have their own teardown). The risk is a developer or external script having toggled it manually; the next `/negotiate/new` then 503s with `{"reason": "global"}` regardless of any per-listing state. The `ensure_storefront_resumed` autouse fixture in `integration-tests/tests/e2e/roles/scenarios/conftest.py` mitigates this by calling `admin_resume()` in module teardown. If running against a live environment that may have been left paused, execute `curl -X POST http://localhost:8001/admin/resume -H "X-Admin-Key: <key>"` before running.
+- **Global pause state persists across e2e test runs:** The storefront's `_GLOBALLY_PAUSED` flag (toggled by `POST /admin/pause` — distinct from per-listing `paused=True`) is in-process memory, not reset between `pytest` sessions. Neither full-deal scenario currently calls global `admin_pause` (storefront integration tests do, but those have their own teardown). The risk is a developer or external script having toggled it manually; the next `/negotiate/new` then 503s with `{"reason": "global"}` regardless of any per-listing state. The `ensure_storefront_resumed` autouse fixture in `e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py` mitigates this by calling `admin_resume()` in module teardown. If running against a live environment that may have been left paused, execute `curl -X POST http://localhost:8001/admin/resume -H "X-Admin-Key: <key>"` before running.
 
 - **Resource CSV importer DB path:** `scripts/import_resources_csv.py` resolves the target SQLite path via `--db-path` CLI arg → `STOREFRONT_DB_PATH` env var → `CONFIG.db_path`, in that order. If the importer writes to a different path than the server reads (e.g. via an unset `STOREFRONT_DB_PATH` falling through to a wrong default), the server starts with zero resources and rejects all `/negotiate/new` calls with `409 no_matching_inventory`. `compose/seller.yml` pins `--db-path src/market_storefront/data/storefront/agent.db` explicitly. **Detection:** `GET /api/v1/system/status` exposes `resource_count` as a top-level field; a value of `0` signals this misconfiguration. The smoke test `test_resource_portfolio_seeded` in `test_storefront_smoke.py` asserts `resource_count > 0` and fails with a remediation command.
 
@@ -251,7 +283,7 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 
 **Status:** Planned.
 
-**Problem:** The `registry-service` is currently deployed as a subchart of the `arkhai-node-operator` Helm chart, implying it is part of every provider node's deployment. In practice the registry is a shared marketplace service — there is one per market, not one per provider. Multiple seller nodes should all register with and publish orders to the same registry instance run by the marketplace operator. Bundling it with the provider chart conflates the marketplace operator role with the provider role.
+**Problem:** The `arkhai-core-registry` is currently deployed as a subchart of the `arkhai-node-operator` Helm chart, implying it is part of every provider node's deployment. In practice the registry is a shared marketplace service — there is one per market, not one per provider. Multiple seller nodes should all register with and publish orders to the same registry instance run by the marketplace operator. Bundling it with the provider chart conflates the marketplace operator role with the provider role.
 
 **Planned fix:** Make `registry` an optional subchart (add `condition: registry.enabled`, default `false`). Provider deployments point at an externally-operated registry via `global.registry.api_url`. Only marketplace operator deployments enable the subchart. Document the two deployment topologies (operator vs. provider) in the Helm `values.yaml` and in `ARCHITECTURE.md`.
 
@@ -260,6 +292,8 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 ## Provisioning Service
 
 ### Golden image configuration (`management-vars.yaml`)
+
+**Status:** Needs review.
 
 **Problem:** The `golden-image-build` Ansible role writes `management-vars.yaml` to the operator's local machine with root SSH credentials for the golden image. The provisioning service reads these credentials through the standard dynaconf profile system, but the key names in `management-vars.yaml` do not match the names in `settings.toml`.
 
@@ -271,11 +305,13 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 
 **Decision:** The Ansible role should write `management-vars.yaml` keys using the exact names that dynaconf expects (matching `settings.toml`). The operator then includes the relevant keys in the Helm `values.yaml` `config:` block. No separate loader class or file-format adapter is needed.
 
-**Planned fix:** Update `golden-image-build.yml` in `compute-provisioning-iac` to write key names matching `settings.toml` (`golden_root_ssh_filename`, `golden_root_ssh_password`, `golden_image_name`). Document the operator workflow for getting `management-vars.yaml` into the Kubernetes Secret in `compute-provisioning-iac/README.md`.
+**Planned fix:** Update `golden-image-build.yml` in `domains/vms/provisioning/iac` to write key names matching `settings.toml` (`golden_root_ssh_filename`, `golden_root_ssh_password`, `golden_image_name`). Document the operator workflow for getting `management-vars.yaml` into the Kubernetes Secret in `domains/vms/provisioning/iac/README.md`.
 
 ---
 
 ### `HostController.check_capacity` resource filters
+
+**Status:** Needs review.
 
 `HostController.check_capacity` should eventually accept optional resource filter parameters (`vcpus`, `ram_mb`, `gpu_count`) and return ranked hosts with sufficient capacity — useful for the storefront's pre-flight check before a `create` job.
 
@@ -283,15 +319,19 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 
 ### Lease expiry watchdog — check job result interpretation
 
-See `ARCHITECTURE.md` "Lease Lifecycle — DB-driven watchdog" for current architecture.
+**Status:** Needs review.
 
-**Remaining gap:** `LeaseLifecycleService._process_releasing_lease` polls the check job status but treats `succeeded` and `failed` uniformly (both proceed to patch the storefront). A future iteration should parse the check job result's `available_gpus` field: if `available_gpus > 0` the VM is confirmed gone and the patch proceeds normally; if `available_gpus == 0` the VM may still be running (late `at` daemon, cleanup race) and the watchdog should wait another cycle before forcing. This requires `AnsibleJobService._build_result_payload` to consistently expose `result.available.gpus` for the `check` action.
+See `ARCHITECTURE.md` "Lease Lifecycle — ledger-driven watchdog" for current architecture.
+
+**Remaining gap:** `LeaseLifecycleService._process_releasing_lease` polls the check job status but treats `succeeded` and `failed` uniformly (both proceed to release the allocation). A future iteration should parse the check job result's `available_gpus` field: if `available_gpus > 0` the VM is confirmed gone and the release proceeds normally; if `available_gpus == 0` the VM may still be running (late `at` daemon, cleanup race) and the watchdog should wait another cycle before forcing. This requires `AnsibleJobService._build_result_payload` to consistently expose `result.available.gpus` for the `check` action.
 
 The `at`-based scheduling on the KVM host runs in parallel — the check job is a verification step, not a replacement for the `at` cleanup.
 
 ---
 
 ### Multi-Provider Resource Pool Architecture
+
+**Status:** Needs review.
 
 This section documents architectural decisions reached for the provisioning service multi-provider refactor. Items are sequenced and cross-referenced with the `compute-market-internal-infra` ops repo `ARCHITECTURE.md` planned work section.
 
@@ -394,7 +434,7 @@ All gated by existing admin API key auth.
 
 #### GCP Provider e2e Test Scenario
 
-A new e2e scenario (addition to `integration-tests/tests/e2e/`) validates the GCP
+A new e2e scenario (addition to `e2e-tests/tests/e2e/`) validates the GCP
 provider without mock provisioning:
 
 1. `POST /api/v1/pools` — create a `gce_vm` pool.
@@ -414,7 +454,7 @@ creates real VMs, and that teardown is Compute-API-based (no SSH key required on
 
 **Status:** Planned. Refactor.
 
-**Problem:** The provisioning-service package exposes its modules at the flat `client.*` level (e.g. `from client.provisioning_client import ...`) because setuptools maps `src/` directly as the package root. To expose a clean `provisioning_service.*` namespace, all internal imports within the package would need to be converted from bare names (e.g. `from models.jobs_model import ...`) to relative imports (e.g. `from .models.jobs_model import ...`).
+**Problem:** The arkhai-vms-provisioning package exposes its modules at the flat `client.*` level (e.g. `from client.provisioning_client import ...`) because setuptools maps `src/` directly as the package root. To expose a clean `provisioning_service.*` namespace, all internal imports within the package would need to be converted from bare names (e.g. `from models.jobs_model import ...`) to relative imports (e.g. `from .models.jobs_model import ...`).
 
 **Planned fix:** do the relative-imports refactor; switch `service/clients/provisioning.py` to import from `provisioning_service.client.provisioning_client`.
 
@@ -422,11 +462,14 @@ creates real VMs, and that teardown is Compute-API-based (no SSH key required on
 
 ### Provisioning Smoke Tests Use Raw `httpx`
 
-**Status:** Planned.
+**Status:** Done.
 
-**Problem:** The provisioning smoke tests in `integration-tests/tests/smoke/test_provisioning_smoke.py` call raw `httpx` rather than going through `SyncProvisioningClient`. The integration tests already established the pattern of routing all calls through the canonical client.
-
-**Planned fix:** update the smoke tests to use `SyncProvisioningClient` for every endpoint they hit.
+The smoke test file (`e2e-tests/tests/smoke/test_provisioning_smoke.py`) already
+routes all calls through `SyncProvisioningClient`. Two methods that were
+also duplicated on `ProvisioningTestClient` (`pause_watchdog` /
+`resume_watchdog`) have been removed from that class; call sites in the
+e2e deal scenarios now use `provisioning_client.pause_lease_watchdog()` /
+`resume_lease_watchdog()` directly.
 
 ---
 
@@ -434,9 +477,9 @@ creates real VMs, and that teardown is Compute-API-based (no SSH key required on
 
 **Status:** Conditional — only do this if the dependency direction becomes a maintenance problem.
 
-**Problem:** The provisioning service depends on `arkhai-storefront-client` for two call sites — `lease_lifecycle_service._patch_storefront_resource()` and `system_service.get_status()`. This inverts the conceptual layer (provisioning is infrastructure; storefront is a consumer). Not a circular import — `storefront-client` doesn't depend on `provisioning-service` — but the direction is inverted.
+**Problem:** The provisioning service depends on `arkhai-core-storefront-client` for two call sites — the deal-scoped capacity-released notification in `lease_lifecycle_service` (`notify_capacity_released`) and `system_service.get_status()`. This inverts the conceptual layer (provisioning is infrastructure; storefront is a consumer). Not a circular import — `storefront-client` doesn't depend on `arkhai-vms-provisioning` — but the direction is inverted.
 
-**Planned fix (if triggered):** extract the two call sites into a thin `StorefrontCallbackClient` inside `provisioning-service/src/client/storefront_callback_client.py` wrapping `httpx` directly for `GET /health` and `PATCH /api/v1/admin/portfolio/resources/{id}`. Keeps `provisioning-service` self-contained without a wheel dependency on the storefront layer.
+**Planned fix (if triggered):** extract the two call sites into a thin client inside the provisioning service wrapping `httpx` directly for the health probe and the deal-event POST. Keeps `arkhai-vms-provisioning` self-contained without a wheel dependency on the storefront layer. May dissolve naturally when deal events route by recorded `deal_ref` (`design-remaining-work.md` § 3).
 
 ---
 
@@ -446,24 +489,36 @@ Items where `ARCHITECTURE.md` has a "TODO: Document X" placeholder. Fill in as p
 
 ### Alkahest Contracts in the Baked State
 
-The exact set of Alkahest contracts deployed in the `test-env` baked state and their addresses — so operators can wire integrations without reading the deploy scripts.
+**Status:** Needs review.
+
+The exact set of Alkahest contracts deployed in the `dev-env` baked state and their addresses — so operators can wire integrations without reading the deploy scripts.
 
 ### Symmetric Order Concept
 
-`integration-tests/.../test_symmetric_orders.py` exercises a "symmetric order" pattern that isn't documented in ARCHITECTURE.md. Document what it is and why it exists.
+**Status:** Needs review.
+
+`e2e-tests/.../test_symmetric_orders.py` exercises a "symmetric order" pattern that isn't documented in ARCHITECTURE.md. Document what it is and why it exists.
 
 ### Alkahest Escrow Mechanics
+
+**Status:** Needs review.
 
 What on-chain calls Alkahest makes at each point in the negotiation lifecycle: escrow lock, attestation submission, release. Currently the doc only points at the function names.
 
 ### SQLite Schema
 
+**Status:** Needs review.
+
 Storefront table definitions, indexes, statefulness/concurrency constraints (single-writer SQLite, negotiation message ordering). The "Storefront DB Pruning" entry assumes a future writer already knows the current layout.
 
 ### `negotiation_watchdog`
 
+**Status:** Needs review.
+
 Trigger conditions (staleness threshold), what it writes to the DB, how it interacts with in-flight `/advance` calls. The watchdog's existence is noted but its semantics are not.
 
 ### GPU Passthrough Setup
+
+**Status:** Needs review.
 
 Host-hardware constraints, BIOS / kernel module / `iommu` requirements, and the IaC role responsibilities for getting GPU passthrough working on a KVM host.

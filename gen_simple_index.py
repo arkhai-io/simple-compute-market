@@ -10,8 +10,8 @@ and/or sdist files::
     <dist_dir>/
       provisioning-service/
         provisioning_service-0.1.0-py3-none-any.whl
-      market-service/
-        market_service-0.1.0-py3-none-any.whl
+      market-alkahest/
+        market_alkahest-0.1.0-py3-none-any.whl
 
 The script writes:
   - ``<dist_dir>/<package>/index.html``  — links for each file in that package dir

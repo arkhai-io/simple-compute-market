@@ -1,0 +1,26 @@
+# ---------------------------------------------------------------------------
+# API-tokens service base defaults.
+# This file documents all supported configuration keys and their defaults.
+# Do NOT put environment-specific values here.
+#
+# Override via (highest priority first):
+#   1. APITOKENS_* environment variables
+#   2. config/config-<profile>.yml  (selected by ACTIVE_PROFILES)
+#   3. config/config.yml
+#   4. This file
+# ---------------------------------------------------------------------------
+
+# HTTP server
+host = "0.0.0.0"
+port = 8082
+log_level = "info"
+
+# Database
+# Defaults to SQLite so a fresh checkout works without any setup.
+database_url = "sqlite:///apitokens.db"
+
+# Shared secret gating every non-health request (X-Admin-Key). Presented
+# by the storefront and by the gated service's middlewares alike; empty
+# leaves the gate open (local dev). Resolution falls back to the mounted
+# storefront TOML's admin_api_key (see config.py).
+storefront_admin_key = ""

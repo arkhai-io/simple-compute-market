@@ -1,0 +1,67 @@
+[project]
+name = "arkhai-apitokens-storefront"
+version = "0.1.0"
+description = "Seller-side storefront for the API-tokens domain: quota-backed listings, sync negotiation with ownership/quota guards, issuance-backed settlement."
+requires-python = ">=3.12"
+dependencies = [
+    "arkhai-core",
+    "arkhai-core-registry-client",
+    "arkhai-core-storefront",
+    "arkhai-kit-alkahest",
+    "arkhai-kit-config",
+    "arkhai-kit-identity",
+    "arkhai-kit-policy",
+    "alkahest-py>=0.4.0",
+    "fastapi~=0.115.8",
+    # [all] carries typing-inspect, which fastapi_utils.cbv imports
+    # unconditionally under pydantic v2.
+    "fastapi-utils[all]>=0.8.0",
+    "uvicorn~=0.34.0",
+    "httpx>=0.27",
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "dynaconf>=3.0.0",
+]
+
+[project.scripts]
+apitokens-storefront = "apitokens_storefront.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4,<9.0.0",
+    "pytest-asyncio>=0.23.8,<1.0.0",
+]
+
+[tool.uv]
+# Internal wheels come from the repo's .dist/ via the CLI flag — see the
+# VM storefront's pyproject for why no find-links entry lives here.
+environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+]
+
+[tool.uv.sources]
+arkhai-core = { path = "../../../core", editable = true }
+arkhai-core-storefront = { path = "../../../core/storefront", editable = true }
+arkhai-core-registry-client = { path = "../../../core/registry-client", editable = true }
+arkhai-kit-alkahest = { path = "../../../kit/alkahest", editable = true }
+arkhai-kit-config = { path = "../../../kit/config", editable = true }
+arkhai-kit-identity = { path = "../../../kit/identity", editable = true }
+arkhai-kit-policy = { path = "../../../kit/policy", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/apitokens_storefront"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "../../..", "../../../kit/policy/src", "../../../kit/alkahest/src", "../../../kit/config/src", "../../../kit/identity/src", "../../../core/src", "../../../core/storefront/src"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

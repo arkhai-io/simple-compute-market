@@ -1,0 +1,81 @@
+# Registry filter spec for the API-tokens schema.
+#
+# Mounted into the shared `arkhai:registry` image and selected via the
+# REGISTRY_FILTER_SPEC_PATH env var (see docker-compose.yml's
+# api-tokens-registry service). The schema.id here is `api_tokens`,
+# which is what `arkhai-apitokens-buyer` declares — so with both
+# registries configured, the buyer plugin's discovery only queries this
+# one and the VM plugin only queries the vms.compute registry. This is
+# what makes schema identity load-bearing (design item 1, proven by
+# item 6's topology).
+#
+# Bump `version` on backwards-incompatible changes; add filters freely
+# (etag changes, clients re-fetch).
+
+version: 1
+
+schema:
+  id: api_tokens
+  version: 1
+
+listing_shape:
+  $schema: "https://json-schema.org/draft/2020-12/schema"
+  type: object
+  additionalProperties: true
+  required: [listing_id, offer_resource, accepted_escrows, storefront_url]
+  properties:
+    listing_id: {type: string, minLength: 1}
+    storefront_url: {type: string, minLength: 1}
+    offer_resource:
+      type: object
+      # An api_tokens.v1 offering. service_name is the only required
+      # axis; the OpenAPI/base URLs and the seller-internal quota
+      # resource_id ride along but are not filtered on.
+      required: [service_name]
+      additionalProperties: true
+      properties:
+        kind: {type: string}
+        service_name: {type: string, minLength: 1}
+        description: {type: [string, "null"]}
+        openapi_url: {type: [string, "null"]}
+        base_url: {type: [string, "null"]}
+        resource_id: {type: [string, "null"]}
+    accepted_escrows:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        required: [chain_name, escrow_address, literal_fields]
+        additionalProperties: true
+        properties:
+          chain_name: {type: string, minLength: 1}
+          escrow_address: {type: string, minLength: 1}
+          literal_fields:
+            type: object
+            additionalProperties: true
+            properties:
+              token: {type: string}
+          rates:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+              properties:
+                field: {type: string}
+                # per is "token" for credit listings (vs "hour" for VM
+                # leases); the buyer's quantity scales the rate to the
+                # absolute amount at negotiation.
+                per: {type: string}
+                value: {type: string}
+
+filters:
+  # service_name equality. The registry has no substring op, so v1 is
+  # exact match (`op: in` covers eq via `in: [x]`); `?service_name=foo`
+  # parses to in:[foo]. Substring/contains is a later registry upgrade.
+  - {name: service_name, path: $.offer_resource.service_name, op: in, value_type: string, on_missing: fail}
+
+  # Payment-token projection over accepted_escrows[*].literal_fields.token,
+  # same as the vms.compute spec. `on_missing: pass` keeps a seller that
+  # advertises no token from vanishing on a token-scoped query.
+  - {name: token,         path: "$.accepted_escrows[*].literal_fields.token", op: in,     value_type: string, on_missing: pass}
+  - {name: token_exclude, path: "$.accepted_escrows[*].literal_fields.token", op: not_in, value_type: string, on_missing: pass}

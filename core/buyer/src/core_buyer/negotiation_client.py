@@ -1,0 +1,738 @@
+"""Buyer-as-pure-client negotiation library.
+
+The buyer doesn't run a storefront or any HTTP server. They pick a
+seller, open a negotiation via HTTP, loop round-by-round until the
+thread ends, and return the outcome. Every request is signed by the
+buyer's wallet so the seller can verify without any prior
+registration.
+
+Public API:
+    negotiate_with_seller(...) -> NegotiationOutcome
+
+Per-round decisions go through ``market_policy.negotiation_middleware``
+— same chain framework the seller uses. The buyer's default chain is
+the pinned-shape guard plus the configured policy's middlewares; domain
+plugins may add schema middlewares (e.g. the API-tokens
+``answer_key_challenge`` pass-through) via ``default_guards``.
+
+Units: listings broadcast **per-unit** rates (per lease hour for VM
+compute, per token for API credits). ``unit_count`` is the schema
+plugin's per-unit→absolute seam — the number of priced units this deal
+spans; once it is fixed at round 0 the whole negotiation runs on
+absolute totals. The VM plugin passes ``duration_seconds / 3600``, the
+API-tokens plugin passes the requested token quantity.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import json
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from typing import Any, Callable, Optional
+
+from market_policy.negotiation_middleware import (
+    NegotiationChainExhausted,
+    NegotiationContext,
+    NegotiationMiddleware,
+    NegotiationRound,
+    load_negotiation_chain,
+    normalize_policies_by_escrow_kind_config,
+    run_negotiation_chain,
+)
+from market_policy.scalar_policies import make_escrow_kind_dispatch_middleware
+from market_alkahest.schemas import EscrowProposal, EscrowTerms
+from market_core.schemas import ProvisionTerms, SettlementPlan
+
+
+DEFAULT_MAX_ROUNDS = 10
+logger = logging.getLogger(__name__)
+_RL_POLICY_NAMES = {"rl", "erc20_rl", "native_token_rl", "erc1155_rl"}
+
+DEFAULT_CHAIN_GUARDS: tuple[str, ...] = ("buyer_escrow_shape_guard",)
+
+#: Hook a domain package installs (at import, like the storefront's
+#: accepted-escrows synthesizer) so the chain loader can trigger
+#: self-registration of optional middlewares the core cannot import —
+#: today the VM plugin's torch RL strategy. Best-effort by contract.
+_RL_MIDDLEWARE_REGISTRAR: Callable[[], None] | None = None
+
+
+def set_rl_middleware_registrar(fn: Callable[[], None] | None) -> None:
+    global _RL_MIDDLEWARE_REGISTRAR
+    _RL_MIDDLEWARE_REGISTRAR = fn
+
+
+def _maybe_register_rl_middleware() -> None:
+    """Trigger self-registration of the RL middleware, if a domain
+    package installed a registrar. Best-effort — if the strategy's
+    dependencies aren't installed, the chain loader raises its own
+    actionable KeyError pointing at the extras."""
+    if _RL_MIDDLEWARE_REGISTRAR is None:
+        return
+    try:
+        _RL_MIDDLEWARE_REGISTRAR()
+    except Exception:
+        pass
+
+
+def _policy_names_need_rl(policy_names: list[str]) -> bool:
+    return any(name in _RL_POLICY_NAMES for name in policy_names)
+
+
+def _policy_map_needs_rl(policies_by_kind: dict[str, list[str]]) -> bool:
+    return any(_policy_names_need_rl(names) for names in policies_by_kind.values())
+
+
+def _load_buyer_chain(
+    *,
+    policies: Any = None,
+    policy_mode: str | None = None,
+    default_guards: tuple[str, ...] = DEFAULT_CHAIN_GUARDS,
+) -> list[NegotiationMiddleware]:
+    """Load the buyer's negotiation chain.
+
+    If ``policies`` is provided (from `[negotiation] policies = [...]`
+    in `buyer.toml`), uses the explicit ordered list. Otherwise the
+    chain is `[*default_guards, *policy.middlewares]` — the default
+    guards open with the shape guard, which vetoes if the seller
+    silently mutates a buyer-pinned field of the EscrowProposal (token
+    swap, expiration push, escrow contract swap); a schema plugin may
+    extend them (the API-tokens plugin inserts its key-challenge
+    pass-through); the policy is `policy_mode` if set, else the one
+    buyer.toml `[negotiation] policy` names (default `listed_price`).
+    Resolution failures raise — a typo'd policy name must not silently
+    become some other policy.
+    """
+    policies_by_kind = normalize_policies_by_escrow_kind_config(policies)
+    if policies_by_kind:
+        if _policy_map_needs_rl(policies_by_kind):
+            _maybe_register_rl_middleware()
+        try:
+            from .buyer_config import buyer_chains
+            chains = buyer_chains()
+        except Exception:
+            chains = {}
+        chain_config_paths = {
+            name: chain.alkahest_address_config_path
+            for name, chain in chains.items()
+        }
+        return load_negotiation_chain(list(default_guards)) + [
+            make_escrow_kind_dispatch_middleware(
+                policies_by_kind,
+                chain_config_paths=chain_config_paths,
+            )
+        ]
+
+    if policies:
+        names = [str(p).strip() for p in policies if str(p).strip()]
+    elif (policy_mode or "").strip():
+        names = [*default_guards, (policy_mode or "").strip()]
+    else:
+        # The configured BuyerPolicy names the rest of the chain
+        # (buyer.toml [negotiation] policy, default listed_price).
+        # Resolution failures propagate: silently substituting a
+        # default here would negotiate under a policy the user never
+        # chose.
+        from .policy_surface import configured_buyer_policy
+
+        try:
+            policy = configured_buyer_policy(strict=True)
+        except KeyError as exc:
+            raise RuntimeError(str(exc)) from exc
+        names = [*default_guards, *policy.middlewares]
+    if _policy_names_need_rl(names):
+        _maybe_register_rl_middleware()
+    return load_negotiation_chain(names)
+
+
+DEFAULT_TIMEOUT_SECONDS = 30.0
+
+
+@dataclass
+class NegotiationOutcome:
+    """What came out of a full negotiation run from the buyer's POV.
+
+    ``accepted_provision_terms`` and ``accepted_escrow_proposal``
+    are populated when the seller echoed them back in the negotiation
+    response (always on non-rejection paths). Settlement-time escrow
+    construction reads from these — using the *seller-confirmed* values
+    rather than the buyer's local proposal protects against any
+    drift between sides.
+
+    ``agreed_amount`` is the absolute total payment in base units of
+    the escrow's payment token (i.e. ``accepted_escrow_proposal.fields
+    ["amount"]``). Per-unit rates only exist as listing broadcasts;
+    once a negotiation starts everything is absolute. ``unit_count``
+    echoes the buyer's ask from negotiation init (None on resume,
+    where the prior run-log is the source of truth).
+    """
+    status: str                     # "agreed" | "exited"
+    negotiation_id: Optional[str]   # None only if /new itself failed
+    agreed_amount: Optional[int] = None
+    unit_count: Optional[float] = None
+    reason: Optional[str] = None    # populated on exit
+    rounds: int = 0
+    accepted_provision_terms: Optional[ProvisionTerms] = None
+    accepted_escrow_proposal: Optional[EscrowProposal] = None
+    settlement_plan: Optional[SettlementPlan] = None
+    # LEGACY mirror of the plan's alkahest obligations; kept while old
+    # run-log readers exist. Leaves with the client-wheel wire bump.
+    accepted_escrow_terms: Optional[list[EscrowTerms]] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"status": self.status, "rounds": self.rounds}
+        if self.negotiation_id is not None:
+            d["negotiation_id"] = self.negotiation_id
+        if self.agreed_amount is not None:
+            d["agreed_amount"] = self.agreed_amount
+        if self.unit_count is not None:
+            d["unit_count"] = self.unit_count
+        if self.reason is not None:
+            d["reason"] = self.reason
+        if self.accepted_provision_terms is not None:
+            d["accepted_provision_terms"] = self.accepted_provision_terms.model_dump()
+        if self.accepted_escrow_proposal is not None:
+            d["accepted_escrow_proposal"] = self.accepted_escrow_proposal.model_dump()
+        if self.settlement_plan is not None:
+            d["settlement_plan"] = self.settlement_plan.model_dump()
+        if self.accepted_escrow_terms is not None:
+            d["accepted_escrow_terms"] = [
+                term.model_dump() for term in self.accepted_escrow_terms
+            ]
+        return d
+
+
+def _parse_accepted_terms_from_reply(
+    reply: dict[str, Any],
+) -> tuple[
+    Optional[ProvisionTerms],
+    Optional[EscrowProposal],
+    Optional[SettlementPlan],
+    Optional[list[EscrowTerms]],
+]:
+    """Extract the seller's echoed accepted terms from a negotiate reply.
+
+    Returns all-None if the seller didn't include them — happens on
+    exit/reject paths or against legacy sellers that haven't shipped the
+    new fields yet. ``settlement_plan`` is preferred from the wire;
+    against pre-plan sellers it is coerced from the flat
+    ``accepted_escrow_terms`` mirror (the carrier's legacy coercion), so
+    downstream code sees a plan either way.
+    """
+    raw_prov = reply.get("accepted_provision_terms")
+    raw_esc = reply.get("accepted_escrow_proposal")
+    raw_plan = reply.get("settlement_plan")
+    raw_terms = reply.get("accepted_escrow_terms")
+    prov = ProvisionTerms.model_validate(raw_prov) if isinstance(raw_prov, dict) else None
+    esc = EscrowProposal.model_validate(raw_esc) if isinstance(raw_esc, dict) else None
+    terms = (
+        [EscrowTerms.model_validate(item) for item in raw_terms]
+        if isinstance(raw_terms, list)
+        else None
+    )
+    plan: Optional[SettlementPlan] = None
+    if isinstance(raw_plan, dict):
+        plan = SettlementPlan.model_validate(raw_plan)
+    elif terms is not None:
+        plan = SettlementPlan.model_validate([t.model_dump() for t in terms])
+    return prov, esc, plan, terms
+
+
+def _sign(message: str, private_key: str) -> tuple[str, int]:
+    """Produce (X-Signature hex, X-Timestamp int) for a given canonical message.
+
+    Mirrors the seller's _check_buyer_signature verification: timestamp
+    is appended to the message, and the full string is EIP-191 signed.
+    """
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+
+    ts = int(time.time())
+    signed_message = f"{message}:{ts}"
+    msg_hash = encode_defunct(text=signed_message)
+    sig = Account.sign_message(msg_hash, private_key).signature.hex()
+    if not sig.startswith("0x"):
+        sig = "0x" + sig
+    return sig, ts
+
+
+def _post(
+    url: str,
+    body: dict[str, Any],
+    *,
+    signature: str,
+    timestamp: int,
+    identity_scheme: str = "eip191",
+    identity_identifier: str | None = None,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Signed POST with JSON body. Raises RuntimeError on non-2xx.
+
+    Emits ``X-Identity-Scheme`` + ``X-Identity`` so storefronts that have
+    adopted the pluggable-identity dispatch (Phase 2) can route by scheme.
+    Storefronts that haven't yet ignore the headers — back-compat is preserved.
+    """
+    data = json.dumps(body).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-Signature": signature,
+        "X-Timestamp": str(timestamp),
+        "X-Identity-Scheme": identity_scheme,
+    }
+    if identity_identifier:
+        headers["X-Identity"] = identity_identifier
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            text = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+        raise RuntimeError(f"POST {url} -> HTTP {exc.code}: {detail[:500]}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"POST {url} failed: {exc}") from exc
+
+    if not text:
+        return {}
+    try:
+        return json.loads(text)
+    except ValueError as exc:
+        raise RuntimeError(f"POST {url} returned non-JSON: {text[:200]!r}") from exc
+
+
+@dataclass
+class ResumeState:
+    """Inputs for resuming an in-flight negotiation thread.
+
+    Built by ``market negotiate --from <run_id>``: the run-log gives
+    us the server-assigned ``negotiation_id``, the rounds we've
+    observed, and the seller's last-known proposal. We replay that
+    into the strategy and continue the round loop without going through
+    ``/api/v1/negotiate/new`` again (the seller has the thread already).
+    """
+    negotiation_id: str
+    transcript: list[NegotiationRound]
+    last_seller_proposal: dict | None
+    rounds_completed: int
+
+
+def negotiate_with_seller(
+    *,
+    seller_url: str,
+    buyer_address: str,
+    buyer_private_key: str,
+    listing_id: str,
+    initial_price: float,
+    max_price: float,
+    unit_count: Optional[float] = None,
+    provision_terms: Optional[ProvisionTerms] = None,
+    escrow_proposal: Optional[EscrowProposal] = None,
+    max_rounds: int = DEFAULT_MAX_ROUNDS,
+    on_round: Optional[Callable[[int, dict, dict], None]] = None,
+    chain: Optional[list[NegotiationMiddleware]] = None,
+    default_guards: tuple[str, ...] = DEFAULT_CHAIN_GUARDS,
+    resume: Optional[ResumeState] = None,
+    policy_params: Optional[dict[str, Any]] = None,
+) -> NegotiationOutcome:
+    """Run a synchronous negotiation with one seller, round-by-round.
+
+    `initial_price` is what the buyer opens with (can be lower than max
+    to haggle). `max_price` is the buyer's absolute ceiling — any seller
+    counter at or below convergence to this gets accepted. Both are
+    **per-unit** rates; ``unit_count`` scales them to the absolute
+    amounts the negotiation runs on, and is required (> 0) for fresh
+    starts — the schema plugin owns the translation (lease hours for
+    compute, token quantity for credits). In resume mode the prices are
+    treated as absolute (the prior run fixed the totals).
+
+    `provision_terms` describes what the buyer wants the seller to
+    deliver (the schema-tagged off-chain payload) and `escrow_proposal`
+    is the buyer's proposed on-chain escrow tuple — picks one of the
+    listing's ``accepted_escrows`` entries by ``(chain_name,
+    escrow_address)`` and supplies the buyer-committable EscrowData
+    in ``fields`` plus ``expiration_unix``. Both are sent on
+    /api/v1/negotiate/new and validated server-side against the
+    listing's acceptance set. Required for fresh starts; ignored in
+    resume mode (the negotiation thread already has them committed).
+
+    The negotiation_id is server-assigned (returned in the
+    /api/v1/negotiate/new response) and threaded through every subsequent
+    /negotiate/{neg_id} round; the buyer doesn't supply it.
+
+    `on_round(round_idx, our_msg, their_reply)` is an optional observer
+    hook (for CLI rendering, testing).
+
+    Synchronous everything: the seller responds in-line on each POST.
+    Returns a NegotiationOutcome describing how it ended; the seller's
+    accepted_* echo is parsed back so settlement-time escrow construction
+    can use the agreed (not local-proposed) values.
+    """
+    seller_url = seller_url.rstrip("/")
+    transcript: list[NegotiationRound] = []
+    # Captured from the seller's round-0 response and threaded forward.
+    # The seller commits to these at /negotiate/new (they're persisted on
+    # the negotiation thread); subsequent rounds don't re-echo them.
+    accepted_prov: Optional[ProvisionTerms] = None
+    accepted_esc: Optional[EscrowProposal] = None
+    accepted_plan: Optional[SettlementPlan] = None
+    accepted_terms: Optional[list[EscrowTerms]] = None
+    if resume is not None:
+        unit_count = None  # absolute bounds; the prior run fixed the totals
+    if chain is None:
+        chain = _load_buyer_chain(default_guards=default_guards)
+
+    # Pinned proposal: the buyer's first-round proposal — every field
+    # set here is a buyer commitment the seller may not mutate. Used by
+    # ``buyer_escrow_shape_guard`` in the chain.
+    pinned_proposal: dict[str, Any] | None = None
+
+    def _amount(p: dict | None) -> int | None:
+        if not isinstance(p, dict):
+            return None
+        v = (p.get("fields") or {}).get("amount")
+        return int(v) if v is not None else None
+
+    if resume is not None:
+        # Resume mode: skip /api/v1/negotiate/new and the first counter exchange.
+        # We trust the run-log's recorded transcript and the seller's last
+        # counter proposal; the strategy decides our next move from there.
+        if resume.last_seller_proposal is None:
+            raise RuntimeError(
+                "Cannot resume — no seller counter proposal recorded in run-log."
+            )
+        neg_id = resume.negotiation_id
+        transcript = list(resume.transcript)
+        # Synthesize a `reply` dict shaped like the round-loop expects.
+        reply: dict[str, Any] = {
+            "negotiation_id": neg_id,
+            "action": "counter",
+            "proposal": resume.last_seller_proposal,
+        }
+        # Recover the buyer's first-pinned proposal from the transcript.
+        for entry in transcript:
+            if entry.sender == "us" and entry.proposal is not None:
+                pinned_proposal = entry.proposal
+                break
+        round_idx = max(1, resume.rounds_completed)
+    else:
+        # --- Round 0: /api/v1/negotiate/new ---------------------------------------
+        if provision_terms is None:
+            raise RuntimeError(
+                "provision_terms is required for fresh negotiations "
+                "(the schema-tagged payload describing what the seller "
+                "will provision)"
+            )
+        if escrow_proposal is None:
+            raise RuntimeError(
+                "escrow_proposal is required for fresh negotiations "
+                "(chain_name + escrow_address + fields + expiration_unix)"
+            )
+        # Translate per-unit bounds → absolute amounts (× unit_count).
+        # Listings broadcast per-unit rates; once the unit count is
+        # fixed, the whole negotiation runs on absolute totals.
+        if unit_count is None or unit_count <= 0:
+            raise RuntimeError(
+                "unit_count must be > 0 to translate per-unit bounds "
+                "into absolute amounts."
+            )
+        scale = float(unit_count)
+        initial_amount = int(round(float(initial_price) * scale))
+        ceiling_amount = float(max_price) * scale
+
+        # Pin the buyer's first proposal: the policy chain owns the
+        # round-0 opening (ARCHITECTURE.md, "Buyer negotiation policy surface") — run it
+        # on an empty history and pin its proposal. Whether and where an
+        # opening amount lands in the fields is the configured policy's
+        # compatibility knowledge, not this loop's.
+        base_proposal = {
+            "chain_name": escrow_proposal.chain_name,
+            "escrow_address": escrow_proposal.escrow_address,
+            "fields": dict(escrow_proposal.fields or {}),
+            "literal_fields": dict(escrow_proposal.literal_fields or escrow_proposal.fields or {}),
+            "rates": [
+                r.model_dump() if hasattr(r, "model_dump") else dict(r)
+                for r in (escrow_proposal.rates or [])
+            ],
+            "demands": [
+                d.model_dump() if hasattr(d, "model_dump") else dict(d)
+                for d in (escrow_proposal.demands or [])
+            ],
+            "expiration_unix": escrow_proposal.expiration_unix,
+        }
+        opening = run_negotiation_chain(chain, [], NegotiationContext(
+            direction="minimize",
+            our_reference_amount=ceiling_amount,
+            our_opening_amount=initial_amount,
+            our_escrow_proposal=base_proposal,
+            max_rounds=max_rounds,
+            intermediate=dict(policy_params or {}),
+        ))
+        # The decision is honored, not second-guessed: a chain that
+        # exits/rejects before opening means this buyer does not open
+        # this negotiation — the seller is never contacted.
+        if opening.action in ("exit", "reject"):
+            return NegotiationOutcome(
+                status="exited",
+                negotiation_id=None,
+                reason=opening.reason or f"buyer_{opening.action}_at_opening",
+                unit_count=unit_count,
+                rounds=0,
+            )
+        if opening.action != "counter" or opening.proposal is None:
+            raise RuntimeError(
+                f"Policy chain produced {opening.action!r} as the round-0 "
+                f"opening — only counter (with a proposal), exit, or "
+                f"reject make sense before the seller has said anything."
+            )
+        pinned_proposal = opening.proposal
+
+        new_body = {
+            "listing_id": listing_id,
+            "buyer_address": buyer_address,
+            "provision_terms": provision_terms.model_dump(),
+            "proposal": pinned_proposal,
+        }
+        sig, ts = _sign(f"negotiate_new:{listing_id}", buyer_private_key)
+        reply = _post(
+            f"{seller_url}/api/v1/negotiate/new", new_body,
+            signature=sig, timestamp=ts,
+            identity_identifier=buyer_address,
+        )
+        if on_round:
+            on_round(0, new_body, reply)
+
+        neg_id = reply.get("negotiation_id")
+        seller_action = reply.get("action")
+        accepted_prov, accepted_esc, accepted_plan, accepted_terms = _parse_accepted_terms_from_reply(reply)
+
+        if seller_action == "accept":
+            return NegotiationOutcome(
+                status="agreed",
+                negotiation_id=neg_id,
+                agreed_amount=_amount(reply.get("proposal")) or initial_amount,
+                unit_count=unit_count,
+                rounds=0,
+                accepted_provision_terms=accepted_prov,
+                accepted_escrow_proposal=accepted_esc,
+                settlement_plan=accepted_plan,
+                accepted_escrow_terms=accepted_terms,
+            )
+        # On non-agreed paths we still carry forward what the seller
+        # validated — used if the negotiation ends up agreed in later
+        # rounds (seller doesn't re-echo accepted_* on /continue).
+        if seller_action in ("exit", "reject"):
+            return NegotiationOutcome(
+                status="exited",
+                negotiation_id=neg_id,
+                reason=reply.get("reason"),
+                unit_count=unit_count,
+                rounds=0,
+            )
+        # From here on seller_action should be "counter".
+        if seller_action != "counter":
+            raise RuntimeError(f"Unexpected seller action on /api/v1/negotiate/new: {seller_action!r}")
+        if not neg_id:
+            raise RuntimeError("/api/v1/negotiate/new returned counter but no negotiation_id")
+
+        transcript.append(NegotiationRound(
+            round_number=0, sender="us", action="initial",
+            proposal=pinned_proposal,
+        ))
+        seller_round0_proposal = reply.get("proposal")
+        transcript.append(NegotiationRound(
+            round_number=0, sender="them", action="counter",
+            proposal=seller_round0_proposal if isinstance(seller_round0_proposal, dict) else None,
+        ))
+        round_idx = 1
+
+    # --- Rounds 1..N: /negotiate/{id} ----------------------------------
+    while round_idx <= max_rounds:
+        seller_counter_proposal = reply.get("proposal")
+        if not isinstance(seller_counter_proposal, dict):
+            raise RuntimeError(f"Seller counter without proposal: {reply!r}")
+
+        # Append the seller's current counter to history so the chain
+        # sees it as their_last_proposal.
+        round_history = list(transcript)
+        if not round_history or round_history[-1].sender != "them":
+            round_history.append(NegotiationRound(
+                round_number=len(round_history),
+                sender="them",
+                action="counter",
+                proposal=seller_counter_proposal,
+            ))
+        ceiling_amount = (
+            float(max_price) * float(unit_count)
+            if unit_count is not None
+            else float(max_price)
+        )
+        ctx = NegotiationContext(
+            direction="minimize",
+            our_reference_amount=ceiling_amount,
+            our_opening_amount=(
+                float(initial_price) * float(unit_count)
+                if unit_count is not None
+                else float(initial_price)
+            ),
+            listing={},
+            our_escrow_proposal=pinned_proposal,
+            available_resources={},
+            max_rounds=max_rounds,
+            intermediate=dict(policy_params or {}),
+        )
+        try:
+            next_move = run_negotiation_chain(chain, round_history, ctx)
+        except NegotiationChainExhausted:
+            # Local misconfiguration — but the seller's thread is live.
+            # Release it with a protocol-level exit before erroring, so
+            # the seller isn't left holding state until a watchdog.
+            try:
+                sig, ts = _sign(f"negotiate_continue:{neg_id}", buyer_private_key)
+                _post(
+                    f"{seller_url}/api/v1/negotiate/{neg_id}",
+                    {
+                        "action": "exit",
+                        "reason": "buyer_chain_no_decision",
+                        "buyer_address": buyer_address,
+                    },
+                    signature=sig, timestamp=ts,
+                    identity_identifier=buyer_address,
+                )
+            except Exception as notify_exc:
+                logger.warning(
+                    "Could not deliver the no-decision exit to the "
+                    "seller: %s", notify_exc,
+                )
+            raise
+
+        body: dict[str, Any] = {
+            "action": next_move.action,
+            "buyer_address": buyer_address,
+        }
+        if next_move.action in ("counter", "accept"):
+            if next_move.proposal is None:
+                raise RuntimeError(
+                    f"chain returned {next_move.action!r} without a proposal"
+                )
+            body["proposal"] = next_move.proposal
+        elif next_move.action in ("exit", "reject"):
+            body["reason"] = next_move.reason or "buyer_exit"
+
+        sig, ts = _sign(f"negotiate_continue:{neg_id}", buyer_private_key)
+        reply = _post(
+            f"{seller_url}/api/v1/negotiate/{neg_id}", body,
+            signature=sig, timestamp=ts,
+            identity_identifier=buyer_address,
+        )
+        if on_round:
+            on_round(round_idx, body, reply)
+
+        # If our chain rejected (shape guard veto), the buyer terminates
+        # locally without trusting any seller reply.
+        if next_move.action == "reject":
+            return NegotiationOutcome(
+                status="exited",
+                negotiation_id=neg_id,
+                reason=next_move.reason or "buyer_reject",
+                unit_count=unit_count,
+                rounds=round_idx,
+            )
+
+        # After we sent our move, the seller has replied with either
+        # a matching terminal (accept/exit) or a further counter.
+        if next_move.action == "accept":
+            # We told the seller we accept; their reply should echo accept.
+            if reply.get("action") == "accept":
+                reply_prov, reply_esc, reply_plan, reply_terms = _parse_accepted_terms_from_reply(reply)
+                return NegotiationOutcome(
+                    status="agreed",
+                    negotiation_id=neg_id,
+                    agreed_amount=(
+                        _amount(reply.get("proposal"))
+                        or _amount(next_move.proposal)
+                    ),
+                    unit_count=unit_count,
+                    rounds=round_idx,
+                    accepted_provision_terms=reply_prov or accepted_prov,
+                    accepted_escrow_proposal=reply_esc or accepted_esc,
+                    settlement_plan=reply_plan or accepted_plan,
+                    accepted_escrow_terms=reply_terms or accepted_terms,
+                )
+            # Non-accept reply to our accept is anomalous but treat as terminal.
+            return NegotiationOutcome(
+                status="exited",
+                negotiation_id=neg_id,
+                reason=f"seller_non_accept_after_buyer_accept:{reply.get('action')!r}",
+                unit_count=unit_count,
+                rounds=round_idx,
+            )
+        if next_move.action == "exit":
+            return NegotiationOutcome(
+                status="exited",
+                negotiation_id=neg_id,
+                reason=next_move.reason or "buyer_exit",
+                unit_count=unit_count,
+                rounds=round_idx,
+            )
+
+        # next_move was counter → record both sides of this round.
+        transcript.append(NegotiationRound(
+            round_number=round_idx, sender="us", action="counter",
+            proposal=next_move.proposal,
+        ))
+        seller_reply_action = reply.get("action") or "counter"
+        seller_reply_proposal = reply.get("proposal")
+        transcript.append(NegotiationRound(
+            round_number=round_idx,
+            sender="them",
+            action=seller_reply_action if seller_reply_action in ("counter", "accept", "exit", "reject") else "counter",
+            proposal=seller_reply_proposal if isinstance(seller_reply_proposal, dict) else None,
+        ))
+
+        seller_action = reply.get("action")
+        if seller_action == "accept":
+            reply_prov, reply_esc, reply_plan, reply_terms = _parse_accepted_terms_from_reply(reply)
+            return NegotiationOutcome(
+                status="agreed",
+                negotiation_id=neg_id,
+                agreed_amount=(
+                    _amount(seller_reply_proposal)
+                    or _amount(next_move.proposal)
+                ),
+                unit_count=unit_count,
+                rounds=round_idx,
+                accepted_provision_terms=reply_prov or accepted_prov,
+                accepted_escrow_proposal=reply_esc or accepted_esc,
+                settlement_plan=reply_plan or accepted_plan,
+                accepted_escrow_terms=reply_terms or accepted_terms,
+            )
+        if seller_action in ("exit", "reject"):
+            return NegotiationOutcome(
+                status="exited",
+                negotiation_id=neg_id,
+                reason=reply.get("reason"),
+                unit_count=unit_count,
+                rounds=round_idx,
+            )
+        if seller_action != "counter":
+            raise RuntimeError(f"Unexpected seller action mid-negotiation: {seller_action!r}")
+
+        round_idx += 1
+
+    # Hit max_rounds without converging.
+    return NegotiationOutcome(
+        status="exited",
+        negotiation_id=neg_id,
+        reason="max_rounds",
+        unit_count=unit_count,
+        rounds=max_rounds,
+    )

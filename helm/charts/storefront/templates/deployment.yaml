@@ -61,14 +61,18 @@ spec:
       initContainers:
         - name: wait-for-rpc
           image: busybox:1.36
+          {{- /* Probe the agent's full chain rpcUrl when set (external
+               providers need the scheme + key path, e.g. infura /v3/<key>);
+               fall back to the in-cluster rpc.url composition. */}}
+          {{- $rpcProbeUrl := default (include "rpc.url" $) ((($agent.config | default dict).chain | default dict).rpcUrl) }}
           command:
             - sh
             - -c
             - |
-              echo "Waiting for RPC at {{ include "rpc.url" $ }}..."
+              echo "Waiting for RPC..."
               until wget -qO- --post-data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
                 --header 'Content-Type: application/json' \
-                {{ include "rpc.url" $ }} > /dev/null 2>&1; do
+                {{ $rpcProbeUrl | quote }} > /dev/null 2>&1; do
                 echo "RPC not ready, retrying in 5s..."; sleep 5
               done
               echo "RPC ready."
@@ -107,7 +111,7 @@ spec:
           {{- end }}
           env:
             # Sole env var: tell dynaconf where to find the mounted TOML
-            # files. service.config_loader.user_config_dir() resolves to
+            # files. The storefront config loader resolves this to
             # $XDG_CONFIG_HOME/arkhai, so this maps to
             # /etc/arkhai/{storefront.toml,storefront.secrets.toml}. The
             # dynaconf instance merges both files at startup; the ConfigMap
