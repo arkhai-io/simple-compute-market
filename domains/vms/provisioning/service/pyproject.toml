@@ -11,7 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
     "arkhai-core-site>=0.1.0",
     "arkhai-core-storefront-client>=0.11.0",
-    "arkhai-vms-provisioning-client>=0.1.0",
+    "arkhai-vms-provisioning-client>=0.1.1",
     "dynaconf>=3.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",

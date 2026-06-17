@@ -29,8 +29,8 @@ Usage (sync, e.g. smoke tests)::
 Polling pattern
 ---------------
 All job-creating methods return a ``JobSubmitResponse`` (job_id + status).
-Use ``poll_until_complete`` / ``sync_poll_until_complete`` to block until the
-job reaches a terminal state, or call ``get_job`` for custom polling logic.
+Use ``poll_until_complete`` to block until the job reaches a terminal state,
+or call ``get_job`` for custom polling logic.
 """
 
 from __future__ import annotations
@@ -223,8 +223,9 @@ class ProvisioningClient(_ProvisioningClientBase):
         return self._submit(await self._post(f"/api/v1/hosts/{host}/vms/", body))
 
     async def list_vms(self, host: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
-        """POST /api/v1/hosts/{host}/vms/ (list action)"""
-        return self._submit(await self._post(f"/api/v1/hosts/{host}/vms/", body or VmActionRequest()))
+        """GET /api/v1/hosts/{host}/vms/"""
+        params = (body or VmActionRequest()).model_dump(exclude_none=True)
+        return self._submit(await self._get(f"/api/v1/hosts/{host}/vms/", params=params or None))
 
     async def start_vm(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
         """POST /api/v1/hosts/{host}/vms/{vm_name}/start"""
@@ -526,6 +527,14 @@ class ProvisioningClient(_ProvisioningClientBase):
         """POST /api/v1/system/check-leases — run one lifecycle cycle now."""
         return await self._post("/api/v1/system/check-leases", {})
 
+    async def pause_lease_watchdog(self) -> dict:
+        """POST /api/v1/system/lease-watchdog/pause — pause timer-driven cycles."""
+        return await self._post("/api/v1/system/lease-watchdog/pause", {})
+
+    async def resume_lease_watchdog(self) -> dict:
+        """POST /api/v1/system/lease-watchdog/resume — resume timer-driven cycles."""
+        return await self._post("/api/v1/system/lease-watchdog/resume", {})
+
     async def capacity_snapshot(self) -> list[dict]:
         """GET /api/v1/capacity/snapshot — advisory availability view."""
         return (await self._get("/api/v1/capacity/snapshot")).get("resources") or []
@@ -648,14 +657,30 @@ class SyncProvisioningClient(_ProvisioningClientBase):
     def create_vm(self, host: str, body: CreateVmRequest) -> JobSubmitResponse:
         return self._submit(self._post(f"/api/v1/hosts/{host}/vms/", body))
 
+    def list_vms(self, host: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        params = (body or VmActionRequest()).model_dump(exclude_none=True)
+        return self._submit(self._get(f"/api/v1/hosts/{host}/vms/", params=params or None))
+
     def start_vm(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
         return self._submit(self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/start", body or VmActionRequest()))
 
     def shutdown_vm(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
         return self._submit(self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/shutdown", body or VmActionRequest()))
 
+    def reboot_vm(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        return self._submit(self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/reboot", body or VmActionRequest()))
+
     def destroy_vm(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
         return self._submit(self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/destroy", body or VmActionRequest()))
+
+    def undefine_vm(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        return self._submit(self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/undefine", body or VmActionRequest()))
+
+    def monitor_vm(self, host: str, vm_name: str) -> JobSubmitResponse:
+        return self._submit(self._get(f"/api/v1/hosts/{host}/vms/{vm_name}/monitor"))
+
+    def reset_password(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        return self._submit(self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/reset-password", body or VmActionRequest()))
 
     def check_capacity(self, host: str) -> JobSubmitResponse:
         return self._submit(self._get(f"/api/v1/hosts/{host}/capacity"))
@@ -761,6 +786,9 @@ class SyncProvisioningClient(_ProvisioningClientBase):
     def get_job_logs(self, job_id: str) -> JobLogsResponse:
         return JobLogsResponse(**(self._get(f"/api/v1/jobs/{job_id}/logs")))
 
+    def cancel_job(self, job_id: str) -> dict:
+        return self._post(f"/api/v1/jobs/{job_id}/cancel", {})
+
     def list_jobs(self, *, status: Optional[str] = None,
                   offset: int = 0, limit: int = 20,
                   escrow_uid: Optional[str] = None) -> JobListResponse:
@@ -771,7 +799,7 @@ class SyncProvisioningClient(_ProvisioningClientBase):
             params["escrow_uid"] = escrow_uid
         return JobListResponse(**(self._get("/api/v1/jobs/", params=params)))
 
-    def sync_poll_until_complete(
+    def poll_until_complete(
         self,
         job_id: str,
         *,
