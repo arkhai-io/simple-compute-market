@@ -20,9 +20,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-import pytest_asyncio
 
-from client.provisioning_client import ProvisioningClient
+from provisioning_client import ProvisioningError
 from models.vm_request_model import CreateVmRequest
 from services.async_job_queue import AsyncJobQueue
 
@@ -74,7 +73,6 @@ class TestHttpValidation:
 
     async def test_get_job_returns_404_for_unknown_id(self, client_and_queue):
         client, _ = client_and_queue
-        from client.provisioning_client import ProvisioningError
         with pytest.raises(ProvisioningError) as exc_info:
             await client.get_job("nonexistent-job-id")
         assert exc_info.value.status_code == 404

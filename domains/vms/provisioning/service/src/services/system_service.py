@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 from sqlalchemy import text
 
-from models.system_model import (
+from provisioning_client.models import (
     AnsibleReadinessResponse,
     FileInfo,
     InventoryInfo,

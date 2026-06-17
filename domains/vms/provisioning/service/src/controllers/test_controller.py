@@ -50,7 +50,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 import container as _container_module
-from models.system_model import EvaluateJobRequest, EvaluateJobResponse
+from models.system_model import EvaluateJobRequest, EvaluateJobResponse  # server-only test controller models
 from services.job_service import AnsibleJobService
 
 logger = logging.getLogger(__name__)

@@ -8,7 +8,7 @@ GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-dev build-seller build-apitokens-service build-apitokens-storefront build-apitokens-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apitokens test-apitokens-middleware test-kits dist dist-storefront-client dist-vms-common dist-storefront dist-policy dist-provisioning dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-apitokens-middleware dist-apitokens-sample-app dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: build build-dev build-seller build-apitokens-service build-apitokens-storefront build-apitokens-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apitokens test-apitokens-middleware test-kits dist dist-storefront-client dist-vms-common dist-storefront dist-policy dist-provisioning dist-provisioning-client dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-apitokens-middleware dist-apitokens-sample-app dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -23,7 +23,7 @@ DIST_DIR := ${CURDIR}/.dist
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-vms-common dist-storefront dist-policy dist-provisioning dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-apitokens-middleware dist-apitokens-sample-app dist-registry dist-buyer
+dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-vms-common dist-storefront dist-policy dist-provisioning-client dist-provisioning dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-apitokens-middleware dist-apitokens-sample-app dist-registry dist-buyer
 
 dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -54,6 +54,10 @@ dist-provisioning: ## Build arkhai-vms-provisioning wheel into .dist/
 	cd domains/vms/provisioning/service && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_vms_provisioning-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-vms-provisioning produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+dist-provisioning-client: ## Build arkhai-vms-provisioning-client wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd domains/vms/provisioning/client && uv build --wheel --out-dir $(DIST_DIR)
 
 dist-apitokens-service: ## Build arkhai-apitokens-service wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -189,7 +193,7 @@ build-dev: build build-dev-env build-test-image
 # (`arkhai:storefront`, `arkhai:provisioning`) and just the wheels they
 # consume via --find-links. Skips `build-registry` (sellers point at
 # someone else's registry).
-build-seller: init-prerequisites dist-storefront-client dist-identity dist-core dist-arkhai-core-storefront dist-alkahest dist-config dist-storefront dist-policy dist-provisioning dist-registry ## Build only what a seller needs: storefront + provisioning images.
+build-seller: init-prerequisites dist-storefront-client dist-identity dist-core dist-arkhai-core-storefront dist-alkahest dist-config dist-storefront dist-policy dist-provisioning-client dist-provisioning dist-registry ## Build only what a seller needs: storefront + provisioning images.
 	$(MAKE) -j2 build-storefront build-provisioning
 
 # Same as build-seller, but the provisioning image's in-container appuser
@@ -259,7 +263,7 @@ init-zero-tier:
 init-buyer: dist-vms-common
 	cd domains/vms/buyer && make init
 
-init-storefront: dist-vms-common dist-policy dist-provisioning dist-storefront-client dist-registry
+init-storefront: dist-vms-common dist-policy dist-provisioning-client dist-provisioning dist-storefront-client dist-registry
 	cd domains/vms/storefront && make init
 
 init-arkhai-core-registry: dist-registry
@@ -339,6 +343,7 @@ PYTHON_REGISTRY := https://$(AR_LOCATION)-python.pkg.dev/$(AR_PROJECT)/$(AR_PREF
 STOREFRONT_CLIENT_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' core/storefront-client/pyproject.toml | head -1)
 REGISTRY_CLIENT_VERSION   := $(shell sed -n 's/^version = "\(.*\)"/\1/p' core/registry-client/pyproject.toml | head -1)
 PROVISIONING_VERSION      := $(shell sed -n 's/^version = "\(.*\)"/\1/p' domains/vms/provisioning/service/pyproject.toml | head -1)
+PROVISIONING_CLIENT_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' domains/vms/provisioning/client/pyproject.toml | head -1)
 # ---------------------------------------------------------------------------
 # Push — publish built artifacts to Artifact Registry.
 #
@@ -420,6 +425,7 @@ push-charts: _require-ar-project dist-helm
 push-wheels: _require-ar-project
 	$(call publish_python_wheel,arkhai-core-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)
 	$(call publish_python_wheel,arkhai-core-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
+	$(call publish_python_wheel,arkhai-vms-provisioning-client,$(PROVISIONING_CLIENT_VERSION),$(DIST_DIR)/arkhai_vms_provisioning_client-$(PROVISIONING_CLIENT_VERSION)-py3-none-any.whl)
 	$(call publish_python_wheel,arkhai-vms-provisioning,$(PROVISIONING_VERSION),$(DIST_DIR)/arkhai_vms_provisioning-$(PROVISIONING_VERSION)-py3-none-any.whl)
 
 push-cli: _require-ar-project
@@ -434,6 +440,7 @@ push-cli: _require-ar-project
 clobber-wheels: _require-ar-project
 	$(call clobber_python_wheel,arkhai-core-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)
 	$(call clobber_python_wheel,arkhai-core-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
+	$(call clobber_python_wheel,arkhai-vms-provisioning-client,$(PROVISIONING_CLIENT_VERSION),$(DIST_DIR)/arkhai_vms_provisioning_client-$(PROVISIONING_CLIENT_VERSION)-py3-none-any.whl)
 	$(call clobber_python_wheel,arkhai-vms-provisioning,$(PROVISIONING_VERSION),$(DIST_DIR)/arkhai_vms_provisioning-$(PROVISIONING_VERSION)-py3-none-any.whl)
 
 code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).

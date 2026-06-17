@@ -35,8 +35,7 @@ from fastapi import APIRouter, Depends, status
 from fastapi_utils.cbv import cbv
 
 import container as _container_module
-from models.jobs_model import JobSubmitResponse
-from models.vm_request_model import CreateVmRequest, VmActionRequest
+from provisioning_client.models import CreateVmRequest, JobSubmitResponse, VmActionRequest
 from services.vm_operations_service import VmOperationsService
 
 router = APIRouter(prefix="/hosts/{host}/vms", tags=["vms"])

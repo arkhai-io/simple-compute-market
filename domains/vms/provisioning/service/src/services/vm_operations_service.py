@@ -11,8 +11,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Optional
 
-from models.jobs_model import JobSubmitResponse
-from models.vm_request_model import CreateVmRequest, VmActionRequest, build_simple_params
+from provisioning_client.models import CreateVmRequest, JobSubmitResponse, VmActionRequest
+from models.vm_request_model import build_create_params, build_simple_params
 from services.async_job_queue import AsyncJobQueue
 
 if TYPE_CHECKING:
@@ -34,7 +34,7 @@ class VmOperationsService:
     async def create_vm(self, *, host: str, body: CreateVmRequest) -> JobSubmitResponse:
         """Submit a VM creation job for ``host``."""
         return await self._job_service.submit(
-            body.to_ansible_job_params(host),
+            build_create_params(host, body),
             self._job_queue_provider(),
         )
 

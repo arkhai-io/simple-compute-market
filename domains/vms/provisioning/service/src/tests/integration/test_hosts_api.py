@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import pytest
 
-from client.provisioning_client import ProvisioningClient, ProvisioningError
+from provisioning_client import ProvisioningClient, ProvisioningError
 from models.host_model import HostCreate, HostResponse, HostListResponse, HostUpdate
 
 
@@ -207,7 +207,6 @@ class TestConnectivity:
 
     async def test_connectivity_unknown_host_raises_404(self, client_and_queue):
         client, _ = client_and_queue
-        from client.provisioning_client import ProvisioningError
         with pytest.raises(ProvisioningError) as exc_info:
             await client.check_connectivity("ghost")
         assert exc_info.value.status_code == 404

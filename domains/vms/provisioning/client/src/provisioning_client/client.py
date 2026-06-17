@@ -43,22 +43,20 @@ from typing import Any, Optional
 
 import httpx
 
-from models.host_model import (
+from provisioning_client.models import (
+    AnsibleReadinessResponse,
+    CreateVmRequest,
+    CredentialListResponse,
+    HealthResponse,
     HostConnectivityResponse,
     HostCreate,
     HostListResponse,
     HostResponse,
     HostUpdate,
-)
-from models.jobs_model import (
-    CredentialListResponse,
     JobListResponse,
     JobLogsResponse,
     JobStatusResponse,
     JobSubmitResponse,
-)
-from models.vm_request_model import (
-    CreateVmRequest,
     VmActionRequest,
 )
 
@@ -199,18 +197,6 @@ class ProvisioningClient(_ProvisioningClientBase):
         payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
         resp = await self._client.put(path, json=payload, headers=self._headers())
         self._raise_for_status("PUT", url, resp.status_code, resp.text)
-        return resp.json()
-
-    async def _delete(self, path: str, body: Any = None) -> dict:
-        url = self._url(path)
-        import json as _json
-        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else {}
-        resp = await self._client.request(
-            "DELETE", path,
-            content=_json.dumps(payload).encode() if payload else None,
-            headers={**self._headers(), "Content-Type": "application/json"},
-        )
-        self._raise_for_status("DELETE", url, resp.status_code, resp.text)
         return resp.json()
 
     async def _patch(self, path: str, body: Any) -> dict:
@@ -573,6 +559,11 @@ class ProvisioningClient(_ProvisioningClientBase):
         )).get("allocation") or {}
 
 
+# ---------------------------------------------------------------------------
+# Sync client
+# ---------------------------------------------------------------------------
+
+
 class SyncProvisioningClient(_ProvisioningClientBase):
     """Synchronous HTTP client for the provisioning service REST API.
 
@@ -638,13 +629,6 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
         resp = self._client.put(path, json=payload, headers=self._headers())
         self._raise_for_status("PUT", url, resp.status_code, resp.text)
-        return resp.json()
-
-    def _delete(self, path: str, body: Any = None) -> dict:
-        url = self._url(path)
-        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else {}
-        resp = self._client.delete(path, json=payload, headers=self._headers())
-        self._raise_for_status("DELETE", url, resp.status_code, resp.text)
         return resp.json()
 
     def _patch(self, path: str, body: Any) -> dict:

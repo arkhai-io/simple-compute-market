@@ -3159,9 +3159,12 @@ Ten pure-Python internal packages are distributed as wheels:
 | `arkhai-kit-alkahest` | `market_alkahest-*.whl` | `kit/alkahest/` | `buyer`, `storefront`, `e2e-tests` |
 | `arkhai-kit-config` | `market_config-*.whl` | `kit/config/` | `buyer`, `storefront` |
 | `arkhai-vms-common` | `arkhai_vms_common-*.whl` | `domains/vms/common/` | `buyer`, `storefront` |
+| `arkhai-vms-provisioning-client` | `arkhai_vms_provisioning_client-*.whl` | `domains/vms/provisioning/client/` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
 | `arkhai-vms-provisioning` | `provisioning_service-*.whl` | `domains/vms/provisioning/service/` | `e2e-tests`, `storefront` |
 | `arkhai-core-storefront-client` | `arkhai_storefront_client-*.whl` | `core/storefront-client/` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
 | `arkhai-core-registry-client` | `arkhai_registry_client-*.whl` | `core/registry-client/` | `e2e-tests` |
+
+`arkhai-vms-provisioning-client` (`domains/vms/provisioning/client/`) is the provisioning service's HTTP client wheel — `httpx` + `pydantic` only, mirroring the `arkhai-core-registry-client` and `arkhai-core-storefront-client` pattern. It exposes `ProvisioningClient` (async) and `SyncProvisioningClient` (sync), plus all public request/response Pydantic models (`CreateVmRequest`, `HostCreate`, `JobStatusResponse`, `LeaseResponse`, etc.). The service wheel (`arkhai-vms-provisioning`) depends on it for the shared Pydantic models its FastAPI route handlers use, exactly as the storefront server imports from `storefront_client` and `registry_client`. Internal server-only types (`AnsibleJobParams`, `AnsibleRunResult`) remain in the service wheel and are never part of the client surface. Consumers import from a collision-free namespace: `from provisioning_client import ProvisioningClient, CreateVmRequest`.
 
 `arkhai-core-storefront-client` exists as a separate lightweight package to avoid pulling `arkhai-vms-storefront`'s heavyweight dependencies (`pufferlib`, `torch`, native RL wheels under the `[rl]` extra) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `core/storefront-client/src/storefront_client/client.py` and exposes `StorefrontClient` (async) and `SyncStorefrontClient` (sync).
 
@@ -3280,8 +3283,8 @@ cd core/registry && make reinit && make test-integration
 | Package | Wheel | Async client | Sync client | Consumers |
 |---|---|---|---|---|
 | `arkhai-core-storefront-client` | `arkhai_storefront_client-*.whl` | `StorefrontClient` | `SyncStorefrontClient` | `storefront`, `e2e-tests` |
-| `core/registry-client/` | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `e2e-tests`, `arkhai-core-registry` tests |
-| `domains/vms/provisioning/service/src/client/` | `provisioning_service-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `e2e-tests` |
+| `arkhai-core-registry-client` (`core/registry-client/`) | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `e2e-tests`, `arkhai-core-registry` tests |
+| `arkhai-vms-provisioning-client` (`domains/vms/provisioning/client/`) | `arkhai_vms_provisioning_client-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
 
 `arkhai-core-storefront-client` exposes EIP-191-signed methods on both
 `StorefrontClient` (async) and `SyncStorefrontClient` (sync):
@@ -3297,7 +3300,7 @@ cd core/registry && make reinit && make test-integration
 The wheel ships `EvaluateNegotiateResponse`, `SettleResponse`, and
 `SettleStatusResponse` typed models alongside these methods.
 
-`arkhai-vms-provisioning` bundles its client inside the service wheel (under `src/client/`) because the request/response models (`CreateVmRequest`, `JobStatusResponse`, etc.) are shared between the server and client. Consumers import as `from client.provisioning_client import ProvisioningClient`.
+`arkhai-vms-provisioning-client` exposes the full provisioning API contract as a collision-free `provisioning_client.*` namespace: `ProvisioningClient`/`SyncProvisioningClient` plus all public Pydantic models (`CreateVmRequest`, `HostCreate`, `JobStatusResponse`, `LeaseResponse`, etc.). The service wheel (`arkhai-vms-provisioning`) imports the shared Pydantic models from this wheel for its FastAPI route handlers, following the same server→client-wheel import pattern that `storefront` uses for `storefront_client` and `registry_client`. Internal server-only types (`AnsibleJobParams`, `AnsibleRunResult`, `EvaluateJobRequest`) remain in the service wheel. Consumer import: `from provisioning_client import ProvisioningClient, CreateVmRequest`.
 
 | Term | Meaning |
 |---|---|

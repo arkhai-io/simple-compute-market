@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from models.jobs_model import AnsibleJobParams
-from models.lease_model import (
+from provisioning_client.models import (
     LeaseForceReleaseRequest,
     LeaseReleaseOversightRequest,
     LeaseRetryReleaseRequest,
