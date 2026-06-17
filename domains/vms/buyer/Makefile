@@ -5,10 +5,10 @@ DIST_DIR ?= $(abspath $(CURDIR)/../../../.dist)
 
 init:
 	uv venv --allow-existing --python 3.12
-	uv sync --python 3.12 --find-links $(DIST_DIR)
+	uv sync --dev --python 3.12 --find-links $(DIST_DIR)
 
 reinit:
-	uv sync --python 3.12 --find-links $(DIST_DIR) \
+	uv sync --dev --python 3.12 --find-links $(DIST_DIR) \
 	--upgrade-package arkhai-vms-common \
 	--reinstall-package arkhai-vms-common
 

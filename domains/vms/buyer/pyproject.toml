@@ -23,10 +23,12 @@ dependencies = [
   "arkhai-vms-common",
 ]
 
-[project.optional-dependencies]
-test = [
+[dependency-groups]
+dev = [
   "pytest>=8.0.0",
 ]
+
+[project.optional-dependencies]
 
 # RL negotiation strategy — inference only. Mirrors the storefront's
 # [rl] extra: ``uv pip install -e ".[rl]"`` runs trained pufferlib
