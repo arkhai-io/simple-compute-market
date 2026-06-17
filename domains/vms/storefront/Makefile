@@ -17,9 +17,11 @@ init: ## Resolve deps and create .venv. Run once after checkout or after changin
 
 reinit: ## Force-reinstall internal wheels without bumping versions. Use after make dist-*.
 	uv sync --find-links $(DIST_DIR) \
+	--upgrade-package arkhai-vms-common \
 	--upgrade-package arkhai-vms-provisioning \
 	--upgrade-package arkhai-core-storefront-client \
 	--upgrade-package arkhai-core-registry-client \
+	--reinstall-package arkhai-vms-common \
 	--reinstall-package arkhai-vms-provisioning \
 	--reinstall-package arkhai-core-storefront-client \
 	--reinstall-package arkhai-core-registry-client

@@ -114,25 +114,15 @@
   tags:
     - vm_reset_password
 
-- name: Include VM lease end tasks
+- name: Include VM remove tasks
   include_tasks:
-    file: vm-lease-end.yml
+    file: vm-remove.yml
     apply:
       tags:
-        - vm_lease_end
-  when: vm_action == "lease_end"
+        - vm_remove
+  when: vm_action == "vm_remove"
   tags:
-    - vm_lease_end
-
-- name: Include VM lease remove tasks
-  include_tasks:
-    file: vm-lease-remove.yml
-    apply:
-      tags:
-        - vm_lease_remove
-  when: vm_action == "lease_remove"
-  tags:
-    - vm_lease_remove
+    - vm_remove
 
 - name: Include VM check tasks
   include_tasks:
@@ -161,11 +151,10 @@
   fail:
     msg: "VM operation '{{ vm_action }}' failed on VM '{{ vm_name }}' at host '{{ target_host }}'"
   when: 
-    - vm_action in ['start', 'shutdown', 'destroy', 'reboot', 'undefine', 'lease_end', 'lease_remove']
+    - vm_action in ['start', 'shutdown', 'destroy', 'reboot', 'undefine', 'vm_remove']
     - (start_result is defined and start_result.failed | default(false)) or
       (shutdown_result is defined and shutdown_result.failed | default(false)) or
       (destroy_result is defined and destroy_result.failed | default(false)) or
       (reboot_result is defined and reboot_result.failed | default(false)) or
       (undefine_result is defined and undefine_result.failed | default(false)) or
-      (lease_end_result is defined and lease_end_result.failed | default(false)) or
-      (lease_remove_result is defined and lease_remove_result.failed | default(false))
+      (vm_cleanup_result is defined and vm_cleanup_result.failed | default(false))

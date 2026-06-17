@@ -60,7 +60,7 @@ from core_storefront.negotiation_sync import (
     record_buyer_exit_message as _record_buyer_exit_message,
     record_seller_decision_message as _record_seller_decision_message,
 )
-from domains.vms.provisioning import provision_duration_seconds
+from arkhai_vms_common import provision_duration_seconds
 from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
 
 logger = logging.getLogger(__name__)
@@ -198,10 +198,12 @@ async def _place_capacity_hold(
     if ttl <= 0:
         return
     try:
-        from domains.vms.provisioning.job_spec import required_compute_attributes
         from market_storefront.services.capacity_client import build_capacity_client
+        from market_storefront.services.vm_job_spec_service import (
+            compute_capacity_claim_from_order,
+        )
 
-        claim = required_compute_attributes(order_dict)
+        claim = compute_capacity_claim_from_order(order_dict)
         capacity = build_capacity_client(lambda: sqlite_client)
         held = await capacity.reserve(
             claim=claim or None,

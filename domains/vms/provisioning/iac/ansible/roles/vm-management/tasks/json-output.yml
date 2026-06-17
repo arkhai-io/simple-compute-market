@@ -129,37 +129,21 @@
     msg: "{{ vm_monitoring_json }}"
   when: vm_action == "monitor" and vm_monitoring_json is defined
 
-# VM Lease End JSON Output
-- name: Create JSON formatted output for VM lease_end
+# VM Remove JSON Output
+- name: Create JSON formatted output for VM remove
   set_fact:
-    vm_lease_end_json: "{{ vm_lease_end_data | to_nice_json }}"
-  when: vm_action == "lease_end" and vm_lease_end_data is defined
+    vm_remove_json: "{{ vm_remove_data | to_nice_json }}"
+  when: vm_action == "vm_remove" and vm_remove_data is defined
 
-- name: Output VM lease_end data as parsable JSON
+- name: Output VM remove data as parsable JSON
   debug:
-    var: vm_lease_end_data
-  when: vm_action == "lease_end" and vm_lease_end_data is defined
+    var: vm_remove_data
+  when: vm_action == "vm_remove" and vm_remove_data is defined
 
-- name: Output VM lease_end JSON string for external parsing
+- name: Output VM remove JSON string for external parsing
   debug:
-    msg: "{{ vm_lease_end_json }}"
-  when: vm_action == "lease_end" and vm_lease_end_json is defined
-
-# VM Lease Remove JSON Output
-- name: Create JSON formatted output for VM lease_remove
-  set_fact:
-    vm_lease_remove_json: "{{ vm_lease_remove_data | to_nice_json }}"
-  when: vm_action == "lease_remove" and vm_lease_remove_data is defined
-
-- name: Output VM lease_remove data as parsable JSON
-  debug:
-    var: vm_lease_remove_data
-  when: vm_action == "lease_remove" and vm_lease_remove_data is defined
-
-- name: Output VM lease_remove JSON string for external parsing
-  debug:
-    msg: "{{ vm_lease_remove_json }}"
-  when: vm_action == "lease_remove" and vm_lease_remove_json is defined
+    msg: "{{ vm_remove_json }}"
+  when: vm_action == "vm_remove" and vm_remove_json is defined
 
 # VM List JSON Output
 - name: Create JSON formatted output for VM list

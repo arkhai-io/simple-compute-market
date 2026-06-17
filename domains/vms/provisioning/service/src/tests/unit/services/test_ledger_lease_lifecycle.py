@@ -61,7 +61,7 @@ def _lifecycle(session_factory, ledger, **settings_overrides):
     return LeaseLifecycleService(
         settings=_settings(**settings_overrides),
         capacity_ledger=ledger,
-        job_service=None,  # direct-release path; check jobs covered elsewhere
+        job_service=None,  # direct-release path; vm_remove jobs covered elsewhere
     )
 
 
@@ -136,11 +136,11 @@ async def test_release_survives_unreachable_storefront(session_factory, ledger):
 
 
 @pytest.mark.asyncio
-async def test_releasing_allocation_waits_for_check_then_grace_forces(
+async def test_releasing_allocation_past_grace_marks_release_failed(
     session_factory, ledger,
 ):
     allocation = _expired_allocation(ledger)
-    ledger.begin_releasing(allocation["allocation_id"], check_job_id="check-1")
+    ledger.begin_releasing(allocation["allocation_id"], vm_remove_job_id="check-1")
 
     job_svc = MagicMock()
     running = MagicMock()
@@ -151,6 +151,7 @@ async def test_releasing_allocation_waits_for_check_then_grace_forces(
         settings=_settings(),
         capacity_ledger=ledger,
         job_service=job_svc,
+        job_queue_provider=lambda: MagicMock(),
     )
 
     sf = MagicMock()
@@ -159,14 +160,14 @@ async def test_releasing_allocation_waits_for_check_then_grace_forces(
     sf.notify_capacity_released = AsyncMock(return_value={})
 
     with patch("storefront_client.StorefrontClient", return_value=sf):
-        # lease ended 2020 + 300s grace — long past: still-running check
-        # job forces the release.
+        # lease ended 2020 + 300s grace — long past: still-running vm_remove
+        # job is marked failed; capacity remains held.
         summary = await svc.force_check_leases()
 
-    assert summary["forced"] == 1
-    assert ledger.get_allocation(allocation["allocation_id"])["state"] == "forced"
-    assert ledger.snapshot()[0]["available_units"] == 8
-    sf.notify_capacity_released.assert_awaited_once()
+    assert summary["release_failed"] == 1
+    assert ledger.get_allocation(allocation["allocation_id"])["state"] == "release_failed"
+    assert ledger.snapshot()[0]["available_units"] < 8
+    sf.notify_capacity_released.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -178,7 +179,7 @@ async def test_releasing_allocation_within_grace_skips(session_factory, ledger):
         allocation_id=reserved["allocation_id"],
         lease_end_utc=soon,  # expired 1s ago — well within the 300s grace
     )
-    ledger.begin_releasing(reserved["allocation_id"], check_job_id="check-1")
+    ledger.begin_releasing(reserved["allocation_id"], vm_remove_job_id="check-1")
 
     job_svc = MagicMock()
     running = MagicMock()
@@ -189,6 +190,7 @@ async def test_releasing_allocation_within_grace_skips(session_factory, ledger):
         settings=_settings(),
         capacity_ledger=ledger,
         job_service=job_svc,
+        job_queue_provider=lambda: MagicMock(),
     )
     summary = await svc.force_check_leases()
     assert summary["skipped"] == 1
@@ -196,9 +198,9 @@ async def test_releasing_allocation_within_grace_skips(session_factory, ledger):
 
 
 @pytest.mark.asyncio
-async def test_succeeded_check_releases_normally(session_factory, ledger):
+async def test_succeeded_vm_remove_releases_normally(session_factory, ledger):
     allocation = _expired_allocation(ledger)
-    ledger.begin_releasing(allocation["allocation_id"], check_job_id="check-1")
+    ledger.begin_releasing(allocation["allocation_id"], vm_remove_job_id="check-1")
 
     job_svc = MagicMock()
     done = MagicMock()
@@ -209,6 +211,7 @@ async def test_succeeded_check_releases_normally(session_factory, ledger):
         settings=_settings(),
         capacity_ledger=ledger,
         job_service=job_svc,
+        job_queue_provider=lambda: MagicMock(),
     )
 
     sf = MagicMock()
@@ -224,9 +227,41 @@ async def test_succeeded_check_releases_normally(session_factory, ledger):
 
 
 @pytest.mark.asyncio
-async def test_due_leased_allocation_submits_check_job(session_factory, ledger):
+async def test_failed_vm_remove_marks_release_failed_without_notification(session_factory, ledger):
+    allocation = _expired_allocation(ledger)
+    ledger.begin_releasing(allocation["allocation_id"], vm_remove_job_id="remove-1")
+
+    job_svc = MagicMock()
+    failed = MagicMock()
+    failed.status = "failed"
+    failed.error = "cleanup script missing"
+    job_svc.get_job.return_value = failed
+
+    svc = LeaseLifecycleService(
+        settings=_settings(),
+        capacity_ledger=ledger,
+        job_service=job_svc,
+        job_queue_provider=lambda: MagicMock(),
+    )
+
+    sf = MagicMock()
+    sf.__aenter__ = AsyncMock(return_value=sf)
+    sf.__aexit__ = AsyncMock(return_value=False)
+    sf.notify_capacity_released = AsyncMock(return_value={})
+
+    with patch("storefront_client.StorefrontClient", return_value=sf):
+        summary = await svc.force_check_leases()
+
+    assert summary["release_failed"] == 1
+    assert ledger.get_allocation(allocation["allocation_id"])["state"] == "release_failed"
+    assert ledger.snapshot()[0]["available_units"] < 8
+    sf.notify_capacity_released.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_due_leased_allocation_submits_vm_remove_job(session_factory, ledger):
     # Lease ended seconds ago — within grace, so the same cycle that
-    # submits the check job must NOT force-release it.
+    # submits the vm_remove job must NOT force-release it.
     reserved = ledger.reserve(claim={"gpu_count": 2}, deal_ref={"escrow_uid": "0xe"})
     just_expired = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
     ledger.commit(
@@ -242,7 +277,7 @@ async def test_due_leased_allocation_submits_check_job(session_factory, ledger):
 
     job_svc = MagicMock()
     submit = MagicMock()
-    submit.job_id = "check-42"
+    submit.job_id = "remove-42"
     job_svc.submit = AsyncMock(return_value=submit)
     running = MagicMock()
     running.status = "running"
@@ -252,16 +287,79 @@ async def test_due_leased_allocation_submits_check_job(session_factory, ledger):
         settings=_settings(),
         capacity_ledger=ledger,
         job_service=job_svc,
+        job_queue_provider=lambda: MagicMock(),
     )
 
-    import container as _container_module
-    with patch.object(_container_module, "resolved_job_queue", MagicMock()):
-        summary = await svc.force_check_leases()
+    summary = await svc.force_check_leases()
 
     assert summary["checked"] == 1
     row = ledger.get_allocation(allocation["allocation_id"])
     assert row["state"] == "releasing"
-    assert row["check_job_id"] == "check-42"
+    assert row["vm_remove_job_id"] == "remove-42"
     params = job_svc.submit.await_args.args[0]
-    assert params.vm_action == "check"
+    assert params.vm_action == "vm_remove"
     assert params.vm_target == "tenant-x"
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_release_resubmits_delegate(session_factory, ledger):
+    allocation = _expired_allocation(ledger)
+    ledger.update_allocation_state(
+        allocation["allocation_id"],
+        state="release_failed",
+        failure_reason="vm_remove_failed",
+        failure_message="cleanup script missing",
+    )
+
+    delegate = AsyncMock(return_value="remove-retry-1")
+    svc = LeaseLifecycleService(
+        settings=_settings(),
+        capacity_ledger=ledger,
+        job_service=None,
+        release_delegate=delegate,
+    )
+
+    from models.lease_model import LeaseRetryReleaseRequest
+
+    updated = await svc.retry_release(
+        allocation["allocation_id"],
+        LeaseRetryReleaseRequest(reason="operator retry"),
+    )
+
+    assert updated["state"] == "releasing"
+    assert updated["vm_remove_job_id"] == "remove-retry-1"
+    assert ledger.snapshot()[0]["available_units"] < 8
+    delegate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_admin_force_release_unmanaged_releases_capacity_and_notifies(session_factory, ledger):
+    allocation = _expired_allocation(ledger)
+    ledger.update_allocation_state(
+        allocation["allocation_id"],
+        state="unmanaged",
+        failure_reason="oversight_released",
+        failure_message="manual ops",
+    )
+
+    svc = _lifecycle(session_factory, ledger)
+
+    sf = MagicMock()
+    sf.__aenter__ = AsyncMock(return_value=sf)
+    sf.__aexit__ = AsyncMock(return_value=False)
+    sf.notify_capacity_released = AsyncMock(return_value={})
+
+    from models.lease_model import LeaseForceReleaseRequest
+
+    with patch("storefront_client.StorefrontClient", return_value=sf):
+        released = await svc.force_release(
+            allocation["allocation_id"],
+            LeaseForceReleaseRequest(reason="host inspected", evidence="VM absent"),
+        )
+
+    assert released["state"] == "force_released"
+    assert released["failure_reason"] == "admin_force_release"
+    assert ledger.snapshot()[0]["available_units"] == 8
+    events, _ = ledger.events_after(0)
+    assert events[-1]["kind"] == "released"
+    sf.notify_capacity_released.assert_awaited_once()

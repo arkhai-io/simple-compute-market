@@ -1,4 +1,4 @@
-from domains.vms.provisioning import make_vm_provision_terms
+from arkhai_vms_common import make_vm_provision_terms
 from core_buyer.escrow_selection import select_escrow_entry
 from domains.vms.settlement import escrow_proposal_from_accepted_entry
 

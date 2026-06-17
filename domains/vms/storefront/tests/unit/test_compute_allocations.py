@@ -97,7 +97,7 @@ def test_sqlite_schema_includes_compute_allocation_correlation_fields(client):
         "failure_reason",
         "failure_message",
         "logs_ref",
-        "check_job_id",
+        "vm_remove_job_id",
     } <= cols
 
 
@@ -166,7 +166,7 @@ def test_sqlite_migration_backfills_compute_allocation_correlation_fields(tmp_pa
         "failure_reason",
         "failure_message",
         "logs_ref",
-        "check_job_id",
+        "vm_remove_job_id",
     } <= cols
     assert "20260604_001_compute_allocation_callback_metadata" in migration_ids
 

@@ -131,6 +131,8 @@ async def client_and_queue(
 
     job_queue = AsyncJobQueue(max_concurrent=2)
     _container_module.resolved_job_queue = job_queue
+    _container_module.resolved_vm_operations_service = app.container.vm_operations_service()
+    _container_module.resolved_host_operations_service = app.container.host_operations_service()
 
     processing_task = asyncio.create_task(
         job_queue.start(job_service._process_job),
@@ -155,6 +157,8 @@ async def client_and_queue(
     app.container.system_service.reset_override()
     app.container.session_factory.reset_override()
     app.container.host_service.reset_override()
+    _container_module.resolved_vm_operations_service = None
+    _container_module.resolved_host_operations_service = None
 
 
 def _make_event_seam(job_queue: AsyncJobQueue) -> asyncio.Event:

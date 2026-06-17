@@ -389,12 +389,6 @@ class AnsibleService:
             lines.append(f"gcs_bucket_url: {params.gcs_bucket_url}")
         if params.gcs_image_path:
             lines.append(f"gcs_image_path: {params.gcs_image_path}")
-        if params.vm_expiry_at:
-            # Passed to Ansible as vm_lease_end; renamed vm_expiry_at on the API side.
-            # TODO(lease-watchdog): remove this Ansible pass-through when Item 2
-            # (DB-driven lease watchdog) is implemented.
-            lines.append(f'vm_lease_end: "{params.vm_expiry_at}"')
-
         if params.image_setup_type == "golden":
             self._inject_golden_image_credentials(lines)
         else:
@@ -551,8 +545,7 @@ class AnsibleService:
             "undefine": "vm_undefine_data",
             "monitor": "vm_monitoring_data",
             "reset_password": "vm_password_reset_data",
-            "lease_end": "vm_lease_end_data",
-            "lease_remove": "vm_lease_remove_data",
+            "vm_remove": "vm_remove_data",
             "check": "check_data",
         }
         fact_name = fact_names.get(action)

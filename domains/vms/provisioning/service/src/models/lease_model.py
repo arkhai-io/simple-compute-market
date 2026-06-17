@@ -6,17 +6,9 @@ LeaseResponse — serialised view returned by all lease endpoints
 LeaseListResponse — wraps a list of LeaseResponse for list queries
 
 The storefront calls POST /api/v1/leases after a VM has been provisioned and
-the lease window is known (i.e., after _do_shutdown succeeds in
-action_executor.py). The provisioning service's LeaseWatchdog then polls the
-vm_leases table, submits a check Ansible job to confirm VM cleanup, and calls
-back to the storefront's PATCH /api/v1/admin/portfolio/resources/{resource_id}
-endpoint when the lease is confirmed released.
-
-The storefront_url and storefront_admin_key are global settings on the
-provisioning service (settings.toml: storefront_url, storefront_admin_key)
-rather than per-lease fields. One provisioning service instance serves one
-storefront. In production these are injected via the provisioning-secrets
-config profile.
+the lease window is known. The provisioning service's LeaseWatchdog enforces
+lease expiry by submitting the concrete release operation for this service
+(``vm_remove``) and releases capacity only after that job succeeds.
 """
 
 from __future__ import annotations
@@ -75,22 +67,101 @@ class LeaseCreate(BaseModel):
 class LeaseUpdate(BaseModel):
     """Body accepted by ``PATCH /api/v1/leases/{lease_id}``.
 
-    All fields are optional; only supplied (non-None) fields are written.
-    Primarily used by operators and tests; normal lifecycle transitions happen
-    internally via LeaseService methods called by the watchdog.
+    All fields are optional; only non-None fields are written to the
+    allocation.  State transitions (e.g. cancellation) are performed via
+    dedicated action endpoints, not via this model.
     """
 
-    status: Optional[str] = Field(
+    vm_host: Optional[str] = Field(
         default=None,
-        description="New lease status. See LeaseStatus for valid values.",
+        description="KVM host alias — update when a VM migrates to a different host.",
     )
-    check_job_id: Optional[str] = Field(
+    vm_target: Optional[str] = Field(
         default=None,
-        description="Provisioning job_id for the most recent watchdog check job.",
+        description="Libvirt domain name — update if the VM was renamed.",
+    )
+    lease_start_utc: Optional[datetime] = Field(
+        default=None,
+        description="Override the lease start time.",
     )
     lease_end_utc: Optional[datetime] = Field(
         default=None,
-        description="Override the lease expiry time (e.g. to extend or shorten a lease).",
+        description=(
+            "Override the lease expiry time (extend or shorten).  "
+            "Setting this to the past causes the watchdog to begin teardown "
+            "on its next cycle; combine with "
+            "``POST /api/v1/system/check-leases`` for an immediate trigger."
+        ),
+    )
+    vm_remove_job_id: Optional[str] = Field(
+        default=None,
+        description="Provisioning job_id for the most recent vm_remove teardown job.",
+    )
+    create_job_id: Optional[str] = Field(
+        default=None,
+        description="Provisioning job_id of the VM creation job.",
+    )
+
+
+class LeaseTerminateRequest(BaseModel):
+    """Body accepted by ``POST /api/v1/leases/{lease_id}/terminate``."""
+
+    reason: Optional[str] = Field(
+        default=None,
+        description="Optional operator reason for terminating the lease early.",
+    )
+    max_retries: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Optional retry override reserved for the vm_remove job.",
+    )
+
+
+class LeaseReleaseOversightRequest(BaseModel):
+    """Body accepted by ``POST /api/v1/leases/{lease_id}/release-oversight``."""
+
+    reason: str = Field(
+        min_length=1,
+        description=(
+            "Required operator reason. Releases provisioning-service lifecycle "
+            "oversight without deleting the VM or releasing capacity."
+        ),
+    )
+
+
+class LeaseRetryReleaseRequest(BaseModel):
+    """Body accepted by ``POST /api/v1/admin/leases/{lease_id}/retry-release``."""
+
+    reason: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional admin reason for retrying teardown after release_failed. "
+            "Retries submit the provisioning service release operation again."
+        ),
+    )
+    max_retries: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Optional retry override reserved for the release job.",
+    )
+
+
+class LeaseForceReleaseRequest(BaseModel):
+    """Body accepted by ``POST /api/v1/admin/leases/{lease_id}/force-release``."""
+
+    reason: str = Field(
+        min_length=1,
+        description=(
+            "Required admin reason. Force-release bypasses teardown proof and "
+            "asserts capacity is safe to resell."
+        ),
+    )
+    evidence: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional operational evidence such as host inspected, VM absent, "
+            "or disks manually removed."
+        ),
     )
 
 
@@ -107,7 +178,7 @@ class LeaseResponse(BaseModel):
     lease_end_utc: datetime
     status: str
     create_job_id: Optional[str] = None
-    check_job_id: Optional[str] = None
+    vm_remove_job_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

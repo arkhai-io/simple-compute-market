@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from domains.vms.provisioning.fulfillment import _commit_capacity_hold
+from market_storefront.services.vm_fulfillment_service import _commit_capacity_hold
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.sync_negotiation import _place_capacity_hold
 
@@ -148,7 +148,9 @@ def test_claim_survives_listing_model_validation():
     whatever resource is first in line (the e2e caught this as a deal
     provisioned on the wrong machine)."""
     from domains.vms.listings.models import Listing
-    from domains.vms.provisioning.job_spec import required_compute_attributes
+    from market_storefront.services.vm_job_spec_service import (
+        compute_capacity_claim_from_order,
+    )
 
     row = {
         "listing_id": "lst-1",
@@ -160,10 +162,10 @@ def test_claim_survives_listing_model_validation():
         },
         "accepted_escrows": [],
     }
-    pinned = required_compute_attributes(row)
+    pinned = compute_capacity_claim_from_order(row)
     Listing.model_validate(row)
     assert not isinstance(row["offer_resource"], dict)  # the mutation
-    assert required_compute_attributes(row) == pinned
+    assert compute_capacity_claim_from_order(row) == pinned
     assert pinned["resource_id"] == "res-pin"
 
 

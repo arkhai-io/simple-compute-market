@@ -255,10 +255,10 @@ def test_list_lease_due_and_begin_releasing(seeded: CapacityLedgerService):
     assert [a["allocation_id"] for a in due] == [reserved["allocation_id"]]
 
     releasing = seeded.begin_releasing(
-        reserved["allocation_id"], check_job_id="check-1",
+        reserved["allocation_id"], vm_remove_job_id="check-1",
     )
     assert releasing["state"] == "releasing"
-    assert releasing["check_job_id"] == "check-1"
+    assert releasing["vm_remove_job_id"] == "check-1"
     # releasing still holds the units and is no longer "due".
     assert seeded.snapshot()[0]["available_units"] == 7
     assert seeded.list_lease_due(datetime.now(timezone.utc)) == []
@@ -273,11 +273,11 @@ def test_list_lease_due_and_begin_releasing(seeded: CapacityLedgerService):
     assert seeded.list_lease_due(datetime.now(timezone.utc)) == []
 
 
-def test_release_can_mark_forced(seeded: CapacityLedgerService):
+def test_release_can_mark_force_released(seeded: CapacityLedgerService):
     reserved = seeded.reserve(claim={}, deal_ref={})
     seeded.begin_releasing(reserved["allocation_id"])
-    forced = seeded.release(allocation_id=reserved["allocation_id"], state="forced")
-    assert forced["state"] == "forced"
+    forced = seeded.release(allocation_id=reserved["allocation_id"], state="force_released")
+    assert forced["state"] == "force_released"
     assert seeded.snapshot()[0]["available_units"] == 8
 
 

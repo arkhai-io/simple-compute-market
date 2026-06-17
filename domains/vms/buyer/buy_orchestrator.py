@@ -45,7 +45,7 @@ from core_buyer.orchestration import (
     make_settle_hook as _core_make_settle_hook,
 )
 from core_buyer.policy_surface import extract_seller_min_price  # noqa: F401
-from domains.vms.provisioning import VmProvisionTerms
+from arkhai_vms_common import VmProvisionTerms
 from core_buyer.escrow_client import BuildEscrowTermsFn, CreateEscrowFn
 
 from .buyer_client import _sign  # noqa: F401 — re-export for service_cli/tests

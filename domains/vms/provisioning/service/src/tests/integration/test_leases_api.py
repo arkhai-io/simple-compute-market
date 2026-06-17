@@ -162,3 +162,165 @@ class TestCheckLeasesEndpoint:
         assert allocation["state"] == "released"
         events, _ = ledger.events_after(0)
         assert events[-1]["kind"] == "released"
+
+
+class TestUpdateLease:
+    async def test_patch_lease_end_utc(self, client_and_queue):
+        """PATCH updates lease_end_utc without changing the allocation state."""
+        client, _ = client_and_queue
+        lease = await _register(client, "escrow-patch-1")
+        new_end = _future_dt(hours=4)
+
+        updated = await client.update_lease(lease["id"], lease_end_utc=new_end)
+
+        assert updated["id"] == lease["id"]
+        assert updated["status"] == "active"  # state unchanged
+        ledger = _container_module.resolved_capacity_ledger_service
+        allocation = ledger.get_allocation(lease["allocation_id"])
+        assert allocation["state"] == "leased"
+        # The new end time was stored (compare prefix to avoid TZ formatting differences)
+        assert allocation["lease_end_utc"].startswith(new_end[:19])
+
+    async def test_patch_vm_host_and_vm_target(self, client_and_queue):
+        """PATCH can update vm_host and vm_target for migrated VMs."""
+        client, _ = client_and_queue
+        lease = await _register(client, "escrow-patch-2")
+
+        updated = await client.update_lease(
+            lease["id"], vm_host="kvm2", vm_target="migrated-vm",
+        )
+
+        assert updated["vm_host"] == "kvm2"
+        assert updated["vm_target"] == "migrated-vm"
+        assert updated["status"] == "active"
+
+    async def test_patch_nonexistent_lease_returns_404(self, client_and_queue):
+        client, _ = client_and_queue
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.update_lease("no-such-lease", lease_end_utc=_future_dt())
+        assert exc_info.value.status_code == 404
+
+    async def test_patch_backdated_lease_end_triggers_watchdog(self, client_and_queue):
+        """Setting lease_end_utc to the past causes the next watchdog cycle
+        to submit a vm_remove job (or, with no job_service wired, release
+        directly in test mode)."""
+        client, _ = client_and_queue
+        lease = await _register(client, "escrow-patch-backdate")
+
+        await client.update_lease(lease["id"], lease_end_utc=_past_dt())
+        result = await client.check_leases()
+
+        assert result.get("released", 0) + result.get("checked", 0) >= 1
+        ledger = _container_module.resolved_capacity_ledger_service
+        allocation = ledger.get_allocation(lease["allocation_id"])
+        assert allocation["state"] in ("released", "releasing")
+
+
+class TestReleaseOversight:
+    async def test_release_oversight_marks_unmanaged_without_releasing_capacity(self, client_and_queue):
+        """release-oversight marks unmanaged and leaves capacity held."""
+        client, _ = client_and_queue
+        lease = await _register(client, "escrow-unmanaged-1")
+
+        unmanaged = await client.release_lease_oversight(
+            lease["id"], reason="operator will manage manually",
+        )
+
+        assert unmanaged["status"] == "unmanaged"
+        ledger = _container_module.resolved_capacity_ledger_service
+        allocation = ledger.get_allocation(lease["allocation_id"])
+        assert allocation["state"] == "unmanaged"
+        snapshot = ledger.snapshot()
+        resource = next(r for r in snapshot if r["resource_id"] == "compute-kvm1-001")
+        assert resource["available_units"] < resource["value"]
+
+    async def test_release_oversight_does_not_emit_capacity_event(self, client_and_queue):
+        client, _ = client_and_queue
+        ledger = _container_module.resolved_capacity_ledger_service
+
+        lease = await _register(client, "escrow-unmanaged-event")
+        _, version_before = ledger.events_after(0)
+
+        await client.release_lease_oversight(lease["id"], reason="manual ops")
+
+        events, _ = ledger.events_after(version_before)
+        kinds = [e["kind"] for e in events]
+        assert "released" not in kinds
+
+    async def test_release_oversight_nonexistent_returns_404(self, client_and_queue):
+        client, _ = client_and_queue
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.release_lease_oversight("no-such-lease", reason="manual ops")
+        assert exc_info.value.status_code == 404
+
+    async def test_release_oversight_releasing_returns_409(self, client_and_queue):
+        """release-oversight on a releasing allocation returns 409."""
+        client, _ = client_and_queue
+        lease = await _register(client, "escrow-cancel-releasing", lease_end_utc=_past_dt())
+        ledger = _container_module.resolved_capacity_ledger_service
+        # Manually transition to releasing (simulating watchdog having fired)
+        ledger.begin_releasing(lease["allocation_id"], vm_remove_job_id="job-in-flight")
+
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.release_lease_oversight(lease["id"], reason="manual ops")
+        assert exc_info.value.status_code == 409
+
+
+
+class TestAdminLeaseRepair:
+    async def test_retry_release_moves_release_failed_back_to_releasing(self, client_and_queue):
+        client, _ = client_and_queue
+        lease = await _register(client, "escrow-retry-release", lease_end_utc=_past_dt())
+        ledger = _container_module.resolved_capacity_ledger_service
+        ledger.update_allocation_state(
+            lease["allocation_id"],
+            state="release_failed",
+            failure_reason="vm_remove_failed",
+            failure_message="cleanup script missing",
+        )
+
+        retried = await client.retry_lease_release(lease["id"], reason="operator retry")
+
+        assert retried["status"] == "releasing"
+        allocation = ledger.get_allocation(lease["allocation_id"])
+        assert allocation["state"] == "releasing"
+        assert allocation["vm_remove_job_id"] == "direct-release"
+
+    async def test_retry_release_non_failed_returns_409(self, client_and_queue):
+        client, _ = client_and_queue
+        lease = await _register(client, "escrow-retry-active")
+
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.retry_lease_release(lease["id"], reason="operator retry")
+        assert exc_info.value.status_code == 409
+
+    async def test_force_release_unmanaged_releases_capacity(self, client_and_queue):
+        client, _ = client_and_queue
+        lease = await _register(client, "escrow-force-unmanaged")
+        ledger = _container_module.resolved_capacity_ledger_service
+        await client.release_lease_oversight(lease["id"], reason="manual ops")
+        _, version_before = ledger.events_after(0)
+
+        released = await client.force_release_lease(
+            lease["id"], reason="host inspected", evidence="VM absent",
+        )
+
+        assert released["status"] == "force_released"
+        allocation = ledger.get_allocation(lease["allocation_id"])
+        assert allocation["state"] == "force_released"
+        assert allocation["failure_reason"] == "admin_force_release"
+        events, _ = ledger.events_after(version_before)
+        assert [event["kind"] for event in events] == ["released"]
+        snapshot = ledger.snapshot()
+        resource = next(r for r in snapshot if r["resource_id"] == "compute-kvm1-001")
+        assert resource["available_units"] == resource["value"]
+
+    async def test_force_release_invalid_state_returns_409(self, client_and_queue):
+        client, _ = client_and_queue
+        reserved = _reserve("escrow-force-reserved")
+
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.force_release_lease(
+                reserved["allocation_id"], reason="not a lease yet",
+            )
+        assert exc_info.value.status_code == 409

@@ -36,7 +36,7 @@ from core_buyer.negotiation_client import (
 from market_alkahest.schemas import EscrowProposal
 from market_policy.negotiation_middleware import NegotiationMiddleware
 
-from domains.vms.provisioning import VmProvisionTerms
+from arkhai_vms_common import VmProvisionTerms
 
 
 def _register_rl_middleware() -> None:

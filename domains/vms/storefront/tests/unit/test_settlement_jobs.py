@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from domains.vms.provisioning import make_vm_provision_terms
+from arkhai_vms_common import make_vm_provision_terms
 
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.settlement_jobs import (

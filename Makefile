@@ -4,10 +4,11 @@
 export UV_HTTP_RETRIES ?= 10
 
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-dev build-seller build-apitokens-service build-apitokens-storefront build-apitokens-sample-app test test-provisioning test-registry test-storefront test-apitokens-middleware dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-apitokens-middleware dist-apitokens-sample-app dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: build build-dev build-seller build-apitokens-service build-apitokens-storefront build-apitokens-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apitokens test-apitokens-middleware test-kits dist dist-storefront-client dist-vms-common dist-storefront dist-policy dist-provisioning dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-apitokens-middleware dist-apitokens-sample-app dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -22,13 +23,19 @@ DIST_DIR := ${CURDIR}/.dist
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-storefront dist-policy dist-provisioning dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-apitokens-middleware dist-apitokens-sample-app dist-registry dist-buyer
+dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-vms-common dist-storefront dist-policy dist-provisioning dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-apitokens-middleware dist-apitokens-sample-app dist-registry dist-buyer
 
 dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd core/storefront-client && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_core_storefront_client-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core-storefront-client produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-vms-common: ## Build arkhai-vms-common wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd domains/vms/common && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_vms_common-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-vms-common produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
 dist-storefront: ## Build arkhai-vms-storefront wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -138,10 +145,16 @@ dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-provisioning test-registry test-storefront test-apitokens-middleware
+test: test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apitokens test-kits
 
-test-provisioning:
+test-core:
+	cd core && make test
+
+test-provisioning: dist-arkhai-core-site dist-storefront-client
 	cd domains/vms/provisioning/service && make reinit && make test
+
+test-provisioning-iac:
+	cd domains/vms/provisioning/iac && make validate-tests
 
 test-registry:
 	cd core/registry && make reinit && make test
@@ -149,14 +162,18 @@ test-registry:
 test-storefront:
 	cd domains/vms/storefront && make reinit && make test
 
-# Cross-language middleware parity: all three implementations replay the
-# shared conformance/session.json. Python is the reference; TS runs under
-# Node's native type-stripping; Rust drives reqwest against an in-process
-# axum mock. Each needs its own toolchain (uv / node+npm / cargo).
-test-apitokens-middleware: ## Run the Python/TS/Rust middleware conformance suites
-	cd domains/apitokens/middleware/python && uv run pytest -q
-	cd domains/apitokens/middleware/typescript && npm install --no-audit --no-fund --silent && npm run check
-	cd domains/apitokens/middleware/rust && cargo test
+test-vms-buyer:
+	cd domains/vms/buyer && make test
+
+test-apitokens:
+	cd domains/apitokens && make test
+
+# Compatibility alias for the cross-language middleware parity suite.
+test-apitokens-middleware:
+	cd domains/apitokens && make test-middleware
+
+test-kits:
+	cd kit && make test
 
 #Basic flow: build (optional), init (downloads if not built), run
 # `build` produces the production artifacts: the three runtime images
@@ -239,10 +256,10 @@ init-submodules:
 init-zero-tier:
 	cd scripts/zerotier && make install
 
-init-buyer:
+init-buyer: dist-vms-common
 	cd domains/vms/buyer && make init
 
-init-storefront: dist-policy dist-provisioning dist-storefront-client dist-registry
+init-storefront: dist-vms-common dist-policy dist-provisioning dist-storefront-client dist-registry
 	cd domains/vms/storefront && make init
 
 init-arkhai-core-registry: dist-registry
@@ -421,8 +438,31 @@ clobber-wheels: _require-ar-project
 
 code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot
-	@OUTFILE="$(CURDIR)/.snapshot/code-$(GIT_SUFFIX).zip"; \
+	@OUTFILE="$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX).zip"; \
 	echo "Creating $$OUTFILE ..."; \
 	git ls-files --recurse-submodules | zip -@ "$$OUTFILE"; \
+	SIZE=$$(du -sh "$$OUTFILE" | cut -f1); \
+	echo "Done: $$OUTFILE ($$SIZE)"
+
+review-diff: ## Write a binary-safe HEAD-relative diff for review without changing git state.
+	@mkdir -p .snapshot
+	@OUTFILE="${CURDIR}/.snapshot/$(GIT_NAME)-${GIT_SUFFIX}.diff"; \
+	echo "Creating $$OUTFILE ..."; \
+	git diff --binary HEAD > "$$OUTFILE"; \
+	echo "Done: $$OUTFILE"
+
+review-wheelhouse: vendor-wheels ## Package vendored dependency wheels for offline review/test runs.
+	@mkdir -p .snapshot
+	@OUTFILE="$(REPO_ROOT)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX)-wheelhouse.zip"; \
+	TMPDIR="$$(mktemp -d)"; \
+	trap 'rm -rf "$$TMPDIR"' EXIT; \
+	echo "Creating $$OUTFILE ..."; \
+	mkdir -p "$$TMPDIR/wheelhouse"; \
+	cp -R vendor/. "$$TMPDIR/wheelhouse/"; \
+	cp pyproject.toml "$$TMPDIR/pyproject.toml"; \
+	if [[ -f uv.lock ]]; then cp uv.lock "$$TMPDIR/uv.lock"; fi; \
+	ZIP_INPUTS="wheelhouse pyproject.toml README_WHEELHOUSE.md"; \
+	if [[ -f "$$TMPDIR/uv.lock" ]]; then ZIP_INPUTS="$$ZIP_INPUTS uv.lock"; fi; \
+	( cd "$$TMPDIR" && zip -qr "$$OUTFILE" $$ZIP_INPUTS ); \
 	SIZE=$$(du -sh "$$OUTFILE" | cut -f1); \
 	echo "Done: $$OUTFILE ($$SIZE)"

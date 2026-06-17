@@ -30,10 +30,9 @@ from models.host_model import (
 )
 from models.ansible import ConnectivityResult
 from models.jobs_model import JobSubmitResponse
-from models.vm_request_model import VmActionRequest, build_simple_params
-from services.ansible_service import AnsibleService
+from models.vm_request_model import VmActionRequest
+from services.host_operations_service import HostOperationsService
 from services.host_service import HostNotFoundError, HostService
-from services.job_service import AnsibleJobService
 
 router = APIRouter(prefix="/hosts", tags=["hosts"])
 
@@ -47,19 +46,15 @@ _POLL_NOTE = (
 class HostController:
     def __init__(
         self,
-        ansible_service: AnsibleService = Depends(
-            lambda: _container_module.resolved_ansible_service
-        ),
-        job_service: AnsibleJobService = Depends(
-            lambda: _container_module.resolved_job_service
-        ),
         host_service: HostService = Depends(
             lambda: _container_module.resolved_host_service
         ),
+        host_operations: HostOperationsService = Depends(
+            lambda: _container_module.resolved_host_operations_service
+        ),
     ) -> None:
-        self._ansible = ansible_service
-        self._job_service = job_service
         self._host_service = host_service
+        self._host_operations = host_operations
 
     # ------------------------------------------------------------------
     # Host list
@@ -260,12 +255,10 @@ class HostController:
 
         ``result.resources`` contains the capacity breakdown on success.
         """
-        if self._host_service.get_host(host) is None:
+        try:
+            return await self._host_operations.check_capacity(host=host, body=body)
+        except HostNotFoundError:
             raise HTTPException(status_code=404, detail=f"Host '{host}' not found")
-        params = build_simple_params("check", host, body)
-        return await self._job_service.submit(
-            params, _container_module.resolved_job_queue
-        )
 
     # ------------------------------------------------------------------
     # Connectivity
@@ -285,22 +278,10 @@ class HostController:
         Returns **200** with ``reachable: false`` if the host is unreachable.
         Returns **404** if ``host`` is not registered in the host registry.
         """
-        h = self._host_service.get_host(host)
-        if h is None:
-            raise HTTPException(status_code=404, detail=f"Host '{host}' not found")
-
-        # Render a temp inventory from the DB row so Ansible uses the
-        # correct connection details, then run the ping.
-        inv_path = self._ansible.write_inventory([h])
         try:
-            # Temporarily override the inventory path via a per-call ping
-            # using the rendered file.
-            return await self._ansible.check_connectivity_with_inventory(host, inv_path)
-        finally:
-            try:
-                inv_path.unlink(missing_ok=True)
-            except Exception:
-                pass
+            return await self._host_operations.check_connectivity(host=host)
+        except HostNotFoundError:
+            raise HTTPException(status_code=404, detail=f"Host '{host}' not found")
 
     @classmethod
     def make_router(cls) -> APIRouter:

@@ -373,7 +373,7 @@ class TestAdapterHostJoin:
 # ---------------------------------------------------------------------------
 
 
-from domains.vms.provisioning.capacity import CapacityExceededError
+from market_storefront.services.resource_capacity_validator import CapacityExceededError
 
 
 class TestCapacityEnforcement:

@@ -121,7 +121,7 @@ def _migrate_compute_allocation_callback_metadata(conn: sqlite3.Connection) -> N
         "failure_reason",
         "failure_message",
         "logs_ref",
-        "check_job_id",
+        "vm_remove_job_id",
     ):
         _add_column_if_missing(conn, "compute_allocations", column, "TEXT")
 

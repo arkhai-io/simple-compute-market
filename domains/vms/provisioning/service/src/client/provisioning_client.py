@@ -59,7 +59,6 @@ from models.jobs_model import (
 )
 from models.vm_request_model import (
     CreateVmRequest,
-    ScheduleVmExpiryRequest,
     VmActionRequest,
 )
 
@@ -268,14 +267,6 @@ class ProvisioningClient(_ProvisioningClientBase):
     async def reset_password(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
         """POST /api/v1/hosts/{host}/vms/{vm_name}/reset-password"""
         return self._submit(await self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/reset-password", body or VmActionRequest()))
-
-    async def schedule_expiry(self, host: str, vm_name: str, body: ScheduleVmExpiryRequest) -> JobSubmitResponse:
-        """POST /api/v1/hosts/{host}/vms/{vm_name}/expiry"""
-        return self._submit(await self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/expiry", body))
-
-    async def cancel_expiry(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
-        """DELETE /api/v1/hosts/{host}/vms/{vm_name}/expiry"""
-        return self._submit(await self._delete(f"/api/v1/hosts/{host}/vms/{vm_name}/expiry", body or VmActionRequest()))
 
     async def check_capacity(self, host: str) -> JobSubmitResponse:
         """GET /api/v1/hosts/{host}/capacity"""
@@ -508,12 +499,38 @@ class ProvisioningClient(_ProvisioningClientBase):
         return await self._get(f"/api/v1/leases/by-escrow/{escrow_uid}")
 
     async def update_lease(self, lease_id: str, **kwargs) -> dict:
-        """PATCH /api/v1/leases/{lease_id} — partial update."""
+        """PATCH /api/v1/leases/{lease_id} — partial update of any lease fields."""
         return await self._patch(f"/api/v1/leases/{lease_id}", kwargs)
 
-    async def cancel_lease(self, lease_id: str) -> dict:
-        """DELETE /api/v1/leases/{lease_id}/cancel — cancel before expiry."""
-        return await self._delete(f"/api/v1/leases/{lease_id}/cancel")
+    async def terminate_lease(self, lease_id: str, **kwargs) -> dict:
+        """POST /api/v1/leases/{lease_id}/terminate — submit vm_remove teardown."""
+        return await self._post(f"/api/v1/leases/{lease_id}/terminate", kwargs)
+
+    async def release_lease_oversight(self, lease_id: str, *, reason: str) -> dict:
+        """POST /api/v1/leases/{lease_id}/release-oversight — mark unmanaged."""
+        return await self._post(
+            f"/api/v1/leases/{lease_id}/release-oversight", {"reason": reason},
+        )
+
+    async def retry_lease_release(
+        self, lease_id: str, *, reason: Optional[str] = None, max_retries: Optional[int] = None,
+    ) -> dict:
+        """POST /api/v1/admin/leases/{lease_id}/retry-release."""
+        body: dict = {}
+        if reason is not None:
+            body["reason"] = reason
+        if max_retries is not None:
+            body["max_retries"] = max_retries
+        return await self._post(f"/api/v1/admin/leases/{lease_id}/retry-release", body)
+
+    async def force_release_lease(
+        self, lease_id: str, *, reason: str, evidence: Optional[str] = None,
+    ) -> dict:
+        """POST /api/v1/admin/leases/{lease_id}/force-release."""
+        body = {"reason": reason}
+        if evidence is not None:
+            body["evidence"] = evidence
+        return await self._post(f"/api/v1/admin/leases/{lease_id}/force-release", body)
 
     # ------------------------------------------------------------------
     # Site-authority capacity ledger
@@ -655,12 +672,6 @@ class SyncProvisioningClient(_ProvisioningClientBase):
 
     def destroy_vm(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
         return self._submit(self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/destroy", body or VmActionRequest()))
-
-    def schedule_expiry(self, host: str, vm_name: str, body: ScheduleVmExpiryRequest) -> JobSubmitResponse:
-        return self._submit(self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/expiry", body))
-
-    def cancel_expiry(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
-        return self._submit(self._delete(f"/api/v1/hosts/{host}/vms/{vm_name}/expiry", body or VmActionRequest()))
 
     def check_capacity(self, host: str) -> JobSubmitResponse:
         return self._submit(self._get(f"/api/v1/hosts/{host}/capacity"))
@@ -858,12 +869,38 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         return self._get(f"/api/v1/leases/by-escrow/{escrow_uid}")
 
     def update_lease(self, lease_id: str, **kwargs) -> dict:
-        """PATCH /api/v1/leases/{lease_id} — partial update."""
+        """PATCH /api/v1/leases/{lease_id} — partial update of any lease fields."""
         return self._patch(f"/api/v1/leases/{lease_id}", kwargs)
 
-    def cancel_lease(self, lease_id: str) -> dict:
-        """DELETE /api/v1/leases/{lease_id}/cancel — cancel before expiry."""
-        return self._delete(f"/api/v1/leases/{lease_id}/cancel")
+    def terminate_lease(self, lease_id: str, **kwargs) -> dict:
+        """POST /api/v1/leases/{lease_id}/terminate — submit vm_remove teardown."""
+        return self._post(f"/api/v1/leases/{lease_id}/terminate", kwargs)
+
+    def release_lease_oversight(self, lease_id: str, *, reason: str) -> dict:
+        """POST /api/v1/leases/{lease_id}/release-oversight — mark unmanaged."""
+        return self._post(
+            f"/api/v1/leases/{lease_id}/release-oversight", {"reason": reason},
+        )
+
+    def retry_lease_release(
+        self, lease_id: str, *, reason: Optional[str] = None, max_retries: Optional[int] = None,
+    ) -> dict:
+        """POST /api/v1/admin/leases/{lease_id}/retry-release."""
+        body: dict = {}
+        if reason is not None:
+            body["reason"] = reason
+        if max_retries is not None:
+            body["max_retries"] = max_retries
+        return self._post(f"/api/v1/admin/leases/{lease_id}/retry-release", body)
+
+    def force_release_lease(
+        self, lease_id: str, *, reason: str, evidence: Optional[str] = None,
+    ) -> dict:
+        """POST /api/v1/admin/leases/{lease_id}/force-release."""
+        body = {"reason": reason}
+        if evidence is not None:
+            body["evidence"] = evidence
+        return self._post(f"/api/v1/admin/leases/{lease_id}/force-release", body)
 
     # ------------------------------------------------------------------
     # Site-authority capacity ledger
@@ -909,7 +946,7 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         """POST /api/v1/system/check-leases — run one lifecycle cycle immediately.
 
         Bypasses the watchdog pause flag. Returns summary dict with
-        activated, checked, released, forced, skipped counts.
+        checked, released, release_failed, skipped counts.
         """
         return self._post("/api/v1/system/check-leases", {})
 

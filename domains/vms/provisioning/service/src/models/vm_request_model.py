@@ -217,46 +217,9 @@ class CreateVmRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Expiry scheduling (body carries vm_expiry_at; host+vm_name from path)
-# ---------------------------------------------------------------------------
-
-
-class ScheduleVmExpiryRequest(BaseModel):
-    """Schedule automatic VM destruction at a future UTC datetime.
-
-    ``POST /api/v1/hosts/{host}/vms/{vm_name}/expiry``
-
-    NYI(Item 2): will write directly to the ``vm_leases`` DB table once the
-    DB-driven lease watchdog is implemented.  Currently submits a
-    ``lease_end`` Ansible job that schedules an ``at`` daemon job on the
-    KVM host.
-    """
-
-    vm_expiry_at: str = Field(
-        description=(
-            "UTC datetime for VM expiry in ISO 8601 format "
-            "(e.g. '2025-12-31T23:59:00'). The VM will be destroyed at this time."
-        )
-    )
-    max_retries: Optional[int] = Field(
-        default=None, ge=0, le=10,
-        description="Per-job retry limit override",
-    )
-
-    def to_ansible_job_params(self, host: str, vm_name: str) -> AnsibleJobParams:
-        return AnsibleJobParams(
-            vm_host=host,
-            vm_action="lease_end",
-            vm_target=vm_name,
-            vm_expiry_at=self.vm_expiry_at,
-            max_retries=self.max_retries,
-        )
-
-
-# ---------------------------------------------------------------------------
 # Helper — build AnsibleJobParams for simple path-only actions
 # (start, shutdown, reboot, destroy, undefine, monitor,
-#  reset_password, cancel_expiry, list_vms, check_capacity)
+#  reset_password, list_vms, check_capacity)
 # ---------------------------------------------------------------------------
 
 

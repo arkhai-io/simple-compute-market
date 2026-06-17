@@ -30,23 +30,24 @@ class AllocationState(str, enum.Enum):
     reserved     — capacity held for a deal; not yet provisioning. May carry
                    a TTL (``hold_expires_at``) for two-phase reserve.
     provisioning — executor is building the workload.
+    provisioning_failed  — provisioning failed before a usable lease existed.
     leased       — committed into an active lease (``lease_end_utc`` set).
-    releasing    — lease ended; teardown/check job in flight.
-    released     — capacity returned to the pool (terminal).
-    forced       — released without teardown confirmation after the grace
-                   period (terminal; counts as released for availability).
-    cancelled    — explicitly ended before expiry (terminal).
-    failed       — provisioning failed; capacity returned (terminal).
+    releasing    — lease ended; teardown/vm_remove job in flight.
+    released             — teardown succeeded and capacity returned to the pool.
+    release_failed       — teardown failed/timed out; capacity remains held.
+    unmanaged            — lifecycle oversight released; capacity remains held until admin repair.
+    force_released       — admin asserted capacity is safe to resell without teardown proof.
     """
 
     reserved = "reserved"
     provisioning = "provisioning"
+    provisioning_failed = "provisioning_failed"
     leased = "leased"
     releasing = "releasing"
     released = "released"
-    forced = "forced"
-    cancelled = "cancelled"
-    failed = "failed"
+    release_failed = "release_failed"
+    unmanaged = "unmanaged"
+    force_released = "force_released"
 
 
 # States that consume capacity. ``releasing`` still holds the units — the
@@ -56,6 +57,8 @@ HELD_ALLOCATION_STATES = (
     AllocationState.provisioning.value,
     AllocationState.leased.value,
     AllocationState.releasing.value,
+    AllocationState.release_failed.value,
+    AllocationState.unmanaged.value,
 )
 
 
@@ -113,7 +116,7 @@ class SiteAllocation(Base):
     lease_start_utc = Column(String, nullable=True)
     lease_end_utc = Column(String, nullable=True)
     create_job_id = Column(String, nullable=True)
-    check_job_id = Column(String, nullable=True)
+    vm_remove_job_id = Column(String, nullable=True)
     failure_reason = Column(String, nullable=True)
     failure_message = Column(Text, nullable=True)
     released_at = Column(String, nullable=True)

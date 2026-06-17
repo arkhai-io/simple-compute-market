@@ -10,12 +10,14 @@ from core_storefront.stage_log import stage_event
 
 from alkahest_py import AlkahestClient
 
-from domains.vms.provisioning import (
-    build_provisioning_job_spec as _vm_build_provisioning_job_spec,
-    fulfill_vm_obligation,
+from domains.vms.provisioning.client import (
     provision_vm_and_wait,
     register_vm_lease,
     schedule_vm_expiry_and_wait,
+)
+from market_storefront.services.vm_fulfillment_service import fulfill_vm_obligation
+from market_storefront.services.vm_job_spec_service import (
+    build_provisioning_job_spec as _vm_build_provisioning_job_spec,
 )
 
 from market_storefront.utils.config import CHAINS, settings, BASE_URL_OVERRIDE

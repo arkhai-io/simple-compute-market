@@ -104,6 +104,7 @@ Import names and console scripts (`market`, `market-storefront`,
 | core | `arkhai-core-registry-client`, `arkhai-core-storefront-client` | protocol clients |
 | core | `arkhai-core-site` (`core/site/`) | site-authority scaffold: capacity ledger, ledger tables, `/api/v1/capacity/*` router — mounted by a hosting service per site |
 | kit | `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-alkahest`, `arkhai-kit-config` | from-below capabilities; alkahest is the first *settlement-mechanism codec* |
+| domain | `arkhai-vms-common` (`domains/vms/common/`) | shared VM-domain models/helpers consumed by both buyer and storefront; currently owns the `compute.v1` provision-term interpretation (`arkhai_vms_common.provision_terms`) |
 | domain | `arkhai-vms-buyer` (`domains/vms/buyer/`) | no console script — publishes the `vms.compute` plugin the core `market` CLI discovers |
 | domain | `arkhai-apitokens-buyer` (`domains/apitokens/buyer/`) | no console script — publishes the `api_tokens` plugin; verbs namespaced under `market tokens …` so both plugins compose in one binary |
 | domain | `arkhai-vms-storefront` (`domains/vms/storefront/`) | the VM storefront executable/composition root (FastAPI adapters over core) |
@@ -115,15 +116,29 @@ Import names and console scripts (`market`, `market-storefront`,
 | domain | `arkhai-apitokens-middleware` crate (`domains/apitokens/middleware/rust/`) | Rust port of the gate (tower/axum layer); reproduces `middleware/conformance/session.json` |
 | domain | `arkhai-apitokens-sample-app` (`domains/apitokens/sample-app/`) | a one-endpoint gated service for the e2e — the metered API the deal consumes to 402 and back |
 
-The *concept* modules (`domains/vms/{listings,negotiation,settlement,provisioning}`,
-`domains/apitokens/{listings,negotiation,settlement}`) are not separate
-wheels: they ship inside the buyer/storefront wheels and implement core
-hook shapes by injection, without importing core. The alkahest-scalar
-negotiation vocabulary both domains share (bisection, listed_price, the
-escrow shape guards, the per-kind dispatch, `SellerRoundResult`) lives
-in the kits (`market_policy.scalar_policies` / `.seller_round`,
-`market_alkahest.proposals`); each domain module keeps only what
-interprets its own market content.
+The *concept* modules (`domains/vms/{listings,negotiation,settlement}`,
+`domains/apitokens/{listings,negotiation,settlement}`) are not general-purpose
+service packages. Most ship inside the buyer/storefront wheels and implement
+core hook shapes by injection, without importing core.
+
+VM-domain code is split by ownership boundary. `arkhai-vms-common`
+(`domains/vms/common/`) carries shared VM-domain model code such as
+`compute.v1` provision-term interpretation (`arkhai_vms_common.provision_terms`).
+The VM storefront composition root owns seller-side provisioning orchestration:
+resource capacity validation in
+`market_storefront.services.resource_capacity_validator`, settlement-time VM
+fulfillment in `market_storefront.services.vm_fulfillment_service`, fulfillment
+planning in `market_storefront.services.vm_fulfillment_planner`, job-spec
+construction in `market_storefront.services.vm_job_spec_service`, and admin API
+payload models in `market_storefront.models.capacity_admin_models`. The
+provisioning package root exposes only the provisioning-service client facade
+(`client.py`, `__init__.py`); the executable provisioning API lives under
+`domains/vms/provisioning/service/`. The alkahest-scalar negotiation vocabulary
+both domains share (bisection, listed_price, the escrow shape guards, the
+per-kind dispatch, `SellerRoundResult`) lives in the kits
+(`market_policy.scalar_policies` / `.seller_round`,
+`market_alkahest.proposals`); each domain module keeps only what interprets its
+own market content.
 
 Executable ownership splits by role: the buyer binary is core-owned
 with domain schema plugins (one binary, many registry schemas; without
@@ -1212,14 +1227,22 @@ Long-running Ansible playbooks (up to `ANSIBLE_TIMEOUT_SECONDS=1800`) are launch
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Controllers (FastAPI layer)                                │
-│  VmController, HostController, JobController (read-only)    │
-│  Accepts typed per-operation requests                       │
-│  Returns job_id; OpenAPI docs describe polling pattern      │
+│  VmController, HostController, JobController, SystemController │
+│  Parse HTTP requests, expose OpenAPI docs, map domain         │
+│  exceptions to HTTP responses                                │
+└─────────────────────────┬───────────────────────────────────┘
+                          │ typed request models
+┌─────────────────────────▼───────────────────────────────────┐
+│  Service layer                                               │
+│  - VmOperationsService: direct admin/operator VM actions     │
+│  - HostOperationsService: host capacity/connectivity checks  │
+│  - SystemService: health/status/readiness + watchdog admin   │
+│  Build internal DTOs, perform diagnostics, and choose queues │
 └─────────────────────────┬───────────────────────────────────┘
                           │ AnsibleJobParams (internal DTO)
 ┌─────────────────────────▼───────────────────────────────────┐
 │  AnsibleJobService                                          │
-│  - submit(AnsibleJobParams, agent_id, job_queue) → job_id   │
+│  - submit(AnsibleJobParams, job_queue) → job_id             │
 │  - list/get/cancel/credentials/logs (read ops)              │
 │  - _process_job(job_id) — handler passed to AsyncJobQueue   │
 └──────────────┬──────────────────┬──────────────────────────┘
@@ -1228,14 +1251,19 @@ Long-running Ansible playbooks (up to `ANSIBLE_TIMEOUT_SECONDS=1800`) are launch
 │  AsyncJobQueue      │  │  AnsibleService                  │
 │  (queue mgmt only)  │  │  - start_playbook()              │
 │  - enqueue(job_id)  │  │  - wait_for_playbook()           │
-│  - start(handler)   │  │  - build_vars_file()  ← absorbed │
-│  - is_alive()       │  │  - parse_playbook_result() ←     │
-│  No Ansible/DB      │  │  - _inject_golden_image_creds()  │
-│  knowledge          │  │  - parse_inventory()             │
-└─────────────────────┘  │  - lookup_host_ip()              │
-                         │  - check_connectivity()          │
+│  - start(handler)   │  │  - build_vars_file()             │
+│  - is_alive()       │  │  - parse_playbook_result()       │
+│  No Ansible/DB      │  │  - parse_inventory()             │
+│  knowledge          │  │  - lookup_host_ip()              │
+└─────────────────────┘  │  - check_connectivity()          │
                          └──────────────────────────────────┘
 ```
+
+Controllers stay thin: they own HTTP routing, request/response schemas,
+OpenAPI descriptions, and translation of service exceptions into HTTP status
+codes. Business rules, Ansible job construction, temporary inventory handling,
+job queue selection, health diagnostics, and lease-watchdog admin operations
+live in services.
 
 ---
 
@@ -1279,6 +1307,8 @@ caller and decides which credentials to surface to which tenant.
 
 #### VM Actions (all routed through a single playbook: `vm-operations.yaml`)
 
+Direct VM controller routes are admin/operator APIs protected by the provisioning service admin key when authentication is configured. Tenant self-service VM actions require lease-owner authorization and are not exposed by this controller.
+
 All actions are submitted as `ProvisionRequest` jobs with a `vm_action` field. The single Ansible playbook dispatches to action-specific task files based on the `vm_action` variable.
 
 | `vm_action` | What it does | Notable behavior |
@@ -1292,55 +1322,70 @@ All actions are submitted as `ProvisionRequest` jobs with a `vm_action` field. T
 | `undefine` | Remove VM definition from libvirt | Typically paired with storage cleanup |
 | `monitor` | Collect CPU/memory/disk/network stats | See details below |
 | `reset_password` | Reset the tenant user password | |
-| `lease_end` | Schedule VM destruction at a future UTC datetime | Uses the host's `at` daemon — **the timer runs on the KVM host, not in the provisioning service** |
-| `lease_remove` | Cancel a previously scheduled `lease_end` | Finds and removes `at` jobs tagged `LEASE:<vm_name>` |
+| `vm_remove` | Full VM teardown | Runs `virsh destroy` then `/usr/local/bin/cleanup_vm_<name>.sh`; fails loudly if the script is missing — operator must intervene manually. Used by the provisioning-service watchdog for lease-driven teardown. |
 | `check` | Report host capacity (total/allocated/available vCPUs, RAM, GPUs) | No `vm_target` required |
 
-**`VmActionRequest` — shared optional body:** Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, `monitor`, `reset-password`, `cancel_expiry`) share one optional body model `VmActionRequest(buyer_agent_id, max_retries)`. The `build_simple_params(action, host, body, vm_name)` helper in `vm_request_model.py` produces `AnsibleJobParams` from path parameters + this body. `CreateVmRequest` and `ScheduleVmExpiryRequest` remain distinct classes with their own fields.
+**`VmActionRequest` — shared optional body:** Direct admin/operator VM actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, `monitor`, `reset-password`) share one optional body model `VmActionRequest(max_retries)`. The `build_simple_params(action, host, body, vm_name)` helper in `vm_request_model.py` produces `AnsibleJobParams` from path parameters + this body. `CreateVmRequest` remains a distinct class with its own fields. `vm_remove` is an internal teardown action submitted by the lease lifecycle watchdog, not a normal VM controller endpoint.
 
 ---
 
-#### Lease Lifecycle — ledger-driven watchdog
+#### Lease Lifecycle — allocation-backed watchdog
 
-A lease is the temporal tail of a capacity allocation: one
-`site_allocations` row on the site authority's ledger carries both the
-hold and the lease timing (`lease_end_utc`, `provider_lease_id`, VM/job
-coordinates). There is no separate lease store — the legacy `vm_leases`
-table is retained schema-only, and the `/api/v1/leases` API is a *view*
-over the ledger (`LeaseLifecycleService` maps allocation states onto
-the lease-status vocabulary: `pending`/`active`/`releasing`/`released`/
-`forced`/`cancelled`). Registering a lease (`POST /api/v1/leases`)
-attaches the lease tail to the deal's live ledger allocation and 404s
-when no live allocation exists.
+A lease is a time-bounded interpretation of a site allocation. The lower
+site resource layer persists resource inventory, allocation state, and
+capacity events; it does not own watchdog policy or VM teardown semantics.
+The provisioning service's `LeaseLifecycleService` interprets allocation
+fields such as `lease_end_utc`, `vm_host`, `vm_target`, and
+`vm_remove_job_id` as the VM lease lifecycle.
 
-The host-side `lease_end` `at` job is best-effort and must not block
-settlement readiness. The watchdog
-(`LeaseLifecycleService(settings, capacity_ledger, job_service)`) is
-the ledger's own scheduler and the authoritative release path:
+The KVM host has no knowledge of leases. The host-side teardown unit is the
+`vm_remove` Ansible action: it runs `virsh destroy` and then the per-VM
+cleanup script written at create time (`/usr/local/bin/cleanup_vm_<name>.sh`).
+That script removes the FRP proxy entry, firewall rules, static DHCP lease,
+GPU passthrough config, SSH keys, libvirt definition, and disk images. If
+the script is missing or cleanup fails, the job fails loudly so an operator
+can intervene; capacity remains held.
+
+`LeaseLifecycleService` uses a release delegate for the concrete teardown
+operation. The VM provisioning service supplies a delegate that submits
+`vm_remove`. This keeps the lifecycle state machine close to a future shared
+lease layer that can support pod, bare-metal, or other time-bounded rentals
+by supplying a different release delegate.
 
 ```
 LeaseWatchdog (every 60s, or on-demand via POST /api/v1/system/check-leases)
   │
-  ├── due leases — lease_end_utc < now, or truncated early by the
-  │   settlement lifecycle (truncate-lease):
-  │   └── submit check Ansible job (vm_action=check) → releasing
+  ├── due leased allocations — lease_end_utc < now:
+  │   └── run release delegate (VM service submits vm_remove)
+  │       → state = releasing, vm_remove_job_id = <job id>
   │
-  ├── releasing leases (check job in flight):
-  │   ├── on succeeded or failed/cancelled:
-  │   │   ├── release the allocation in a local ledger transaction
+  ├── releasing allocations:
+  │   ├── vm_remove succeeded:
+  │   │   ├── release the allocation in a local site-resource transaction
   │   │   │   (publishes an anonymous capacity delta to subscribers)
   │   │   └── post a deal-scoped capacity-released event to the
   │   │       owning storefront (X-Admin-Key)
-  │   ├── on still-running within grace: wait next cycle
-  │   └── on still-running past grace: force-release without confirmation
+  │   ├── vm_remove failed/cancelled:
+  │   │   └── state = release_failed; capacity remains held
+  │   ├── still-running within grace: wait next cycle
+  │   └── still-running past grace:
+  │       └── state = release_failed; capacity remains held
 ```
 
-Everything downstream is event-driven: the storefront's reconciler
-reacts to the capacity delta; the deal-scoped event feeds its stage log
-and failure policy. The old executor→storefront callback pattern
-(`PATCH /api/v1/admin/portfolio/resources/{id}` and per-transition
-fulfillment callbacks from this service) is retired — notifications
-route through the ledger so each is consistent with a snapshot.
+Lease states surfaced by the API are `pending`, `active`, `releasing`,
+`released`, `release_failed`, `unmanaged`, `provisioning_failed`, and
+`force_released`. `unmanaged` is terminal for automated lifecycle oversight:
+an operator has released provisioning-service oversight without deleting the
+VM or releasing capacity. Admin cleanup and force-release are required before
+that capacity can be resold. `retry-release` is available for `release_failed`
+leases when the operator wants the provisioning service to submit the release
+delegate again; `force-release` is the explicit repair action after manual
+verification that capacity is safe to resell.
+
+Everything downstream is event-driven. The storefront's reconciler reacts to
+the anonymous capacity delta, and the deal-scoped capacity-released event feeds
+stage logs and deal-specific policy. No storefront capacity-released event is
+sent for `release_failed` because capacity has not become available.
 
 **Watchdog configuration** (`settings.toml` → dynaconf):
 ```toml
@@ -1352,22 +1397,25 @@ storefront_admin_key = ""    # X-Admin-Key for the event POST
                              # inject via provisioning-secrets profile in production
 ```
 
-`storefront_url` and `storefront_admin_key` are global service settings
-— one provisioning service instance currently serves one storefront.
-Routing deal events by the `deal_ref` recorded at reserve time instead
-(one site, many storefronts) is an open edge tracked in
-`design-remaining-work.md` § 3.
+`storefront_url` and `storefront_admin_key` are global service settings — one
+provisioning service instance currently serves one storefront. Routing deal
+events by the `deal_ref` recorded at reserve time remains planned work.
 
-**On-demand trigger:** `POST /api/v1/system/check-leases` runs one watchdog cycle immediately. Used by operators and tests to avoid waiting for the 60-second timer.
+**On-demand trigger:** `POST /api/v1/system/check-leases` runs one watchdog
+cycle immediately. Used by operators and tests to avoid waiting for the
+60-second timer.
 
-**Leases API (view over the ledger):**
+**Leases API (view over allocation-backed leases):**
 ```
-POST   /api/v1/leases                  Attach lease tail to the deal's live allocation
-GET    /api/v1/leases                  List leases (filter: status, vm_host, escrow_uid)
-GET    /api/v1/leases/{lease_id}       Get one lease by ID
-PATCH  /api/v1/leases/{lease_id}       Partial update (lease_end_utc, …)
-GET    /api/v1/leases/by-escrow/{uid}  Lookup by escrow_uid (storefront recovery path)
-DELETE /api/v1/leases/{lease_id}/cancel  Cancel a lease before expiry
+POST   /api/v1/leases                              Attach lease tail to the deal's live allocation
+GET    /api/v1/leases                              List leases (filter: status, vm_host, escrow_uid)
+GET    /api/v1/leases/{lease_id}                   Get one lease by ID
+PATCH  /api/v1/leases/{lease_id}                   Partial update (vm_host, vm_target, lease_end_utc, …)
+GET    /api/v1/leases/by-escrow/{uid}              Lookup by escrow_uid
+POST   /api/v1/leases/{lease_id}/terminate         Submit release delegate; capacity releases only on success
+POST   /api/v1/leases/{lease_id}/release-oversight Mark unmanaged; no teardown and no capacity release
+POST   /api/v1/admin/leases/{lease_id}/retry-release    Admin repair: retry release_failed teardown
+POST   /api/v1/admin/leases/{lease_id}/force-release    Admin repair: release capacity without teardown proof
 ```
 
 ---
@@ -1484,8 +1532,7 @@ Rules are evaluated in insertion order. The first rule whose `match` dict is a s
 | What VMs exist on the host? | Submit a `list` job, check `result` when succeeded |
 | What resources are available on the host? | Submit a `check` job |
 | What are the resource usage stats for a running VM? | Submit a `monitor` job |
-| Did the lease-end cleanup actually run? | SSH to KVM host: `cat /var/log/vm-lease-end/<vm_name>/lease_end_*.log` — no API visibility |
-| What `at` jobs are pending on the host? | SSH to KVM host: `atq` — no API visibility |
+| Did VM teardown run? | `GET /jobs/{id}` + `GET /jobs/{id}/logs` for the `vm_remove` job |
 | Is a VM stuck in `running` state in Ansible mid-job? | `GET /api/v1/jobs/{id}` — `process_id` field gives the Ansible PID (same container as the API) |
 
 ---
@@ -1493,8 +1540,8 @@ Rules are evaluated in insertion order. The first rule whose `match` dict is a s
 **Key source layout:**
 ```
 domains/vms/provisioning/service/src/
-├── controllers/                # Handles Http Routing concerns.
-├── services/                   # For internal business logic
+├── controllers/                # HTTP routing, OpenAPI docs, response mapping
+├── services/                   # Business logic, Ansible job construction, queue use
 ├── models/                     # Request and Response objects for controllers
 ├── middleware/
 │   ├── auth.py                 # StorefrontAuthMiddleware (shared X-Admin-Key gate)
@@ -1506,7 +1553,7 @@ domains/vms/provisioning/service/src/
 │   ├── config.yml              # Environment schema (mostly empty — structure documentation)
 │   ├── config-docker.yml       # IaC paths + ansible_cfg for standalone container runs
 │   └── config-local.yml.example  # Developer override template (copy to config-local.yml)
-├── container.py                # dependency-injector DeclarativeContainer
+├── container.py                # dependency-injector DeclarativeContainer; controllers receive resolved services via Depends
 ├── config.py                   # Profile-aware dynaconf loader
 ├── settings.toml               # Committed base defaults
 └── main.py                     # FastAPI app + lifespan (starts job processing loop)
@@ -1737,7 +1784,7 @@ The provisioning client (`service/clients/provisioning.py`) normalizes the resul
 
 **VM teardown and FRP cleanup:**
 
-The cleanup script written to `/usr/local/bin/cleanup_vm_<name>.sh` on the KVM host at create time includes removal of the FRP proxy block (sed delete on the `ANSIBLE MANAGED BLOCK FOR VM <name>` markers in `frpc.toml`) and a `frpc` restart. This runs as part of the `at`-scheduled lease expiry. The FRP server retains no persistent state — the proxy entry disappears as soon as `frpc` reconnects without it.
+The cleanup script written to `/usr/local/bin/cleanup_vm_<name>.sh` on the KVM host at create time includes removal of the FRP proxy block (sed delete on the `ANSIBLE MANAGED BLOCK FOR VM <name>` markers in `frpc.toml`) and a `frpc` restart. This runs as part of the `vm_remove` Ansible action when the provisioning-service watchdog tears down an expired lease. The FRP server retains no persistent state — the proxy entry disappears as soon as `frpc` reconnects without it.
 
 **Fallback mode (no FRP):**
 
@@ -2772,7 +2819,7 @@ This section defines the testing conventions for the Arkhai Market Stack. It exi
 **What to focus on in this codebase:**
 - `AnsibleService`: `_build_vm_vars` (YAML serialisation of every field combination), `_extract_ssh_port` / `_extract_tenant_user` / `_extract_ansible_json` (output parsers against representative playbook output strings).
 - `AnsibleJobService`: `_build_params` (dict → `AnsibleJobParams` mapping), `_redact_logs` (regex redaction), `_calculate_retry_delay` (backoff arithmetic), `_should_retry_error` (error string matching), `_build_result_payload` (structured result assembly from `AnsibleRunResult`).
-- `models/vm_request_model.py`: `CreateVmRequest` Pydantic validation (FRP cross-field rule, field constraints), `ScheduleVmExpiryRequest` required field, `build_simple_params` action routing.
+- `models/vm_request_model.py`: `CreateVmRequest` Pydantic validation (FRP cross-field rule, field constraints), `VmActionRequest` optional-body behavior, and `build_simple_params` action routing.
 - `HostService`: `seed_from_ini` (INI parsing, upsert idempotency), `register_host` with `embedded` key (Fernet encryption round-trip), `render_inventory_ini` (correct `[kvm_hosts]` group + variable output), `list_hosts(enabled_only=True)` filter.
 
 **Mocking convention:** Use `unittest.mock.MagicMock` / `AsyncMock` for injected collaborators. Do not patch module-level imports; instead, pass mocks in via the constructor (the DI design makes this natural).
@@ -2878,8 +2925,8 @@ autouse `reap_buyer_settle_subprocess` teardown is a no-op when
 | 09a | Gate release + ansible succeeds | `resume_rule`; `wait_for_job` (long-poll) → succeeded |
 | 09b | Ready + credentials + capacity held | `wait_for_settlement` → ready; `GET /api/v1/settle/{uid}/status` → tenant credentials; 1x listing closes while capacity is held |
 | 09c | Lease registered | `GET /api/v1/leases/by-escrow/{uid}` → active/pending |
-| 10a / 10b | Lease expiry setup + watchdog advances | pause watchdog, patch `lease_end_utc` past, arm check-gate mock; watchdog transitions lease to `releasing` |
-| 11a / 11b | Releasing state stable + capacity released | check-gate released; provisioning reports `/api/v1/admin/fulfillment/events/capacity-released` and the storefront releases the matching allocation |
+| 10a / 10b | Lease teardown setup + watchdog advances | pause watchdog, patch `lease_end_utc` past, arm `vm_remove` gate mock; watchdog transitions lease to `releasing` |
+| 11a / 11b | Releasing state stable + capacity released | `vm_remove` gate released; provisioning reports `/api/v1/admin/fulfillment/events/capacity-released` and the storefront releases the matching allocation |
 
 **Buyer-CLI variant divergence (`test_full_deal_buyer_cli.py`):**
 
@@ -2946,9 +2993,9 @@ reserve the e2e-seeded row rather than any matching inventory row from a
 mounted startup file. Stage 08b waits for `provision/job_submitted` and
 asserts the reserved resource is the inline e2e-seeded row. Stage 09c
 asserts provisioning registered an active/pending lease for the escrow via
-`GET /api/v1/leases/by-escrow/{uid}`. Admin pause/resume and forced
-resource release are intentionally outside the full-deal happy path; they
-belong in separate smoke or e2e tests for operator interventions.
+`GET /api/v1/leases/by-escrow/{uid}`. Admin pause/resume, retry-release, and
+force-release are intentionally outside the full-deal happy path; they belong
+in separate smoke or e2e tests for operator interventions.
 
 **Pre-negotiation inventory guard:** `/api/v1/negotiate/new` enforces immediate-deal inventory availability via the `has_matching_inventory_guard` middleware in the configured negotiation chain (round 0 only — `len(history) == 0`). If no available resource matches the listing's `offer_resource`, the middleware short-circuits with `action="reject", reason="no_matching_inventory"`, which the controller maps to HTTP 409. The default chain in `storefront.toml` puts this middleware first, so the check happens before any rate negotiation.
 
@@ -3095,13 +3142,13 @@ make build         →  docker build (COPY .dist/ /dist/, uv sync --find-links /
 
 Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockfile and breaks the other context. Setting it via `UV_FIND_LINKS` on the command line means the path stays out of version-controlled files entirely.
 
-**Rule:** downstream `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for wheel-consumed internal packages (`arkhai-kit-identity`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-core-storefront`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-vms-provisioning`, `arkhai-core-storefront-client`, or `arkhai-core-registry-client`). These packages are resolved exclusively from wheels in `.dist/` outside their owning package's local dev environment.
+**Rule:** downstream `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for wheel-consumed internal packages (`arkhai-kit-identity`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-core-storefront`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-vms-common`, `arkhai-vms-provisioning`, `arkhai-core-storefront-client`, or `arkhai-core-registry-client`). These packages are resolved exclusively from wheels in `.dist/` outside their owning package's local dev environment.
 
 **Why not `uv.sources` editable installs:** Editable path references are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker that relative path does not exist, causing resolution failures. The wheel approach makes both the path and the mechanism context-specific (CLI flag, not lockfile entry).
 
 ### Internal wheel packages
 
-Nine pure-Python internal packages are distributed as wheels:
+Ten pure-Python internal packages are distributed as wheels:
 
 | Package | Wheel name | Source | Primary consumers |
 |---------|-----------|--------|-------------------|
@@ -3111,6 +3158,7 @@ Nine pure-Python internal packages are distributed as wheels:
 | `arkhai-core-storefront` | `core_storefront-*.whl` | `core/storefront/` | `storefront` |
 | `arkhai-kit-alkahest` | `market_alkahest-*.whl` | `kit/alkahest/` | `buyer`, `storefront`, `e2e-tests` |
 | `arkhai-kit-config` | `market_config-*.whl` | `kit/config/` | `buyer`, `storefront` |
+| `arkhai-vms-common` | `arkhai_vms_common-*.whl` | `domains/vms/common/` | `buyer`, `storefront` |
 | `arkhai-vms-provisioning` | `provisioning_service-*.whl` | `domains/vms/provisioning/service/` | `e2e-tests`, `storefront` |
 | `arkhai-core-storefront-client` | `arkhai_storefront_client-*.whl` | `core/storefront-client/` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
 | `arkhai-core-registry-client` | `arkhai_registry_client-*.whl` | `core/registry-client/` | `e2e-tests` |
@@ -3120,7 +3168,7 @@ Nine pure-Python internal packages are distributed as wheels:
 **Dependency direction note — arkhai-vms-provisioning → arkhai-core-storefront-client:**
 
 The provisioning service depends on `arkhai-core-storefront-client` for two call sites:
-1. `lease_lifecycle_service._patch_storefront_resource()` — PATCH storefront resource on lease expiry
+1. `lease_lifecycle_service` — post deal-scoped capacity release events to the owning storefront
 2. `system_service.get_status()` — probe storefront reachability for the diagnostic status endpoint
 
 This inverts the conceptual layer (provisioning is infrastructure; storefront is a consumer). It does not create a circular import — `storefront-client` has no dependency on `arkhai-vms-provisioning`. The `make dist` ordering already builds `arkhai-core-storefront-client` before `arkhai-vms-provisioning`, so wheel resolution is correct.

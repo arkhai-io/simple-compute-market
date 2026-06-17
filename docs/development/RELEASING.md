@@ -37,7 +37,7 @@ constrained with lower bounds (see Versioning policy).
 | `arkhai-kit-config` | `kit/config/` | 0.1.0 | `arkhai-kit-alkahest` |
 | `arkhai-vms-buyer` | `domains/vms/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
 | `arkhai-vms-storefront` | `domains/vms/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-vms-provisioning` |
-| `arkhai-vms-provisioning` | `domains/vms/provisioning/service/` | 0.4.0 | `arkhai-core-site`, `arkhai-core-storefront-client` |
+| `arkhai-vms-provisioning` | `domains/vms/provisioning/service/` | 0.5.0 | `arkhai-core-site`, `arkhai-core-storefront-client` |
 | `arkhai-apitokens-buyer` | `domains/apitokens/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
 | `arkhai-apitokens-storefront` | `domains/apitokens/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy` |
 | `arkhai-apitokens-service` | `domains/apitokens/service/` | 0.1.0 | `arkhai-core-site` |

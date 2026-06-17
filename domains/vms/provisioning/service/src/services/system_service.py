@@ -1,7 +1,8 @@
 """System diagnostics service.
 
 Provides the business logic for the ``SystemController`` endpoints:
-health checks, version resolution, and Ansible readiness inspection.
+health checks, version resolution, Ansible readiness inspection, full status
+diagnostics, and lease-watchdog admin operations.
 
 This service is intentionally free of FastAPI and any HTTP concerns — those
 live in the controller.  It can be instantiated and tested without starting
@@ -29,7 +30,9 @@ import os
 import subprocess
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
+
+from sqlalchemy import text
 
 from models.system_model import (
     AnsibleReadinessResponse,
@@ -40,7 +43,11 @@ from models.system_model import (
 from services.ansible_service import AnsibleService
 
 if TYPE_CHECKING:
+    from sqlalchemy.orm import Session, sessionmaker
+
     from services.host_service import HostService
+    from services.async_job_queue import AsyncJobQueue
+    from services.lease_lifecycle_service import LeaseLifecycleService
 
 
 # ---------------------------------------------------------------------------
@@ -159,10 +166,12 @@ def collect_ssh_keys_from_hosts(hosts: list) -> list[SshKeyInfo]:
 class SystemService:
     """Diagnostics operations for the system controller.
 
-    Depends on ``AnsibleService`` and ``Settings``; optionally accepts a
-    ``HostService`` for DB-backed inventory diagnostics.  All public methods
-    are synchronous; callers that need to run them from an async context
-    should use ``asyncio.to_thread``.
+    Depends on ``AnsibleService`` and ``Settings``; optionally accepts
+    ``HostService`` for DB-backed inventory diagnostics, a DB session factory
+    and job-queue provider for local health checks, and a lease lifecycle
+    service for watchdog status/admin operations. Filesystem-oriented public
+    methods are synchronous; callers that need to run them from an async
+    context should use ``asyncio.to_thread``.
     """
 
     def __init__(
@@ -170,10 +179,16 @@ class SystemService:
         ansible_service: AnsibleService,
         settings,
         host_service: "Optional[HostService]" = None,
+        session_factory: "Optional[sessionmaker[Session]]" = None,
+        job_queue_provider: "Optional[Callable[[], AsyncJobQueue]]" = None,
+        lease_lifecycle_service: "Optional[LeaseLifecycleService]" = None,
     ) -> None:
         self._ansible = ansible_service
         self._settings = settings
         self._host_service = host_service
+        self._session_factory = session_factory
+        self._job_queue_provider = job_queue_provider
+        self._lease_lifecycle_service = lease_lifecycle_service
 
     def get_version(self) -> str:
         """Return the service version string."""
@@ -182,6 +197,41 @@ class SystemService:
     def ansible_version(self) -> Optional[str]:
         """Run ``ansible --version`` and return the first line."""
         return ansible_version()
+
+    def get_health(self) -> tuple[dict, bool]:
+        """Return local liveness/readiness checks and aggregate health.
+
+        Checks are intentionally local-only so Kubernetes probes do not depend
+        on outbound storefront connectivity.
+        """
+        checks: dict[str, str] = {"api": "ok"}
+
+        if self._session_factory is None:
+            checks["database"] = "degraded"
+        else:
+            try:
+                with self._session_factory() as db:
+                    db.execute(text("SELECT 1"))
+                checks["database"] = "ok"
+            except Exception as exc:
+                checks["database"] = f"error: {exc}"
+
+        try:
+            job_queue = (
+                self._job_queue_provider()
+                if self._job_queue_provider is not None
+                else None
+            )
+            checks["job_processor"] = (
+                "ok"
+                if (job_queue is not None and job_queue.is_alive())
+                else "degraded"
+            )
+        except Exception:
+            checks["job_processor"] = "degraded"
+
+        all_ok = all(v == "ok" for v in checks.values())
+        return {"status": "ok" if all_ok else "degraded", "checks": checks}, all_ok
 
     def ansible_readiness(self) -> AnsibleReadinessResponse:
         """Collect full Ansible readiness information synchronously.
@@ -264,7 +314,6 @@ class SystemService:
           - lease_watchdog:  "running", "paused", or "disabled"
         """
         from storefront_client import StorefrontClient, StorefrontClientError
-        import container as _container_module
 
         checks: dict[str, str] = {}
 
@@ -319,12 +368,11 @@ class SystemService:
                     checks["storefront_auth"] = f"error: {type(exc).__name__}"
 
         # Lease watchdog state
-        svc = getattr(_container_module, "resolved_lease_lifecycle_service", None)
-        if svc is None:
+        if self._lease_lifecycle_service is None:
             checks["lease_watchdog"] = "disabled"
         elif not getattr(self._settings, "lease_watchdog_enabled", True):
             checks["lease_watchdog"] = "disabled"
-        elif not svc._resume_event.is_set():
+        elif self._lease_lifecycle_service.is_paused:
             checks["lease_watchdog"] = "paused"
         else:
             checks["lease_watchdog"] = "running"
@@ -346,3 +394,22 @@ class SystemService:
 
         all_ok = all(_is_healthy(k, v) for k, v in checks.items())
         return {"status": "ok" if all_ok else "degraded", "checks": checks}
+    async def force_check_leases(self) -> dict:
+        """Run one lease lifecycle cycle, bypassing the pause gate."""
+        if self._lease_lifecycle_service is None:
+            return {"error": "lease_lifecycle_service not initialised", "checked": 0}
+        return await self._lease_lifecycle_service.force_check_leases()
+
+    def pause_lease_watchdog(self) -> dict:
+        """Pause timer-driven lease watchdog cycles."""
+        if self._lease_lifecycle_service is None:
+            return {"error": "lease_lifecycle_service not initialised", "paused": False}
+        self._lease_lifecycle_service.pause()
+        return {"paused": True}
+
+    def resume_lease_watchdog(self) -> dict:
+        """Resume timer-driven lease watchdog cycles."""
+        if self._lease_lifecycle_service is None:
+            return {"error": "lease_lifecycle_service not initialised", "paused": True}
+        self._lease_lifecycle_service.resume()
+        return {"paused": False}

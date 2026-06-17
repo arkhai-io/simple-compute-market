@@ -30,7 +30,7 @@ from controllers.system_controller import SystemController   # noqa: E402
 from controllers.jobs_controller import AnsibleJobsController  # noqa: E402
 from controllers.hosts_controller import HostController      # noqa: E402
 from controllers.vms_controller import VmController          # noqa: E402
-from controllers.leases_controller import LeasesController   # noqa: E402
+from controllers.leases_controller import AdminLeasesController, LeasesController   # noqa: E402
 from core_site.router import make_capacity_router  # noqa: E402
 
 
@@ -57,6 +57,8 @@ async def lifespan(_: FastAPI):
     _container_module.resolved_ansible_service = container.ansible_service()
     _container_module.resolved_system_service = container.system_service()
     _container_module.resolved_host_service = container.host_service()
+    _container_module.resolved_vm_operations_service = container.vm_operations_service()
+    _container_module.resolved_host_operations_service = container.host_operations_service()
     _container_module.resolved_lease_lifecycle_service = container.lease_lifecycle_service()
     _container_module.resolved_lease_watchdog = container.lease_watchdog()
     _container_module.resolved_capacity_ledger_service = container.capacity_ledger_service()
@@ -197,7 +199,11 @@ app = FastAPI(
     openapi_tags=[
         {
             "name": "vms",
-            "description": "VM lifecycle operations (create, start, shutdown, etc.).",
+            "description": (
+                "Admin/operator VM operations (create, start, shutdown, etc.). "
+                "Tenant self-service requires lease-owner authorization and is "
+                "not exposed by this controller."
+            ),
         },
         {
             "name": "hosts",
@@ -213,7 +219,14 @@ app = FastAPI(
         },
         {
             "name": "leases",
-            "description": "VM lease lifecycle — register, query, and cancel leases.",
+            "description": (
+                "VM lease lifecycle — register, query, terminate, release oversight, "
+                "and admin repair actions."
+            ),
+        },
+        {
+            "name": "admin",
+            "description": "Admin-only repair operations for exceptional lifecycle states.",
         },
         {
             "name": "capacity",
@@ -262,6 +275,7 @@ app.include_router(AnsibleJobsController.make_router(), prefix="/api/v1")       
 app.include_router(HostController.make_router(), prefix="/api/v1")                 # /api/v1/hosts/*
 app.include_router(VmController.make_router(), prefix="/api/v1")                   # /api/v1/hosts/{host}/vms/*
 app.include_router(LeasesController.make_router(), prefix="/api/v1")               # /api/v1/leases/*
+app.include_router(AdminLeasesController.make_router(), prefix="/api/v1")          # /api/v1/admin/leases/*
 app.include_router(                                                                # /api/v1/capacity/*
     make_capacity_router(lambda: _container_module.resolved_capacity_ledger_service),
     prefix="/api/v1",

@@ -351,22 +351,31 @@ async def client_and_queue(
         host_service=host_service,
     )
 
-    system_service = SystemService(
-        ansible_service=fake_ansible,
-        settings=mock_settings,
-        host_service=host_service,
-    )
-
     from core_site.ledger import CapacityLedgerService
     capacity_ledger_service = CapacityLedgerService(
         session_factory=session_factory, required_attributes=("vm_host",),
     )
 
+    from services.site_resources_service import SiteResourcesService
+    site_resources_service = SiteResourcesService(capacity_ledger_service)
+
     from services.lease_lifecycle_service import LeaseLifecycleService
     lease_lifecycle_service = LeaseLifecycleService(
         settings=mock_settings,
-        capacity_ledger=capacity_ledger_service,
+        site_resources_service=site_resources_service,
         job_service=None,  # tests use the direct-release path; no real Ansible jobs
+    )
+
+    # Fresh queue per test — caller can inject on_job_started via fixture params
+    job_queue = AsyncJobQueue(max_concurrent=2)
+
+    system_service = SystemService(
+        ansible_service=fake_ansible,
+        settings=mock_settings,
+        host_service=host_service,
+        session_factory=session_factory,
+        job_queue_provider=lambda: job_queue,
+        lease_lifecycle_service=lease_lifecycle_service,
     )
 
     # Override container providers
@@ -375,6 +384,7 @@ async def client_and_queue(
     app.container.system_service.override(system_service)
     app.container.session_factory.override(session_factory)
     app.container.host_service.override(host_service)
+    app.container.site_resources_service.override(site_resources_service)
     app.container.lease_lifecycle_service.override(lease_lifecycle_service)
     app.container.capacity_ledger_service.override(capacity_ledger_service)
 
@@ -387,9 +397,9 @@ async def client_and_queue(
     _container_module.resolved_lease_lifecycle_service = lease_lifecycle_service
     _container_module.resolved_capacity_ledger_service = capacity_ledger_service
 
-    # Fresh queue per test — caller can inject on_job_started via fixture params
-    job_queue = AsyncJobQueue(max_concurrent=2)
     _container_module.resolved_job_queue = job_queue
+    _container_module.resolved_vm_operations_service = app.container.vm_operations_service()
+    _container_module.resolved_host_operations_service = app.container.host_operations_service()
 
     processing_task = asyncio.create_task(
         job_queue.start(job_service._process_job),
@@ -426,6 +436,7 @@ async def client_and_queue(
     app.container.system_service.reset_override()
     app.container.session_factory.reset_override()
     app.container.host_service.reset_override()
+    app.container.site_resources_service.reset_override()
     app.container.lease_lifecycle_service.reset_override()
     app.container.capacity_ledger_service.reset_override()
 

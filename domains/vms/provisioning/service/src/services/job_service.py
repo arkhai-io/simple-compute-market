@@ -314,6 +314,7 @@ class AnsibleJobService:
         log streaming, and credential storage.
         """
         db = self._session_factory()
+        rendered_inv_path = None
         try:
             job = (
                 db.query(AnsibleJob)
@@ -343,8 +344,8 @@ class AnsibleJobService:
 
             # Resolve inventory: prefer DB-backed rendering when HostService
             # is wired and has a row for this host. rendered_inv_path is
-            # initialised here so the outer finally block can always clean it up.
-            rendered_inv_path = None
+            # initialised before the try block so the outer finally block can
+            # always clean it up, including early returns.
             host_public_host = None
             if self._host_service is not None:
                 host = self._host_service.get_host(params.vm_host)
@@ -580,7 +581,6 @@ class AnsibleJobService:
             golden_image_name=params.get("golden_image_name"),
             gcs_bucket_url=params.get("gcs_bucket_url"),
             gcs_image_path=params.get("gcs_image_path"),
-            vm_expiry_at=params.get("vm_expiry_at"),
             max_retries=params.get("max_retries"),
         )
 

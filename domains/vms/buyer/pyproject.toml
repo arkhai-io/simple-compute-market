@@ -20,6 +20,7 @@ dependencies = [
   "arkhai-kit-alkahest",
   "arkhai-kit-config",
   "arkhai-kit-policy",
+  "arkhai-vms-common",
 ]
 
 [project.optional-dependencies]
@@ -111,12 +112,7 @@ dev-mode-dirs = ["../../.."]
 "../negotiation/rl/models/arkhai_negotiator_buyer.pt" = "domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt"
 "../negotiation/rl/models/arkhai_negotiator_seller.pt" = "domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt"
 "../provisioning/__init__.py" = "domains/vms/provisioning/__init__.py"
-"../provisioning/capacity.py" = "domains/vms/provisioning/capacity.py"
 "../provisioning/client.py" = "domains/vms/provisioning/client.py"
-"../provisioning/fulfillment.py" = "domains/vms/provisioning/fulfillment.py"
-"../provisioning/fulfillment_plan.py" = "domains/vms/provisioning/fulfillment_plan.py"
-"../provisioning/job_spec.py" = "domains/vms/provisioning/job_spec.py"
-"../provisioning/terms.py" = "domains/vms/provisioning/terms.py"
 "../settlement/__init__.py" = "domains/vms/settlement/__init__.py"
 "../settlement/compute_lease.py" = "domains/vms/settlement/compute_lease.py"
 "../settlement/fulfillment.py" = "domains/vms/settlement/fulfillment.py"
