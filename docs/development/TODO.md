@@ -10,9 +10,9 @@ Pending architectural work and known operational issues for the Arkhai market st
 |------|---------|--------|
 | [Init container migration & schema drift guard](#init-container-migration-pattern-and-schema-drift-guard) | State Management | Planned |
 | [Registry: Postgres migration](#registry-postgres-migration) | State Management | Planned |
-| [Market Core Extraction follow-ons](#market-core-extraction--done-remaining-follow-on-work) | Core Stack | In progress |
+| [Market Core Extraction follow-ons](#market-core-extraction-follow-ons) | Core Stack | In progress |
 | [Native Launch CLI for Provisioning Service](#native-launch-cli-for-provisioning-service) | Core Stack | Planned |
-| [Escrow Kind Codec Expansion](#escrow-kind-codec-expansion) | Core Stack | Done |
+| [Buyer internal dependency wheel cleanup](#buyer-internal-dependency-wheel-cleanup) | Core Stack | Planned |
 | [Storefront DB Pruning](#storefront-db-pruning) | Core Stack | Planned |
 | [Registry Filter-Spec side indexes](#registry-filter-spec-indexed-true-side-indexes) | Core Stack | Deferred |
 | [Shared Dynaconf Bootstrap](#shared-dynaconf-bootstrap) | Core Stack | Planned |
@@ -24,7 +24,6 @@ Pending architectural work and known operational issues for the Arkhai market st
 | [Host capacity resource filters](#host-capacity-resource-filters) | Provisioning Service | Needs review |
 | [Site resources and shared lease lifecycle boundaries](#site-resources-and-shared-lease-lifecycle-boundaries) | Provisioning Service | Needs review |
 | [Multi-Provider Resource Pool Architecture](#multi-provider-resource-pool-architecture) | Provisioning Service | Needs review |
-| [Provisioning smoke tests: use typed client](#provisioning-smoke-tests-use-raw-httpx) | Provisioning Service | Done |
 | [`StorefrontCallbackClient` extraction](#storefrontcallbackclient-extraction-conditional) | Provisioning Service | Conditional |
 | [Alkahest contracts in baked state](#alkahest-contracts-in-the-baked-state) | Documentation Gaps | Needs review |
 | [Symmetric Order Concept](#symmetric-order-concept) | Documentation Gaps | Needs review |
@@ -36,7 +35,6 @@ Pending architectural work and known operational issues for the Arkhai market st
 > **Structural notes for next TODO pass:**
 > - **"Latent Bug Fixes"** section below is an empty placeholder — no items have been filed under it yet. Either populate or remove.
 > - **"Known Issues & Areas of Concern"** is a list of operational gotchas, not trackable work items with acceptance criteria. It doesn't map cleanly to table rows (no owner, no completion state). Consider splitting into a separate `KNOWN_ISSUES.md` or converting each entry to a proper task.
-> - **"Market Core Extraction follow-ons"** is a single heading containing a numbered list of sub-items with mixed statuses (some done, some planned). Each sub-item is really its own row — worth breaking out as individual `###` entries so their statuses can be tracked independently.
 > - **Provisioning Service** and **Documentation Gaps** items lack explicit `**Status:**` fields, making their state harder to scan. Should be consistent with the rest of the file.
 
 ---
@@ -90,22 +88,15 @@ Infrastructure-side (compute-market-internal-infra):
 
 ## Core Stack
 
-### Market Core Extraction — done; remaining follow-on work
+### Market Core Extraction follow-ons
 
-**Status:** Done (branch `reorg-market-core-extraction`). The package
-graph expresses the core/kit/domain split, distribution names mirror it
-(`arkhai-{core,kit,vms}-*`), and the boundaries are enforced by tests
-(dependency-direction guardrail, carrier purity, no-plugin buyer CLI).
-Current-state layout and decisions: `ARCHITECTURE.md` → "Organizing
-Principle" / "Package layout". The remaining architectural items are
-planned with their design context in
-[`design-remaining-work.md`](design-remaining-work.md). The API-tokens
-market domain (second schema plugin, second storefront, tokens service +
-middlewares) has since shipped — current state in `ARCHITECTURE.md` →
-"API-tokens market domain".
+**Status:** In progress. The core/kit/domain package split is the current
+architecture; stable layout and boundary decisions live in `ARCHITECTURE.md`
+→ "Organizing Principle" / "Package layout". This TODO entry tracks only
+remaining follow-on work, with design context in
+[`design-remaining-work.md`](design-remaining-work.md).
 
-**This list is the single aggregation of what remains**, in rough
-dependency order:
+**Remaining work**, in rough dependency order:
 
 1. **Settlement plan shapes** (`design-remaining-work.md` § 2). The
    lifecycle machinery is landed — mechanism-neutral plan carrier,
@@ -138,33 +129,18 @@ dependency order:
    generalization (`design-remaining-work.md` § 1) so `/negotiate/*`
    churns once.
 
-4. **Schema identity/version for plugins:** *(Done — shipped with the
-   API-tokens domain.)* `filter-spec.yaml` gained a `schema: {id,
-   version}` header surfaced by the registry client, and
-   `resolve_indexer_urls_for_schema` offers each plugin only the
-   registries whose declared id matches (lenient on undeclared/
-   unreachable). See `ARCHITECTURE.md` → "API-tokens market domain".
-
-5. **Buyer CLI residue (small):** render top-level listing `demands`
+4. **Buyer CLI residue (small):** render top-level listing `demands`
    wherever listing detail should expose payment constraints; keep
    old-run-log compatibility code clearly marked legacy.
 
-   Deferred remainders from the buyer policy-surface work
+   Deferred remainder from the buyer policy-surface work
    (`ARCHITECTURE.md` → "Buyer negotiation policy surface"):
-   - *(Done — the API-tokens domain fired both triggers.)* The `--yes`
-     flag and the `inject_policy_cli_params` invocation moved into core
-     (`core_buyer.cli.assume_yes_option` / `register_policy_verb`); the
-     per-unit→absolute price translation moved out of the CLI bodies into
-     the buyer's negotiation client (`negotiate_with_seller` scales by an
-     explicit `unit_count`). The ERC-20 **token-decimals** scaling still
-     rides in the VM `buy` body and could follow the same path when
-     wanted.
    - a `BuyerPolicy.prefer(candidates)` hook for policy-driven escrow
      tuple choice among compatible entries — when policies need
      different preferences (today selection takes the first compatible
      entry).
 
-6. **PyPI trusted-publishing one-time setup:** the publish CI
+5. **PyPI trusted-publishing one-time setup:** the publish CI
    (`.github/workflows/publish-pypi.yml`) now covers all 18 consumable
    packages (kit/core libraries, SDK clients, buyer/storefront plugins,
    the registry indexer, provisioning + tokens services, the tokens
@@ -188,13 +164,28 @@ The `arkhai-vms-provisioning` wheel stays its own distributable — it's operate
 
 ---
 
-### Escrow Kind Codec Expansion
 
-**Status:** Done.
+### Buyer internal dependency wheel cleanup
 
-**Current state:** settlement consumes concrete `EscrowTerms` on accept, and every tierable/non-tierable escrow obligation under `alkahest/contracts/src/obligations/escrow` is registered with codec-boundary tests: ERC20, native-token, ERC721, ERC1155, token-bundle, attestation-request, and attestation-UID. Packaged policies include exact-match behavior for non-default formats, and scalar policies cover ERC20, native-token, and ERC1155. Representative compose-backed settlement e2e coverage exists for native-token and ERC1155 escrows.
+**Status:** Planned after the provisioning-client feature stabilizes.
 
-Follow-up work around schema-packaged registry filters and buyer CLI plugins is tracked under Market Core Extraction.
+**Problem:** `core/buyer/pyproject.toml` still declares several internal
+packages through repository-relative editable sources (`[tool.uv.sources]`).
+That is acceptable for local development, but it keeps the buyer package
+tightly coupled to the repository checkout and makes the dependency surface
+look broader than it should once the internal packages are available as
+built wheels. The provisioning-client work is moving consumers toward
+explicit wheel dependencies; the buyer should follow that pattern rather
+than accumulating relative imports/source paths.
+
+**Planned fix:** after the provisioning-client extraction is accepted, audit
+the buyer package's internal dependencies and switch package consumption to
+`.dist/` wheels wherever the dependency is already a distributable package.
+Keep editable path sources only where they are intentionally needed for local
+development workflows, and document any remaining exceptions in
+`ARCHITECTURE.md` rather than leaving them as implicit pyproject coupling.
+
+---
 
 ### Storefront DB Pruning
 
@@ -474,18 +465,6 @@ creates real VMs, and that teardown is Compute-API-based (no SSH key required on
 
 ---
 
-### Provisioning Smoke Tests Use Raw `httpx`
-
-**Status:** Done.
-
-The smoke test file (`e2e-tests/tests/smoke/test_provisioning_smoke.py`) already
-routes all calls through `SyncProvisioningClient`. Two methods that were
-also duplicated on `ProvisioningTestClient` (`pause_watchdog` /
-`resume_watchdog`) have been removed from that class; call sites in the
-e2e deal scenarios now use `provisioning_client.pause_lease_watchdog()` /
-`resume_lease_watchdog()` directly.
-
----
 
 ### `StorefrontCallbackClient` Extraction (Conditional)
 
