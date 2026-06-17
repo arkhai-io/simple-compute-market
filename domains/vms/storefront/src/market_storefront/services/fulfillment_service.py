@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import logging
 from typing import Any, Awaitable, Callable
 
 from core_storefront.stage_log import stage_event
@@ -11,6 +10,9 @@ from core_storefront.stage_log import stage_event
 from alkahest_py import AlkahestClient
 
 from provisioning_client import CreateVmRequest, ProvisioningClient
+from market_storefront.services.provisioning_orchestration_service import (
+    create_vm_and_wait_with_credentials,
+)
 from market_storefront.services.vm_fulfillment_service import fulfill_vm_obligation
 from market_storefront.services.vm_job_spec_service import (
     build_provisioning_job_spec as _vm_build_provisioning_job_spec,
@@ -20,7 +22,6 @@ from market_storefront.utils.config import CHAINS, settings, BASE_URL_OVERRIDE
 from market_storefront.services.capacity_client import build_capacity_client
 from market_storefront.utils.sqlite_client import get_sqlite_client
 
-logger = logging.getLogger(__name__)
 
 
 async def _do_provision(
@@ -48,49 +49,15 @@ async def _do_provision(
     if settings.provisioning.frp_dashboard_password:
         params["frp_dashboard_password"] = settings.provisioning.frp_dashboard_password
 
-    async with ProvisioningClient(
-        settings.provisioning.service_url,
+    return await create_vm_and_wait_with_credentials(
+        service_url=settings.provisioning.service_url,
         admin_key=settings.admin_api_key,
         timeout=timeout,
-    ) as client:
-        submit = await client.create_vm(vm_host, CreateVmRequest(**params))
-
-        if on_job_submitted is not None:
-            try:
-                await on_job_submitted(submit.job_id)
-            except Exception as exc:
-                logger.warning(
-                    "[PROVISIONING] on_job_submitted callback failed for job %s: %s",
-                    submit.job_id,
-                    exc,
-                )
-
-        job = await client.poll_until_complete(
-            submit.job_id,
-            timeout=timeout,
-            poll_interval=poll_interval,
-        )
-        result = job.result or {}
-        try:
-            creds_resp = await client.get_job_credentials(submit.job_id)
-            auth: dict[str, Any] = {}
-            for c in creds_resp.credentials:
-                if c.role:
-                    auth[c.role] = {
-                        "password": c.password,
-                        "ssh_commands": c.ssh_commands,
-                        "ssh_key_path_host": c.ssh_key_path_host,
-                        "key_type": c.key_type,
-                    }
-            if auth:
-                result["authentication"] = auth
-        except Exception as exc:
-            logger.warning(
-                "[PROVISIONING] Failed to fetch credentials for job %s: %s",
-                submit.job_id,
-                exc,
-            )
-    return result
+        poll_interval=poll_interval,
+        vm_host=vm_host,
+        request=CreateVmRequest(**params),
+        on_job_submitted=on_job_submitted,
+    )
 
 
 async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:

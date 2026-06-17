@@ -2,7 +2,7 @@
 Unit tests for typed VM request model validation.
 
 ``ProvisionRequest`` has been replaced by typed per-operation models in
-``models/vm_request_model.py``.  Validation is now distributed:
+``provisioning_client.models``.  Validation is now distributed:
 
   - ``vm_target`` is no longer validated here — it is a required URL path
     parameter enforced by FastAPI routing, not a model field.
@@ -10,8 +10,8 @@ Unit tests for typed VM request model validation.
   - Field-level constraints (ram, vcpus, disk_size, max_retries, gpu_count)
     live on ``CreateVmRequest``.
 
-The ``to_ansible_job_params()`` adapter on each model is also exercised
-here — that method is the boundary between the HTTP layer and the internal
+The server-side ``build_create_params()`` / ``build_simple_params()`` adapters are also exercised
+here — those functions are the boundary between the HTTP layer and the internal
 ``AnsibleJobParams`` DTO, so correctness matters.
 """
 from __future__ import annotations
@@ -19,11 +19,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from models.vm_request_model import (
-    CreateVmRequest,
-    VmActionRequest,
-    build_simple_params,
-)
+from provisioning_client.models import CreateVmRequest, VmActionRequest
+from models.vm_request_model import build_create_params, build_simple_params
 
 
 # ---------------------------------------------------------------------------
@@ -121,13 +118,13 @@ class TestCreateVmDefaults:
 
 
 # ---------------------------------------------------------------------------
-# CreateVmRequest — to_ansible_job_params adapter
+# CreateVmRequest — build_create_params adapter
 # ---------------------------------------------------------------------------
 
 class TestCreateVmToParams:
     def test_host_comes_from_argument_not_body(self):
         req = CreateVmRequest(vm_target="my-vm")
-        params = req.to_ansible_job_params("kvm1")
+        params = build_create_params("kvm1", req)
         assert params.vm_host == "kvm1"
         assert params.vm_target == "my-vm"
         assert params.vm_action == "create"
@@ -140,7 +137,7 @@ class TestCreateVmToParams:
             vm_disk_size="40G",
             vm_os_variant="ubuntu22.04",
         )
-        p = req.to_ansible_job_params("kvm1")
+        p = build_create_params("kvm1", req)
         assert p.vm_ram == 8192
         assert p.vm_vcpus == 8
         assert p.vm_disk_size == "40G"
@@ -153,7 +150,7 @@ class TestCreateVmToParams:
             frp_domain="example.com",
             frp_dashboard_password="secret",
         )
-        p = req.to_ansible_job_params("kvm1")
+        p = build_create_params("kvm1", req)
         assert p.frp_server_addr == "1.2.3.4"
         assert p.frp_domain == "example.com"
         assert p.frp_dashboard_password == "secret"
@@ -165,7 +162,7 @@ class TestCreateVmToParams:
             vm_gpu_count=2,
             vm_gpu_devices=["0000:03:00.0", "0000:04:00.0"],
         )
-        p = req.to_ansible_job_params("kvm1")
+        p = build_create_params("kvm1", req)
         assert p.gpu_provisioned is True
         assert p.vm_gpu_count == 2
         assert p.vm_gpu_devices == ["0000:03:00.0", "0000:04:00.0"]
@@ -178,7 +175,7 @@ class TestCreateVmToParams:
             gcs_bucket_url="gs://bucket",
             gcs_image_path="images/img.qcow2",
         )
-        p = req.to_ansible_job_params("kvm1")
+        p = build_create_params("kvm1", req)
         assert p.image_setup_type == "golden"
         assert p.golden_image_name == "base-v3"
 

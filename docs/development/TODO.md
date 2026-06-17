@@ -24,7 +24,6 @@ Pending architectural work and known operational issues for the Arkhai market st
 | [Host capacity resource filters](#host-capacity-resource-filters) | Provisioning Service | Needs review |
 | [Site resources and shared lease lifecycle boundaries](#site-resources-and-shared-lease-lifecycle-boundaries) | Provisioning Service | Needs review |
 | [Multi-Provider Resource Pool Architecture](#multi-provider-resource-pool-architecture) | Provisioning Service | Needs review |
-| [Flat `client.*` package namespace](#flat-client-package-namespace) | Provisioning Service | Planned |
 | [Provisioning smoke tests: use typed client](#provisioning-smoke-tests-use-raw-httpx) | Provisioning Service | Done |
 | [`StorefrontCallbackClient` extraction](#storefrontcallbackclient-extraction-conditional) | Provisioning Service | Conditional |
 | [Alkahest contracts in baked state](#alkahest-contracts-in-the-baked-state) | Documentation Gaps | Needs review |
@@ -472,16 +471,6 @@ provider without mock provisioning:
 
 This scenario validates the watchdog pause/resume admin endpoints, that GCPComputeProvider
 creates real VMs, and that teardown is Compute-API-based (no SSH key required on the VM).
-
----
-
-### Flat `client.*` Package Namespace
-
-**Status:** Planned. Refactor.
-
-**Problem:** The arkhai-vms-provisioning package exposes its modules at the flat `client.*` level (e.g. `from client.provisioning_client import ...`) because setuptools maps `src/` directly as the package root. To expose a clean `provisioning_service.*` namespace, all internal imports within the package would need to be converted from bare names (e.g. `from models.jobs_model import ...`) to relative imports (e.g. `from .models.jobs_model import ...`).
-
-**Planned fix:** do the relative-imports refactor; switch `service/clients/provisioning.py` to import from `provisioning_service.client.provisioning_client`.
 
 ---
 

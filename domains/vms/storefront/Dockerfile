@@ -51,7 +51,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-kit-identity \
             --refresh-package arkhai-kit-config \
             --refresh-package arkhai-vms-storefront \
-            --refresh-package arkhai-vms-provisioning; \
+            --refresh-package arkhai-vms-provisioning-client; \
     else \
         uv sync --no-sources --no-dev --no-install-project --find-links /.dist \
             --refresh-package arkhai-core \
@@ -63,7 +63,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-kit-identity \
             --refresh-package arkhai-kit-config \
             --refresh-package arkhai-vms-storefront \
-            --refresh-package arkhai-vms-provisioning; \
+            --refresh-package arkhai-vms-provisioning-client; \
     fi
 
 # Stage 2: Lean runtime image
@@ -142,7 +142,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --refresh-package arkhai-kit-identity \
         --refresh-package arkhai-kit-config \
         --refresh-package arkhai-vms-storefront \
-        --refresh-package arkhai-vms-provisioning
+        --refresh-package arkhai-vms-provisioning-client
 
 ARG PORT=8080
 ENV PORT=${PORT}

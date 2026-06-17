@@ -30,7 +30,7 @@ from provisioning_client import ProvisioningClient, ProvisioningError
 from db.database import create_session_factory
 from db.models import Base
 from main import app
-from models.vm_request_model import CreateVmRequest
+from provisioning_client.models import CreateVmRequest
 from services.ansible_service import AnsibleService
 from services.async_job_queue import AsyncJobQueue
 from services.host_service import HostService
@@ -87,7 +87,7 @@ async def client_and_queue(
     )
 
     host_service = HostService(session_factory=session_factory, settings=mock_settings)
-    from models.host_model import HostCreate
+    from provisioning_client.models import HostCreate
     host_service.register_host(HostCreate(
         name=HOST,
         kvm_host="10.0.0.1",

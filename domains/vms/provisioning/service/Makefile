@@ -16,7 +16,9 @@ reinit: ## Force-reinstall internal wheels after make dist. Use when bumping int
 		--upgrade-package arkhai-core-site \
 		--reinstall-package arkhai-core-site \
 		--upgrade-package arkhai-core-storefront-client \
-		--reinstall-package arkhai-core-storefront-client
+		--reinstall-package arkhai-core-storefront-client \
+		--upgrade-package arkhai-vms-provisioning-client \
+		--reinstall-package arkhai-vms-provisioning-client
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 # Absolute path to the sibling VM provisioning IaC tree, resolved from this Makefile's

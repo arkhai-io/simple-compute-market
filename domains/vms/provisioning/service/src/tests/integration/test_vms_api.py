@@ -22,7 +22,7 @@ import asyncio
 import pytest
 
 from provisioning_client import ProvisioningError
-from models.vm_request_model import CreateVmRequest
+from provisioning_client.models import CreateVmRequest
 from services.async_job_queue import AsyncJobQueue
 
 
