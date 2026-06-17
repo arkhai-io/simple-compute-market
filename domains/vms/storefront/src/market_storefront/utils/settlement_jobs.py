@@ -23,7 +23,7 @@ import json
 import logging
 from typing import Any
 
-from domains.vms.provisioning import VmProvisionTerms, make_vm_provision_terms
+from arkhai_vms_common import VmProvisionTerms, make_vm_provision_terms
 from market_core.schemas import EscrowProposal
 
 logger = logging.getLogger(__name__)

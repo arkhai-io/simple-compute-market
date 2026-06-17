@@ -163,7 +163,7 @@ class ProvisionTerms(BaseModel):
     ``kind`` identifies the market/schema-specific interpreter and
     ``payload`` carries that interpreter's data. Core code treats
     ``payload`` as opaque; interpreting it (and constructing it) is the
-    job of domain adapters — e.g. ``domains.vms.provisioning.terms`` for
+    job of domain adapters — e.g. ``arkhai_vms_common.provision_terms`` for
     the ``compute.v1`` payload shape.
     """
 

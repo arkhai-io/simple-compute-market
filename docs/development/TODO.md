@@ -16,12 +16,13 @@ Pending architectural work and known operational issues for the Arkhai market st
 | [Storefront DB Pruning](#storefront-db-pruning) | Core Stack | Planned |
 | [Registry Filter-Spec side indexes](#registry-filter-spec-indexed-true-side-indexes) | Core Stack | Deferred |
 | [Shared Dynaconf Bootstrap](#shared-dynaconf-bootstrap) | Core Stack | Planned |
+| [VM provisioning tombstone cleanup](#vm-provisioning-tombstone-cleanup) | Core Stack | Planned |
 | [Storefront Admin CLI Test Coverage](#storefront-admin-cli-test-coverage) | Core Stack | Planned |
 | [Move e2e Tests to Separate Project](#move-e2e-tests-to-a-separate-project) | Core Stack | Planned, no timeline |
 | [Shared marketplace registry (not per-node)](#shared-marketplace-infrastructure-not-per-node) | Registry Service | Planned |
 | [Golden image configuration](#golden-image-configuration-management-varsyaml) | Provisioning Service | Needs review |
-| [`HostController.check_capacity` filters](#hostcontrollercheck_capacity-resource-filters) | Provisioning Service | Needs review |
-| [Lease expiry watchdog: check job interpretation](#lease-expiry-watchdog--check-job-result-interpretation) | Provisioning Service | Needs review |
+| [Host capacity resource filters](#host-capacity-resource-filters) | Provisioning Service | Needs review |
+| [Site resources and shared lease lifecycle boundaries](#site-resources-and-shared-lease-lifecycle-boundaries) | Provisioning Service | Needs review |
 | [Multi-Provider Resource Pool Architecture](#multi-provider-resource-pool-architecture) | Provisioning Service | Needs review |
 | [Flat `client.*` package namespace](#flat-client-package-namespace) | Provisioning Service | Planned |
 | [Provisioning smoke tests: use typed client](#provisioning-smoke-tests-use-raw-httpx) | Provisioning Service | Done |
@@ -237,6 +238,16 @@ Until then: the `indexed: bool` field stays as a no-op in the loader so the YAML
 
 ---
 
+### VM provisioning tombstone cleanup
+
+**Status:** Planned.
+
+**Problem:** `domains/vms/provisioning/` contains review tombstones for deprecated root-level modules. The package root is reserved for the provisioning-service client facade (`client.py`, `__init__.py`), while seller-side VM fulfillment, capacity validation, job-spec construction, and admin payload models belong to the VM storefront package. Shared VM-domain model code belongs in built wheels such as `arkhai-vms-common`, not repository-relative force-includes.
+
+**Planned fix:** after code review, delete the tombstone files (`capacity.py`, `fulfillment.py`, `fulfillment_plan.py`, `job_spec.py`, `storefront_models.py`, and `terms.py`) from `domains/vms/provisioning/`. Keep cross-package dependencies on shared VM-domain code flowing through built wheels in `.dist/`; do not reintroduce repository-relative force-includes for provisioning helpers.
+
+---
+
 ### Storefront Admin CLI Test Coverage
 
 **Status:** Planned. Test file was on the original split-plan TODO and never landed.
@@ -309,23 +320,37 @@ Operational gotchas the current code lives with. Distinct from [Latent Bug Fixes
 
 ---
 
-### `HostController.check_capacity` resource filters
+### Host capacity resource filters
 
 **Status:** Needs review.
 
-`HostController.check_capacity` should eventually accept optional resource filter parameters (`vcpus`, `ram_mb`, `gpu_count`) and return ranked hosts with sufficient capacity — useful for the storefront's pre-flight check before a `create` job.
+The host capacity check API should eventually accept optional resource filter parameters (`vcpus`, `ram_mb`, `gpu_count`) and return ranked hosts with sufficient capacity — useful for the storefront's pre-flight check before a `create` job.
 
 ---
 
-### Lease expiry watchdog — check job result interpretation
+### Site resources and shared lease lifecycle boundaries
 
-**Status:** Needs review.
+**Status:** Planned.
 
-See `ARCHITECTURE.md` "Lease Lifecycle — ledger-driven watchdog" for current architecture.
+See `ARCHITECTURE.md` "Lease Lifecycle — allocation-backed watchdog" for the current VM provisioning implementation.
 
-**Remaining gap:** `LeaseLifecycleService._process_releasing_lease` polls the check job status but treats `succeeded` and `failed` uniformly (both proceed to release the allocation). A future iteration should parse the check job result's `available_gpus` field: if `available_gpus > 0` the VM is confirmed gone and the release proceeds normally; if `available_gpus == 0` the VM may still be running (late `at` daemon, cleanup race) and the watchdog should wait another cycle before forcing. This requires `AnsibleJobService._build_result_payload` to consistently expose `result.available.gpus` for the `check` action.
+**Problem:** The site authority resource/allocation persistence layer and the lease lifecycle policy layer are still too tightly coupled. A lease is one kind of allocation: it has a start/end time and a watchdog-enforced release path. Other allocation types are plausible, including token allocations, bandwidth allocations, usage-bucket allocations, pod rentals, and bare-metal rentals. The storefront needs to understand leases when it negotiates a time window; a provisioning service needs to understand leases when it enforces that time window. The generic site resource system should not need to understand watchdogs, VM teardown, or lease-specific terminal states.
 
-The `at`-based scheduling on the KVM host runs in parallel — the check job is a verification step, not a replacement for the `at` cleanup.
+**Planned fix:** introduce a generic `SiteResourcesService` boundary around the site resource tables and keep it in resource/allocation/event vocabulary. The site resource system can have focused CRUD/state wrappers around each underlying table family:
+
+- `site_resources` — resource inventory and enabled/disabled state.
+- `site_allocations` — generic allocation records, allocation state, claim units, opaque metadata, and release state.
+- `capacity_events` — anonymous capacity/resource availability deltas for subscribers.
+
+`SiteResourcesService` should understand generic concepts such as `allocation_id`, `resource_id`, state, units/claim attributes, metadata, created/updated/released timestamps, and resource availability events. It should not understand `lease_end_utc`, watchdog cycles, `vm_remove`, VM host/target semantics, `release_failed`, `unmanaged`, or provisioning-specific lifecycle policy.
+
+Lease lifecycle policy should sit above that generic site resource layer. A reusable lease lifecycle service can be moved into a shared wheel by accepting a release delegate/callback for the concrete teardown operation. VM provisioning supplies a `vm_remove` delegate; a pod provisioning service could supply a pod-delete delegate; a bare-metal rental service could supply a node-reclaim delegate. Token or bandwidth allocations might use `SiteResourcesService` without any lease lifecycle layer at all.
+
+**Current state:** VM provisioning has a local `SiteResourcesService` adapter over the existing `core_site` capacity implementation. `LeaseLifecycleService` owns the lease state machine and uses a release delegate so the lifecycle layer is easier to migrate into the shared wheel later. Admin repair routes are available for operator recovery: `POST /api/v1/admin/leases/{lease_id}/retry-release` resubmits the release delegate for `release_failed` leases, and `POST /api/v1/admin/leases/{lease_id}/force-release` releases capacity without teardown proof after manual verification. The force-release route requires an operator reason and can include evidence because it can make capacity available despite incomplete infrastructure cleanup.
+
+**Remaining shared-layer refactor:** narrow the lower `core_site` implementation behind the generic site-resource boundary. The lower implementation still exposes ledger-named and lease-shaped methods; future code should depend on focused site resource/allocation/event service wrappers instead of reaching through those details. Once the lower boundary is generic, move the delegate-based lease lifecycle service into the shared wheel so VM, pod, and bare-metal provisioning services can reuse the state machine with different release delegates.
+
+**Monitoring work:** `release_failed` requires polling the provisioning service or inspecting logs. Add admin monitoring/alerting for failed releases with `lease_id`, resource id, host, VM target, `vm_remove_job_id`, failure reason/message, and suggested recovery actions. Do not notify the storefront with a capacity-released event unless capacity was actually released.
 
 ---
 

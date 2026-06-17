@@ -13,6 +13,8 @@ install: ## Install dependencies using uv
 
 reinit: ## Force-reinstall internal wheels after make dist. Use when bumping internal wheel versions.
 	uv sync --dev --find-links $(DIST_DIR) \
+		--upgrade-package arkhai-core-site \
+		--reinstall-package arkhai-core-site \
 		--upgrade-package arkhai-core-storefront-client \
 		--reinstall-package arkhai-core-storefront-client
 

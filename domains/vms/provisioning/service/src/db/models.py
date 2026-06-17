@@ -27,22 +27,20 @@ class LeaseStatus(str, enum.Enum):
 
     pending   — lease_start_utc is in the future; VM may not yet be running.
     active    — lease is running; lease_end_utc is in the future.
-    releasing — lease_end_utc has passed; watchdog submitted a check job to
+    releasing — lease_end_utc has passed; watchdog submitted a vm_remove job to
                 confirm VM cleanup and is waiting for it to complete before
                 releasing the storefront resource.
-    released  — storefront PATCH /resources/{id} called successfully; resource
-                is available again.
-    forced    — grace period elapsed without VM confirmation; storefront
-                patched regardless. Resource is available; VM state unknown.
-    cancelled — lease cancelled before expiry (e.g. early termination by deal).
+    released       — vm_remove succeeded and capacity is available again.
+    release_failed — vm_remove failed/timed out; capacity remains held.
+    unmanaged      — lifecycle oversight released; admin cleanup is required.
     """
 
-    pending   = "pending"
-    active    = "active"
-    releasing = "releasing"
-    released  = "released"
-    forced    = "forced"
-    cancelled = "cancelled"
+    pending        = "pending"
+    active         = "active"
+    releasing      = "releasing"
+    released       = "released"
+    release_failed = "release_failed"
+    unmanaged      = "unmanaged"
 
 
 class AnsibleJob(Base):
@@ -151,7 +149,7 @@ class VmLease(Base):
         exactly one lease. Used for recovery queries and idempotency.
 
     vm_host / vm_target:
-        KVM host alias and libvirt domain name. Used when submitting check jobs.
+        KVM host alias and libvirt domain name. Used when submitting vm_remove jobs.
 
     lease_start_utc / lease_end_utc:
         Lease window boundaries in UTC. lease_start_utc is nullable (None means
@@ -161,19 +159,19 @@ class VmLease(Base):
     status:
         LeaseStatus enum value. Transitions:
           pending  → active    (when lease_start_utc passes or is None at creation)
-          active   → releasing (when lease_end_utc passes, watchdog submits check job)
-          releasing→ released  (check job confirms VM gone, storefront patched)
-          releasing→ forced    (grace period elapsed, storefront patched anyway)
-          *        → cancelled (explicit cancellation before expiry)
+          active   → releasing (when lease_end_utc passes, watchdog submits vm_remove job)
+          releasing→ released       (vm_remove job succeeds)
+          releasing→ release_failed (vm_remove fails or times out)
+          active   → unmanaged      (operator releases lifecycle oversight)
 
     create_job_id:
         Provisioning job_id of the VM creation job. Allows tracing from lease
         back to the original job that produced the VM.
 
-    check_job_id:
-        Provisioning job_id for the most recent check Ansible job submitted by
+    vm_remove_job_id:
+        Provisioning job_id for the most recent vm_remove Ansible job submitted by
         the watchdog. Nullable — only set during the 'releasing' phase. Allows
-        operators to query ``GET /api/v1/jobs/{check_job_id}`` for details.
+        operators to query ``GET /api/v1/jobs/{vm_remove_job_id}`` for details.
     """
 
     __tablename__ = "vm_leases"
@@ -192,7 +190,7 @@ class VmLease(Base):
         String, nullable=False, default=LeaseStatus.pending.value, index=True
     )
     create_job_id = Column(String, nullable=True)
-    check_job_id = Column(String, nullable=True)
+    vm_remove_job_id = Column(String, nullable=True)
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

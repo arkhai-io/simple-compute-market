@@ -63,9 +63,6 @@ class AnsibleJobParams:
     gcs_bucket_url: Optional[str] = None
     gcs_image_path: Optional[str] = None
 
-    # Lease scheduling
-    vm_expiry_at: Optional[str] = None
-
     # Deal linkage — on-chain escrow UID for recovery queries
     escrow_uid: Optional[str] = None
 

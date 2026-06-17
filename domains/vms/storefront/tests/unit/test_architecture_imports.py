@@ -2,9 +2,11 @@
 
 The target graph (docs/development/ARCHITECTURE.md, "Organizing Principle"):
 kit packages and the VM domain *concept* modules (listings, negotiation,
-settlement, provisioning hooks) are composed from below — they implement
-core hook shapes without importing core. Only composition roots (the VM
-buyer/storefront executables and the provisioning service) may import
+settlement) are composed from below — they implement core hook shapes without
+importing core. Storefront-owned provisioning orchestration lives under the VM
+storefront composition root, while the executable provisioning service and its
+client facade live under ``domains/vms/provisioning``. Only composition roots
+(the VM buyer/storefront executables and the provisioning service) may import
 core packages. Kit additionally takes no domain dependencies.
 
 This test walks the actual import statements so the rule is enforced,
@@ -49,16 +51,16 @@ DOMAIN_PREFIXES = ("domains",)
 
 KIT_ROOTS = sorted(REPO.glob("kit/*/src"))
 
-# Concept modules: from-below hook/implementation homes. The provisioning
-# *service* subtree is the VM fulfillment executable (a composition root)
-# and is exempt; so are tests and the IaC tree.
+# Concept modules: from-below hook/implementation homes. Storefront-owned VM
+# provisioning orchestration is now under the storefront composition root, and
+# ``domains/vms/provisioning`` is the provisioning-service client/executable
+# namespace rather than a concept-module home.
 CONCEPT_ROOTS = [
     REPO / "domains/vms/listings",
     REPO / "domains/vms/negotiation",
     REPO / "domains/vms/settlement",
-    REPO / "domains/vms/provisioning",
 ]
-CONCEPT_EXCLUDES = ("provisioning/service/", "provisioning/iac/")
+CONCEPT_EXCLUDES: tuple[str, ...] = ()
 
 SKIP_PARTS = {"__pycache__", "tests", "build", ".venv", "dist"}
 

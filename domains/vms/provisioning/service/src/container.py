@@ -7,11 +7,20 @@ from db.database import create_db_engine, create_session_factory
 from services.ansible_service import AnsibleService
 from services.async_job_queue import AsyncJobQueue
 from core_site.ledger import CapacityLedgerService
+from services.host_operations_service import HostOperationsService
 from services.host_service import HostService
 from services.job_service import AnsibleJobService
 from services.lease_lifecycle_service import LeaseLifecycleService
 from services.lease_watchdog import LeaseWatchdog
+from services.site_resources_service import SiteResourcesService
 from services.system_service import SystemService
+from services.vm_operations_service import VmOperationsService
+
+
+def _resolved_job_queue():
+    if resolved_job_queue is None:
+        raise RuntimeError("Job queue is not initialised")
+    return resolved_job_queue
 
 
 def _make_ansible_service(cfg):
@@ -79,11 +88,18 @@ class Container(containers.DeclarativeContainer):
         host_service=host_service,
     )
 
-    system_service = providers.Singleton(
-        SystemService,
+    vm_operations_service = providers.Factory(
+        VmOperationsService,
+        job_service=job_service,
+        job_queue_provider=_resolved_job_queue,
+    )
+
+    host_operations_service = providers.Factory(
+        HostOperationsService,
         ansible_service=ansible_service,
-        settings=config,
         host_service=host_service,
+        job_service=job_service,
+        job_queue_provider=_resolved_job_queue,
     )
 
     capacity_ledger_service = providers.Singleton(
@@ -93,17 +109,33 @@ class Container(containers.DeclarativeContainer):
         required_attributes=("vm_host",),
     )
 
+    site_resources_service = providers.Singleton(
+        SiteResourcesService,
+        capacity_service=capacity_ledger_service,
+    )
+
     lease_lifecycle_service = providers.Singleton(
         LeaseLifecycleService,
         settings=config,
-        capacity_ledger=capacity_ledger_service,
+        site_resources_service=site_resources_service,
         job_service=job_service,
+        job_queue_provider=_resolved_job_queue,
     )
 
     lease_watchdog = providers.Singleton(
         LeaseWatchdog,
         lease_lifecycle_service=lease_lifecycle_service,
         settings=config,
+    )
+
+    system_service = providers.Singleton(
+        SystemService,
+        ansible_service=ansible_service,
+        settings=config,
+        host_service=host_service,
+        session_factory=session_factory,
+        job_queue_provider=_resolved_job_queue,
+        lease_lifecycle_service=lease_lifecycle_service,
     )
 
 
@@ -125,6 +157,8 @@ resolved_ansible_service: "AnsibleService | None" = None
 resolved_job_queue: "AsyncJobQueue | None" = None
 resolved_system_service: "SystemService | None" = None
 resolved_host_service: "HostService | None" = None
+resolved_vm_operations_service: "VmOperationsService | None" = None
+resolved_host_operations_service: "HostOperationsService | None" = None
 resolved_lease_lifecycle_service: "LeaseLifecycleService | None" = None
 resolved_lease_watchdog: "LeaseWatchdog | None" = None
 resolved_capacity_ledger_service: "CapacityLedgerService | None" = None

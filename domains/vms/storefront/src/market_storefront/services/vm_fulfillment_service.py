@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
-from domains.vms.provisioning.fulfillment_plan import build_vm_fulfillment_plan
+from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
 from domains.vms.settlement import submit_compute_fulfillment
 
 logger = logging.getLogger(__name__)

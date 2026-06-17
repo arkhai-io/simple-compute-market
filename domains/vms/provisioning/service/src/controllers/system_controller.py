@@ -29,8 +29,6 @@ import os
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
-from sqlalchemy import text
-from sqlalchemy.orm import Session, sessionmaker
 
 import container as _container_module
 from config import Settings
@@ -39,7 +37,6 @@ from models.system_model import (
     HealthResponse,
     VersionResponse,
 )
-from services.ansible_service import AnsibleService
 from services.system_service import SystemService
 
 _health_router = APIRouter(tags=["system"])
@@ -51,14 +48,10 @@ _system_router = APIRouter(prefix="/system", tags=["system"])
 class SystemController:
     def __init__(
         self,
-        session_factory: sessionmaker[Session] = Depends(
-            lambda: _container_module.resolved_session_factory
-        ),
         system_service: SystemService = Depends(
             lambda: _container_module.resolved_system_service
         ),
     ) -> None:
-        self._session_factory = session_factory
         self._system_service = system_service
 
     # ------------------------------------------------------------------
@@ -72,25 +65,8 @@ class SystemController:
         Used by Kubernetes liveness and readiness probes at GET /health.
         Must complete within the probe timeout (default 1s in most clusters).
         """
-        checks: dict[str, str] = {"api": "ok"}
-
-        try:
-            with self._session_factory() as db:
-                db.execute(text("SELECT 1"))
-            checks["database"] = "ok"
-        except Exception as exc:
-            checks["database"] = f"error: {exc}"
-
-        job_queue = _container_module.resolved_job_queue
-        checks["job_processor"] = (
-            "ok" if (job_queue is not None and job_queue.is_alive()) else "degraded"
-        )
-
-        all_ok = all(v == "ok" for v in checks.values())
-        return JSONResponse(
-            content={"status": "ok" if all_ok else "degraded", "checks": checks},
-            status_code=200 if all_ok else 503,
-        )
+        body, all_ok = self._system_service.get_health()
+        return JSONResponse(content=body, status_code=200 if all_ok else 503)
 
     @_system_router.get(
         "/status",
@@ -218,17 +194,13 @@ class SystemController:
         Returns a summary dict::
 
             {
-                "activated": <int>,  # pending leases advanced to active
-                "checked":   <int>,  # expired leases for which check jobs were submitted
-                "released":  <int>,  # successfully patched to available
-                "forced":    <int>,  # force-patched after grace period
-                "skipped":   <int>,  # errors or transient states
+                "checked":        <int>,  # expired leases for which release jobs were submitted
+                "released":       <int>,  # release job succeeded and capacity was released
+                "release_failed": <int>,  # release job failed/timed out; capacity remains held
+                "skipped":        <int>,  # errors or transient states
             }
         """
-        svc = getattr(_container_module, "resolved_lease_lifecycle_service", None)
-        if svc is None:
-            return {"error": "lease_lifecycle_service not initialised", "checked": 0}
-        return await svc.force_check_leases()
+        return await self._system_service.force_check_leases()
 
     @_system_router.post(
         "/lease-watchdog/pause",
@@ -246,11 +218,7 @@ class SystemController:
         Primary use: e2e tests that need deterministic control over when lease
         lifecycle transitions occur.
         """
-        svc = getattr(_container_module, "resolved_lease_lifecycle_service", None)
-        if svc is None:
-            return {"error": "lease_lifecycle_service not initialised", "paused": False}
-        svc.pause()
-        return {"paused": True}
+        return self._system_service.pause_lease_watchdog()
 
     @_system_router.post(
         "/lease-watchdog/resume",
@@ -262,11 +230,7 @@ class SystemController:
         Clears the pause flag set by pause_lease_watchdog(). Any blocked
         check_leases() call in the timer loop is unblocked immediately.
         """
-        svc = getattr(_container_module, "resolved_lease_lifecycle_service", None)
-        if svc is None:
-            return {"error": "lease_lifecycle_service not initialised", "paused": True}
-        svc.resume()
-        return {"paused": False}
+        return self._system_service.resume_lease_watchdog()
 
     # ------------------------------------------------------------------
     # Router factories

@@ -6,8 +6,6 @@ Unit tests for typed VM request model validation.
 
   - ``vm_target`` is no longer validated here — it is a required URL path
     parameter enforced by FastAPI routing, not a model field.
-  - ``vm_expiry_at`` is a required field on ``ScheduleVmExpiryRequest``
-    (Pydantic raises on construction if absent).
   - FRP password cross-field rule lives on ``CreateVmRequest``.
   - Field-level constraints (ram, vcpus, disk_size, max_retries, gpu_count)
     live on ``CreateVmRequest``.
@@ -23,7 +21,6 @@ from pydantic import ValidationError
 
 from models.vm_request_model import (
     CreateVmRequest,
-    ScheduleVmExpiryRequest,
     VmActionRequest,
     build_simple_params,
 )
@@ -184,24 +181,6 @@ class TestCreateVmToParams:
         p = req.to_ansible_job_params("kvm1")
         assert p.image_setup_type == "golden"
         assert p.golden_image_name == "base-v3"
-
-
-# ---------------------------------------------------------------------------
-# ScheduleVmExpiryRequest — required field and adapter
-# ---------------------------------------------------------------------------
-
-class TestScheduleVmExpiry:
-    def test_vm_expiry_at_required(self):
-        with pytest.raises(ValidationError):
-            ScheduleVmExpiryRequest()  # type: ignore[call-arg]
-
-    def test_to_ansible_job_params_sets_lease_end_action(self):
-        req = ScheduleVmExpiryRequest(vm_expiry_at="2025-12-31T23:59:00")
-        p = req.to_ansible_job_params(host="kvm1", vm_name="agent-vm-01")
-        assert p.vm_action == "lease_end"
-        assert p.vm_host == "kvm1"
-        assert p.vm_target == "agent-vm-01"
-        assert p.vm_expiry_at == "2025-12-31T23:59:00"
 
 
 # ---------------------------------------------------------------------------

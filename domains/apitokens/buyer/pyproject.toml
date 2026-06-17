@@ -36,6 +36,11 @@ arkhai-kit-alkahest = { path = "../../../kit/alkahest", editable = true }
 arkhai-kit-config = { path = "../../../kit/config", editable = true }
 arkhai-kit-policy = { path = "../../../kit/policy", editable = true }
 
+[dependency-groups]
+dev = [
+  "pytest>=8.0.0",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

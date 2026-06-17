@@ -17,7 +17,7 @@ from fastapi_utils.cbv import cbv
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
 from core_storefront.models.system_models import AdminPauseResponse
-from domains.vms.provisioning.storefront_models import (
+from market_storefront.models.capacity_admin_models import (
     CapacityReleasedEventRequest,
     FulfillmentEventResponse,
     FulfillmentFailedEventRequest,
@@ -517,7 +517,7 @@ class AdminController:
             state="releasing",
             close_oversized=True,
             provider_lease_id=body.provider_lease_id,
-            check_job_id=body.check_job_id,
+            vm_remove_job_id=body.vm_remove_job_id,
         )
 
     @router.post(

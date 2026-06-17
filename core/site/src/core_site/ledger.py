@@ -405,7 +405,7 @@ class CapacityLedgerService:
         return due
 
     def begin_releasing(
-        self, allocation_id: str, *, check_job_id: str | None = None,
+        self, allocation_id: str, *, vm_remove_job_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Transition a leased allocation to releasing (teardown in flight).
 
@@ -417,7 +417,104 @@ class CapacityLedgerService:
             if allocation is None or allocation.state not in HELD_ALLOCATION_STATES:
                 return None
             allocation.state = AllocationState.releasing.value
-            allocation.check_job_id = check_job_id
+            allocation.vm_remove_job_id = vm_remove_job_id
+            db.commit()
+            return self._allocation_payload(allocation)
+
+    def update_lease_fields(
+        self,
+        allocation_id: str,
+        *,
+        vm_host: str | None = None,
+        vm_target: str | None = None,
+        lease_start_utc: str | None = None,
+        lease_end_utc: str | None = None,
+        vm_remove_job_id: str | None = None,
+        create_job_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Update lease-tail fields on a non-terminal allocation.
+
+        Unlike ``attach_lease``, this operates on any non-terminal state
+        (including ``releasing``) and never changes the allocation state.
+        Returns ``None`` when the allocation does not exist or is already
+        terminal.  Used by the operator PATCH endpoint to update expiry time,
+        host coordinates, or job references without driving a state transition.
+        """
+        with self._lock, self._session_factory() as db:
+            allocation = db.get(SiteAllocation, allocation_id)
+            terminal = {
+                AllocationState.released.value,
+                AllocationState.force_released.value,
+                AllocationState.provisioning_failed.value,
+            }
+            if allocation is None or allocation.state in terminal:
+                return None
+            if vm_host is not None:
+                allocation.vm_host = vm_host
+            if vm_target is not None:
+                allocation.vm_target = vm_target
+            if lease_start_utc is not None:
+                allocation.lease_start_utc = str(lease_start_utc)
+            if lease_end_utc is not None:
+                allocation.lease_end_utc = str(lease_end_utc)
+            if vm_remove_job_id is not None:
+                allocation.vm_remove_job_id = vm_remove_job_id
+            if create_job_id is not None:
+                allocation.create_job_id = create_job_id
+            db.commit()
+            return self._allocation_payload(allocation)
+
+    def find_active_lease_by_vm_target(
+        self, vm_host: str, vm_target: str
+    ) -> dict[str, Any] | None:
+        """Return the first active (held) lease allocation for a VM, or None.
+
+        Used by the ``POST /vms/{vm_name}/remove`` endpoint to cancel any
+        watchdog-managed lease before submitting the explicit removal job,
+        avoiding a double-fire when the lease would otherwise expire later.
+        """
+        with self._lock, self._session_factory() as db:
+            allocation = (
+                db.query(SiteAllocation)
+                .filter(
+                    SiteAllocation.vm_host == vm_host,
+                    SiteAllocation.vm_target == vm_target,
+                    SiteAllocation.state.in_(HELD_ALLOCATION_STATES),
+                    SiteAllocation.lease_end_utc.isnot(None),
+                )
+                .order_by(SiteAllocation.created_at.desc())
+                .first()
+            )
+            return self._allocation_payload(allocation) if allocation else None
+
+
+    def update_allocation_state(
+        self,
+        allocation_id: str,
+        *,
+        state: str,
+        failure_reason: str | None = None,
+        failure_message: str | None = None,
+        vm_remove_job_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Update a site allocation state without emitting capacity events.
+
+        This is a generic state mutation primitive for lifecycle services.
+        Releasing, release_failed, and unmanaged still consume capacity; use
+        ``release`` when capacity should become available and an event should be
+        published.
+        """
+        with self._lock, self._session_factory() as db:
+            allocation = db.get(SiteAllocation, allocation_id)
+            if allocation is None:
+                return None
+            allocation.state = str(state)
+            if failure_reason is not None:
+                allocation.failure_reason = failure_reason
+            if failure_message is not None:
+                allocation.failure_message = failure_message
+            if vm_remove_job_id is not None:
+                allocation.vm_remove_job_id = vm_remove_job_id
             db.commit()
             return self._allocation_payload(allocation)
 
@@ -652,7 +749,7 @@ class CapacityLedgerService:
             "lease_start_utc": allocation.lease_start_utc,
             "lease_end_utc": allocation.lease_end_utc,
             "create_job_id": allocation.create_job_id,
-            "check_job_id": allocation.check_job_id,
+            "vm_remove_job_id": allocation.vm_remove_job_id,
             "failure_reason": allocation.failure_reason,
             "released_at": allocation.released_at,
         }

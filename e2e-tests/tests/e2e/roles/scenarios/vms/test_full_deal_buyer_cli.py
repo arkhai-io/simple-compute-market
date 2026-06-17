@@ -67,16 +67,16 @@ Phase 9 — Provisioning completion
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
 
 Phase 10 — Lease expiry setup and watchdog advance to releasing
-  10a  Setup: pause watchdog, arm check mock rule, patch lease_end_utc to past,
-       dry-run evaluate_job → rule_matched=check-gate, would_pause=True
+  10a  Setup: pause watchdog, arm remove mock rule, patch lease_end_utc to past,
+       dry-run evaluate_job → rule_matched=remove-gate, would_pause=True
   10b  Trigger check-leases cycle → lease transitions to releasing,
-       check_job_id written; storefront resource still leased
+       remove_job_id written; storefront resource still leased
 
 Phase 11 — VM cleanup confirmation and resource release
-  11a  Assert releasing state holds: check job paused, resource still leased.
+  11a  Assert releasing state holds: vm_remove job paused, resource still leased.
        Represents stable "VM being torn down, not yet available" invariant —
        structurally identical to the planned vm_destroy rework.
-  11b  Release check gate, trigger another check-leases cycle →
+  11b  Release remove gate, trigger another check-leases cycle →
        lease released, storefront resource available; resume watchdog
 """
 
@@ -166,7 +166,7 @@ DURATION_HOURS = 1
 BUYER_INITIAL_PRICE = 7_000    # below seller floor (10_000) — forces counter at round 0
 BUYER_MAX_PRICE = 12_000
 PROV_RULE_ID = "e2e-create-pause"
-CHECK_RULE_ID = "e2e-check-pause"   # mock rule that pauses the lease check job
+REMOVE_RULE_ID = "e2e-remove-pause"   # mock rule that pauses the vm_remove job
 E2E_RESOURCE_ID = "compute-e2e-deal-001"
 E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
 compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm1
@@ -1080,7 +1080,7 @@ class TestStage09c_LeaseRegistered:
         assert lease.get("resource_id") == E2E_RESOURCE_ID
         vm_host = lease.get("vm_host")
         assert vm_host, (
-            f"Lease missing vm_host; required for stage 10a check job: {lease!r}"
+            f"Lease missing vm_host; required for stage 10a vm_remove job: {lease!r}"
         )
         assert lease.get("create_job_id") in (None, deal_state.provisioning_job_id)
         assert lease.get("status") in ("active", "pending"), (
@@ -1105,7 +1105,7 @@ class TestStage09c_LeaseRegistered:
 # ===========================================================================
 
 class TestStage10a_LeaseExpirySetup:
-    def test_10a_setup_lease_expiry_and_arm_check_gate(
+    def test_10a_setup_lease_expiry_and_arm_remove_gate(
         self,
         provisioning_client,
         provisioning_test_client,
@@ -1117,8 +1117,8 @@ class TestStage10a_LeaseExpirySetup:
 
         1. Pause the watchdog — no background timer cycles will fire from this
            point. The test drives all advances explicitly via check-leases.
-        2. Arm check mock rule — a paused ProgrammableMockAnsibleService rule
-           for vm_action=check will hold the check job in a non-terminal state,
+        2. Arm remove mock rule — a paused ProgrammableMockAnsibleService rule
+           for vm_action=vm_remove will hold the vm_remove job in a non-terminal state,
            keeping the lease in 'releasing' long enough for phase 10b and 11a
            assertions.
         3. Back-date lease_end_utc to the past — the watchdog sees an expired
@@ -1143,13 +1143,13 @@ class TestStage10a_LeaseExpirySetup:
         )
         log.info("[10a] Watchdog paused")
 
-        # Step 2 — arm mock rule that pauses the check job
+        # Step 2 — arm mock rule that pauses the vm_remove job
         provisioning_test_client.add_mock_rule(
-            rule_id=CHECK_RULE_ID,
-            match={"vm_action": "check"},
+            rule_id=REMOVE_RULE_ID,
+            match={"vm_action": "vm_remove"},
             pause_before_result=True,
         )
-        log.info("[10a] Check mock rule %r armed (pause_before_result=True)", CHECK_RULE_ID)
+        log.info("[10a] Remove mock rule %r armed (pause_before_result=True)", REMOVE_RULE_ID)
 
         # Dry-run: confirm evaluate_job sees the rule before we fire a real cycle.
         # vm_host comes from the lease (captured in 09c) — the synthetic
@@ -1158,13 +1158,13 @@ class TestStage10a_LeaseExpirySetup:
         eval_result = provisioning_test_client.evaluate_job(
             host=deal_state.vm_host,
             vm_target="eval-target",
-            vm_action="check",
+            vm_action="vm_remove",
         )
         assert eval_result.get("params_valid") is True, (
             f"evaluate_job params rejected: {eval_result.get('errors')}"
         )
-        assert eval_result.get("rule_matched") == CHECK_RULE_ID, (
-            f"Expected check mock rule {CHECK_RULE_ID!r} to match, "
+        assert eval_result.get("rule_matched") == REMOVE_RULE_ID, (
+            f"Expected remove mock rule {REMOVE_RULE_ID!r} to match, "
             f"got rule_matched={eval_result.get('rule_matched')!r}.\n"
             f"Registered rules: {provisioning_test_client.list_mock_rules()}"
         )
@@ -1196,11 +1196,11 @@ class TestStage10b_WatchdogAdvancesToReleasing:
         storefront_admin_client,
         deal_state: DealState,
     ):
-        """POST /api/v1/system/check-leases → lease=releasing, check_job_id written.
+        """POST /api/v1/system/check-leases → lease=releasing, remove_job_id written.
 
         check-leases bypasses the watchdog pause flag, so this fires exactly
-        one lifecycle cycle. The check mock rule is still holding, so the
-        submitted check job will pause before returning a result — this keeps
+        one lifecycle cycle. The remove mock rule is still holding, so the
+        submitted vm_remove job will pause before returning a result — this keeps
         the lease in 'releasing' for the 11a assertion.
 
         The storefront resource must still be 'leased' at this point — the
@@ -1217,32 +1217,32 @@ class TestStage10b_WatchdogAdvancesToReleasing:
         )
         log.info("[10b] check-leases result: %s", result)
 
-        # Fetch updated lease — expect 'releasing' now that check job was submitted
+        # Fetch updated lease — expect 'releasing' now that vm_remove job was submitted
         lease = deal_state.deal_lease.refresh()
         assert lease.get("status") == "releasing", (
             f"Expected lease status='releasing' after check-leases cycle, "
             f"got {lease.get('status')!r}.\n"
             f"Full lease: {lease}\n"
-            "If status='released' the check job completed before this assertion — "
-            "ensure CHECK_RULE_ID mock rule is armed and the job_service is wired."
+            "If status='released' the vm_remove job completed before this assertion — "
+            "ensure REMOVE_RULE_ID mock rule is armed and the job_service is wired."
         )
-        assert lease.get("check_job_id") is not None, (
-            f"check_job_id should be set after transitioning to 'releasing': {lease}"
+        assert lease.get("vm_remove_job_id") is not None, (
+            f"vm_remove_job_id should be set after transitioning to 'releasing': {lease}"
         )
-        log.info("[10b] Lease %s is releasing (check_job=%s)",
-                 deal_state.lease_id, lease.get("check_job_id"))
+        log.info("[10b] Lease %s is releasing (remove_job=%s)",
+                 deal_state.lease_id, lease.get("vm_remove_job_id"))
 
         # The deal's capacity must still be held — VM not yet confirmed gone
         assert deal_state.deal_lease.resource_consumed(
             storefront_admin_client, deal_state.reserved_resource_id,
         ), (
             f"Capacity for {deal_state.reserved_resource_id!r} should still be "
-            "held while the check job is pending."
+            "held while the vm_remove job is pending."
         )
         log.info("[10b] Capacity for %s still held (VM not yet confirmed gone)",
                  deal_state.reserved_resource_id)
 
-        deal_state.check_job_id = lease.get("check_job_id")
+        deal_state.remove_job_id = lease.get("vm_remove_job_id")
         deal_state.lease_status = "releasing"
 
 
@@ -1257,12 +1257,12 @@ class TestStage11a_VerifyReleasingState:
         storefront_admin_client,
         deal_state: DealState,
     ):
-        """Assert the 'releasing' invariant: check job not yet done, resource still leased.
+        """Assert the 'releasing' invariant: vm_remove job not yet done, resource still leased.
 
         This stage has no side effects — it only reads state. It validates the
         boundary condition where:
           - The provisioning service knows the lease is expiring (status=releasing)
-          - The Ansible check job is submitted but not yet complete (paused by mock)
+          - The Ansible vm_remove job is submitted but not yet complete (paused by mock)
           - The storefront resource has not been released yet (state=leased)
 
         This observable invariant is structurally identical to the state the
@@ -1271,24 +1271,24 @@ class TestStage11a_VerifyReleasingState:
         initiated, not yet confirmed" and the storefront resource must remain
         unavailable until the provisioning service confirms cleanup is done.
 
-        If the lease is already 'released' here, the check job completed before
-        this assertion — ensure the CHECK_RULE_ID mock gate is still armed.
+        If the lease is already 'released' here, the vm_remove job completed before
+        this assertion — ensure the REMOVE_RULE_ID mock gate is still armed.
         """
-        require_state(deal_state, "lease_status", "check_job_id", "reserved_resource_id")
+        require_state(deal_state, "lease_status", "vm_remove_job_id", "reserved_resource_id")
         assert deal_state.lease_status == "releasing", (
             f"Stage 10b did not leave lease in 'releasing' state. "
             f"Current: {deal_state.lease_status!r}"
         )
 
-        # Check job must be in a non-terminal state (paused by mock rule)
-        job = provisioning_client.get_job(deal_state.check_job_id)
+        # vm_remove job must be in a non-terminal state (paused by mock rule)
+        job = provisioning_client.get_job(deal_state.remove_job_id)
         assert job.status in ("queued", "running"), (
-            f"Check job {deal_state.check_job_id!r} is already terminal: "
+            f"vm_remove job {deal_state.remove_job_id!r} is already terminal: "
             f"status={job.status!r}.\n"
-            "The mock pause gate may not be armed — CHECK_RULE_ID rule may be missing."
+            "The mock pause gate may not be armed — REMOVE_RULE_ID rule may be missing."
         )
-        log.info("[11a] Check job %s is %s (paused by mock gate — VM not yet confirmed gone)",
-                 deal_state.check_job_id, job.status)
+        log.info("[11a] vm_remove job %s is %s (paused by mock gate — VM not yet confirmed gone)",
+                 deal_state.remove_job_id, job.status)
 
         # The deal's capacity must still be held
         assert deal_state.deal_lease.resource_consumed(
@@ -1309,12 +1309,12 @@ class TestStage11b_WatchdogReleasesResource:
         storefront_admin_client,
         deal_state: DealState,
     ):
-        """Release check gate → check job succeeds → watchdog patches resource to available.
+        """Release remove gate → vm_remove job succeeds → watchdog patches resource to available.
 
         Three steps:
-        1. resume_rule(CHECK_RULE_ID) — unblocks the check job; mock returns success.
-        2. wait_for_job(check_job_id) — long-poll until the job reaches a terminal state.
-        3. check-leases — watchdog sees the succeeded check job, patches storefront,
+        1. resume_rule(REMOVE_RULE_ID) — unblocks the vm_remove job; mock returns success.
+        2. wait_for_job(vm_remove_job_id) — long-poll until the job reaches a terminal state.
+        3. check-leases — watchdog sees the succeeded vm_remove job, patches storefront,
            transitions lease to 'released'.
 
         Final assertions:
@@ -1324,21 +1324,21 @@ class TestStage11b_WatchdogReleasesResource:
         Teardown: resume_watchdog() so background timer cycles work normally
         after the test module completes.
         """
-        require_state(deal_state, "check_job_id", "lease_id",
+        require_state(deal_state, "vm_remove_job_id", "lease_id",
                       "reserved_resource_id", "_lease_expiry_armed")
 
-        # Step 1 — unblock the check job
-        provisioning_test_client.resume_rule(CHECK_RULE_ID)
-        log.info("[11b] Released check gate (rule=%s)", CHECK_RULE_ID)
+        # Step 1 — unblock the vm_remove job
+        provisioning_test_client.resume_rule(REMOVE_RULE_ID)
+        log.info("[11b] Released check gate (rule=%s)", REMOVE_RULE_ID)
 
-        # Step 2 — wait for the check job to complete
+        # Step 2 — wait for the vm_remove job to complete
         job_result = provisioning_test_client.wait_for_job(
-            deal_state.check_job_id, timeout=30
+            deal_state.remove_job_id, timeout=30
         )
         assert job_result.get("status") == "succeeded", (
-            f"Check job {deal_state.check_job_id!r} did not succeed: {job_result}"
+            f"vm_remove job {deal_state.remove_job_id!r} did not succeed: {job_result}"
         )
-        log.info("[11b] Check job %s succeeded", deal_state.check_job_id)
+        log.info("[11b] vm_remove job %s succeeded", deal_state.remove_job_id)
 
         # Snapshot the storefront's latest release-notification event id
         # before triggering the watchdog cycle. Embedded mode delivers
@@ -1357,11 +1357,11 @@ class TestStage11b_WatchdogReleasesResource:
         )
         since_id = max((ev.id for ev in existing_lifecycle.events), default=0)
 
-        # Step 3 — trigger the lifecycle cycle that processes the completed check job
+        # Step 3 — trigger the lifecycle cycle that processes the completed vm_remove job
         result = provisioning_client.check_leases()
         assert result.get("released", 0) >= 1, (
             f"Expected at least one lease released, got: {result}\n"
-            "The check job succeeded but the watchdog cycle did not release the lease. "
+            "The vm_remove job succeeded but the watchdog cycle did not release the lease. "
             "Check _process_releasing_lease in lease_lifecycle_service.py."
         )
         log.info("[11b] check-leases result: %s", result)

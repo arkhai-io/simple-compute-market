@@ -20,7 +20,7 @@ from unittest.mock import patch
 from urllib.parse import urlparse
 
 from market_core.schemas import EscrowProposal, EscrowTerms
-from domains.vms.provisioning import VmProvisionTerms, make_vm_provision_terms
+from arkhai_vms_common import VmProvisionTerms, make_vm_provision_terms
 
 _ESCROW_ADDR_AGG = "0x" + "cd" * 20
 

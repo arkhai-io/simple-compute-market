@@ -62,13 +62,6 @@
     insertafter: EOF
   tags: net_tools
 
-- name: Add at package for scheduled tasks
-  lineinfile:
-    path: /tmp/install_tools.sh
-    line: "apt-get install -y at"
-    insertafter: EOF
-  tags: at
-
 - name: Add fail2ban for intrusion prevention
   lineinfile:
     path: /tmp/install_tools.sh

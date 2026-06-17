@@ -192,7 +192,7 @@ class SQLiteClient(CoreSQLiteClient):
               failure_reason TEXT,
               failure_message TEXT,
               logs_ref TEXT,
-              check_job_id TEXT,
+              vm_remove_job_id TEXT,
               created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
               updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
               released_at TEXT,
@@ -297,7 +297,7 @@ class SQLiteClient(CoreSQLiteClient):
         """
         # Capacity gate — only for active compute.gpu slices.
         if resource_type == "compute.gpu" and (state is None or state != "deleted"):
-            from domains.vms.provisioning.capacity import check_slice_fits_host
+            from market_storefront.services.resource_capacity_validator import check_slice_fits_host
             attrs = attributes or {}
             await check_slice_fits_host(
                 sqlite_client=self,

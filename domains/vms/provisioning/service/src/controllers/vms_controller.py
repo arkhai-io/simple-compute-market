@@ -1,4 +1,4 @@
-"""VM lifecycle controller.
+"""Admin/operator VM operations controller.
 
 All VM operations are scoped to a KVM host identified in the URL:
 
@@ -7,8 +7,9 @@ All VM operations are scoped to a KVM host identified in the URL:
 ``host`` is the Ansible inventory alias for the KVM host (e.g. ``kvm1``).
 ``vm_name`` is the libvirt domain name of the target VM.
 
-Every mutating endpoint submits an Ansible job and returns a
-``JobSubmitResponse`` containing a ``job_id``.  Callers poll
+Direct VM operations are admin/operator APIs. Every mutating endpoint
+submits an Ansible job and returns a ``JobSubmitResponse`` containing a
+``job_id``.  Callers poll
 ``GET /api/v1/jobs/{job_id}`` for status.
 
 The provisioning service may sit behind an API gateway — callers must
@@ -30,18 +31,13 @@ the ``/hosts/{host}/...`` tree.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from fastapi_utils.cbv import cbv
 
 import container as _container_module
 from models.jobs_model import JobSubmitResponse
-from models.vm_request_model import (
-    CreateVmRequest,
-    ScheduleVmExpiryRequest,
-    VmActionRequest,
-    build_simple_params,
-)
-from services.job_service import AnsibleJobService
+from models.vm_request_model import CreateVmRequest, VmActionRequest
+from services.vm_operations_service import VmOperationsService
 
 router = APIRouter(prefix="/hosts/{host}/vms", tags=["vms"])
 
@@ -55,11 +51,11 @@ _POLL_NOTE = (
 class VmController:
     def __init__(
         self,
-        job_service: AnsibleJobService = Depends(
-            lambda: _container_module.resolved_job_service
+        vm_operations: VmOperationsService = Depends(
+            lambda: _container_module.resolved_vm_operations_service
         ),
     ) -> None:
-        self._job_service = job_service
+        self._vm_operations = vm_operations
 
     # ------------------------------------------------------------------
     # Collection
@@ -87,10 +83,7 @@ class VmController:
         Credentials are stored separately — fetch with
         ``GET /api/v1/jobs/{job_id}/credentials``.
         """
-        params = body.to_ansible_job_params(host)
-        return await self._job_service.submit(
-            params, _container_module.resolved_job_queue
-        )
+        return await self._vm_operations.create_vm(host=host, body=body)
 
     @router.get(
         "/",
@@ -103,23 +96,16 @@ class VmController:
         host: str,
         body: VmActionRequest = Depends(),
     ) -> JobSubmitResponse:
-        """Submit a job to list all VMs on ``host``.
-
-        NYI(Item 3): will return a synchronous list from the ``vms`` DB
-        cache once VM lifecycle tracking is implemented.  Currently submits
-        an Ansible ``list`` job.
+        """Submit a job to list all KVM virtual machines on ``host``.
 
         """ + _POLL_NOTE + """
 
-        ``result.vms`` contains the list of VM names and states on success.
+        On success, ``result`` contains the list of VM names and their states.
         """
-        params = build_simple_params("list", host, body)
-        return await self._job_service.submit(
-            params, _container_module.resolved_job_queue
-        )
+        return await self._vm_operations.list_vms(host=host, body=body)
 
     # ------------------------------------------------------------------
-    # Instance lifecycle
+    # Single-VM lifecycle actions
     # ------------------------------------------------------------------
 
     @router.post(
@@ -134,10 +120,14 @@ class VmController:
         vm_name: str,
         body: VmActionRequest,
     ) -> JobSubmitResponse:
-        """Start a stopped VM. """ + _POLL_NOTE
-        params = build_simple_params("start", host, body, vm_name)
-        return await self._job_service.submit(
-            params, _container_module.resolved_job_queue
+        """Start a stopped KVM virtual machine.
+
+        """ + _POLL_NOTE
+        return await self._vm_operations.submit_action(
+            action="start",
+            host=host,
+            vm_name=vm_name,
+            body=body,
         )
 
     @router.post(
@@ -152,10 +142,16 @@ class VmController:
         vm_name: str,
         body: VmActionRequest,
     ) -> JobSubmitResponse:
-        """Send an ACPI shutdown signal to ``vm_name``. """ + _POLL_NOTE
-        params = build_simple_params("shutdown", host, body, vm_name)
-        return await self._job_service.submit(
-            params, _container_module.resolved_job_queue
+        """Send an ACPI shutdown signal to the VM (graceful).
+
+        Use ``/destroy`` for an immediate force-kill.
+
+        """ + _POLL_NOTE
+        return await self._vm_operations.submit_action(
+            action="shutdown",
+            host=host,
+            vm_name=vm_name,
+            body=body,
         )
 
     @router.post(
@@ -170,10 +166,14 @@ class VmController:
         vm_name: str,
         body: VmActionRequest,
     ) -> JobSubmitResponse:
-        """Reboot ``vm_name``. """ + _POLL_NOTE
-        params = build_simple_params("reboot", host, body, vm_name)
-        return await self._job_service.submit(
-            params, _container_module.resolved_job_queue
+        """Send an ACPI reboot signal to the VM.
+
+        """ + _POLL_NOTE
+        return await self._vm_operations.submit_action(
+            action="reboot",
+            host=host,
+            vm_name=vm_name,
+            body=body,
         )
 
     @router.post(
@@ -188,15 +188,19 @@ class VmController:
         vm_name: str,
         body: VmActionRequest,
     ) -> JobSubmitResponse:
-        """Force-kill ``vm_name`` (equivalent to pulling the power cord).
+        """Force-kill (``virsh destroy``) a running VM.
 
-        Does **not** remove storage or the libvirt definition.
-        Use ``POST /{vm_name}/undefine`` to remove the definition afterwards.
+        This is a libvirt-only power-off.  It does **not** clean up FRP proxy
+        entries, iptables rules, GPU passthrough config, disk images, or the
+        libvirt domain definition.  Market-managed teardown will be exposed
+        through the lease lifecycle API.
 
         """ + _POLL_NOTE
-        params = build_simple_params("destroy", host, body, vm_name)
-        return await self._job_service.submit(
-            params, _container_module.resolved_job_queue
+        return await self._vm_operations.submit_action(
+            action="destroy",
+            host=host,
+            vm_name=vm_name,
+            body=body,
         )
 
     @router.post(
@@ -211,20 +215,19 @@ class VmController:
         vm_name: str,
         body: VmActionRequest,
     ) -> JobSubmitResponse:
-        """Remove ``vm_name``'s libvirt definition.
+        """Remove the VM definition from libvirt.
 
-        Typically run after ``destroy``.  Does not clean up storage — use
-        the lease cleanup script for full VM teardown.
+        Typically paired with ``/destroy`` for libvirt cleanup.  Does not
+        remove FRP proxy entries, iptables rules, or disk images on its own.
+        Market-managed teardown will be exposed through the lease lifecycle API.
 
         """ + _POLL_NOTE
-        params = build_simple_params("undefine", host, body, vm_name)
-        return await self._job_service.submit(
-            params, _container_module.resolved_job_queue
+        return await self._vm_operations.submit_action(
+            action="undefine",
+            host=host,
+            vm_name=vm_name,
+            body=body,
         )
-
-    # ------------------------------------------------------------------
-    # Observability
-    # ------------------------------------------------------------------
 
     @router.get(
         "/{vm_name}/monitor",
@@ -238,27 +241,20 @@ class VmController:
         vm_name: str,
         body: VmActionRequest = Depends(),
     ) -> JobSubmitResponse:
-        """Submit a job to collect CPU, memory, storage, and network stats.
+        """Submit a job to collect CPU, memory, disk, and network stats.
 
-        Requires ``qemu-guest-agent`` inside the VM for guest-side storage
-        metrics; host-side metrics are always available.
-
-        NYI(Item 3): future implementations may expose a live stats stream
-        (potentially via gRPC) or read from a time-series cache, removing
-        the need to submit an Ansible job.
+        The VM must be in the ``running`` state.
 
         """ + _POLL_NOTE + """
 
-        ``result.resources`` contains the stats snapshot on success.
+        On success, ``result.resources`` contains the stats.
         """
-        params = build_simple_params("monitor", host, body, vm_name)
-        return await self._job_service.submit(
-            params, _container_module.resolved_job_queue
+        return await self._vm_operations.submit_action(
+            action="monitor",
+            host=host,
+            vm_name=vm_name,
+            body=body,
         )
-
-    # ------------------------------------------------------------------
-    # Tenant access
-    # ------------------------------------------------------------------
 
     @router.post(
         "/{vm_name}/reset-password",
@@ -272,72 +268,16 @@ class VmController:
         vm_name: str,
         body: VmActionRequest,
     ) -> JobSubmitResponse:
-        """Reset the tenant user password on a running VM.
+        """Reset the tenant user's SSH password inside the VM.
 
-        """ + _POLL_NOTE + """
-
-        New credentials are available via
+        Fetch updated credentials via
         ``GET /api/v1/jobs/{job_id}/credentials`` once the job succeeds.
         """
-        params = build_simple_params("reset_password", host, body, vm_name)
-        return await self._job_service.submit(
-            params, _container_module.resolved_job_queue
-        )
-
-    # ------------------------------------------------------------------
-    # Expiry / lease
-    # ------------------------------------------------------------------
-
-    @router.post(
-        "/{vm_name}/expiry",
-        response_model=JobSubmitResponse,
-        status_code=status.HTTP_202_ACCEPTED,
-        summary="Schedule VM expiry",
-    )
-    async def schedule_expiry(
-        self,
-        host: str,
-        vm_name: str,
-        body: ScheduleVmExpiryRequest,
-    ) -> JobSubmitResponse:
-        """Schedule automatic VM destruction at a future UTC datetime.
-
-        NYI(Item 2): will write directly to the ``vm_leases`` DB table once
-        the DB-driven lease watchdog is implemented.  Currently submits a
-        ``lease_end`` Ansible job that delegates to the KVM host's ``at``
-        daemon.
-
-        """ + _POLL_NOTE
-        params = body.to_ansible_job_params(host, vm_name)
-        return await self._job_service.submit(
-            params, _container_module.resolved_job_queue
-        )
-
-    @router.delete(
-        "/{vm_name}/expiry",
-        response_model=JobSubmitResponse,
-        status_code=status.HTTP_202_ACCEPTED,
-        summary="Cancel a scheduled VM expiry",
-    )
-    async def cancel_expiry(
-        self,
-        host: str,
-        vm_name: str,
-        body: VmActionRequest,
-    ) -> JobSubmitResponse:
-        """Cancel a previously scheduled VM expiry.
-
-        Finds and removes the ``at`` daemon job on the KVM host tagged
-        ``LEASE:<vm_name>``.  Returns a failed job if no pending expiry
-        exists (the expiry time has already passed).
-
-        NYI(Item 2): will delete from the ``vm_leases`` DB table once the
-        DB-driven lease watchdog is implemented.
-
-        """ + _POLL_NOTE
-        params = build_simple_params("lease_remove", host, body, vm_name)
-        return await self._job_service.submit(
-            params, _container_module.resolved_job_queue
+        return await self._vm_operations.submit_action(
+            action="reset_password",
+            host=host,
+            vm_name=vm_name,
+            body=body,
         )
 
     @classmethod

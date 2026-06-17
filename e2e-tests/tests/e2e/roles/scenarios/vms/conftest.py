@@ -97,7 +97,7 @@ class DealState:
     seller_listing_final_status: Optional[str] = None
     # Phase 10-11 — lease expiry lifecycle
     _lease_expiry_armed: bool = False
-    check_job_id: Optional[str] = None
+    remove_job_id: Optional[str] = None
     # Mode-agnostic lease view (DealLease) resolved in 09c: a vm_leases
     # row in embedded-capacity mode, a site-ledger allocation in remote
     # mode. Phases 10-11 drive the expiry lifecycle through it.
@@ -466,16 +466,18 @@ class DealLease:
             "status": self._LEASE_STATUS.get(
                 str(row.get("state")), str(row.get("state")),
             ),
-            "check_job_id": row.get("check_job_id"),
+            "vm_remove_job_id": row.get("vm_remove_job_id"),
             "create_job_id": row.get("create_job_id"),
         }
 
     def backdate(self, lease_end_utc: str) -> dict:
         """Move the lease end into the past so the next watchdog cycle fires.
 
-        Returns the refreshed normalized lease view.
+        Uses PATCH /api/v1/leases/{id} (update_lease) to update the ledger
+        allocation's lease_end_utc directly.  Returns the refreshed normalized
+        lease view.
         """
-        self._client.truncate_capacity_lease(self.lease_id, lease_end_utc)
+        self._client.update_lease(self.lease_id, lease_end_utc=lease_end_utc)
         return self.refresh()
 
     def resource_consumed(self, storefront_admin_client, resource_id: str) -> bool:

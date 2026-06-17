@@ -180,29 +180,6 @@ class TestBuildVmVarsCreate:
 
 
 # ---------------------------------------------------------------------------
-# _build_vm_vars -- lease / expiry
-# ---------------------------------------------------------------------------
-
-
-class TestBuildVmVarsExpiry:
-    def test_vm_expiry_at_written_as_vm_lease_end(self):
-        """API field vm_expiry_at is passed to Ansible as vm_lease_end."""
-        svc = _make_service()
-        yaml = svc._build_vm_vars(
-            AnsibleJobParams(
-                vm_host="kvm1",
-                vm_target="test-vm",
-                vm_action="lease_end",
-                vm_expiry_at="2025-12-31T23:59:00",
-            )
-        )
-        assert 'vm_lease_end: "2025-12-31T23:59:00"' in yaml
-
-    def test_vm_expiry_absent_when_none(self):
-        svc = _make_service()
-        assert "vm_lease_end" not in _build(svc, vm_action="shutdown")
-
-
 # ---------------------------------------------------------------------------
 # _inject_golden_image_credentials
 # ---------------------------------------------------------------------------
@@ -385,8 +362,7 @@ class TestExtractAnsibleJson:
             ("undefine", "vm_undefine_data"),
             ("monitor", "vm_monitoring_data"),
             ("reset_password", "vm_password_reset_data"),
-            ("lease_end", "vm_lease_end_data"),
-            ("lease_remove", "vm_lease_remove_data"),
+            ("vm_remove", "vm_remove_data"),
             ("check", "check_data"),
         ]
         for action, fact_name in actions:

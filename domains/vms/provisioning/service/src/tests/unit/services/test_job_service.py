@@ -105,7 +105,6 @@ class TestBuildParams:
             "golden_image_name": "base-v3",
             "gcs_bucket_url": "gs://bucket",
             "gcs_image_path": "images/img.qcow2",
-            "vm_expiry_at": "2025-12-31T23:59:00",
         }
         params = svc._build_params(raw)
         assert params.image_setup_type == "golden"
@@ -125,7 +124,6 @@ class TestBuildParams:
         assert params.golden_image_name == "base-v3"
         assert params.gcs_bucket_url == "gs://bucket"
         assert params.gcs_image_path == "images/img.qcow2"
-        assert params.vm_expiry_at == "2025-12-31T23:59:00"
 
     def test_frp_falls_back_to_settings_when_not_in_params(self):
         svc = _make_service(frp_server_addr="9.9.9.9", frp_domain="fallback.com")

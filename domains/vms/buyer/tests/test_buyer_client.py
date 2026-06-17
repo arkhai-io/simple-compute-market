@@ -23,7 +23,7 @@ from market_policy.negotiation_middleware import load_negotiation_chain
 
 from market_core.schemas import EscrowProposal
 from domains.vms.buyer.buyer_client import NegotiationOutcome, negotiate_with_seller
-from domains.vms.provisioning import VmProvisionTerms, make_vm_provision_terms
+from arkhai_vms_common import VmProvisionTerms, make_vm_provision_terms
 
 
 # Canonical provision / escrow proposals used by every negotiate test —

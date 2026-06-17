@@ -1,4 +1,4 @@
-"""VM provisioning job-spec construction."""
+"""VM provisioning job-spec construction for storefront fulfillment."""
 
 from __future__ import annotations
 
@@ -17,15 +17,15 @@ _REQUIRED_COMPUTE_KEYS = (
 )
 
 
-def required_compute_attributes(order_dict: dict[str, Any] | None) -> dict[str, Any]:
-    """Extract inventory-matching attributes from a VM listing.
+def compute_capacity_claim_from_order(order_dict: dict[str, Any] | None) -> dict[str, Any]:
+    """Extract inventory-matching attributes from a VM listing/order.
 
     ``offer_resource`` may arrive as a JSON string, a plain dict, or a
-    ``ComputeResource`` model instance — ``Listing.model_validate``
-    mutates rows it validates, replacing the dict in place, and several
-    callers (the negotiation accept paths) run after such a validation.
-    Silently returning ``{}`` for the model shape un-pins the claim and
-    makes capacity reservations grab the wrong resource.
+    ``ComputeResource`` model instance — ``Listing.model_validate`` mutates
+    rows it validates, replacing the dict in place, and several callers (the
+    negotiation accept paths) run after such validation. Silently returning
+    ``{}`` for the model shape un-pins the claim and makes capacity
+    reservations grab the wrong resource.
     """
     required_attributes: dict[str, Any] = {}
     if not order_dict:
@@ -49,7 +49,7 @@ async def build_provisioning_job_spec(
     vm_target_factory: Callable[[], str] | None = None,
 ) -> dict[str, Any] | None:
     """Probe the capacity ledger (read-only) and build a VM job spec."""
-    required_attributes = required_compute_attributes(order_dict)
+    required_attributes = compute_capacity_claim_from_order(order_dict)
     selected = await capacity.probe(claim=required_attributes or None)
     if not selected:
         return None

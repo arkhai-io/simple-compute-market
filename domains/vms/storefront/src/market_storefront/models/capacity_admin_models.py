@@ -116,7 +116,7 @@ class UsageStartedEventRequest(BaseModel):
 class ReleaseStartedEventRequest(BaseModel):
     allocation_id: str
     provider_lease_id: str | None = None
-    check_job_id: str | None = None
+    vm_remove_job_id: str | None = None
 
 
 class CapacityReleasedEventRequest(BaseModel):
