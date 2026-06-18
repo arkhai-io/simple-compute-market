@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import typer
 
+from storefront_client.fixtures.escrow import build_claim_response, build_refund_response
 from tests._settings_overrides import settings_overrides
 
 from .conftest import fake_chain
@@ -40,13 +41,7 @@ def test_escrow_claim_happy_path_propagates_arguments(monkeypatch, runner, app, 
     monkeypatch.setattr(
         escrow_group,
         "_submit_claim",
-        lambda *args: calls.append(args) or {
-            "status": "claimed",
-            "escrow_uid": "0xESCROW",
-            "escrow_kind": "ERC20",
-            "fulfillment_uid": "0xFULF",
-            "collect_result": "ok",
-        },
+        lambda *args: calls.append(args) or build_claim_response(),
     )
 
     with settings_overrides(**{"wallet.private_key": private_key}):
@@ -91,15 +86,7 @@ def test_escrow_refund_happy_path_propagates_arguments(monkeypatch, runner, app,
     monkeypatch.setattr(
         escrow_group,
         "_submit_refund",
-        lambda *args: calls.append(args) or {
-            "status": "refunded",
-            "tx_hash": "0xTX",
-            "from_address": "0xSELLER",
-            "to_address": "0xBUYER",
-            "token": None,
-            "amount_raw": "1000000",
-            "block_number": 42,
-        },
+        lambda *args: calls.append(args) or build_refund_response(),
     )
     monkeypatch.setattr("market_alkahest.token.render_token", lambda _token, **_kwargs: "MOCK")
 

@@ -2808,6 +2808,40 @@ The Helm subcharts expose a `persistence.existingClaim` parameter: when set, the
 
 This section defines the testing conventions for the Arkhai Market Stack. It exists to give every contributor a consistent mental model of what each test level is responsible for, what it is explicitly not responsible for, and how the levels relate to each other. New tests should be placed at the lowest level that can meaningfully exercise the behaviour in question.
 
+### Contract Fixtures
+
+A **contract fixture** is a pair of functions — `build_*()` and `validate_*()` — that define the canonical shape of a message at a package boundary. They are shared between the producer-side tests (which call `validate_*` to assert real code emits the agreed shape) and the consumer-side tests (which call `build_*` to produce mock inputs of exactly that shape). When the boundary changes, both sides break at once.
+
+**When to use them:** A boundary earns a contract fixture when *both* its producer and consumer have unit tests. Consumer-only mocks that have no corresponding producer test remain as local inline dicts — moving them prematurely documents a contract that has no enforcement on the production side.
+
+**`build_*()`** constructs a minimal but complete canonical instance. Use keyword arguments with sensible defaults so tests can override only the fields relevant to them. Non-deterministic fields (timestamps, generated IDs) use fixed sentinel values in `build_*` and range/type assertions in `validate_*` — *not* equality checks. This avoids the classic brittle test failure where `created_at` shifts by a millisecond.
+
+**`validate_*()`** asserts structural and semantic constraints on a value produced by real code. It checks field presence, type, and any invariants the consumer depends on. It does not check incidental fields the consumer ignores. When `validate_*` is called in a producer test, a failure means the producer broke the contract; when `build_*` is used in a consumer test, a silent mismatch is exposed the moment the producer test also calls `validate_*` on a real output that no longer matches.
+
+**Where they live — import direction always flows producer → consumer:**
+
+- **Same-package boundary** (producer and consumer are in the same package): `tests/fixtures/<module>.py` within that package. Importable as `tests.fixtures.<module>` by any test in the package because pytest adds the package root to `sys.path`.
+
+- **Cross-package boundary** (consumer is in a higher-level package): `src/{package_name}/fixtures/<module>.py` inside the producer's source package. Because the producer is already installed as a wheel in consumer packages, no `pythonpath` changes are needed. The import mirrors the existing client import pattern:
+
+  ```python
+  # existing pattern
+  from storefront_client import SyncStorefrontClient
+  from storefront_client.models import ClaimResponse
+  # contract fixture — same namespace, no new configuration
+  from storefront_client.fixtures.escrow import build_claim_response
+  ```
+
+  This means two producer packages are naturally unambiguous:
+
+  ```python
+  from storefront_client.fixtures.escrow import build_claim_response
+  from provisioning_client.fixtures.host import build_host_response
+  ```
+
+  If the producer has no unit tests yet, create the `fixtures/` subpackage anyway and leave `validate_*` functions dormant. They document the contract and give future producer tests an immediate hook. Mark dormant validators with a module docstring explaining which test file will call them once the producer gains test coverage.
+
+
 ### Four-Level Hierarchy
 
 #### 1. Unit Tests

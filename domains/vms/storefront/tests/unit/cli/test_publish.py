@@ -5,33 +5,12 @@ import subprocess
 import pytest
 
 from .conftest import fake_chain
+from tests.fixtures.publish import build_published_entry, build_failed_resource
 
 
 def _patch_publish_prereqs(monkeypatch, *, db_path: str = "/fake/agent.db") -> None:
     monkeypatch.setattr("market_storefront.cli_publish._resolve_db_path", lambda _db: db_path)
     monkeypatch.setattr("market_storefront.utils.config.CHAINS", {"anvil": fake_chain()})
-
-
-def _published_entry(resource_id: str = "r1") -> dict:
-    return {
-        "resource": {
-            "resource_id": resource_id,
-            "gpu_model": "A100",
-            "gpu_count": 1,
-            "region": "us-west",
-        },
-        "response": {"listing_id": "l1", "status": "published"},
-        "accepted_escrows": [],
-    }
-
-
-def _failed_resource(resource_id: str = "r1") -> dict:
-    return {
-        "resource_id": resource_id,
-        "gpu_model": "A100",
-        "gpu_count": 1,
-        "region": "us-west",
-    }
 
 
 def test_publish_exits_when_db_not_resolvable(monkeypatch, runner, app):
@@ -148,7 +127,7 @@ def test_publish_inventory_success_then_publishes_with_cli_args(monkeypatch, tmp
     monkeypatch.setattr("market_storefront.cli_publish._open_listing_resource_keys", lambda _db: {"already-open"})
     monkeypatch.setattr(
         "market_storefront.cli_publish._publish_round",
-        lambda **kwargs: publish_calls.append(kwargs) or ([_published_entry()], [], []),
+        lambda **kwargs: publish_calls.append(kwargs) or ([build_published_entry()], [], []),
     )
 
     result = runner.invoke(
@@ -191,7 +170,7 @@ def test_publish_oneshot_all_published(monkeypatch, runner, app):
     monkeypatch.setattr("market_storefront.cli_publish._open_listing_resource_keys", lambda _db: set())
     monkeypatch.setattr(
         "market_storefront.cli_publish._publish_round",
-        lambda **_kwargs: ([_published_entry()], [], []),
+        lambda **_kwargs: ([build_published_entry()], [], []),
     )
 
     result = runner.invoke(app, ["publish"])
@@ -203,7 +182,7 @@ def test_publish_oneshot_all_failed(monkeypatch, runner, app):
     _patch_publish_prereqs(monkeypatch)
     monkeypatch.setattr("market_storefront.cli_publish._close_stale_derived_listings", lambda **_kwargs: [])
     monkeypatch.setattr("market_storefront.cli_publish._open_listing_resource_keys", lambda _db: set())
-    monkeypatch.setattr("market_storefront.cli_publish._publish_round", lambda **_kwargs: ([], [(_failed_resource(), "RPC error")], []))
+    monkeypatch.setattr("market_storefront.cli_publish._publish_round", lambda **_kwargs: ([], [(build_failed_resource(), "RPC error")], []))
 
     result = runner.invoke(app, ["publish"])
 
