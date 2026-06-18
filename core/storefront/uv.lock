@@ -281,7 +281,7 @@ dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 
 [[package]]
 name = "arkhai-kit-policy"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "../../kit/policy" }
 dependencies = [
     { name = "pydantic" },
@@ -290,17 +290,18 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "pufferlib", marker = "extra == 'training'", git = "https://github.com/arkhai-io/ArkhaiPufferEnv?rev=f18e3b42c0ae22e8aec5e8d26a26f424e6b18a30" },
     { name = "pydantic", specifier = ">=2" },
-    { name = "torch", marker = "extra == 'training'", specifier = ">=2.7.0", index = "https://download.pytorch.org/whl/cpu" },
     { name = "typer", specifier = ">=0.12.0" },
 ]
-provides-extras = ["training"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
+]
+training = [
+    { name = "pufferlib", git = "https://github.com/arkhai-io/ArkhaiPufferEnv?rev=f18e3b42c0ae22e8aec5e8d26a26f424e6b18a30" },
+    { name = "torch", specifier = ">=2.7.0", index = "https://download.pytorch.org/whl/cpu" },
 ]
 
 [[package]]

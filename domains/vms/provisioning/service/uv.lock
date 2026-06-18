@@ -167,12 +167,13 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-provisioning"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "arkhai-core-site" },
     { name = "arkhai-core-storefront-client" },
+    { name = "arkhai-vms-provisioning-client" },
     { name = "cachetools" },
     { name = "cryptography" },
     { name = "dependency-injector" },
@@ -200,6 +201,7 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "arkhai-core-site", specifier = ">=0.1.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.11.0" },
+    { name = "arkhai-vms-provisioning-client", specifier = ">=0.1.1" },
     { name = "cachetools", specifier = ">=5.3" },
     { name = "cryptography", specifier = ">=42.0" },
     { name = "dependency-injector", specifier = ">=4.41.0" },
@@ -220,6 +222,18 @@ requires-dist = [
 dev = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
+]
+
+[[package]]
+name = "arkhai-vms-provisioning-client"
+version = "0.1.1"
+source = { registry = "../../../../.dist" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_vms_provisioning_client-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]
