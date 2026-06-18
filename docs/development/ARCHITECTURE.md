@@ -2808,6 +2808,40 @@ The Helm subcharts expose a `persistence.existingClaim` parameter: when set, the
 
 This section defines the testing conventions for the Arkhai Market Stack. It exists to give every contributor a consistent mental model of what each test level is responsible for, what it is explicitly not responsible for, and how the levels relate to each other. New tests should be placed at the lowest level that can meaningfully exercise the behaviour in question.
 
+### Contract Fixtures
+
+A **contract fixture** is a pair of functions — `build_*()` and `validate_*()` — that define the canonical shape of a message at a package boundary. They are shared between the producer-side tests (which call `validate_*` to assert real code emits the agreed shape) and the consumer-side tests (which call `build_*` to produce mock inputs of exactly that shape). When the boundary changes, both sides break at once.
+
+**When to use them:** A boundary earns a contract fixture when *both* its producer and consumer have unit tests. Consumer-only mocks that have no corresponding producer test remain as local inline dicts — moving them prematurely documents a contract that has no enforcement on the production side.
+
+**`build_*()`** constructs a minimal but complete canonical instance. Use keyword arguments with sensible defaults so tests can override only the fields relevant to them. Non-deterministic fields (timestamps, generated IDs) use fixed sentinel values in `build_*` and range/type assertions in `validate_*` — *not* equality checks. This avoids the classic brittle test failure where `created_at` shifts by a millisecond.
+
+**`validate_*()`** asserts structural and semantic constraints on a value produced by real code. It checks field presence, type, and any invariants the consumer depends on. It does not check incidental fields the consumer ignores. When `validate_*` is called in a producer test, a failure means the producer broke the contract; when `build_*` is used in a consumer test, a silent mismatch is exposed the moment the producer test also calls `validate_*` on a real output that no longer matches.
+
+**Where they live — import direction always flows producer → consumer:**
+
+- **Same-package boundary** (producer and consumer are in the same package): `tests/fixtures/<module>.py` within that package. Importable as `tests.fixtures.<module>` by any test in the package because pytest adds the package root to `sys.path`.
+
+- **Cross-package boundary** (consumer is in a higher-level package): `src/{package_name}/fixtures/<module>.py` inside the producer's source package. Because the producer is already installed as a wheel in consumer packages, no `pythonpath` changes are needed. The import mirrors the existing client import pattern:
+
+  ```python
+  # existing pattern
+  from storefront_client import SyncStorefrontClient
+  from storefront_client.models import ClaimResponse
+  # contract fixture — same namespace, no new configuration
+  from storefront_client.fixtures.escrow import build_claim_response
+  ```
+
+  This means two producer packages are naturally unambiguous:
+
+  ```python
+  from storefront_client.fixtures.escrow import build_claim_response
+  from provisioning_client.fixtures.host import build_host_response
+  ```
+
+  If the producer has no unit tests yet, create the `fixtures/` subpackage anyway and leave `validate_*` functions dormant. They document the contract and give future producer tests an immediate hook. Mark dormant validators with a module docstring explaining which test file will call them once the producer gains test coverage.
+
+
 ### Four-Level Hierarchy
 
 #### 1. Unit Tests
@@ -3115,6 +3149,22 @@ e2e-tests/
             └── stages/
                 └── discovery/test_buyer.py
 ```
+
+**CLI unit test conventions:**
+
+CLI tests should use `typer.testing.CliRunner` and `monkeypatch`. No real network, chain, subprocess, Make, or SQLite I/O — the `logs` tests use `FakeLogConnection` (defined in `cli/conftest.py`) rather than a real SQLite database.
+
+Three mocking layers, applied in order of specificity:
+
+- **`settings_overrides(**{...})`** — the canonical way to inject dynaconf `settings` values. Always use this for `settings.*` reads (e.g. `wallet.private_key`, `zerotier_network`). Import from `tests._settings_overrides`. Use dotted keys for nested paths: `settings_overrides(**{"wallet.private_key": "0x..."})`.
+
+- **`monkeypatch.setattr("market_storefront.utils.config.CHAINS", {...})`** — for the module-level `CHAINS` dict, which CLI command bodies import lazily (`from ..utils.config import CHAINS`). Always patch the *source* module (`market_storefront.utils.config`), not a consumer, because the lazy `from ... import` re-reads the source at call time.
+
+- **`monkeypatch.setattr(importing_module, "name", fake)`** — for everything else: patch on the *importing* module, not the defining one. For example, `monkeypatch.setattr(config_group, "storefront_config_file", ...)` (not `market_config.config_loader.storefront_config_file`), `monkeypatch.setattr(escrow_group, "_submit_claim", ...)`, `monkeypatch.setattr(network_group, "run_step", ...)`. This keeps each test's patch target colocated with the module it is testing and avoids action-at-a-distance through unrelated namespaces.
+
+For lazy imports inside a function body (e.g. `from market_alkahest.alkahest import get_escrow_obligation_with_codec`), patch on the *defining* module (`market_alkahest.alkahest.<fn>`), since the `from … import` re-reads the module's namespace at each call.
+
+**`FakeLogConnection`** (in `cli/conftest.py`) is the logs test seam. It implements the minimal sqlite3 connection interface (`cursor`, `execute`, `close`) and pattern-matches SQL query substrings to return shaped `FakeRow` objects seeded at construction time (`stage_events=`, `threads=`, `listings=`, `escrows=`). The `fake_log_db` fixture installs it by monkeypatching both `_resolve_db_path` and `sqlite3.connect` on `market_storefront.cli_logs`. This approach makes the test boundary explicit — CLI tests own wiring and rendering, not SQL correctness — and avoids DDL management. The tradeoff is that `FakeLogConnection.execute` pattern-matches on query substrings; if query text changes materially, a filter test may silently stop exercising the intended branch rather than failing. The `test_logs_show_filters_negotiation_and_stage` test mitigates this by asserting on the captured `params` tuple in addition to the exit code.
 
 
 ### Problem
