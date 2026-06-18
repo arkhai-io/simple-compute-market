@@ -16,8 +16,6 @@ Pending architectural work and known operational issues for the Arkhai market st
 | [Storefront DB Pruning](#storefront-db-pruning) | Core Stack | Planned |
 | [Registry Filter-Spec side indexes](#registry-filter-spec-indexed-true-side-indexes) | Core Stack | Deferred |
 | [Shared Dynaconf Bootstrap](#shared-dynaconf-bootstrap) | Core Stack | Planned |
-| [VM provisioning tombstone cleanup](#vm-provisioning-tombstone-cleanup) | Core Stack | Planned |
-| [Storefront Admin CLI Test Coverage](#storefront-admin-cli-test-coverage) | Core Stack | Planned |
 | [Move e2e Tests to Separate Project](#move-e2e-tests-to-a-separate-project) | Core Stack | Planned, no timeline |
 | [Shared marketplace registry (not per-node)](#shared-marketplace-infrastructure-not-per-node) | Registry Service | Planned |
 | [Golden image configuration](#golden-image-configuration-management-varsyaml) | Provisioning Service | Needs review |
@@ -225,26 +223,6 @@ Until then: the `indexed: bool` field stays as a no-op in the loader so the YAML
 **Problem:** `domains/vms/provisioning/service/src/config.py` (~100 LOC) and `e2e-tests/src/settings.py` (~80 LOC) each carry their own near-identical Dynaconf bootstrap (profile selection from `ACTIVE_PROFILES`, `CONFIG_DIRECTORY` resolution, deep-merged `settings.toml` → `.secrets.toml` → `config.yml` → `config-<profile>.yml` → env vars layering). The storefront has since gained its own dynaconf loader at `domains/vms/storefront/src/market_storefront/utils/config.py` with the `STOREFRONT_*` prefix — that one is structurally similar but profile-free, so isn't part of the duplication.
 
 **Planned fix:** lift the shared bootstrap (profile resolution + layered loader factory) into `kit/config` alongside `market_config.config_loader`. `arkhai-vms-provisioning` and `e2e-tests` import from there and pass in their per-service prefix (`PROVISIONING_*` / `ARKHAI_*`) + defaults path. No behavior change; pure dedup.
-
----
-
-### VM provisioning tombstone cleanup
-
-**Status:** Planned.
-
-**Problem:** `domains/vms/provisioning/` contains review tombstones for deprecated root-level modules. The package root is reserved for the provisioning-service client facade (`client.py`, `__init__.py`), while seller-side VM fulfillment, capacity validation, job-spec construction, and admin payload models belong to the VM storefront package. Shared VM-domain model code belongs in built wheels such as `arkhai-vms-common`, not repository-relative force-includes.
-
-**Planned fix:** after code review, delete the tombstone files (`capacity.py`, `fulfillment.py`, `fulfillment_plan.py`, `job_spec.py`, `storefront_models.py`, and `terms.py`) from `domains/vms/provisioning/`. Keep cross-package dependencies on shared VM-domain code flowing through built wheels in `.dist/`; do not reintroduce repository-relative force-includes for provisioning helpers.
-
----
-
-### Storefront Admin CLI Test Coverage
-
-**Status:** Planned. Test file was on the original split-plan TODO and never landed.
-
-**Problem:** When the provider subcommands moved from the buyer CLI to `market_storefront.cli`, the provider-side command tests were dropped from `buyer/tests/` and not re-added on the storefront side. `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py` and `test_cli_serve.py` cover slices, but there's no umbrella `test_cli_admin.py` exercising the full subcommand surface.
-
-**Planned fix:** add `domains/vms/storefront/tests/unit/test_cli_admin.py` covering each `market_storefront.cli` subcommand: argument parsing, config-file resolution, the `serve` → `publish` happy path against a mocked storefront, and the error cases for missing wallet / missing config / unreachable chain.
 
 ---
 

@@ -159,6 +159,25 @@ core CLI has no concrete market behavior, and
 `domains/vms/buyer/tests/test_plugin_export.py` asserts the VM plugin
 is discovered through real entry-point metadata).
 
+**Storefront admin CLI test conventions:** provider-side CLI unit tests live
+under `domains/vms/storefront/tests/unit/cli/`, grouped by command surface
+(`publish`, `portfolio`, `config`, `network`, `logs`, and `escrow`) rather than
+as one umbrella test file. These tests exercise Typer argument parsing, command
+wiring, exit-code behavior, and rendering at the CLI boundary. They do not
+perform real network, chain, subprocess, Make, or SQLite work.
+
+When a command imports a dependency at module load time with
+`from package.module import symbol`, tests patch the importing command module
+(e.g. `market_storefront.groups.config.storefront_config_file` or
+`market_storefront.groups.network.run_step`) because that is the binding the
+command will call. When a command body performs a lazy import from the source
+module at invocation time (for example `from ..utils.config import CHAINS` in
+`escrow show`), tests patch the source module before invoking the command.
+Logs CLI tests patch `market_storefront.cli_logs.sqlite3.connect` with a fake
+connection object; SQL/schema correctness belongs in lower-level or integration
+tests, while CLI unit tests own log-command lookup, derivation, and rendering
+behavior without creating database files.
+
 Remaining divergences are aggregated in [`TODO.md`](TODO.md) → "Core
 Stack"; the architectural items still open (plan shapes, mechanism
 vocabulary, multi-domain capacity dispatch) are planned with their
@@ -3165,7 +3184,6 @@ Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockf
 
 Typed client wheels are the **authoritative inter-service contracts** for their services' public HTTP DTOs and primitive operations. This applies repo-wide to `arkhai-vms-provisioning-client`, `arkhai-core-storefront-client`, and `arkhai-core-registry-client`. Do not duplicate public DTOs inside a server just to avoid importing from its client wheel; controllers and service unit tests may import client-owned public models when those models are the natural method boundary. Server-only types remain in the service package and are not exported through the client surface. When a client package exposes both async and sync clients, they must expose the same public operation names and signatures; the owning service's unit suite should carry the parity guardrail, while the owning service's integration suite remains the behavioral contract test surface for every public client endpoint.
 
-`arkhai-vms-provisioning-client` (`domains/vms/provisioning/client/`) is the provisioning service's HTTP client wheel — `httpx` + `pydantic` only, mirroring the `arkhai-core-registry-client` and `arkhai-core-storefront-client` pattern. It exposes `ProvisioningClient` (async) and `SyncProvisioningClient` (sync), plus all public request/response Pydantic models (`CreateVmRequest`, `HostCreate`, `JobStatusResponse`, `LeaseResponse`, etc.). The provisioning service depends on it for the shared Pydantic models its FastAPI route handlers use. Internal server-only types (`AnsibleJobParams`, `AnsibleRunResult`) remain in the service wheel and are never part of the client surface. Consumers import from a collision-free namespace: `from provisioning_client import ProvisioningClient, CreateVmRequest`. Storefront and e2e depend on `arkhai-vms-provisioning-client` for HTTP calls and public DTOs; they should not depend on the full `arkhai-vms-provisioning` service package unless they are intentionally operating the service itself. The provisioning service package is built into its container image from source; because no other project consumes a provisioning service wheel, the root Makefile does not build or publish `arkhai-vms-provisioning` as a wheel.
 
 `arkhai-core-storefront-client` exists as a separate lightweight package to avoid pulling `arkhai-vms-storefront`'s heavyweight dependencies (`pufferlib`, `torch`, native RL wheels under the `[rl]` extra) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `core/storefront-client/src/storefront_client/client.py` and exposes `StorefrontClient` (async) and `SyncStorefrontClient` (sync). The storefront service is the owner of storefront-client behavioral contract coverage.
 
