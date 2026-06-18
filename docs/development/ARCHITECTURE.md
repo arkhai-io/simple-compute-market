@@ -159,25 +159,6 @@ core CLI has no concrete market behavior, and
 `domains/vms/buyer/tests/test_plugin_export.py` asserts the VM plugin
 is discovered through real entry-point metadata).
 
-**Storefront admin CLI test conventions:** provider-side CLI unit tests live
-under `domains/vms/storefront/tests/unit/cli/`, grouped by command surface
-(`publish`, `portfolio`, `config`, `network`, `logs`, and `escrow`) rather than
-as one umbrella test file. These tests exercise Typer argument parsing, command
-wiring, exit-code behavior, and rendering at the CLI boundary. They do not
-perform real network, chain, subprocess, Make, or SQLite work.
-
-When a command imports a dependency at module load time with
-`from package.module import symbol`, tests patch the importing command module
-(e.g. `market_storefront.groups.config.storefront_config_file` or
-`market_storefront.groups.network.run_step`) because that is the binding the
-command will call. When a command body performs a lazy import from the source
-module at invocation time (for example `from ..utils.config import CHAINS` in
-`escrow show`), tests patch the source module before invoking the command.
-Logs CLI tests patch `market_storefront.cli_logs.sqlite3.connect` with a fake
-connection object; SQL/schema correctness belongs in lower-level or integration
-tests, while CLI unit tests own log-command lookup, derivation, and rendering
-behavior without creating database files.
-
 Remaining divergences are aggregated in [`TODO.md`](TODO.md) → "Core
 Stack"; the architectural items still open (plan shapes, mechanism
 vocabulary, multi-domain capacity dispatch) are planned with their
@@ -3134,6 +3115,22 @@ e2e-tests/
             └── stages/
                 └── discovery/test_buyer.py
 ```
+
+**CLI unit test conventions:**
+
+CLI tests should use `typer.testing.CliRunner` and `monkeypatch`. No real network, chain, subprocess, Make, or SQLite I/O — the `logs` tests use `FakeLogConnection` (defined in `cli/conftest.py`) rather than a real SQLite database.
+
+Three mocking layers, applied in order of specificity:
+
+- **`settings_overrides(**{...})`** — the canonical way to inject dynaconf `settings` values. Always use this for `settings.*` reads (e.g. `wallet.private_key`, `zerotier_network`). Import from `tests._settings_overrides`. Use dotted keys for nested paths: `settings_overrides(**{"wallet.private_key": "0x..."})`.
+
+- **`monkeypatch.setattr("market_storefront.utils.config.CHAINS", {...})`** — for the module-level `CHAINS` dict, which CLI command bodies import lazily (`from ..utils.config import CHAINS`). Always patch the *source* module (`market_storefront.utils.config`), not a consumer, because the lazy `from ... import` re-reads the source at call time.
+
+- **`monkeypatch.setattr(importing_module, "name", fake)`** — for everything else: patch on the *importing* module, not the defining one. For example, `monkeypatch.setattr(config_group, "storefront_config_file", ...)` (not `market_config.config_loader.storefront_config_file`), `monkeypatch.setattr(escrow_group, "_submit_claim", ...)`, `monkeypatch.setattr(network_group, "run_step", ...)`. This keeps each test's patch target colocated with the module it is testing and avoids action-at-a-distance through unrelated namespaces.
+
+For lazy imports inside a function body (e.g. `from market_alkahest.alkahest import get_escrow_obligation_with_codec`), patch on the *defining* module (`market_alkahest.alkahest.<fn>`), since the `from … import` re-reads the module's namespace at each call.
+
+**`FakeLogConnection`** (in `cli/conftest.py`) is the logs test seam. It implements the minimal sqlite3 connection interface (`cursor`, `execute`, `close`) and pattern-matches SQL query substrings to return shaped `FakeRow` objects seeded at construction time (`stage_events=`, `threads=`, `listings=`, `escrows=`). The `fake_log_db` fixture installs it by monkeypatching both `_resolve_db_path` and `sqlite3.connect` on `market_storefront.cli_logs`. This approach makes the test boundary explicit — CLI tests own wiring and rendering, not SQL correctness — and avoids DDL management. The tradeoff is that `FakeLogConnection.execute` pattern-matches on query substrings; if query text changes materially, a filter test may silently stop exercising the intended branch rather than failing. The `test_logs_show_filters_negotiation_and_stage` test mitigates this by asserting on the captured `params` tuple in addition to the exit code.
 
 
 ### Problem
