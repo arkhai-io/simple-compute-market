@@ -13,9 +13,8 @@ import logging
 
 import pytest
 
-from client.provisioning_client import ProvisioningError, SyncProvisioningClient
-from models.host_model import HostCreate, HostUpdate
-from models.vm_request_model import CreateVmRequest
+from provisioning_client import ProvisioningError, SyncProvisioningClient
+from provisioning_client import HostCreate, HostUpdate, CreateVmRequest
 
 log = logging.getLogger(__name__)
 

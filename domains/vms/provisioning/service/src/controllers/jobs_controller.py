@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi_utils.cbv import cbv
 
 import container as _container_module
-from models.jobs_model import (
+from provisioning_client.models import (
     CredentialListResponse,
     JobListResponse,
     JobLogsResponse,

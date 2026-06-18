@@ -36,6 +36,8 @@ from db.models import (
 from models.jobs_model import (
     AnsibleJobParams,
     AnsibleRunResult,
+)
+from provisioning_client.models import (
     CredentialListResponse,
     CredentialResponse,
     JobListResponse,

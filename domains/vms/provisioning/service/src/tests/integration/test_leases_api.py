@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 import container as _container_module
 import pytest
 
-from client.provisioning_client import ProvisioningError
+from provisioning_client import ProvisioningError
 
 
 def _future_dt(hours: int = 2) -> str:

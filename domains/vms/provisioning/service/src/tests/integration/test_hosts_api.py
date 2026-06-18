@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import pytest
 
-from client.provisioning_client import ProvisioningClient, ProvisioningError
-from models.host_model import HostCreate, HostResponse, HostListResponse, HostUpdate
+from provisioning_client import ProvisioningClient, ProvisioningError
+from provisioning_client.models import HostCreate, HostListResponse, HostResponse, HostUpdate
 
 
 _SAMPLE_HOST = HostCreate(
@@ -53,6 +53,7 @@ class TestListHostsEmpty:
         result = await client.list_hosts()
         assert isinstance(result, HostListResponse)
         assert result.hosts == []
+        assert result.total == 0
 
 
 class TestRegisterHost:
@@ -71,6 +72,7 @@ class TestRegisterHost:
         await _register(client)
         result = await client.list_hosts()
         assert any(h.name == "kvm1" for h in result.hosts)
+        assert result.total == len(result.hosts)
 
     async def test_register_host_client_contract(self, client_and_queue):
         """register_host return value is a typed HostResponse — contract enforced."""
@@ -132,6 +134,7 @@ class TestEnableDisableHost:
         await client.disable_host("kvm1")
         result = await client.list_hosts()
         assert not any(h.name == "kvm1" for h in result.hosts)
+        assert result.total == len(result.hosts)
 
     async def test_disabled_host_visible_with_include_disabled(self, client_and_queue):
         client, _ = client_and_queue
@@ -139,6 +142,7 @@ class TestEnableDisableHost:
         await client.disable_host("kvm1")
         result = await client.list_hosts(include_disabled=True)
         assert any(h.name == "kvm1" for h in result.hosts)
+        assert result.total == len(result.hosts)
 
     async def test_enable_restores_visibility(self, client_and_queue):
         client, _ = client_and_queue
@@ -147,6 +151,7 @@ class TestEnableDisableHost:
         await client.enable_host("kvm1")
         result = await client.list_hosts()
         assert any(h.name == "kvm1" for h in result.hosts)
+        assert result.total == len(result.hosts)
 
     async def test_disable_unknown_host_raises_404(self, client_and_queue):
         client, _ = client_and_queue
@@ -163,6 +168,7 @@ class TestImportHosts:
         names = [h.name for h in result.hosts]
         assert "kvm1" in names
         assert "ww2" in names
+        assert result.total == len(result.hosts)
 
     async def test_import_is_idempotent(self, client_and_queue):
         client, _ = client_and_queue
@@ -173,6 +179,7 @@ class TestImportHosts:
         assert len(names) == len(set(names))
         assert "kvm1" in names
         assert "ww2" in names
+        assert result.total == len(result.hosts)
 
     async def test_import_does_not_disable_absent_hosts(self, client_and_queue):
         """Hosts not in the new INI must be left untouched (append-only)."""
@@ -207,7 +214,6 @@ class TestConnectivity:
 
     async def test_connectivity_unknown_host_raises_404(self, client_and_queue):
         client, _ = client_and_queue
-        from client.provisioning_client import ProvisioningError
         with pytest.raises(ProvisioningError) as exc_info:
             await client.check_connectivity("ghost")
         assert exc_info.value.status_code == 404

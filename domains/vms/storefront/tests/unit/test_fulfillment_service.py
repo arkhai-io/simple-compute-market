@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from client import provisioning_client
+import provisioning_client
 from market_storefront.services import publication_service
 from market_storefront.services import fulfillment_service
 from domains.vms.listings.reconciler import record_derived_listing

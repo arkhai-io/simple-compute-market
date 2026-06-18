@@ -27,7 +27,7 @@ dependencies = [
     "arkhai-core-registry-client>=0.6.0",
     "arkhai-kit-alkahest>=0.1.0",
 	"arkhai-vms-storefront>=0.1.0",
-    "arkhai-vms-provisioning>=0.5.0",
+    "arkhai-vms-provisioning-client>=0.1.1",
     # The buyer's `market` CLI, run as a subprocess by the buyer-machine
     # e2e (tests/e2e/roles/buyer_cli.py). Installed so the binary is on
     # PATH inside arkhai:e2e-tests when the suite runs in-network.

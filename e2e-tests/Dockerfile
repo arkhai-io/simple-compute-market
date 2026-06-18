@@ -46,7 +46,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --refresh-package arkhai-apitokens-buyer \
         --refresh-package arkhai-kit-policy \
         --refresh-package arkhai-vms-storefront \
-        --refresh-package arkhai-vms-provisioning \
+        --refresh-package arkhai-vms-provisioning-client \
         --refresh-package arkhai-core-storefront-client \
         --refresh-package arkhai-kit-alkahest \
         --refresh-package arkhai-kit-identity \

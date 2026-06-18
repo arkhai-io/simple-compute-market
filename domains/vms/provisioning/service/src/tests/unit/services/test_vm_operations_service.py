@@ -2,8 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from models.jobs_model import JobSubmitResponse
-from models.vm_request_model import CreateVmRequest, VmActionRequest
+from provisioning_client.models import CreateVmRequest, JobSubmitResponse, VmActionRequest
 from services.vm_operations_service import VmOperationsService
 
 

@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import logging
 from typing import Any, Awaitable, Callable
 
 from core_storefront.stage_log import stage_event
 
 from alkahest_py import AlkahestClient
 
-from domains.vms.provisioning.client import (
-    provision_vm_and_wait,
-    register_vm_lease,
-    schedule_vm_expiry_and_wait,
+from provisioning_client import CreateVmRequest, ProvisioningClient
+from market_storefront.services.provisioning_orchestration_service import (
+    create_vm_and_wait_with_credentials,
 )
 from market_storefront.services.vm_fulfillment_service import fulfill_vm_obligation
 from market_storefront.services.vm_job_spec_service import (
@@ -24,7 +22,6 @@ from market_storefront.utils.config import CHAINS, settings, BASE_URL_OVERRIDE
 from market_storefront.services.capacity_client import build_capacity_client
 from market_storefront.utils.sqlite_client import get_sqlite_client
 
-logger = logging.getLogger(__name__)
 
 
 async def _do_provision(
@@ -41,31 +38,44 @@ async def _do_provision(
     in the settlement_jobs row so the buyer's GET /settle/{uid}/status can
     surface it while the job is still queued/running.
     """
-    return await provision_vm_and_wait(
+    timeout = float(settings.provisioning.timeout)
+    poll_interval = float(settings.provisioning.poll_interval)
+
+    params: dict[str, Any] = {"vm_target": vm_target, "ssh_pubkey": ssh_public_key}
+    if settings.provisioning.frp_server_addr:
+        params["frp_server_addr"] = settings.provisioning.frp_server_addr
+    if settings.provisioning.frp_domain:
+        params["frp_domain"] = settings.provisioning.frp_domain
+    if settings.provisioning.frp_dashboard_password:
+        params["frp_dashboard_password"] = settings.provisioning.frp_dashboard_password
+
+    return await create_vm_and_wait_with_credentials(
         service_url=settings.provisioning.service_url,
         admin_key=settings.admin_api_key,
-        timeout=float(settings.provisioning.timeout),
-        poll_interval=float(settings.provisioning.poll_interval),
-        ssh_public_key=ssh_public_key,
+        timeout=timeout,
+        poll_interval=poll_interval,
         vm_host=vm_host,
-        vm_target=vm_target,
-        frp_server_addr=settings.provisioning.frp_server_addr,
-        frp_domain=settings.provisioning.frp_domain,
-        frp_dashboard_password=settings.provisioning.frp_dashboard_password,
+        request=CreateVmRequest(**params),
         on_job_submitted=on_job_submitted,
     )
 
 
 async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
-    """Schedule VM expiry via the provisioning service."""
-    return await schedule_vm_expiry_and_wait(
-        service_url=settings.provisioning.service_url,
-        admin_key=settings.admin_api_key,
-        timeout=float(settings.provisioning.timeout),
-        poll_interval=float(settings.provisioning.poll_interval),
-        lease_end_utc=lease_end_utc,
-        vm_host=vm_host,
-        vm_target=vm_target,
+    """Schedule VM expiry via the provisioning service.
+
+    NOTE: The provisioning service has no ``schedule_expiry`` endpoint — this
+    hook was wired but the underlying API was never implemented.
+    Lease teardown is managed by the LeaseWatchdog; call
+    ``POST /api/v1/system/check-leases`` or wait for the next watchdog cycle.
+
+    Raises ``NotImplementedError`` if called so callers discover the gap
+    immediately rather than silently failing on a missing import.
+    """
+    raise NotImplementedError(
+        "_do_shutdown is not implemented: the provisioning service has no "
+        "schedule_expiry endpoint. Lease teardown is handled by the "
+        "LeaseWatchdog. Submit POST /api/v1/system/check-leases to trigger "
+        "an immediate teardown cycle."
     )
 
 
@@ -129,17 +139,19 @@ async def _register_vm_lease_with_settings(
     lease_end_dt = datetime.strptime(lease_end_utc, "%Y-%m-%d %H:%M").replace(
         tzinfo=timezone.utc,
     )
-    await register_vm_lease(
-        service_url=settings.provisioning.service_url,
+    async with ProvisioningClient(
+        settings.provisioning.service_url,
         admin_key=settings.admin_api_key,
         timeout=10,
-        resource_id=resource_id,
-        allocation_id=allocation_id,
-        escrow_uid=escrow_uid,
-        vm_host=vm_host,
-        vm_target=vm_target,
-        lease_end_utc=lease_end_dt,
-    )
+    ) as client:
+        await client.register_lease(
+            resource_id=resource_id,
+            allocation_id=allocation_id,
+            escrow_uid=escrow_uid,
+            vm_host=vm_host,
+            vm_target=vm_target,
+            lease_end_utc=lease_end_dt,
+        )
 
 
 async def fulfill_compute_obligation(

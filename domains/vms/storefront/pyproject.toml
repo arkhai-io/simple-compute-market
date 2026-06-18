@@ -17,13 +17,17 @@ dependencies = [
     "arkhai-kit-config",
     "arkhai-kit-policy",
     "arkhai-vms-common",
-    "arkhai-vms-provisioning>=0.5.0",
+    "arkhai-vms-provisioning-client>=0.1.1",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
     "google-cloud-logging>=3.12.0,<4.0.0",
     "fastapi~=0.115.8",
-    "fastapi-utils>=0.8.0",
+    # [all] carries typing-inspect, which fastapi_utils.cbv imports
+    # unconditionally under pydantic v2.
+    "fastapi-utils[all]>=0.8.0",
     "uvicorn~=0.34.0",
     "psycopg2-binary>=2.9.10,<3.0.0",
+    # Required by FastAPI routes that accept UploadFile/File form data.
+    "python-multipart>=0.0.20",
     "alkahest-py>=0.4.0",
     "web3>=7.14.0",
     "websockets>=15.0.1",
@@ -70,13 +74,13 @@ lint = [
 ]
 
 [tool.uv]
-# Internal wheels (clients, arkhai-vms-provisioning) come from the repo's
+# Internal wheels (clients, arkhai-vms-provisioning-client) come from the repo's
 # .dist/ via the CLI flag — `make init`/`reinit`/`test` and the Dockerfile
 # all pass --find-links. No find-links entry here: a relative path can't
 # normalize inside the Docker build, where /app is the project root.
 # Restrict resolution to platforms that have alkahest_py wheels.
 # Without this, uv attempts to solve for all platforms and fails to
-# find arkhai-vms-provisioning wheels for platforms
+# find arkhai-vms-provisioning-client wheels for platforms
 # where it has no local find-links path to check.
 environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",

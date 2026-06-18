@@ -22,15 +22,15 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from fastapi_utils.cbv import cbv
 
 import container as _container_module
-from models.host_model import (
+from provisioning_client.models import (
     HostCreate,
     HostListResponse,
     HostResponse,
     HostUpdate,
+    JobSubmitResponse,
+    VmActionRequest,
 )
 from models.ansible import ConnectivityResult
-from models.jobs_model import JobSubmitResponse
-from models.vm_request_model import VmActionRequest
 from services.host_operations_service import HostOperationsService
 from services.host_service import HostNotFoundError, HostService
 
@@ -79,7 +79,8 @@ class HostController:
             search=search,
             enabled_only=not include_disabled,
         )
-        return HostListResponse(hosts=[HostResponse.model_validate(h) for h in hosts])
+        host_models = [HostResponse.model_validate(h) for h in hosts]
+        return HostListResponse(hosts=host_models, total=len(host_models))
 
     # ------------------------------------------------------------------
     # Host registration
@@ -158,7 +159,8 @@ class HostController:
             hosts = self._host_service.seed_from_ini(ini_text, ssh_key_type=ssh_key_type)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        return HostListResponse(hosts=[HostResponse.model_validate(h) for h in hosts])
+        host_models = [HostResponse.model_validate(h) for h in hosts]
+        return HostListResponse(hosts=host_models, total=len(host_models))
 
     # ------------------------------------------------------------------
     # Single host operations

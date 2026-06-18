@@ -5,8 +5,7 @@ import pytest
 
 from db.models import Host
 from models.ansible import ConnectivityResult
-from models.jobs_model import JobSubmitResponse
-from models.vm_request_model import VmActionRequest
+from provisioning_client.models import JobSubmitResponse, VmActionRequest
 from services.host_operations_service import HostOperationsService
 from services.host_service import HostNotFoundError
 

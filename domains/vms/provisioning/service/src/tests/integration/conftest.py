@@ -38,7 +38,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import container as _container_module
-from client.provisioning_client import ProvisioningClient
+from provisioning_client import ProvisioningClient
 from db.database import create_session_factory
 
 from db.models import Base

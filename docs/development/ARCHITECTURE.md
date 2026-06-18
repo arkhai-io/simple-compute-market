@@ -2515,7 +2515,7 @@ make dist
   ├── dist-registry           → .dist/arkhai_registry_client-*.whl
   ├── dist-arkhai-core-buyer         → .dist/core_buyer-*.whl
   ├── dist-arkhai-core-storefront    → .dist/core_storefront-*.whl
-  ├── dist-provisioning       → .dist/provisioning_service-*.whl
+  ├── dist-provisioning-client → .dist/arkhai_vms_provisioning_client-*.whl
   ├── dist-storefront         → .dist/market_storefront-*.whl      (Docker builds only)
   ├── dist-policy             → .dist/market_policy-*.whl          (Docker builds only)
   ├── dist-identity           → .dist/market_identity-*.whl        (Docker builds only)
@@ -2540,7 +2540,7 @@ repo. The registries and their IAM are managed there; this repo only pushes.
 | Helm chart (`arkhai-node-operator`) | DOCKER (OCI) | `helm` | git short SHA |
 | `arkhai-core-storefront-client` wheel | PYTHON | `python` | wheel version |
 | `arkhai-core-registry-client` wheel | PYTHON | `python` | wheel version |
-| `arkhai-vms-provisioning` wheel | PYTHON | `python` | wheel version |
+| `arkhai-vms-provisioning-client` wheel | PYTHON | `python` | wheel version |
 | `market` CLI binary | GENERIC | `cli` | git short SHA |
 
 The internal-only wheels (`arkhai-vms-storefront`, `arkhai-kit-policy`) are consumed only via `--find-links` inside
@@ -2593,7 +2593,7 @@ package/version/filename. Semver tags (`<version>-rc.N` for preprod,
 **Dev wheel overwrite path:** during dev-cluster iteration, use
 `make clobber-wheels` to delete the current published versions of
 `arkhai-core-storefront-client`, `arkhai-core-registry-client`, and
-`arkhai-vms-provisioning`, then immediately re-upload the local `.dist/` wheels.
+`arkhai-vms-provisioning-client`, then immediately re-upload the local `.dist/` wheels.
 This is intentionally separate from `push-wheels` because it mutates the Python
 repository by deleting package versions. Use it only for development
 repositories; preprod/prod wheel changes should bump package versions instead.
@@ -2808,6 +2808,40 @@ The Helm subcharts expose a `persistence.existingClaim` parameter: when set, the
 
 This section defines the testing conventions for the Arkhai Market Stack. It exists to give every contributor a consistent mental model of what each test level is responsible for, what it is explicitly not responsible for, and how the levels relate to each other. New tests should be placed at the lowest level that can meaningfully exercise the behaviour in question.
 
+### Contract Fixtures
+
+A **contract fixture** is a pair of functions — `build_*()` and `validate_*()` — that define the canonical shape of a message at a package boundary. They are shared between the producer-side tests (which call `validate_*` to assert real code emits the agreed shape) and the consumer-side tests (which call `build_*` to produce mock inputs of exactly that shape). When the boundary changes, both sides break at once.
+
+**When to use them:** A boundary earns a contract fixture when *both* its producer and consumer have unit tests. Consumer-only mocks that have no corresponding producer test remain as local inline dicts — moving them prematurely documents a contract that has no enforcement on the production side.
+
+**`build_*()`** constructs a minimal but complete canonical instance. Use keyword arguments with sensible defaults so tests can override only the fields relevant to them. Non-deterministic fields (timestamps, generated IDs) use fixed sentinel values in `build_*` and range/type assertions in `validate_*` — *not* equality checks. This avoids the classic brittle test failure where `created_at` shifts by a millisecond.
+
+**`validate_*()`** asserts structural and semantic constraints on a value produced by real code. It checks field presence, type, and any invariants the consumer depends on. It does not check incidental fields the consumer ignores. When `validate_*` is called in a producer test, a failure means the producer broke the contract; when `build_*` is used in a consumer test, a silent mismatch is exposed the moment the producer test also calls `validate_*` on a real output that no longer matches.
+
+**Where they live — import direction always flows producer → consumer:**
+
+- **Same-package boundary** (producer and consumer are in the same package): `tests/fixtures/<module>.py` within that package. Importable as `tests.fixtures.<module>` by any test in the package because pytest adds the package root to `sys.path`.
+
+- **Cross-package boundary** (consumer is in a higher-level package): `src/{package_name}/fixtures/<module>.py` inside the producer's source package. Because the producer is already installed as a wheel in consumer packages, no `pythonpath` changes are needed. The import mirrors the existing client import pattern:
+
+  ```python
+  # existing pattern
+  from storefront_client import SyncStorefrontClient
+  from storefront_client.models import ClaimResponse
+  # contract fixture — same namespace, no new configuration
+  from storefront_client.fixtures.escrow import build_claim_response
+  ```
+
+  This means two producer packages are naturally unambiguous:
+
+  ```python
+  from storefront_client.fixtures.escrow import build_claim_response
+  from provisioning_client.fixtures.host import build_host_response
+  ```
+
+  If the producer has no unit tests yet, create the `fixtures/` subpackage anyway and leave `validate_*` functions dormant. They document the contract and give future producer tests an immediate hook. Mark dormant validators with a module docstring explaining which test file will call them once the producer gains test coverage.
+
+
 ### Four-Level Hierarchy
 
 #### 1. Unit Tests
@@ -2836,7 +2870,9 @@ This section defines the testing conventions for the Arkhai Market Stack. It exi
 
 **Test setup pattern:** Use `httpx.AsyncClient` with `ASGITransport` against the real `app` instance, injected via the canonical `FooClient(transport=...)` constructor. Override container providers for `AnsibleService` before the test and restore them after. See `src/tests/integration/conftest.py` for the full fixture implementation.
 
-**Client contract verification:** Integration tests call `ProvisioningClient` methods directly against the in-process app. Route strings, request body shapes, and response parsing are owned by the client — no raw HTTP calls appear in test code. If the API renames a field or changes a route, the client method raises `ProvisioningError` and the test fails immediately.
+**Typed client contract verification:** Service integration tests call the service's canonical typed client methods directly against the in-process app (`ProvisioningClient` for provisioning, `StorefrontClient` for storefront, `RegistryClient` for registry). Route strings, request body shapes, and response parsing are owned by the client — happy-path tests should not make raw HTTP calls. If an API renames a field or changes a route, the typed client should raise its client error and the test should fail immediately. These service integration suites are the complete behavioral contract test surface for their client wheels: each public client endpoint is exercised against FastAPI controllers with lower service layers mocked where appropriate. Client packages themselves intentionally remain lightweight and do not need separate test dependencies or Makefile machinery when the owning service can validate the contract through integration tests.
+
+**Sync/async client parity guardrails:** When a client package exposes both async and sync clients, the owning service's unit suite owns a small contract test that compares public method names and signatures. New client methods must be added to both clients in the same change. This guardrail belongs with the service tests because the service owns the contract validation boundary; it is not a substitute for integration tests that call the client methods through the real controller routes.
 
 **The "no raw calls" rule — two legitimate exceptions:**
 
@@ -2848,7 +2884,7 @@ The rule is absolute for happy-path tests. Two narrow exceptions are permitted:
 
 Any other use of `_request`, `_client.get/post`, or raw `httpx` in an integration test is a gap that requires either adding a method to the canonical client or restructuring the test. The comment `"not yet a client method"` is a deferred debt marker, not a permanent exemption — it must reference a tracking item and be resolved before the gap accumulates.
 
-**State setup convention:** Test precondition state (e.g., a job row that must already exist before the endpoint under test is called) should be created through the HTTP API where feasible. Use direct DB factory functions only for state that is not expressible through any API endpoint — this keeps integration tests honest about the API contract.
+**State setup convention:** Test precondition state (e.g., a job row that must already exist before the endpoint under test is called) should be created through the HTTP API where feasible. Use direct DB factory functions or injected service-layer helpers only for state that is not expressible through any API endpoint, or where the test is explicitly setting up ledger/job state below the controller layer so the client method under test remains the only HTTP operation. This keeps integration tests honest about the API contract while avoiding costly end-to-end setup for lower-layer state machines.
 
 **Async test discipline — no sleeps:** Tests that exercise the background job processing loop must never use `asyncio.sleep` or `await asyncio.wait_for(..., timeout=...)` to wait for side effects. These approaches always produce intermittent failures. The correct pattern uses the `on_job_started` seam on `AsyncJobQueue`:
 
@@ -3114,6 +3150,22 @@ e2e-tests/
                 └── discovery/test_buyer.py
 ```
 
+**CLI unit test conventions:**
+
+CLI tests should use `typer.testing.CliRunner` and `monkeypatch`. No real network, chain, subprocess, Make, or SQLite I/O — the `logs` tests use `FakeLogConnection` (defined in `cli/conftest.py`) rather than a real SQLite database.
+
+Three mocking layers, applied in order of specificity:
+
+- **`settings_overrides(**{...})`** — the canonical way to inject dynaconf `settings` values. Always use this for `settings.*` reads (e.g. `wallet.private_key`, `zerotier_network`). Import from `tests._settings_overrides`. Use dotted keys for nested paths: `settings_overrides(**{"wallet.private_key": "0x..."})`.
+
+- **`monkeypatch.setattr("market_storefront.utils.config.CHAINS", {...})`** — for the module-level `CHAINS` dict, which CLI command bodies import lazily (`from ..utils.config import CHAINS`). Always patch the *source* module (`market_storefront.utils.config`), not a consumer, because the lazy `from ... import` re-reads the source at call time.
+
+- **`monkeypatch.setattr(importing_module, "name", fake)`** — for everything else: patch on the *importing* module, not the defining one. For example, `monkeypatch.setattr(config_group, "storefront_config_file", ...)` (not `market_config.config_loader.storefront_config_file`), `monkeypatch.setattr(escrow_group, "_submit_claim", ...)`, `monkeypatch.setattr(network_group, "run_step", ...)`. This keeps each test's patch target colocated with the module it is testing and avoids action-at-a-distance through unrelated namespaces.
+
+For lazy imports inside a function body (e.g. `from market_alkahest.alkahest import get_escrow_obligation_with_codec`), patch on the *defining* module (`market_alkahest.alkahest.<fn>`), since the `from … import` re-reads the module's namespace at each call.
+
+**`FakeLogConnection`** (in `cli/conftest.py`) is the logs test seam. It implements the minimal sqlite3 connection interface (`cursor`, `execute`, `close`) and pattern-matches SQL query substrings to return shaped `FakeRow` objects seeded at construction time (`stage_events=`, `threads=`, `listings=`, `escrows=`). The `fake_log_db` fixture installs it by monkeypatching both `_resolve_db_path` and `sqlite3.connect` on `market_storefront.cli_logs`. This approach makes the test boundary explicit — CLI tests own wiring and rendering, not SQL correctness — and avoids DDL management. The tradeoff is that `FakeLogConnection.execute` pattern-matches on query substrings; if query text changes materially, a filter test may silently stop exercising the intended branch rather than failing. The `test_logs_show_filters_negotiation_and_stage` test mitigates this by asserting on the captured `params` tuple in addition to the exit code.
+
 
 ### Problem
 Python packages in this monorepo need to consume each other (e.g. the storefront imports the provisioning service client). Relative path imports across project directories are fragile — they encode layout assumptions and break when projects move. Native extension wheels (those with platform/ABI tags like `cp312-cp312-linux_x86_64`) must be compiled inside the target Docker environment; this is why `alkahest-py` ships pre-built wheels for each platform in `domains/vms/storefront/packages/`. Pure Python wheels (`py3-none-any`) have no such constraint and can be built safely on the host.
@@ -3131,7 +3183,7 @@ make build         →  docker build (COPY .dist/ /dist/, uv sync --find-links /
 
 `make dist` runs automatically as a prerequisite of `make build`.
 
-**Guard:** `make dist-provisioning` asserts the output wheel filename ends in `-none-any.whl`. If a C extension or Rust crate is ever added to a package, the build fails loudly with an error directing the developer to move compilation inside the Docker build context.
+**Guard:** wheel-build targets assert their output filenames end in `-none-any.whl` for packages expected to remain pure Python. If a C extension or Rust crate is ever added to one of those packages, the build fails loudly with an error directing the developer to move compilation inside the Docker build context.
 
 **Why `--find-links` is passed on the CLI, not in `pyproject.toml`:**
 
@@ -3142,13 +3194,11 @@ make build         →  docker build (COPY .dist/ /dist/, uv sync --find-links /
 
 Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockfile and breaks the other context. Setting it via `UV_FIND_LINKS` on the command line means the path stays out of version-controlled files entirely.
 
-**Rule:** downstream `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for wheel-consumed internal packages (`arkhai-kit-identity`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-core-storefront`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-vms-common`, `arkhai-vms-provisioning`, `arkhai-core-storefront-client`, or `arkhai-core-registry-client`). These packages are resolved exclusively from wheels in `.dist/` outside their owning package's local dev environment.
+**Rule:** downstream `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for wheel-consumed internal packages (`arkhai-kit-identity`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-core-storefront`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-vms-common`, `arkhai-vms-provisioning-client`, `arkhai-core-storefront-client`, or `arkhai-core-registry-client`). These packages are resolved exclusively from wheels in `.dist/` outside their owning package's local dev environment.
 
 **Why not `uv.sources` editable installs:** Editable path references are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker that relative path does not exist, causing resolution failures. The wheel approach makes both the path and the mechanism context-specific (CLI flag, not lockfile entry).
 
 ### Internal wheel packages
-
-Ten pure-Python internal packages are distributed as wheels:
 
 | Package | Wheel name | Source | Primary consumers |
 |---------|-----------|--------|-------------------|
@@ -3159,11 +3209,17 @@ Ten pure-Python internal packages are distributed as wheels:
 | `arkhai-kit-alkahest` | `market_alkahest-*.whl` | `kit/alkahest/` | `buyer`, `storefront`, `e2e-tests` |
 | `arkhai-kit-config` | `market_config-*.whl` | `kit/config/` | `buyer`, `storefront` |
 | `arkhai-vms-common` | `arkhai_vms_common-*.whl` | `domains/vms/common/` | `buyer`, `storefront` |
-| `arkhai-vms-provisioning` | `provisioning_service-*.whl` | `domains/vms/provisioning/service/` | `e2e-tests`, `storefront` |
+| `arkhai-vms-provisioning-client` | `arkhai_vms_provisioning_client-*.whl` | `domains/vms/provisioning/client/` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
 | `arkhai-core-storefront-client` | `arkhai_storefront_client-*.whl` | `core/storefront-client/` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
 | `arkhai-core-registry-client` | `arkhai_registry_client-*.whl` | `core/registry-client/` | `e2e-tests` |
 
-`arkhai-core-storefront-client` exists as a separate lightweight package to avoid pulling `arkhai-vms-storefront`'s heavyweight dependencies (`pufferlib`, `torch`, native RL wheels under the `[rl]` extra) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `core/storefront-client/src/storefront_client/client.py` and exposes `StorefrontClient` (async) and `SyncStorefrontClient` (sync).
+Typed client wheels are the **authoritative inter-service contracts** for their services' public HTTP DTOs and primitive operations. This applies repo-wide to `arkhai-vms-provisioning-client`, `arkhai-core-storefront-client`, and `arkhai-core-registry-client`. Do not duplicate public DTOs inside a server just to avoid importing from its client wheel; controllers and service unit tests may import client-owned public models when those models are the natural method boundary. Server-only types remain in the service package and are not exported through the client surface. When a client package exposes both async and sync clients, they must expose the same public operation names and signatures; the owning service's unit suite should carry the parity guardrail, while the owning service's integration suite remains the behavioral contract test surface for every public client endpoint.
+
+`arkhai-vms-provisioning-client` (`domains/vms/provisioning/client/`) is the provisioning service's HTTP client wheel — `httpx` + `pydantic` only, mirroring the `arkhai-core-registry-client` and `arkhai-core-storefront-client` pattern. It exposes `ProvisioningClient` (async) and `SyncProvisioningClient` (sync), plus all public request/response Pydantic models (`CreateVmRequest`, `HostCreate`, `JobStatusResponse`, `LeaseResponse`, etc.). The provisioning service depends on it for the shared Pydantic models its FastAPI route handlers use. Internal server-only types (`AnsibleJobParams`, `AnsibleRunResult`) remain in the service wheel and are never part of the client surface. Consumers import from a collision-free namespace: `from provisioning_client import ProvisioningClient, CreateVmRequest`. Storefront and e2e depend on `arkhai-vms-provisioning-client` for HTTP calls and public DTOs; they should not depend on the full `arkhai-vms-provisioning` service package unless they are intentionally operating the service itself. The provisioning service package is built into its container image from source; because no other project consumes a provisioning service wheel, the root Makefile does not build or publish `arkhai-vms-provisioning` as a wheel.
+
+`arkhai-core-storefront-client` exists as a separate lightweight package to avoid pulling `arkhai-vms-storefront`'s heavyweight dependencies (`pufferlib`, `torch`, native RL wheels under the `[rl]` extra) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `core/storefront-client/src/storefront_client/client.py` and exposes `StorefrontClient` (async) and `SyncStorefrontClient` (sync). The storefront service is the owner of storefront-client behavioral contract coverage.
+
+`arkhai-core-registry-client` is the registry service's lightweight HTTP client wheel. Registry DTOs and primitive operations that cross process boundaries belong in the client wheel; registry service integration tests own route/DTO/client compatibility coverage.
 
 **Dependency direction note — arkhai-vms-provisioning → arkhai-core-storefront-client:**
 
@@ -3171,7 +3227,7 @@ The provisioning service depends on `arkhai-core-storefront-client` for two call
 1. `lease_lifecycle_service` — post deal-scoped capacity release events to the owning storefront
 2. `system_service.get_status()` — probe storefront reachability for the diagnostic status endpoint
 
-This inverts the conceptual layer (provisioning is infrastructure; storefront is a consumer). It does not create a circular import — `storefront-client` has no dependency on `arkhai-vms-provisioning`. The `make dist` ordering already builds `arkhai-core-storefront-client` before `arkhai-vms-provisioning`, so wheel resolution is correct.
+This inverts the conceptual layer (provisioning is infrastructure; storefront is a consumer). It does not create a circular import — `storefront-client` has no dependency on `arkhai-vms-provisioning`. The provisioning image build resolves `arkhai-core-storefront-client` from `.dist/` before syncing the service environment, so wheel resolution is correct.
 
 **`arkhai-core-storefront-client` versioning policy:**
 
@@ -3192,10 +3248,11 @@ When either contract changes: bump `version` in `core/storefront-client/pyprojec
 **Internal builds (Docker images):** `.dist/` wheels are consumed via
 `--find-links` inside Docker `RUN` instructions. This path is unchanged.
 
-**External distribution:** The three client packages (`arkhai-core-storefront-client`,
-`arkhai-core-registry-client`, `arkhai-vms-provisioning`) are published to GCP Artifact
-Registry via `make push-wheels`. See the `## Artifact Registry Publishing`
-section for the full push flow.
+**External distribution:** The client packages (`arkhai-core-storefront-client`,
+`arkhai-core-registry-client`, `arkhai-vms-provisioning-client`) are published
+to GCP Artifact Registry via `make push-wheels`. Service workloads are
+distributed as Docker images, not service wheels. See the `## Artifact
+Registry Publishing` section for the full push flow.
 
 **PEP 503 local index (optional):** `scripts/gen_simple_index.py .dist/` generates
 a local `simple/` index. Useful if a consumer needs `--index` rather than
@@ -3242,7 +3299,7 @@ finally:
     client.close()
 ```
 
-**No module-level wrapper functions:** Functions like `provision_machine_async()` or `schedule_vm_expiry_async()` that wrap client methods are removed. Callers instantiate the client and call methods directly.
+**No module-level wrapper functions in client packages:** Functions like `provision_machine_async()` or `schedule_vm_expiry_async()` that wrap client methods are removed from client packages. Callers instantiate the client and call methods directly. Service-specific orchestration may still live in the consuming service when it combines multiple primitive client calls into that service's workflow; for example, storefront owns a local helper that submits a VM create job, records the job id callback, polls for completion, and merges credentials into the storefront fulfillment payload.
 
 **Transport injection for integration tests:** Service integration tests use `FooClient` (async) with `httpx.ASGITransport(app=app)`. The fixture wires `get_db` override and yields the client — tests call methods, never route strings:
 
@@ -3280,8 +3337,8 @@ cd core/registry && make reinit && make test-integration
 | Package | Wheel | Async client | Sync client | Consumers |
 |---|---|---|---|---|
 | `arkhai-core-storefront-client` | `arkhai_storefront_client-*.whl` | `StorefrontClient` | `SyncStorefrontClient` | `storefront`, `e2e-tests` |
-| `core/registry-client/` | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `e2e-tests`, `arkhai-core-registry` tests |
-| `domains/vms/provisioning/service/src/client/` | `provisioning_service-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `e2e-tests` |
+| `arkhai-core-registry-client` (`core/registry-client/`) | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `e2e-tests`, `arkhai-core-registry` tests |
+| `arkhai-vms-provisioning-client` (`domains/vms/provisioning/client/`) | `arkhai_vms_provisioning_client-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
 
 `arkhai-core-storefront-client` exposes EIP-191-signed methods on both
 `StorefrontClient` (async) and `SyncStorefrontClient` (sync):
@@ -3297,7 +3354,6 @@ cd core/registry && make reinit && make test-integration
 The wheel ships `EvaluateNegotiateResponse`, `SettleResponse`, and
 `SettleStatusResponse` typed models alongside these methods.
 
-`arkhai-vms-provisioning` bundles its client inside the service wheel (under `src/client/`) because the request/response models (`CreateVmRequest`, `JobStatusResponse`, etc.) are shared between the server and client. Consumers import as `from client.provisioning_client import ProvisioningClient`.
 
 | Term | Meaning |
 |---|---|

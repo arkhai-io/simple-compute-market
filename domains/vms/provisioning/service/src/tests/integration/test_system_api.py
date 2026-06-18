@@ -19,9 +19,6 @@ from __future__ import annotations
 
 import pytest
 
-from client.provisioning_client import ProvisioningClient
-
-
 class TestHealthEndpoint:
     """GET /health — fast liveness probe via ProvisioningClient.get_health().
 
