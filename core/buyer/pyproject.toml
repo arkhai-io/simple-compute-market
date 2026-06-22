@@ -31,12 +31,6 @@ dependencies = [
 [project.scripts]
 market = "core_buyer.cli:main"
 
-[tool.uv.sources]
-arkhai-kit-config = { path = "../../kit/config", editable = true }
-arkhai-kit-policy = { path = "../../kit/policy", editable = true }
-arkhai-kit-alkahest = { path = "../../kit/alkahest", editable = true }
-arkhai-core = { path = "../", editable = true }
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

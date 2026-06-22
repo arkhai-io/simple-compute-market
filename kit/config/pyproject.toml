@@ -21,9 +21,6 @@ pythonpath = ["src"]
 asyncio_mode = "auto"
 testpaths = ["tests/unit"]
 
-[tool.uv.sources]
-arkhai-kit-alkahest = { path = "../alkahest", editable = true }
-
 [dependency-groups]
 dev = [
     "pytest>=8.3.4,<9.0.0",

@@ -12,7 +12,7 @@ Pending architectural work and known operational issues for the Arkhai market st
 | [Registry: Postgres migration](#registry-postgres-migration) | State Management | Planned |
 | [Market Core Extraction follow-ons](#market-core-extraction-follow-ons) | Core Stack | In progress |
 | [Native Launch CLI for Provisioning Service](#native-launch-cli-for-provisioning-service) | Core Stack | Planned |
-| [Buyer internal dependency wheel cleanup](#buyer-internal-dependency-wheel-cleanup) | Core Stack | Planned |
+| [Eliminate remaining `../` uv.sources path entries](#eliminate-remaining--uvsources-path-entries) | Core Stack | Planned |
 | [Storefront DB Pruning](#storefront-db-pruning) | Core Stack | Planned |
 | [Registry Filter-Spec side indexes](#registry-filter-spec-indexed-true-side-indexes) | Core Stack | Deferred |
 | [Shared Dynaconf Bootstrap](#shared-dynaconf-bootstrap) | Core Stack | Planned |
@@ -162,26 +162,25 @@ The `arkhai-vms-provisioning` wheel stays its own distributable — it's operate
 
 ---
 
+### Eliminate remaining `../` uv.sources path entries
 
-### Buyer internal dependency wheel cleanup
+**Status:** Planned.
 
-**Status:** Planned after the provisioning-client feature stabilizes.
+**Problem:** The ARCHITECTURE.md rule prohibits `[tool.uv.sources]` `path` entries containing `../` in any `pyproject.toml`. Such paths bake the monorepo's filesystem topology into `uv.lock`, breaking Docker builds and preventing customers from installing the package outside the checkout. The following packages still have `../` path sources:
 
-**Problem:** `core/buyer/pyproject.toml` still declares several internal
-packages through repository-relative editable sources (`[tool.uv.sources]`).
-That is acceptable for local development, but it keeps the buyer package
-tightly coupled to the repository checkout and makes the dependency surface
-look broader than it should once the internal packages are available as
-built wheels. The provisioning-client work is moving consumers toward
-explicit wheel dependencies; the buyer should follow that pattern rather
-than accumulating relative imports/source paths.
+**Wheel packages (highest priority — customer-facing):**
 
-**Planned fix:** after the provisioning-client extraction is accepted, audit
-the buyer package's internal dependencies and switch package consumption to
-`.dist/` wheels wherever the dependency is already a distributable package.
-Keep editable path sources only where they are intentionally needed for local
-development workflows, and document any remaining exceptions in
-`ARCHITECTURE.md` rather than leaving them as implicit pyproject coupling.
+- `domains/apitokens/buyer/pyproject.toml` — 5 editable path sources (core, core-buyer, alkahest, config, policy). Domain wheel plugin.
+- `domains/vms/buyer/pyproject.toml` — 5 editable path sources (same set). Already has a Makefile; needs sources removal and `reinit` target additions.
+
+**Docker service packages (lower priority — monorepo-root build context makes the referenced paths available inside containers):**
+
+- `core/registry/pyproject.toml` — 1 editable path source (`arkhai-kit-identity`).
+- `domains/vms/storefront/pyproject.toml` — 6 editable path sources.
+- `domains/apitokens/storefront/pyproject.toml` — 7 editable path sources.
+- `domains/apitokens/sample-app/pyproject.toml` — 1 editable path source (`arkhai-apitokens-middleware = { path = "../middleware/python" }`), intra-domain sibling reference.
+
+**Planned fix:** apply the `core/buyer` pattern to each wheel package in priority order: remove `[tool.uv.sources]`, add or update the package Makefile to pass `--find-links $(DIST_DIR)` through `init`, `reinit`, and `test` targets, regenerate `uv.lock`. Service packages follow after the wheel packages are clean.
 
 ---
 

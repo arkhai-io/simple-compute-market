@@ -26,13 +26,6 @@ pythonpath = ["src"]
 testpaths = ["tests/unit"]
 asyncio_mode = "auto"
 
-[tool.uv.sources]
-arkhai-core = { path = "..", editable = true }
-arkhai-core-registry-client = { path = "../registry-client", editable = true }
-arkhai-kit-config = { path = "../../kit/config", editable = true }
-arkhai-kit-identity = { path = "../../kit/identity", editable = true }
-arkhai-kit-policy = { path = "../../kit/policy", editable = true }
-
 [dependency-groups]
 dev = [
     "pytest>=8.3.4,<9.0.0",

@@ -8,13 +8,13 @@ test-core:
 	uv run --find-links $(DIST_DIR) pytest tests/unit -q
 
 test-core-buyer:
-	cd buyer && uv run --find-links $(DIST_DIR) pytest tests/unit -q
+	cd buyer && make test
 
 test-core-site:
 	cd site && uv run --find-links $(DIST_DIR) pytest tests/unit -q
 
 test-core-storefront:
-	cd storefront && uv run --find-links $(DIST_DIR) pytest tests/unit -q
+	cd storefront && make test
 
 test-core-storefront-client:
 	cd storefront-client && uv run --find-links $(DIST_DIR) pytest tests -q

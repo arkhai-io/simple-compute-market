@@ -8,7 +8,7 @@ test-alkahest:
 	cd alkahest && uv run --find-links $(DIST_DIR) pytest tests/unit -q
 
 test-config:
-	cd config && uv run --find-links $(DIST_DIR) pytest tests/unit -q
+	cd config && make test
 
 test-identity:
 	cd identity && uv run --find-links $(DIST_DIR) pytest tests/unit -q

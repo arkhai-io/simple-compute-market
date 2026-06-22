@@ -2543,8 +2543,7 @@ repo. The registries and their IAM are managed there; this repo only pushes.
 | `arkhai-vms-provisioning-client` wheel | PYTHON | `python` | wheel version |
 | `market` CLI binary | GENERIC | `cli` | git short SHA |
 
-The internal-only wheels (`arkhai-vms-storefront`, `arkhai-kit-policy`) are consumed only via `--find-links` inside
-Docker builds and are never pushed to AR.
+The internal-only wheels (`arkhai-vms-storefront`, `arkhai-kit-policy`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-core-storefront`) are consumed only via `--find-links` inside Docker builds and local development; they are never pushed to AR. Only the three client wheels above (`arkhai-core-storefront-client`, `arkhai-core-registry-client`, `arkhai-vms-provisioning-client`) are published externally.
 
 **Push flow:**
 
@@ -3194,9 +3193,9 @@ make build         →  docker build (COPY .dist/ /dist/, uv sync --find-links /
 
 Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockfile and breaks the other context. Setting it via `UV_FIND_LINKS` on the command line means the path stays out of version-controlled files entirely.
 
-**Rule:** downstream `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for wheel-consumed internal packages (`arkhai-kit-identity`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-core-storefront`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-vms-common`, `arkhai-vms-provisioning-client`, `arkhai-core-storefront-client`, or `arkhai-core-registry-client`). These packages are resolved exclusively from wheels in `.dist/` outside their owning package's local dev environment.
+**Rule:** No `pyproject.toml` in this repo may declare a `[tool.uv.sources]` `path` entry traverses above the declaring package's own directory. Such paths encode the monorepo's filesystem topology into `uv.lock`, break Docker builds where the referenced path does not exist, and prevent customers from using the package outside the monorepo checkout. All cross-package internal dependencies are resolved exclusively from wheels in `.dist/` via `--find-links`.
 
-**Why not `uv.sources` editable installs:** Editable path references are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker that relative path does not exist, causing resolution failures. The wheel approach makes both the path and the mechanism context-specific (CLI flag, not lockfile entry).
+**Why not `uv.sources` editable installs:** Editable path references are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker builds where the monorepo layout is not present that path does not exist, causing resolution failures. The same flaw prevents customers installing the wheel outside the monorepo from resolving its dependencies. The wheel approach makes both the path and the mechanism context-specific (CLI flag, not lockfile entry).
 
 ### Internal wheel packages
 
@@ -3208,6 +3207,7 @@ Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockf
 | `arkhai-core-storefront` | `core_storefront-*.whl` | `core/storefront/` | `storefront` |
 | `arkhai-kit-alkahest` | `market_alkahest-*.whl` | `kit/alkahest/` | `buyer`, `storefront`, `e2e-tests` |
 | `arkhai-kit-config` | `market_config-*.whl` | `kit/config/` | `buyer`, `storefront` |
+| `arkhai-kit-policy` | `market_policy-*.whl` | `kit/policy/` | `buyer`, `storefront` |
 | `arkhai-vms-common` | `arkhai_vms_common-*.whl` | `domains/vms/common/` | `buyer`, `storefront` |
 | `arkhai-vms-provisioning-client` | `arkhai_vms_provisioning_client-*.whl` | `domains/vms/provisioning/client/` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
 | `arkhai-core-storefront-client` | `arkhai_storefront_client-*.whl` | `core/storefront-client/` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
