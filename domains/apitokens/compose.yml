@@ -56,8 +56,6 @@ services:
       - "8092:8082"
     environment:
       - APITOKENS_STOREFRONT_ADMIN_KEY=test-api-key
-    volumes:
-      - tokens-service-data:/app/data
     restart: unless-stopped
     deploy:
       resources:
@@ -130,7 +128,6 @@ services:
       # the VM storefront's data tree (the canonical anvil address book). A
       # non-Anvil deployment supplies its own address book here.
       - ../vms/storefront/src/market_storefront/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
-      - tokens-storefront-data:/app/src/apitokens_storefront/data/storefront
     restart: unless-stopped
     deploy:
       resources:
@@ -142,7 +139,3 @@ services:
       timeout: 5s
       retries: 6
       start_period: 15s
-
-volumes:
-  tokens-service-data:
-  tokens-storefront-data:
