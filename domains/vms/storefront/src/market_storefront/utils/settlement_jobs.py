@@ -46,6 +46,14 @@ def _resolve_duration_seconds(thread: dict[str, Any], order_dict: dict[str, Any]
     )
 
 
+def _resolve_start_utc(thread: dict[str, Any]) -> str | None:
+    raw = thread.get("requested_start_utc")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
+
+
 def _resolve_compute_resource(order_dict: dict[str, Any]) -> dict[str, Any] | None:
     """Best-effort extraction of the listing's offer_resource as a dict.
 
@@ -130,6 +138,7 @@ async def start_settlement_job(
     # request; for now built locally from the negotiation thread + listing.
     provision = make_vm_provision_terms(
         duration_seconds=_resolve_duration_seconds(thread, our_order_dict),
+        start_utc=_resolve_start_utc(thread),
         ssh_public_key=ssh_public_key,
         compute_resource=_resolve_compute_resource(our_order_dict),
     )
@@ -259,6 +268,7 @@ async def _run_settlement_job_bg(
             ssh_public_key=provision.ssh_public_key,
             order=order_dict,
             duration_seconds=provision.duration_seconds,
+            start_utc=provision.start_utc,
             listing_id=listing_id,
             negotiation_id=negotiation_id,
         )

@@ -4,7 +4,7 @@ How to bring up a compute storefront: publish listings (signed with
 your wallet key), and (optionally) provision real KVM VMs to buyers.
 
 For the buyer side see [`buyer-quickstart.md`](./buyer-quickstart.md).
-To run your own indexer registry instead of pointing at an existing one,
+To run your own listing registry instead of pointing at an existing one,
 see [`indexer-quickstart.md`](./indexer-quickstart.md). To expose VMs
 via wildcard subdomains instead of direct port-forward NAT, see
 [`seller-frp-setup.md`](./seller-frp-setup.md).
@@ -18,7 +18,7 @@ via wildcard subdomains instead of direct port-forward NAT, see
   (test funds from [faucet.circle.com](https://faucet.circle.com)), but
   any EVM chain with Alkahest contracts deployed works.
 - An RPC URL for that chain.
-- An indexer URL + (if private) bearer token to publish to.
+- A listing registry URL + (if private) bearer token to publish to.
 - **Live provisioning only** — KVM-capable host: `egrep -c "(vmx|svm)"
   /proc/cpuinfo > 0`, `libvirtd` running, your ansible user has
   passwordless sudo and is in the `libvirt` group.
@@ -62,15 +62,15 @@ chain_id = 84532
 rpc_url  = "https://sepolia.base.org"   # public RPC; or your own provider
 
 [registry]
-# The Arkhai public indexer registry (preprod, Base Sepolia listings):
+# The Arkhai public listing registry (preprod, Base Sepolia listings):
 urls = ["http://34.41.205.175/registry"]
-# Or point at any other indexer, e.g. a self-hosted one:
+# Or point at any other listing registry, e.g. a self-hosted one:
 # urls = ["http://<INDEXER_HOST>:8080"]
 
 [registry.auth]
-# Required when the indexer gates writes (REGISTRY_REQUIRE_WRITE_API_KEY=true);
-# the key must be write-scoped. The Arkhai public indexer gates writes —
-# request a write key from the operator, or run your own indexer.
+# Required when the listing registry gates writes (REGISTRY_REQUIRE_WRITE_API_KEY=true);
+# the key must be write-scoped. The Arkhai public listing registry gates writes —
+# request a write key from the operator, or run your own listing registry.
 # Keys must exactly match the URLs in [registry] urls (scheme, host,
 # port, trailing slash).
 "http://34.41.205.175/registry" = "<your-write-token>"
@@ -141,7 +141,7 @@ don't repeat it anywhere else. Likewise `[provisioning].mode` in
 the TOML drives mock-vs-live; no separate env knob.
 
 There is no registration step: your identity is the wallet. Every
-publish is EIP-191-signed, and the indexer creates your publisher
+publish is EIP-191-signed, and the listing registry creates your publisher
 record from the signature the first time you publish.
 
 ## 5. Publish
@@ -151,7 +151,7 @@ docker compose -f compose/seller.yml exec seller-storefront \
   market-storefront publish --inventory /app/resources.csv
 ```
 
-Verify directly against the storefront and the indexer:
+Verify directly against the storefront and the listing registry:
 
 ```bash
 curl -s http://<YOUR_PUBLIC_IP>:8001/api/v1/listings | jq '.listings[]'

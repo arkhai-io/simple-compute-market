@@ -50,11 +50,21 @@ class CapacityApi:
         return resp.json()["allocation"]
 
     async def commit(
-        self, allocation_id: str, *, resource_id: str, lease_end_utc: str
+        self,
+        allocation_id: str,
+        *,
+        resource_id: str,
+        lease_start_utc: str | None = None,
+        lease_end_utc: str | None = None,
     ) -> dict:
+        body: dict = {"resource_id": resource_id}
+        if lease_start_utc is not None:
+            body["lease_start_utc"] = lease_start_utc
+        if lease_end_utc is not None:
+            body["lease_end_utc"] = lease_end_utc
         resp = await self._client.post(
             f"/api/v1/capacity/allocations/{allocation_id}/commit",
-            json={"resource_id": resource_id, "lease_end_utc": lease_end_utc},
+            json=body,
         )
         assert resp.status_code == 200, resp.text
         return resp.json()["allocation"]
@@ -111,7 +121,8 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
     committed = await capacity.commit(
         reserved["allocation_id"],
         resource_id=reserved["resource_id"],
-        lease_end_utc="2099-01-01 00:00",
+        lease_start_utc="2099-01-01T00:00:00Z",
+        lease_end_utc="2099-01-01T01:00:00Z",
     )
     assert committed["state"] == "leased"
 

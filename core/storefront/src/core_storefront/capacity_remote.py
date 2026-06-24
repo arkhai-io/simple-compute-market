@@ -80,10 +80,19 @@ class RemoteCapacityClient:
         return list(data.get("resources") or [])
 
     async def probe(
-        self, *, claim: Mapping[str, Any] | None = None,
+        self,
+        *,
+        claim: Mapping[str, Any] | None = None,
+        lease_start_utc: str | None = None,
+        lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
+        body: dict[str, Any] = {"claim": dict(claim or {})}
+        if lease_start_utc is not None:
+            body["lease_start_utc"] = str(lease_start_utc)
+        if lease_duration_seconds is not None:
+            body["lease_duration_seconds"] = int(lease_duration_seconds)
         resp = await self._post(
-            "/api/v1/capacity/probe", {"claim": dict(claim or {})},
+            "/api/v1/capacity/probe", body,
         )
         resp.raise_for_status()
         return resp.json().get("match")
@@ -94,6 +103,8 @@ class RemoteCapacityClient:
         claim: Mapping[str, Any] | None = None,
         deal_ref: Mapping[str, Any] | None = None,
         ttl_seconds: float | None = None,
+        lease_start_utc: str | None = None,
+        lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         body: dict[str, Any] = {
             "claim": dict(claim or {}),
@@ -101,6 +112,10 @@ class RemoteCapacityClient:
         }
         if ttl_seconds is not None:
             body["ttl_seconds"] = float(ttl_seconds)
+        if lease_start_utc is not None:
+            body["lease_start_utc"] = str(lease_start_utc)
+        if lease_duration_seconds is not None:
+            body["lease_duration_seconds"] = int(lease_duration_seconds)
         resp = await self._post("/api/v1/capacity/reservations", body)
         resp.raise_for_status()
         return resp.json().get("allocation")
@@ -110,6 +125,7 @@ class RemoteCapacityClient:
         *,
         resource_id: str,
         allocation_id: str | None = None,
+        lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
     ) -> None:
@@ -122,8 +138,9 @@ class RemoteCapacityClient:
             f"/api/v1/capacity/allocations/{allocation_id}/commit",
             {
                 "resource_id": resource_id,
-                # None = open-ended commit (no lease tail) — prepaid
-                # domains never schedule expiry.
+                "lease_start_utc": (
+                    str(lease_start_utc) if lease_start_utc is not None else None
+                ),
                 "lease_end_utc": (
                     str(lease_end_utc) if lease_end_utc is not None else None
                 ),

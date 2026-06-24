@@ -141,7 +141,7 @@ remaining follow-on work, with design context in
 5. **PyPI trusted-publishing one-time setup:** the publish CI
    (`.github/workflows/publish-pypi.yml`) now covers all 18 consumable
    packages (kit/core libraries, SDK clients, buyer/storefront plugins,
-   the registry indexer, provisioning + tokens services, the tokens
+   the listing registry, provisioning + tokens services, the tokens
    middleware) — every userland role, not the e2e harness/demo/tooling. Names keep the
    `arkhai-` prefix — PyPI orgs don't namespace distribution names, so the
    prefix is the namespace. Each package still needs its PyPI project +

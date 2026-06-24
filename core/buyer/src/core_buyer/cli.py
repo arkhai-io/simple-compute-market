@@ -134,7 +134,7 @@ def _build_generic_listing_app() -> typer.Typer:
     def listing_list(
         registry_urls: Optional[str] = typer.Option(
             None, "--registry-urls", "-r",
-            help="Comma-separated registry indexer base URLs "
+            help="Comma-separated listing registry base URLs "
                  "(config.toml: registry.urls).",
         ),
         discovery_timeout: Optional[float] = typer.Option(
@@ -171,7 +171,7 @@ def _build_generic_listing_app() -> typer.Typer:
         listing_id: str = typer.Argument(..., help="Listing ID"),
         registry_urls: Optional[str] = typer.Option(
             None, "--registry-urls", "-r",
-            help="Comma-separated registry indexer base URLs "
+            help="Comma-separated listing registry base URLs "
                  "(config.toml: registry.urls).",
         ),
         discovery_timeout: Optional[float] = typer.Option(

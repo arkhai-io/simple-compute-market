@@ -32,6 +32,27 @@ def _hold_lapsed(hold_expires_at: Any) -> bool:
     return expires <= datetime.now(timezone.utc)
 
 
+def _parse_start_utc(start_utc: str | None) -> datetime:
+    if not start_utc:
+        return datetime.now(timezone.utc)
+    text = str(start_utc).strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        parsed = datetime.strptime(str(start_utc).strip(), "%Y-%m-%d %H:%M")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _lease_window_strings(
+    *, start_utc: str | None, duration_seconds: int,
+) -> tuple[str, str]:
+    start = _parse_start_utc(start_utc)
+    end = start + timedelta(seconds=int(duration_seconds))
+    return start.isoformat(), end.strftime("%Y-%m-%d %H:%M")
+
+
 async def _commit_capacity_hold(
     *,
     capacity: Any,
@@ -39,6 +60,7 @@ async def _commit_capacity_hold(
     escrow_uid: str,
     duration_seconds: int,
     stage_event: StageEventFn,
+    start_utc: str | None = None,
 ) -> dict[str, Any] | None:
     """Secure an acceptance-time hold for this deal, or None to reserve fresh.
 
@@ -55,13 +77,15 @@ async def _commit_capacity_hold(
             held_allocation.get("allocation_id"),
         )
         return None
-    lease_end_utc = (
-        datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
-    ).strftime("%Y-%m-%d %H:%M")
+    lease_start_utc, lease_end_utc = _lease_window_strings(
+        start_utc=start_utc,
+        duration_seconds=duration_seconds,
+    )
     try:
         await capacity.commit(
             resource_id=str(held_allocation.get("resource_id")),
             allocation_id=str(held_allocation["allocation_id"]),
+            lease_start_utc=lease_start_utc,
             lease_end_utc=lease_end_utc,
             idempotency_ref=escrow_uid,
         )
@@ -96,6 +120,7 @@ async def fulfill_vm_obligation(
     ssh_public_key: str,
     order: str | dict[str, Any] | None = None,
     duration_seconds: int = 3600,
+    start_utc: str | None = None,
     listing_id: str | None = None,
     seller_order_id: str | None = None,
     chain_configs: dict[str, Any] | None = None,
@@ -140,6 +165,7 @@ async def fulfill_vm_obligation(
             held_allocation=held_allocation,
             escrow_uid=escrow_uid,
             duration_seconds=duration_seconds,
+            start_utc=start_utc,
             stage_event=stage_event,
         )
         if reserved is None:
@@ -149,6 +175,8 @@ async def fulfill_vm_obligation(
                     "listing_id": listing_id or order_id,
                     "escrow_uid": escrow_uid,
                 },
+                lease_start_utc=start_utc,
+                lease_duration_seconds=duration_seconds,
             )
         if not reserved:
             raise RuntimeError("No available compute VM matched required attributes")
@@ -175,6 +203,21 @@ async def fulfill_vm_obligation(
         # capacity-delta subscriber (reacting to the reserve above), not
         # inline here — another storefront's reservation must trigger
         # the same reconciliation, so it can't live in this deal flow.
+
+        start_dt = _parse_start_utc(start_utc)
+        delay_seconds = (start_dt - datetime.now(timezone.utc)).total_seconds()
+        if delay_seconds > 0:
+            stage_event(
+                "provision", "scheduled",
+                listing_id=order_id,
+                escrow_uid=escrow_uid,
+                resource_id=reserved_resource_id,
+                allocation_id=reserved_allocation_id,
+                vm_host=reserved_vm_host,
+                lease_start_utc=start_dt.isoformat(),
+                delay_seconds=delay_seconds,
+            )
+            await asyncio.sleep(delay_seconds)
 
         async def _record_job_id(job_id: str) -> None:
             await get_sqlite_client().update_escrow(
@@ -239,15 +282,17 @@ async def fulfill_vm_obligation(
             "ssh_public_key": ssh_public_key,
         }
 
-    lease_end_utc = (
-        datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
-    ).strftime("%Y-%m-%d %H:%M")
+    lease_start_utc, lease_end_utc = _lease_window_strings(
+        start_utc=start_utc,
+        duration_seconds=duration_seconds,
+    )
 
     if reserved_resource_id:
         try:
             await capacity.commit(
                 resource_id=reserved_resource_id,
                 allocation_id=reserved_allocation_id,
+                lease_start_utc=lease_start_utc,
                 lease_end_utc=lease_end_utc,
                 idempotency_ref=escrow_uid,
             )
@@ -303,6 +348,7 @@ async def fulfill_vm_obligation(
                 escrow_uid=escrow_uid,
                 vm_host=reserved_vm_host,
                 vm_target=vm_target,
+                lease_start_utc=lease_start_utc,
                 lease_end_utc=lease_end_utc,
             )
             logger.info(

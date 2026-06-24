@@ -15,7 +15,7 @@ Simple Compute Market is inspired by [Compositional Game Theory (CGT)](https://g
 - `domains/vms/provisioning/service/` — VM provisioning microservice
 - `kit/alkahest/`, `kit/config/`, `kit/identity/` — Shared from-below helpers for chain settlement, config, and identity
 - `kit/policy/` — Shared negotiation middleware machinery
-- `core/registry/` — Listings registry / indexer API (FastAPI)
+- `core/registry/` — Listing registry API (FastAPI)
 - `core/registry-client/` — Async + sync Python client for the registry HTTP API
 - `core/storefront-client/` — Async + sync Python client for the storefront HTTP API
 - `compose/` — Docker Compose stacks for the seller side
@@ -31,7 +31,7 @@ Pick the role you're standing up:
 
 - **Buy compute** → [`docs/buyer-quickstart.md`](./docs/buyer-quickstart.md)
 - **Sell compute** → [`docs/seller-quickstart.md`](./docs/seller-quickstart.md)
-- **Run your own indexer registry** → [`docs/indexer-quickstart.md`](./docs/indexer-quickstart.md)
+- **Run your own listing registry** → [`docs/indexer-quickstart.md`](./docs/indexer-quickstart.md)
 - **Add FRP reverse-proxy for VM subdomains (seller)** → [`docs/seller-frp-setup.md`](./docs/seller-frp-setup.md)
 - **Set up a private ZeroTier overlay (operator)** → [`docs/zerotier-setup.md`](./docs/zerotier-setup.md)
 

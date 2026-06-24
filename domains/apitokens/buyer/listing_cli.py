@@ -1,4 +1,4 @@
-"""`market tokens listing` — read-only views over the registry indexer.
+"""`market tokens listing` — read-only views over the listing registry.
 
 Mirrors the VM plugin's listing verbs at the same altitude: fan-in
 across the configured registries (filtered to those declaring the
@@ -96,7 +96,7 @@ def format_accepted_escrows(raw: Any) -> str:
 def listing_list(
     registry_urls: str = typer.Option(
         None, "--registry-urls", "-r",
-        help="Comma-separated registry indexer base URLs "
+        help="Comma-separated listing registry base URLs "
              "(config.toml: registry.urls). The result is the union "
              "across all registries, deduped by listing_id.",
     ),
@@ -119,7 +119,7 @@ def listing_list(
     limit: int = typer.Option(50, "--limit", "-l", help="Maximum listings to fetch (1-200)."),
     offset: int = typer.Option(0, "--offset", "-o", help="Pagination offset."),
 ) -> None:
-    """List open API-token listings from the registry indexer."""
+    """List open API-token listings from the listing registry."""
     from core_buyer.cli import parse_filter_options
 
     from .common import (
@@ -215,7 +215,7 @@ def listing_show(
     listing_id: str = typer.Argument(..., help="Listing ID"),
     registry_urls: str = typer.Option(
         None, "--registry-urls", "-r",
-        help="Comma-separated registry indexer base URLs "
+        help="Comma-separated listing registry base URLs "
              "(config.toml: registry.urls). The first registry that "
              "knows the listing wins; others are skipped.",
     ),

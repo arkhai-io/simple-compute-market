@@ -124,7 +124,8 @@ class FakeSite:
             if allocation is None:
                 return httpx.Response(404, json={"detail": "not found"})
             allocation["state"] = "leased"
-            allocation["lease_end_utc"] = body["lease_end_utc"]
+            allocation["lease_start_utc"] = body.get("lease_start_utc")
+            allocation["lease_end_utc"] = body.get("lease_end_utc")
             self._emit("committed", allocation["resource_id"])
             return httpx.Response(200, json={"allocation": allocation})
 

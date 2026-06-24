@@ -135,6 +135,7 @@ async def _register_vm_lease_with_settings(
     vm_host: str,
     vm_target: str,
     lease_end_utc: str,
+    lease_start_utc: str | None = None,
 ) -> None:
     lease_end_dt = datetime.strptime(lease_end_utc, "%Y-%m-%d %H:%M").replace(
         tzinfo=timezone.utc,
@@ -150,6 +151,7 @@ async def _register_vm_lease_with_settings(
             escrow_uid=escrow_uid,
             vm_host=vm_host,
             vm_target=vm_target,
+            lease_start_utc=lease_start_utc,
             lease_end_utc=lease_end_dt,
         )
 
@@ -160,6 +162,7 @@ async def fulfill_compute_obligation(
     ssh_public_key: str,
     order: str | dict | None = None,
     duration_seconds: int = 3600,
+    start_utc: str | None = None,
     listing_id: str | None = None,
     seller_order_id: str | None = None,
     negotiation_id: str | None = None,
@@ -195,6 +198,7 @@ async def fulfill_compute_obligation(
         ssh_public_key=ssh_public_key,
         order=order,
         duration_seconds=duration_seconds,
+        start_utc=start_utc,
         listing_id=listing_id,
         seller_order_id=seller_order_id,
         chain_configs=CHAINS,

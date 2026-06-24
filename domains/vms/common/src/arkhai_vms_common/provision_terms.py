@@ -20,6 +20,14 @@ class VmProvisionTerms(BaseModel):
         return int(raw) if raw is not None else None
 
     @property
+    def start_utc(self) -> str | None:
+        raw = self.payload.get("start_utc")
+        if raw is None:
+            return None
+        text = str(raw).strip()
+        return text or None
+
+    @property
     def ssh_public_key(self) -> str:
         raw = self.payload.get("ssh_public_key")
         return raw if isinstance(raw, str) else ""
@@ -34,12 +42,15 @@ def make_vm_provision_terms(
     *,
     duration_seconds: int,
     ssh_public_key: str,
+    start_utc: str | None = None,
     compute_resource: dict[str, Any] | None = None,
 ) -> VmProvisionTerms:
     payload: dict[str, Any] = {
         "duration_seconds": int(duration_seconds),
         "ssh_public_key": ssh_public_key,
     }
+    if start_utc is not None:
+        payload["start_utc"] = str(start_utc)
     if compute_resource is not None:
         payload["compute_resource"] = compute_resource
     return VmProvisionTerms(payload=payload)
@@ -66,6 +77,14 @@ def provision_payload(terms: Any) -> dict[str, Any]:
 def provision_duration_seconds(terms: Any) -> int | None:
     raw = provision_payload(terms).get("duration_seconds")
     return int(raw) if raw is not None else None
+
+
+def provision_start_utc(terms: Any) -> str | None:
+    raw = provision_payload(terms).get("start_utc")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
 
 
 def provision_ssh_public_key(terms: Any) -> str:

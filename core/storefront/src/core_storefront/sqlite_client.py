@@ -259,6 +259,7 @@ class SQLiteClient:
                   -- unlimited). Stays for the lifetime of the thread; the agreed
                   -- value below is just an echo when the negotiation succeeds.
                   requested_duration_seconds INTEGER,
+                  requested_start_utc TEXT,
                   -- Buyer's escrow shape proposal — opaque JSON blob captured at
                   -- /negotiate/new (validated against the listing's acceptance
                   -- set). Persisted because settlement-time verification
@@ -323,6 +324,10 @@ class SQLiteClient:
                 pass
             try:
                 cur.execute("ALTER TABLE negotiation_threads ADD COLUMN requested_duration_seconds INTEGER")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN requested_start_utc TEXT")
             except sqlite3.OperationalError:
                 pass
             try:
@@ -1177,6 +1182,7 @@ class SQLiteClient:
         negotiation_id: str,
         agreed_price: int | str | float,
         agreed_duration_seconds: int,
+        agreed_start_utc: str | None = None,
     ) -> None:
         """Record the agreement artifact that comes out of a successful negotiation.
 
@@ -1202,6 +1208,7 @@ class SQLiteClient:
                     UPDATE negotiation_threads
                     SET agreed_price = ?,
                         agreed_duration_seconds = ?,
+                        requested_start_utc = COALESCE(requested_start_utc, ?),
                         agreed_at = ?,
                         updated_at = ?
                     WHERE negotiation_id = ?
@@ -1209,6 +1216,7 @@ class SQLiteClient:
                     (
                         agreed_price_text,
                         int(agreed_duration_seconds),
+                        agreed_start_utc,
                         now,
                         now,
                         negotiation_id,
@@ -1241,6 +1249,7 @@ class SQLiteClient:
                            our_agent_id, their_agent_id, status,
                            created_at, updated_at, terminal_state,
                            requested_duration_seconds,
+                           requested_start_utc,
                            buyer_escrow_proposal,
                            agreed_price, agreed_duration_seconds, agreed_at,
                            buyer, matched_offer_id
@@ -1256,6 +1265,7 @@ class SQLiteClient:
                     "our_agent_id", "their_agent_id", "status",
                     "created_at", "updated_at", "terminal_state",
                     "requested_duration_seconds",
+                    "requested_start_utc",
                     "buyer_escrow_proposal",
                     "agreed_price", "agreed_duration_seconds", "agreed_at",
                     "buyer", "matched_offer_id",
@@ -1900,6 +1910,7 @@ class SQLiteClient:
         our_initial_price: int | str | float | None = None,
         our_strategy: str | None = None,
         requested_duration_seconds: int | None = None,
+        requested_start_utc: str | None = None,
         buyer_escrow_proposal: dict[str, Any] | None = None,
     ) -> None:
         """Create a new negotiation thread with private local state.
@@ -1916,6 +1927,7 @@ class SQLiteClient:
             our_strategy: Private strategy
             requested_duration_seconds: Buyer's duration ask from /negotiate/new.
                 Validated against the listing's max_duration_seconds upstream.
+            requested_start_utc: Buyer's requested lease start. None means now.
             buyer_escrow_proposal: The buyer's accepted escrow proposal,
                 persisted as a JSON blob. Settlement reads this back to
                 reconstruct the expected on-chain obligation_data. None
@@ -1940,15 +1952,17 @@ class SQLiteClient:
                         negotiation_id, our_listing_id, their_listing_id,
                         our_agent_id, their_agent_id, status,
                         requested_duration_seconds,
+                        requested_start_utc,
                         buyer_escrow_proposal,
                         created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         negotiation_id, our_listing_id, their_listing_id,
                         our_agent_id, their_agent_id, status,
                         requested_duration_seconds,
+                        requested_start_utc,
                         proposal_blob,
                         timestamp, timestamp,
                     ),
@@ -2405,6 +2419,7 @@ class SQLiteClient:
                     SELECT negotiation_id, our_listing_id, their_agent_id,
                            status, terminal_state,
                            requested_duration_seconds,
+                           requested_start_utc,
                            agreed_price, agreed_duration_seconds,
                            agreed_at, created_at, updated_at
                     FROM negotiation_threads
@@ -2418,6 +2433,7 @@ class SQLiteClient:
                     "negotiation_id", "our_listing_id", "buyer_address",
                     "status", "terminal_state",
                     "requested_duration_seconds",
+                    "requested_start_utc",
                     # Column stays ``agreed_price``; wire field is
                     # ``agreed_amount`` (absolute amount in base units).
                     "agreed_amount", "agreed_duration_seconds",
@@ -2456,6 +2472,7 @@ class SQLiteClient:
                     SELECT negotiation_id, our_listing_id, their_listing_id,
                            our_agent_id, their_agent_id, status, terminal_state,
                            requested_duration_seconds,
+                           requested_start_utc,
                            agreed_price, agreed_duration_seconds, agreed_at,
                            created_at, updated_at
                     FROM negotiation_threads
@@ -2471,6 +2488,7 @@ class SQLiteClient:
                     "negotiation_id", "our_listing_id", "their_listing_id",
                     "our_agent_id", "their_agent_id", "status", "terminal_state",
                     "requested_duration_seconds",
+                    "requested_start_utc",
                     # Column is named ``agreed_price`` (kept from before the
                     # per-hour → absolute refactor); the wire field is
                     # ``agreed_amount`` since it holds an absolute amount.
@@ -2640,4 +2658,3 @@ class SQLiteClient:
                 conn.close()
 
         return await asyncio.to_thread(_query)
-

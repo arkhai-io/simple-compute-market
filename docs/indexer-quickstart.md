@@ -1,15 +1,15 @@
-# Indexer quickstart
+# Listing registry quickstart
 
-How to stand up your own indexer registry. Reasons to run one:
+How to stand up your own listing registry. Reasons to run one:
 
 - **Curate which sellers can publish and which buyers can query**
   (bearer-token auth, §6).
 - **No third-party rate limits.**
 - **Custom `filter-spec.yaml`** — the vocabulary for `gpu_model`,
-  `region`, etc. is per-indexer.
+  `region`, etc. is per registry.
 - **Solo testing** — no fanout.
 
-`compose/seller.yml` is registry-agnostic, so an indexer can run on
+`compose/seller.yml` is registry-agnostic, so a listing registry can run on
 the same host as a seller or anywhere else.
 
 ## 1. Build the image
@@ -37,10 +37,10 @@ Fill in:
 
 The example file gates reads and writes independently and ships with
 both on (`REGISTRY_REQUIRE_READ_API_KEY=true`,
-`REGISTRY_REQUIRE_WRITE_API_KEY=true`) — a private indexer where buyers
+`REGISTRY_REQUIRE_WRITE_API_KEY=true`) — a private listing registry where buyers
 hold read keys and sellers hold write keys.
 
-For a fully public indexer (anyone can publish and query) set both to
+For a fully public listing registry (anyone can publish and query) set both to
 `false` and drop the two key vars. For an open market — public
 discovery, publishing limited to vetted sellers — set only
 `REGISTRY_REQUIRE_WRITE_API_KEY=true` and hand write keys to sellers.
@@ -66,7 +66,7 @@ In each storefront / buyer TOML:
 urls = ["http://<INDEXER_HOST>:8080"]
 ```
 
-When the indexer and seller share a docker network, use the service
+When the listing registry and seller share a docker network, use the service
 name: `urls = ["http://registry:8080"]`.
 
 ## 5. Checks
@@ -86,7 +86,7 @@ curl -s "http://<INDEXER_HOST>:8080/agents/eip155%3A84532%3A0x8004A818BFB912233c
 ## 6. Bearer-token auth
 
 `config.registry.env.example` ships with both gates on. To disable auth
-(fully public indexer) set `REGISTRY_REQUIRE_READ_API_KEY` and
+(fully public listing registry) set `REGISTRY_REQUIRE_READ_API_KEY` and
 `REGISTRY_REQUIRE_WRITE_API_KEY` to `false` and drop the two key vars.
 
 Flow:

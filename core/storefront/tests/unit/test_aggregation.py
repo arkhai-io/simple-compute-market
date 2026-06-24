@@ -43,14 +43,28 @@ class FakeSite:
             "attributes": {"vm_host": "h"},
         }]
 
-    async def probe(self, *, claim: Mapping[str, Any] | None = None):
+    async def probe(
+        self,
+        *,
+        claim: Mapping[str, Any] | None = None,
+        lease_start_utc=None,
+        lease_duration_seconds=None,
+    ):
         self._check()
         requested = int((claim or {}).get("gpu_count") or 1)
         if self.available < requested:
             return None
         return {"resource_id": self.resource_id, "allocated_gpu_count": requested}
 
-    async def reserve(self, *, claim=None, deal_ref=None, ttl_seconds=None):
+    async def reserve(
+        self,
+        *,
+        claim=None,
+        deal_ref=None,
+        ttl_seconds=None,
+        lease_start_utc=None,
+        lease_duration_seconds=None,
+    ):
         self._check()
         requested = int((claim or {}).get("gpu_count") or 1)
         if self.available < requested:
@@ -65,7 +79,8 @@ class FakeSite:
         }
 
     async def commit(self, *, resource_id, allocation_id=None,
-                     lease_end_utc, idempotency_ref=None) -> None:
+                     lease_start_utc=None, lease_duration_seconds=None,
+                     lease_end_utc=None, idempotency_ref=None) -> None:
         self._check()
         if allocation_id not in self.allocations:
             raise LookupError(f"unknown allocation {allocation_id}")
@@ -163,7 +178,8 @@ async def test_writes_route_to_the_owning_site():
     await client.commit(
         resource_id=reserved["resource_id"],
         allocation_id=allocation_id,
-        lease_end_utc="2099-01-01 00:00",
+        lease_start_utc="2099-01-01T00:00:00Z",
+        lease_end_utc="2099-01-01 01:00",
     )
     assert a.committed == [allocation_id]
 

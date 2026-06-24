@@ -39,7 +39,8 @@ async def test_truncates_the_ledger_lease_to_now(db):
         await capacity.commit(
             resource_id=reserved["resource_id"],
             allocation_id=reserved["allocation_id"],
-            lease_end_utc="2099-01-01 00:00",
+            lease_start_utc="2099-01-01T00:00:00Z",
+            lease_end_utc="2099-01-01 01:00",
         )
         truncated = await truncate_lease_for_abandoned_claim(
             db, escrow_uid="0xabandoned", reason="expiration window passed",

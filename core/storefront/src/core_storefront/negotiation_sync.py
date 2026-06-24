@@ -232,6 +232,7 @@ async def create_sync_negotiation_thread(
     our_initial_amount: int,
     our_strategy: str,
     requested_duration_seconds: int | None,
+    requested_start_utc: str | None,
     buyer_escrow_proposal: dict[str, Any] | None,
     opening_sender: str,
     opening_amount: int,
@@ -249,6 +250,7 @@ async def create_sync_negotiation_thread(
             our_initial_price=our_initial_amount,
             our_strategy=our_strategy,
             requested_duration_seconds=requested_duration_seconds,
+            requested_start_utc=requested_start_utc,
             buyer_escrow_proposal=buyer_escrow_proposal,
         )
         await txn.add_message(

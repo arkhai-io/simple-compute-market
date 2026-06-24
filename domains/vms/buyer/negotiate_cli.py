@@ -25,6 +25,15 @@ from .deal_helpers import load_negotiation_resume_point
 from .run_log import RunLog
 
 
+def _normalize_start_utc(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() == "now":
+        return None
+    return text
+
+
 def register(app: typer.Typer) -> None:
     """Register the top-level `market negotiate` command.
 
@@ -92,6 +101,11 @@ def register(app: typer.Typer) -> None:
                  "Required for fresh runs — sent on /negotiate/new and "
                  "validated server-side against the listing's max_duration_seconds. "
                  "Resumed runs read it from the run-log.",
+        ),
+        start_utc: Optional[str] = typer.Option(
+            None, "--start-utc",
+            help="Requested lease start time in UTC (ISO-8601 or YYYY-MM-DD HH:MM). "
+                 "Omit or pass 'now' for immediate start.",
         ),
         token_contract: Optional[str] = typer.Option(
             None, "--token-contract",
@@ -251,6 +265,7 @@ def register(app: typer.Typer) -> None:
         duration_seconds = (
             int(round(duration_hours * 3600)) if duration_hours is not None else None
         )
+        requested_start_utc = _normalize_start_utc(start_utc)
 
         # Pick one accepted_escrows entry — token, escrow contract, and
         # chain all come from the listing. ``--token-contract`` (when
@@ -341,6 +356,7 @@ def register(app: typer.Typer) -> None:
             max_rounds=max_rounds,
             seller_wallet_address=seller_wallet,
             duration_seconds=duration_seconds,
+            start_utc=requested_start_utc,
             token_contract=token_contract,
             token_decimals=token_decimals,
             resumed_from=from_run,
@@ -400,6 +416,7 @@ def register(app: typer.Typer) -> None:
             assert picked_entry is not None  # listing fetched + entry picked above
             provision_terms = make_vm_provision_terms(
                 duration_seconds=int(duration_seconds),
+                start_utc=requested_start_utc,
                 ssh_public_key="",  # negotiate-only flow; settle is a separate command
             )
             escrow_proposal = escrow_proposal_from_accepted_entry(

@@ -161,12 +161,20 @@ class AggregateCapacityClient:
         return rows
 
     async def probe(
-        self, *, claim: Mapping[str, Any] | None = None,
+        self,
+        *,
+        claim: Mapping[str, Any] | None = None,
+        lease_start_utc: str | None = None,
+        lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         snapshots = await self._snapshots()
         for name in self._placement(self.site_names, snapshots, claim=claim):
             try:
-                match = await self._sites[name].probe(claim=claim)
+                match = await self._sites[name].probe(
+                    claim=claim,
+                    lease_start_utc=lease_start_utc,
+                    lease_duration_seconds=lease_duration_seconds,
+                )
             except Exception as exc:
                 logger.warning("[AGGREGATOR] probe at site %r failed: %s", name, exc)
                 continue
@@ -182,6 +190,8 @@ class AggregateCapacityClient:
         claim: Mapping[str, Any] | None = None,
         deal_ref: Mapping[str, Any] | None = None,
         ttl_seconds: float | None = None,
+        lease_start_utc: str | None = None,
+        lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         """Route to one site in placement order; fall back on refusal.
 
@@ -193,7 +203,11 @@ class AggregateCapacityClient:
         for name in self._placement(self.site_names, snapshots, claim=claim):
             try:
                 reserved = await self._sites[name].reserve(
-                    claim=claim, deal_ref=deal_ref, ttl_seconds=ttl_seconds,
+                    claim=claim,
+                    deal_ref=deal_ref,
+                    ttl_seconds=ttl_seconds,
+                    lease_start_utc=lease_start_utc,
+                    lease_duration_seconds=lease_duration_seconds,
                 )
             except Exception as exc:
                 logger.warning(
@@ -214,7 +228,8 @@ class AggregateCapacityClient:
         *,
         resource_id: str,
         allocation_id: str | None = None,
-        lease_end_utc: str,
+        lease_start_utc: str | None = None,
+        lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
     ) -> None:
         """Commit at the owning site (cache-first, then the rest).
@@ -229,6 +244,7 @@ class AggregateCapacityClient:
                 await self._sites[name].commit(
                     resource_id=resource_id,
                     allocation_id=allocation_id,
+                    lease_start_utc=lease_start_utc,
                     lease_end_utc=lease_end_utc,
                     idempotency_ref=idempotency_ref,
                 )

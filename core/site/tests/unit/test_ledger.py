@@ -121,17 +121,47 @@ def test_reserve_decrements_and_releases_restore(seeded: CapacityLedgerService):
     assert seeded.release(deal_ref={"escrow_uid": "0xesc"}) is None
 
 
+def test_future_reservation_ignores_non_overlapping_current_lease(seeded: CapacityLedgerService):
+    first = seeded.reserve(
+        claim={"gpu_count": 8},
+        deal_ref={"escrow_uid": "0xnow"},
+        lease_start_utc="2030-01-01T00:00:00Z",
+        lease_duration_seconds=3600,
+    )
+    assert first is not None
+
+    assert seeded.reserve(
+        claim={"gpu_count": 1},
+        deal_ref={"escrow_uid": "0xoverlap"},
+        lease_start_utc="2030-01-01T00:30:00Z",
+        lease_duration_seconds=3600,
+    ) is None
+
+    later = seeded.reserve(
+        claim={"gpu_count": 8},
+        deal_ref={"escrow_uid": "0xlater"},
+        lease_start_utc="2030-01-01T02:00:00Z",
+        lease_duration_seconds=3600,
+    )
+    assert later is not None
+    assert later["allocated_gpu_count"] == 8
+
+    # Future bookings do not consume the current snapshot.
+    assert seeded.snapshot()[0]["available_units"] == 8
+
+
 def test_commit_marks_leased_and_sets_window(seeded: CapacityLedgerService):
     reserved = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xa"})
     committed = seeded.commit(
         resource_id=reserved["resource_id"],
         allocation_id=reserved["allocation_id"],
-        lease_end_utc="2099-01-01 00:00",
+        lease_start_utc="2099-01-01T00:00:00Z",
+        lease_end_utc="2099-01-01T01:00:00Z",
         idempotency_ref="0xa",
     )
     assert committed["state"] == "leased"
-    assert committed["lease_end_utc"] == "2099-01-01 00:00"
-    assert committed["lease_start_utc"] is not None
+    assert committed["lease_start_utc"] == "2099-01-01T00:00:00+00:00"
+    assert committed["lease_end_utc"] == "2099-01-01T01:00:00Z"
 
     # Committing a released allocation conflicts.
     seeded.release(allocation_id=reserved["allocation_id"])
@@ -249,7 +279,8 @@ def test_list_lease_due_and_begin_releasing(seeded: CapacityLedgerService):
     seeded.commit(
         resource_id=reserved["resource_id"],
         allocation_id=reserved["allocation_id"],
-        lease_end_utc="2020-01-01 00:00",  # already expired
+        lease_start_utc="2020-01-01T00:00:00Z",
+        lease_end_utc="2020-01-01 00:00",
     )
     due = seeded.list_lease_due(datetime.now(timezone.utc))
     assert [a["allocation_id"] for a in due] == [reserved["allocation_id"]]
@@ -268,6 +299,7 @@ def test_list_lease_due_and_begin_releasing(seeded: CapacityLedgerService):
     seeded.commit(
         resource_id=future["resource_id"],
         allocation_id=future["allocation_id"],
+        lease_start_utc="2099-01-01T00:00:00Z",
         lease_end_utc="2099-01-01 00:00",
     )
     assert seeded.list_lease_due(datetime.now(timezone.utc)) == []

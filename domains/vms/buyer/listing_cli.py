@@ -1,7 +1,7 @@
-"""`market listing` — read-only views over the registry indexer.
+"""`market listing` — read-only views over the listing registry.
 
 Pure buyers don't run a storefront, so this module only covers
-operations that hit the operator-run registry indexer:
+operations that hit the operator-run listing registry:
 
     market listing list           # browse open listings
     market listing show <id>      # inspect a single listing
@@ -50,7 +50,7 @@ def _normalize_registry_url(raw_url: str) -> str:
 
 
 def _fetch_json(url: str) -> dict:
-    """GET a JSON document from the registry indexer."""
+    """GET a JSON document from the listing registry."""
     try:
         request = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(request, timeout=10) as response:
@@ -73,7 +73,7 @@ def _fetch_json(url: str) -> dict:
 def listing_list(
     registry_urls: str = typer.Option(
         None, "--registry-urls", "-r",
-        help="Comma-separated registry indexer base URLs "
+        help="Comma-separated listing registry base URLs "
              "(config.toml: registry.urls). The result is the union "
              "across all registries, deduped by listing_id.",
     ),
@@ -116,7 +116,7 @@ def listing_list(
     limit: int = typer.Option(50, "--limit", "-l", help="Maximum listings to fetch (1-200)."),
     offset: int = typer.Option(0, "--offset", "-o", help="Pagination offset."),
 ) -> None:
-    """List open listings from the registry indexer.
+    """List open listings from the listing registry.
 
     Spec filters mirror the registry API: equality for strings/enums/bools,
     `_min` semantics for numerics. Without any filters, returns all open
@@ -237,7 +237,7 @@ def listing_show(
         None,
         "--registry-urls",
         "-r",
-        help="Comma-separated registry indexer base URLs "
+        help="Comma-separated listing registry base URLs "
              "(config.toml: registry.urls). The first registry that "
              "knows the listing wins; others are skipped.",
     ),
@@ -248,7 +248,7 @@ def listing_show(
     ),
 ) -> None:
     """Show a single listing by ID, fetched from the configured
-    registry indexers — the first one that knows the listing wins."""
+    listing registries — the first one that knows the listing wins."""
     from .common import (
         VMS_SCHEMA_ID, resolve_indexer_urls_for_schema,
         resolve_discovery_timeout, resolve_indexer_auth,

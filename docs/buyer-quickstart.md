@@ -1,6 +1,6 @@
 # Buyer quickstart
 
-Install the `market` CLI, point it at an indexer, find a listing, buy
+Install the `market` CLI, point it at a listing registry, find a listing, buy
 compute, and SSH into the leased VM.
 
 For the seller side see [`seller-quickstart.md`](./seller-quickstart.md).
@@ -77,14 +77,14 @@ chain_id = 84532
 rpc_url  = "https://sepolia.base.org"   # public RPC; or your own provider
 
 [registry]
-# The Arkhai public indexer registry (preprod, Base Sepolia listings):
+# The Arkhai public listing registry (preprod, Base Sepolia listings):
 urls = ["http://34.41.205.175/registry"]
-# Or point at any other indexer, e.g. a self-hosted one:
+# Or point at any other listing registry, e.g. a self-hosted one:
 # urls = ["http://<INDEXER_HOST>:8080"]
 
 [registry.auth]
-# Required when the indexer gates reads (REGISTRY_REQUIRE_READ_API_KEY=true).
-# The public preprod indexer is currently read-open — no token needed.
+# Required when the listing registry gates reads (REGISTRY_REQUIRE_READ_API_KEY=true).
+# The public preprod listing registry is currently read-open — no token needed.
 # Keys must match the URLs in [registry] urls exactly (scheme, host,
 # port, no trailing slash).
 # "http://<INDEXER_HOST>:8080" = "<your-token>"

@@ -121,7 +121,11 @@ def make_capacity_router(
         ledger: CapacityLedgerService = Depends(get_ledger),
     ) -> MatchResponse:
         try:
-            return MatchResponse(match=ledger.probe(claim=body.claim))
+            return MatchResponse(match=ledger.probe(
+                claim=body.claim,
+                lease_start_utc=body.lease_start_utc,
+                lease_duration_seconds=body.lease_duration_seconds,
+            ))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
@@ -145,6 +149,8 @@ def make_capacity_router(
                 claim=body.claim,
                 deal_ref=body.deal_ref,
                 ttl_seconds=body.ttl_seconds,
+                lease_start_utc=body.lease_start_utc,
+                lease_duration_seconds=body.lease_duration_seconds,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
@@ -164,6 +170,7 @@ def make_capacity_router(
             allocation = ledger.commit(
                 resource_id=body.resource_id,
                 allocation_id=allocation_id,
+                lease_start_utc=body.lease_start_utc,
                 lease_end_utc=body.lease_end_utc,
                 idempotency_ref=body.idempotency_ref,
             )

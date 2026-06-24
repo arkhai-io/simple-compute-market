@@ -301,6 +301,7 @@ async def start_sync_negotiation(
         our_initial_amount=our_amount,
         our_strategy=strategy,
         requested_duration_seconds=None,
+        requested_start_utc=None,
         buyer_escrow_proposal=(
             accepted_proposal.model_dump()
             if accepted_proposal is not None

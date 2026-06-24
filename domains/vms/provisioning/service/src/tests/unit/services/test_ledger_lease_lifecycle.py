@@ -70,6 +70,7 @@ def _expired_allocation(ledger: CapacityLedgerService, escrow: str = "0xe") -> d
     ledger.commit(
         resource_id=reserved["resource_id"],
         allocation_id=reserved["allocation_id"],
+        lease_start_utc="2020-01-01T00:00:00Z",
         lease_end_utc="2020-01-01 00:00",
     )
     ledger.attach_lease(
@@ -173,11 +174,13 @@ async def test_releasing_allocation_past_grace_marks_release_failed(
 @pytest.mark.asyncio
 async def test_releasing_allocation_within_grace_skips(session_factory, ledger):
     reserved = ledger.reserve(claim={}, deal_ref={})
-    soon = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    soon_dt = datetime.now(timezone.utc) - timedelta(seconds=1)
+    soon = soon_dt.isoformat()
     ledger.commit(
         resource_id=reserved["resource_id"],
         allocation_id=reserved["allocation_id"],
-        lease_end_utc=soon,  # expired 1s ago — well within the 300s grace
+        lease_start_utc=(soon_dt - timedelta(seconds=3600)).isoformat(),
+        lease_end_utc=soon,
     )
     ledger.begin_releasing(reserved["allocation_id"], vm_remove_job_id="check-1")
 
@@ -263,10 +266,12 @@ async def test_due_leased_allocation_submits_vm_remove_job(session_factory, ledg
     # Lease ended seconds ago — within grace, so the same cycle that
     # submits the vm_remove job must NOT force-release it.
     reserved = ledger.reserve(claim={"gpu_count": 2}, deal_ref={"escrow_uid": "0xe"})
-    just_expired = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    just_expired_dt = datetime.now(timezone.utc) - timedelta(seconds=1)
+    just_expired = just_expired_dt.isoformat()
     ledger.commit(
         resource_id=reserved["resource_id"],
         allocation_id=reserved["allocation_id"],
+        lease_start_utc=(just_expired_dt - timedelta(seconds=3600)).isoformat(),
         lease_end_utc=just_expired,
     )
     allocation = ledger.attach_lease(

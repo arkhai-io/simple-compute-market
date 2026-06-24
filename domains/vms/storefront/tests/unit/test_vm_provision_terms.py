@@ -13,6 +13,7 @@ from arkhai_vms_common import (
     provision_duration_seconds,
     provision_payload,
     provision_ssh_public_key,
+    provision_start_utc,
 )
 from market_core.schemas import ProvisionTerms
 
@@ -22,12 +23,14 @@ def test_accessors_read_a_core_envelope():
         "kind": "compute.v1",
         "payload": {
             "duration_seconds": 3600,
+            "start_utc": "2030-01-01T00:00:00Z",
             "ssh_public_key": "ssh-ed25519 AAAA",
             "compute_resource": {"gpu_model": "H200"},
         },
     })
 
     assert provision_duration_seconds(terms) == 3600
+    assert provision_start_utc(terms) == "2030-01-01T00:00:00Z"
     assert provision_ssh_public_key(terms) == "ssh-ed25519 AAAA"
     assert provision_compute_resource(terms) == {"gpu_model": "H200"}
 
@@ -45,6 +48,7 @@ def test_accessors_tolerate_missing_or_foreign_payloads():
     foreign = ProvisionTerms(kind="fiat.v1", payload={"invoice_id": "inv-1"})
 
     assert provision_duration_seconds(foreign) is None
+    assert provision_start_utc(foreign) is None
     assert provision_ssh_public_key(foreign) == ""
     assert provision_compute_resource(foreign) is None
     assert provision_payload(None) == {}
@@ -53,6 +57,7 @@ def test_accessors_tolerate_missing_or_foreign_payloads():
 def test_make_vm_provision_terms_matches_the_wire_shape():
     terms = make_vm_provision_terms(
         duration_seconds=3600,
+        start_utc="2030-01-01T00:00:00Z",
         ssh_public_key="ssh-ed25519 AAAA",
         compute_resource={"gpu_model": "H200"},
     )
@@ -61,12 +66,14 @@ def test_make_vm_provision_terms_matches_the_wire_shape():
         "kind": "compute.v1",
         "payload": {
             "duration_seconds": 3600,
+            "start_utc": "2030-01-01T00:00:00Z",
             "ssh_public_key": "ssh-ed25519 AAAA",
             "compute_resource": {"gpu_model": "H200"},
         },
     }
     # Properties mirror the module accessors for domain-constructed terms.
     assert terms.duration_seconds == 3600
+    assert terms.start_utc == "2030-01-01T00:00:00Z"
     assert terms.ssh_public_key == "ssh-ed25519 AAAA"
     assert terms.compute_resource == {"gpu_model": "H200"}
 

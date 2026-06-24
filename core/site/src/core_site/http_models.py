@@ -47,6 +47,15 @@ class SnapshotResponse(BaseModel):
 
 class ProbeRequest(BaseModel):
     claim: dict[str, Any] = Field(default_factory=dict)
+    lease_start_utc: Optional[str] = Field(
+        default=None,
+        description="Requested lease start. Omit/null means now.",
+    )
+    lease_duration_seconds: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Requested lease duration in seconds for window-aware matching.",
+    )
 
 
 class MatchResponse(BaseModel):
@@ -71,6 +80,15 @@ class ReserveRequest(BaseModel):
             "auto-expires unless committed before the deadline."
         ),
     )
+    lease_start_utc: Optional[str] = Field(
+        default=None,
+        description="Requested lease start. Omit/null means now.",
+    )
+    lease_duration_seconds: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Requested lease duration in seconds for window-aware matching.",
+    )
 
 
 class AllocationResponse(BaseModel):
@@ -79,11 +97,14 @@ class AllocationResponse(BaseModel):
 
 class CommitRequest(BaseModel):
     resource_id: str
+    lease_start_utc: Optional[str] = Field(
+        default=None,
+        description="Lease start. Omit/null means now.",
+    )
     lease_end_utc: Optional[str] = Field(
         default=None,
         description=(
-            "When the lease ends (ISO-8601 or 'YYYY-MM-DD HH:MM'). "
-            "Omit for an open-ended commit (no lease tail)."
+            "Derived lease expiry timestamp. Omit for an open-ended commit."
         ),
     )
     idempotency_ref: Optional[str] = None

@@ -116,7 +116,11 @@ class CapacityClient(Protocol):
         ...
 
     async def probe(
-        self, *, claim: Mapping[str, Any] | None = None,
+        self,
+        *,
+        claim: Mapping[str, Any] | None = None,
+        lease_start_utc: str | None = None,
+        lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         """Dry-run match for ``claim`` — consumes nothing."""
         ...
@@ -127,12 +131,16 @@ class CapacityClient(Protocol):
         claim: Mapping[str, Any] | None = None,
         deal_ref: Mapping[str, Any] | None = None,
         ttl_seconds: float | None = None,
+        lease_start_utc: str | None = None,
+        lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         """Atomically check-and-reserve capacity matching ``claim``.
 
         Returns the allocation payload, or None when nothing matches.
         ``ttl_seconds`` requests a soft hold that auto-expires unless
-        committed (two-phase reserve).
+        committed (two-phase reserve). ``lease_start_utc`` omitted means
+        "now"; when ``lease_duration_seconds`` is supplied, matching is
+        against that requested lease window instead of current availability.
         """
         ...
 
@@ -141,7 +149,8 @@ class CapacityClient(Protocol):
         *,
         resource_id: str,
         allocation_id: str | None = None,
-        lease_end_utc: str,
+        lease_start_utc: str | None = None,
+        lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
     ) -> None:
         """Confirm a reservation into an active lease."""

@@ -68,6 +68,43 @@ def parse_utc(value: str | None) -> Optional[datetime]:
     return None
 
 
+def _lease_window(
+    *,
+    lease_start_utc: str | None = None,
+    lease_duration_seconds: int | None = None,
+    lease_end_utc: str | None = None,
+) -> tuple[datetime | None, datetime | None]:
+    """Return a normalized lease window.
+
+    Start omitted means "now" only when a duration is supplied. Without
+    duration or explicit end, callers are using the timeless/open-ended path.
+    """
+    start = parse_utc(lease_start_utc)
+    end = parse_utc(lease_end_utc)
+    if lease_duration_seconds is not None:
+        seconds = int(lease_duration_seconds)
+        if seconds <= 0:
+            raise ValueError("lease_duration_seconds must be > 0")
+        if start is None:
+            start = datetime.now(timezone.utc)
+        end = start + timedelta(seconds=seconds)
+    return start, end
+
+
+def _windows_overlap(
+    a_start: datetime | None,
+    a_end: datetime | None,
+    b_start: datetime | None,
+    b_end: datetime | None,
+) -> bool:
+    """Half-open interval overlap, with None as unbounded."""
+    if a_end is not None and b_start is not None and a_end <= b_start:
+        return False
+    if b_end is not None and a_start is not None and b_end <= a_start:
+        return False
+    return True
+
+
 # Claim keys that request a unit count rather than matching an attribute.
 # "units" is the generic key; "gpu_count" is the VM domain's alias.
 _UNIT_CLAIM_KEYS = ("units", "gpu_count")
@@ -205,12 +242,22 @@ class CapacityLedgerService:
         """Advisory availability view (enabled resources only)."""
         return [r for r in self.list_resources() if r.get("enabled")]
 
-    def probe(self, *, claim: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+    def probe(
+        self,
+        *,
+        claim: Mapping[str, Any] | None = None,
+        lease_start_utc: str | None = None,
+        lease_duration_seconds: int | None = None,
+    ) -> dict[str, Any] | None:
         """Dry-run match for ``claim`` — consumes nothing."""
         requested = _requested_units(claim)
+        window_start, window_end = _lease_window(
+            lease_start_utc=lease_start_utc,
+            lease_duration_seconds=lease_duration_seconds,
+        )
         with self._lock, self._session_factory() as db:
             self._expire_stale_holds(db)
-            match = self._find_candidate(db, claim, requested)
+            match = self._find_candidate(db, claim, requested, window_start, window_end)
             if match is None:
                 return None
             resource, available = match
@@ -222,13 +269,19 @@ class CapacityLedgerService:
         claim: Mapping[str, Any] | None = None,
         deal_ref: Mapping[str, Any] | None = None,
         ttl_seconds: float | None = None,
+        lease_start_utc: str | None = None,
+        lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         """Atomically check-and-reserve capacity matching ``claim``."""
         requested = _requested_units(claim)
         deal = dict(deal_ref or {})
+        window_start, window_end = _lease_window(
+            lease_start_utc=lease_start_utc,
+            lease_duration_seconds=lease_duration_seconds,
+        )
         with self._lock, self._session_factory() as db:
             self._expire_stale_holds(db)
-            match = self._find_candidate(db, claim, requested)
+            match = self._find_candidate(db, claim, requested, window_start, window_end)
             if match is None:
                 return None
             resource, available = match
@@ -246,6 +299,8 @@ class CapacityLedgerService:
                 escrow_uid=deal.get("escrow_uid"),
                 hold_expires_at=hold_expires_at,
                 vm_host=(resource.attributes or {}).get("vm_host"),
+                lease_start_utc=window_start.isoformat() if window_start else None,
+                lease_end_utc=window_end.isoformat() if window_end else None,
             )
             db.add(allocation)
             db.add(CapacityEvent(kind="reserved", resource_id=resource.resource_id))
@@ -260,16 +315,20 @@ class CapacityLedgerService:
         *,
         resource_id: str,
         allocation_id: str | None = None,
+        lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
     ) -> dict[str, Any] | None:
         """Confirm a reservation into an active lease.
 
-        Idempotent: committing an already-leased allocation refreshes the
-        lease end and clears any TTL hold. ``lease_end_utc=None`` commits
-        an open-ended hold (no lease tail — the watchdog never sees it);
-        re-committing without a lease end leaves any existing end alone.
+        Idempotent: committing an already-leased allocation records the
+        derived lease window and clears any TTL hold. ``lease_end_utc=None``
+        commits an open-ended hold (no lease tail — the watchdog never sees it).
         """
+        window_start, window_end = _lease_window(
+            lease_start_utc=lease_start_utc,
+            lease_end_utc=lease_end_utc,
+        )
         with self._lock, self._session_factory() as db:
             allocation = self._find_allocation(
                 db, allocation_id=allocation_id,
@@ -283,10 +342,12 @@ class CapacityLedgerService:
                     f"{allocation.state}; cannot commit"
                 )
             allocation.state = AllocationState.leased.value
-            if lease_end_utc is not None:
+            if window_end is not None:
                 allocation.lease_end_utc = str(lease_end_utc)
             allocation.hold_expires_at = None
-            if not allocation.lease_start_utc:
+            if window_start is not None:
+                allocation.lease_start_utc = window_start.isoformat()
+            elif not allocation.lease_start_utc:
                 allocation.lease_start_utc = datetime.now(timezone.utc).isoformat()
             db.add(CapacityEvent(kind="committed", resource_id=allocation.resource_id))
             db.commit()
@@ -621,7 +682,13 @@ class CapacityLedgerService:
         if lapsed:
             db.commit()
 
-    def _held_units(self, db: Session, resource_id: str) -> int:
+    def _held_units(
+        self,
+        db: Session,
+        resource_id: str,
+        lease_start: datetime | None = None,
+        lease_end: datetime | None = None,
+    ) -> int:
         rows = (
             db.query(SiteAllocation)
             .filter(
@@ -630,13 +697,30 @@ class CapacityLedgerService:
             )
             .all()
         )
-        return sum(int(row.units or 0) for row in rows)
+        if lease_start is None and lease_end is None:
+            return sum(int(row.units or 0) for row in rows)
+        total = 0
+        for row in rows:
+            if row.state == AllocationState.releasing.value:
+                total += int(row.units or 0)
+                continue
+            row_start = parse_utc(row.lease_start_utc)
+            row_end = parse_utc(row.lease_end_utc)
+            if row_start is None and row_end is None:
+                # Legacy/current holds without a window block every window.
+                total += int(row.units or 0)
+                continue
+            if _windows_overlap(lease_start, lease_end, row_start, row_end):
+                total += int(row.units or 0)
+        return total
 
     def _find_candidate(
         self,
         db: Session,
         claim: Mapping[str, Any] | None,
         requested: int,
+        lease_start: datetime | None = None,
+        lease_end: datetime | None = None,
     ) -> tuple[SiteResource, int] | None:
         rows = (
             db.query(SiteResource)
@@ -654,7 +738,7 @@ class CapacityLedgerService:
             ):
                 continue
             available = int(resource.total_units or 0) - self._held_units(
-                db, resource.resource_id
+                db, resource.resource_id, lease_start, lease_end
             )
             if available < requested:
                 continue
@@ -683,7 +767,13 @@ class CapacityLedgerService:
         return q.order_by(SiteAllocation.created_at.desc()).first()
 
     def _resource_payload(self, db: Session, row: SiteResource) -> dict[str, Any]:
-        held = self._held_units(db, row.resource_id)
+        now = datetime.now(timezone.utc)
+        held = self._held_units(
+            db,
+            row.resource_id,
+            now,
+            now + timedelta(microseconds=1),
+        )
         total = int(row.total_units or 0)
         available = max(total - held, 0)
         if available >= total or held <= 0:
