@@ -8,6 +8,7 @@ from arkhai_vms_common.provision_terms import (
     provision_duration_seconds,
     provision_payload,
     provision_ssh_public_key,
+    provision_start_utc,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "provision_duration_seconds",
     "provision_payload",
     "provision_ssh_public_key",
+    "provision_start_utc",
 ]

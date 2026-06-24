@@ -3,9 +3,9 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from domains.vms.provisioning.storefront_models import InterruptDealRequest
 import market_storefront.server  # noqa: F401 - initializes controller import order
 from market_storefront.controllers.admin_controller import AdminController
+from market_storefront.models.capacity_admin_models import InterruptDealRequest
 
 
 class _FakeDb:
