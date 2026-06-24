@@ -29,10 +29,10 @@
     "barter_utils": "0x5f3f1dbd7b74c6b46e8c44f98792a1daf8d69154",
     "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
     "eas_schema_registry": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
-    "escrow_obligation_2_nontierable": "0xc3e53f4d16ae77db1c982e75a937b9f60fe63690",
-    "escrow_obligation_2_tierable": "0x0e801d84fa97b50751dbf25036d067dcf18858bf",
-    "escrow_obligation_nontierable": "0xe6e340d132b5f46d1e472debcd681b2abc16e57e",
-    "escrow_obligation_tierable": "0x99bba657f2bbc93c02d617f8ba121cb8fc104acf"
+    "escrow_obligation_2_default": "0xc3e53f4d16ae77db1c982e75a937b9f60fe63690",
+    "escrow_obligation_2_unconditional": "0x0e801d84fa97b50751dbf25036d067dcf18858bf",
+    "escrow_obligation_default": "0xe6e340d132b5f46d1e472debcd681b2abc16e57e",
+    "escrow_obligation_unconditional": "0x99bba657f2bbc93c02d617f8ba121cb8fc104acf"
   },
   "commit_reveal_obligation_addresses": {
     "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
@@ -41,29 +41,29 @@
   "erc1155_addresses": {
     "barter_utils": "0x2bdcc0de6be1f7d2ee689a0342d76f52e8efaba3",
     "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
-    "escrow_obligation_nontierable": "0x95401dc811bb5740090279ba06cfa8fcf6113778",
-    "escrow_obligation_tierable": "0x36c02da8a0983159322a80ffe9f24b1acff8b570",
+    "escrow_obligation_default": "0x95401dc811bb5740090279ba06cfa8fcf6113778",
+    "escrow_obligation_unconditional": "0x36c02da8a0983159322a80ffe9f24b1acff8b570",
     "payment_obligation": "0x998abeb3e57409262ae5b751f60747921b33613e"
   },
   "erc20_addresses": {
     "barter_utils": "0xcd8a1c3ba11cf5ecfa6267617243239504a98d90",
     "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
-    "escrow_obligation_nontierable": "0xa82ff9afd8f496c3d6ac40e2a0f282e47488cfc9",
-    "escrow_obligation_tierable": "0x9d4454b023096f34b160d6b654540c56a1f81688",
+    "escrow_obligation_default": "0xa82ff9afd8f496c3d6ac40e2a0f282e47488cfc9",
+    "escrow_obligation_unconditional": "0x9d4454b023096f34b160d6b654540c56a1f81688",
     "payment_obligation": "0x1613beb3b2c4f22ee086b2b38c1476a3ce7f78e8"
   },
   "erc721_addresses": {
     "barter_utils": "0x82e01223d51eb87e16a03e24687edf0f294da6f1",
     "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
-    "escrow_obligation_nontierable": "0x851356ae760d987e095750cceb3bc6014560891c",
-    "escrow_obligation_tierable": "0x5eb3bc0a489c5a8288765d2336659ebca68fcd00",
+    "escrow_obligation_default": "0x851356ae760d987e095750cceb3bc6014560891c",
+    "escrow_obligation_unconditional": "0x5eb3bc0a489c5a8288765d2336659ebca68fcd00",
     "payment_obligation": "0xf5059a5d33d5853360d16c683c16e67980206f36"
   },
   "native_token_addresses": {
     "barter_utils": "0x7969c5ed335650692bc04293b07f5bf2e7a673c0",
     "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
-    "escrow_obligation_nontierable": "0x70e0ba845a1a0f2da3359c97e0285013525ffc49",
-    "escrow_obligation_tierable": "0x809d550fca64d94bd9f66e60752a544199cfac3d",
+    "escrow_obligation_default": "0x70e0ba845a1a0f2da3359c97e0285013525ffc49",
+    "escrow_obligation_unconditional": "0x809d550fca64d94bd9f66e60752a544199cfac3d",
     "payment_obligation": "0x4826533b4897376654bb4d4ad88b7fafd0c98528"
   },
   "string_obligation_addresses": {
@@ -73,8 +73,8 @@
   "token_bundle_addresses": {
     "barter_utils": "0xb7278a61aa25c888815afc32ad3cc52ff24fe575",
     "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
-    "escrow_obligation_nontierable": "0x84ea74d481ee0a5332c457a4d796187f6ba67feb",
-    "escrow_obligation_tierable": "0x8f86403a4de0bb5791fa46b8e795c547942fe4cf",
+    "escrow_obligation_default": "0x84ea74d481ee0a5332c457a4d796187f6ba67feb",
+    "escrow_obligation_unconditional": "0x8f86403a4de0bb5791fa46b8e795c547942fe4cf",
     "payment_obligation": "0x9e545e3c0baab3e08cdfd552c960a1050f373042"
   }
 }

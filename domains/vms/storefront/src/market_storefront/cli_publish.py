@@ -704,7 +704,7 @@ def _publish_round(
         # resolved ``accepted_escrows`` list onto the row. We only need
         # to scale rate values to base units (token decimals lookup) and
         # publish — no CHAINS broadcast, no min_price/token reading,
-        # no get_erc20_escrow_obligation_nontierable.
+        # no get_erc20_escrow_obligation_default.
         template_entries = res.get("accepted_escrows")
         if template_entries:
             from .utils.config import CHAINS
@@ -881,12 +881,12 @@ def _publish_round(
             raw_max_duration_seconds
         )
         offer = _offer_resource_for_listing(res)
-        from market_alkahest.alkahest import get_erc20_escrow_obligation_nontierable
+        from market_alkahest.alkahest import get_erc20_escrow_obligation_default
         accepted_escrows: list[dict] = []
         per_chain_errors: list[str] = []
         for chain in CHAINS.values():
             try:
-                escrow_address = get_erc20_escrow_obligation_nontierable(
+                escrow_address = get_erc20_escrow_obligation_default(
                     chain.name,
                     config_path=chain.alkahest_address_config_path,
                 )

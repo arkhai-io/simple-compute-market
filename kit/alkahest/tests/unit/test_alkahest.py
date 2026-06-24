@@ -45,7 +45,7 @@ def test_get_trusted_oracle_arbiter_ethereum_sepolia():
     addr = get_trusted_oracle_arbiter("ethereum_sepolia")
     # alkahest-py SDK normalises addresses to lowercase hex (alloy
     # ``Address`` Display); compare case-insensitively.
-    assert addr.lower() == "0x3b2a812e3eb3b729d40d866da16c2bb2b6cdd2f2"
+    assert addr.lower() == "0x61dc9c2d757a1c9d0d38a281288d9ef918e77baa"
 
 
 def test_resolve_alkahest_address_config_base_sepolia_returns_none():
@@ -77,136 +77,136 @@ def test_address_to_slot_base_sepolia_recipient_arbiter():
 def test_address_to_slot_base_sepolia_erc20_escrow():
     from market_alkahest.alkahest import (
         address_to_slot,
-        get_erc20_escrow_obligation_nontierable,
-        get_erc20_escrow_obligation_tierable,
+        get_erc20_escrow_obligation_default,
+        get_erc20_escrow_obligation_unconditional,
         _reverse_address_map,
     )
     _reverse_address_map.cache_clear()
-    non_tierable = get_erc20_escrow_obligation_nontierable("base_sepolia")
-    tierable = get_erc20_escrow_obligation_tierable("base_sepolia")
-    assert address_to_slot("base_sepolia", non_tierable) == "erc20_escrow_obligation_nontierable"
-    if int(tierable, 16) != 0:
-        assert address_to_slot("base_sepolia", tierable) == "erc20_escrow_obligation_tierable"
+    default = get_erc20_escrow_obligation_default("base_sepolia")
+    unconditional = get_erc20_escrow_obligation_unconditional("base_sepolia")
+    assert address_to_slot("base_sepolia", default) == "erc20_escrow_obligation_default"
+    if int(unconditional, 16) != 0:
+        assert address_to_slot("base_sepolia", unconditional) == "erc20_escrow_obligation_unconditional"
     else:
-        assert address_to_slot("base_sepolia", tierable) is None
+        assert address_to_slot("base_sepolia", unconditional) is None
 
 
 def test_address_to_slot_base_sepolia_erc721_escrows():
     from market_alkahest.alkahest import (
         address_to_slot,
-        get_erc721_escrow_obligation_nontierable,
-        get_erc721_escrow_obligation_tierable,
+        get_erc721_escrow_obligation_default,
+        get_erc721_escrow_obligation_unconditional,
         _reverse_address_map,
     )
     _reverse_address_map.cache_clear()
-    non_tierable = get_erc721_escrow_obligation_nontierable("base_sepolia")
-    tierable = get_erc721_escrow_obligation_tierable("base_sepolia")
-    assert address_to_slot("base_sepolia", non_tierable) == "erc721_escrow_obligation_nontierable"
-    if int(tierable, 16) != 0:
-        assert address_to_slot("base_sepolia", tierable) == "erc721_escrow_obligation_tierable"
+    default = get_erc721_escrow_obligation_default("base_sepolia")
+    unconditional = get_erc721_escrow_obligation_unconditional("base_sepolia")
+    assert address_to_slot("base_sepolia", default) == "erc721_escrow_obligation_default"
+    if int(unconditional, 16) != 0:
+        assert address_to_slot("base_sepolia", unconditional) == "erc721_escrow_obligation_unconditional"
     else:
-        assert address_to_slot("base_sepolia", tierable) is None
+        assert address_to_slot("base_sepolia", unconditional) is None
 
 
 def test_address_to_slot_base_sepolia_erc1155_escrows():
     from market_alkahest.alkahest import (
         address_to_slot,
-        get_erc1155_escrow_obligation_nontierable,
-        get_erc1155_escrow_obligation_tierable,
+        get_erc1155_escrow_obligation_default,
+        get_erc1155_escrow_obligation_unconditional,
         _reverse_address_map,
     )
     _reverse_address_map.cache_clear()
-    non_tierable = get_erc1155_escrow_obligation_nontierable("base_sepolia")
-    tierable = get_erc1155_escrow_obligation_tierable("base_sepolia")
-    assert address_to_slot("base_sepolia", non_tierable) == "erc1155_escrow_obligation_nontierable"
-    if int(tierable, 16) != 0:
-        assert address_to_slot("base_sepolia", tierable) == "erc1155_escrow_obligation_tierable"
+    default = get_erc1155_escrow_obligation_default("base_sepolia")
+    unconditional = get_erc1155_escrow_obligation_unconditional("base_sepolia")
+    assert address_to_slot("base_sepolia", default) == "erc1155_escrow_obligation_default"
+    if int(unconditional, 16) != 0:
+        assert address_to_slot("base_sepolia", unconditional) == "erc1155_escrow_obligation_unconditional"
     else:
-        assert address_to_slot("base_sepolia", tierable) is None
+        assert address_to_slot("base_sepolia", unconditional) is None
 
 
 def test_address_to_slot_base_sepolia_native_token_escrows():
     from market_alkahest.alkahest import (
         address_to_slot,
-        get_native_token_escrow_obligation_nontierable,
-        get_native_token_escrow_obligation_tierable,
+        get_native_token_escrow_obligation_default,
+        get_native_token_escrow_obligation_unconditional,
         _reverse_address_map,
     )
     _reverse_address_map.cache_clear()
-    non_tierable = get_native_token_escrow_obligation_nontierable("base_sepolia")
-    tierable = get_native_token_escrow_obligation_tierable("base_sepolia")
+    default = get_native_token_escrow_obligation_default("base_sepolia")
+    unconditional = get_native_token_escrow_obligation_unconditional("base_sepolia")
     assert (
-        address_to_slot("base_sepolia", non_tierable)
-        == "native_token_escrow_obligation_nontierable"
+        address_to_slot("base_sepolia", default)
+        == "native_token_escrow_obligation_default"
     )
-    if int(tierable, 16) != 0:
+    if int(unconditional, 16) != 0:
         assert (
-            address_to_slot("base_sepolia", tierable)
-            == "native_token_escrow_obligation_tierable"
+            address_to_slot("base_sepolia", unconditional)
+            == "native_token_escrow_obligation_unconditional"
         )
     else:
-        assert address_to_slot("base_sepolia", tierable) is None
+        assert address_to_slot("base_sepolia", unconditional) is None
 
 
 def test_address_to_slot_base_sepolia_token_bundle_escrows():
     from market_alkahest.alkahest import (
         address_to_slot,
-        get_token_bundle_escrow_obligation_nontierable,
-        get_token_bundle_escrow_obligation_tierable,
+        get_token_bundle_escrow_obligation_default,
+        get_token_bundle_escrow_obligation_unconditional,
         _reverse_address_map,
     )
     _reverse_address_map.cache_clear()
-    non_tierable = get_token_bundle_escrow_obligation_nontierable("base_sepolia")
-    tierable = get_token_bundle_escrow_obligation_tierable("base_sepolia")
+    default = get_token_bundle_escrow_obligation_default("base_sepolia")
+    unconditional = get_token_bundle_escrow_obligation_unconditional("base_sepolia")
     assert (
-        address_to_slot("base_sepolia", non_tierable)
-        == "token_bundle_escrow_obligation_nontierable"
+        address_to_slot("base_sepolia", default)
+        == "token_bundle_escrow_obligation_default"
     )
-    if int(tierable, 16) != 0:
+    if int(unconditional, 16) != 0:
         assert (
-            address_to_slot("base_sepolia", tierable)
-            == "token_bundle_escrow_obligation_tierable"
+            address_to_slot("base_sepolia", unconditional)
+            == "token_bundle_escrow_obligation_unconditional"
         )
     else:
-        assert address_to_slot("base_sepolia", tierable) is None
+        assert address_to_slot("base_sepolia", unconditional) is None
 
 
 def test_address_to_slot_base_sepolia_attestation_escrows():
     from market_alkahest.alkahest import (
         address_to_slot,
-        get_attestation_escrow_obligation_2_nontierable,
-        get_attestation_escrow_obligation_2_tierable,
-        get_attestation_escrow_obligation_nontierable,
-        get_attestation_escrow_obligation_tierable,
+        get_attestation_escrow_obligation_2_default,
+        get_attestation_escrow_obligation_2_unconditional,
+        get_attestation_escrow_obligation_default,
+        get_attestation_escrow_obligation_unconditional,
         _reverse_address_map,
     )
     _reverse_address_map.cache_clear()
-    v1_non_tierable = get_attestation_escrow_obligation_nontierable("base_sepolia")
-    v1_tierable = get_attestation_escrow_obligation_tierable("base_sepolia")
-    v2_non_tierable = get_attestation_escrow_obligation_2_nontierable("base_sepolia")
-    v2_tierable = get_attestation_escrow_obligation_2_tierable("base_sepolia")
+    v1_default = get_attestation_escrow_obligation_default("base_sepolia")
+    v1_unconditional = get_attestation_escrow_obligation_unconditional("base_sepolia")
+    v2_default = get_attestation_escrow_obligation_2_default("base_sepolia")
+    v2_unconditional = get_attestation_escrow_obligation_2_unconditional("base_sepolia")
     assert (
-        address_to_slot("base_sepolia", v1_non_tierable)
-        == "attestation_escrow_obligation_nontierable"
+        address_to_slot("base_sepolia", v1_default)
+        == "attestation_escrow_obligation_default"
     )
     assert (
-        address_to_slot("base_sepolia", v2_non_tierable)
-        == "attestation_escrow_obligation_2_nontierable"
+        address_to_slot("base_sepolia", v2_default)
+        == "attestation_escrow_obligation_2_default"
     )
-    if int(v1_tierable, 16) != 0:
+    if int(v1_unconditional, 16) != 0:
         assert (
-            address_to_slot("base_sepolia", v1_tierable)
-            == "attestation_escrow_obligation_tierable"
+            address_to_slot("base_sepolia", v1_unconditional)
+            == "attestation_escrow_obligation_unconditional"
         )
     else:
-        assert address_to_slot("base_sepolia", v1_tierable) is None
-    if int(v2_tierable, 16) != 0:
+        assert address_to_slot("base_sepolia", v1_unconditional) is None
+    if int(v2_unconditional, 16) != 0:
         assert (
-            address_to_slot("base_sepolia", v2_tierable)
-            == "attestation_escrow_obligation_2_tierable"
+            address_to_slot("base_sepolia", v2_unconditional)
+            == "attestation_escrow_obligation_2_unconditional"
         )
     else:
-        assert address_to_slot("base_sepolia", v2_tierable) is None
+        assert address_to_slot("base_sepolia", v2_unconditional) is None
 
 
 def test_address_to_slot_unknown_address_returns_none():
@@ -243,46 +243,46 @@ def test_address_to_slot_anvil_override(tmp_path):
             "eas": "0x" + "00" * 20,  # zero-address slot should be skipped
         },
         "erc20_addresses": {
-            "escrow_obligation_nontierable": escrow_addr,
-            "escrow_obligation_tierable": "0x" + "98" * 20,
+            "escrow_obligation_default": escrow_addr,
+            "escrow_obligation_unconditional": "0x" + "98" * 20,
         },
         "erc721_addresses": {
-            "escrow_obligation_nontierable": "0x" + "ef" * 20,
-            "escrow_obligation_tierable": "0x" + "34" * 20,
+            "escrow_obligation_default": "0x" + "ef" * 20,
+            "escrow_obligation_unconditional": "0x" + "34" * 20,
         },
         "erc1155_addresses": {
-            "escrow_obligation_nontierable": "0x" + "56" * 20,
-            "escrow_obligation_tierable": "0x" + "78" * 20,
+            "escrow_obligation_default": "0x" + "56" * 20,
+            "escrow_obligation_unconditional": "0x" + "78" * 20,
         },
         "native_token_addresses": {
-            "escrow_obligation_nontierable": "0x" + "9a" * 20,
-            "escrow_obligation_tierable": "0x" + "bc" * 20,
+            "escrow_obligation_default": "0x" + "9a" * 20,
+            "escrow_obligation_unconditional": "0x" + "bc" * 20,
         },
         "token_bundle_addresses": {
-            "escrow_obligation_nontierable": "0x" + "de" * 20,
-            "escrow_obligation_tierable": "0x" + "f1" * 20,
+            "escrow_obligation_default": "0x" + "de" * 20,
+            "escrow_obligation_unconditional": "0x" + "f1" * 20,
         },
         "attestation_addresses": {
-            "escrow_obligation_nontierable": "0x" + "13" * 20,
-            "escrow_obligation_tierable": "0x" + "24" * 20,
-            "escrow_obligation_2_nontierable": "0x" + "35" * 20,
-            "escrow_obligation_2_tierable": "0x" + "46" * 20,
+            "escrow_obligation_default": "0x" + "13" * 20,
+            "escrow_obligation_unconditional": "0x" + "24" * 20,
+            "escrow_obligation_2_default": "0x" + "35" * 20,
+            "escrow_obligation_2_unconditional": "0x" + "46" * 20,
         },
     }))
     cfg_path = str(override)
     assert address_to_slot("anvil", arbiter_addr, config_path=cfg_path) == "recipient_arbiter"
-    assert address_to_slot("anvil", escrow_addr, config_path=cfg_path) == "erc20_escrow_obligation_nontierable"
-    assert address_to_slot("anvil", "0x" + "98" * 20, config_path=cfg_path) == "erc20_escrow_obligation_tierable"
-    assert address_to_slot("anvil", "0x" + "ef" * 20, config_path=cfg_path) == "erc721_escrow_obligation_nontierable"
-    assert address_to_slot("anvil", "0x" + "34" * 20, config_path=cfg_path) == "erc721_escrow_obligation_tierable"
-    assert address_to_slot("anvil", "0x" + "56" * 20, config_path=cfg_path) == "erc1155_escrow_obligation_nontierable"
-    assert address_to_slot("anvil", "0x" + "78" * 20, config_path=cfg_path) == "erc1155_escrow_obligation_tierable"
-    assert address_to_slot("anvil", "0x" + "9a" * 20, config_path=cfg_path) == "native_token_escrow_obligation_nontierable"
-    assert address_to_slot("anvil", "0x" + "bc" * 20, config_path=cfg_path) == "native_token_escrow_obligation_tierable"
-    assert address_to_slot("anvil", "0x" + "de" * 20, config_path=cfg_path) == "token_bundle_escrow_obligation_nontierable"
-    assert address_to_slot("anvil", "0x" + "f1" * 20, config_path=cfg_path) == "token_bundle_escrow_obligation_tierable"
-    assert address_to_slot("anvil", "0x" + "13" * 20, config_path=cfg_path) == "attestation_escrow_obligation_nontierable"
-    assert address_to_slot("anvil", "0x" + "24" * 20, config_path=cfg_path) == "attestation_escrow_obligation_tierable"
-    assert address_to_slot("anvil", "0x" + "35" * 20, config_path=cfg_path) == "attestation_escrow_obligation_2_nontierable"
-    assert address_to_slot("anvil", "0x" + "46" * 20, config_path=cfg_path) == "attestation_escrow_obligation_2_tierable"
+    assert address_to_slot("anvil", escrow_addr, config_path=cfg_path) == "erc20_escrow_obligation_default"
+    assert address_to_slot("anvil", "0x" + "98" * 20, config_path=cfg_path) == "erc20_escrow_obligation_unconditional"
+    assert address_to_slot("anvil", "0x" + "ef" * 20, config_path=cfg_path) == "erc721_escrow_obligation_default"
+    assert address_to_slot("anvil", "0x" + "34" * 20, config_path=cfg_path) == "erc721_escrow_obligation_unconditional"
+    assert address_to_slot("anvil", "0x" + "56" * 20, config_path=cfg_path) == "erc1155_escrow_obligation_default"
+    assert address_to_slot("anvil", "0x" + "78" * 20, config_path=cfg_path) == "erc1155_escrow_obligation_unconditional"
+    assert address_to_slot("anvil", "0x" + "9a" * 20, config_path=cfg_path) == "native_token_escrow_obligation_default"
+    assert address_to_slot("anvil", "0x" + "bc" * 20, config_path=cfg_path) == "native_token_escrow_obligation_unconditional"
+    assert address_to_slot("anvil", "0x" + "de" * 20, config_path=cfg_path) == "token_bundle_escrow_obligation_default"
+    assert address_to_slot("anvil", "0x" + "f1" * 20, config_path=cfg_path) == "token_bundle_escrow_obligation_unconditional"
+    assert address_to_slot("anvil", "0x" + "13" * 20, config_path=cfg_path) == "attestation_escrow_obligation_default"
+    assert address_to_slot("anvil", "0x" + "24" * 20, config_path=cfg_path) == "attestation_escrow_obligation_unconditional"
+    assert address_to_slot("anvil", "0x" + "35" * 20, config_path=cfg_path) == "attestation_escrow_obligation_2_default"
+    assert address_to_slot("anvil", "0x" + "46" * 20, config_path=cfg_path) == "attestation_escrow_obligation_2_unconditional"
     assert address_to_slot("anvil", "0x" + "00" * 20, config_path=cfg_path) is None

@@ -105,7 +105,7 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
             self.escrow_updates.append(kwargs)
 
     fake_codec = SimpleNamespace(
-        kind="erc20_escrow_obligation_nontierable",
+        kind="erc20_escrow_obligation_default",
         refund_claimed=AsyncMock(return_value={"tx_hash": "0xrefund"}),
     )
     fake_terms = SimpleNamespace(
@@ -151,7 +151,7 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
         {
             "action": "refund",
             "status": "refunded",
-            "escrow_kind": "erc20_escrow_obligation_nontierable",
+            "escrow_kind": "erc20_escrow_obligation_default",
             "body": {"tx_hash": "0xrefund"},
         }
     ]

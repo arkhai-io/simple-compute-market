@@ -93,22 +93,8 @@ wheels = [
 
 [[package]]
 name = "alkahest-py"
-version = "0.4.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/52/62/6b1fe64c73541718565ba19eaa97d75d8ffb892366b2b7d5e096b55696f6/alkahest_py-0.4.0.tar.gz", hash = "sha256:df2be263f7ddd9dd54155d40865b334e8ac5f9b4dfa142f9ec00df35896a09cd", size = 920209, upload-time = "2026-05-07T14:54:31.548Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/60/dd/d7fd5361e680a4a33240d432682f3a6ffc3c90111597e568839127be9e19/alkahest_py-0.4.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:4bd58f69316be66f1b4cfb8d737ef5d29cff00bc81e1960550aa6ddd914cd592", size = 7311917, upload-time = "2026-05-07T14:53:07.225Z" },
-    { url = "https://files.pythonhosted.org/packages/41/eb/bf3fd9673e574b4ab8e490d462bf4ba7c86a928758e5909ce23cbf4944a0/alkahest_py-0.4.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d9f1ddae7c330fbe686fe55371a1cce7789c8c29b468478e99671c1c80fad9e2", size = 8064326, upload-time = "2026-05-07T14:53:11.29Z" },
-    { url = "https://files.pythonhosted.org/packages/90/74/de7889e3c6413e21313cfebdcf0f7d64ba7a88d7f80129dcfac2cd89986f/alkahest_py-0.4.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:55b943785a2be667393979bb34856c48a4606bc3bfaae3965b6247e64ca1bc49", size = 8280047, upload-time = "2026-05-07T14:53:15.434Z" },
-    { url = "https://files.pythonhosted.org/packages/1c/cf/e892bb51151d3b2db46220ce446262746df84e7fed778a3fcd7c45104ecf/alkahest_py-0.4.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:7b873ce04724cfd639e9b3d4fcfd1033b3a41c969ff6f655d88ac4aa2c40208a", size = 7311316, upload-time = "2026-05-07T14:53:21.451Z" },
-    { url = "https://files.pythonhosted.org/packages/5e/ec/d0741caf949080ade0d59d7215f2c1ebeff4a4d0d640d978c786c56e50da/alkahest_py-0.4.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9a402124dbdfb644019d0f81eb74a9e07ee8626d922fc1bff13a4b52a29e7282", size = 8064110, upload-time = "2026-05-07T14:53:26.07Z" },
-    { url = "https://files.pythonhosted.org/packages/d2/d5/f30844dace9ffc4bffc6cc72acc0bd0d17efa9f13411f828a6e36752134c/alkahest_py-0.4.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:e074f724880a1d2f7cba4b6daecb4dafb12a7cdb5e077f036dadb22b5da47233", size = 8279672, upload-time = "2026-05-07T14:53:30.257Z" },
-    { url = "https://files.pythonhosted.org/packages/54/cb/be7f9d8dcf932d837ccba486551472c26664a28a4097982790048fe05af7/alkahest_py-0.4.0-cp313-cp313t-musllinux_1_2_x86_64.whl", hash = "sha256:a953c2f3c96ca9ed113bc42e68f769eaf1c81f8026ed997d3216a27406edfb3d", size = 8273404, upload-time = "2026-05-07T14:53:36.334Z" },
-    { url = "https://files.pythonhosted.org/packages/a1/79/7658ebbe93cb852089fc603e96759078950db9e34ee321915fbdbe35b391/alkahest_py-0.4.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:c6a58400738ba0449693e9f873a57dbef3172d776ada74234b66806ae440ce00", size = 7327507, upload-time = "2026-05-07T14:53:40.837Z" },
-    { url = "https://files.pythonhosted.org/packages/9d/9c/4bf834dce54279ddb3da1c999035279db8f04ec40e5431db6c2cc5a5fd00/alkahest_py-0.4.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f9af2cca06843b9fa06a0d1bbcbd2741a64e32af92ddd644390c214e81f7b09c", size = 8034809, upload-time = "2026-05-07T14:53:44.537Z" },
-    { url = "https://files.pythonhosted.org/packages/fb/74/dd29f6fdbb277d0baa542b08e28568c2b5938b3b8495e7c1ae15b9c1e50c/alkahest_py-0.4.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:6c431a69a42f83e04951ab2768ae962f688797963158afaa0431efa02e039f29", size = 8254115, upload-time = "2026-05-07T14:53:48.812Z" },
-    { url = "https://files.pythonhosted.org/packages/de/45/9fd3b8fd4ba46dca0f77bcf8d2f7e7cbc9f8d089812542167ba2a7ba43c4/alkahest_py-0.4.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:9e83175ec95119cd8728d0eb62b9f3f032bfebe87dc1835dd881947c471d5cdc", size = 8269994, upload-time = "2026-05-07T14:53:56.361Z" },
-]
+version = "0.4.1"
+source = { git = "https://github.com/arkhai-io/alkahest?subdirectory=sdks%2Fpy&rev=4cd898c757441f9e16d4d6b1549052d021aa74b4#4cd898c757441f9e16d4d6b1549052d021aa74b4" }
 
 [[package]]
 name = "annotated-doc"
@@ -202,16 +188,13 @@ dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 [[package]]
 name = "arkhai-core-registry-client"
 version = "0.10.0"
-source = { editable = "../../../core/registry-client" }
+source = { registry = "../../../.dist" }
 dependencies = [
     { name = "eth-account", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "eth-account", specifier = ">=0.12" },
-    { name = "httpx", specifier = ">=0.27" },
+wheels = [
+    { path = "arkhai_core_registry_client-0.10.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -230,11 +213,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-core", editable = "../../../core" },
-    { name = "arkhai-core-registry-client", editable = "../../../core/registry-client" },
-    { name = "arkhai-kit-config", editable = "../../../kit/config" },
-    { name = "arkhai-kit-identity", editable = "../../../kit/identity" },
-    { name = "arkhai-kit-policy", editable = "../../../kit/policy" },
+    { name = "arkhai-core" },
+    { name = "arkhai-core-registry-client" },
+    { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-policy" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2" },
 ]
@@ -274,7 +257,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "alkahest-py", specifier = ">=0.4.0" },
+    { name = "alkahest-py", git = "https://github.com/arkhai-io/alkahest?subdirectory=sdks%2Fpy&rev=4cd898c757441f9e16d4d6b1549052d021aa74b4" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
 ]
@@ -290,7 +273,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-kit-alkahest", editable = "../../../kit/alkahest" },
+    { name = "arkhai-kit-alkahest" },
     { name = "eth-account", specifier = ">=0.13.0" },
 ]
 
@@ -407,8 +390,8 @@ lint = [
     { name = "types-requests", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 rl = [
-    { name = "torch", version = "2.12.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "python_full_version < '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin'" },
-    { name = "torch", version = "2.12.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version >= '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "torch", version = "2.12.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+    { name = "torch", version = "2.12.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 
 [package.dev-dependencies]
@@ -421,7 +404,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alkahest-py", specifier = ">=0.4.0" },
+    { name = "alkahest-py", git = "https://github.com/arkhai-io/alkahest?subdirectory=sdks%2Fpy&rev=4cd898c757441f9e16d4d6b1549052d021aa74b4" },
     { name = "arkhai-core", editable = "../../../core" },
     { name = "arkhai-core-registry-client", specifier = ">=0.7.0" },
     { name = "arkhai-core-storefront", editable = "../../../core/storefront" },
@@ -2926,18 +2909,19 @@ name = "torch"
 version = "2.12.0"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
+    "python_full_version >= '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin'",
     "python_full_version == '3.14.*' and platform_machine == 'arm64' and sys_platform == 'darwin'",
     "python_full_version == '3.13.*' and platform_machine == 'arm64' and sys_platform == 'darwin'",
     "python_full_version < '3.13' and platform_machine == 'arm64' and sys_platform == 'darwin'",
 ]
 dependencies = [
-    { name = "filelock", marker = "python_full_version < '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin'" },
-    { name = "fsspec", marker = "python_full_version < '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin'" },
-    { name = "jinja2", marker = "python_full_version < '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin'" },
-    { name = "networkx", marker = "python_full_version < '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin'" },
-    { name = "setuptools", marker = "python_full_version < '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin'" },
-    { name = "sympy", marker = "python_full_version < '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin'" },
-    { name = "typing-extensions", marker = "python_full_version < '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin'" },
+    { name = "filelock", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+    { name = "fsspec", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+    { name = "jinja2", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+    { name = "networkx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+    { name = "setuptools", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+    { name = "sympy", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+    { name = "typing-extensions", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.12.0-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:b41339df93d491435e790ff8bcbae1c0ce777175889bfd1281d119862793e6a2", upload-time = "2026-05-12T16:20:12Z" },
@@ -2952,7 +2936,6 @@ name = "torch"
 version = "2.12.0+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "python_full_version >= '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin'",
     "python_full_version >= '3.15' and platform_machine == 'x86_64' and sys_platform == 'linux'",
     "python_full_version == '3.14.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
     "python_full_version == '3.13.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
@@ -2963,13 +2946,13 @@ resolution-markers = [
     "python_full_version < '3.13' and platform_machine == 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
-    { name = "filelock", marker = "(python_full_version >= '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "fsspec", marker = "(python_full_version >= '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "jinja2", marker = "(python_full_version >= '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "networkx", marker = "(python_full_version >= '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "setuptools", marker = "(python_full_version >= '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "sympy", marker = "(python_full_version >= '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "typing-extensions", marker = "(python_full_version >= '3.15' and platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "filelock", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "fsspec", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "jinja2", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "networkx", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "setuptools", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "sympy", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "typing-extensions", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.12.0%2Bcpu-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:ce2ddb880b0813fcc91a737f08fdd973a8115a74c64ccb34e9c09a7964b4d448", upload-time = "2026-05-12T23:16:40Z" },

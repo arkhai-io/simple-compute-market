@@ -12,18 +12,18 @@ from eth_account.signers.local import LocalAccount
 from web3 import Web3
 
 from market_alkahest.alkahest import (
-    Attestation2NonTierableEscrowCodec,
-    Attestation2TierableEscrowCodec,
-    AttestationNonTierableEscrowCodec,
-    AttestationTierableEscrowCodec,
-    Erc1155NonTierableEscrowCodec,
-    Erc1155TierableEscrowCodec,
-    Erc721NonTierableEscrowCodec,
-    Erc721TierableEscrowCodec,
-    NativeTokenNonTierableEscrowCodec,
-    NativeTokenTierableEscrowCodec,
-    TokenBundleNonTierableEscrowCodec,
-    TokenBundleTierableEscrowCodec,
+    Attestation2DefaultEscrowCodec,
+    Attestation2UnconditionalEscrowCodec,
+    AttestationDefaultEscrowCodec,
+    AttestationUnconditionalEscrowCodec,
+    Erc1155DefaultEscrowCodec,
+    Erc1155UnconditionalEscrowCodec,
+    Erc721DefaultEscrowCodec,
+    Erc721UnconditionalEscrowCodec,
+    NativeTokenDefaultEscrowCodec,
+    NativeTokenUnconditionalEscrowCodec,
+    TokenBundleDefaultEscrowCodec,
+    TokenBundleUnconditionalEscrowCodec,
     encode_recipient_demand,
     get_alkahest_network,
     get_recipient_arbiter,
@@ -154,18 +154,18 @@ class CodecCase:
 
 
 _CODEC_CASES = [
-    CodecCase("native-token-nontierable", "native", NativeTokenNonTierableEscrowCodec()),
-    CodecCase("native-token-tierable", "native", NativeTokenTierableEscrowCodec()),
-    CodecCase("token-bundle-nontierable", "bundle", TokenBundleNonTierableEscrowCodec()),
-    CodecCase("token-bundle-tierable", "bundle", TokenBundleTierableEscrowCodec()),
-    CodecCase("attestation-v1-nontierable", "attestation_v1", AttestationNonTierableEscrowCodec()),
-    CodecCase("attestation-v1-tierable", "attestation_v1", AttestationTierableEscrowCodec()),
-    CodecCase("attestation-v2-nontierable", "attestation_v2", Attestation2NonTierableEscrowCodec()),
-    CodecCase("attestation-v2-tierable", "attestation_v2", Attestation2TierableEscrowCodec()),
-    CodecCase("erc721-nontierable", "erc721", Erc721NonTierableEscrowCodec()),
-    CodecCase("erc721-tierable", "erc721", Erc721TierableEscrowCodec()),
-    CodecCase("erc1155-nontierable", "erc1155", Erc1155NonTierableEscrowCodec()),
-    CodecCase("erc1155-tierable", "erc1155", Erc1155TierableEscrowCodec()),
+    CodecCase("native-token-default", "native", NativeTokenDefaultEscrowCodec()),
+    CodecCase("native-token-unconditional", "native", NativeTokenUnconditionalEscrowCodec()),
+    CodecCase("token-bundle-default", "bundle", TokenBundleDefaultEscrowCodec()),
+    CodecCase("token-bundle-unconditional", "bundle", TokenBundleUnconditionalEscrowCodec()),
+    CodecCase("attestation-v1-default", "attestation_v1", AttestationDefaultEscrowCodec()),
+    CodecCase("attestation-v1-unconditional", "attestation_v1", AttestationUnconditionalEscrowCodec()),
+    CodecCase("attestation-v2-default", "attestation_v2", Attestation2DefaultEscrowCodec()),
+    CodecCase("attestation-v2-unconditional", "attestation_v2", Attestation2UnconditionalEscrowCodec()),
+    CodecCase("erc721-default", "erc721", Erc721DefaultEscrowCodec()),
+    CodecCase("erc721-unconditional", "erc721", Erc721UnconditionalEscrowCodec()),
+    CodecCase("erc1155-default", "erc1155", Erc1155DefaultEscrowCodec()),
+    CodecCase("erc1155-unconditional", "erc1155", Erc1155UnconditionalEscrowCodec()),
 ]
 
 
@@ -235,12 +235,12 @@ def _mint_erc1155(w3: Web3, buyer_address: str, token_id: int, amount: int) -> N
     assert after == before + amount
 
 
-def _approve_tierable_escrow(
+def _approve_unconditional_escrow(
     case: CodecCase,
     w3: Web3,
     token_id: int,
 ) -> None:
-    if getattr(case.codec, "tier_attr", None) != "tierable":
+    if getattr(case.codec, "sdk_variant_attr", None) != "unconditional":
         return
 
     account = w3.eth.account.from_key(str(settings.BUYER.PRIVATE_KEY))
@@ -259,12 +259,12 @@ def _approve_tierable_escrow(
     _send_tx(w3, account, token.functions.setApprovalForAll(spender, True).build_transaction())
 
 
-def _approve_tierable_bundle_escrow(
+def _approve_unconditional_bundle_escrow(
     case: CodecCase,
     w3: Web3,
     bundle_data: dict[str, Any],
 ) -> None:
-    if case.asset_kind != "bundle" or getattr(case.codec, "tier_attr", None) != "tierable":
+    if case.asset_kind != "bundle" or getattr(case.codec, "sdk_variant_attr", None) != "unconditional":
         return
 
     account = w3.eth.account.from_key(str(settings.BUYER.PRIVATE_KEY))
@@ -355,7 +355,7 @@ async def _build_obligation_data(
             "erc1155TokenIds": [erc1155_token_id],
             "erc1155Amounts": [erc1155_amount],
         }
-        _approve_tierable_bundle_escrow(case, w3, bundle_data)
+        _approve_unconditional_bundle_escrow(case, w3, bundle_data)
         return bundle_data
 
     if case.asset_kind == "attestation_v1":
@@ -375,7 +375,7 @@ async def _build_obligation_data(
         }
 
     if case.asset_kind == "attestation_v2":
-        seed_codec = AttestationNonTierableEscrowCodec()
+        seed_codec = AttestationDefaultEscrowCodec()
         seed_data = {
             **common,
             "attestation": {
@@ -408,7 +408,7 @@ async def _build_obligation_data(
 
     if case.asset_kind == "erc721":
         token_id = _mint_erc721(w3, buyer_address)
-        _approve_tierable_escrow(case, w3, token_id)
+        _approve_unconditional_escrow(case, w3, token_id)
         return {
             **common,
             "token": _MOCK_ERC721_A,
@@ -418,7 +418,7 @@ async def _build_obligation_data(
     token_id = 100 + case_index
     amount = 3 + case_index
     _mint_erc1155(w3, buyer_address, token_id=token_id, amount=amount)
-    _approve_tierable_escrow(case, w3, token_id)
+    _approve_unconditional_escrow(case, w3, token_id)
     return {
         **common,
         "token": _MOCK_ERC1155_A,

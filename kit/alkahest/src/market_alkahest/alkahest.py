@@ -205,12 +205,12 @@ def get_native_token_splitter(
     )
 
 
-def get_erc20_escrow_obligation_nontierable(
+def get_erc20_escrow_obligation_default(
     chain_name: str,
     *,
     config_path: str | None = None,
 ) -> str:
-    """Resolve the address of ``ERC20EscrowObligation`` (non-tierable variant).
+    """Resolve the default ``ERC20EscrowObligation`` address.
 
     This is where buyer-side ERC20 payment escrows live on-chain. It's the
     contract the buyer calls ``doObligation`` on at escrow creation, and the
@@ -219,30 +219,25 @@ def get_erc20_escrow_obligation_nontierable(
     code can dispatch the right SDK read shape without consulting a codec
     registry — the address is the natural identity.
     """
-    selected = get_alkahest_network(chain_name)
-    override = _load_override_config(config_path)
-    if override is not None:
-        return str(override["erc20_addresses"]["escrow_obligation_nontierable"])
-    if selected == NETWORK_ANVIL:
-        raise ValueError(
-            "chain_name='anvil' requires an explicit alkahest_address_config_path "
-            "with deployed local addresses."
-        )
-    cfg = _sdk_addresses_for_chain(selected)
-    return str(cfg.erc20_addresses.escrow_obligation_nontierable)
-
-
-def get_erc20_escrow_obligation_tierable(
-    chain_name: str,
-    *,
-    config_path: str | None = None,
-) -> str:
-    """Resolve ``ERC20EscrowObligation`` (tierable variant)."""
     return _escrow_obligation_address(
         chain_name,
         config_path=config_path,
         category="erc20_addresses",
-        field="escrow_obligation_tierable",
+        field="escrow_obligation_default",
+    )
+
+
+def get_erc20_escrow_obligation_unconditional(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve ``ERC20EscrowObligation`` (unconditional variant)."""
+    return _escrow_obligation_address(
+        chain_name,
+        config_path=config_path,
+        category="erc20_addresses",
+        field="escrow_obligation_unconditional",
     )
 
 
@@ -264,174 +259,237 @@ def _escrow_obligation_address(
             "with deployed local addresses."
         )
     cfg = _sdk_addresses_for_chain(selected)
-    return str(getattr(getattr(cfg, category), field))
+    address_category = getattr(cfg, category)
+    for candidate in _sdk_field_candidates(category, field):
+        if hasattr(address_category, candidate):
+            return str(getattr(address_category, candidate))
+    raise AttributeError(
+        f"{type(address_category).__name__} has no address field for {field!r}"
+    )
 
 
-def get_erc721_escrow_obligation_nontierable(
+_SDK_FIELD_ALIASES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("erc20_addresses", "escrow_obligation_default"): (
+        "escrow_obligation_default",
+    ),
+    ("erc20_addresses", "escrow_obligation_unconditional"): (
+        "escrow_obligation_unconditional",
+    ),
+    ("erc721_addresses", "escrow_obligation_default"): (
+        "escrow_obligation_default",
+    ),
+    ("erc721_addresses", "escrow_obligation_unconditional"): (
+        "escrow_obligation_unconditional",
+    ),
+    ("erc1155_addresses", "escrow_obligation_default"): (
+        "escrow_obligation_default",
+    ),
+    ("erc1155_addresses", "escrow_obligation_unconditional"): (
+        "escrow_obligation_unconditional",
+    ),
+    ("native_token_addresses", "escrow_obligation_default"): (
+        "escrow_obligation_default",
+    ),
+    ("native_token_addresses", "escrow_obligation_unconditional"): (
+        "escrow_obligation_unconditional",
+    ),
+    ("token_bundle_addresses", "escrow_obligation_default"): (
+        "escrow_obligation_default",
+    ),
+    ("token_bundle_addresses", "escrow_obligation_unconditional"): (
+        "escrow_obligation_unconditional",
+    ),
+    ("attestation_addresses", "escrow_obligation_default"): (
+        "escrow_obligation_default",
+    ),
+    ("attestation_addresses", "escrow_obligation_unconditional"): (
+        "escrow_obligation_unconditional",
+    ),
+    ("attestation_addresses", "escrow_obligation_2_default"): (
+        "attestation_reference_escrow_obligation_default",
+    ),
+    ("attestation_addresses", "escrow_obligation_2_unconditional"): (
+        "attestation_reference_escrow_obligation_unconditional",
+    ),
+}
+
+
+_SDK_SLOT_ALIASES: dict[tuple[str, str], str] = {
+    (category, candidate): field
+    for (category, field), candidates in _SDK_FIELD_ALIASES.items()
+    for candidate in candidates
+}
+
+
+def _sdk_field_candidates(category: str, field: str) -> tuple[str, ...]:
+    return (field, *_SDK_FIELD_ALIASES.get((category, field), ()))
+
+
+def get_erc721_escrow_obligation_default(
     chain_name: str,
     *,
     config_path: str | None = None,
 ) -> str:
-    """Resolve ``ERC721EscrowObligation`` (non-tierable variant)."""
+    """Resolve the default ``ERC721EscrowObligation`` address."""
     return _escrow_obligation_address(
         chain_name,
         config_path=config_path,
         category="erc721_addresses",
-        field="escrow_obligation_nontierable",
+        field="escrow_obligation_default",
     )
 
 
-def get_erc721_escrow_obligation_tierable(
+def get_erc721_escrow_obligation_unconditional(
     chain_name: str,
     *,
     config_path: str | None = None,
 ) -> str:
-    """Resolve ``ERC721EscrowObligation`` (tierable variant)."""
+    """Resolve ``ERC721EscrowObligation`` (unconditional variant)."""
     return _escrow_obligation_address(
         chain_name,
         config_path=config_path,
         category="erc721_addresses",
-        field="escrow_obligation_tierable",
+        field="escrow_obligation_unconditional",
     )
 
 
-def get_erc1155_escrow_obligation_nontierable(
+def get_erc1155_escrow_obligation_default(
     chain_name: str,
     *,
     config_path: str | None = None,
 ) -> str:
-    """Resolve ``ERC1155EscrowObligation`` (non-tierable variant)."""
+    """Resolve the default ``ERC1155EscrowObligation`` address."""
     return _escrow_obligation_address(
         chain_name,
         config_path=config_path,
         category="erc1155_addresses",
-        field="escrow_obligation_nontierable",
+        field="escrow_obligation_default",
     )
 
 
-def get_erc1155_escrow_obligation_tierable(
+def get_erc1155_escrow_obligation_unconditional(
     chain_name: str,
     *,
     config_path: str | None = None,
 ) -> str:
-    """Resolve ``ERC1155EscrowObligation`` (tierable variant)."""
+    """Resolve ``ERC1155EscrowObligation`` (unconditional variant)."""
     return _escrow_obligation_address(
         chain_name,
         config_path=config_path,
         category="erc1155_addresses",
-        field="escrow_obligation_tierable",
+        field="escrow_obligation_unconditional",
     )
 
 
-def get_native_token_escrow_obligation_nontierable(
+def get_native_token_escrow_obligation_default(
     chain_name: str,
     *,
     config_path: str | None = None,
 ) -> str:
-    """Resolve ``NativeTokenEscrowObligation`` (non-tierable variant)."""
+    """Resolve the default ``NativeTokenEscrowObligation`` address."""
     return _escrow_obligation_address(
         chain_name,
         config_path=config_path,
         category="native_token_addresses",
-        field="escrow_obligation_nontierable",
+        field="escrow_obligation_default",
     )
 
 
-def get_native_token_escrow_obligation_tierable(
+def get_native_token_escrow_obligation_unconditional(
     chain_name: str,
     *,
     config_path: str | None = None,
 ) -> str:
-    """Resolve ``NativeTokenEscrowObligation`` (tierable variant)."""
+    """Resolve ``NativeTokenEscrowObligation`` (unconditional variant)."""
     return _escrow_obligation_address(
         chain_name,
         config_path=config_path,
         category="native_token_addresses",
-        field="escrow_obligation_tierable",
+        field="escrow_obligation_unconditional",
     )
 
 
-def get_token_bundle_escrow_obligation_nontierable(
+def get_token_bundle_escrow_obligation_default(
     chain_name: str,
     *,
     config_path: str | None = None,
 ) -> str:
-    """Resolve ``TokenBundleEscrowObligation`` (non-tierable variant)."""
+    """Resolve the default ``TokenBundleEscrowObligation`` address."""
     return _escrow_obligation_address(
         chain_name,
         config_path=config_path,
         category="token_bundle_addresses",
-        field="escrow_obligation_nontierable",
+        field="escrow_obligation_default",
     )
 
 
-def get_token_bundle_escrow_obligation_tierable(
+def get_token_bundle_escrow_obligation_unconditional(
     chain_name: str,
     *,
     config_path: str | None = None,
 ) -> str:
-    """Resolve ``TokenBundleEscrowObligation`` (tierable variant)."""
+    """Resolve ``TokenBundleEscrowObligation`` (unconditional variant)."""
     return _escrow_obligation_address(
         chain_name,
         config_path=config_path,
         category="token_bundle_addresses",
-        field="escrow_obligation_tierable",
+        field="escrow_obligation_unconditional",
     )
 
 
-def get_attestation_escrow_obligation_nontierable(
+def get_attestation_escrow_obligation_default(
     chain_name: str,
     *,
     config_path: str | None = None,
 ) -> str:
-    """Resolve ``AttestationEscrowObligation`` v1 (non-tierable variant)."""
+    """Resolve the default ``AttestationEscrowObligation`` v1 address."""
     return _escrow_obligation_address(
         chain_name,
         config_path=config_path,
         category="attestation_addresses",
-        field="escrow_obligation_nontierable",
+        field="escrow_obligation_default",
     )
 
 
-def get_attestation_escrow_obligation_tierable(
+def get_attestation_escrow_obligation_unconditional(
     chain_name: str,
     *,
     config_path: str | None = None,
 ) -> str:
-    """Resolve ``AttestationEscrowObligation`` v1 (tierable variant)."""
+    """Resolve ``AttestationEscrowObligation`` v1 (unconditional variant)."""
     return _escrow_obligation_address(
         chain_name,
         config_path=config_path,
         category="attestation_addresses",
-        field="escrow_obligation_tierable",
+        field="escrow_obligation_unconditional",
     )
 
 
-def get_attestation_escrow_obligation_2_nontierable(
+def get_attestation_escrow_obligation_2_default(
     chain_name: str,
     *,
     config_path: str | None = None,
 ) -> str:
-    """Resolve ``AttestationEscrowObligation2`` (non-tierable variant)."""
+    """Resolve the default ``AttestationEscrowObligation2`` address."""
     return _escrow_obligation_address(
         chain_name,
         config_path=config_path,
         category="attestation_addresses",
-        field="escrow_obligation_2_nontierable",
+        field="escrow_obligation_2_default",
     )
 
 
-def get_attestation_escrow_obligation_2_tierable(
+def get_attestation_escrow_obligation_2_unconditional(
     chain_name: str,
     *,
     config_path: str | None = None,
 ) -> str:
-    """Resolve ``AttestationEscrowObligation2`` (tierable variant)."""
+    """Resolve ``AttestationEscrowObligation2`` (unconditional variant)."""
     return _escrow_obligation_address(
         chain_name,
         config_path=config_path,
         category="attestation_addresses",
-        field="escrow_obligation_2_tierable",
+        field="escrow_obligation_2_unconditional",
     )
 
 
@@ -474,7 +532,7 @@ def _reverse_address_map(
     """Build ``{lowercase_address: slot_name}`` for a chain.
 
     Slot name format: ``<category_prefix>_<field>`` (e.g.
-    ``erc20_escrow_obligation_nontierable``); arbiters keep their
+    ``erc20_escrow_obligation_default``); arbiters keep their
     field names unprefixed. Zero-address slots are skipped — they
     represent contracts not yet deployed on this chain.
 
@@ -515,7 +573,8 @@ def _reverse_address_map(
                     continue  # undeployed slot placeholder
             except ValueError:
                 continue
-            slot = f"{prefix}_{field_name}" if prefix else field_name
+            slot_field = _SDK_SLOT_ALIASES.get((category_attr, field_name), field_name)
+            slot = f"{prefix}_{slot_field}" if prefix else slot_field
             result[value.lower()] = slot
     return result
 
@@ -1026,7 +1085,7 @@ def materialize_escrow_terms_payload_from_proposal(
 # identity, so the same EscrowTerms artifact dispatches the right SDK
 # path without any side-channel "what kind is this" metadata.
 #
-# Today only ``Erc20NonTierableEscrowCodec`` is registered. Adding
+# Today only ``Erc20DefaultEscrowCodec`` is registered. Adding
 # native / ERC721 / token-bundle / attestation escrows later means
 # writing a codec + registering it — neither the buyer's submit hook
 # nor the seller's verifier needs to learn about new kinds.
@@ -1339,8 +1398,8 @@ class EscrowKindCodec(Protocol):
     ) -> dict[str, Any]: ...
 
 
-class Erc20NonTierableEscrowCodec:
-    """``ERC20EscrowObligation`` (non-tierable variant).
+class Erc20DefaultEscrowCodec:
+    """Default ``ERC20EscrowObligation`` adapter.
 
     Solidity ObligationData layout:
         (address arbiter, bytes demand, address token, uint256 amount)
@@ -1355,12 +1414,12 @@ class Erc20NonTierableEscrowCodec:
     the same identifier namespace.
     """
 
-    kind = "erc20_escrow_obligation_nontierable"
+    kind = "erc20_escrow_obligation_default"
 
     def resolve_address(
         self, chain_name: str, *, config_path: str | None
     ) -> str:
-        return get_erc20_escrow_obligation_nontierable(
+        return get_erc20_escrow_obligation_default(
             chain_name, config_path=config_path,
         )
 
@@ -1379,7 +1438,7 @@ class Erc20NonTierableEscrowCodec:
             "demand": _normalize_demand_bytes(obligation_data["demand"]),
         }
         await client.erc20.util.approve(price_data, "escrow")
-        receipt = await client.erc20.escrow.non_tierable.create(
+        receipt = await client.erc20.escrow.default.create(
             price_data, arbiter_data, expiration_unix,
         )
         uid = (receipt or {}).get("log", {}).get("uid")
@@ -1390,13 +1449,13 @@ class Erc20NonTierableEscrowCodec:
         return uid
 
     async def get_obligation(self, client: Any, uid: str) -> Any:
-        return await client.erc20.escrow.non_tierable.get_obligation(uid)
+        return await client.erc20.escrow.default.get_obligation(uid)
 
     async def collect(self, client: Any, uid: str, fulfillment_uid: str) -> Any:
-        return await client.erc20.escrow.non_tierable.collect(uid, fulfillment_uid)
+        return await client.erc20.escrow.default.collect(uid, fulfillment_uid)
 
     async def reclaim_expired(self, client: Any, uid: str) -> Any:
-        return await client.erc20.escrow.non_tierable.reclaim_expired(uid)
+        return await client.erc20.escrow.default.reclaim_expired(uid)
 
     async def refund_claimed(
         self,
@@ -1415,15 +1474,15 @@ class Erc20NonTierableEscrowCodec:
         )
 
 
-class Erc20TierableEscrowCodec(Erc20NonTierableEscrowCodec):
-    """``ERC20EscrowObligation`` (tierable variant)."""
+class Erc20UnconditionalEscrowCodec(Erc20DefaultEscrowCodec):
+    """``ERC20EscrowObligation`` (unconditional variant)."""
 
-    kind = "erc20_escrow_obligation_tierable"
+    kind = "erc20_escrow_obligation_unconditional"
 
     def resolve_address(
         self, chain_name: str, *, config_path: str | None
     ) -> str:
-        return get_erc20_escrow_obligation_tierable(
+        return get_erc20_escrow_obligation_unconditional(
             chain_name, config_path=config_path,
         )
 
@@ -1442,7 +1501,7 @@ class Erc20TierableEscrowCodec(Erc20NonTierableEscrowCodec):
             "demand": _normalize_demand_bytes(obligation_data["demand"]),
         }
         await client.erc20.util.approve(price_data, "escrow")
-        receipt = await client.erc20.escrow.tierable.create(
+        receipt = await client.erc20.escrow.unconditional.create(
             price_data, arbiter_data, expiration_unix,
         )
         uid = (receipt or {}).get("log", {}).get("uid")
@@ -1453,13 +1512,13 @@ class Erc20TierableEscrowCodec(Erc20NonTierableEscrowCodec):
         return uid
 
     async def get_obligation(self, client: Any, uid: str) -> Any:
-        return await client.erc20.escrow.tierable.get_obligation(uid)
+        return await client.erc20.escrow.unconditional.get_obligation(uid)
 
     async def collect(self, client: Any, uid: str, fulfillment_uid: str) -> Any:
-        return await client.erc20.escrow.tierable.collect(uid, fulfillment_uid)
+        return await client.erc20.escrow.unconditional.collect(uid, fulfillment_uid)
 
     async def reclaim_expired(self, client: Any, uid: str) -> Any:
-        return await client.erc20.escrow.tierable.reclaim_expired(uid)
+        return await client.erc20.escrow.unconditional.reclaim_expired(uid)
 
 
 class _NativeTokenEscrowCodecBase:
@@ -1469,7 +1528,7 @@ class _NativeTokenEscrowCodecBase:
         (address arbiter, bytes demand, uint256 amount)
     """
 
-    tier_attr: str
+    sdk_variant_attr: str
     address_field: str
 
     def _price_data(self, obligation_data: dict[str, Any]) -> dict[str, Any]:
@@ -1499,8 +1558,8 @@ class _NativeTokenEscrowCodecBase:
     ) -> str:
         price_data = self._price_data(obligation_data)
         arbiter_data = self._arbiter_data(obligation_data)
-        tier_client = getattr(client.native_token.escrow, self.tier_attr)
-        receipt = await tier_client.create(
+        sdk_variant_client = getattr(client.native_token.escrow, self.sdk_variant_attr)
+        receipt = await sdk_variant_client.create(
             price_data, arbiter_data, expiration_unix,
         )
         uid = (receipt or {}).get("log", {}).get("uid")
@@ -1511,16 +1570,16 @@ class _NativeTokenEscrowCodecBase:
         return uid
 
     async def get_obligation(self, client: Any, uid: str) -> Any:
-        tier_client = getattr(client.native_token.escrow, self.tier_attr)
-        return await tier_client.get_obligation(uid)
+        sdk_variant_client = getattr(client.native_token.escrow, self.sdk_variant_attr)
+        return await sdk_variant_client.get_obligation(uid)
 
     async def collect(self, client: Any, uid: str, fulfillment_uid: str) -> Any:
-        tier_client = getattr(client.native_token.escrow, self.tier_attr)
-        return await tier_client.collect(uid, fulfillment_uid)
+        sdk_variant_client = getattr(client.native_token.escrow, self.sdk_variant_attr)
+        return await sdk_variant_client.collect(uid, fulfillment_uid)
 
     async def reclaim_expired(self, client: Any, uid: str) -> Any:
-        tier_client = getattr(client.native_token.escrow, self.tier_attr)
-        return await tier_client.reclaim_expired(uid)
+        sdk_variant_client = getattr(client.native_token.escrow, self.sdk_variant_attr)
+        return await sdk_variant_client.reclaim_expired(uid)
 
     async def refund_claimed(
         self,
@@ -1538,20 +1597,20 @@ class _NativeTokenEscrowCodecBase:
         )
 
 
-class NativeTokenNonTierableEscrowCodec(_NativeTokenEscrowCodecBase):
-    """``NativeTokenEscrowObligation`` (non-tierable variant)."""
+class NativeTokenDefaultEscrowCodec(_NativeTokenEscrowCodecBase):
+    """Default ``NativeTokenEscrowObligation`` adapter."""
 
-    kind = "native_token_escrow_obligation_nontierable"
-    tier_attr = "non_tierable"
-    address_field = "escrow_obligation_nontierable"
+    kind = "native_token_escrow_obligation_default"
+    sdk_variant_attr = "default"
+    address_field = "escrow_obligation_default"
 
 
-class NativeTokenTierableEscrowCodec(_NativeTokenEscrowCodecBase):
-    """``NativeTokenEscrowObligation`` (tierable variant)."""
+class NativeTokenUnconditionalEscrowCodec(_NativeTokenEscrowCodecBase):
+    """``NativeTokenEscrowObligation`` (unconditional variant)."""
 
-    kind = "native_token_escrow_obligation_tierable"
-    tier_attr = "tierable"
-    address_field = "escrow_obligation_tierable"
+    kind = "native_token_escrow_obligation_unconditional"
+    sdk_variant_attr = "unconditional"
+    address_field = "escrow_obligation_unconditional"
 
 
 def _as_int_list(values: Any, field: str) -> list[int]:
@@ -1596,7 +1655,7 @@ class _TokenBundleEscrowCodecBase:
          uint256[] erc1155Amounts)
     """
 
-    tier_attr: str
+    sdk_variant_attr: str
     address_field: str
 
     def _bundle_data(self, obligation_data: dict[str, Any]) -> dict[str, Any]:
@@ -1671,8 +1730,8 @@ class _TokenBundleEscrowCodecBase:
         bundle_data = self._bundle_data(obligation_data)
         arbiter_data = self._arbiter_data(obligation_data)
         await client.token_bundle.util.approve(bundle_data, "escrow")
-        tier_client = getattr(client.token_bundle.escrow, self.tier_attr)
-        receipt = await tier_client.create(
+        sdk_variant_client = getattr(client.token_bundle.escrow, self.sdk_variant_attr)
+        receipt = await sdk_variant_client.create(
             bundle_data, arbiter_data, expiration_unix,
         )
         uid = (receipt or {}).get("log", {}).get("uid")
@@ -1683,16 +1742,16 @@ class _TokenBundleEscrowCodecBase:
         return uid
 
     async def get_obligation(self, client: Any, uid: str) -> Any:
-        tier_client = getattr(client.token_bundle.escrow, self.tier_attr)
-        return await tier_client.get_obligation(uid)
+        sdk_variant_client = getattr(client.token_bundle.escrow, self.sdk_variant_attr)
+        return await sdk_variant_client.get_obligation(uid)
 
     async def collect(self, client: Any, uid: str, fulfillment_uid: str) -> Any:
-        tier_client = getattr(client.token_bundle.escrow, self.tier_attr)
-        return await tier_client.collect(uid, fulfillment_uid)
+        sdk_variant_client = getattr(client.token_bundle.escrow, self.sdk_variant_attr)
+        return await sdk_variant_client.collect(uid, fulfillment_uid)
 
     async def reclaim_expired(self, client: Any, uid: str) -> Any:
-        tier_client = getattr(client.token_bundle.escrow, self.tier_attr)
-        return await tier_client.reclaim_expired(uid)
+        sdk_variant_client = getattr(client.token_bundle.escrow, self.sdk_variant_attr)
+        return await sdk_variant_client.reclaim_expired(uid)
 
     async def refund_claimed(
         self,
@@ -1740,27 +1799,27 @@ class _TokenBundleEscrowCodecBase:
         return {"asset_kind": "token_bundle", "transfers": transfers}
 
 
-class TokenBundleNonTierableEscrowCodec(_TokenBundleEscrowCodecBase):
-    """``TokenBundleEscrowObligation`` (non-tierable variant)."""
+class TokenBundleDefaultEscrowCodec(_TokenBundleEscrowCodecBase):
+    """Default ``TokenBundleEscrowObligation`` adapter."""
 
-    kind = "token_bundle_escrow_obligation_nontierable"
-    tier_attr = "non_tierable"
-    address_field = "escrow_obligation_nontierable"
+    kind = "token_bundle_escrow_obligation_default"
+    sdk_variant_attr = "default"
+    address_field = "escrow_obligation_default"
 
 
-class TokenBundleTierableEscrowCodec(_TokenBundleEscrowCodecBase):
-    """``TokenBundleEscrowObligation`` (tierable variant)."""
+class TokenBundleUnconditionalEscrowCodec(_TokenBundleEscrowCodecBase):
+    """``TokenBundleEscrowObligation`` (unconditional variant)."""
 
-    kind = "token_bundle_escrow_obligation_tierable"
-    tier_attr = "tierable"
-    address_field = "escrow_obligation_tierable"
+    kind = "token_bundle_escrow_obligation_unconditional"
+    sdk_variant_attr = "unconditional"
+    address_field = "escrow_obligation_unconditional"
 
 
 class _AttestationEscrowCodecBase:
     """Common attestation escrow SDK adapter."""
 
     version_attr: str
-    tier_attr: str
+    sdk_variant_attr: str
     address_field: str
 
     def _attestation_data(self, obligation_data: dict[str, Any]) -> Any:
@@ -1791,8 +1850,8 @@ class _AttestationEscrowCodecBase:
         attestation_data = self._attestation_data(obligation_data)
         arbiter_data = self._arbiter_data(obligation_data)
         version_client = getattr(client.attestation.escrow, self.version_attr)
-        tier_client = getattr(version_client, self.tier_attr)
-        receipt = await tier_client.create(
+        sdk_variant_client = getattr(version_client, self.sdk_variant_attr)
+        receipt = await sdk_variant_client.create(
             attestation_data, arbiter_data, expiration_unix,
         )
         uid = (receipt or {}).get("log", {}).get("uid")
@@ -1804,18 +1863,18 @@ class _AttestationEscrowCodecBase:
 
     async def get_obligation(self, client: Any, uid: str) -> Any:
         version_client = getattr(client.attestation.escrow, self.version_attr)
-        tier_client = getattr(version_client, self.tier_attr)
-        return await tier_client.get_obligation(uid)
+        sdk_variant_client = getattr(version_client, self.sdk_variant_attr)
+        return await sdk_variant_client.get_obligation(uid)
 
     async def collect(self, client: Any, uid: str, fulfillment_uid: str) -> Any:
         version_client = getattr(client.attestation.escrow, self.version_attr)
-        tier_client = getattr(version_client, self.tier_attr)
-        return await tier_client.collect(uid, fulfillment_uid)
+        sdk_variant_client = getattr(version_client, self.sdk_variant_attr)
+        return await sdk_variant_client.collect(uid, fulfillment_uid)
 
     async def reclaim_expired(self, client: Any, uid: str) -> Any:
         version_client = getattr(client.attestation.escrow, self.version_attr)
-        tier_client = getattr(version_client, self.tier_attr)
-        return await tier_client.reclaim_expired(uid)
+        sdk_variant_client = getattr(version_client, self.sdk_variant_attr)
+        return await sdk_variant_client.reclaim_expired(uid)
 
     async def refund_claimed(
         self,
@@ -1829,7 +1888,7 @@ class _AttestationEscrowCodecBase:
 
 
 class _AttestationV1EscrowCodecBase(_AttestationEscrowCodecBase):
-    version_attr = "v1"
+    version_attr = "default"
 
     def _attestation_data(self, obligation_data: dict[str, Any]) -> Any:
         from alkahest_py import AttestationRequest, AttestationRequestData
@@ -1854,24 +1913,24 @@ class _AttestationV1EscrowCodecBase(_AttestationEscrowCodecBase):
         )
 
 
-class AttestationNonTierableEscrowCodec(_AttestationV1EscrowCodecBase):
-    """``AttestationEscrowObligation`` v1 (non-tierable variant)."""
+class AttestationDefaultEscrowCodec(_AttestationV1EscrowCodecBase):
+    """Default ``AttestationEscrowObligation`` v1 adapter."""
 
-    kind = "attestation_escrow_obligation_nontierable"
-    tier_attr = "non_tierable"
-    address_field = "escrow_obligation_nontierable"
+    kind = "attestation_escrow_obligation_default"
+    sdk_variant_attr = "default"
+    address_field = "escrow_obligation_default"
 
 
-class AttestationTierableEscrowCodec(_AttestationV1EscrowCodecBase):
-    """``AttestationEscrowObligation`` v1 (tierable variant)."""
+class AttestationUnconditionalEscrowCodec(_AttestationV1EscrowCodecBase):
+    """``AttestationEscrowObligation`` v1 (unconditional variant)."""
 
-    kind = "attestation_escrow_obligation_tierable"
-    tier_attr = "tierable"
-    address_field = "escrow_obligation_tierable"
+    kind = "attestation_escrow_obligation_unconditional"
+    sdk_variant_attr = "unconditional"
+    address_field = "escrow_obligation_unconditional"
 
 
 class _AttestationV2EscrowCodecBase(_AttestationEscrowCodecBase):
-    version_attr = "v2"
+    version_attr = "reference"
 
     def _attestation_data(self, obligation_data: dict[str, Any]) -> Any:
         attestation_uid = (
@@ -1883,20 +1942,20 @@ class _AttestationV2EscrowCodecBase(_AttestationEscrowCodecBase):
         return str(attestation_uid)
 
 
-class Attestation2NonTierableEscrowCodec(_AttestationV2EscrowCodecBase):
-    """``AttestationEscrowObligation2`` (non-tierable variant)."""
+class Attestation2DefaultEscrowCodec(_AttestationV2EscrowCodecBase):
+    """Default ``AttestationEscrowObligation2`` adapter."""
 
-    kind = "attestation_escrow_obligation_2_nontierable"
-    tier_attr = "non_tierable"
-    address_field = "escrow_obligation_2_nontierable"
+    kind = "attestation_escrow_obligation_2_default"
+    sdk_variant_attr = "default"
+    address_field = "escrow_obligation_2_default"
 
 
-class Attestation2TierableEscrowCodec(_AttestationV2EscrowCodecBase):
-    """``AttestationEscrowObligation2`` (tierable variant)."""
+class Attestation2UnconditionalEscrowCodec(_AttestationV2EscrowCodecBase):
+    """``AttestationEscrowObligation2`` (unconditional variant)."""
 
-    kind = "attestation_escrow_obligation_2_tierable"
-    tier_attr = "tierable"
-    address_field = "escrow_obligation_2_tierable"
+    kind = "attestation_escrow_obligation_2_unconditional"
+    sdk_variant_attr = "unconditional"
+    address_field = "escrow_obligation_2_unconditional"
 
 
 class _Erc721EscrowCodecBase:
@@ -1911,7 +1970,7 @@ class _Erc721EscrowCodecBase:
       - ``expiration`` as a separate uint64
     """
 
-    tier_attr: str
+    sdk_variant_attr: str
     address_field: str
     approve_via_sdk: bool = True
 
@@ -1947,8 +2006,8 @@ class _Erc721EscrowCodecBase:
         arbiter_data = self._arbiter_data(obligation_data)
         if self.approve_via_sdk:
             await client.erc721.util.approve(price_data, "escrow")
-        tier_client = getattr(client.erc721.escrow, self.tier_attr)
-        receipt = await tier_client.create(
+        sdk_variant_client = getattr(client.erc721.escrow, self.sdk_variant_attr)
+        receipt = await sdk_variant_client.create(
             price_data, arbiter_data, expiration_unix,
         )
         uid = (receipt or {}).get("log", {}).get("uid")
@@ -1959,16 +2018,16 @@ class _Erc721EscrowCodecBase:
         return uid
 
     async def get_obligation(self, client: Any, uid: str) -> Any:
-        tier_client = getattr(client.erc721.escrow, self.tier_attr)
-        return await tier_client.get_obligation(uid)
+        sdk_variant_client = getattr(client.erc721.escrow, self.sdk_variant_attr)
+        return await sdk_variant_client.get_obligation(uid)
 
     async def collect(self, client: Any, uid: str, fulfillment_uid: str) -> Any:
-        tier_client = getattr(client.erc721.escrow, self.tier_attr)
-        return await tier_client.collect(uid, fulfillment_uid)
+        sdk_variant_client = getattr(client.erc721.escrow, self.sdk_variant_attr)
+        return await sdk_variant_client.collect(uid, fulfillment_uid)
 
     async def reclaim_expired(self, client: Any, uid: str) -> Any:
-        tier_client = getattr(client.erc721.escrow, self.tier_attr)
-        return await tier_client.reclaim_expired(uid)
+        sdk_variant_client = getattr(client.erc721.escrow, self.sdk_variant_attr)
+        return await sdk_variant_client.reclaim_expired(uid)
 
     async def refund_claimed(
         self,
@@ -1987,20 +2046,20 @@ class _Erc721EscrowCodecBase:
         )
 
 
-class Erc721NonTierableEscrowCodec(_Erc721EscrowCodecBase):
-    """``ERC721EscrowObligation`` (non-tierable variant)."""
+class Erc721DefaultEscrowCodec(_Erc721EscrowCodecBase):
+    """Default ``ERC721EscrowObligation`` adapter."""
 
-    kind = "erc721_escrow_obligation_nontierable"
-    tier_attr = "non_tierable"
-    address_field = "escrow_obligation_nontierable"
+    kind = "erc721_escrow_obligation_default"
+    sdk_variant_attr = "default"
+    address_field = "escrow_obligation_default"
 
 
-class Erc721TierableEscrowCodec(_Erc721EscrowCodecBase):
-    """``ERC721EscrowObligation`` (tierable variant)."""
+class Erc721UnconditionalEscrowCodec(_Erc721EscrowCodecBase):
+    """``ERC721EscrowObligation`` (unconditional variant)."""
 
-    kind = "erc721_escrow_obligation_tierable"
-    tier_attr = "tierable"
-    address_field = "escrow_obligation_tierable"
+    kind = "erc721_escrow_obligation_unconditional"
+    sdk_variant_attr = "unconditional"
+    address_field = "escrow_obligation_unconditional"
     approve_via_sdk = False
 
 
@@ -2016,7 +2075,7 @@ class _Erc1155EscrowCodecBase:
       - ``expiration`` as a separate uint64
     """
 
-    tier_attr: str
+    sdk_variant_attr: str
     address_field: str
 
     def _price_data(self, obligation_data: dict[str, Any]) -> dict[str, Any]:
@@ -2051,8 +2110,8 @@ class _Erc1155EscrowCodecBase:
         price_data = self._price_data(obligation_data)
         arbiter_data = self._arbiter_data(obligation_data)
         await client.erc1155.util.approve_all(price_data["address"], "escrow")
-        tier_client = getattr(client.erc1155.escrow, self.tier_attr)
-        receipt = await tier_client.create(
+        sdk_variant_client = getattr(client.erc1155.escrow, self.sdk_variant_attr)
+        receipt = await sdk_variant_client.create(
             price_data, arbiter_data, expiration_unix,
         )
         uid = (receipt or {}).get("log", {}).get("uid")
@@ -2063,16 +2122,16 @@ class _Erc1155EscrowCodecBase:
         return uid
 
     async def get_obligation(self, client: Any, uid: str) -> Any:
-        tier_client = getattr(client.erc1155.escrow, self.tier_attr)
-        return await tier_client.get_obligation(uid)
+        sdk_variant_client = getattr(client.erc1155.escrow, self.sdk_variant_attr)
+        return await sdk_variant_client.get_obligation(uid)
 
     async def collect(self, client: Any, uid: str, fulfillment_uid: str) -> Any:
-        tier_client = getattr(client.erc1155.escrow, self.tier_attr)
-        return await tier_client.collect(uid, fulfillment_uid)
+        sdk_variant_client = getattr(client.erc1155.escrow, self.sdk_variant_attr)
+        return await sdk_variant_client.collect(uid, fulfillment_uid)
 
     async def reclaim_expired(self, client: Any, uid: str) -> Any:
-        tier_client = getattr(client.erc1155.escrow, self.tier_attr)
-        return await tier_client.reclaim_expired(uid)
+        sdk_variant_client = getattr(client.erc1155.escrow, self.sdk_variant_attr)
+        return await sdk_variant_client.reclaim_expired(uid)
 
     async def refund_claimed(
         self,
@@ -2092,37 +2151,37 @@ class _Erc1155EscrowCodecBase:
         )
 
 
-class Erc1155NonTierableEscrowCodec(_Erc1155EscrowCodecBase):
-    """``ERC1155EscrowObligation`` (non-tierable variant)."""
+class Erc1155DefaultEscrowCodec(_Erc1155EscrowCodecBase):
+    """Default ``ERC1155EscrowObligation`` adapter."""
 
-    kind = "erc1155_escrow_obligation_nontierable"
-    tier_attr = "non_tierable"
-    address_field = "escrow_obligation_nontierable"
+    kind = "erc1155_escrow_obligation_default"
+    sdk_variant_attr = "default"
+    address_field = "escrow_obligation_default"
 
 
-class Erc1155TierableEscrowCodec(_Erc1155EscrowCodecBase):
-    """``ERC1155EscrowObligation`` (tierable variant)."""
+class Erc1155UnconditionalEscrowCodec(_Erc1155EscrowCodecBase):
+    """``ERC1155EscrowObligation`` (unconditional variant)."""
 
-    kind = "erc1155_escrow_obligation_tierable"
-    tier_attr = "tierable"
-    address_field = "escrow_obligation_tierable"
+    kind = "erc1155_escrow_obligation_unconditional"
+    sdk_variant_attr = "unconditional"
+    address_field = "escrow_obligation_unconditional"
 
 
 _ESCROW_KIND_CODECS: dict[str, EscrowKindCodec] = {
-    "erc20_escrow_obligation_nontierable": Erc20NonTierableEscrowCodec(),
-    "erc20_escrow_obligation_tierable": Erc20TierableEscrowCodec(),
-    "erc721_escrow_obligation_nontierable": Erc721NonTierableEscrowCodec(),
-    "erc721_escrow_obligation_tierable": Erc721TierableEscrowCodec(),
-    "erc1155_escrow_obligation_nontierable": Erc1155NonTierableEscrowCodec(),
-    "erc1155_escrow_obligation_tierable": Erc1155TierableEscrowCodec(),
-    "native_token_escrow_obligation_nontierable": NativeTokenNonTierableEscrowCodec(),
-    "native_token_escrow_obligation_tierable": NativeTokenTierableEscrowCodec(),
-    "token_bundle_escrow_obligation_nontierable": TokenBundleNonTierableEscrowCodec(),
-    "token_bundle_escrow_obligation_tierable": TokenBundleTierableEscrowCodec(),
-    "attestation_escrow_obligation_nontierable": AttestationNonTierableEscrowCodec(),
-    "attestation_escrow_obligation_tierable": AttestationTierableEscrowCodec(),
-    "attestation_escrow_obligation_2_nontierable": Attestation2NonTierableEscrowCodec(),
-    "attestation_escrow_obligation_2_tierable": Attestation2TierableEscrowCodec(),
+    "erc20_escrow_obligation_default": Erc20DefaultEscrowCodec(),
+    "erc20_escrow_obligation_unconditional": Erc20UnconditionalEscrowCodec(),
+    "erc721_escrow_obligation_default": Erc721DefaultEscrowCodec(),
+    "erc721_escrow_obligation_unconditional": Erc721UnconditionalEscrowCodec(),
+    "erc1155_escrow_obligation_default": Erc1155DefaultEscrowCodec(),
+    "erc1155_escrow_obligation_unconditional": Erc1155UnconditionalEscrowCodec(),
+    "native_token_escrow_obligation_default": NativeTokenDefaultEscrowCodec(),
+    "native_token_escrow_obligation_unconditional": NativeTokenUnconditionalEscrowCodec(),
+    "token_bundle_escrow_obligation_default": TokenBundleDefaultEscrowCodec(),
+    "token_bundle_escrow_obligation_unconditional": TokenBundleUnconditionalEscrowCodec(),
+    "attestation_escrow_obligation_default": AttestationDefaultEscrowCodec(),
+    "attestation_escrow_obligation_unconditional": AttestationUnconditionalEscrowCodec(),
+    "attestation_escrow_obligation_2_default": Attestation2DefaultEscrowCodec(),
+    "attestation_escrow_obligation_2_unconditional": Attestation2UnconditionalEscrowCodec(),
 }
 
 

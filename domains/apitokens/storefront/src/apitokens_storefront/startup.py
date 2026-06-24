@@ -191,9 +191,9 @@ async def _seed_demo_listing() -> None:
         escrow_address = seed.get("escrow_address")
         if not escrow_address:
             from market_alkahest.alkahest import (
-                get_erc20_escrow_obligation_nontierable,
+                get_erc20_escrow_obligation_default,
             )
-            escrow_address = get_erc20_escrow_obligation_nontierable(
+            escrow_address = get_erc20_escrow_obligation_default(
                 chain, config_path=chain_cfg.alkahest_address_config_path,
             )
         price = str(seed.get("price_per_token", "1"))

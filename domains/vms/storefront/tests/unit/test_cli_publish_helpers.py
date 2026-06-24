@@ -73,7 +73,7 @@ def _stub_resolve_token(monkeypatch):
     )
     from market_alkahest import alkahest as alkahest_mod
     monkeypatch.setattr(
-        alkahest_mod, "get_erc20_escrow_obligation_nontierable",
+        alkahest_mod, "get_erc20_escrow_obligation_default",
         lambda chain_name, *, config_path=None: "0x" + "cd" * 20,
     )
     monkeypatch.setattr(

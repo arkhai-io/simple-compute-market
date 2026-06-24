@@ -232,7 +232,7 @@ def test_splitter_plan_carries_interruptible_service_terms(tmp_path):
     override = {
         "arbiters_addresses": {"erc20_splitter": SPLITTER},
         "erc20_addresses": {
-            "escrow_obligation_nontierable": ESCROW,
+            "escrow_obligation_default": ESCROW,
         },
     }
     path = tmp_path / "alkahest_override.json"

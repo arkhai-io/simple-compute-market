@@ -14,8 +14,8 @@ from eth_account.signers.local import LocalAccount
 from web3 import Web3
 
 from market_alkahest.alkahest import (
-    Erc1155NonTierableEscrowCodec,
-    NativeTokenNonTierableEscrowCodec,
+    Erc1155DefaultEscrowCodec,
+    NativeTokenDefaultEscrowCodec,
     encode_recipient_demand,
     get_alkahest_network,
     get_recipient_arbiter,
@@ -133,10 +133,10 @@ def _mint_erc1155(
 
 
 def _settlement_cases() -> list[SettlementCase]:
-    native_addr = NativeTokenNonTierableEscrowCodec().resolve_address(
+    native_addr = NativeTokenDefaultEscrowCodec().resolve_address(
         _CHAIN_NAME, config_path=_ALKAHEST_ADDRESSES_PATH,
     )
-    erc1155_addr = Erc1155NonTierableEscrowCodec().resolve_address(
+    erc1155_addr = Erc1155DefaultEscrowCodec().resolve_address(
         _CHAIN_NAME, config_path=_ALKAHEST_ADDRESSES_PATH,
     )
     return [
@@ -241,7 +241,7 @@ def _create_on_chain_escrow(
 
     async def _do_it() -> str:
         if case.token_id is None:
-            receipt = await NativeTokenNonTierableEscrowCodec().create_obligation(
+            receipt = await NativeTokenDefaultEscrowCodec().create_obligation(
                 client,
                 {**common, "amount": _AGREED_AMOUNT},
                 expiration,
@@ -253,7 +253,7 @@ def _create_on_chain_escrow(
                 token_id=case.token_id,
                 amount=_AGREED_AMOUNT,
             )
-            receipt = await Erc1155NonTierableEscrowCodec().create_obligation(
+            receipt = await Erc1155DefaultEscrowCodec().create_obligation(
                 client,
                 {
                     **common,

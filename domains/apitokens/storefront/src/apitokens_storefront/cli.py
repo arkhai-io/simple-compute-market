@@ -83,7 +83,7 @@ def publish_cmd(
     escrow_address: str | None = typer.Option(
         None, "--escrow-address",
         help="Escrow contract address; resolved from the chain's alkahest "
-             "config (erc20 non-tierable) when omitted.",
+             "config (erc20 non-unconditional) when omitted.",
     ),
     description: str | None = typer.Option(None, "--description"),
     openapi_url: str | None = typer.Option(None, "--openapi-url"),
@@ -113,10 +113,10 @@ def publish_cmd(
             typer.echo(f"chain {chain!r} is not configured", err=True)
             raise typer.Exit(code=2)
         from market_alkahest.alkahest import (
-            get_erc20_escrow_obligation_nontierable,
+            get_erc20_escrow_obligation_default,
         )
 
-        resolved_escrow = get_erc20_escrow_obligation_nontierable(
+        resolved_escrow = get_erc20_escrow_obligation_default(
             chain, config_path=chain_cfg.alkahest_address_config_path,
         )
 

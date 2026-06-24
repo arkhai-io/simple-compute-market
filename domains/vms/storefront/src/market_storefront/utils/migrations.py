@@ -68,12 +68,12 @@ def synthesize_accepted_escrows_from_demand(
     else:
         rate_value = None
 
-    from market_alkahest.alkahest import get_erc20_escrow_obligation_nontierable
+    from market_alkahest.alkahest import get_erc20_escrow_obligation_default
 
     entries: list[dict[str, Any]] = []
     for name, chain in CHAINS.items():
         try:
-            escrow_address = get_erc20_escrow_obligation_nontierable(
+            escrow_address = get_erc20_escrow_obligation_default(
                 name,
                 config_path=chain.alkahest_address_config_path,
             )

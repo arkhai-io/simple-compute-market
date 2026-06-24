@@ -139,7 +139,7 @@ def create_buyer_escrow(
 
     async def _do_it() -> str:
         await client.erc20.util.approve(price_data, "escrow")
-        receipt = await client.erc20.escrow.non_tierable.create(
+        receipt = await client.erc20.escrow.default.create(
             price_data, arbiter_data, expiration,
         )
         uid = (receipt or {}).get("log", {}).get("uid")

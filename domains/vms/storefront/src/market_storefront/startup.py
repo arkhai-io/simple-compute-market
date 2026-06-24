@@ -48,7 +48,7 @@ async def _probe_chain_addresses() -> None:
                 ),
                 (("arbiters_addresses", "eas"), f"{chain.name}/alkahest.eas"),
                 (
-                    ("erc20_addresses", "escrow_obligation_nontierable"),
+                    ("erc20_addresses", "escrow_obligation_default"),
                     f"{chain.name}/alkahest.erc20_escrow_obligation",
                 ),
             ):

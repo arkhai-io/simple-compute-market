@@ -20,7 +20,7 @@ async def approve_escrow(client):
 
 async def create_escrow(client, arbiter, demand=b"", expiration=0):
     price = {"address": MOCK_TOKEN_ADDR, "value": 100}
-    hash = await client.erc20.escrow.non_tierable.permit_and_create(
+    hash = await client.erc20.escrow.default.permit_and_create(
         price, arbiter, expiration
     )
     return hash
@@ -65,7 +65,7 @@ async def full_arbitration_flow(
 
     assert len(decisions) > 0
     
-    escrow_collection_uid = await seller_client.erc20.escrow.non_tierable.collect(escrow_uid, fulfillment_uid)
+    escrow_collection_uid = await seller_client.erc20.escrow.default.collect(escrow_uid, fulfillment_uid)
 
     assert escrow_uid is not None
     assert escrow_collection_uid is not None

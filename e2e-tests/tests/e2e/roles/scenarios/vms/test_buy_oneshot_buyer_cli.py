@@ -79,7 +79,7 @@ _ALKAHEST_CFG = resolve_alkahest_address_config(
 ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
     "escrow_address": str(
-        _ALKAHEST_CFG.erc20_addresses.escrow_obligation_nontierable
+        _ALKAHEST_CFG.erc20_addresses.escrow_obligation_default
     ).lower(),
     "literal_fields": {"token": DEMAND_TOKEN_ADDRESS},
     "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_AMOUNT)}],

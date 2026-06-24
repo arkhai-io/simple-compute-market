@@ -55,8 +55,8 @@ def test_resolve_config_from_path_override(tmp_path: Path) -> None:
         "erc20_addresses": {
             "eas": "0x1111111111111111111111111111111111111111",
             "barter_utils": "0x2222222222222222222222222222222222222222",
-            "escrow_obligation_nontierable": "0x3333333333333333333333333333333333333333",
-            "escrow_obligation_tierable": "0x0000000000000000000000000000000000000000",
+            "escrow_obligation_default": "0x3333333333333333333333333333333333333333",
+            "escrow_obligation_unconditional": "0x0000000000000000000000000000000000000000",
             "payment_obligation": "0x4444444444444444444444444444444444444444",
         },
         "arbiters_addresses": {

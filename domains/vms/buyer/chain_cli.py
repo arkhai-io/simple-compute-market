@@ -80,7 +80,7 @@ def chain_check(
             for path, label in (
                 (("arbiters_addresses", "recipient_arbiter"), "alkahest.recipient_arbiter"),
                 (("arbiters_addresses", "eas"), "alkahest.eas"),
-                (("erc20_addresses", "escrow_obligation_nontierable"),
+                (("erc20_addresses", "escrow_obligation_default"),
                  "alkahest.erc20_escrow_obligation"),
             ):
                 obj: object | None = cfg
