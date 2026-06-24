@@ -6,4 +6,5 @@ from market_alkahest.proposals import (  # noqa: F401
     accepted_escrow_artifacts_from_proposal,
     escrow_proposal_from_accepted_entry,
     proposal_is_oracle_gated,
+    proposal_is_splitter_gated,
 )

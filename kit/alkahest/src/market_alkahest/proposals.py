@@ -82,6 +82,45 @@ def proposal_is_oracle_gated(
     return False
 
 
+def proposal_is_splitter_gated(
+    proposal: EscrowProposal | dict[str, Any],
+    *,
+    chain_config_paths: dict[str, str | None] | None = None,
+) -> bool:
+    """True when collection routes through a splitter arbiter."""
+    from market_alkahest.alkahest import address_to_slot
+    from market_alkahest.schemas import accepted_demands
+
+    chain = (
+        proposal.chain_name
+        if isinstance(proposal, EscrowProposal)
+        else proposal.get("chain_name")
+    )
+    config_path = (chain_config_paths or {}).get(chain)
+    splitter_slots = {"erc20_splitter", "native_token_splitter"}
+    for demand in accepted_demands(proposal):
+        arbiter = demand.get("arbiter")
+        if not arbiter:
+            continue
+        try:
+            slot = address_to_slot(chain, arbiter, config_path=config_path)
+        except Exception:
+            continue
+        if slot in splitter_slots:
+            return True
+        if slot == "all_arbiter":
+            children = (demand.get("demand_data") or {}).get("arbiters") or []
+            for child in children:
+                try:
+                    if address_to_slot(
+                        chain, child, config_path=config_path
+                    ) in splitter_slots:
+                        return True
+                except Exception:
+                    continue
+    return False
+
+
 def accepted_escrow_artifacts_from_proposal(
     *,
     proposal: EscrowProposal | dict[str, Any] | None,
@@ -137,6 +176,13 @@ def accepted_escrow_artifacts_from_proposal(
             service_terms["heartbeat"] = {
                 "schema": "vms.heartbeat.v1",
                 "interval_seconds": int(heartbeat_interval_seconds),
+            }
+        if proposal_is_splitter_gated(
+            accepted, chain_config_paths=chain_config_paths
+        ):
+            service_terms["interruptible"] = {
+                "schema": "vms.interruptible.v1",
+                "refund_authority": "seller_declared",
             }
         plan = materialize_settlement_plan_from_proposal(
             proposal=accepted,

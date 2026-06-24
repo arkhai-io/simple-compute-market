@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -24,6 +25,8 @@ from market_storefront.models.capacity_admin_models import (
     FulfillmentStartedEventRequest,
     ImportResourcesResponse,
     ImportRowError,
+    InterruptDealRequest,
+    InterruptDealResponse,
     ReleaseReservationsResponse,
     ReleaseStartedEventRequest,
     ReserveCapacityRequest,
@@ -48,6 +51,9 @@ logger = logging.getLogger(__name__)
 # ``leased`` is the post-fulfillment hold for the duration of the lease.
 # Anything else (``available``, ``deleted``, etc.) is a no-op.
 _HELD_STATES = frozenset({"reserved", "leased"})
+_INTERRUPTIBLE_HELD_STATES = frozenset(
+    {"reserved", "provisioning", "leased", "releasing"}
+)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -73,6 +79,105 @@ class AdminController:
     async def resume(self) -> AdminPauseResponse:
         _set_globally_paused(False)
         return AdminPauseResponse(paused=False, message="Storefront resumed.")
+
+    @router.post(
+        "/deals/{escrow_uid}/interrupt",
+        response_model=InterruptDealResponse,
+        summary="Interrupt an active interruptible compute deal (admin)",
+    )
+    async def interrupt_deal(
+        self, escrow_uid: str, body: InterruptDealRequest,
+    ) -> InterruptDealResponse:
+        """End an interruptible deal's capacity lease early.
+
+        This is the provider-control-plane half of spot interruption.
+        It validates that the deal came from an interruptible listing,
+        finds the live capacity allocation, and truncates that lease to
+        the interruption timestamp. The splitter declaration remains a
+        separate settlement action until the on-chain helper is wired.
+        """
+        escrow = await self._db.load_escrow(escrow_uid=escrow_uid)
+        if escrow is None:
+            raise HTTPException(
+                status_code=404, detail=f"Unknown escrow {escrow_uid!r}",
+            )
+        listing_id = await self._db.get_listing_id_by_escrow_uid(
+            escrow_uid=escrow_uid
+        )
+        if not listing_id:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No listing found for escrow {escrow_uid!r}",
+            )
+        listing = await self._db.load_listing(listing_id=listing_id)
+        if listing is None:
+            raise HTTPException(
+                status_code=404, detail=f"Listing {listing_id!r} not found",
+            )
+        thread = await self._db.load_negotiation_thread_row(
+            negotiation_id=escrow["negotiation_id"]
+        )
+        if not self._deal_is_interruptible(listing=listing, thread=thread):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Deal is not marked interruptible/splitter-backed; "
+                    "refusing spot interruption."
+                ),
+            )
+
+        interrupted_at = self._interrupt_time(body.interrupted_at_utc)
+        allocation = await self._find_live_allocation_for_escrow(escrow_uid)
+        if allocation is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No live allocation found for escrow {escrow_uid!r}",
+            )
+        allocation_id = str(allocation["allocation_id"])
+
+        truncated: dict[str, Any] | None = None
+        if not body.dry_run:
+            capacity = self._capacity()
+            truncated = await capacity.truncate_lease(
+                allocation_id=allocation_id,
+                lease_end_utc=interrupted_at,
+            )
+            if truncated is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Allocation {allocation_id!r} is no longer held "
+                        "and could not be interrupted"
+                    ),
+                )
+            await self._db.update_escrow(
+                escrow_uid=escrow_uid,
+                reason=body.reason or "interruptible_preemption",
+            )
+            stage_event(
+                "admin", "deal_interrupted",
+                escrow_uid=escrow_uid,
+                listing_id=listing_id,
+                allocation_id=allocation_id,
+                interrupted_at_utc=interrupted_at,
+                reason=body.reason,
+                seller_amount=body.seller_amount,
+                refund_amount=body.refund_amount,
+                settlement_action="splitter_declaration_pending",
+            )
+
+        return InterruptDealResponse(
+            escrow_uid=escrow_uid,
+            status="dry_run" if body.dry_run else "interrupted",
+            allocation_id=allocation_id,
+            listing_id=listing_id,
+            interrupted_at_utc=interrupted_at,
+            lease_truncated=not body.dry_run,
+            settlement_action="splitter_declaration_pending",
+            seller_amount=body.seller_amount,
+            refund_amount=body.refund_amount,
+            allocation=truncated or allocation,
+        )
 
     @router.post(
         "/portfolio/resources/import",
@@ -318,6 +423,96 @@ class AdminController:
             attributes=attrs_out,
             updated=True,
         )
+
+    @staticmethod
+    def _json_object(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str) and value.strip():
+            try:
+                parsed = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return {}
+
+    @staticmethod
+    def _interrupt_time(value: str | None) -> str:
+        if not value:
+            dt = datetime.now(timezone.utc)
+        else:
+            raw = value.strip()
+            if raw.endswith("Z"):
+                raw = raw[:-1] + "+00:00"
+            try:
+                dt = datetime.fromisoformat(raw)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "interrupted_at_utc must be an ISO-8601 UTC timestamp "
+                        "or omitted"
+                    ),
+                ) from exc
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            else:
+                dt = dt.astimezone(timezone.utc)
+        return dt.strftime("%Y-%m-%d %H:%M")
+
+    def _deal_is_interruptible(
+        self,
+        *,
+        listing: dict[str, Any],
+        thread: dict[str, Any] | None,
+    ) -> bool:
+        offer = self._json_object(listing.get("offer_resource"))
+        if offer.get("interruptible") is True:
+            return True
+
+        proposal = (thread or {}).get("buyer_escrow_proposal")
+        if not isinstance(proposal, dict):
+            return False
+        try:
+            from domains.vms.settlement.proposals import proposal_is_splitter_gated
+            from market_storefront.utils.config import CHAINS
+
+            chain_config_paths = {
+                name: chain.alkahest_address_config_path
+                for name, chain in CHAINS.items()
+            }
+            return proposal_is_splitter_gated(
+                proposal, chain_config_paths=chain_config_paths,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[ADMIN] Could not inspect splitter posture for proposal: %s",
+                exc,
+            )
+            return False
+
+    async def _find_live_allocation_for_escrow(
+        self, escrow_uid: str,
+    ) -> dict[str, Any] | None:
+        from market_storefront.services.capacity_client import remote_site_clients
+
+        capacity = self._capacity()
+        for client in remote_site_clients(capacity).values():
+            try:
+                rows = await client.list_allocations(escrow_uid=escrow_uid)
+            except Exception as exc:
+                logger.warning(
+                    "[ADMIN] Could not list allocations for escrow %s: %s",
+                    escrow_uid, exc,
+                )
+                continue
+            held = [
+                row for row in rows
+                if row.get("state") in _INTERRUPTIBLE_HELD_STATES
+            ]
+            if held:
+                return held[0]
+        return None
 
     async def _mirror_resources_to_site_authority(self, source: str) -> None:
         """Re-sync inventory to the site ledger after an admin mutation.

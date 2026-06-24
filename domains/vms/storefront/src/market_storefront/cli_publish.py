@@ -560,6 +560,37 @@ def _heartbeat_oracle_demands_for_chains(
     return demands
 
 
+def _splitter_demands_for_chains(
+    chains: dict[str, Any],
+    chain_names: set[str],
+    oracle_address: str,
+) -> list[dict[str, Any]]:
+    """Interruptible plan shape: splitter demands.
+
+    The splitter demand identifies who may declare the eventual refund
+    split. For the current VM spot MVP that can be the seller wallet;
+    the split itself is applied later on-chain when an interruption
+    occurs.
+    """
+    from market_alkahest.alkahest import get_erc20_splitter
+
+    demands: list[dict[str, Any]] = []
+    for name in sorted(chain_names):
+        chain = chains.get(name)
+        if chain is None:
+            continue
+        arbiter = get_erc20_splitter(
+            chain.name,
+            config_path=chain.alkahest_address_config_path,
+        )
+        demands.append({
+            "chain_name": chain.name,
+            "arbiter": arbiter.lower(),
+            "demand_data": {"oracle": oracle_address.lower(), "data": "0x"},
+        })
+    return demands
+
+
 def _demands_for_chains(
     chains: dict[str, Any],
     chain_names: set[str],
@@ -568,7 +599,13 @@ def _demands_for_chains(
     """Published demand set per the seller's settlement posture."""
     from market_storefront.utils.config import settings
 
+    interruptible = bool(getattr(settings, "interruptible_listings", False))
     if getattr(settings, "oracle_gated_listings", False):
+        if interruptible:
+            raise ValueError(
+                "oracle_gated_listings and interruptible_listings are mutually "
+                "exclusive settlement postures"
+            )
         oracle = str(getattr(settings, "trusted_oracle_address", "") or "")
         if not oracle:
             raise ValueError(
@@ -583,7 +620,30 @@ def _demands_for_chains(
                 "a self-oracle gates nothing — name a third party."
             )
         return _heartbeat_oracle_demands_for_chains(chains, chain_names, oracle)
+    if interruptible:
+        oracle = str(getattr(settings, "interruptible_oracle_address", "") or "")
+        return _splitter_demands_for_chains(
+            chains, chain_names, oracle or wallet_address,
+        )
     return _recipient_demands_for_chains(chains, chain_names, wallet_address)
+
+
+def _offer_resource_for_listing(res: dict[str, Any]) -> dict[str, Any]:
+    from market_storefront.utils.config import settings
+
+    offer = {
+        "pool_id": res.get("pool_id"),
+        "gpu_model": res["gpu_model"],
+        "gpu_count": res["gpu_count"],
+        "sla": res["sla"],
+        "region": res["region"],
+    }
+    if res.get("resource_id"):
+        offer["resource_id"] = res["resource_id"]
+    if getattr(settings, "interruptible_listings", False):
+        offer["interruptible"] = True
+        offer["settlement_model"] = "splitter_refund"
+    return offer
 
 
 def _publish_round(
@@ -679,15 +739,7 @@ def _publish_round(
             max_duration_seconds = _normalize_max_duration_seconds(
                 raw_max_duration_seconds
             )
-            offer = {
-                "pool_id": res.get("pool_id"),
-                "gpu_model": res["gpu_model"],
-                "gpu_count": res["gpu_count"],
-                "sla": res["sla"],
-                "region": res["region"],
-            }
-            if res.get("resource_id"):
-                offer["resource_id"] = res["resource_id"]
+            offer = _offer_resource_for_listing(res)
             try:
                 reopened = _reopen_derived_listing_if_present(
                     db_path=db_path,
@@ -828,15 +880,7 @@ def _publish_round(
         max_duration_seconds = _normalize_max_duration_seconds(
             raw_max_duration_seconds
         )
-        offer = {
-            "pool_id": res.get("pool_id"),
-            "gpu_model": res["gpu_model"],
-            "gpu_count": res["gpu_count"],
-            "sla": res["sla"],
-            "region": res["region"],
-        }
-        if res.get("resource_id"):
-            offer["resource_id"] = res["resource_id"]
+        offer = _offer_resource_for_listing(res)
         from market_alkahest.alkahest import get_erc20_escrow_obligation_nontierable
         accepted_escrows: list[dict] = []
         per_chain_errors: list[str] = []
@@ -872,11 +916,9 @@ def _publish_round(
             if isinstance(e, dict) and e.get("chain_name")
         }
         try:
-            demands = _recipient_demands_for_chains(
-                CHAINS, chain_names, wallet_address,
-            )
+            demands = _demands_for_chains(CHAINS, chain_names, wallet_address)
         except Exception as exc:
-            failed.append((res, f"recipient demands: {exc}"))
+            failed.append((res, f"listing demands: {exc}"))
             continue
         try:
             reopened = _reopen_derived_listing_if_present(

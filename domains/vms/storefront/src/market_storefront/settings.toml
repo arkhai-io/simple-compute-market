@@ -68,6 +68,13 @@ heartbeat_interval_seconds = 60
 # heartbeats (cadence above) are the dispute evidence.
 oracle_gated_listings = false
 trusted_oracle_address = ""
+# Interruptible / spot collection: publish listings whose escrow demand
+# routes through ERC20Splitter. The buyer escrows the max amount; on
+# interruption, the refund authority declares the seller/refund split.
+# Empty interruptible_oracle_address means this storefront's wallet,
+# which is intentional for the current trusted-seller MVP.
+interruptible_listings = false
+interruptible_oracle_address = ""
 default_vm_host               = "kvm1"
 
 [wallet]

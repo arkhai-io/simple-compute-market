@@ -10,6 +10,8 @@ from market_alkahest.alkahest import (
     NETWORK_ETHEREUM_SEPOLIA,
     NETWORK_ETHEREUM_MAINNET,
     get_alkahest_network,
+    get_erc20_splitter,
+    get_native_token_splitter,
     get_trusted_oracle_arbiter,
     resolve_alkahest_address_config,
 )
@@ -84,3 +86,22 @@ def test_get_trusted_oracle_arbiter_prefers_override(tmp_path: Path) -> None:
     _load_override_config_cached.cache_clear()
     resolved = get_trusted_oracle_arbiter(NETWORK_BASE_SEPOLIA, config_path=str(path))
     assert resolved == override["arbiters_addresses"]["trusted_oracle_arbiter"]
+
+
+def test_get_splitter_arbiters_prefer_override(tmp_path: Path) -> None:
+    override = {
+        "arbiters_addresses": {
+            "erc20_splitter": "0x7777777777777777777777777777777777777777",
+            "native_token_splitter": "0x8888888888888888888888888888888888888888",
+        }
+    }
+    path = tmp_path / "splitter_override.json"
+    path.write_text(json.dumps(override), encoding="utf-8")
+    from market_alkahest.alkahest import _load_override_config_cached
+    _load_override_config_cached.cache_clear()
+    assert get_erc20_splitter(NETWORK_BASE_SEPOLIA, config_path=str(path)) == (
+        override["arbiters_addresses"]["erc20_splitter"]
+    )
+    assert get_native_token_splitter(
+        NETWORK_BASE_SEPOLIA, config_path=str(path)
+    ) == override["arbiters_addresses"]["native_token_splitter"]

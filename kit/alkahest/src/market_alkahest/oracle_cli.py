@@ -7,10 +7,9 @@ manual tool (and the test harness's): record a decision for a
 fulfillment, or check what has been arbitrated so far.
 
 An automated oracle *service* (arbitrate true at lease end on a timer,
-park disputes for a human) is the production follow-up; the on-chain
-alternatives — a heartbeat-verifying arbiter contract, or the splitter
-contracts with per-interval escrows — are recorded in the lifecycle
-design doc as future plan shapes.
+park disputes for a human) is the production follow-up. Splitter-backed
+refunds are a separate arbiter path; this CLI only records boolean
+TrustedOracleArbiter decisions.
 
 stdlib argparse on purpose: the kit ships no CLI framework.
 """

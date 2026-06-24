@@ -31,7 +31,9 @@ from .alkahest import (
     AgreementContext,
     EscrowKindCodec,
     _arbiter_address,
+    get_erc20_splitter,
     get_escrow_codec_for,
+    get_native_token_splitter,
     get_trusted_oracle_arbiter,
     register_arbiter_codec,
 )
@@ -146,8 +148,62 @@ class AllArbiterCodec:
         }
 
 
+class _SplitterArbiterCodec:
+    """Base codec for ``BaseSplitter.SplitterDemandData``.
+
+    Splitters wrap an escrow and later distribute it according to an
+    oracle-provided split. Their demand data is the same shape as
+    TrustedOracleArbiter, but the contract interprets a true decision
+    as a set of settlement splits rather than an all-or-nothing release.
+    """
+
+    kind: str
+
+    def encode_demand(self, agreement: AgreementContext) -> bytes:
+        raise ValueError(
+            f"{self.kind} demands are not derivable from the agreement "
+            "context alone — encode explicit demand_data "
+            "{'oracle': <address>, 'data': <bytes|hex>} instead"
+        )
+
+    def encode_demand_data(self, demand_data: dict[str, Any]) -> bytes:
+        from eth_abi import encode as _abi_encode
+
+        oracle = demand_data.get("oracle")
+        if not oracle:
+            raise ValueError(f"{self.kind} demand_data requires 'oracle'")
+        data = _demand_bytes(demand_data.get("data") or b"")
+        return _abi_encode(["address", "bytes"], [oracle, data])
+
+    def decode_demand_data(self, demand: bytes) -> dict[str, Any]:
+        from eth_abi import decode as _abi_decode
+
+        oracle, data = _abi_decode(["address", "bytes"], _demand_bytes(demand))
+        return {"oracle": str(oracle), "data": bytes(data)}
+
+
+class ERC20SplitterArbiterCodec(_SplitterArbiterCodec):
+    """ERC20 splitter demand codec."""
+
+    kind = "erc20_splitter"
+
+    def resolve_address(self, chain_name: str, *, config_path: str | None) -> str:
+        return get_erc20_splitter(chain_name, config_path=config_path)
+
+
+class NativeTokenSplitterArbiterCodec(_SplitterArbiterCodec):
+    """Native-token splitter demand codec."""
+
+    kind = "native_token_splitter"
+
+    def resolve_address(self, chain_name: str, *, config_path: str | None) -> str:
+        return get_native_token_splitter(chain_name, config_path=config_path)
+
+
 register_arbiter_codec(TrustedOracleArbiterCodec())
 register_arbiter_codec(AllArbiterCodec())
+register_arbiter_codec(ERC20SplitterArbiterCodec())
+register_arbiter_codec(NativeTokenSplitterArbiterCodec())
 
 
 # ---------------------------------------------------------------------------

@@ -178,6 +178,33 @@ def get_recipient_arbiter(
     )
 
 
+def get_erc20_splitter(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve the ERC20 splitter arbiter address.
+
+    The splitter contracts act as arbiters from the escrow's point of
+    view, so address overrides live under ``arbiters_addresses`` using
+    the deployment slot name ``erc20_splitter``.
+    """
+    return _arbiter_address(
+        chain_name, config_path=config_path, arbiter_field="erc20_splitter"
+    )
+
+
+def get_native_token_splitter(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve the native-token splitter arbiter address."""
+    return _arbiter_address(
+        chain_name, config_path=config_path, arbiter_field="native_token_splitter"
+    )
+
+
 def get_erc20_escrow_obligation_nontierable(
     chain_name: str,
     *,

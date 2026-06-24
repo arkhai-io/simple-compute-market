@@ -134,3 +134,47 @@ class FulfillmentEventResponse(BaseModel):
     resource_state: str | None = None
     closed_listing_ids: list[str] = Field(default_factory=list)
     reopened_listing_ids: list[str] = Field(default_factory=list)
+
+
+class InterruptDealRequest(BaseModel):
+    """Request body for POST /api/v1/admin/deals/{escrow_uid}/interrupt."""
+
+    interrupted_at_utc: str | None = Field(
+        default=None,
+        description=(
+            "UTC interruption time. Defaults to the storefront's current UTC "
+            "time when omitted."
+        ),
+    )
+    reason: str | None = None
+    seller_amount: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Seller payout in base units. For now this is recorded for the "
+            "splitter transaction helper; the endpoint does not submit the "
+            "on-chain splitter call yet."
+        ),
+    )
+    refund_amount: int | None = Field(
+        default=None,
+        ge=0,
+        description="Buyer refund in base units, if precomputed by the caller.",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="Validate and compute the interruption plan without truncating capacity.",
+    )
+
+
+class InterruptDealResponse(BaseModel):
+    escrow_uid: str
+    status: str
+    allocation_id: str | None = None
+    listing_id: str | None = None
+    interrupted_at_utc: str
+    lease_truncated: bool = False
+    settlement_action: str = "pending"
+    seller_amount: int | None = None
+    refund_amount: int | None = None
+    allocation: dict[str, Any] | None = None
