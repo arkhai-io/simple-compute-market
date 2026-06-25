@@ -3,7 +3,7 @@ name = "arkhai-vms-buyer"
 version = "0.1.0"
 license = "MIT"
 description = "Buyer-side CLI for the market: discover sellers, negotiate, place orders. Pure HTTP client; no server, no agent runtime."
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
   "typer>=0.12.0",
   "rich>=13.7.0",
@@ -39,6 +39,16 @@ rl = [
   "torch>=2.7.0",
 ]
 
+[tool.uv]
+# Restrict resolution to platforms we actually run/support for the VM buyer.
+# Without this, uv attempts future/platform marker splits and can fail before
+# reaching local path sources for internal packages.
+environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+]
+
 # The `market` console script ships from arkhai-core-buyer; this package only
 # contributes the VM compute schema plugin the core CLI discovers.
 [project.entry-points."market.buyer_plugins"]
@@ -53,6 +63,7 @@ arkhai-core-buyer = { path = "../../../core/buyer", editable = true }
 arkhai-kit-alkahest = { path = "../../../kit/alkahest", editable = true }
 arkhai-kit-config = { path = "../../../kit/config", editable = true }
 arkhai-kit-policy = { path = "../../../kit/policy", editable = true }
+arkhai-vms-common = { path = "../common", editable = true }
 torch = [
   { index = "pytorch-cpu" },
 ]

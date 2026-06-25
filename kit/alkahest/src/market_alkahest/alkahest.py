@@ -815,6 +815,11 @@ def build_payment_obligation_data(
     ``ArbiterCodec`` matching ``arbiter_kind``.
     """
     if demands:
+        if len(demands) > 1:
+            raise ValueError(
+                "payment obligation demands[] is a deprecated proposal alias "
+                "and may contain at most one selected demand"
+            )
         first = demands[0]
         if not isinstance(first, dict):
             raise ValueError("demands entries must be objects")
@@ -1001,6 +1006,11 @@ def materialize_escrow_terms_from_proposal(
 
     demands = accepted_demands(proposal)
     if demands:
+        if len(demands) > 1:
+            raise ValueError(
+                "proposal demands[] is deprecated and may contain at most one "
+                "selected demand; listing demands[] remains the allowed-options list"
+            )
         first = demands[0]
         arbiter_address = first.get("arbiter")
         if not isinstance(arbiter_address, str) or not arbiter_address:

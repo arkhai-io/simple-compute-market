@@ -620,8 +620,19 @@ def accepted_recipient_address(accepted_or_proposal: Any) -> str | None:
 def accepted_demands(accepted_or_proposal: Any) -> list[dict[str, Any]]:
     """Return arbiter demands advertised/negotiated for this escrow shape."""
     if isinstance(accepted_or_proposal, dict):
+        selected = accepted_or_proposal.get("demand")
+        if isinstance(selected, dict):
+            return [dict(selected)]
         raw = accepted_or_proposal.get("demands")
     else:
+        selected = getattr(accepted_or_proposal, "demand", None)
+        dumped = (
+            selected.model_dump(exclude_none=True)
+            if hasattr(selected, "model_dump")
+            else None
+        )
+        if isinstance(dumped, dict):
+            return [dumped]
         raw = getattr(accepted_or_proposal, "demands", None)
     if not isinstance(raw, list):
         return []
@@ -630,7 +641,11 @@ def accepted_demands(accepted_or_proposal: Any) -> list[dict[str, Any]]:
         if isinstance(item, dict):
             out.append(dict(item))
         else:
-            dumped = item.model_dump() if hasattr(item, "model_dump") else None
+            dumped = (
+                item.model_dump(exclude_none=True)
+                if hasattr(item, "model_dump")
+                else None
+            )
             if isinstance(dumped, dict):
                 out.append(dumped)
     return out
@@ -685,8 +700,8 @@ class AcceptedEscrow(BaseModel):
     ``literal_fields`` is escrow-data-only: keys present advertise a seller-
     preferred value; keys absent are open. Never includes a rate-bearing
     field directly — those live in ``rates`` so duration scaling stays
-    explicit. Arbiter release criteria live in the listing/proposal-level
-    ``demands`` list.
+    explicit. Arbiter release criteria live in listing-level ``demands``
+    as allowed options; proposals carry the singular selected ``demand``.
 
     ``rates`` carries every rate-bearing field on the obligation. For
     ERC20 escrows that's a single ``{"field": "amount", "per": "hour",
@@ -782,11 +797,22 @@ class EscrowProposal(BaseModel):
             "proposals carry one ``RateValue`` per rate-bearing field."
         ),
     )
+    demand: EscrowDemand | None = Field(
+        default=None,
+        description=(
+            "Buyer-selected concrete arbiter demand. Listing-level "
+            "``demands`` advertises seller-allowed options; a proposal "
+            "selects exactly one. Multiple subconditions are represented "
+            "inside one logical arbiter demand, such as AllArbiter."
+        ),
+    )
     demands: list[EscrowDemand] | None = Field(
         default=None,
         description=(
-            "Arbiter demand criteria inherited from the accepted escrow "
-            "entry and committed during negotiation."
+            "Deprecated proposal-level alias for a one-item selected "
+            "``demand``. Kept temporarily for older clients; remove after "
+            "the next wire compatibility window. Listing-level ``demands`` "
+            "remains the allowed-options list."
         ),
     )
     expiration_unix: int = Field(
@@ -797,3 +823,25 @@ class EscrowProposal(BaseModel):
             "clock-drift tolerance window."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_demands(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        if data.get("demand") is not None:
+            return data
+        legacy = data.get("demands")
+        if legacy is None:
+            return data
+        if not isinstance(legacy, list):
+            raise ValueError("deprecated proposal demands must be a list")
+        if len(legacy) > 1:
+            raise ValueError(
+                "proposal demands[] is deprecated and may contain at most one "
+                "selected demand; listing demands[] remains the allowed-options list"
+            )
+        if legacy:
+            data["demand"] = legacy[0]
+        return data

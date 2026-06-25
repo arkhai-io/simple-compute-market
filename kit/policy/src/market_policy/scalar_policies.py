@@ -483,6 +483,23 @@ def _normalize_demands_for_chain(value: Any, chain_name: Any) -> list[Any]:
     return out
 
 
+def _normalize_selected_demand(proposal: dict[str, Any]) -> Any | None:
+    selected = proposal.get("demand")
+    if isinstance(selected, dict):
+        return _normalize_exact_value(selected)
+    legacy = proposal.get("demands")
+    if legacy is None:
+        return None
+    raw = _loads_json_list(legacy)
+    if len(raw) > 1:
+        raise ValueError(
+            "deprecated proposal demands[] may contain at most one selected demand"
+        )
+    if raw and isinstance(raw[0], dict):
+        return _normalize_exact_value(raw[0])
+    return None
+
+
 def _accepted_escrow_for_proposal(
     listing: dict[str, Any],
     proposal: dict[str, Any],
@@ -655,6 +672,32 @@ def escrow_shape_guard(
                 ),
                 context,
             )
+    listing_demands = _normalize_demands_for_chain(
+        listing.get("demands"),
+        proposal.get("chain_name"),
+    )
+    if listing_demands:
+        try:
+            selected_demand = _normalize_selected_demand(proposal)
+        except ValueError as exc:
+            return (
+                NegotiationDecision(
+                    action="reject",
+                    reason=f"invalid_selected_demand:{exc}",
+                ),
+                context,
+            )
+        if selected_demand not in listing_demands:
+            return (
+                NegotiationDecision(
+                    action="reject",
+                    reason=(
+                        f"selected_demand_not_allowed:"
+                        f"{selected_demand!r} not in {listing_demands!r}"
+                    ),
+                ),
+                context,
+            )
     return None, context
 
 
@@ -777,17 +820,23 @@ def accept_exact_listing_middleware(
         listing.get("demands"),
         proposal.get("chain_name"),
     )
-    proposal_demands = _normalize_demands_for_chain(
-        proposal.get("demands"),
-        proposal.get("chain_name"),
-    )
-    if proposal_demands != expected_demands:
+    try:
+        selected_demand = _normalize_selected_demand(proposal)
+    except ValueError as exc:
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=f"exact_listing:invalid_selected_demand:{exc}",
+            ),
+            context,
+        )
+    if expected_demands and selected_demand not in expected_demands:
         return (
             NegotiationDecision(
                 action="reject",
                 reason=(
                     f"exact_listing:demands_mismatch:"
-                    f"{proposal_demands!r}!={expected_demands!r}"
+                    f"{selected_demand!r} not in {expected_demands!r}"
                 ),
             ),
             context,
@@ -877,6 +926,25 @@ def buyer_escrow_shape_guard(
                 ),
                 context,
             )
+    try:
+        pinned_demand = _normalize_selected_demand(pinned)
+        their_demand = _normalize_selected_demand(their_proposal)
+    except ValueError as exc:
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=f"invalid_selected_demand:{exc}",
+            ),
+            context,
+        )
+    if pinned_demand != their_demand:
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=f"demand_changed:{pinned_demand!r}->{their_demand!r}",
+            ),
+            context,
+        )
     return None, context
 __all__ = [
     "_amount_from_proposal",

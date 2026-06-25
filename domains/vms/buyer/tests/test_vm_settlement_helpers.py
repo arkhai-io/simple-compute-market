@@ -35,7 +35,7 @@ def test_select_escrow_entry_filters_by_chain_and_token():
     )["escrow_address"] == _ESCROW
 
 
-def test_escrow_proposal_from_accepted_entry_carries_demands_for_selected_chain():
+def test_escrow_proposal_from_accepted_entry_selects_first_matching_demand():
     entry = {
         "chain_name": "anvil",
         "escrow_address": _ESCROW,
@@ -62,7 +62,10 @@ def test_escrow_proposal_from_accepted_entry_carries_demands_for_selected_chain(
     assert proposal.literal_fields == {"token": _TOKEN}
     assert [rate.model_dump() for rate in proposal.rates] == entry["rates"]
     assert proposal.expiration_unix == 123
-    assert [d.arbiter for d in proposal.demands] == [_ARBITER, _ARBITER]
+    assert proposal.demand is not None
+    assert proposal.demand.arbiter == _ARBITER
+    assert proposal.demand.demand_data == {"x": 1}
+    assert proposal.demands is None
 
 
 def test_make_vm_provision_terms_uses_compute_compat_shape():

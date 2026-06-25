@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_serializer, field_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 
 
 class ERC20TokenMetadata(BaseModel):
@@ -128,8 +128,33 @@ class EscrowProposal(BaseModel):
     fields: dict[str, Any] = Field(default_factory=dict)
     literal_fields: dict[str, Any] | None = None
     rates: list[RateValue] | None = None
+    demand: EscrowDemand | None = None
+    # Deprecated proposal-level compatibility alias. Listings still use
+    # demands[] for seller-allowed options; proposals must choose one demand.
     demands: list[EscrowDemand] | None = None
     expiration_unix: int = Field(gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_demands(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        if data.get("demand") is not None:
+            return data
+        legacy = data.get("demands")
+        if legacy is None:
+            return data
+        if not isinstance(legacy, list):
+            raise ValueError("deprecated proposal demands must be a list")
+        if len(legacy) > 1:
+            raise ValueError(
+                "proposal demands[] is deprecated and may contain at most one "
+                "selected demand; listing demands[] remains the allowed-options list"
+            )
+        if legacy:
+            data["demand"] = legacy[0]
+        return data
 
 
 class AcceptedEscrow(BaseModel):
@@ -144,8 +169,19 @@ class AcceptedEscrow(BaseModel):
 def accepted_demands(accepted_or_proposal: Any) -> list[dict[str, Any]]:
     """Return arbiter demands advertised/negotiated for this escrow shape."""
     if isinstance(accepted_or_proposal, dict):
+        selected = accepted_or_proposal.get("demand")
+        if isinstance(selected, dict):
+            return [dict(selected)]
         raw = accepted_or_proposal.get("demands")
     else:
+        selected = getattr(accepted_or_proposal, "demand", None)
+        dumped = (
+            selected.model_dump(exclude_none=True)
+            if hasattr(selected, "model_dump")
+            else None
+        )
+        if isinstance(dumped, dict):
+            return [dumped]
         raw = getattr(accepted_or_proposal, "demands", None)
     if not isinstance(raw, list):
         return []
@@ -154,7 +190,11 @@ def accepted_demands(accepted_or_proposal: Any) -> list[dict[str, Any]]:
         if isinstance(item, dict):
             out.append(dict(item))
         else:
-            dumped = item.model_dump() if hasattr(item, "model_dump") else None
+            dumped = (
+                item.model_dump(exclude_none=True)
+                if hasattr(item, "model_dump")
+                else None
+            )
             if isinstance(dumped, dict):
                 out.append(dumped)
     return out
@@ -278,7 +318,7 @@ def normalize_proposal_against_accepted_escrows(
         fields=dict(proposal.fields or {}),
         literal_fields=literal_fields,
         rates=rates,
-        demands=proposal.demands,
+        demand=proposal.demand,
         expiration_unix=proposal.expiration_unix,
     )
 

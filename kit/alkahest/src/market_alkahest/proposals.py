@@ -28,17 +28,18 @@ def escrow_proposal_from_accepted_entry(
     if token:
         literal_fields["token"] = token
     selected_chain = entry.get("chain_name")
-    demands = [
+    matching_demands = [
         demand for demand in accepted_demands(listing)
         if not demand.get("chain_name") or demand.get("chain_name") == selected_chain
     ]
+    selected_demand = matching_demands[0] if matching_demands else None
     return EscrowProposal(
         chain_name=selected_chain,
         escrow_address=entry["escrow_address"],
         fields={"token": token},
         literal_fields=literal_fields,
         rates=entry.get("rates") or [],
-        demands=demands,
+        demand=selected_demand,
         expiration_unix=expiration_unix,
     )
 
@@ -153,13 +154,16 @@ def accepted_escrow_artifacts_from_proposal(
         fields=fields,
         literal_fields=proposal_model.literal_fields,
         rates=proposal_model.rates,
-        demands=proposal_model.demands,
+        demand=proposal_model.demand,
         expiration_unix=proposal_model.expiration_unix,
     )
 
+    accepted_payload = accepted.model_dump()
+    if accepted_payload.get("demands") is None:
+        accepted_payload.pop("demands", None)
     out: dict[str, Any] = {
-        "proposal": accepted.model_dump(),
-        "accepted_escrow_proposal": accepted.model_dump(),
+        "proposal": dict(accepted_payload),
+        "accepted_escrow_proposal": dict(accepted_payload),
     }
     try:
         from market_alkahest.plans import (

@@ -462,10 +462,13 @@ def negotiate_with_seller(
                 r.model_dump() if hasattr(r, "model_dump") else dict(r)
                 for r in (escrow_proposal.rates or [])
             ],
-            "demands": [
-                d.model_dump() if hasattr(d, "model_dump") else dict(d)
-                for d in (escrow_proposal.demands or [])
-            ],
+            "demand": (
+                escrow_proposal.demand.model_dump()
+                if hasattr(escrow_proposal.demand, "model_dump")
+                else dict(escrow_proposal.demand)
+                if escrow_proposal.demand is not None
+                else None
+            ),
             "expiration_unix": escrow_proposal.expiration_unix,
         }
         opening = run_negotiation_chain(chain, [], NegotiationContext(

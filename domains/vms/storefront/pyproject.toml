@@ -6,7 +6,7 @@ description = "Provider-side storefront server: hosts /orders, /negotiate, /sett
 authors = [
     {name = "Your Name", email = "your@email.com"},
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
 	"arkhai-core-registry-client>=0.7.0",
     "arkhai-core-storefront-client>=0.15.0",
@@ -95,6 +95,8 @@ arkhai-kit-identity = { path = "../../../kit/identity", editable = true }
 arkhai-kit-alkahest = { path = "../../../kit/alkahest", editable = true }
 arkhai-kit-config = { path = "../../../kit/config", editable = true }
 arkhai-kit-policy = { path = "../../../kit/policy", editable = true }
+arkhai-vms-common = { path = "../common", editable = true }
+arkhai-vms-provisioning-client = { path = "../provisioning/client", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]
