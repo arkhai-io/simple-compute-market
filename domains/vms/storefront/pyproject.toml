@@ -28,7 +28,7 @@ dependencies = [
     "psycopg2-binary>=2.9.10,<3.0.0",
     # Required by FastAPI routes that accept UploadFile/File form data.
     "python-multipart>=0.0.20",
-    "alkahest-py @ git+https://github.com/arkhai-io/alkahest@fe900a2bfcc1e5642c4b5f6c0ec4e014fba29f17#subdirectory=sdks/py",
+    "alkahest-py==1.0.0",
     "web3>=7.14.0",
     "websockets>=15.0.1",
     "httpx>=0.27",

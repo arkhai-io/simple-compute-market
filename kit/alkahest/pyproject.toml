@@ -26,7 +26,7 @@ testpaths = ["tests/unit"]
 
 [dependency-groups]
 dev = [
-    "alkahest-py @ git+https://github.com/arkhai-io/alkahest@fe900a2bfcc1e5642c4b5f6c0ec4e014fba29f17#subdirectory=sdks/py",
+    "alkahest-py==1.0.0",
     "pytest>=8.3.4,<9.0.0",
     "pytest-asyncio>=0.23.8,<1.0.0",
 ]
