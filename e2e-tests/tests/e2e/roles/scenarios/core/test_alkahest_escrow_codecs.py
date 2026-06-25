@@ -12,8 +12,8 @@ from eth_account.signers.local import LocalAccount
 from web3 import Web3
 
 from market_alkahest.alkahest import (
-    Attestation2DefaultEscrowCodec,
-    Attestation2UnconditionalEscrowCodec,
+    AttestationReferenceDefaultEscrowCodec,
+    AttestationReferenceUnconditionalEscrowCodec,
     AttestationDefaultEscrowCodec,
     AttestationUnconditionalEscrowCodec,
     Erc1155DefaultEscrowCodec,
@@ -160,8 +160,8 @@ _CODEC_CASES = [
     CodecCase("token-bundle-unconditional", "bundle", TokenBundleUnconditionalEscrowCodec()),
     CodecCase("attestation-v1-default", "attestation_v1", AttestationDefaultEscrowCodec()),
     CodecCase("attestation-v1-unconditional", "attestation_v1", AttestationUnconditionalEscrowCodec()),
-    CodecCase("attestation-v2-default", "attestation_v2", Attestation2DefaultEscrowCodec()),
-    CodecCase("attestation-v2-unconditional", "attestation_v2", Attestation2UnconditionalEscrowCodec()),
+    CodecCase("attestation-reference-default", "attestation_reference", AttestationReferenceDefaultEscrowCodec()),
+    CodecCase("attestation-reference-unconditional", "attestation_reference", AttestationReferenceUnconditionalEscrowCodec()),
     CodecCase("erc721-default", "erc721", Erc721DefaultEscrowCodec()),
     CodecCase("erc721-unconditional", "erc721", Erc721UnconditionalEscrowCodec()),
     CodecCase("erc1155-default", "erc1155", Erc1155DefaultEscrowCodec()),
@@ -374,7 +374,7 @@ async def _build_obligation_data(
             },
         }
 
-    if case.asset_kind == "attestation_v2":
+    if case.asset_kind == "attestation_reference":
         seed_codec = AttestationDefaultEscrowCodec()
         seed_data = {
             **common,
@@ -431,7 +431,7 @@ def _assert_obligation_matches(case: CodecCase, data: dict[str, Any], obligation
     if isinstance(obligation, dict) and "data" in obligation:
         obligation = obligation["data"]
 
-    if case.asset_kind in {"native", "bundle", "attestation_v1", "attestation_v2"}:
+    if case.asset_kind in {"native", "bundle", "attestation_v1", "attestation_reference"}:
         assert _read_chain_obligation_data(obligation) == _normalize_obligation_data(data)
         return
 

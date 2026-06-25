@@ -2,10 +2,10 @@
 
 The seller's storefront calls ``verify_escrow_for_settlement`` before any
 provisioning side-effect. It reads the EAS attestation by uid via
-alkahest-py's ``client.erc20.escrow.non_tierable.get_obligation(uid)`` and
-asserts the on-chain obligation_data dict-matches what the seller
-expects, computed via ``build_payment_obligation_data`` from the same
-negotiation inputs the buyer used.
+alkahest-py's ``client.erc20.escrow.default.get_obligation(uid)`` and asserts
+the on-chain obligation_data dict-matches what the seller expects, computed
+via ``build_payment_obligation_data`` from the same negotiation inputs the
+buyer used.
 
 Verification is two-phase:
 
@@ -242,7 +242,7 @@ async def verify_escrow_for_settlement(
     chain_name: str,
     alkahest_address_config_path: str | None,
     escrow_proposal: Any = None,
-    escrow_kind: str = "erc20_escrow_obligation_nontierable",
+    escrow_kind: str = "erc20_escrow_obligation_default",
     now_unix: int | None = None,
     get_obligation_fn: Any = None,
     build_obligation_data_fn: Any = None,
@@ -281,7 +281,7 @@ async def verify_escrow_for_settlement(
         and the ``escrow_kind`` default.
     escrow_kind:
         Fallback escrow slot name when ``escrow_proposal`` is None.
-        Today only ``"erc20_escrow_obligation_nontierable"`` is
+        Today ``"erc20_escrow_obligation_default"`` is
         registered.
     now_unix:
         Override for ``time.time()`` (test seam).

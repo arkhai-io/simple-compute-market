@@ -591,8 +591,8 @@ of the alkahest `ObligationData` struct:
 `{maker, chain_name, escrow_contract, obligation_data, expiration_unix}`.
 The settlement verifier reads the on-chain obligation by UID and
 byte-compares against materialized `EscrowTerms.obligation_data`. Adding a
-new escrow kind is primarily a codec-registration change: all tierable
-and non-tierable Alkahest escrow obligation variants under
+new escrow kind is primarily a codec-registration change: all default
+and unconditional Alkahest escrow obligation variants under
 `contracts/src/obligations/escrow` are registered, and the buyer submit
 hook resolves each term's `(chain_name, escrow_contract)` to a codec via
 `market_alkahest.alkahest.get_escrow_kind_codec_by_address`. The
@@ -1866,8 +1866,7 @@ heartbeat-gating, fiat) are planned in `design-remaining-work.md`.
 
 ### Arbiters are microconditions
 
-Alkahest escrow demands are arbiter trees
-(`~/dev/arkhai/alkahest/contracts/src/arbiters/`):
+Alkahest escrow demands are arbiter trees:
 
 - `attestation-properties/RecipientArbiter.sol` — synchronous: checks a
   property of the fulfillment attestation; collection can succeed in

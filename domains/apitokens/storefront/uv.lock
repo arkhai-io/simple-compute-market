@@ -85,7 +85,7 @@ wheels = [
 [[package]]
 name = "alkahest-py"
 version = "0.4.1"
-source = { git = "https://github.com/arkhai-io/alkahest?subdirectory=sdks%2Fpy&rev=4cd898c757441f9e16d4d6b1549052d021aa74b4#4cd898c757441f9e16d4d6b1549052d021aa74b4" }
+source = { git = "https://github.com/arkhai-io/alkahest?subdirectory=sdks%2Fpy&rev=fe900a2bfcc1e5642c4b5f6c0ec4e014fba29f17#fe900a2bfcc1e5642c4b5f6c0ec4e014fba29f17" }
 
 [[package]]
 name = "annotated-doc"
@@ -148,7 +148,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alkahest-py", git = "https://github.com/arkhai-io/alkahest?subdirectory=sdks%2Fpy&rev=4cd898c757441f9e16d4d6b1549052d021aa74b4" },
+    { name = "alkahest-py", git = "https://github.com/arkhai-io/alkahest?subdirectory=sdks%2Fpy&rev=fe900a2bfcc1e5642c4b5f6c0ec4e014fba29f17" },
     { name = "arkhai-core", editable = "../../../core" },
     { name = "arkhai-core-registry-client", editable = "../../../core/registry-client" },
     { name = "arkhai-core-storefront", editable = "../../../core/storefront" },
@@ -248,7 +248,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "alkahest-py", git = "https://github.com/arkhai-io/alkahest?subdirectory=sdks%2Fpy&rev=4cd898c757441f9e16d4d6b1549052d021aa74b4" },
+    { name = "alkahest-py", git = "https://github.com/arkhai-io/alkahest?subdirectory=sdks%2Fpy&rev=fe900a2bfcc1e5642c4b5f6c0ec4e014fba29f17" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
 ]

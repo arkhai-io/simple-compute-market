@@ -260,69 +260,7 @@ def _escrow_obligation_address(
         )
     cfg = _sdk_addresses_for_chain(selected)
     address_category = getattr(cfg, category)
-    for candidate in _sdk_field_candidates(category, field):
-        if hasattr(address_category, candidate):
-            return str(getattr(address_category, candidate))
-    raise AttributeError(
-        f"{type(address_category).__name__} has no address field for {field!r}"
-    )
-
-
-_SDK_FIELD_ALIASES: dict[tuple[str, str], tuple[str, ...]] = {
-    ("erc20_addresses", "escrow_obligation_default"): (
-        "escrow_obligation_default",
-    ),
-    ("erc20_addresses", "escrow_obligation_unconditional"): (
-        "escrow_obligation_unconditional",
-    ),
-    ("erc721_addresses", "escrow_obligation_default"): (
-        "escrow_obligation_default",
-    ),
-    ("erc721_addresses", "escrow_obligation_unconditional"): (
-        "escrow_obligation_unconditional",
-    ),
-    ("erc1155_addresses", "escrow_obligation_default"): (
-        "escrow_obligation_default",
-    ),
-    ("erc1155_addresses", "escrow_obligation_unconditional"): (
-        "escrow_obligation_unconditional",
-    ),
-    ("native_token_addresses", "escrow_obligation_default"): (
-        "escrow_obligation_default",
-    ),
-    ("native_token_addresses", "escrow_obligation_unconditional"): (
-        "escrow_obligation_unconditional",
-    ),
-    ("token_bundle_addresses", "escrow_obligation_default"): (
-        "escrow_obligation_default",
-    ),
-    ("token_bundle_addresses", "escrow_obligation_unconditional"): (
-        "escrow_obligation_unconditional",
-    ),
-    ("attestation_addresses", "escrow_obligation_default"): (
-        "escrow_obligation_default",
-    ),
-    ("attestation_addresses", "escrow_obligation_unconditional"): (
-        "escrow_obligation_unconditional",
-    ),
-    ("attestation_addresses", "escrow_obligation_2_default"): (
-        "attestation_reference_escrow_obligation_default",
-    ),
-    ("attestation_addresses", "escrow_obligation_2_unconditional"): (
-        "attestation_reference_escrow_obligation_unconditional",
-    ),
-}
-
-
-_SDK_SLOT_ALIASES: dict[tuple[str, str], str] = {
-    (category, candidate): field
-    for (category, field), candidates in _SDK_FIELD_ALIASES.items()
-    for candidate in candidates
-}
-
-
-def _sdk_field_candidates(category: str, field: str) -> tuple[str, ...]:
-    return (field, *_SDK_FIELD_ALIASES.get((category, field), ()))
+    return str(getattr(address_category, field))
 
 
 def get_erc721_escrow_obligation_default(
@@ -465,39 +403,38 @@ def get_attestation_escrow_obligation_unconditional(
     )
 
 
-def get_attestation_escrow_obligation_2_default(
+def get_attestation_reference_escrow_obligation_default(
     chain_name: str,
     *,
     config_path: str | None = None,
 ) -> str:
-    """Resolve the default ``AttestationEscrowObligation2`` address."""
+    """Resolve the default ``AttestationReferenceEscrowObligation`` address."""
     return _escrow_obligation_address(
         chain_name,
         config_path=config_path,
         category="attestation_addresses",
-        field="escrow_obligation_2_default",
+        field="attestation_reference_escrow_obligation_default",
     )
 
 
-def get_attestation_escrow_obligation_2_unconditional(
+def get_attestation_reference_escrow_obligation_unconditional(
     chain_name: str,
     *,
     config_path: str | None = None,
 ) -> str:
-    """Resolve ``AttestationEscrowObligation2`` (unconditional variant)."""
+    """Resolve ``AttestationReferenceEscrowObligation`` (unconditional variant)."""
     return _escrow_obligation_address(
         chain_name,
         config_path=config_path,
         category="attestation_addresses",
-        field="escrow_obligation_2_unconditional",
+        field="attestation_reference_escrow_obligation_unconditional",
     )
 
 
-_ADDRESS_CATEGORIES: tuple[tuple[str, str], ...] = (
-    # (attribute on DefaultExtensionConfig, prefix for slot name).
-    # Arbiters' field names are already ``*_arbiter``-suffixed, so the
-    # empty prefix produces e.g. ``recipient_arbiter`` rather than
-    # the redundant ``arbiters_recipient_arbiter``.
+_OVERRIDE_ADDRESS_CATEGORIES: tuple[tuple[str, str], ...] = (
+    # Fallback for JSON override configs. SDK-backed configs use
+    # DefaultExtensionConfig.lookup_address(), so this only mirrors the
+    # grouped JSON shape we accept for local/custom deployments.
     ("arbiters_addresses", ""),
     ("string_obligation_addresses", "string_obligation"),
     ("commit_reveal_obligation_addresses", "commit_reveal_obligation"),
@@ -510,60 +447,64 @@ _ADDRESS_CATEGORIES: tuple[tuple[str, str], ...] = (
 )
 
 
-def _list_category_fields(category: Any) -> list[str]:
-    """Best-effort enumeration of address-field names on a category.
-
-    SimpleNamespace (override JSON path) → ``vars()``; pyo3 binding
-    (SDK path) → ``dir()`` filtering. Both produce the same set of
-    field names for valid configs.
-    """
-    if hasattr(category, "__dict__"):
-        return [k for k in vars(category).keys() if not k.startswith("_")]
-    return [
-        k for k in dir(category)
-        if not k.startswith("_") and not callable(getattr(category, k, None))
-    ]
+_OVERRIDE_ESCROW_KIND_FIELDS: dict[tuple[str, str], str] = {
+    ("erc20_addresses", "escrow_obligation_default"):
+        "erc20_escrow_obligation_default",
+    ("erc20_addresses", "escrow_obligation_unconditional"):
+        "erc20_escrow_obligation_unconditional",
+    ("erc721_addresses", "escrow_obligation_default"):
+        "erc721_escrow_obligation_default",
+    ("erc721_addresses", "escrow_obligation_unconditional"):
+        "erc721_escrow_obligation_unconditional",
+    ("erc1155_addresses", "escrow_obligation_default"):
+        "erc1155_escrow_obligation_default",
+    ("erc1155_addresses", "escrow_obligation_unconditional"):
+        "erc1155_escrow_obligation_unconditional",
+    ("native_token_addresses", "escrow_obligation_default"):
+        "native_token_escrow_obligation_default",
+    ("native_token_addresses", "escrow_obligation_unconditional"):
+        "native_token_escrow_obligation_unconditional",
+    ("token_bundle_addresses", "escrow_obligation_default"):
+        "token_bundle_escrow_obligation_default",
+    ("token_bundle_addresses", "escrow_obligation_unconditional"):
+        "token_bundle_escrow_obligation_unconditional",
+    ("attestation_addresses", "escrow_obligation_default"):
+        "attestation_escrow_obligation_default",
+    ("attestation_addresses", "escrow_obligation_unconditional"):
+        "attestation_escrow_obligation_unconditional",
+    ("attestation_addresses", "attestation_reference_escrow_obligation_default"):
+        "attestation_reference_escrow_obligation_default",
+    ("attestation_addresses", "attestation_reference_escrow_obligation_unconditional"):
+        "attestation_reference_escrow_obligation_unconditional",
+}
 
 
 @lru_cache(maxsize=64)
-def _reverse_address_map(
+def _override_reverse_address_map(
     chain_name: str, config_path_or_none: str,
 ) -> dict[str, str]:
-    """Build ``{lowercase_address: slot_name}`` for a chain.
+    """Build ``{lowercase_address: slot_name}`` for override JSON configs.
 
-    Slot name format: ``<category_prefix>_<field>`` (e.g.
-    ``erc20_escrow_obligation_default``); arbiters keep their
-    field names unprefixed. Zero-address slots are skipped — they
-    represent contracts not yet deployed on this chain.
-
-    Cache key is a flat ``(chain_name, config_path_str)`` tuple so the
-    lru_cache works against hashable arguments; pass empty string for
-    "no config path."
+    SDK-backed configs delegate to Alkahest's DefaultExtensionConfig
+    reverse lookup. This fallback remains for local/custom JSON address
+    books that the SDK does not construct itself.
     """
     config_path = config_path_or_none or None
-    selected = get_alkahest_network(chain_name)
     override = _load_override_config(config_path)
-    source: Any
-    if override is not None:
-        source = _dict_to_namespace(override)
-    elif selected == NETWORK_ANVIL:
+    if override is None:
         raise ValueError(
             "chain_name='anvil' requires an explicit alkahest_address_config_path "
             "with deployed local addresses."
         )
-    else:
-        source = _sdk_addresses_for_chain(selected)
 
     result: dict[str, str] = {}
-    for category_attr, prefix in _ADDRESS_CATEGORIES:
-        category = getattr(source, category_attr, None)
+    for category_attr, prefix in _OVERRIDE_ADDRESS_CATEGORIES:
+        category = override.get(category_attr)
         if category is None:
             continue
-        for field_name in _list_category_fields(category):
-            try:
-                value = getattr(category, field_name)
-            except Exception:
-                continue
+        if not isinstance(category, dict):
+            continue
+        for field_name, value in category.items():
             if not isinstance(value, str) or not value.startswith("0x"):
                 continue
             if len(value) != 42:
@@ -573,10 +514,25 @@ def _reverse_address_map(
                     continue  # undeployed slot placeholder
             except ValueError:
                 continue
-            slot_field = _SDK_SLOT_ALIASES.get((category_attr, field_name), field_name)
-            slot = f"{prefix}_{slot_field}" if prefix else slot_field
+            slot = _OVERRIDE_ESCROW_KIND_FIELDS.get((category_attr, field_name))
+            if slot is None:
+                slot = f"{prefix}_{field_name}" if prefix else field_name
             result[value.lower()] = slot
     return result
+
+
+def _sdk_address_to_slot(chain_name: str, address: str) -> str | None:
+    cfg = _sdk_addresses_for_chain(chain_name)
+    matches = cfg.lookup_address(address)
+    for info in matches:
+        escrow_kind = getattr(info, "escrow_kind", None)
+        if escrow_kind:
+            return str(escrow_kind)
+    for info in matches:
+        field = getattr(info, "field", None)
+        if field:
+            return str(field)
+    return None
 
 
 def address_to_slot(
@@ -592,19 +548,26 @@ def address_to_slot(
     the payment ERC20 token itself, which lives on-chain but isn't part
     of any alkahest deployment slot.
     """
-    return _reverse_address_map(chain_name, config_path or "").get(address.lower())
+    selected = get_alkahest_network(chain_name)
+    if _load_override_config(config_path) is not None:
+        return _override_reverse_address_map(
+            selected, config_path or "",
+        ).get(address.lower())
+    if selected == NETWORK_ANVIL:
+        raise ValueError(
+            "chain_name='anvil' requires an explicit alkahest_address_config_path "
+            "with deployed local addresses."
+        )
+    return _sdk_address_to_slot(selected, address)
 
 
 def encode_recipient_demand(recipient_address: str) -> bytes:
     """ABI-encode RecipientArbiter.DemandData{address recipient}.
 
-    alkahest_py exposes TrustedOracleArbiterDemandData but no analogous
-    encoder for RecipientArbiter, so we encode the tuple directly. The
-    solidity struct is a single-field struct, which abi.encodes as a
-    padded 32-byte address (same as abi.encode(address)).
+    Delegates to alkahest-py's typed demand codec so the ABI shape stays
+    aligned with the contract bindings.
     """
-    from eth_abi import encode as _abi_encode
-    from eth_abi.exceptions import EncodingError
+    from alkahest_py import RecipientArbiterDemandData
 
     if (
         not isinstance(recipient_address, str)
@@ -615,8 +578,10 @@ def encode_recipient_demand(recipient_address: str) -> bytes:
             f"recipient_address must be a 0x-prefixed 20-byte hex string, got {recipient_address!r}"
         )
     try:
-        return _abi_encode(["address"], [recipient_address])
-    except EncodingError as exc:
+        return bytes(
+            RecipientArbiterDemandData(recipient=recipient_address).encode_self()
+        )
+    except Exception as exc:
         raise ValueError(
             f"recipient_address {recipient_address!r} is not valid hex: {exc}"
         ) from exc
@@ -1939,7 +1904,7 @@ class AttestationUnconditionalEscrowCodec(_AttestationV1EscrowCodecBase):
     address_field = "escrow_obligation_unconditional"
 
 
-class _AttestationV2EscrowCodecBase(_AttestationEscrowCodecBase):
+class _AttestationReferenceEscrowCodecBase(_AttestationEscrowCodecBase):
     version_attr = "reference"
 
     def _attestation_data(self, obligation_data: dict[str, Any]) -> Any:
@@ -1952,20 +1917,20 @@ class _AttestationV2EscrowCodecBase(_AttestationEscrowCodecBase):
         return str(attestation_uid)
 
 
-class Attestation2DefaultEscrowCodec(_AttestationV2EscrowCodecBase):
-    """Default ``AttestationEscrowObligation2`` adapter."""
+class AttestationReferenceDefaultEscrowCodec(_AttestationReferenceEscrowCodecBase):
+    """Default ``AttestationReferenceEscrowObligation`` adapter."""
 
-    kind = "attestation_escrow_obligation_2_default"
+    kind = "attestation_reference_escrow_obligation_default"
     sdk_variant_attr = "default"
-    address_field = "escrow_obligation_2_default"
+    address_field = "attestation_reference_escrow_obligation_default"
 
 
-class Attestation2UnconditionalEscrowCodec(_AttestationV2EscrowCodecBase):
-    """``AttestationEscrowObligation2`` (unconditional variant)."""
+class AttestationReferenceUnconditionalEscrowCodec(_AttestationReferenceEscrowCodecBase):
+    """``AttestationReferenceEscrowObligation`` (unconditional variant)."""
 
-    kind = "attestation_escrow_obligation_2_unconditional"
+    kind = "attestation_reference_escrow_obligation_unconditional"
     sdk_variant_attr = "unconditional"
-    address_field = "escrow_obligation_2_unconditional"
+    address_field = "attestation_reference_escrow_obligation_unconditional"
 
 
 class _Erc721EscrowCodecBase:
@@ -2190,8 +2155,8 @@ _ESCROW_KIND_CODECS: dict[str, EscrowKindCodec] = {
     "token_bundle_escrow_obligation_unconditional": TokenBundleUnconditionalEscrowCodec(),
     "attestation_escrow_obligation_default": AttestationDefaultEscrowCodec(),
     "attestation_escrow_obligation_unconditional": AttestationUnconditionalEscrowCodec(),
-    "attestation_escrow_obligation_2_default": Attestation2DefaultEscrowCodec(),
-    "attestation_escrow_obligation_2_unconditional": Attestation2UnconditionalEscrowCodec(),
+    "attestation_reference_escrow_obligation_default": AttestationReferenceDefaultEscrowCodec(),
+    "attestation_reference_escrow_obligation_unconditional": AttestationReferenceUnconditionalEscrowCodec(),
 }
 
 

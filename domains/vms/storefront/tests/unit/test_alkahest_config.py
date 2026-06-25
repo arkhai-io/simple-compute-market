@@ -54,7 +54,7 @@ def test_resolve_config_from_path_override(tmp_path: Path) -> None:
     override = {
         "erc20_addresses": {
             "eas": "0x1111111111111111111111111111111111111111",
-            "barter_utils": "0x2222222222222222222222222222222222222222",
+            "atomic_payment_utils": "0x2222222222222222222222222222222222222222",
             "escrow_obligation_default": "0x3333333333333333333333333333333333333333",
             "escrow_obligation_unconditional": "0x0000000000000000000000000000000000000000",
             "payment_obligation": "0x4444444444444444444444444444444444444444",
@@ -70,7 +70,10 @@ def test_resolve_config_from_path_override(tmp_path: Path) -> None:
         config_path=str(path),
     )
     assert config is not None
-    assert config.erc20_addresses.barter_utils == override["erc20_addresses"]["barter_utils"]
+    assert (
+        config.erc20_addresses.atomic_payment_utils
+        == override["erc20_addresses"]["atomic_payment_utils"]
+    )
 
 
 def test_get_trusted_oracle_arbiter_prefers_override(tmp_path: Path) -> None:

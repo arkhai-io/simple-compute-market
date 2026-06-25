@@ -123,7 +123,7 @@ class AllArbiterCodec:
         )
 
     def encode_demand_data(self, demand_data: dict[str, Any]) -> bytes:
-        from eth_abi import encode as _abi_encode
+        from alkahest_py import alkahest_py as _alkahest_ext
 
         arbiters = list(demand_data.get("arbiters") or [])
         demands = [_demand_bytes(d) for d in (demand_data.get("demands") or [])]
@@ -134,14 +134,13 @@ class AllArbiterCodec:
             )
         if not arbiters:
             raise ValueError("all_arbiter demand_data requires at least one child")
-        return _abi_encode(["address[]", "bytes[]"], [arbiters, demands])
+        return bytes(_alkahest_ext.AllArbiter.encode(arbiters, demands))
 
     def decode_demand_data(self, demand: bytes) -> dict[str, Any]:
         from eth_abi import decode as _abi_decode
 
-        arbiters, demands = _abi_decode(
-            ["address[]", "bytes[]"], _demand_bytes(demand)
-        )
+        (decoded,) = _abi_decode(["(address[],bytes[])"], _demand_bytes(demand))
+        arbiters, demands = decoded
         return {
             "arbiters": [str(a) for a in arbiters],
             "demands": [bytes(d) for d in demands],
@@ -167,19 +166,21 @@ class _SplitterArbiterCodec:
         )
 
     def encode_demand_data(self, demand_data: dict[str, Any]) -> bytes:
-        from eth_abi import encode as _abi_encode
+        from alkahest_py import alkahest_py as _alkahest_ext
 
         oracle = demand_data.get("oracle")
         if not oracle:
             raise ValueError(f"{self.kind} demand_data requires 'oracle'")
         data = _demand_bytes(demand_data.get("data") or b"")
-        return _abi_encode(["address", "bytes"], [oracle, data])
+        return bytes(
+            _alkahest_ext.PySplitterDemandData(oracle=oracle, data=data).encode_self()
+        )
 
     def decode_demand_data(self, demand: bytes) -> dict[str, Any]:
-        from eth_abi import decode as _abi_decode
+        from alkahest_py import alkahest_py as _alkahest_ext
 
-        oracle, data = _abi_decode(["address", "bytes"], _demand_bytes(demand))
-        return {"oracle": str(oracle), "data": bytes(data)}
+        decoded = _alkahest_ext.PySplitterDemandData.decode(_demand_bytes(demand))
+        return {"oracle": decoded.oracle, "data": bytes(decoded.data)}
 
 
 class ERC20SplitterArbiterCodec(_SplitterArbiterCodec):

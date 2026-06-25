@@ -63,13 +63,38 @@ def test_resolve_alkahest_address_config_ethereum_sepolia_returns_config():
     assert result.erc20_addresses.eas.lower() == "0xc2679fbd37d54388ce493f1db75320d236e1815e"
 
 
+def test_address_to_slot_uses_sdk_lookup(monkeypatch):
+    import market_alkahest.alkahest as alc
+
+    class _Info:
+        escrow_kind = "erc20_escrow_obligation_default"
+        field = "escrow_obligation_default"
+
+    class _Config:
+        def __init__(self):
+            self.calls = []
+
+        def lookup_address(self, address):
+            self.calls.append(address)
+            return [_Info()]
+
+    cfg = _Config()
+    monkeypatch.setattr(alc, "_sdk_addresses_for_chain", lambda chain: cfg)
+
+    assert (
+        alc.address_to_slot("base_sepolia", "0xABC")
+        == "erc20_escrow_obligation_default"
+    )
+    assert cfg.calls == ["0xABC"]
+
+
 def test_address_to_slot_base_sepolia_recipient_arbiter():
     from market_alkahest.alkahest import (
         address_to_slot,
         get_recipient_arbiter,
-        _reverse_address_map,
+        _override_reverse_address_map,
     )
-    _reverse_address_map.cache_clear()
+    _override_reverse_address_map.cache_clear()
     ra = get_recipient_arbiter("base_sepolia")
     assert address_to_slot("base_sepolia", ra) == "recipient_arbiter"
 
@@ -79,9 +104,9 @@ def test_address_to_slot_base_sepolia_erc20_escrow():
         address_to_slot,
         get_erc20_escrow_obligation_default,
         get_erc20_escrow_obligation_unconditional,
-        _reverse_address_map,
+        _override_reverse_address_map,
     )
-    _reverse_address_map.cache_clear()
+    _override_reverse_address_map.cache_clear()
     default = get_erc20_escrow_obligation_default("base_sepolia")
     unconditional = get_erc20_escrow_obligation_unconditional("base_sepolia")
     assert address_to_slot("base_sepolia", default) == "erc20_escrow_obligation_default"
@@ -96,9 +121,9 @@ def test_address_to_slot_base_sepolia_erc721_escrows():
         address_to_slot,
         get_erc721_escrow_obligation_default,
         get_erc721_escrow_obligation_unconditional,
-        _reverse_address_map,
+        _override_reverse_address_map,
     )
-    _reverse_address_map.cache_clear()
+    _override_reverse_address_map.cache_clear()
     default = get_erc721_escrow_obligation_default("base_sepolia")
     unconditional = get_erc721_escrow_obligation_unconditional("base_sepolia")
     assert address_to_slot("base_sepolia", default) == "erc721_escrow_obligation_default"
@@ -113,9 +138,9 @@ def test_address_to_slot_base_sepolia_erc1155_escrows():
         address_to_slot,
         get_erc1155_escrow_obligation_default,
         get_erc1155_escrow_obligation_unconditional,
-        _reverse_address_map,
+        _override_reverse_address_map,
     )
-    _reverse_address_map.cache_clear()
+    _override_reverse_address_map.cache_clear()
     default = get_erc1155_escrow_obligation_default("base_sepolia")
     unconditional = get_erc1155_escrow_obligation_unconditional("base_sepolia")
     assert address_to_slot("base_sepolia", default) == "erc1155_escrow_obligation_default"
@@ -130,9 +155,9 @@ def test_address_to_slot_base_sepolia_native_token_escrows():
         address_to_slot,
         get_native_token_escrow_obligation_default,
         get_native_token_escrow_obligation_unconditional,
-        _reverse_address_map,
+        _override_reverse_address_map,
     )
-    _reverse_address_map.cache_clear()
+    _override_reverse_address_map.cache_clear()
     default = get_native_token_escrow_obligation_default("base_sepolia")
     unconditional = get_native_token_escrow_obligation_unconditional("base_sepolia")
     assert (
@@ -153,9 +178,9 @@ def test_address_to_slot_base_sepolia_token_bundle_escrows():
         address_to_slot,
         get_token_bundle_escrow_obligation_default,
         get_token_bundle_escrow_obligation_unconditional,
-        _reverse_address_map,
+        _override_reverse_address_map,
     )
-    _reverse_address_map.cache_clear()
+    _override_reverse_address_map.cache_clear()
     default = get_token_bundle_escrow_obligation_default("base_sepolia")
     unconditional = get_token_bundle_escrow_obligation_unconditional("base_sepolia")
     assert (
@@ -174,24 +199,24 @@ def test_address_to_slot_base_sepolia_token_bundle_escrows():
 def test_address_to_slot_base_sepolia_attestation_escrows():
     from market_alkahest.alkahest import (
         address_to_slot,
-        get_attestation_escrow_obligation_2_default,
-        get_attestation_escrow_obligation_2_unconditional,
+        get_attestation_reference_escrow_obligation_default,
+        get_attestation_reference_escrow_obligation_unconditional,
         get_attestation_escrow_obligation_default,
         get_attestation_escrow_obligation_unconditional,
-        _reverse_address_map,
+        _override_reverse_address_map,
     )
-    _reverse_address_map.cache_clear()
+    _override_reverse_address_map.cache_clear()
     v1_default = get_attestation_escrow_obligation_default("base_sepolia")
     v1_unconditional = get_attestation_escrow_obligation_unconditional("base_sepolia")
-    v2_default = get_attestation_escrow_obligation_2_default("base_sepolia")
-    v2_unconditional = get_attestation_escrow_obligation_2_unconditional("base_sepolia")
+    reference_default = get_attestation_reference_escrow_obligation_default("base_sepolia")
+    reference_unconditional = get_attestation_reference_escrow_obligation_unconditional("base_sepolia")
     assert (
         address_to_slot("base_sepolia", v1_default)
         == "attestation_escrow_obligation_default"
     )
     assert (
-        address_to_slot("base_sepolia", v2_default)
-        == "attestation_escrow_obligation_2_default"
+        address_to_slot("base_sepolia", reference_default)
+        == "attestation_reference_escrow_obligation_default"
     )
     if int(v1_unconditional, 16) != 0:
         assert (
@@ -200,18 +225,18 @@ def test_address_to_slot_base_sepolia_attestation_escrows():
         )
     else:
         assert address_to_slot("base_sepolia", v1_unconditional) is None
-    if int(v2_unconditional, 16) != 0:
+    if int(reference_unconditional, 16) != 0:
         assert (
-            address_to_slot("base_sepolia", v2_unconditional)
-            == "attestation_escrow_obligation_2_unconditional"
+            address_to_slot("base_sepolia", reference_unconditional)
+            == "attestation_reference_escrow_obligation_unconditional"
         )
     else:
-        assert address_to_slot("base_sepolia", v2_unconditional) is None
+        assert address_to_slot("base_sepolia", reference_unconditional) is None
 
 
 def test_address_to_slot_unknown_address_returns_none():
-    from market_alkahest.alkahest import address_to_slot, _reverse_address_map
-    _reverse_address_map.cache_clear()
+    from market_alkahest.alkahest import address_to_slot, _override_reverse_address_map
+    _override_reverse_address_map.cache_clear()
     unknown = "0x" + "12" * 20
     assert address_to_slot("base_sepolia", unknown) is None
 
@@ -220,9 +245,9 @@ def test_address_to_slot_case_insensitive():
     from market_alkahest.alkahest import (
         address_to_slot,
         get_recipient_arbiter,
-        _reverse_address_map,
+        _override_reverse_address_map,
     )
-    _reverse_address_map.cache_clear()
+    _override_reverse_address_map.cache_clear()
     ra = get_recipient_arbiter("base_sepolia")
     assert address_to_slot("base_sepolia", ra.upper()) == "recipient_arbiter"
     assert address_to_slot("base_sepolia", ra.lower()) == "recipient_arbiter"
@@ -232,8 +257,8 @@ def test_address_to_slot_anvil_override(tmp_path):
     """Override JSON path (anvil) — uses the same enumeration as SDK
     objects but via SimpleNamespace."""
     import json
-    from market_alkahest.alkahest import address_to_slot, _reverse_address_map
-    _reverse_address_map.cache_clear()
+    from market_alkahest.alkahest import address_to_slot, _override_reverse_address_map
+    _override_reverse_address_map.cache_clear()
     override = tmp_path / "anvil.json"
     arbiter_addr = "0x" + "ab" * 20
     escrow_addr = "0x" + "cd" * 20
@@ -265,8 +290,8 @@ def test_address_to_slot_anvil_override(tmp_path):
         "attestation_addresses": {
             "escrow_obligation_default": "0x" + "13" * 20,
             "escrow_obligation_unconditional": "0x" + "24" * 20,
-            "escrow_obligation_2_default": "0x" + "35" * 20,
-            "escrow_obligation_2_unconditional": "0x" + "46" * 20,
+            "attestation_reference_escrow_obligation_default": "0x" + "35" * 20,
+            "attestation_reference_escrow_obligation_unconditional": "0x" + "46" * 20,
         },
     }))
     cfg_path = str(override)
@@ -283,6 +308,6 @@ def test_address_to_slot_anvil_override(tmp_path):
     assert address_to_slot("anvil", "0x" + "f1" * 20, config_path=cfg_path) == "token_bundle_escrow_obligation_unconditional"
     assert address_to_slot("anvil", "0x" + "13" * 20, config_path=cfg_path) == "attestation_escrow_obligation_default"
     assert address_to_slot("anvil", "0x" + "24" * 20, config_path=cfg_path) == "attestation_escrow_obligation_unconditional"
-    assert address_to_slot("anvil", "0x" + "35" * 20, config_path=cfg_path) == "attestation_escrow_obligation_2_default"
-    assert address_to_slot("anvil", "0x" + "46" * 20, config_path=cfg_path) == "attestation_escrow_obligation_2_unconditional"
+    assert address_to_slot("anvil", "0x" + "35" * 20, config_path=cfg_path) == "attestation_reference_escrow_obligation_default"
+    assert address_to_slot("anvil", "0x" + "46" * 20, config_path=cfg_path) == "attestation_reference_escrow_obligation_unconditional"
     assert address_to_slot("anvil", "0x" + "00" * 20, config_path=cfg_path) is None

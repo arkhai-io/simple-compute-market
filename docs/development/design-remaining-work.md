@@ -69,10 +69,7 @@ block payment needs one of:
 - (a) a heartbeat-verifying **arbiter contract** checking buyer
   signatures on-chain, with the deal split into per-interval escrows so
   a dead buyer costs the seller at most one interval; or
-- (b) the **splitter contracts**
-  (`~/dev/arkhai/alkahest/contracts/src/utils/splitters/`, not yet
-  fully audited and under security patching) with an off-chain oracle
-  service.
+- (b) Alkahest's **splitter contracts** with an off-chain oracle service.
 
 The constraint that shapes both: the oracle must be a party that does
 not benefit from the decision (a seller-operated oracle gates nothing;
@@ -159,6 +156,5 @@ configs out of the package data dir into a deploy directory.
   "Capacity and the Site Authority": current state of everything this
   doc builds on
 - `TODO.md` → "Core Stack" — the flat aggregation of remaining work
-- `~/dev/arkhai/alkahest/contracts/src/arbiters/` —
-  `TrustedOracleArbiter.sol`, `logical/AllArbiter.sol`,
-  `attestation-properties/RecipientArbiter.sol`
+- Alkahest arbiter contracts — `TrustedOracleArbiter.sol`,
+  `logical/AllArbiter.sol`, `attestation-properties/RecipientArbiter.sol`

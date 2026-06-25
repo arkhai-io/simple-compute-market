@@ -74,7 +74,7 @@ chain = ["accept_exact_listing"]
 ```
 
 Keys may be exact Alkahest kinds such as
-`erc20_escrow_obligation_nontierable`, family keys such as `erc20`,
+`erc20_escrow_obligation_default`, family keys such as `erc20`,
 `native_token`, or `erc1155`, or `default`. A string value is a single
 terminal policy. A nested table with `chain = [...]`, `policies = [...]`,
 or `policy = "..."` is used when one escrow kind needs its own sequence.

@@ -19,8 +19,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from market_alkahest.alkahest import (
-    Attestation2DefaultEscrowCodec,
-    Attestation2UnconditionalEscrowCodec,
+    AttestationReferenceDefaultEscrowCodec,
+    AttestationReferenceUnconditionalEscrowCodec,
     AttestationDefaultEscrowCodec,
     AttestationUnconditionalEscrowCodec,
     Erc20DefaultEscrowCodec,
@@ -107,8 +107,8 @@ def test_erc20_default_registered_by_default():
     assert "token_bundle_escrow_obligation_unconditional" in known_escrow_kinds()
     assert "attestation_escrow_obligation_default" in known_escrow_kinds()
     assert "attestation_escrow_obligation_unconditional" in known_escrow_kinds()
-    assert "attestation_escrow_obligation_2_default" in known_escrow_kinds()
-    assert "attestation_escrow_obligation_2_unconditional" in known_escrow_kinds()
+    assert "attestation_reference_escrow_obligation_default" in known_escrow_kinds()
+    assert "attestation_reference_escrow_obligation_unconditional" in known_escrow_kinds()
 
 
 def test_get_escrow_kind_codec_returns_erc20_impl():
@@ -149,14 +149,14 @@ def test_get_escrow_kind_codec_returns_token_bundle_impls():
 
 
 def test_get_escrow_kind_codec_returns_attestation_impls():
-    v1_non = get_escrow_kind_codec("attestation_escrow_obligation_default")
-    v1_tier = get_escrow_kind_codec("attestation_escrow_obligation_unconditional")
-    v2_non = get_escrow_kind_codec("attestation_escrow_obligation_2_default")
-    v2_tier = get_escrow_kind_codec("attestation_escrow_obligation_2_unconditional")
-    assert isinstance(v1_non, AttestationDefaultEscrowCodec)
-    assert isinstance(v1_tier, AttestationUnconditionalEscrowCodec)
-    assert isinstance(v2_non, Attestation2DefaultEscrowCodec)
-    assert isinstance(v2_tier, Attestation2UnconditionalEscrowCodec)
+    v1_default = get_escrow_kind_codec("attestation_escrow_obligation_default")
+    v1_unconditional = get_escrow_kind_codec("attestation_escrow_obligation_unconditional")
+    reference_default = get_escrow_kind_codec("attestation_reference_escrow_obligation_default")
+    reference_unconditional = get_escrow_kind_codec("attestation_reference_escrow_obligation_unconditional")
+    assert isinstance(v1_default, AttestationDefaultEscrowCodec)
+    assert isinstance(v1_unconditional, AttestationUnconditionalEscrowCodec)
+    assert isinstance(reference_default, AttestationReferenceDefaultEscrowCodec)
+    assert isinstance(reference_unconditional, AttestationReferenceUnconditionalEscrowCodec)
 
 
 def test_get_escrow_kind_codec_unknown_kind_raises():
@@ -908,8 +908,8 @@ def test_token_bundle_refund_claimed_fans_out_to_token_transfers(monkeypatch):
 def test_attestation_codecs_satisfy_protocol():
     assert isinstance(AttestationDefaultEscrowCodec(), EscrowKindCodec)
     assert isinstance(AttestationUnconditionalEscrowCodec(), EscrowKindCodec)
-    assert isinstance(Attestation2DefaultEscrowCodec(), EscrowKindCodec)
-    assert isinstance(Attestation2UnconditionalEscrowCodec(), EscrowKindCodec)
+    assert isinstance(AttestationReferenceDefaultEscrowCodec(), EscrowKindCodec)
+    assert isinstance(AttestationReferenceUnconditionalEscrowCodec(), EscrowKindCodec)
 
 
 def _attestation_request():
@@ -934,7 +934,7 @@ def _attestation_v1_obligation_data():
     }
 
 
-def _attestation_v2_obligation_data():
+def _attestation_reference_obligation_data():
     return {
         "arbiter": _ARBITER,
         "demand": _DEMAND_HEX,
@@ -982,11 +982,11 @@ def test_attestation_v1_create_obligation_translates_to_sdk_shape(
 @pytest.mark.parametrize(
     ("codec", "version_attr", "sdk_variant_attr"),
     [
-        (Attestation2DefaultEscrowCodec(), "reference", "default"),
-        (Attestation2UnconditionalEscrowCodec(), "reference", "unconditional"),
+        (AttestationReferenceDefaultEscrowCodec(), "reference", "default"),
+        (AttestationReferenceUnconditionalEscrowCodec(), "reference", "unconditional"),
     ],
 )
-def test_attestation_v2_create_obligation_translates_to_sdk_shape(
+def test_attestation_reference_create_obligation_translates_to_sdk_shape(
     codec, version_attr, sdk_variant_attr,
 ):
     mock_client, sdk_variant_client = _mock_attestation_client(version_attr, sdk_variant_attr)
@@ -994,7 +994,7 @@ def test_attestation_v2_create_obligation_translates_to_sdk_shape(
     uid = asyncio.run(
         codec.create_obligation(
             mock_client,
-            _attestation_v2_obligation_data(),
+            _attestation_reference_obligation_data(),
             expiration_unix=1_800_000_000,
         )
     )
@@ -1006,10 +1006,10 @@ def test_attestation_v2_create_obligation_translates_to_sdk_shape(
     assert expiration == 1_800_000_000
 
 
-def test_attestation_v2_create_obligation_missing_uid_raises():
-    codec = Attestation2DefaultEscrowCodec()
+def test_attestation_reference_create_obligation_missing_uid_raises():
+    codec = AttestationReferenceDefaultEscrowCodec()
     mock_client, _sdk_variant_client = _mock_attestation_client("reference", "default")
-    data = _attestation_v2_obligation_data()
+    data = _attestation_reference_obligation_data()
     data.pop("attestationUid")
     with pytest.raises(ValueError, match="attestationUid is required"):
         asyncio.run(
@@ -1024,8 +1024,8 @@ def test_attestation_v2_create_obligation_missing_uid_raises():
     [
         (AttestationDefaultEscrowCodec(), "default", "default"),
         (AttestationUnconditionalEscrowCodec(), "default", "unconditional"),
-        (Attestation2DefaultEscrowCodec(), "reference", "default"),
-        (Attestation2UnconditionalEscrowCodec(), "reference", "unconditional"),
+        (AttestationReferenceDefaultEscrowCodec(), "reference", "default"),
+        (AttestationReferenceUnconditionalEscrowCodec(), "reference", "unconditional"),
     ],
 )
 def test_attestation_get_obligation_dispatches_to_sdk(codec, version_attr, sdk_variant_attr):

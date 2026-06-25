@@ -59,7 +59,7 @@ ADDRESSES_PATH = (
 SECTION_FIELDS: dict[str, list[str]] = {
     "arbiters_addresses": [
         "eas", "trivial_arbiter", "trusted_oracle_arbiter", "intrinsics_arbiter",
-        "intrinsics_arbiter_2", "erc8004_arbiter", "any_arbiter", "all_arbiter",
+        "references_escrow_arbiter", "erc8004_arbiter", "any_arbiter", "all_arbiter",
         "attester_arbiter", "expiration_time_after_arbiter", "expiration_time_before_arbiter",
         "expiration_time_equal_arbiter", "recipient_arbiter", "ref_uid_arbiter",
         "revocable_arbiter", "schema_arbiter", "time_after_arbiter", "time_before_arbiter",
@@ -67,12 +67,12 @@ SECTION_FIELDS: dict[str, list[str]] = {
         "exclusive_unrevocable_confirmation_arbiter", "nonexclusive_revocable_confirmation_arbiter",
         "nonexclusive_unrevocable_confirmation_arbiter",
     ],
-    "erc20_addresses": ["eas", "barter_utils", "escrow_obligation_nontierable", "escrow_obligation_tierable", "payment_obligation"],
-    "erc721_addresses": ["eas", "barter_utils", "escrow_obligation_nontierable", "escrow_obligation_tierable", "payment_obligation"],
-    "erc1155_addresses": ["eas", "barter_utils", "escrow_obligation_nontierable", "escrow_obligation_tierable", "payment_obligation"],
-    "native_token_addresses": ["eas", "barter_utils", "escrow_obligation_nontierable", "escrow_obligation_tierable", "payment_obligation"],
-    "token_bundle_addresses": ["eas", "barter_utils", "escrow_obligation_nontierable", "escrow_obligation_tierable", "payment_obligation"],
-    "attestation_addresses": ["eas", "eas_schema_registry", "barter_utils", "escrow_obligation_nontierable", "escrow_obligation_tierable", "escrow_obligation_2_nontierable", "escrow_obligation_2_tierable"],
+    "erc20_addresses": ["eas", "atomic_payment_utils", "escrow_obligation_default", "escrow_obligation_unconditional", "payment_obligation"],
+    "erc721_addresses": ["eas", "atomic_payment_utils", "escrow_obligation_default", "escrow_obligation_unconditional", "payment_obligation"],
+    "erc1155_addresses": ["eas", "atomic_payment_utils", "escrow_obligation_default", "escrow_obligation_unconditional", "payment_obligation"],
+    "native_token_addresses": ["eas", "atomic_payment_utils", "escrow_obligation_default", "escrow_obligation_unconditional", "payment_obligation"],
+    "token_bundle_addresses": ["eas", "atomic_payment_utils", "escrow_obligation_default", "escrow_obligation_unconditional", "payment_obligation"],
+    "attestation_addresses": ["eas", "eas_schema_registry", "atomic_attestation_utils", "escrow_obligation_default", "escrow_obligation_unconditional", "attestation_reference_escrow_obligation_default", "attestation_reference_escrow_obligation_unconditional"],
     "string_obligation_addresses": ["eas", "obligation"],
     "commit_reveal_obligation_addresses": ["eas", "obligation"],
 }

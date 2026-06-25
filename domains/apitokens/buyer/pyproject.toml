@@ -11,7 +11,7 @@ dependencies = [
   # Needed by the buy/settle path for in-process on-chain escrow
   # creation. Imported lazily from core_buyer.escrow_client so loading
   # the CLI does not pay the native-binary cost unless a deal settles.
-  "alkahest-py @ git+https://github.com/arkhai-io/alkahest@4cd898c757441f9e16d4d6b1549052d021aa74b4#subdirectory=sdks/py",
+  "alkahest-py @ git+https://github.com/arkhai-io/alkahest@fe900a2bfcc1e5642c4b5f6c0ec4e014fba29f17#subdirectory=sdks/py",
   "arkhai-core-buyer",
   "arkhai-core",
   "arkhai-kit-alkahest",
