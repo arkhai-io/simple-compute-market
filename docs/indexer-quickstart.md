@@ -10,7 +10,10 @@ How to stand up your own listing registry. Reasons to run one:
 - **Solo testing** — no fanout.
 
 `compose/seller.yml` is registry-agnostic, so a listing registry can run on
-the same host as a seller or anywhere else.
+the same host as a seller or anywhere else. Co-location is only deployment
+convenience: the registry remains a discovery role, while the storefront
+remains the seller's negotiation, settlement, and fulfillment role. See
+[`roles.md`](./roles.md) for the role model.
 
 ## 1. Build the image
 
@@ -63,7 +66,7 @@ In each storefront / buyer TOML:
 
 ```toml
 [registry]
-urls = ["http://<INDEXER_HOST>:8080"]
+urls = ["http://<REGISTRY_HOST>:8080"]
 ```
 
 When the listing registry and seller share a docker network, use the service
@@ -72,14 +75,14 @@ name: `urls = ["http://registry:8080"]`.
 ## 5. Checks
 
 ```bash
-curl -sf http://<INDEXER_HOST>:8080/health
+curl -sf http://<REGISTRY_HOST>:8080/health
 
 docker compose logs registry | grep -i "JIT.*Indexed agent"
 
-curl -s http://<INDEXER_HOST>:8080/filter-spec | jq
+curl -s http://<REGISTRY_HOST>:8080/filter-spec | jq
 
 # Listings — note the full canonical agent ID, URL-encoded:
-curl -s "http://<INDEXER_HOST>:8080/agents/eip155%3A84532%3A0x8004A818BFB912233c491871b3d84c89A494BD9e%3A<N>/listings" \
+curl -s "http://<REGISTRY_HOST>:8080/agents/eip155%3A84532%3A0x8004A818BFB912233c491871b3d84c89A494BD9e%3A<N>/listings" \
   | jq
 ```
 
@@ -104,5 +107,5 @@ In the seller / buyer TOML:
 
 ```toml
 [registry.auth]
-"http://<INDEXER_HOST>:8080" = "<api_key>"
+"http://<REGISTRY_HOST>:8080" = "<api_key>"
 ```

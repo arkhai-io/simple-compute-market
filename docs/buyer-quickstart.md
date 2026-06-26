@@ -80,14 +80,14 @@ rpc_url  = "https://sepolia.base.org"   # public RPC; or your own provider
 # The Arkhai public listing registry (preprod, Base Sepolia listings):
 urls = ["http://34.41.205.175/registry"]
 # Or point at any other listing registry, e.g. a self-hosted one:
-# urls = ["http://<INDEXER_HOST>:8080"]
+# urls = ["http://<REGISTRY_HOST>:8080"]
 
 [registry.auth]
 # Required when the listing registry gates reads (REGISTRY_REQUIRE_READ_API_KEY=true).
 # The public preprod listing registry is currently read-open — no token needed.
 # Keys must match the URLs in [registry] urls exactly (scheme, host,
 # port, no trailing slash).
-# "http://<INDEXER_HOST>:8080" = "<your-token>"
+# "http://<REGISTRY_HOST>:8080" = "<your-token>"
 
 [negotiation]
 # Ordered policy chain run per round. The buyer's default chain pairs

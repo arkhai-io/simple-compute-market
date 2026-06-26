@@ -65,7 +65,7 @@ rpc_url  = "https://sepolia.base.org"   # public RPC; or your own provider
 # The Arkhai public listing registry (preprod, Base Sepolia listings):
 urls = ["http://34.41.205.175/registry"]
 # Or point at any other listing registry, e.g. a self-hosted one:
-# urls = ["http://<INDEXER_HOST>:8080"]
+# urls = ["http://<REGISTRY_HOST>:8080"]
 
 [registry.auth]
 # Required when the listing registry gates writes (REGISTRY_REQUIRE_WRITE_API_KEY=true);
@@ -156,7 +156,7 @@ Verify directly against the storefront and the listing registry:
 ```bash
 curl -s http://<YOUR_PUBLIC_IP>:8001/api/v1/listings | jq '.listings[]'
 
-# Indexer: filter listings by your publishing wallet address:
+# Registry: filter listings by your publishing wallet address:
 curl -s "http://34.41.205.175/registry/listings?publisher=<YOUR_WALLET_ADDRESS>" \
   | jq '.items[]'
 ```

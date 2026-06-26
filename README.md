@@ -1,8 +1,8 @@
 # Simple Compute Market
 
-Simple Compute Market is a reference implementation of an open compute market. Buyers find sellers through a listings registry, negotiate prices peer-to-peer over signed HTTP, and settle on-chain with escrow-backed obligations via [Alkahest](https://github.com/arkhai-io/alkahest). Buyers run a CLI; sellers run a storefront server; the registry is only a listings index; provisioning stays with the seller's own service.
+Simple Compute Market is a reference implementation of an open compute market. Buyers find sellers through federated listing registries, negotiate prices peer-to-peer with seller storefronts over signed HTTP, and settle on-chain with escrow-backed obligations via [Alkahest](https://github.com/arkhai-io/alkahest). Buyers run a CLI; sellers run a storefront server; the registry is only a listings index; provisioning stays with the seller's own service.
 
-Compute is the concrete domain, but the goal is the pattern: userland buyer, storefront, and registry roles with peer-to-peer negotiation and escrowed settlement. Another asset class should be able to reuse that shape by substituting its own resource schemas, escrow contracts, and execution modules.
+Compute is the concrete domain, but the goal is the pattern: independent userland buyer, storefront, registry, and seller resource-service roles with peer-to-peer negotiation and escrowed settlement. There is no canonical platform role that owns both discovery and fulfillment. Another asset class should be able to reuse that shape by substituting its own resource schemas, escrow contracts, and execution modules.
 
 ## Design notes
 
@@ -29,6 +29,7 @@ Simple Compute Market is inspired by [Compositional Game Theory (CGT)](https://g
 
 Pick the role you're standing up:
 
+- **Understand market roles** → [`docs/roles.md`](./docs/roles.md)
 - **Buy compute** → [`docs/buyer-quickstart.md`](./docs/buyer-quickstart.md)
 - **Sell compute** → [`docs/seller-quickstart.md`](./docs/seller-quickstart.md)
 - **Run your own listing registry** → [`docs/indexer-quickstart.md`](./docs/indexer-quickstart.md)
@@ -55,3 +56,4 @@ Validation and issue-discovery docs:
 
 - [`docs/development/ARCHITECTURE.md`](./docs/development/ARCHITECTURE.md) — end-to-end design: components, request flow, on-chain schema, negotiation policy machinery
 - [`docs/configuration.md`](./docs/configuration.md) — config reference: bundled negotiation + aggregation policies and how to write custom ones
+- [`docs/roles.md`](./docs/roles.md) — canonical role boundaries: registries, storefronts, seller resource services, and buyers
