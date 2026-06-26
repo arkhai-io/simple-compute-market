@@ -21,7 +21,7 @@ Simple Compute Market is inspired by [Compositional Game Theory (CGT)](https://g
 - `compose/` — Docker Compose stacks for the seller side
 - `helm/` — Kubernetes/Helm charts for production seller + registry deployments
 - `scripts/zerotier/` — ZeroTier controller scripts
-- `docs/` — User/operator quickstarts and configuration reference (developer/internal docs live under `docs/development/`)
+- `docs/` — User/operator quickstarts, domain-authoring guides, and configuration reference (repo-internal development docs live under `docs/development/`)
 - `scripts/` — Repo-root wrappers for build, install, validation, and clean-room workflows
 - `tools/` — Repo-owned developer and validation tools
 
@@ -32,6 +32,7 @@ Pick the role you're standing up:
 - **Buy compute** → [`docs/buyer-quickstart.md`](./docs/buyer-quickstart.md)
 - **Sell compute** → [`docs/seller-quickstart.md`](./docs/seller-quickstart.md)
 - **Run your own listing registry** → [`docs/indexer-quickstart.md`](./docs/indexer-quickstart.md)
+- **Implement a new market domain** → [`docs/domain-authoring/`](./docs/domain-authoring/)
 - **Add FRP reverse-proxy for VM subdomains (seller)** → [`docs/seller-frp-setup.md`](./docs/seller-frp-setup.md)
 - **Set up a private ZeroTier overlay (operator)** → [`docs/zerotier-setup.md`](./docs/zerotier-setup.md)
 
