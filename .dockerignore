@@ -10,6 +10,8 @@ storefront/src/market_storefront/data/*.csv
 .git
 **/.venv
 **/__pycache__
+**/._*
+**/.DS_Store
 **/.pytest_cache
 .uv-cache
 .snapshot

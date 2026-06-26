@@ -3,6 +3,8 @@
 The helpers take ``chain_name`` + optional ``config_path`` arguments —
 no env reads. Tests pass values explicitly.
 """
+import json
+
 import pytest
 
 
@@ -61,6 +63,32 @@ def test_resolve_alkahest_address_config_ethereum_sepolia_returns_config():
     result = resolve_alkahest_address_config("ethereum_sepolia")
     assert result is not None
     assert result.erc20_addresses.eas.lower() == "0xc2679fbd37d54388ce493f1db75320d236e1815e"
+
+
+def test_escrow_override_accepts_flat_sdk_keys(tmp_path):
+    from market_alkahest.alkahest import get_erc20_escrow_obligation_default
+    import market_alkahest.alkahest as alc
+
+    alc._load_override_config_cached.cache_clear()
+    config_path = tmp_path / "addresses.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "erc20_addresses": {
+                    "escrow_obligation_default": (
+                        "0xa82ff9afd8f496c3d6ac40e2a0f282e47488cfc9"
+                    )
+                }
+            }
+        )
+    )
+
+    assert (
+        get_erc20_escrow_obligation_default(
+            "anvil", config_path=str(config_path)
+        )
+        == "0xa82ff9afd8f496c3d6ac40e2a0f282e47488cfc9"
+    )
 
 
 def test_address_to_slot_uses_sdk_lookup(monkeypatch):

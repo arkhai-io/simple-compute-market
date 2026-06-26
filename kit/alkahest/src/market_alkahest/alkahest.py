@@ -252,7 +252,15 @@ def _escrow_obligation_address(
     selected = get_alkahest_network(chain_name)
     override = _load_override_config(config_path)
     if override is not None:
-        return str(override[category][field])
+        category_override = override[category]
+        if field in category_override:
+            return str(category_override[field])
+        prefix = "escrow_obligation_"
+        if field.startswith(prefix):
+            nested = category_override.get("escrow_obligation")
+            if isinstance(nested, dict):
+                return str(nested[field.removeprefix(prefix)])
+        return str(category_override[field])
     if selected == NETWORK_ANVIL:
         raise ValueError(
             "chain_name='anvil' requires an explicit alkahest_address_config_path "
