@@ -148,8 +148,8 @@ test: test-core test-provisioning test-provisioning-iac test-registry test-store
 test-core:
 	cd core && make test
 
-test-provisioning: dist-arkhai-core-site dist-storefront-client
-	cd domains/vms/provisioning/service && make reinit && make test
+test-provisioning:
+	cd domains/vms/provisioning/service && make test
 
 test-provisioning-iac:
 	cd domains/vms/provisioning/iac && make validate-tests

@@ -1,5 +1,5 @@
 REPO_ROOT := $(shell git rev-parse --show-toplevel)
-DIST_DIR ?= $(abspath $(CURDIR)/../../../.dist)
+DIST_DIR ?= ../../../.dist
 
 .PHONY: build init reinit test smoke-test
 

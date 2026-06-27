@@ -1,4 +1,4 @@
-DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
+DIST_DIR ?= ../.dist
 
 .PHONY: test test-core test-core-buyer test-core-site test-core-storefront test-core-storefront-client
 

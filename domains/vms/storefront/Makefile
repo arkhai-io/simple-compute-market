@@ -8,7 +8,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 # distributed as wheels rather than editable source installs. The
 # Dockerfile passes --find-links /dist on the uv sync CLI instead;
 # this variable is for local development only.
-DIST_DIR ?= $(abspath $(CURDIR)/../../../.dist)
+DIST_DIR ?= ../../../.dist
 
 .PHONY: build build-images build-no-cache deploy deploy-storefront init reinit test test-unit test-integration
 

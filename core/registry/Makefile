@@ -5,7 +5,7 @@ PYTHON_VERSION := 3.13
 # Used by uv when resolving pure-Python internal packages distributed as wheels
 # (arkhai-core-registry-client).  The Dockerfile passes --find-links /dist on the
 # uv sync CLI instead; this variable is for local development only.
-DIST_DIR ?= $(abspath $(CURDIR)/../../.dist)
+DIST_DIR ?= ../../.dist
 
 # ==============================================================================
 # Installation & Setup

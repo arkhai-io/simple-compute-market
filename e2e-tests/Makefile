@@ -15,7 +15,7 @@ MODULE ?= contracts
 # arkhai-kit-policy, arkhai-vms-storefront, arkhai-vms-provisioning-client) that are distributed as wheels rather than editable
 # source installs.  The Dockerfile passes --find-links /dist on the uv sync
 # CLI instead; this variable is for local development only.
-DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
+DIST_DIR ?= ../.dist
 
 .PHONY: build venv test test-e2e
 

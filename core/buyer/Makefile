@@ -4,7 +4,7 @@
 # The rule is: no [tool.uv.sources] path entries with ../ in this file; all
 # cross-package internal dependencies resolve exclusively from .dist/ wheels
 # via --find-links on the CLI.
-DIST_DIR ?= $(abspath $(CURDIR)/../../.dist)
+DIST_DIR ?= ../../.dist
 
 .PHONY: init reinit test
 

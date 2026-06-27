@@ -1,17 +1,17 @@
-.PHONY: help install serve test test-unit test-integration clean build build-image deploy docker-run-dev
+.PHONY: help install reinit serve test test-unit test-integration clean build build-image deploy docker-run-dev
 
 .DEFAULT_GOAL := help
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-DIST_DIR ?= $(abspath $(CURDIR)/../../../../.dist)
+DIST_DIR ?= ../../../../.dist
 
 install: ## Install dependencies using uv
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Install from https://docs.astral.sh/uv/"; exit 1; }
 	uv sync --dev --find-links $(DIST_DIR)
 
-reinit: ## Force-reinstall internal wheels after make dist. Use when bumping internal wheel versions.
+reinit:
 	uv sync --dev --find-links $(DIST_DIR) \
 		--upgrade-package arkhai-core-site \
 		--reinstall-package arkhai-core-site \
@@ -39,10 +39,10 @@ serve: ## Start the unified API + job processing server locally
 
 test: reinit test-unit test-integration ## Run all tests
 
-test-unit: ## Run unit tests
+test-unit: reinit ## Run unit tests
 	PYTHONPATH=src uv run --find-links $(DIST_DIR) pytest src/tests/unit/ -v
 
-test-integration: ## Run integration tests (no real Ansible or DB required — mocked at boundary)
+test-integration: reinit ## Run integration tests (no real Ansible or DB required — mocked at boundary)
 	ACTIVE_PROFILES=mock PYTHONPATH=src uv run --find-links $(DIST_DIR) pytest src/tests/integration/ -v
 
 clean: ## Remove generated files

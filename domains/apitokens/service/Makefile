@@ -5,7 +5,7 @@
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-DIST_DIR ?= $(abspath $(CURDIR)/../../../.dist)
+DIST_DIR ?= ../../../.dist
 
 install: ## Install dependencies using uv
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Install from https://docs.astral.sh/uv/"; exit 1; }
