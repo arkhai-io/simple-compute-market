@@ -5,7 +5,7 @@ DIST_DIR ?= ../.dist
 test: test-alkahest test-config test-identity test-policy
 
 test-alkahest:
-	cd alkahest && uv run --find-links $(DIST_DIR) pytest tests/unit -q
+	cd alkahest && make test
 
 test-config:
 	cd config && make test

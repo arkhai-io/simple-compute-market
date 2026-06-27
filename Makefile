@@ -27,7 +27,7 @@ dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist
 
 dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd core/storefront-client && uv build --wheel --out-dir $(DIST_DIR)
+	cd core/storefront-client && $(MAKE) build DIST_DIR=$(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_core_storefront_client-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core-storefront-client produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
@@ -117,13 +117,13 @@ dist-arkhai-core-storefront: ## Build arkhai-core-storefront wheel into .dist/
 
 dist-arkhai-core-site: ## Build arkhai-core-site wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd core/site && uv build --wheel --out-dir $(DIST_DIR)
+	cd core/site && $(MAKE) build DIST_DIR=$(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_core_site-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core-site produced a platform-specific wheel — must build inside Docker" && exit 1)
 
 dist-alkahest: ## Build arkhai-kit-alkahest wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd kit/alkahest && uv build --wheel --out-dir $(DIST_DIR)
+	cd kit/alkahest && $(MAKE) build DIST_DIR=$(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_kit_alkahest-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-alkahest produced a platform-specific wheel — must build inside Docker" && exit 1)
 

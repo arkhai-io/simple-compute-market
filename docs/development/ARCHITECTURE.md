@@ -2864,6 +2864,7 @@ A **contract fixture** is a pair of functions — `build_*()` and `validate_*()`
 
 **External boundary definition:** Any I/O that crosses a process boundary. In this codebase that means:
 - Ansible subprocess invocations — mocked at `AnsibleService` (replace `start_playbook` / `wait_for_playbook` / `check_connectivity`)
+- Alkahest SDK `EnvTestManager` checks — integration tests only; it spawns a local chain process and requires host Node/Foundry runtime availability
 - The `StorefrontAuthMiddleware` X-Admin-Key gate — open in tests because the test settings leave `storefront_admin_key` empty
 
 **Test setup pattern:** Use `httpx.AsyncClient` with `ASGITransport` against the real `app` instance, injected via the canonical `FooClient(transport=...)` constructor. Override container providers for `AnsibleService` before the test and restore them after. See `src/tests/integration/conftest.py` for the full fixture implementation.

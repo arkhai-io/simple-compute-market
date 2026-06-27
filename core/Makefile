@@ -11,10 +11,10 @@ test-core-buyer:
 	cd buyer && make test
 
 test-core-site:
-	uv run --project site --find-links $(DIST_DIR) pytest site/tests/unit -q
+	cd site && make test
 
 test-core-storefront:
 	cd storefront && make test
 
 test-core-storefront-client:
-	uv run --project storefront-client --find-links $(DIST_DIR) pytest storefront-client/tests -q
+	cd storefront-client && make test
