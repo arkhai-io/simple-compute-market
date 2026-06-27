@@ -701,7 +701,11 @@ class CapacityLedgerService:
             return sum(int(row.units or 0) for row in rows)
         total = 0
         for row in rows:
-            if row.state == AllocationState.releasing.value:
+            if row.state in {
+                AllocationState.releasing.value,
+                AllocationState.release_failed.value,
+                AllocationState.unmanaged.value,
+            }:
                 total += int(row.units or 0)
                 continue
             row_start = parse_utc(row.lease_start_utc)

@@ -305,6 +305,22 @@ def test_list_lease_due_and_begin_releasing(seeded: CapacityLedgerService):
     assert seeded.list_lease_due(datetime.now(timezone.utc)) == []
 
 
+def test_release_failed_still_holds_capacity(seeded: CapacityLedgerService):
+    reserved = seeded.reserve(claim={"gpu_count": 2}, deal_ref={})
+    seeded.commit(
+        resource_id=reserved["resource_id"],
+        allocation_id=reserved["allocation_id"],
+        lease_start_utc="2020-01-01T00:00:00Z",
+        lease_end_utc="2020-01-01 00:00",
+    )
+    seeded.update_allocation_state(
+        reserved["allocation_id"],
+        state="release_failed",
+        failure_reason="vm_remove_failed",
+    )
+    assert seeded.snapshot()[0]["available_units"] == 6
+
+
 def test_release_can_mark_force_released(seeded: CapacityLedgerService):
     reserved = seeded.reserve(claim={}, deal_ref={})
     seeded.begin_releasing(reserved["allocation_id"])
