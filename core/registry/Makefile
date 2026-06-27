@@ -16,8 +16,8 @@ init: init-uv
 
 reinit:
 	uv sync --dev --python $(PYTHON_VERSION) --find-links $(DIST_DIR) \
-		--reinstall-package arkhai-kit-identity \
-		--reinstall-package arkhai-core-registry-client
+		--upgrade-package arkhai-kit-identity         --reinstall-package arkhai-kit-identity \
+		--upgrade-package arkhai-core-registry-client --reinstall-package arkhai-core-registry-client
 
 init-uv:
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }

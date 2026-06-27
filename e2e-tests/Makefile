@@ -31,14 +31,10 @@ init: init-venv
 
 reinit: init-venv
 	uv sync --find-links $(DIST_DIR) \
-	--upgrade-package arkhai-core-registry-client \
-	--upgrade-package arkhai-core-storefront-client \
-	--upgrade-package arkhai-vms-provisioning-client \
-	--upgrade-package arkhai-vms-storefront \
-	--reinstall-package arkhai-core-registry-client \
-	--reinstall-package arkhai-core-storefront-client \
-	--reinstall-package arkhai-vms-provisioning-client \
-	--reinstall-package arkhai-vms-storefront
+	--upgrade-package arkhai-core-registry-client    --reinstall-package arkhai-core-registry-client \
+	--upgrade-package arkhai-core-storefront-client  --reinstall-package arkhai-core-storefront-client \
+	--upgrade-package arkhai-vms-provisioning-client --reinstall-package arkhai-vms-provisioning-client \
+	--upgrade-package arkhai-vms-storefront          --reinstall-package arkhai-vms-storefront
 
 # -----------------------------------------------------------------------
 # Build

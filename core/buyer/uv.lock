@@ -188,14 +188,14 @@ dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 
 [[package]]
 name = "arkhai-kit-alkahest"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
     { name = "web3" },
 ]
 wheels = [
-    { path = "arkhai_kit_alkahest-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_alkahest-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]

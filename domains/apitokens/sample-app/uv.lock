@@ -36,23 +36,12 @@ wheels = [
 [[package]]
 name = "arkhai-apitokens-middleware"
 version = "0.1.0"
-source = { editable = "../middleware/python" }
+source = { registry = "../../../.dist" }
 dependencies = [
     { name = "httpx" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23.0" },
-]
-provides-extras = ["test"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", specifier = ">=0.23.0" },
+wheels = [
+    { path = "../../../.dist/arkhai_apitokens_middleware-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -81,7 +70,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-apitokens-middleware", editable = "../middleware/python" },
+    { name = "arkhai-apitokens-middleware" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },

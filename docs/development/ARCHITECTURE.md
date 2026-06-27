@@ -2511,7 +2511,7 @@ Wheel builds happen separately via `make dist` (called automatically by
 ```
 make dist
   ├── dist-storefront-client  → .dist/arkhai_storefront_client-*.whl
-  ├── dist-registry           → .dist/arkhai_registry_client-*.whl
+  ├── dist-registry-client    → .dist/arkhai_core_registry_client-*.whl
   ├── dist-arkhai-core-buyer         → .dist/core_buyer-*.whl
   ├── dist-arkhai-core-storefront    → .dist/core_storefront-*.whl
   ├── dist-provisioning-client → .dist/arkhai_vms_provisioning_client-*.whl
@@ -3210,7 +3210,7 @@ Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockf
 | `arkhai-vms-common` | `arkhai_vms_common-*.whl` | `domains/vms/common/` | `buyer`, `storefront` |
 | `arkhai-vms-provisioning-client` | `arkhai_vms_provisioning_client-*.whl` | `domains/vms/provisioning/client/` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
 | `arkhai-core-storefront-client` | `arkhai_storefront_client-*.whl` | `core/storefront-client/` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
-| `arkhai-core-registry-client` | `arkhai_registry_client-*.whl` | `core/registry-client/` | `e2e-tests` |
+| `arkhai-core-registry-client` | `arkhai_core_registry_client-*.whl` | `core/registry-client/` | `e2e-tests` |
 
 Typed client wheels are the **authoritative inter-service contracts** for their services' public HTTP DTOs and primitive operations. This applies repo-wide to `arkhai-vms-provisioning-client`, `arkhai-core-storefront-client`, and `arkhai-core-registry-client`. Do not duplicate public DTOs inside a server just to avoid importing from its client wheel; controllers and service unit tests may import client-owned public models when those models are the natural method boundary. Server-only types remain in the service package and are not exported through the client surface. When a client package exposes both async and sync clients, they must expose the same public operation names and signatures; the owning service's unit suite should carry the parity guardrail, while the owning service's integration suite remains the behavioral contract test surface for every public client endpoint.
 
@@ -3325,18 +3325,18 @@ health = client.get_health()
 **Iteration workflow for wheel consumers:** When iterating on a client package during development, use `make reinit` (not `make init`) to force reinstallation and re-resolution to the latest version in `.dist/`:
 
 ```
-make dist-registry          # rebuild wheel
+make dist-registry-client   # rebuild wheel
 cd core/registry && make reinit && make test-integration
 ```
 
-`reinit` runs `uv sync --upgrade-package <pkg> --reinstall-package <pkg>`. The `--upgrade-package` flag is essential: without it, `uv` re-installs whatever version is **pinned in the local `uv.lock`** rather than resolving the latest available wheel from `.dist/`. If `uv.lock` was generated when an older wheel was the only option, subsequent `make dist` runs that produce a higher version are silently ignored by `--reinstall-package` alone. `--upgrade-package` forces uv to re-resolve the constraint against the current contents of `.dist/` and update `uv.lock` to the new version.
+`reinit` runs `uv sync --upgrade-package <pkg> --reinstall-package <pkg>`. The `--upgrade-package` flag is essential: without it, `uv` re-installs whatever version is **pinned in the local `uv.lock`** rather than resolving the latest available wheel from `.dist/`. If `uv.lock` was generated when an older wheel was the only option, subsequent `make dist` runs that produce a higher version are silently ignored by `--reinstall-package` alone. `--upgrade-package` also implies uv's package refresh behavior, so a separate `--refresh-package` flag is redundant. `--reinstall-package` remains useful because local wheel rebuilds often keep the same version while changing the wheel contents.
 
 ### Client package inventory
 
 | Package | Wheel | Async client | Sync client | Consumers |
 |---|---|---|---|---|
 | `arkhai-core-storefront-client` | `arkhai_storefront_client-*.whl` | `StorefrontClient` | `SyncStorefrontClient` | `storefront`, `e2e-tests` |
-| `arkhai-core-registry-client` (`core/registry-client/`) | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `e2e-tests`, `arkhai-core-registry` tests |
+| `arkhai-core-registry-client` (`core/registry-client/`) | `arkhai_core_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `e2e-tests`, `arkhai-core-registry` tests |
 | `arkhai-vms-provisioning-client` (`domains/vms/provisioning/client/`) | `arkhai_vms_provisioning_client-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
 
 `arkhai-core-storefront-client` exposes EIP-191-signed methods on both

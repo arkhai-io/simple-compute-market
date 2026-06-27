@@ -13,14 +13,14 @@ init:
 
 # Reinstall all internal wheel dependencies when iterating on kit or core packages.
 # Run the relevant dist-* targets from the monorepo root first to ensure .dist/
-# has fresh wheels (dist-core, dist-registry, dist-config, dist-identity, dist-policy).
+# has fresh wheels (dist-core, dist-registry-client, dist-config, dist-identity, dist-policy).
 reinit:
 	uv sync --dev --python 3.12 --find-links $(DIST_DIR) \
-		--upgrade-package arkhai-core                --reinstall-package arkhai-core \
+		--upgrade-package arkhai-core                 --reinstall-package arkhai-core \
 		--upgrade-package arkhai-core-registry-client --reinstall-package arkhai-core-registry-client \
-		--upgrade-package arkhai-kit-config          --reinstall-package arkhai-kit-config \
-		--upgrade-package arkhai-kit-identity        --reinstall-package arkhai-kit-identity \
-		--upgrade-package arkhai-kit-policy          --reinstall-package arkhai-kit-policy
+		--upgrade-package arkhai-kit-config           --reinstall-package arkhai-kit-config \
+		--upgrade-package arkhai-kit-identity         --reinstall-package arkhai-kit-identity \
+		--upgrade-package arkhai-kit-policy           --reinstall-package arkhai-kit-policy
 
 test: reinit
 	uv run --find-links $(DIST_DIR) pytest tests/unit -q
