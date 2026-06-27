@@ -54,16 +54,7 @@ environments = [
 [project.entry-points."market.buyer_plugins"]
 vms = "domains.vms.buyer.cli:plugin"
 
-# Workspace resolution for sibling packages.
-# arkhai-kit-policy: per-round negotiation decision logic, shared with the
-# storefront so both sides drive negotiation through one engine.
 [tool.uv.sources]
-arkhai-core = { path = "../../../core", editable = true }
-arkhai-core-buyer = { path = "../../../core/buyer", editable = true }
-arkhai-kit-alkahest = { path = "../../../kit/alkahest", editable = true }
-arkhai-kit-config = { path = "../../../kit/config", editable = true }
-arkhai-kit-policy = { path = "../../../kit/policy", editable = true }
-arkhai-vms-common = { path = "../common", editable = true }
 torch = [
   { index = "pytorch-cpu" },
 ]

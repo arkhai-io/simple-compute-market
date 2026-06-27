@@ -29,13 +29,6 @@ test = [
 [project.entry-points."market.buyer_plugins"]
 apitokens = "domains.apitokens.buyer.cli:plugin"
 
-[tool.uv.sources]
-arkhai-core = { path = "../../../core", editable = true }
-arkhai-core-buyer = { path = "../../../core/buyer", editable = true }
-arkhai-kit-alkahest = { path = "../../../kit/alkahest", editable = true }
-arkhai-kit-config = { path = "../../../kit/config", editable = true }
-arkhai-kit-policy = { path = "../../../kit/policy", editable = true }
-
 [dependency-groups]
 dev = [
   "pytest>=8.0.0",

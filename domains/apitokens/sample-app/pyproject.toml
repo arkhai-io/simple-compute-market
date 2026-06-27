@@ -13,9 +13,6 @@ dependencies = [
 [project.scripts]
 apitokens-sample-app = "apitokens_sample_app.app:main"
 
-[tool.uv.sources]
-arkhai-apitokens-middleware = { path = "../middleware/python", editable = true }
-
 [project.optional-dependencies]
 test = [
   "pytest>=8.0.0",

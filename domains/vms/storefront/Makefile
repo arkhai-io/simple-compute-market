@@ -17,14 +17,16 @@ init: ## Resolve deps and create .venv. Run once after checkout or after changin
 
 reinit: ## Force-reinstall internal wheels without bumping versions. Use after make dist-*.
 	uv sync --find-links $(DIST_DIR) \
-	--upgrade-package arkhai-vms-common \
-	--upgrade-package arkhai-vms-provisioning-client \
-	--upgrade-package arkhai-core-storefront-client \
-	--upgrade-package arkhai-core-registry-client \
-	--reinstall-package arkhai-vms-common \
-	--reinstall-package arkhai-vms-provisioning-client \
-	--reinstall-package arkhai-core-storefront-client \
-	--reinstall-package arkhai-core-registry-client
+	--upgrade-package arkhai-core                --reinstall-package arkhai-core \
+	--upgrade-package arkhai-core-storefront     --reinstall-package arkhai-core-storefront \
+	--upgrade-package arkhai-kit-identity        --reinstall-package arkhai-kit-identity \
+	--upgrade-package arkhai-kit-alkahest        --reinstall-package arkhai-kit-alkahest \
+	--upgrade-package arkhai-kit-config          --reinstall-package arkhai-kit-config \
+	--upgrade-package arkhai-kit-policy          --reinstall-package arkhai-kit-policy \
+	--upgrade-package arkhai-vms-common          --reinstall-package arkhai-vms-common \
+	--upgrade-package arkhai-vms-provisioning-client --reinstall-package arkhai-vms-provisioning-client \
+	--upgrade-package arkhai-core-storefront-client  --reinstall-package arkhai-core-storefront-client \
+	--upgrade-package arkhai-core-registry-client    --reinstall-package arkhai-core-registry-client
 
 # build deliberately does NOT depend on reinit. reinit drives a host-side
 # `uv sync` that resolves the [rl] extra (incl. torch) across whatever

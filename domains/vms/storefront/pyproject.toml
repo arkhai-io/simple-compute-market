@@ -74,10 +74,10 @@ lint = [
 ]
 
 [tool.uv]
-# Internal wheels (clients, arkhai-vms-provisioning-client) come from the repo's
-# .dist/ via the CLI flag — `make init`/`reinit`/`test` and the Dockerfile
-# all pass --find-links. No find-links entry here: a relative path can't
-# normalize inside the Docker build, where /app is the project root.
+# All internal wheels resolve from the repo's .dist/ via the CLI flag —
+# `make init`/`reinit`/`test` and the Dockerfile all pass --find-links.
+# No find-links entry here: a relative path can't normalize inside the
+# Docker build, where /app is the project root.
 # Restrict resolution to platforms that have alkahest_py wheels.
 # Without this, uv attempts to solve for all platforms and fails to
 # find arkhai-vms-provisioning-client wheels for platforms
@@ -89,14 +89,6 @@ environments = [
 ]
 
 [tool.uv.sources]
-arkhai-core-storefront = { path = "../../../core/storefront", editable = true }
-arkhai-core = { path = "../../../core", editable = true }
-arkhai-kit-identity = { path = "../../../kit/identity", editable = true }
-arkhai-kit-alkahest = { path = "../../../kit/alkahest", editable = true }
-arkhai-kit-config = { path = "../../../kit/config", editable = true }
-arkhai-kit-policy = { path = "../../../kit/policy", editable = true }
-arkhai-vms-common = { path = "../common", editable = true }
-arkhai-vms-provisioning-client = { path = "../provisioning/client", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]
@@ -155,7 +147,7 @@ build-backend = "hatchling.build"
 
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "../../..", "../../../kit/policy/src", "../../../kit/alkahest/src", "../../../kit/config/src", "../../../core/src"]
+pythonpath = ["src", "../../.."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
