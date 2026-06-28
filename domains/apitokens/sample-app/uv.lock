@@ -41,7 +41,7 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "../../../.dist/arkhai_apitokens_middleware-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_apitokens_middleware-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

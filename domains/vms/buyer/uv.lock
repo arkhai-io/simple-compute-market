@@ -103,7 +103,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "../../../.dist/arkhai_core-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -120,20 +120,19 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "../../../.dist/arkhai_core_buyer-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_core_buyer-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-alkahest"
-version = "0.1.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.1.1"
+source = { registry = "../../../.dist" }
 dependencies = [
     { name = "pydantic" },
     { name = "web3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a5/57/b879e921397c21aae46e5cbf2f81f6053289ef8206ae2eec629e44e5998d/arkhai_kit_alkahest-0.1.0.tar.gz", hash = "sha256:012a919f975286e25b55b5707013db396bf410c48c7b063798de0fc694af28ba", size = 154273, upload-time = "2026-06-16T05:02:10.311Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/0d/fd112ddc7fd2f21a8eeac1166047463736e8e87b8fc252bf25f8816951f1/arkhai_kit_alkahest-0.1.0-py3-none-any.whl", hash = "sha256:de54f52418ca13e96f164c4f02a3668586407f24fc92d04ebb95d1d10f78af10", size = 37937, upload-time = "2026-06-16T05:02:08.994Z" },
+    { path = "arkhai_kit_alkahest-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -145,7 +144,7 @@ dependencies = [
     { name = "eth-account" },
 ]
 wheels = [
-    { path = "../../../.dist/arkhai_kit_config-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -157,7 +156,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "../../../.dist/arkhai_kit_policy-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_kit_policy-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -219,7 +218,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "../../../.dist/arkhai_vms_common-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_vms_common-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

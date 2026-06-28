@@ -54,17 +54,76 @@ install_base_packages() {
   log "installing base packages"
   need_sudo apt-get update --allow-releaseinfo-change
   need_sudo apt-get install -y \
+    build-essential \
     ca-certificates \
     curl \
     git \
     gnupg \
     jq \
+    libssl-dev \
     make \
-    nodejs \
+    pkg-config \
     python3 \
     sudo \
     tar \
     unzip
+}
+
+install_node() {
+  if command -v node >/dev/null 2>&1; then
+    node -e 'const v=process.versions.node.split(".").map(Number); process.exit(v[0] > 22 || (v[0] === 22 && v[1] >= 6) ? 0 : 1)' \
+      >/dev/null 2>&1 && {
+        log "node >= 22.6 already installed"
+        return
+      }
+  fi
+
+  log "installing nodejs 22.x"
+  old_node_packages="$(
+    dpkg-query -W -f='${Package} ${Status}\n' nodejs npm libnode-dev 2>/dev/null \
+      | awk '$2 == "install" { print $1 }'
+  )"
+  if [ -n "$old_node_packages" ]; then
+    log "removing Ubuntu node packages before installing NodeSource nodejs"
+    # NodeSource's nodejs package includes npm and Node headers. Ubuntu's
+    # libnode-dev owns some of the same files, so it must be removed first.
+    # shellcheck disable=SC2086
+    need_sudo apt-get remove -y $old_node_packages
+  fi
+  curl -fsSL https://deb.nodesource.com/setup_22.x | need_sudo bash -
+  need_sudo apt-get install -y nodejs
+}
+
+install_rust() {
+  if command -v cargo >/dev/null 2>&1; then
+    log "cargo already installed"
+    return
+  fi
+
+  log "installing rust/cargo"
+  if [ "${EUID}" -eq 0 ]; then
+    sudo -u "$TARGET_USER" env HOME="$TARGET_HOME" sh -c 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y'
+  else
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  fi
+  export PATH="$TARGET_HOME/.cargo/bin:$PATH"
+}
+
+install_foundry() {
+  export PATH="$TARGET_HOME/.foundry/bin:$PATH"
+  if command -v anvil >/dev/null 2>&1; then
+    log "foundry/anvil already installed"
+    return
+  fi
+
+  log "installing foundry/anvil"
+  if [ "${EUID}" -eq 0 ]; then
+    sudo -u "$TARGET_USER" env HOME="$TARGET_HOME" sh -c 'curl -L https://foundry.paradigm.xyz | bash'
+    sudo -u "$TARGET_USER" env HOME="$TARGET_HOME" PATH="$TARGET_HOME/.foundry/bin:$PATH" foundryup -i v1.5.1
+  else
+    curl -L https://foundry.paradigm.xyz | bash
+    PATH="$TARGET_HOME/.foundry/bin:$PATH" foundryup -i v1.5.1
+  fi
 }
 
 install_docker() {
@@ -127,6 +186,15 @@ check_tools() {
   require_command curl
   require_command jq
   require_command node
+  node -e 'const v=process.versions.node.split(".").map(Number); process.exit(v[0] > 22 || (v[0] === 22 && v[1] >= 6) ? 0 : 1)' \
+    >/dev/null 2>&1 || {
+      log "node >= 22.6 is required"
+      return 1
+    }
+  require_command npm
+  require_command cargo
+  export PATH="$TARGET_HOME/.foundry/bin:$PATH"
+  require_command anvil
   require_command python3
   require_command uv
   require_command docker
@@ -166,6 +234,9 @@ log_tool_versions() {
   log_version_command curl curl --version
   log_version_command jq jq --version
   log_version_command node node --version
+  log_version_command npm npm --version
+  log_version_command cargo cargo --version
+  log_version_command anvil anvil --version
   log_version_command python3 python3 --version
   log_version_command uv uv --version
   log_version_command docker docker --version
@@ -220,6 +291,9 @@ case "$MODE" in
   run)
     check_ubuntu
     install_base_packages
+    install_node
+    install_rust
+    install_foundry
     install_docker
     install_uv
     install_zerotier

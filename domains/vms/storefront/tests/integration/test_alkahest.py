@@ -18,15 +18,11 @@ _ENV_TEST_MANAGER_SETUP = """\
 EnvTestManager could not start the local Alkahest test chain runtime.
 
 This integration test requires host Node.js, Rust/Cargo, and Foundry/Anvil.
-On Ubuntu, install the prerequisites with:
+Canonical Ubuntu setup from the repository root:
 
-  sudo apt-get update
-  sudo apt-get install -y nodejs npm curl build-essential pkg-config libssl-dev
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-  . "$HOME/.cargo/env"
-  curl -L https://foundry.paradigm.xyz | bash
-  export PATH="$HOME/.foundry/bin:$PATH"
-  foundryup -i v1.5.1
+  cd ../../..
+  sudo SCM_RUN_VALIDATION=0 ./scripts/bootstrap-clean-host-ubuntu.sh run
+  ./scripts/bootstrap-clean-host-ubuntu.sh check
 
 Then rerun:
 
