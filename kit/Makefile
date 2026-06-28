@@ -1,5 +1,3 @@
-DIST_DIR ?= ../.dist
-
 .PHONY: test test-alkahest test-config test-identity test-policy
 
 test: test-alkahest test-config test-identity test-policy
@@ -11,7 +9,7 @@ test-config:
 	cd config && make test
 
 test-identity:
-	cd identity && uv run --find-links $(DIST_DIR) pytest tests/unit -q
+	cd identity && make test
 
 test-policy:
-	cd policy && uv run --find-links $(DIST_DIR) pytest tests -q
+	cd policy && make test
