@@ -353,6 +353,13 @@ an implicit single pool.
   `disabled`, `unchanged`, `rejected`), active-reservation/settlement
   protection, and reset semantics that prefer disabling/deprecating removed
   pools over hard deletion.
+- Design-review before implementation: how pool selection priority is defined.
+  The `PhysicalSettlementScheduler` (POOLS-2) performs priority-ordered pool
+  matching; the priority order must be established in POOLS-1 so the scheduler
+  has something to sort on. Options include an explicit `priority` integer column
+  on `resource_pools`, implicit ordering by YAML declaration order preserved at
+  import, or tag-specificity scoring. Decide and document before the import
+  endpoint is built so the schema and the import behavior agree.
 - Unit tests: `ResourcePoolService` CRUD, tag-filter lookup, default-pool
   backfill idempotency. Integration tests: admin CRUD/import/validate paths and
   startup seeder skip-if-nonempty.
@@ -385,6 +392,14 @@ capacity commitment.
   (resource-level, pool-level, provisioning-service-level, storefront-level),
   how specific-resource opt-in is configured, and how future-facing resource
   availability should be represented.
+- Capacity reservation expiry and crash recovery must be decided before the
+  scheduler boundary is implemented, as the answer affects what
+  `PhysicalSettlementRequest` must carry and what the scheduler must expose.
+  Decide whether expiry is driven by a storefront watchdog, provisioning
+  capacity authority, database TTL/reaper, explicit release calls, or a
+  combination; define behavior when the storefront crashes after reservation
+  but before settlement submission; decide whether reservations can be
+  future-facing like leases.
 - Unit tests: scheduler idempotency, disabled/exhausted pool exclusion, explicit
   `resource_id` binding, no-match errors. Integration tests: concurrent
   selection attempts bind exactly one settlement resource per allocation.
@@ -414,6 +429,16 @@ depend on VM-domain code.
   provider level.
 - Implement `ProviderRegistry.require(provider)` and keep lifecycle code free of
   provider-specific branches.
+- Design-review before implementation: clarify the ownership boundary between
+  `SettlementRecord` (provisioning-side durable state for physical settlement)
+  and the storefront's `settlement_claims` / `mechanism_state` in
+  `ClaimsEngine` (market-side settlement lifecycle). These are parallel tracking
+  systems for different concerns — physical settlement vs on-chain claim
+  collection — but the naming is close enough to cause confusion and the
+  responsibility boundary is not yet explicit in either codebase. Decide whether
+  they reference each other (and via what key), whether `SettlementRecord`
+  replaces any storefront-side state, and document the ownership rule so
+  implementers landing POOLS-3 and POOLS-4 don't need to infer it.
 - Unit tests: provider idempotency by `allocation_id`, pool config resolution,
   mock seam selection, registry lookup/missing-key error. Existing
   `AnsibleJobService` and `AnsibleService` tests must pass unchanged.
@@ -445,12 +470,9 @@ also obscure ownership and should be replaced with capacity/projection language.
 - Document the chosen ownership rule: provisioning is the source of truth for
   physical inventory, resource pools, scheduling, and settlement resources;
   storefront owns capacity offerings/projections and market reservations.
-- Design-review topic before implementation: capacity reservation expiry and
-  crash recovery. Decide whether expiry is driven by storefront watchdog,
-  provisioning capacity authority, explicit release, database reaper/TTL, or a
-  combination; define behavior when storefront crashes after reservation but
-  before settlement; decide whether reservations can be future-facing like
-  leases.
+- Apply the capacity reservation expiry decision made in POOLS-2 to the
+  storefront-side reservation path: update watchdog, release, or TTL wiring
+  as determined.
 - Integration tests: reservation with pool-level attributes succeeds; explicit
   resource reservation remains possible when configured; existing negotiation
   and settlement smoke tests continue to pass.
