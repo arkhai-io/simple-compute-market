@@ -6,6 +6,23 @@
 
 ---
 
+## Document Map
+
+| Section | Purpose |
+|---|---|
+| [Repository Overview](#repository-overview) | High-level system purpose and production shape. |
+| [Organizing Principle](#organizing-principle-composition-from-above-and-below) | Core/kit/domain package boundary rules. |
+| [Service Map](#service-map) | Runtime services and cross-service relationships. |
+| [Technical Terms and Cross-Service IDs](#technical-terms-and-cross-service-ids) | Official vocabulary and identifiers used across service boundaries. |
+| [Component Summaries](#component-summaries) | Current responsibilities, APIs, and storage by component. |
+| [Settlement Lifecycle](#settlement-lifecycle--plans-claims-engine-heartbeats) | Market settlement, servicing, and claim lifecycle model. |
+| [Capacity and the Site Authority](#capacity-and-the-site-authority) | Current capacity reservation machinery and pending naming cleanup. |
+| [Deployment Topology](#deployment-topology) | Local/dev and deployed runtime topology. |
+| [Build & Init Flow](#build--init-flow) | Packaging, artifact publishing, Make targets, and runtime support conventions. |
+| [Testing Strategy](#testing-strategy) | Test levels, e2e structure, and coverage contracts. |
+
+---
+
 ## Repository Overview
 
 **Simple Compute Market** is a reference implementation of an agent-driven compute marketplace. Autonomous buyer and seller agents discover each other, negotiate prices, and settle agreements on-chain using Alkahest smart contracts. Physical compute (VMs) is provisioned post-settlement via Ansible.
@@ -103,6 +120,7 @@ Import names and console scripts (`market`, `market-storefront`,
 | core | `arkhai-core-registry` (`core/registry/`) | registry service; schema injected as `filter-spec.yaml` config |
 | core | `arkhai-core-registry-client`, `arkhai-core-storefront-client` | protocol clients |
 | core | `arkhai-core-site` (`core/site/`) | site-authority scaffold: capacity ledger, ledger tables, `/api/v1/capacity/*` router — mounted by a hosting service per site |
+| core | `arkhai-core-provisioning` *(planned — POOLS-5)* | shared provisioning machinery extracted from `arkhai-vms-provisioning`: `FulfillmentProvider`, `ProviderRegistry`, `PhysicalSettlementScheduler` contract, `SettlementResource` / settlement record shapes, `AsyncJobQueue`, `LeaseLifecycleService`, and `LeaseWatchdog`; capacity-reservation/projection services should be renamed before extraction rather than carrying `SiteResourcesService` forward unchanged |
 | kit | `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-alkahest`, `arkhai-kit-config` | from-below capabilities; alkahest is the first *settlement-mechanism codec* |
 | domain | `arkhai-vms-common` (`domains/vms/common/`) | shared VM-domain models/helpers consumed by both buyer and storefront; currently owns the `compute.v1` provision-term interpretation (`arkhai_vms_common.provision_terms`) |
 | domain | `arkhai-vms-buyer` (`domains/vms/buyer/`) | no console script — publishes the `vms.compute` plugin the core `market` CLI discovers |
@@ -217,6 +235,70 @@ state are retired — their decisions are folded into this file.
  └──────────────┘   │   market-policy    — train/eval/export    │
                     └────────────────────────────────────────┘
 ```
+
+
+## Technical Terms and Cross-Service IDs
+
+The terms below are the official vocabulary for capacity and settlement work. Prefer these names in new code, APIs, tests, and documentation. Older VM-shaped names remain in existing code until their planned cleanup lands.
+
+### Technical terms
+
+| Term | Definition | Primary owner | Notes |
+|---|---|---|---|
+| Market Agreement | The commercial agreement/order/deal accepted by buyer and seller after negotiation. | Core / schema implementation | The agreement is the business input to settlement; it is not the physical resource itself. |
+| Capacity Offering | Storefront-facing representation of sellable capacity. | Storefront | Listings and listing derivation operate on offerings, not physical inventory. |
+| Capacity Projection | Storefront-side view/cache of capacity that provisioning can physically satisfy. | Storefront, sourced from provisioning | A projection may be stale; it is not the physical source of truth. |
+| Capacity Reservation | A hold against sellable capacity so concurrent buyers cannot rent the same committed capacity. | Storefront capacity layer / capacity authority | Reservation expiry and recovery semantics are still a POOLS design-review topic. |
+| Physical Resource | A real resource that can satisfy a marketplace agreement, such as a host, pod allocation, storage allocation, power circuit, or bandwidth allocation. | Provisioning | Physical resources are not owned by storefront tables. |
+| Resource Pool | Provisioning-owned grouping of physical resources eligible for settlement. | Provisioning | Resource pools are infrastructure routing and scheduling inputs. They are distinct from storefront capacity pools. |
+| Physical Settlement | The process of binding a market agreement to physical resources and making the agreed resource available. | Provisioning | Physical settlement may create, configure, enable, reserve, or tear down resources depending on market type. |
+| Settlement Resource | The selected physical resource or resource-specific binding context used to satisfy a capacity reservation. | Provisioning | Avoid `SettlementTarget`; use `SettlementResource` or, in method names, `select_resource` / `select_target_resource`. |
+| PhysicalSettlementScheduler | The component that atomically selects a settlement resource for a capacity reservation or accepted agreement. | Provisioning | The scheduler decides placement. Fulfillment providers do not independently schedule. |
+| FulfillmentProvider | Provider implementation that performs create/status/teardown operations for a selected settlement resource. | Provisioning | The provider fulfills a marketplace order; it executes operations but does not decide which resource should be selected. |
+| Settlement Record | Durable record of the reservation, selected settlement resource, provider, state, and provider metadata required for status and teardown. | Provisioning / shared provisioning core | This replaces ad hoc VM-specific linkage as the generic lifecycle shape emerges. |
+
+### Cross-service identifiers
+
+| Identifier | Meaning | Stable across services? | Notes |
+|---|---|---|---|
+| `agreement_id` / deal reference | Identifier for the accepted market agreement or deal context. | Yes | Exact field name varies in current VM paths; new generic code should carry an explicit deal/agreement reference. |
+| `allocation_id` | Durable capacity/settlement allocation identity used for idempotency. | Yes | Fulfillment `create` must be idempotent by `allocation_id`; retries must not double-provision. |
+| `pool_id` | Identifier of an eligible resource pool or capacity pool, depending on layer. | Boundary-sensitive | Do not assume storefront capacity pools and provisioning resource pools are the same table or FK target. Mapping is explicit configuration/attributes. |
+| `resource_id` | Identifier for a specific physical resource when the agreement intentionally names one. | Boundary-sensitive | Specific-resource listings are valid minority use cases: the buyer may choose the resource because the seller opted into exposing that choice. |
+| `settlement_resource_id` | Identifier of the resource selected by `PhysicalSettlementScheduler`. | Yes after scheduling | Used by status/teardown and persisted in the settlement record. |
+| provider metadata | Provider-specific operational data learned during fulfillment. | Yes, opaque outside provider/core lifecycle | Store under a provider-specific envelope; do not require generic services to understand VM/Ansible fields. |
+
+### Physical settlement flow
+
+```text
+Marketplace agreement
+        ↓
+Storefront capacity / availability representation
+        ↓
+Capacity reservation against sellable capacity
+        ↓
+Physical settlement request
+        ↓
+Provisioning-side scheduling / resource binding
+        ↓
+Fulfillment provider executes create / status / teardown
+        ↓
+Settlement state and release lifecycle
+```
+
+The important separation is:
+
+```text
+PhysicalSettlementScheduler.select_resource(...)
+    → atomically binds allocation_id/agreement_id to a settlement resource
+
+FulfillmentProvider.create(...)
+    → performs provider operations against that selected settlement resource
+```
+
+A fulfillment provider may validate that the selected settlement resource is usable, but it must not independently substitute a different physical resource without returning to the scheduler boundary.
+
+---
 
 Negotiation flow: the buyer's `market buy`/`market negotiate`
 discovers seller orders from `arkhai-core-registry`, then issues
@@ -358,9 +440,51 @@ on-chain registration step and nothing to register ahead of time. The
 storefront becomes known to a registry the first time it publishes a
 listing (the registry creates its publisher row lazily).
 
-**Compute inventory and dynamic listings:**
+**Storefront capacity boundary:**
 
-For compute resources, the storefront owns the market-facing inventory
+The storefront owns market-facing capacity negotiation and listing
+derivation. Provisioning owns physical inventory, resource pools, resource
+scheduling, and physical settlement. Storefront capacity data is therefore a
+**capacity projection**: a view of capacity that can be sold, not the source
+of truth for the physical resources that will satisfy a deal.
+
+- Physical resource records — hosts, pod capacity, storage allocations,
+  power circuits, bandwidth slots, pool configurations, and physical
+  allocation history — live in provisioning-owned services.
+- The storefront may advertise capacity offerings derived from those
+  resources, but it must not require host/VM-specific attributes in the
+  normal fungible-capacity reservation path.
+- A buyer-selected concrete `resource_id` is a valid minority use case when
+  the seller intentionally exposes specific resources as individually
+  selectable. In that case the buyer is effectively making the scheduling
+  decision with seller permission. The generic path remains pool/capacity
+  based: the buyer reserves capacity, and provisioning selects the
+  settlement resource.
+- The physical settlement request sent to provisioning should carry either
+  a pool/capacity commitment or an explicitly negotiated specific resource.
+  Provisioning then records the durable settlement state and calls
+  `PhysicalSettlementScheduler.select_resource(...)` or
+  `select_target_resource(...)` before invoking a `FulfillmentProvider`.
+- The storefront's `compute_capacity_pools` table (planned rename from
+  `compute_inventory_pools` — POOLS-4) groups market-facing resources into
+  fungibility buckets for listing derivation. These are market-level
+  grouping decisions, not physical-machine inventory. Mapping between a
+  storefront capacity pool and a provisioning `resource_pool` is explicit
+  configuration/attributes, not a cross-service foreign key.
+
+**Known technical debt:** `required_attributes=("vm_host",)` in the
+`CapacityLedgerService` constructor currently forces physical host selection
+into the storefront at reservation time for the normal capacity path. The
+`AggregateCapacityClient` placement policies (`fill_first`,
+`most_available`) are a consequence of the same layering problem — host
+selection happens before the provisioning scheduler boundary. POOLS-4 removes
+the host-specific requirement from the ordinary capacity reservation path and
+keeps explicit `resource_id` reservations only for intentionally specific
+resource listings.
+
+**Compute capacity pools and dynamic listings:**
+
+For compute resources, the storefront owns the market-facing capacity
 projection; the authoritative capacity ledger lives in the **site
 authority** (hosted by the provisioning service — see "Capacity and the
 Site Authority"). The storefront is strictly a capacity *client*: every
@@ -368,13 +492,14 @@ hold, commit, release, and lease truncation goes through the
 `CapacityClient` boundary, and its SQLite holds market state only.
 
 The storefront stores concrete imported resources in `resources`. Those
-rows are grouped into `compute_inventory_pools`, with
-`compute_pool_members` linking each member — keyed by
-`(site, resource_id)`, NULL site = the home site — to a pool. Existing
-resources are backfilled into one-member pools. Multiple rows can opt
-into fungible capacity by sharing `attribute.pool_id` in the CSV or
-import payload; listings can then represent capacity across equivalent
-machines without exposing which machine will satisfy the lease.
+rows are grouped into `compute_capacity_pools` (currently named
+`compute_inventory_pools` — rename in POOLS-4), with `compute_pool_members`
+linking each member — keyed by `(site, resource_id)`, NULL site = the
+home site — to a pool. Existing resources are backfilled into one-member
+pools. Multiple rows can opt into fungible capacity by sharing
+`attribute.pool_id` in the CSV or import payload; listings can then
+represent capacity across equivalent machines without exposing which
+machine will satisfy the lease.
 
 `derived_compute_listings` records generated listing identity for each
 advertised GPU slice. Single-resource pools keep the legacy
@@ -469,7 +594,7 @@ domains/vms/storefront/src/market_storefront/
 │  │                   SQLiteClient                                │ │
 │  │  listings · negotiation_threads · negotiation_messages        │ │
 │  │  stage_events · policy_config · resources                     │ │
-│  │  compute_inventory_pools · compute_pool_members               │ │
+│  │  compute_capacity_pools [née compute_inventory_pools, POOLS-4] · compute_pool_members │ │
 │  │  derived_compute_listings · capacity_holds                    │ │
 │  │  settlement_claims · deal_heartbeats · escrows                │ │
 │  └──────────────────────────────────────────────────────────────┘ │
@@ -973,7 +1098,7 @@ GET   /api/v1/admin/status   Live counts: active_negotiations, open_orders, paus
 POST  /api/v1/admin/portfolio/resources/import
       Runtime inventory CSV import/upsert — admin key required.
       Resources that share attribute.pool_id join the same fungible
-      compute_inventory_pools row; otherwise they remain one-member pools.
+      compute_capacity_pools row (currently named compute_inventory_pools — rename in POOLS-4); otherwise they remain one-member pools.
 PATCH /api/v1/admin/portfolio/resources/{resource_id}
       Partial update of a resource row — admin key required.
       Body: { state?, attributes? } — only non-None fields written.
@@ -1683,6 +1808,350 @@ GET    /api/v1/hosts/{host}/connectivity   Run ansible -m ping
 
 ---
 
+#### Physical Settlement Scheduler and FulfillmentProvider Architecture *(design finalized; implementation in POOLS-1 through POOLS-5)*
+
+The provisioning service separates **scheduling** from **fulfillment**:
+
+```text
+PhysicalSettlementScheduler.select_resource(...)
+    -> atomically binds the agreement/allocation to a settlement resource
+
+FulfillmentProvider.create(...)
+    -> performs provider-specific operations against the selected resource
+```
+
+This boundary prepares the system for multiple physical settlement markets —
+bare metal, Kubernetes pods, power, storage, bandwidth, and VM-like compute —
+without turning any one provider into the generic lifecycle model. The VM
+service keeps its Ansible implementation, but the generic machinery should be
+usable by future domain provisioning services without inheriting VM or Ansible
+vocabulary.
+
+**`PhysicalSettlementScheduler`:**
+
+The scheduler owns placement. It receives a physical settlement request and
+selects the settlement resource that will satisfy it. It must be durable and
+idempotent by `allocation_id` so retries, process crashes, and duplicate job
+delivery do not create multiple physical bindings.
+
+```python
+from dataclasses import dataclass
+from typing import Any
+
+@dataclass(frozen=True)
+class PhysicalSettlementRequest:
+    allocation_id: str
+    agreement_id: str
+    market: str
+    terms: dict[str, Any]
+    pool_id: str | None = None
+    resource_id: str | None = None
+
+@dataclass(frozen=True)
+class SettlementResource:
+    settlement_resource_id: str
+    pool_id: str
+    resource_kind: str
+    provider: str
+    attributes: dict[str, Any]
+
+class PhysicalSettlementScheduler:
+    async def select_resource(
+        self,
+        request: PhysicalSettlementRequest,
+    ) -> SettlementResource:
+        """Atomically bind request.allocation_id to a settlement resource.
+
+        Repeated calls for the same allocation_id return the existing binding.
+        """
+        ...
+```
+
+`select_target_resource(...)` is also acceptable as an implementation name
+where call-site readability benefits from emphasizing that the selected
+resource is the fulfillment target. Avoid the noun `SettlementTarget`; the
+preferred domain noun is **Settlement Resource**.
+
+Specific-resource agreements are valid: if the seller lists concrete resources
+and allows the buyer to choose one, the request can carry `resource_id`. That
+means the buyer made the scheduling decision with seller permission. The normal
+fungible-capacity path carries pool/capacity attributes, and the scheduler
+selects the settlement resource after the capacity reservation is accepted.
+
+**`FulfillmentProvider` ABC:**
+
+The provider owns operations, not placement. It receives a selected settlement
+resource and performs create/status/teardown for that resource. A provider may
+validate that the selected resource is usable, but it must not independently
+select or substitute a different resource without returning to the scheduler
+boundary.
+
+```python
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Any
+
+@dataclass
+class FulfillmentResult:
+    """Provider result persisted on the settlement record."""
+    provider_metadata: dict[str, Any]
+    credentials: dict[str, Any]
+
+@dataclass
+class ProviderStatus:
+    state: str           # "running" | "stopped" | "gone" | "unknown"
+    detail: str | None = None
+
+class FulfillmentProvider(ABC):
+    """Minimum contract for any physical settlement provider.
+
+    The identity key is allocation_id. Infra-specific identifiers are
+    provider metadata, not generic lifecycle identity.
+
+    create() is idempotent on allocation_id: re-delivery must detect-or-create,
+    not double-provision. teardown() is idempotent: no-op if already gone.
+    status() and teardown() operate from the persisted settlement record.
+    """
+
+    @abstractmethod
+    async def create(
+        self,
+        request: PhysicalSettlementRequest,
+        resource: SettlementResource,
+    ) -> FulfillmentResult: ...
+
+    @abstractmethod
+    async def teardown(
+        self,
+        allocation_id: str,
+        resource: SettlementResource,
+        provider_metadata: dict[str, Any],
+    ) -> None: ...
+
+    @abstractmethod
+    async def get_status(
+        self,
+        allocation_id: str,
+        resource: SettlementResource,
+        provider_metadata: dict[str, Any],
+    ) -> ProviderStatus: ...
+```
+
+The `release_delegate` injected into `LeaseLifecycleService` becomes a thin
+adapter around the selected provider's `teardown(...)`. The lifecycle state
+machine never learns whether the provider is Ansible, Kubernetes, storage,
+power, bandwidth, or another mechanism.
+
+**`ProviderRegistry`:**
+
+Maps pool/provider strings to `FulfillmentProvider` instances, constructed in
+the DI container at startup. The VM service starts as a degenerate singleton
+(`"ansible" -> AnsibleFulfillmentProvider`). New provider implementations extend
+the registry without adding provider branches to lifecycle code.
+
+```python
+class ProviderRegistry:
+    def __init__(self, providers: dict[str, FulfillmentProvider]) -> None:
+        self._providers = providers
+
+    def require(self, provider: str) -> FulfillmentProvider:
+        if provider not in self._providers:
+            raise KeyError(f"No provider registered for '{provider}'")
+        return self._providers[provider]
+```
+
+**Ansible fulfillment provider and `AnsiblePoolConfig`:**
+
+The Ansible implementation owns Ansible variable construction, job queue
+dispatch, playbook result normalization, and SSH credential extraction. It does
+not own scheduling. It receives a `SettlementResource` that identifies the host
+or host-like resource selected by the scheduler, then runs the configured
+playbook against that resource.
+
+Pool-level variation in data center infrastructure (different FRP servers,
+network bridges, firewall topologies, available utilities) is expressed via
+`AnsiblePoolConfig`, resolved from the `ansible_pool_configs` table at execution
+time. Different pools get different playbooks and extra_vars without requiring a
+new provider type:
+
+```python
+@dataclass
+class AnsiblePoolConfig:
+    playbook_path: str
+    inventory_group: str
+    extra_vars: dict[str, Any]
+```
+
+The mock seam for tests stays at the Ansible layer: `ProgrammableMockAnsibleService`
+is selected by the `mockMode` profile flag inside the Ansible provider, not
+promoted to the `FulfillmentProvider` level. The `/test/*` test controller and
+the e2e gate pattern are unchanged.
+
+**Physical settlement job shape:**
+
+The job submitted at settlement time carries a `PhysicalSettlementRequest` with
+either `pool_id` (fungible) or `resource_id` (specific-resource agreement). The
+scheduler resolves that request to a `SettlementResource`; the provider executes
+against the selected resource.
+
+```python
+@dataclass
+class PhysicalSettlementJobSpec:
+    request: PhysicalSettlementRequest
+```
+
+**Settlement record metadata envelope:**
+
+Provider-specific data should not leak into generic lifecycle columns. Persist a
+small stable envelope and put operational details under provider metadata:
+
+```python
+@dataclass
+class SettlementRecord:
+    allocation_id: str
+    agreement_id: str
+    market: str
+    pool_id: str
+    provider: str
+    resource: SettlementResource
+    provider_metadata: dict[str, Any]
+    credentials_ref: str | None
+    state: str
+```
+
+`resource` records what was selected for settlement. `provider_metadata` records
+what the provider learned or created while executing settlement. Sensitive access
+material should be referenced where possible rather than stored inline.
+
+**Error surface for settlement:**
+
+The planned failure taxonomy is intentionally broader than the initial VM path
+so future markets can reuse it. Names may be refined during implementation, but
+each failure must classify as retryable, terminal, or operator-action-required.
+
+- `pool_not_found`
+- `pool_disabled`
+- `pool_exhausted`
+- `resource_unavailable`
+- `target_resource_missing` / `settlement_resource_missing`
+- `provider_not_found`
+- `provider_unavailable`
+- `provider_config_invalid`
+- `settlement_already_bound`
+- `fulfillment_create_failed`
+- `fulfillment_status_failed`
+- `fulfillment_teardown_failed`
+- `credentials_publish_failed`
+- `capacity_projection_stale`
+
+**Resource pools data model:**
+
+```sql
+-- Infrastructure routing metadata; lives in provisioning-owned storage only.
+-- Not in the storefront, which owns capacity projection rather than physical
+-- resource inventory.
+
+CREATE TABLE resource_pools (
+    id          TEXT PRIMARY KEY,
+    label       TEXT NOT NULL,
+    provider    TEXT NOT NULL,
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+    policy_tags JSON NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE ansible_pool_configs (
+    pool_id         TEXT PRIMARY KEY REFERENCES resource_pools(id),
+    playbook_path   TEXT NOT NULL,
+    inventory_group TEXT NOT NULL,
+    extra_vars      JSON NOT NULL DEFAULT '{}'
+);
+
+-- hosts.pool_id FK; nullable during migration. Existing hosts backfill
+-- to a system-created default pool ("default") in POOLS-1 migration.
+ALTER TABLE hosts ADD COLUMN pool_id TEXT REFERENCES resource_pools(id);
+```
+
+The provisioning service's `resource_pools` and the storefront's
+`compute_capacity_pools` are different tables at different layers. A storefront
+capacity pool member maps to a provisioning pool via explicit configuration or
+resource attributes, not a foreign key between services.
+
+**Pool listing authority — unresolved design point:**
+
+Something in system configuration must determine how resources are listed:
+resource-by-resource, resource-pool-level, provisioning-service-level, or
+storefront-level. Specific-resource listings are allowed, but should be treated
+as an explicit seller opt-in because they grant buyers placement choice. This is
+left as a POOLS design-review topic rather than prematurely encoding the answer
+in the architecture.
+
+**Pool seeding and admin surfaces:**
+
+Pool definitions are YAML because pool configs have nested structure that flat
+formats cannot express. The admin API should include normal CRUD plus import and
+validate paths:
+
+```text
+GET    /api/v1/admin/pools
+POST   /api/v1/admin/pools
+GET    /api/v1/admin/pools/{pool_id}
+PUT    /api/v1/admin/pools/{pool_id}
+PATCH  /api/v1/admin/pools/{pool_id}
+DELETE /api/v1/admin/pools/{pool_id}   # disable/soft-delete by default
+POST   /api/v1/admin/pools/import
+POST   /api/v1/admin/pools/validate
+```
+
+Import guardrails:
+
+- Validate-only mode before apply.
+- Import returns a diff: created, updated, disabled, unchanged, rejected.
+- Reset must not remove or mutate pools with active reservations or settlements
+  unless an explicit force path is designed with operator-action semantics.
+- Reset should prefer disabling/deprecating removed pools over hard deletion.
+- Import is idempotent.
+
+YAML format example:
+
+```yaml
+pools:
+  - id: hetzner-eu-central
+    label: Hetzner EU Central
+    provider: ansible
+    policy_tags:
+      region: eu
+      provider: hetzner
+    ansible_config:
+      playbook_path: playbooks/vm-operations-frp.yaml
+      inventory_group: kvm_hosts_eu
+      extra_vars:
+        frp_server_addr: frp.eu.example.com
+        network_bridge: virbr0
+  - id: equinix-us-west
+    label: Equinix US West
+    provider: ansible
+    policy_tags:
+      region: us-west
+      provider: equinix
+    ansible_config:
+      playbook_path: playbooks/vm-operations-direct.yaml
+      inventory_group: kvm_hosts_usw
+      extra_vars:
+        network_bridge: br0
+```
+
+**Capacity reservation expiry — unresolved design point:**
+
+POOLS must define how capacity reservations expire and recover across crashes.
+Open questions include whether reservation expiry is driven by a storefront
+watchdog, provisioning-side capacity authority, database TTL/reaper, explicit
+release calls, or a combination; what happens if the storefront crashes after
+reservation but before settlement submission; and whether reservations can be
+future-facing like leases. These questions are intentionally left for design
+review before implementing the reservation/scheduler boundary.
+
+---
+
 ### `domains/vms/provisioning/iac`
 
 **Role:** Infrastructure-as-code for the physical layer.
@@ -1695,7 +2164,7 @@ Contains Ansible roles and Terraform modules used by both the provisioning worke
 - `frp-setup` — sets up FRP server (fast reverse proxy) for buyer network access to VMs
 - `docker-app` — deploys Docker-based apps to a host
 
-**Terraform modules:** GCP-focused (Cloud Run, artifact registry, service accounts, Redis, ZeroTier controller). Used for the production/staging/sandbox cloud deployment of the non-hardware services.
+**Terraform modules:** legacy cloud-focused modules for non-hardware service deployment support. These are separate from the resource-pool / physical settlement architecture and are not a driver for POOLS work.
 
 ---
 
@@ -2036,7 +2505,11 @@ via the generic `units` key (`gpu_count` is the VM alias), a host
 declares its eligibility invariant at construction
 (`required_attributes=("vm_host",)` for the provisioning service — a
 slice that names no host can't be fulfilled; the tokens service
-declares none), and `commit` without a `lease_end_utc` produces an
+declares none **[technical debt: this forces physical host selection
+into the storefront at reservation time for the normal fungible-capacity
+path, violating the storefront capacity boundary; POOLS-4 removes this
+host-specific requirement and routes physical resource binding through
+`PhysicalSettlementScheduler`]**), and `commit` without a `lease_end_utc` produces an
 open-ended lease the watchdog never sees (prepaid credits don't
 expire). The surface mirrors
 the `CapacityClient` contract defined in `core_storefront.capacity`
@@ -2527,8 +3000,7 @@ make dist
 
 ## Artifact Registry Publishing
 
-Built runtime artifacts are published to GCP Artifact Registry in the `compute-market-internal-infra` 
-repo. The registries and their IAM are managed there; this repo only pushes.
+Built runtime artifacts are published to the internal artifact registries managed by the `compute-market-internal-infra` repo. Registry infrastructure and IAM are managed there; this repo only pushes.
 
 **Artifact inventory:**
 
@@ -3250,7 +3722,7 @@ When either contract changes: bump `version` in `core/storefront-client/pyprojec
 
 **External distribution:** The client packages (`arkhai-core-storefront-client`,
 `arkhai-core-registry-client`, `arkhai-vms-provisioning-client`) are published
-to GCP Artifact Registry via `make push-wheels`. Service workloads are
+to the internal artifact registry via `make push-wheels`. Service workloads are
 distributed as Docker images, not service wheels. See the `## Artifact
 Registry Publishing` section for the full push flow.
 

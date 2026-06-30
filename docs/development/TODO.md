@@ -20,7 +20,7 @@ Pending architectural work and known operational issues for the Arkhai market st
 | [Golden image configuration](#golden-image-configuration-management-varsyaml) | Provisioning Service | Needs review |
 | [Host capacity resource filters](#host-capacity-resource-filters) | Provisioning Service | Needs review |
 | [Site resources and shared lease lifecycle boundaries](#site-resources-and-shared-lease-lifecycle-boundaries) | Provisioning Service | Needs review |
-| [Multi-Provider Resource Pool Architecture](#multi-provider-resource-pool-architecture) | Provisioning Service | Needs review |
+| [Resource Pool Architecture — POOLS-1 through POOLS-6](#resource-pool-architecture-pools-1-through-pools-6) | Provisioning Service | In progress |
 | [`StorefrontCallbackClient` extraction](#storefrontcallbackclient-extraction-conditional) | Provisioning Service | Conditional |
 | [Alkahest contracts in baked state](#alkahest-contracts-in-the-baked-state) | Documentation Gaps | Needs review |
 | [Symmetric Order Concept](#symmetric-order-concept) | Documentation Gaps | Needs review |
@@ -304,127 +304,210 @@ Lease lifecycle policy should sit above that generic site resource layer. A reus
 
 ---
 
-### Multi-Provider Resource Pool Architecture
+### Resource Pool Architecture (POOLS-1 through POOLS-6)
 
-**Status:** Needs review.
+**Status:** Design Review.
 
-This section documents architectural decisions reached for the provisioning service multi-provider refactor. Items are sequenced and cross-referenced with the `compute-market-internal-infra` ops repo `ARCHITECTURE.md` planned work section.
+Design context and finalized decisions are in `ARCHITECTURE.md`:
+- "Technical Terms and Cross-Service IDs"
+- "Storefront capacity boundary"
+- "Physical Settlement Scheduler and FulfillmentProvider Architecture"
 
-#### Background: Resource Pool Architecture
-
-The provisioning service is being extended from a single-provider (Ansible/KVM)
-system to a multi-provider, multi-pool system. The driver is GCP deployment: GPU
-workloads on GCE cannot use nested VM provisioning (GPU passthrough from L1 GCE VM
-to L2 nested VM is not a supported GCP configuration), so a GCP Compute API provider
-is needed alongside the existing Ansible provider.
-
-The design uses a `ComputeProvider` abstraction with per-lease pool selection via a
-`PoolSelectorService` (label/tag matching analogous to Kubernetes node selectors). This allows a single provisioning service deployment to route leases to different providers and pool types based on the lease's resource requirements.
-
-**Provider types planned:**
-- `AnsibleProvider` — existing path, SSH into a KVM host and run `virt-install`.
-  Requires pre-provisioned hosts in the `hosts` table.
-- `GCPComputeProvider` — new, calls GCP Compute API directly. No pre-provisioned
-  hosts required. Teardown via Compute API (independent of VM-internal state).
-
-**Pool types:**
-- `kvm_host` — Physical hosts in a data center or VMs acting as KVM hosts, Ansible provider
-- `gce_vm` — GCE VMs as direct-access compute, GCP provider (GPU)
-
-#### Data Model Changes
-
-**New table: `resource_pools`**
-```sql
-CREATE TABLE resource_pools (
-    id              TEXT PRIMARY KEY,
-    provider        TEXT NOT NULL,  -- 'ansible' | 'gcp'
-    pool_type       TEXT NOT NULL,  -- 'kvm_host | 'gce_vm'
-	pool_config     TEXT FOREIGN KEY
-    label           TEXT,
-    policy_tags     JSON,           -- used by node selector service to choose a resource pool
-);
-
-CREATE TABLE gcp_pool_configs (
-    id           TEXT PRIMARY KEY,
-    project      TEXT,
-    region       TEXT,
-    zone         TEXT,
-);
-```
-
-**Modified tables (migrations, backwards compatible):**
-- `hosts`: add `pool_id TEXT REFERENCES resource_pools(id)`
-- `vms`: add `pool_id TEXT REFERENCES resource_pools(id)` (nullable; set at VM
-  creation time)
-- `jobs`: add `provider_log_ref TEXT` (nullable; for GCP jobs, stores GCE operation
-  ID for Cloud Logging cross-reference)
-- `leases`: no changes
-
-Initialization pattern for resource_pools and gcp_pool_configs should mirror host inventory seeding (populate on startup from file, admin enabled clobber endpoint for reconcilation). This will require an additional volume mount in the helm chart to support seeding from a file managed in the compute-market-internal-infra repo.
-
-#### New Service Classes
-
-**`ComputeProvider` (ABC)** — `create_vm`, `destroy_vm`, `get_capacity`,
-`get_status`. All providers implement this interface.
-
-**`AnsibleProvider(ComputeProvider)`** — extracts existing Ansible job runner logic.
-Behavior identical to current implementation; this is a rename/extraction, not a
-rewrite. Existing tests continue to pass.
-
-**`GCPComputeProvider(ComputeProvider)`** — calls `google-cloud-compute` SDK.
-`create_vm` uses Compute API create with data from lease and gcp_pool_config.
-`destroy_vm` uses Compute API delete (no SSH required — critical security improvement).
-Authenticates via Workload Identity Federation (WIF annotation on provisioning KSA).
-
-**`ResourcePoolService`** — CRUD for resource pools; lookup by ID and tag filter.
-JOIN with gcp_pool_config when provider is gcp
-
-**`PoolSelectorService`** — pool selection given a lease request. v1: priority-ordered tag
-matching. Designed to extend to scoring (cost, utilization) in a future item.
-
-Design intended to mirror Kubernetes node selectors.
-
-**`ProviderRegistry`** — maps `pool.provider` string to `ComputeProvider` instance.
-Constructed in DI container at startup.
-
-#### Modified Service Classes
-
-**`LeaseService`** — calls `PoolSelectorService.select_pool(request)` before VM creation,
-then dispatches to the selected pool's provider. All existing Ansible calls route
-through `AnsibleProvider` unchanged.
-
-**`LeaseWatchdog`** — looks up the lease's pool on expiry, dispatches to the pool's
-provider for `destroy_vm`. Replaces hardcoded Ansible teardown dispatch.
-
-**`mockMode` flag** — becomes a `MockProvider` registered in `ProviderRegistry` rather
-than a service-level branch. Helm values flag preserved for backwards compatibility.
-
-#### New Pool Controller
-
-All gated by existing admin API key auth.
-
-`POST /api/v1/pools` — create a resource pool. Body: pool table fields.
-
-`GET /api/v1/pools` — list pools with tags and host counts.
-
-#### GCP Provider e2e Test Scenario
-
-A new e2e scenario (addition to `e2e-tests/tests/e2e/`) validates the GCP
-provider without mock provisioning:
-
-1. `POST /api/v1/pools` — create a `gce_vm` pool.
-2. `POST /system/lease-watchdog/pause` — hold expiry for inspection.
-3. Full storefront → negotiate → settle → provisioning flow (reuse existing helpers).
-4. Poll `GET /api/v1/jobs/{id}` until GCE VM is running (90-second timeout).
-5. Verify SSH credentials returned; attempt SSH to GCE external IP.
-6. `POST /system/lease-watchdog/resume` — trigger expiry.
-7. Poll until lease `expired`; verify GCE instance deleted via Compute API.
-
-This scenario validates the watchdog pause/resume admin endpoints, that GCPComputeProvider
-creates real VMs, and that teardown is Compute-API-based (no SSH key required on the VM).
+**Background:** The provisioning boundary is being cleaned up so future markets
+can settle bare metal, Kubernetes pods, power, storage, bandwidth, and VM-like
+compute without baking VM host placement into storefront reservation logic. This
+sequence does not introduce a specific new market; it prepares the architecture
+for those markets by separating market capacity, physical inventory, settlement
+scheduling, and fulfillment execution.
 
 ---
 
+#### POOLS-1 — official vocabulary, resource pools, and pool admin API
+
+**Problem:** The repo lacks formal terms for capacity, resources, reservations,
+scheduling, and fulfillment. The provisioning service also has no data model or
+admin surface for infrastructure routing metadata; all hosts are effectively in
+an implicit single pool.
+
+**Planned fix:**
+- Update `ARCHITECTURE.md` with a major-section document map and a formal
+  dictionary of technical terms and cross-service identifiers near the Service
+  Map. Use the official terms: `Capacity Offering`, `Capacity Projection`,
+  `Capacity Reservation`, `Physical Resource`, `Resource Pool`, `Physical
+  Settlement`, `Settlement Resource`, `PhysicalSettlementScheduler`,
+  `FulfillmentProvider`, and `Settlement Record`.
+- DB migration: create `resource_pools` and `ansible_pool_configs` tables; add
+  `hosts.pool_id` FK (nullable; existing hosts backfill to a system-created
+  `"default"` pool).
+- `ResourcePoolService`: full CRUD over `resource_pools` and provider-specific
+  config tables; lookup by ID and tag filter.
+- Admin API: `GET/POST /api/v1/admin/pools`, `GET/PUT/PATCH/DELETE
+  /api/v1/admin/pools/{pool_id}`, `POST /api/v1/admin/pools/import`, and
+  `POST /api/v1/admin/pools/validate`. Delete should disable/soft-delete by
+  default unless a later design review approves hard deletion rules.
+- Startup seeder: reads `pool_definitions_path` YAML; skip-if-nonempty. If
+  unconfigured and the table is empty, creates a single `"default"` pool and
+  assigns all existing hosts to it.
+- YAML import guardrails to resolve during implementation design review:
+  validate-only mode, idempotent import, diff output (`created`, `updated`,
+  `disabled`, `unchanged`, `rejected`), active-reservation/settlement
+  protection, and reset semantics that prefer disabling/deprecating removed
+  pools over hard deletion.
+- Unit tests: `ResourcePoolService` CRUD, tag-filter lookup, default-pool
+  backfill idempotency. Integration tests: admin CRUD/import/validate paths and
+  startup seeder skip-if-nonempty.
+
+---
+
+#### POOLS-2 — `PhysicalSettlementScheduler` and settlement resource binding
+
+**Problem:** The current path conflates capacity reservation, host placement,
+and provider execution. That creates race conditions and makes it unclear
+whether `resource_id` means a physical scheduling decision or a market-level
+capacity commitment.
+
+**Planned fix:**
+- Introduce `PhysicalSettlementScheduler` with `select_resource(...)` or
+  `select_target_resource(...)`. Prefer the noun `Settlement Resource`; avoid
+  the noun `SettlementTarget` in code and docs.
+- Define `PhysicalSettlementRequest` carrying `allocation_id`, `agreement_id`,
+  `market`, `terms`, and exactly one of pool/capacity attributes or explicit
+  `resource_id`.
+- Define `SettlementResource` as the durable selected physical resource or
+  resource-specific binding context.
+- Make selection atomic and idempotent by `allocation_id`: repeated calls return
+  the existing binding rather than selecting another resource.
+- Preserve the valid minority use case where the seller intentionally exposes
+  specific resources and the buyer chooses one. The normal fungible path remains
+  capacity/pool based, with provisioning selecting the resource after capacity
+  reservation.
+- Design-review topics before implementation: where listing authority lives
+  (resource-level, pool-level, provisioning-service-level, storefront-level),
+  how specific-resource opt-in is configured, and how future-facing resource
+  availability should be represented.
+- Unit tests: scheduler idempotency, disabled/exhausted pool exclusion, explicit
+  `resource_id` binding, no-match errors. Integration tests: concurrent
+  selection attempts bind exactly one settlement resource per allocation.
+
+---
+
+#### POOLS-3 — `FulfillmentProvider` ABC + Ansible implementation + registry
+
+**Problem:** The provisioning service has no formal abstraction separating
+physical settlement operations from lifecycle and job management machinery.
+Future domain provisioning services would need to duplicate this machinery or
+depend on VM-domain code.
+
+**Planned fix:**
+- Define `FulfillmentProvider`, `FulfillmentResult`, and `ProviderStatus` in the
+  VM provisioning service first; extract to `arkhai-core-provisioning` in
+  POOLS-5.
+- Provider methods operate against a selected `SettlementResource` and persisted
+  provider metadata. Providers execute create/status/teardown; they do not
+  independently schedule or substitute resources.
+- Implement the Ansible fulfillment provider around existing `AnsibleJobService`
+  / `AnsibleService`. It resolves `AnsiblePoolConfig`, builds Ansible variables,
+  dispatches jobs, normalizes results, and extracts credentials for the selected
+  resource.
+- Keep `ProgrammableMockAnsibleService` selected by the `mockMode` profile flag
+  inside the Ansible implementation; do not promote the test seam to the generic
+  provider level.
+- Implement `ProviderRegistry.require(provider)` and keep lifecycle code free of
+  provider-specific branches.
+- Unit tests: provider idempotency by `allocation_id`, pool config resolution,
+  mock seam selection, registry lookup/missing-key error. Existing
+  `AnsibleJobService` and `AnsibleService` tests must pass unchanged.
+
+---
+
+#### POOLS-4 — storefront capacity boundary and capacity reservation cleanup
+
+**Problem:** `required_attributes=("vm_host",)` in `CapacityLedgerService`
+forces physical host selection into the storefront for the ordinary capacity
+reservation path. The storefront's `AggregateCapacityClient` placement policies
+(`fill_first`, `most_available`) are symptoms of the same layering issue. The
+`SiteLedger` / `SiteResourcesService` / `SiteResource` / `SiteAllocation` names
+also obscure ownership and should be replaced with capacity/projection language.
+
+**Planned fix:**
+- Remove the host-specific `vm_host` requirement from the ordinary capacity
+  reservation path. A `resource_id` path remains valid only for intentionally
+  specific-resource listings.
+- Update storefront reservation claim shape to use capacity/pool attributes
+  instead of VM-host attributes. Update `RemoteCapacityClient` /
+  `AggregateCapacityClient` call sites that assume physical host selection.
+- Rename `compute_inventory_pools` -> `compute_capacity_pools` in the storefront
+  SQLite schema and update all references in `SQLiteClient`, controllers,
+  services, and tests.
+- Rename or plan the rename of `SiteLedger`, `SiteResourcesService`,
+  `SiteResource`, and `SiteAllocation` toward capacity-reservation/projection
+  terminology after the official dictionary is applied consistently.
+- Document the chosen ownership rule: provisioning is the source of truth for
+  physical inventory, resource pools, scheduling, and settlement resources;
+  storefront owns capacity offerings/projections and market reservations.
+- Design-review topic before implementation: capacity reservation expiry and
+  crash recovery. Decide whether expiry is driven by storefront watchdog,
+  provisioning capacity authority, explicit release, database reaper/TTL, or a
+  combination; define behavior when storefront crashes after reservation but
+  before settlement; decide whether reservations can be future-facing like
+  leases.
+- Integration tests: reservation with pool-level attributes succeeds; explicit
+  resource reservation remains possible when configured; existing negotiation
+  and settlement smoke tests continue to pass.
+
+---
+
+#### POOLS-5 — `arkhai-core-provisioning` shared wheel extraction
+
+**Problem:** `AsyncJobQueue`, lease lifecycle/watchdog machinery, provider
+registry, settlement scheduling contracts, and fulfillment provider contracts
+live in `arkhai-vms-provisioning`. Future domain provisioning services should
+not depend on a VM-domain package.
+
+**Planned fix:**
+- Create `core/provisioning/` package (`arkhai-core-provisioning`, import
+  `core_provisioning`).
+- Extract only after shared contracts use generic vocabulary: no `vm_host`,
+  `vm_target`, or Ansible-shaped names in shared interfaces.
+- Extract: `FulfillmentProvider`, `FulfillmentResult`, `ProviderStatus`,
+  `ProviderRegistry`, `PhysicalSettlementScheduler` contract,
+  `SettlementResource`, `SettlementRecord` shape, `AsyncJobQueue`,
+  `LeaseLifecycleService`, and `LeaseWatchdog` as appropriate after the naming
+  cleanup.
+- Reassess whether the old `SiteResourcesService` should be extracted as-is or
+  first renamed/split into capacity reservation/projection responsibilities.
+- Update `arkhai-vms-provisioning` `pyproject.toml` to depend on
+  `arkhai-core-provisioning`; update imports. Add to `Makefile` dist targets and
+  internal wheel table in `ARCHITECTURE.md`.
+- This is a refactor with no behavior change. All existing unit and integration
+  tests must pass unchanged; a failing test after this item means something
+  moved incorrectly.
+
+---
+
+#### POOLS-6 — E2E verification + final documentation pass
+
+**Problem:** The full-deal e2e scenario and smoke tests exercise paths changed
+by POOLS-1 through POOLS-5. The validation strategy needs review, but detailed
+contract design should wait until the implementation has settled.
+
+**Planned fix:**
+- Update e2e test helpers for the new physical settlement request shape and
+  pool/capacity-based reservation path.
+- Run the full deal e2e (`e2e_deal` and `e2e_deal_buyer_cli` markers) against a
+  stack with a configured default pool.
+- Smoke test the pool admin API's core paths: CRUD, import, validate, upsert,
+  and reset/disable behavior as defined during POOLS-1 implementation review.
+- Review validation strategy once the implementation is closer: boundary tests,
+  provider contract tests, scheduler idempotency/race tests, negative settlement
+  paths, and reservation expiry/recovery tests are candidates, but this item
+  should not over-specify them before the design firms up.
+- Final `ARCHITECTURE.md` pass: confirm all landed decisions are reflected in
+  current-state documentation; remove remaining `(planned)` / `(POOLS-N)`
+  annotations that have landed; update the package layout table with
+  `arkhai-core-provisioning` as a shipped wheel.
+
+---
 
 ### `StorefrontCallbackClient` Extraction (Conditional)
 
