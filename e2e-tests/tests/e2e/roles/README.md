@@ -54,8 +54,8 @@ roles/
     │   ├── test_compute_dynamic_listings.py
     │   ├── test_multi_registry.py        # registry fan-out, on the VM vehicle
     │   └── test_non_erc20_settlement.py  # settlement variants, on the VM vehicle
-    ├── apitokens/               # API-tokens market (its own bring-up; no VM conftest)
-    │   └── test_tokens_deal_buyer_cli.py
+    ├── apicredits/               # API-credits market (its own bring-up; no VM conftest)
+    │   └── test_credits_deal_buyer_cli.py
     └── core/                    # settlement-mechanism scenarios with no domain service
         └── test_alkahest_escrow_codecs.py
 ```
@@ -63,8 +63,8 @@ roles/
 Scenarios are grouped by domain because most are single-domain. The
 domain a scenario lives under is decided by what it actually needs: a
 scenario sits in `vms/` if it drives the VM storefront/provisioning
-(so it shares that conftest's fixtures), in `apitokens/` if it drives
-the tokens stack, and in `core/` if it touches no domain service at all
+(so it shares that conftest's fixtures), in `apicredits/` if it drives
+the credits stack, and in `core/` if it touches no domain service at all
 (e.g. round-tripping Alkahest codecs against the chain). `multi_registry`
 and `non_erc20_settlement` are really core capabilities — registry
 fan-out, non-ERC20 settlement — but ride the VM domain as their test
@@ -103,7 +103,7 @@ development, the root `docker-compose.yml` bundles every domain on one
 shared dev chain (it `include:`s `compose.dev.yml` + each
 `domains/<domain>/compose.yml`). A single domain can be brought up on its
 own via its wrapper — `docker compose -f compose.vms.yml up` or
-`docker compose -f compose.apitokens.yml up` — but the role tests below
+`docker compose -f compose.apicredits.yml up` — but the role tests below
 expect the full stack:
 
 ```bash
@@ -113,10 +113,10 @@ PROVISIONING_MODE=mock docker compose up -d
 # Tests select by marker (see the markers table in pyproject.toml); the
 # Makefile wraps this as `make test-module MODULE=<marker>`.
 uv run pytest -m e2e_deal_buyer_cli -v     # a VM deal scenario
-uv run pytest -m e2e_tokens_deal -v        # the API-tokens deal scenario
+uv run pytest -m e2e_credits_deal -v        # the API-credits deal scenario
 
 # Or by path — the layer liveness checks, or one domain's scenarios:
 uv run pytest tests/e2e/roles/layers/ -v
-uv run pytest tests/e2e/roles/scenarios/apitokens/ -v
+uv run pytest tests/e2e/roles/scenarios/apicredits/ -v
 uv run pytest tests/e2e/roles/scenarios/vms/ -v
 ```

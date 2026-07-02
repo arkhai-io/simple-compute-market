@@ -73,7 +73,7 @@ def test_generic_ledger_has_no_attribute_requirement():
     # matches attribute-less resources and speaks the generic unit key.
     generic = _make_ledger()
     generic.register_resource(
-        resource_id="svc-quota", total_units=1000, resource_type="api_tokens",
+        resource_id="svc-quota", total_units=1000, resource_type="api_credits",
     )
     match = generic.probe(claim={"units": 250})
     assert match is not None

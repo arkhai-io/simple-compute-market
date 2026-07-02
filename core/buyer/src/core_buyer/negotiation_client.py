@@ -12,7 +12,7 @@ Public API:
 Per-round decisions go through ``market_policy.negotiation_middleware``
 — same chain framework the seller uses. The buyer's default chain is
 the pinned-shape guard plus the configured policy's middlewares; domain
-plugins may add schema middlewares (e.g. the API-tokens
+plugins may add schema middlewares (e.g. the API-credits
 ``answer_key_challenge`` pass-through) via ``default_guards``.
 
 Units: listings broadcast **per-unit** rates (per lease hour for VM
@@ -20,7 +20,7 @@ compute, per token for API credits). ``unit_count`` is the schema
 plugin's per-unit→absolute seam — the number of priced units this deal
 spans; once it is fixed at round 0 the whole negotiation runs on
 absolute totals. The VM plugin passes ``duration_seconds / 3600``, the
-API-tokens plugin passes the requested token quantity.
+API-credits plugin passes the requested token quantity.
 """
 
 from __future__ import annotations
@@ -101,7 +101,7 @@ def _load_buyer_chain(
     guards open with the shape guard, which vetoes if the seller
     silently mutates a buyer-pinned field of the EscrowProposal (token
     swap, expiration push, escrow contract swap); a schema plugin may
-    extend them (the API-tokens plugin inserts its key-challenge
+    extend them (the API-credits plugin inserts its key-challenge
     pass-through); the policy is `policy_mode` if set, else the one
     buyer.toml `[negotiation] policy` names (default `listed_price`).
     Resolution failures raise — a typo'd policy name must not silently

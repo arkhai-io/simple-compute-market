@@ -19,7 +19,7 @@ The core market services intentionally stay generic:
 
 This repository includes two useful references:
 
-- `domains/apitokens/` is a small service-access domain: listings describe
+- `domains/apicredits/` is a small service-access domain: listings describe
   an API service, fulfillment issues or reuses an API token, and middleware
   gates requests against token balance.
 - `domains/vms/` is a larger resource-lifecycle domain: listings describe
@@ -86,14 +86,14 @@ domain-specific validation and filtering.
 
 Define:
 
-- a stable resource kind, usually versioned, such as `api_tokens.v1`
+- a stable resource kind, usually versioned, such as `api_credits.v1`
 - a typed model for the `offer_resource` payload
 - coercion helpers for JSON loaded from registry/storefront storage
 - filterable fields and their validation rules
 
 Examples:
 
-- `domains/apitokens/listings/models.py`
+- `domains/apicredits/listings/models.py`
 - `domains/vms/listings/models.py`
 
 ### Registry validation and filters
@@ -142,7 +142,7 @@ is domain-defined.
 
 Examples:
 
-- API tokens use `api_tokens.v1` with payload fields such as `quantity`
+- API credits use `api_credits.v1` with payload fields such as `quantity`
   and key disposition.
 - VMs use provision terms for start/end lease intent and machine access
   requirements.
@@ -189,7 +189,7 @@ Define:
 - how failure, refund, revocation, interruption, or expiration work
 - which admin endpoints or hooks are allowed to settle or interrupt a deal
 
-For example, the API-tokens domain issues credentials and relies on
+For example, the API-credits domain issues credentials and relies on
 middleware to meter usage. The VM domain may reserve capacity, provision a
 machine, and later shut it down on lease end or interruption.
 

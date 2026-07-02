@@ -8,7 +8,7 @@ GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-dev build-seller build-apitokens-service build-apitokens-storefront build-apitokens-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apitokens test-apitokens-middleware test-kits dist dist-storefront-client dist-vms-common dist-storefront dist-policy dist-provisioning-client dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-apitokens-middleware dist-apitokens-sample-app dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-vms-common dist-storefront dist-policy dist-provisioning-client dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -23,7 +23,7 @@ DIST_DIR := ${CURDIR}/.dist
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-vms-common dist-storefront dist-policy dist-provisioning-client dist-apitokens-service dist-apitokens-storefront dist-apitokens-buyer dist-apitokens-middleware dist-apitokens-sample-app dist-registry-client dist-buyer
+dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-site dist-alkahest dist-config dist-vms-common dist-storefront dist-policy dist-provisioning-client dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-buyer
 
 dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -53,35 +53,35 @@ dist-provisioning-client: ## Build arkhai-vms-provisioning-client wheel into .di
 	-mkdir -p $(DIST_DIR)
 	cd domains/vms/provisioning/client && uv build --wheel --out-dir $(DIST_DIR)
 
-dist-apitokens-service: ## Build arkhai-apitokens-service wheel into .dist/
+dist-apicredits-service: ## Build arkhai-apicredits-service wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd domains/apitokens/service && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_apitokens_service-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-apitokens-service produced a platform-specific wheel — must build inside Docker" && exit 1)
+	cd domains/apicredits/service && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_apicredits_service-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-apicredits-service produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-apitokens-storefront: ## Build arkhai-apitokens-storefront wheel into .dist/
+dist-apicredits-storefront: ## Build arkhai-apicredits-storefront wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd domains/apitokens/storefront && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_apitokens_storefront-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-apitokens-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
+	cd domains/apicredits/storefront && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_apicredits_storefront-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-apicredits-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-apitokens-middleware: ## Build arkhai-apitokens-middleware wheel into .dist/
+dist-apicredits-middleware: ## Build arkhai-apicredits-middleware wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd domains/apitokens/middleware/python && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_apitokens_middleware-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-apitokens-middleware produced a platform-specific wheel — must build inside Docker" && exit 1)
+	cd domains/apicredits/middleware/python && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_apicredits_middleware-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-apicredits-middleware produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-apitokens-sample-app: ## Build arkhai-apitokens-sample-app wheel into .dist/
+dist-apicredits-sample-app: ## Build arkhai-apicredits-sample-app wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd domains/apitokens/sample-app && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_apitokens_sample_app-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-apitokens-sample-app produced a platform-specific wheel — must build inside Docker" && exit 1)
+	cd domains/apicredits/sample-app && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_apicredits_sample_app-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-apicredits-sample-app produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-apitokens-buyer: ## Build arkhai-apitokens-buyer wheel into .dist/
+dist-apicredits-buyer: ## Build arkhai-apicredits-buyer wheel into .dist/
 	-mkdir -p $(DIST_DIR)
-	cd domains/apitokens/buyer && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_apitokens_buyer-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-apitokens-buyer produced a platform-specific wheel — must build inside Docker" && exit 1)
+	cd domains/apicredits/buyer && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_apicredits_buyer-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-apicredits-buyer produced a platform-specific wheel — must build inside Docker" && exit 1)
 
 dist-registry-client: ## Build arkhai-core-registry-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -145,7 +145,7 @@ dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apitokens test-kits
+test: test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-kits
 
 test-core:
 	cd core && make test
@@ -165,12 +165,12 @@ test-storefront:
 test-vms-buyer:
 	cd domains/vms/buyer && make test
 
-test-apitokens:
-	cd domains/apitokens && make test
+test-apicredits:
+	cd domains/apicredits && make test
 
 # Compatibility alias for the cross-language middleware parity suite.
-test-apitokens-middleware:
-	cd domains/apitokens && make test-middleware
+test-apicredits-middleware:
+	cd domains/apicredits && make test-middleware
 
 test-kits:
 	cd kit && make test
@@ -181,7 +181,7 @@ test-kits:
 # adds the test chain + integration-test image needed for the local e2e stack.
 build: init-prerequisites dist build-buyer
 	$(MAKE) -j3 build-registry build-storefront build-provisioning
-	$(MAKE) -j3 build-apitokens-service build-apitokens-storefront build-apitokens-sample-app
+	$(MAKE) -j3 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app
 
 build-dev: build build-dev-env build-test-image
 
@@ -222,18 +222,18 @@ build-storefront:
 build-provisioning:
 	cd domains/vms/provisioning/service && make build
 
-# API-tokens domain images (item 6). Built from the repo root so each
-# Dockerfile's `COPY .dist/` + `COPY domains/` resolve. The api-tokens
+# API-credits domain images (item 6). Built from the repo root so each
+# Dockerfile's `COPY .dist/` + `COPY domains/` resolve. The api-credits
 # registry reuses arkhai:registry (built by build-registry) with a
 # different filter-spec mounted at runtime.
-build-apitokens-service:
-	docker build --ulimit nofile=65536:65536 -f domains/apitokens/service/Dockerfile -t arkhai:apitokens-service .
+build-apicredits-service:
+	docker build --ulimit nofile=65536:65536 -f domains/apicredits/service/Dockerfile -t arkhai:apicredits-service .
 
-build-apitokens-storefront:
-	docker build --ulimit nofile=65536 -f domains/apitokens/storefront/Dockerfile -t arkhai:apitokens-storefront .
+build-apicredits-storefront:
+	docker build --ulimit nofile=65536 -f domains/apicredits/storefront/Dockerfile -t arkhai:apicredits-storefront .
 
-build-apitokens-sample-app:
-	docker build --ulimit nofile=65536:65536 -f domains/apitokens/sample-app/Dockerfile -t arkhai:apitokens-sample-app .
+build-apicredits-sample-app:
+	docker build --ulimit nofile=65536:65536 -f domains/apicredits/sample-app/Dockerfile -t arkhai:apicredits-sample-app .
 
 build-test-image:
 	cd e2e-tests && make build

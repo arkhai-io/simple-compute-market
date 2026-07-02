@@ -106,18 +106,18 @@ Import names and console scripts (`market`, `market-storefront`,
 | kit | `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-alkahest`, `arkhai-kit-config` | from-below capabilities; alkahest is the first *settlement-mechanism codec* |
 | domain | `arkhai-vms-common` (`domains/vms/common/`) | shared VM-domain models/helpers consumed by both buyer and storefront; currently owns the `compute.v1` provision-term interpretation (`arkhai_vms_common.provision_terms`) |
 | domain | `arkhai-vms-buyer` (`domains/vms/buyer/`) | no console script — publishes the `vms.compute` plugin the core `market` CLI discovers |
-| domain | `arkhai-apitokens-buyer` (`domains/apitokens/buyer/`) | no console script — publishes the `api_tokens` plugin; verbs namespaced under `market tokens …` so both plugins compose in one binary |
+| domain | `arkhai-apicredits-buyer` (`domains/apicredits/buyer/`) | no console script — publishes the `api_credits` plugin; verbs namespaced under `market credits …` so both plugins compose in one binary |
 | domain | `arkhai-vms-storefront` (`domains/vms/storefront/`) | the VM storefront executable/composition root (FastAPI adapters over core) |
 | domain | `arkhai-vms-provisioning` (`domains/vms/provisioning/service/`) | the VM fulfillment executor service |
-| domain | `arkhai-apitokens-service` (`domains/apitokens/service/`) | the tokens service: API keys/credit grants/consumption + the quota ledger (mounts `core_site`) |
-| domain | `arkhai-apitokens-storefront` (`domains/apitokens/storefront/`) | the API-tokens storefront executable/composition root: quota-backed listings, quantity/key-ownership negotiation guards, issuance-backed settlement |
-| domain | `arkhai-apitokens-middleware` (`domains/apitokens/middleware/python/`) | seller-side ASGI gate that meters a downstream app on prepaid credits (verify cache + synchronous/batched consume + 402-with-purchase-pointer); the reference implementation |
-| domain | `@arkhai/apitokens-middleware` (`domains/apitokens/middleware/typescript/`) | TypeScript port of the gate (Connect/Express + Web-fetch adapters); reproduces `middleware/conformance/session.json` |
-| domain | `arkhai-apitokens-middleware` crate (`domains/apitokens/middleware/rust/`) | Rust port of the gate (tower/axum layer); reproduces `middleware/conformance/session.json` |
-| domain | `arkhai-apitokens-sample-app` (`domains/apitokens/sample-app/`) | a one-endpoint gated service for the e2e — the metered API the deal consumes to 402 and back |
+| domain | `arkhai-apicredits-service` (`domains/apicredits/service/`) | the credits service: API keys/credit grants/consumption + the quota ledger (mounts `core_site`) |
+| domain | `arkhai-apicredits-storefront` (`domains/apicredits/storefront/`) | the API-credits storefront executable/composition root: quota-backed listings, quantity/key-ownership negotiation guards, issuance-backed settlement |
+| domain | `arkhai-apicredits-middleware` (`domains/apicredits/middleware/python/`) | seller-side ASGI gate that meters a downstream app on prepaid credits (verify cache + synchronous/batched consume + 402-with-purchase-pointer); the reference implementation |
+| domain | `@arkhai/apicredits-middleware` (`domains/apicredits/middleware/typescript/`) | TypeScript port of the gate (Connect/Express + Web-fetch adapters); reproduces `middleware/conformance/session.json` |
+| domain | `arkhai-apicredits-middleware` crate (`domains/apicredits/middleware/rust/`) | Rust port of the gate (tower/axum layer); reproduces `middleware/conformance/session.json` |
+| domain | `arkhai-apicredits-sample-app` (`domains/apicredits/sample-app/`) | a one-endpoint gated service for the e2e — the metered API the deal consumes to 402 and back |
 
 The *concept* modules (`domains/vms/{listings,negotiation,settlement}`,
-`domains/apitokens/{listings,negotiation,settlement}`) are not general-purpose
+`domains/apicredits/{listings,negotiation,settlement}`) are not general-purpose
 service packages. Most ship inside the buyer/storefront wheels and implement
 core hook shapes by injection, without importing core.
 
@@ -1109,7 +1109,7 @@ the same names would silently shadow each other; `[negotiation] policy`
 in `buyer.toml` names the configured one. Their prices are **per unit**;
 the schema plugin's verb supplies the unit count that scales them to the
 absolute amounts a negotiation runs on (lease hours for `vms.compute`,
-token quantity for `api_tokens`). This gives a three-way CLI split:
+token quantity for `api_credits`). This gives a three-way CLI split:
 core owns the verb skeleton, run-log chaining, and identity; the schema
 plugin owns *what* is bought (`--gpu-model` and `--quantity` are plugin
 vocabulary); the policy owns *how it is paid for* (`--max-price` is policy vocabulary —
@@ -2030,12 +2030,12 @@ tail as one row, TTL soft holds supported at the ledger) plus the
 `allocations/{id}/commit`, `releases`,
 `allocations/{id}/truncate-lease`, `allocations`, `events`). A hosting
 service mounts the tables on its engine and the router on its app; the
-VM provisioning service is the first host (the API-tokens service is
+VM provisioning service is the first host (the API-credits service is
 the second). The ledger is domain-neutral: claims request a unit count
 via the generic `units` key (`gpu_count` is the VM alias), a host
 declares its eligibility invariant at construction
 (`required_attributes=("vm_host",)` for the provisioning service — a
-slice that names no host can't be fulfilled; the tokens service
+slice that names no host can't be fulfilled; the credits service
 declares none), and `commit` without a `lease_end_utc` produces an
 open-ended lease the watchdog never sees (prepaid credits don't
 expire). The surface mirrors
@@ -2140,21 +2140,21 @@ route to the storefront named in service settings rather than the
 
 ---
 
-## API-tokens market domain
+## API-credits market domain
 
 The second market schema: **prepaid API credits** sold against a
 token-gated service. A listing advertises a service at a unit price per
 token; the buyer picks a quantity and whether the credits land on a new
 API key or top up an existing one; settlement is the standard escrow
-flow; the deliverable is a credit grant in a seller-side tokens service,
+flow; the deliverable is a credit grant in a seller-side credits service,
 enforced by drop-in middlewares (Python / TypeScript / Rust) in the
 gated service. It is the second instance that made the "wait for a
 second schema" seams concrete: schema identity for registries
 (`filter-spec.yaml`'s `schema: {id, version}` header), the second
 storefront composition root, non-per-hour price scaling, and the
 site-authority ledger extraction (`core_site`). Concept modules live in
-`domains/apitokens/{listings,negotiation,settlement}`; the packages are
-in the layout table above (`arkhai-apitokens-{buyer,storefront,service,
+`domains/apicredits/{listings,negotiation,settlement}`; the packages are
+in the layout table above (`arkhai-apicredits-{buyer,storefront,service,
 middleware,sample-app}`).
 
 ### Decisions
@@ -2165,7 +2165,7 @@ middleware,sample-app}`).
 - **Vocabulary.** The sold asset is an "API token" in listings and
   prose; the consumable count in code/DB/middleware is **credits /
   balance** — "token" unqualified is already ERC-20 vocabulary, and the
-  payment side of an API-token deal *is* an ERC-20/native escrow, so the
+  payment side of an API-credit deal *is* an ERC-20/native escrow, so the
   split keeps "token" from meaning two things in one wire message.
 - **Quota is sellable inventory**, capacity-managed through the existing
   `/api/v1/capacity/*` contract: the seller configures sellable credit
@@ -2174,7 +2174,7 @@ middleware,sample-app}`).
   finite supply that selling decrements — not an outstanding-liability
   cap that consumption replenishes (a later seller-policy upgrade over
   the same ledger).
-- **Middlewares consume online** against the tokens service, with a
+- **Middlewares consume online** against the credits service, with a
   short-TTL verify cache and batched decrements (batching bounds a small
   overdraft window; the flush threshold is the bound). One source of
   truth; revocation is immediate; the gate is thin in all three
@@ -2186,28 +2186,28 @@ middleware,sample-app}`).
 ### Market shape
 
 **Listing.** `offer_resource` is opaque to the registry, schema-typed by
-the plugin: `{kind: "api_tokens.v1", service_name, description,
+the plugin: `{kind: "api_credits.v1", service_name, description,
 openapi_url, base_url}`. `accepted_escrows` carries the unit price as a
 rate with a `per: "token"` unit. The buyer renders `openapi_url` in
-listing detail so it can inspect what the tokens gate.
+listing detail so it can inspect what the credits gate.
 
 **Negotiation.** Same round/chain model. The plugin owns *what* is
 bought — `--quantity N` and the key disposition (`--new-key` |
 `--key-id <id>`), fixed at round 0 in
-`ProvisionTerms{kind: "api_tokens.v1", payload: {quantity, key}}`. The
+`ProvisionTerms{kind: "api_credits.v1", payload: {quantity, key}}`. The
 policy owns *how it is paid*: the negotiated scalar is `quantity × unit
 rate`, and the per-unit→absolute translation lives in the buyer's
 negotiation client (`negotiate_with_seller` scales by an explicit
 `unit_count`), not the CLI bodies — the non-per-hour trigger that also
 moved the VM plugin's per-hour scaling to the same seam. `listed_price`
 is the default (bound = quantity × advertised rate). Seller guards:
-`token_quota_guard` (requested quantity ≤ available units in the
+`credit_quota_guard` (requested quantity ≤ available units in the
 captured capacity snapshot) and `key_owned_by_buyer_wallet` for
 existing-key claims (see Key ownership).
 
 **Settlement.** Standard scalar escrow for the absolute amount,
 RecipientArbiter immediate settlement by default. Fulfillment is an
-issuance job against the tokens service: commit the quota hold, create
+issuance job against the credits service: commit the quota hold, create
 the key (new) or locate it (existing), write the credit grant
 (`escrow_uid` UNIQUE → idempotent under retry), and return
 `{key_id, secret?}` once through the settle-status / run-log channel
@@ -2237,7 +2237,7 @@ side inputs, exactly like price, escrow shape, and duration.
 
 - `key_owned_by_buyer_wallet` *(seller default, shipped)* — a round-0
   guard structurally identical to the inventory guard: it consults a
-  captured key→owner lookup (the tokens-service `GET /keys/{id}`) and
+  captured key→owner lookup (the credits-service `GET /keys/{id}`) and
   rejects with `key_not_owned` unless the key's `wallet` owner equals
   the negotiation's signing wallet. **Free** — the wallet-signed
   negotiation *is* the possession proof; no extra round, no buyer
@@ -2281,13 +2281,13 @@ compose.dev.yml                  — the shared dev chain: an Anvil node with th
                                    not compose). The one thing every domain shares.
 domains/vms/compose.yml          — the VM compute market: two registry instances,
                                    Bob's + Alice's storefronts, Redis, provisioning.
-domains/apitokens/compose.yml    — the API-tokens market: the api_tokens registry
-                                   instance, tokens service, sample gated app,
-                                   tokens storefront.
+domains/apicredits/compose.yml    — the API-credits market: the api_credits registry
+                                   instance, credits service, sample gated app,
+                                   credits storefront.
 docker-compose.yml               — full multi-domain stack (includes compose.dev.yml
                                    + every domains/<d>/compose.yml). Bare
                                    `docker compose up` — what the e2e expects.
-compose.vms.yml / compose.apitokens.yml
+compose.vms.yml / compose.apicredits.yml
                                  — single-domain wrappers (compose.dev.yml + one
                                    domain), so a domain runs without the others:
                                    `docker compose -f compose.vms.yml up`.
@@ -2305,7 +2305,7 @@ There is no buyer compose service — the buyer is the `market` CLI invoked
 from the host or another container, not a long-running service. The
 seller container reads its config from a TOML mounted at
 `/etc/arkhai/storefront.toml` (set via `XDG_CONFIG_HOME=/etc`); override
-`$VMS_BOB_STOREFRONT_CONFIG` / `$APITOKENS_STOREFRONT_CONFIG` to point a
+`$VMS_BOB_STOREFRONT_CONFIG` / `$APICREDITS_STOREFRONT_CONFIG` to point a
 storefront at a different chain's config without editing the compose file.
 
 ### Production / Staging — Helm (`helm/`)

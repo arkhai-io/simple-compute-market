@@ -1,5 +1,5 @@
 """Compatibility shim — across-seller aggregation moved to
-``core_buyer.aggregation`` when the API-tokens domain became the second
+``core_buyer.aggregation`` when the API-credits domain became the second
 schema plugin. The policy registry, file discovery, and built-ins are
 shared; tests that patch module internals target the core module."""
 

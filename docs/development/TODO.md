@@ -164,6 +164,21 @@ The `arkhai-vms-provisioning` wheel stays its own distributable — it's operate
 
 **Status:** Planned.
 
+**Problem:** The ARCHITECTURE.md rule prohibits `[tool.uv.sources]` `path` entries containing `../` in any `pyproject.toml`. Such paths bake the monorepo's filesystem topology into `uv.lock`, breaking Docker builds and preventing customers from installing the package outside the checkout. The following packages still have `../` path sources:
+
+**Wheel packages (highest priority — customer-facing):**
+
+- `domains/apicredits/buyer/pyproject.toml` — 5 editable path sources (core, core-buyer, alkahest, config, policy). Domain wheel plugin.
+- `domains/vms/buyer/pyproject.toml` — 5 editable path sources (same set). Already has a Makefile; needs sources removal and `reinit` target additions.
+
+**Docker service packages (lower priority — monorepo-root build context makes the referenced paths available inside containers):**
+
+- `core/registry/pyproject.toml` — 1 editable path source (`arkhai-kit-identity`).
+- `domains/vms/storefront/pyproject.toml` — 6 editable path sources.
+- `domains/apicredits/storefront/pyproject.toml` — 7 editable path sources.
+- `domains/apicredits/sample-app/pyproject.toml` — 1 editable path source (`arkhai-apicredits-middleware = { path = "../middleware/python" }`), intra-domain sibling reference.
+
+**Planned fix:** apply the `core/buyer` pattern to each wheel package in priority order: remove `[tool.uv.sources]`, add or update the package Makefile to pass `--find-links $(DIST_DIR)` through `init`, `reinit`, and `test` targets, regenerate `uv.lock`. Service packages follow after the wheel packages are clean.
 
 ---
 

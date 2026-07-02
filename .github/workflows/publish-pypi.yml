@@ -7,7 +7,7 @@ on:
       - 'kit/**'
       - 'core/**'
       - 'domains/vms/**'
-      - 'domains/apitokens/**'
+      - 'domains/apicredits/**'
       - '.github/workflows/publish-pypi.yml'
   workflow_dispatch:
 
@@ -81,10 +81,10 @@ jobs:
             vms-buyer: ['domains/vms/buyer/**', '.github/workflows/publish-pypi.yml']
             vms-provisioning: ['domains/vms/provisioning/service/**', '.github/workflows/publish-pypi.yml']
             vms-storefront: ['domains/vms/storefront/**', '.github/workflows/publish-pypi.yml']
-            apitokens-buyer: ['domains/apitokens/buyer/**', '.github/workflows/publish-pypi.yml']
-            apitokens-middleware: ['domains/apitokens/middleware/python/**', '.github/workflows/publish-pypi.yml']
-            apitokens-storefront: ['domains/apitokens/storefront/**', '.github/workflows/publish-pypi.yml']
-            apitokens-service: ['domains/apitokens/service/**', '.github/workflows/publish-pypi.yml']
+            apicredits-buyer: ['domains/apicredits/buyer/**', '.github/workflows/publish-pypi.yml']
+            apicredits-middleware: ['domains/apicredits/middleware/python/**', '.github/workflows/publish-pypi.yml']
+            apicredits-storefront: ['domains/apicredits/storefront/**', '.github/workflows/publish-pypi.yml']
+            apicredits-service: ['domains/apicredits/service/**', '.github/workflows/publish-pypi.yml']
       - name: Build publish matrix
         id: build-matrix
         env:
@@ -110,10 +110,10 @@ jobs:
             {"key": "vms-buyer",              "path": "domains/vms/buyer",                "dist": "arkhai-vms-buyer", "wheel_only": true},
             {"key": "vms-provisioning",       "path": "domains/vms/provisioning/service", "dist": "arkhai-vms-provisioning"},
             {"key": "vms-storefront",         "path": "domains/vms/storefront",           "dist": "arkhai-vms-storefront"},
-            {"key": "apitokens-buyer",        "path": "domains/apitokens/buyer",          "dist": "arkhai-apitokens-buyer", "wheel_only": true},
-            {"key": "apitokens-middleware",   "path": "domains/apitokens/middleware/python", "dist": "arkhai-apitokens-middleware"},
-            {"key": "apitokens-storefront",   "path": "domains/apitokens/storefront",     "dist": "arkhai-apitokens-storefront"},
-            {"key": "apitokens-service",      "path": "domains/apitokens/service",        "dist": "arkhai-apitokens-service"}
+            {"key": "apicredits-buyer",        "path": "domains/apicredits/buyer",          "dist": "arkhai-apicredits-buyer", "wheel_only": true},
+            {"key": "apicredits-middleware",   "path": "domains/apicredits/middleware/python", "dist": "arkhai-apicredits-middleware"},
+            {"key": "apicredits-storefront",   "path": "domains/apicredits/storefront",     "dist": "arkhai-apicredits-storefront"},
+            {"key": "apicredits-service",      "path": "domains/apicredits/service",        "dist": "arkhai-apicredits-service"}
           ]
           JSON
 

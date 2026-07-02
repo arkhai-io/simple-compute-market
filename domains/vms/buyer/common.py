@@ -2,7 +2,7 @@
 
 The schema-invariant config resolution (wallet, chains, negotiation
 policy, storefront URL) moved to ``core_buyer.buyer_config`` when the
-API-tokens domain became the second schema plugin; it is re-exported
+API-credits domain became the second schema plugin; it is re-exported
 here because every CLI module resolves it through ``.common``. This
 module keeps what is VM vocabulary: the SSH-key resolver, repo paths
 for operator scripts, and the schema id.

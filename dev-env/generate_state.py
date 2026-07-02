@@ -75,6 +75,16 @@ SECTION_FIELDS: dict[str, list[str]] = {
     "attestation_addresses": ["eas", "eas_schema_registry", "atomic_attestation_utils", "escrow_obligation_default", "escrow_obligation_unconditional", "attestation_reference_escrow_obligation_default", "attestation_reference_escrow_obligation_unconditional"],
     "string_obligation_addresses": ["eas", "obligation"],
     "commit_reveal_obligation_addresses": ["eas", "obligation"],
+    "hook_based_addresses": [
+        "eas", "hook_escrow_obligation", "hooks_escrow_obligation",
+        "erc20_escrow_hook", "erc721_escrow_hook", "erc1155_escrow_hook",
+        "native_token_escrow_hook", "attestation_escrow_hook",
+        "attestation_reference_escrow_hook",
+    ],
+    "splitters_addresses": [
+        "erc20_splitter", "erc1155_splitter", "native_token_splitter",
+        "token_bundle_splitter", "token_bundle_splitter_unvalidated",
+    ],
 }
 
 

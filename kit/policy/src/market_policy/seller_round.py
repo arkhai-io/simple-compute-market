@@ -5,11 +5,11 @@ Every domain storefront drives negotiation through a seller round hook
 message. The hook's result shape is domain-invariant: the decision the
 policy chain produced plus the labels the storefront persists for the
 stage log. Domain modules implement the hook itself (the VM hook
-captures inventory snapshots, the API-tokens hook quota + key records);
+captures inventory snapshots, the API-credits hook quota + key records);
 this module owns only the carrier.
 
 History: extracted from ``domains.vms.negotiation.storefront_round``
-when the API-tokens domain became the second plugin; the VM module
+when the API-credits domain became the second plugin; the VM module
 re-exports both names.
 """
 

@@ -1,6 +1,6 @@
 """Shared OpenAPI customization for storefront composition roots.
 
-Every storefront FastAPI app (VM compute, API-tokens, and whatever
+Every storefront FastAPI app (VM compute, API-credits, and whatever
 domain comes next) authenticates admin endpoints with an ``X-Admin-Key``
 header and runs behind an optional gateway path prefix. Both facts shape
 the generated schema identically:

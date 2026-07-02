@@ -10,7 +10,7 @@ inventory tables and migrations (``_ensure_domain_tables`` /
 singleton factory stays with each composition root.
 
 Hoisted from ``market_storefront.utils.sqlite_client`` when the
-API-tokens domain became the second composition root. A few VM-era
+API-credits domain became the second composition root. A few VM-era
 column names (e.g. ``ssh_commands`` on credentials) ride along until a
 future cross-root consolidation pass.
 """

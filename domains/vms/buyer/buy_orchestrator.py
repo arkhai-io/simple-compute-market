@@ -1,7 +1,7 @@
 """VM shim over the core buyer orchestration stages.
 
 The discover → negotiate → settle plumbing moved to
-``core_buyer.orchestration`` when the API-tokens domain became the
+``core_buyer.orchestration`` when the API-credits domain became the
 second schema plugin. This module keeps the VM instantiation: the
 legacy hook factories translate ``VmProvisionTerms`` into the core
 seams — ``unit_count`` (lease hours, ``duration_seconds / 3600``),

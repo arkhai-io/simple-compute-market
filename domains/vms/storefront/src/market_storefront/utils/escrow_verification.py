@@ -1,5 +1,5 @@
 """Compatibility shim — settle-time escrow verification moved to
-``core_storefront.escrow_verification`` when the API-tokens domain
+``core_storefront.escrow_verification`` when the API-credits domain
 became the second storefront composition root."""
 
 from core_storefront.escrow_verification import (  # noqa: F401

@@ -162,7 +162,7 @@ wheels = [
 ]
 
 [[package]]
-name = "arkhai-apitokens-buyer"
+name = "arkhai-apicredits-buyer"
 version = "0.1.0"
 source = { registry = "https://packages.applied-caas-gateway1.internal.api.openai.org/artifactory/api/pypi/pypi-public/simple" }
 dependencies = [
@@ -177,7 +177,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { url = "https://packages.applied-caas-gateway1.internal.api.openai.org/artifactory/api/pypi/pypi-public/packages/packages/e6/c6/8ba5b75f93886a62cec87e0c68bc94765c5b928b9d7a4cd3db87a2592f19/arkhai_apitokens_buyer-0.1.0-py3-none-any.whl", hash = "sha256:87fb3be1799a4bad8bef087d3bc1bd520db7281ff814f7a8299cdccd4d73d233", size = 38664, upload-time = "2026-06-16T05:08:11.503Z" },
+    { url = "https://packages.applied-caas-gateway1.internal.api.openai.org/artifactory/api/pypi/pypi-public/packages/packages/e6/c6/8ba5b75f93886a62cec87e0c68bc94765c5b928b9d7a4cd3db87a2592f19/arkhai_apicredits_buyer-0.1.0-py3-none-any.whl", hash = "sha256:87fb3be1799a4bad8bef087d3bc1bd520db7281ff814f7a8299cdccd4d73d233", size = 38664, upload-time = "2026-06-16T05:08:11.503Z" },
 ]
 
 [[package]]
@@ -271,7 +271,7 @@ name = "arkhai-e2e-tests"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "arkhai-apitokens-buyer" },
+    { name = "arkhai-apicredits-buyer" },
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-core-storefront-client" },
     { name = "arkhai-kit-alkahest" },
@@ -303,7 +303,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-apitokens-buyer", specifier = ">=0.1.0" },
+    { name = "arkhai-apicredits-buyer", specifier = ">=0.1.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.6.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.11.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.1.0" },
