@@ -34,6 +34,7 @@ Pick the role you're standing up:
 - **Sell compute** → [`docs/seller-quickstart.md`](./docs/seller-quickstart.md)
 - **Run your own listing registry** → [`docs/indexer-quickstart.md`](./docs/indexer-quickstart.md)
 - **Implement a new market domain** → [`docs/domain-authoring/`](./docs/domain-authoring/)
+- **Deploy cookbook examples** → [`docs/cookbooks/`](./docs/cookbooks/)
 - **Add FRP reverse-proxy for VM subdomains (seller)** → [`docs/seller-frp-setup.md`](./docs/seller-frp-setup.md)
 - **Set up a private ZeroTier overlay (operator)** → [`docs/zerotier-setup.md`](./docs/zerotier-setup.md)
 

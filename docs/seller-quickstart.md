@@ -7,7 +7,9 @@ For the buyer side see [`buyer-quickstart.md`](./buyer-quickstart.md).
 To run your own listing registry instead of pointing at an existing one,
 see [`indexer-quickstart.md`](./indexer-quickstart.md). To expose VMs
 via wildcard subdomains instead of direct port-forward NAT, see
-[`seller-frp-setup.md`](./seller-frp-setup.md).
+[`seller-frp-setup.md`](./seller-frp-setup.md). To sell request quota
+for an OpenAI-compatible vLLM server instead of VMs, see the
+[`vLLM API-credits cookbook`](./cookbooks/vllm-apicredits-seller.md).
 
 ## Prerequisites
 
