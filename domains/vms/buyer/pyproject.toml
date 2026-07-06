@@ -14,7 +14,7 @@ dependencies = [
   # on-chain escrow creation. Imported lazily from
   # core_buyer.escrow_client so loading the CLI does not pay the
   # native-binary cost unless the orchestrator actually runs.
-  "alkahest-py==1.0.0",
+  "alkahest-py==1.1.0",
   "arkhai-core-buyer",
   "arkhai-core",
   "arkhai-kit-alkahest",

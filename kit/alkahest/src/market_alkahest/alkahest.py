@@ -1834,9 +1834,16 @@ class _AttestationEscrowCodecBase:
         arbiter_data = self._arbiter_data(obligation_data)
         version_client = getattr(client.attestation.escrow, self.version_attr)
         sdk_variant_client = getattr(version_client, self.sdk_variant_attr)
-        receipt = await sdk_variant_client.create(
-            attestation_data, arbiter_data, expiration_unix,
-        )
+        args: list[Any] = [attestation_data, arbiter_data, expiration_unix]
+        if self.version_attr == "reference":
+            args.append(
+                int(
+                    obligation_data.get("reference_expiration")
+                    or obligation_data.get("referenceExpiration")
+                    or expiration_unix
+                )
+            )
+        receipt = await sdk_variant_client.create(*args)
         uid = (receipt or {}).get("log", {}).get("uid")
         if not uid:
             raise RuntimeError(

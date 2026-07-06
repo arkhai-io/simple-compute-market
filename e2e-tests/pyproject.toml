@@ -17,6 +17,7 @@ dependencies = [
     "web3>=7.0",
     "eth-account>=0.12",
     "eth-typing>=4.0",
+    "alkahest-py==1.1.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
     "rich>=13.0",

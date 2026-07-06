@@ -220,14 +220,18 @@ def _read_chain_obligation_data(obligation: Any) -> dict[str, Any]:
         "erc1155_token_ids": "erc1155TokenIds",
         "erc1155_amounts": "erc1155Amounts",
         "attestation_uid": "attestationUid",
+        "referenced_attestation_uid": "attestationUid",
     }
     for sdk_attr, canonical_key in field_aliases.items():
         value = getattr(obligation, sdk_attr, None)
         if value is not None:
             raw[canonical_key] = bytes(value) if sdk_attr == "demand" else value
-    attestation = _plain_attestation_request(getattr(obligation, "attestation", None))
+    attestation_value = getattr(obligation, "attestation", None)
+    attestation = _plain_attestation_request(attestation_value)
     if attestation is not None:
         raw["attestation"] = attestation
+    elif attestation_value is not None:
+        raw["attestationUid"] = attestation_value
     return _normalize_obligation_data(raw)
 
 

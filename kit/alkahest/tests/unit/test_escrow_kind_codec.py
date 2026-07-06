@@ -1000,10 +1000,16 @@ def test_attestation_reference_create_obligation_translates_to_sdk_shape(
     )
 
     assert uid == "0xatt"
-    attestation_uid, arbiter_data, expiration = sdk_variant_client.create.await_args.args
+    (
+        attestation_uid,
+        arbiter_data,
+        expiration,
+        reference_expiration,
+    ) = sdk_variant_client.create.await_args.args
     assert attestation_uid == _UID
     assert arbiter_data == {"arbiter": _ARBITER, "demand": _DEMAND_BYTES}
     assert expiration == 1_800_000_000
+    assert reference_expiration == 1_800_000_000
 
 
 def test_attestation_reference_create_obligation_missing_uid_raises():
