@@ -11,6 +11,7 @@ Pending architectural work and known operational issues for the Arkhai market st
 | [Init container migration & schema drift guard](#init-container-migration-pattern-and-schema-drift-guard) | State Management | Planned |
 | [Registry: Postgres migration](#registry-postgres-migration) | State Management | Planned |
 | [Market Core Extraction follow-ons](#market-core-extraction-follow-ons) | Core Stack | In progress |
+| [Gradual typing for core packages](#gradual-typing-for-core-packages) | Core Stack | Planned |
 | [Native Launch CLI for Provisioning Service](#native-launch-cli-for-provisioning-service) | Core Stack | Planned |
 | [Storefront DB Pruning](#storefront-db-pruning) | Core Stack | Planned |
 | [Registry Filter-Spec side indexes](#registry-filter-spec-indexed-true-side-indexes) | Core Stack | Deferred |
@@ -146,6 +147,71 @@ remaining follow-on work, with design context in
    prefix is the namespace. Each package still needs its PyPI project +
    trusted-publisher environment created per `RELEASING.md` before its
    first publish succeeds (nothing is on PyPI yet).
+
+---
+
+### Gradual typing for core packages
+
+**Status:** Planned.
+
+**Problem:** The `core/` packages are type-friendly but not fully typed or
+consistently checked. Most production modules already use annotations and
+Pydantic/dataclass carriers, but there is no shared type-checking policy, no
+`py.typed` markers in the core wheels, and only `core/registry` has a Makefile
+path that invokes mypy. The current dynamic boundaries around generated SDK
+clients, Alkahest native objects, JSON wire payloads, and plugin hooks mean API
+drift can still escape static checks and surface only in e2e.
+
+**Planned fix:** phase in typing where it most reduces contract drift, without
+blocking feature work on a strictness cliff.
+
+1. **Inventory and package markers.**
+   - Add `py.typed` to core library/client wheels once each package's exported
+     public API is intentionally annotated.
+   - Add packaging tests that verify the marker is included in built wheels.
+   - Track typed public surfaces package by package: `arkhai-core`,
+     `arkhai-core-registry-client`, `arkhai-core-storefront-client`,
+     `arkhai-core-buyer`, `arkhai-core-storefront`, `arkhai-core-site`, and
+     `arkhai-core-registry`.
+
+2. **Establish a shared non-strict baseline.**
+   - Add a repo-local mypy or basedpyright config for `core/` with pragmatic
+     defaults: check untyped function bodies, report missing imports only where
+     stubs should exist, and avoid `Any` bans until SDK/client seams are wrapped.
+   - Add `uv run` Makefile targets for each core package and one aggregate
+     root target.
+   - Run the baseline in CI as advisory first, then required once stable.
+
+3. **Tighten carrier and generated-client contracts first.**
+   - Make `market_core.schemas` pass a stricter profile before service shells;
+     this is the highest-leverage wire contract layer.
+   - Tighten registry/storefront client models and method signatures next,
+     because downstream packages rely on these as SDKs.
+   - Prefer explicit `TypedDict`, Pydantic models, or dataclasses at wire
+     boundaries over `dict[str, Any]` where the shape is stable.
+
+4. **Wrap dynamic boundaries instead of leaking `Any`.**
+   - Add narrow protocols/adapters for Alkahest SDK objects returned through
+     `kit/alkahest` and storefront escrow verification.
+   - Type plugin registration hooks and buyer/storefront extension points at
+     the trait/protocol level, so domain packages can type-check against the
+     contract rather than concrete implementations.
+   - Keep raw JSON helpers local to edge modules; normalize into typed carriers
+     before crossing core package boundaries.
+
+5. **Ratchet strictness package by package.**
+   - Start with `arkhai-core`, registry-client, and storefront-client.
+   - Then tighten `core-site` and `core-storefront` service helpers.
+   - Leave FastAPI route modules, SQLAlchemy rows, and migration scripts for
+     later; these carry the most framework-driven dynamic typing and lowest
+     immediate contract value.
+   - Only enable `disallow_untyped_defs` / `disallow_untyped_calls` after the
+     package has a clean baseline and typed public API.
+
+**Acceptance criteria:** a fresh checkout can run one aggregate `core` type-check
+target with `uv`; all exported core wheels that claim typed support include
+`py.typed`; and new SDK/API compatibility breaks in core-facing code are caught
+by type checks or focused unit tests before e2e.
 
 ---
 
