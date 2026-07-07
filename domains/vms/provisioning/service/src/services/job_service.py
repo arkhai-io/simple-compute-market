@@ -564,10 +564,21 @@ class AnsibleJobService:
 
     def _build_params(self, params: dict) -> AnsibleJobParams:
         """Reconstruct an ``AnsibleJobParams`` from the DB JSON params column."""
+        executor_action = params.get("executor_action") or params.get(
+            "vm_action", "create"
+        )
+        executor_target = params.get("executor_target") or params.get("vm_target")
         return AnsibleJobParams(
-            vm_host=params.get("vm_host", self._settings.default_vm_host),
+            vm_host=params.get(
+                "vm_host",
+                executor_target or self._settings.default_vm_host,
+            ),
             vm_target=params.get("vm_target"),
-            vm_action=params.get("vm_action", "create"),
+            vm_action=params.get("vm_action") or executor_action,
+            executor_kind=params.get("executor_kind", "vm"),
+            executor_action=executor_action,
+            executor_target=executor_target,
+            executor_ref=params.get("executor_ref"),
             image_setup_type=params.get("image_setup_type", "scratch"),
             vm_ram=params.get("vm_ram"),
             vm_vcpus=params.get("vm_vcpus"),
@@ -594,7 +605,10 @@ class AnsibleJobService:
         )
 
     def _playbook_path_for_params(self, params: AnsibleJobParams):
-        if params.vm_action in _BARE_METAL_ACTIONS:
+        if (
+            params.executor_kind == "bare_metal"
+            or params.executor_action in _BARE_METAL_ACTIONS
+        ):
             return self._settings.resolved_bare_metal_playbook_path
         return self._settings.resolved_playbook_path
 

@@ -137,6 +137,9 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
         assert job is not None
         assert job.params["vm_action"] == NODE_GRANT_ACCESS_ACTION
         assert job.params["vm_host"] == "bm-node-1"
+        assert job.params["executor_kind"] == "bare_metal"
+        assert job.params["executor_action"] == NODE_GRANT_ACCESS_ACTION
+        assert job.params["executor_target"] == "bm-node-1"
         assert job.params["physical_host_id"] == "host-physical-1"
 
 

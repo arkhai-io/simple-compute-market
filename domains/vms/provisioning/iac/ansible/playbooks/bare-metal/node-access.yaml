@@ -3,9 +3,9 @@
   hosts: kvm_hosts
   gather_facts: no
   vars:
-    target_host: "{{ vm_host | default('localhost') }}"
-    machine_id: "{{ vm_target | default(vm_host | default('')) }}"
-    node_action: "{{ vm_action | default('node_grant_access') }}"
+    target_host: "{{ executor_target | default(vm_host | default('localhost')) }}"
+    machine_id: "{{ executor_target | default(vm_target | default(vm_host | default(''))) }}"
+    node_action: "{{ executor_action | default(vm_action | default('node_grant_access')) }}"
 
   roles:
     - ../../roles/bare-metal-access

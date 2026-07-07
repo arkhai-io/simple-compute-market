@@ -36,6 +36,13 @@ class AnsibleJobParams:
     vm_action: str
     vm_target: Optional[str] = None
 
+    # Domain-neutral executor contract.  ``vm_*`` remains the compatibility
+    # alias for the existing VM playbook, mock API, and persisted jobs.
+    executor_kind: str = "vm"
+    executor_action: Optional[str] = None
+    executor_target: Optional[str] = None
+    executor_ref: Optional[dict[str, Any]] = None
+
     # VM sizing (create only)
     image_setup_type: str = "scratch"
     vm_ram: Optional[int] = None
@@ -74,6 +81,14 @@ class AnsibleJobParams:
 
     # Retry policy (per-job override)
     max_retries: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if not self.executor_action:
+            self.executor_action = self.vm_action
+        if self.executor_target is None:
+            self.executor_target = self.vm_target or self.vm_host
+        if not self.vm_action:
+            self.vm_action = self.executor_action
 
 
 # ---------------------------------------------------------------------------

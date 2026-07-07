@@ -2,8 +2,9 @@
 # Bare-metal node access grant/reclaim.
 #
 # These actions operate on the selected inventory host itself. The provisioning
-# service passes vm_host/vm_target as the executor-local machine id, while
-# physical_host_id is the cross-mode accounting identity.
+# service passes executor_target as the executor-local machine id, while
+# physical_host_id is the cross-mode accounting identity.  vm_host/vm_target are
+# accepted by the playbook as compatibility aliases for older persisted jobs.
 
 - name: Validate bare-metal grant inputs
   fail:

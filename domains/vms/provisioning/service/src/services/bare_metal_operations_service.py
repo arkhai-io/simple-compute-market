@@ -10,7 +10,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
-from arkhai_bare_metal_contracts import BareMetalLeaseCreate
+from arkhai_bare_metal_contracts import (
+    BARE_METAL_EXECUTOR_KIND,
+    BareMetalLeaseCreate,
+    bare_metal_executor_ref,
+)
 from models.jobs_model import AnsibleJobParams
 from provisioning_client.models import JobSubmitResponse
 from services.async_job_queue import AsyncJobQueue
@@ -53,6 +57,13 @@ class BareMetalOperationsService:
                 vm_host=body.machine_id,
                 vm_action=NODE_GRANT_ACCESS_ACTION,
                 vm_target=body.machine_id,
+                executor_kind=BARE_METAL_EXECUTOR_KIND,
+                executor_action=NODE_GRANT_ACCESS_ACTION,
+                executor_target=body.machine_id,
+                executor_ref=bare_metal_executor_ref(
+                    body.physical_host_id,
+                    access_ref=access_ref or None,
+                ),
                 escrow_uid=body.escrow_uid,
                 physical_host_id=body.physical_host_id,
                 ssh_user=_access_value(access_ref, "ssh_user", "user"),
@@ -80,6 +91,10 @@ class BareMetalOperationsService:
                 vm_host=machine_id,
                 vm_action=NODE_RECLAIM_ACCESS_ACTION,
                 vm_target=machine_id,
+                executor_kind=BARE_METAL_EXECUTOR_KIND,
+                executor_action=NODE_RECLAIM_ACCESS_ACTION,
+                executor_target=machine_id,
+                executor_ref=allocation.get("executor_ref"),
                 escrow_uid=allocation.get("escrow_uid"),
                 physical_host_id=get_physical_host_id(allocation),
                 ssh_user=_access_value(access_ref, "ssh_user", "user"),

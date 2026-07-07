@@ -45,6 +45,14 @@ async def test_grant_access_submits_node_grant_job():
     assert params.vm_host == "bm-node-1"
     assert params.vm_target == "bm-node-1"
     assert params.vm_action == NODE_GRANT_ACCESS_ACTION
+    assert params.executor_kind == "bare_metal"
+    assert params.executor_action == NODE_GRANT_ACCESS_ACTION
+    assert params.executor_target == "bm-node-1"
+    assert params.executor_ref == {
+        "physical_host_id": "host-physical-1",
+        "ssh_user": "tenant-a",
+        "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
+    }
     assert params.escrow_uid == "0xbm"
     assert params.physical_host_id == "host-physical-1"
     assert params.ssh_user == "tenant-a"
@@ -78,6 +86,13 @@ async def test_reclaim_access_submits_node_reclaim_job_from_allocation():
     assert params.vm_host == "bm-node-1"
     assert params.vm_target == "bm-node-1"
     assert params.vm_action == NODE_RECLAIM_ACCESS_ACTION
+    assert params.executor_kind == "bare_metal"
+    assert params.executor_action == NODE_RECLAIM_ACCESS_ACTION
+    assert params.executor_target == "bm-node-1"
+    assert params.executor_ref == {
+        "physical_host_id": "host-physical-1",
+        "ssh_user": "tenant-a",
+    }
     assert params.escrow_uid == "0xbm"
     assert params.physical_host_id == "host-physical-1"
     assert params.ssh_user == "tenant-a"

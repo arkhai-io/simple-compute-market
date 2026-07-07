@@ -349,7 +349,12 @@ class AnsibleService:
         lines = [
             f"vm_host: {params.vm_host}",
             f"vm_action: {params.vm_action}",
+            f"executor_kind: {params.executor_kind}",
+            f"executor_action: {params.executor_action}",
+            f"executor_target: {params.executor_target}",
         ]
+        if params.executor_ref:
+            lines.append(f"executor_ref: {json.dumps(params.executor_ref)}")
         if params.vm_target:
             lines.append(f"vm_target: {params.vm_target}")
         if params.vm_action == "create":

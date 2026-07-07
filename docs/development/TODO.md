@@ -411,8 +411,11 @@ adapter now exposes `/api/v1/bare-metal/leases/*` using the
 queued `node_grant_access` job and stores `create_job_id`; bare-metal release
 routes through `executor_kind=bare_metal` and submits `node_reclaim_access`.
 Those actions use a separate bare-metal Ansible playbook/role rather than the
-VM management role. The service package, internal job DTO, and most operator
-APIs are still VM-shaped.
+VM management role. Internal job payloads now carry domain-neutral
+`executor_kind`, `executor_action`, `executor_target`, and `executor_ref`
+alongside the legacy `vm_*` aliases; the bare-metal playbook consumes the
+neutral values first. The service package and most operator APIs are still
+VM-shaped.
 
 **Design stance:** VM and bare-metal provisioning should be separate executor
 services, or at least separate executor implementations, but they must not own
@@ -462,8 +465,8 @@ moved out of the VM domain tree.
 1. Move market-managed fulfillment dispatch behind an allocation/executor
    interface keyed by `executor_kind`; VM dispatch calls the existing VM
    provisioner, and bare-metal dispatch calls `node_grant_access` /
-   `node_reclaim_access`. The transitional service-side dispatch and separate
-   bare-metal playbook path are landed.
+   `node_reclaim_access`. The transitional service-side dispatch, neutral
+   executor job fields, and separate bare-metal playbook path are landed.
 2. Keep direct `/hosts/{host}/vms/*` operator APIs for VM administration, but
    stop treating those APIs as the market-level abstraction for all compute
    fulfillment.

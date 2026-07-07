@@ -192,6 +192,23 @@ class TestBuildVmVarsCreate:
         assert 'bare_metal_ssh_public_key: "ssh-ed25519 AAAA tenant-a"' in yaml
         assert 'bare_metal_access_ref: {"ssh_user": "tenant-a"}' in yaml
 
+    def test_executor_fields_are_serialized_for_playbook_contract(self):
+        svc = _make_service()
+        yaml = _build(
+            svc,
+            vm_host="bm-node-1",
+            vm_action="node_grant_access",
+            executor_kind="bare_metal",
+            executor_action="node_grant_access",
+            executor_target="bm-node-1",
+            executor_ref={"physical_host_id": "host-physical-1"},
+        )
+
+        assert "executor_kind: bare_metal" in yaml
+        assert "executor_action: node_grant_access" in yaml
+        assert "executor_target: bm-node-1" in yaml
+        assert 'executor_ref: {"physical_host_id": "host-physical-1"}' in yaml
+
     def test_gcs_fields_included_when_set(self):
         svc = _make_service()
         yaml = _build(svc, gcs_bucket_url="gs://bucket", gcs_image_path="images/img.qcow2")
