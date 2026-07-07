@@ -12,7 +12,7 @@ Naming conventions:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +65,12 @@ class AnsibleJobParams:
 
     # Deal linkage — on-chain escrow UID for recovery queries
     escrow_uid: Optional[str] = None
+
+    # Bare-metal access jobs (server-internal, used by node_* actions)
+    physical_host_id: Optional[str] = None
+    ssh_user: Optional[str] = None
+    ssh_public_key: Optional[str] = None
+    access_ref: Optional[dict[str, Any]] = None
 
     # Retry policy (per-job override)
     max_retries: Optional[int] = None

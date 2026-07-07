@@ -583,6 +583,11 @@ class AnsibleJobService:
             golden_image_name=params.get("golden_image_name"),
             gcs_bucket_url=params.get("gcs_bucket_url"),
             gcs_image_path=params.get("gcs_image_path"),
+            escrow_uid=params.get("escrow_uid"),
+            physical_host_id=params.get("physical_host_id"),
+            ssh_user=params.get("ssh_user"),
+            ssh_public_key=params.get("ssh_public_key"),
+            access_ref=params.get("access_ref"),
             max_retries=params.get("max_retries"),
         )
 

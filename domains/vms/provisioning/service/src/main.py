@@ -64,6 +64,9 @@ async def lifespan(_: FastAPI):
     _container_module.resolved_lease_watchdog = container.lease_watchdog()
     _container_module.resolved_capacity_ledger_service = container.capacity_ledger_service()
     _container_module.resolved_bare_metal_lease_service = container.bare_metal_lease_service()
+    _container_module.resolved_bare_metal_operations_service = (
+        container.bare_metal_operations_service()
+    )
 
     # ------------------------------------------------------------------
     # Inventory seeding — runs once at startup if the hosts table is empty.

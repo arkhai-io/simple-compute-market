@@ -407,9 +407,12 @@ preserving the legacy VM fields. The site ledger also understands
 `physical_host_id` plus `allocation_mode` (`shareable` or `exclusive`) resource
 attributes for cross-mode conflict checks. A transitional bare-metal domain
 adapter now exposes `/api/v1/bare-metal/leases/*` using the
-`arkhai-bare-metal-contracts` lease models, but the service package and most
-operator APIs are still VM-shaped, and real bare-metal access grant/reclaim
-executor APIs are not implemented yet.
+`arkhai-bare-metal-contracts` lease models. Lease registration now submits a
+queued `node_grant_access` job and stores `create_job_id`; bare-metal release
+routes through `executor_kind=bare_metal` and submits `node_reclaim_access`.
+The service package, internal job DTO, and most operator APIs are still
+VM-shaped, and the concrete Ansible playbook tasks for node grant/reclaim are
+still pending.
 
 **Design stance:** VM and bare-metal provisioning should be separate executor
 services, or at least separate executor implementations, but they must not own
@@ -458,13 +461,14 @@ moved out of the VM domain tree.
 
 1. Move market-managed fulfillment dispatch behind an allocation/executor
    interface keyed by `executor_kind`; VM dispatch calls the existing VM
-   provisioner, and bare-metal dispatch can later call `node_grant_access` /
-   `node_reclaim`.
+   provisioner, and bare-metal dispatch calls `node_grant_access` /
+   `node_reclaim_access`. The transitional service-side dispatch is landed;
+   the playbook implementation remains.
 2. Keep direct `/hosts/{host}/vms/*` operator APIs for VM administration, but
    stop treating those APIs as the market-level abstraction for all compute
    fulfillment.
-3. Add real bare-metal access grant/reclaim API/service support using the
-   shared allocation lifecycle and `executor_ref.physical_host_id` convention.
+3. Add concrete bare-metal access grant/reclaim playbook tasks using the shared
+   allocation lifecycle and `executor_ref.physical_host_id` convention.
 4. Extend listing/publication flows so VM and bare-metal listings are derived
    from the same site-authority snapshot and cross-mode availability.
 

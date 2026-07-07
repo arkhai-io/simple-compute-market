@@ -14,7 +14,9 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from core_site.ledger import ALLOCATION_MODE_EXCLUSIVE
+from db.models import AnsibleJob
 from main import app
+from services.bare_metal_operations_service import NODE_GRANT_ACCESS_ACTION
 
 
 def _future_dt(hours: int = 2) -> str:
@@ -109,7 +111,6 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
         physical_host_id="host-physical-1",
         access_ref={"ssh_user": "tenant-a"},
         lease_end_utc=_future_dt(),
-        create_job_id="grant-ssh-1",
     )
 
     assert lease["allocation_id"] == reserved["allocation_id"]
@@ -127,7 +128,16 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
         "physical_host_id": "host-physical-1",
         "ssh_user": "tenant-a",
     }
+    assert allocation["create_job_id"]
     assert allocation["vm_target"] is None
+
+    session_factory = _container_module.resolved_session_factory
+    with session_factory() as db:
+        job = db.get(AnsibleJob, allocation["create_job_id"])
+        assert job is not None
+        assert job.params["vm_action"] == NODE_GRANT_ACCESS_ACTION
+        assert job.params["vm_host"] == "bm-node-1"
+        assert job.params["physical_host_id"] == "host-physical-1"
 
 
 async def test_list_and_get_bare_metal_leases_exclude_vm_leases(

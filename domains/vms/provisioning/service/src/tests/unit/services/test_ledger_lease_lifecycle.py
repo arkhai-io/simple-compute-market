@@ -405,6 +405,41 @@ async def test_bare_metal_executor_releases_locally_and_notifies(session_factory
 
 
 @pytest.mark.asyncio
+async def test_bare_metal_executor_submits_reclaim_job_when_delegate_configured(
+    session_factory, ledger,
+):
+    allocation = _just_expired_allocation(ledger)
+    ledger.update_lease_fields(
+        allocation["allocation_id"],
+        executor_kind=BARE_METAL_EXECUTOR_KIND,
+        executor_target="node-1",
+        executor_ref=bare_metal_executor_ref(
+            "host-kvm1",
+            access_ref={"ssh_user": "tenant-x"},
+        ),
+    )
+    release_delegate = AsyncMock(return_value="reclaim-42")
+    dispatcher = ExecutorReleaseDispatcher({
+        BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
+            release_delegate=release_delegate,
+        ),
+    })
+    svc = LeaseLifecycleService(
+        settings=_settings(),
+        capacity_ledger=ledger,
+        release_dispatcher=dispatcher,
+    )
+
+    summary = await svc.force_check_leases()
+
+    assert summary["checked"] == 1
+    row = ledger.get_allocation(allocation["allocation_id"])
+    assert row["state"] == "releasing"
+    assert row["release_job_id"] == "reclaim-42"
+    release_delegate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_bare_metal_release_submission_failure_stays_held(session_factory, ledger):
     allocation = _just_expired_allocation(ledger)
     ledger.update_lease_fields(

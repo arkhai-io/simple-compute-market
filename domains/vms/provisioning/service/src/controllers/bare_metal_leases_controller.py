@@ -18,6 +18,7 @@ from services.bare_metal_lease_service import (
     BareMetalLeaseService,
     bare_metal_access_ref,
 )
+from services.bare_metal_operations_service import BareMetalOperationsService
 from services.lease_lifecycle_service import LeaseNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -62,8 +63,12 @@ class BareMetalLeasesController:
         bare_metal_lease_service: BareMetalLeaseService = Depends(
             lambda: _container_module.resolved_bare_metal_lease_service
         ),
+        bare_metal_operations_service: BareMetalOperationsService = Depends(
+            lambda: _container_module.resolved_bare_metal_operations_service
+        ),
     ) -> None:
         self._leases = bare_metal_lease_service
+        self._operations = bare_metal_operations_service
 
     @router.get(
         "/",
@@ -79,7 +84,10 @@ class BareMetalLeasesController:
         status_code=201,
         summary="Register a bare-metal lease on its allocation",
     )
-    def create_lease(self, body: BareMetalLeaseCreate) -> BareMetalLeaseView:
+    async def create_lease(self, body: BareMetalLeaseCreate) -> BareMetalLeaseView:
+        if not body.create_job_id:
+            grant = await self._operations.grant_access(body)
+            body = body.model_copy(update={"create_job_id": grant.job_id})
         try:
             attached = self._leases.register_lease(body)
         except LeaseNotFoundError as exc:
