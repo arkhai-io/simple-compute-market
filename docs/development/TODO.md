@@ -21,6 +21,8 @@ Pending architectural work and known operational issues for the Arkhai market st
 | [Golden image configuration](#golden-image-configuration-management-varsyaml) | Provisioning Service | Needs review |
 | [Host capacity resource filters](#host-capacity-resource-filters) | Provisioning Service | Needs review |
 | [Site resources and shared lease lifecycle boundaries](#site-resources-and-shared-lease-lifecycle-boundaries) | Provisioning Service | Needs review |
+| [Shared host accounting for VM and bare-metal offers](#shared-host-accounting-for-vm-and-bare-metal-offers) | Provisioning Service | Planned |
+| [Seller-side spot automation](#seller-side-spot-automation) | Provisioning Service | Planned |
 | [Multi-Provider Resource Pool Architecture](#multi-provider-resource-pool-architecture) | Provisioning Service | Needs review |
 | [`StorefrontCallbackClient` extraction](#storefrontcallbackclient-extraction-conditional) | Provisioning Service | Conditional |
 | [Alkahest contracts in baked state](#alkahest-contracts-in-the-baked-state) | Documentation Gaps | Needs review |
@@ -382,6 +384,121 @@ Lease lifecycle policy should sit above that generic site resource layer. A reus
 **Remaining shared-layer refactor:** narrow the lower `core_site` implementation behind the generic site-resource boundary. The lower implementation still exposes ledger-named and lease-shaped methods; future code should depend on focused site resource/allocation/event service wrappers instead of reaching through those details. Once the lower boundary is generic, move the delegate-based lease lifecycle service into the shared wheel so VM, pod, and bare-metal provisioning services can reuse the state machine with different release delegates.
 
 **Monitoring work:** `release_failed` requires polling the provisioning service or inspecting logs. Add admin monitoring/alerting for failed releases with `lease_id`, resource id, host, VM target, `vm_remove_job_id`, failure reason/message, and suggested recovery actions. Do not notify the storefront with a capacity-released event unless capacity was actually released.
+
+---
+
+### Shared host accounting for VM and bare-metal offers
+
+**Status:** Planned.
+
+**Goal:** allow a seller to offer the same underlying physical machine as
+exclusive bare metal or as VM slices, depending on demand, without double
+selling capacity. A bare-metal lease of a host must make all VM slice listings
+for that host unavailable. VM slice allocations must make the exclusive
+bare-metal listing unavailable until all child allocations are gone.
+
+**Current state:** the VM provisioning service already hosts the site ledger
+and is part-way toward the target architecture: `CapacityLedgerService` owns
+site resources, allocations, and capacity events; `SiteResourcesService` is a
+thin resource/allocation adapter; `LeaseLifecycleService` accepts a release
+delegate. However, the implementation is still VM-shaped. The provisioning
+container declares `required_attributes=("vm_host",)`, allocation rows expose
+`vm_host`, `vm_target`, and `vm_remove_job_id`, market-managed release defaults
+to `vm_remove`, and fulfillment dispatch still goes through VM-specific
+executor paths.
+
+**Design stance:** VM and bare-metal provisioning should be separate executor
+services, or at least separate executor implementations, but they must not own
+separate capacity ledgers for the same hardware. The site authority is the
+single source of truth for physical inventory, reservations, conflicts, lease
+state, and capacity events. Executor services consume allocation decisions and
+report provisioning/release outcomes; they do not independently decide that
+shared hardware is available.
+
+**Required accounting model:**
+
+- Physical machines are represented once in the site authority with stable
+  `host_id`/`resource_id`, total units, attributes, supported modes, and
+  health/enabled state.
+- VM claims consume shareable units from a host, such as GPU count, vCPU, RAM,
+  disk, and ports, while the host is not exclusively leased.
+- Bare-metal claims require exclusive host ownership and conflict with any held
+  allocation on the same host.
+- Capacity matching must understand parent/child conflicts: bare metal blocks
+  VM slices; VM slices block bare metal; compatible VM slices can coexist while
+  unit capacity remains.
+- Listings are derived from remaining ledger availability. The storefront
+  should publish/reopen/close VM and bare-metal listings from the same capacity
+  snapshot rather than from executor-local state.
+
+**Planned fix, before real bare-metal sales:**
+
+1. Add generic executor metadata to allocations, such as `executor_kind`,
+   `executor_target`, `release_job_id`, and/or an opaque `executor_ref`, while
+   keeping compatibility with existing `vm_*` fields during migration.
+2. Extend the site-resource model to represent host-level resources and
+   shareable child capacity, or equivalent conflict metadata keyed by host.
+3. Teach ledger `probe`/`reserve` conflict checks about exclusive host claims
+   and shareable VM-slice claims.
+4. Move market-managed fulfillment dispatch behind an allocation/executor
+   interface keyed by `executor_kind`; VM dispatch calls the existing VM
+   provisioner, and bare-metal dispatch can later call `node_grant_access` /
+   `node_reclaim`.
+5. Keep direct `/hosts/{host}/vms/*` operator APIs for VM administration, but
+   stop treating those APIs as the market-level abstraction for all compute
+   fulfillment.
+6. Add unit tests for same-host conflicts: bare metal after VM allocation
+   fails, VM after bare-metal allocation fails, compatible VM slices can
+   coexist, release restores both listing classes, and `release_failed` keeps
+   both listing classes unavailable.
+
+**Acceptance criteria:** one physical host can be registered once, exposed as
+both a whole-host bare-metal offer and one or more VM slice offers, and the
+site ledger prevents all cross-mode double-sell cases before any executor job
+starts.
+
+---
+
+### Seller-side spot automation
+
+**Status:** Planned.
+
+**Current state:** interruptible VM listings can publish splitter-backed
+settlement demands, and the storefront has an admin interruption endpoint that
+validates an interruptible deal and truncates its capacity lease. The on-chain
+splitter declaration and seller automation loop remain separate follow-on work.
+
+**Design stance:** keep the storefront/provisioning HTTP APIs as the public
+control surface first. Seller-side spot automation should be configurable, but
+does not need to become a protocol-level structured policy API until another
+in-protocol participant needs to consume or verify it. In the near term, sellers
+can run free implementation code against public endpoints, using shared
+middleware/utilities for discovery, safety guards, scoring, dry-runs,
+settlement split calculation, and audit logging.
+
+**Public, structured terms vs private automation:** buyer-facing interruption
+terms may need a structured listing/negotiation shape earlier than the seller's
+private scheduling logic. Public terms include fields such as `interruptible`,
+minimum notice, refund formula, protected runtime, preemption limits, and any
+penalty or bond semantics. Private automation decides when to interrupt within
+those terms, based on seller capacity pressure, fixed-demand opportunity cost,
+buyer/account protections, and local operating policy.
+
+**Planned fix:**
+
+1. Add/read missing control-plane views needed by automation: active
+   interruptible deals, current allocations, capacity pressure, and dry-run
+   interruption plans.
+2. Wire the settlement half of interruption: compute/validate splitter amounts
+   and submit or prepare the on-chain splitter declaration after capacity lease
+   truncation.
+3. Ship a seller-side reference runner or library that composes reusable guards
+   and scoring helpers over the public API, recording policy name/version,
+   config, selected deal, reason, dry-run result, and settlement split in stage
+   logs.
+4. Promote a formal structured policy/plugin API only after at least two
+   materially different seller automation strategies or another in-protocol
+   consumer require a stable decision vocabulary.
 
 ---
 
