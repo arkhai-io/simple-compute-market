@@ -113,7 +113,7 @@ class Resource(BaseModel):
         if isinstance(data, Resource):
             return data
         if not isinstance(data, dict):
-            return data
+            raise ValueError("Unsupported resource payload for core Resource parser")
         if "token" in data:
             return TokenResource(**data)
         raise ValueError("Unsupported resource payload for core Resource parser")
@@ -628,7 +628,7 @@ def accepted_demands(accepted_or_proposal: Any) -> list[dict[str, Any]]:
         selected = getattr(accepted_or_proposal, "demand", None)
         dumped = (
             selected.model_dump(exclude_none=True)
-            if hasattr(selected, "model_dump")
+            if selected is not None and hasattr(selected, "model_dump")
             else None
         )
         if isinstance(dumped, dict):

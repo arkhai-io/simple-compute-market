@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import httpx
 
@@ -51,7 +51,7 @@ def _eip191_address(private_key: str) -> str:
     """Lowercased EIP-191 wallet address for ``private_key``."""
     from eth_account import Account
 
-    return Account.from_key(private_key).address.lower()
+    return str(Account.from_key(private_key).address).lower()
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +108,9 @@ class _RegistryClientBase:
         return {"If-Match": normalized}
 
     @staticmethod
-    def _publish_listing_body(listing: ListingRequest, private_key: str) -> tuple[dict, dict]:
+    def _publish_listing_body(
+        listing: ListingRequest, private_key: str
+    ) -> tuple[dict[str, Any], dict[str, str]]:
         """Returns (json_body, headers) for a publish POST /listings.
 
         The signing identity is derived from ``private_key``; the registry
@@ -127,7 +129,7 @@ class _RegistryClientBase:
         return body, {"Content-Type": "application/json"}
 
     @staticmethod
-    def _delete_listing_params(listing_id: str, private_key: str) -> dict:
+    def _delete_listing_params(listing_id: str, private_key: str) -> dict[str, Any]:
         """Returns query params for a delete-listing DELETE."""
         timestamp = int(time.time())
         message = f"delete_listing:{listing_id}:{timestamp}"
@@ -291,11 +293,16 @@ class RegistryClient(_RegistryClientBase):
     # /listings
     # ------------------------------------------------------------------
 
-    async def publish_listing(self, listing: ListingRequest, private_key: str) -> dict:
+    async def publish_listing(
+        self, listing: ListingRequest, private_key: str
+    ) -> dict[str, Any]:
         """POST /listings with EIP-191 auth (signer derived from the key)."""
         body, hdrs = self._publish_listing_body(listing, private_key)
-        return await self._request(
-            "POST", "/listings", json=body, headers=hdrs, expected=(201,),
+        return cast(
+            dict[str, Any],
+            await self._request(
+                "POST", "/listings", json=body, headers=hdrs, expected=(201,),
+            ),
         )
 
     async def validate_publish_listing(
@@ -353,9 +360,16 @@ class RegistryClient(_RegistryClientBase):
         data = await self._request("GET", f"/listings/{listing_id}")
         return self._parse_listing(data.get("listing", data) if isinstance(data, dict) else data)
 
-    async def update_listing(self, listing_id: str, request: UpdateListingRequest) -> dict:
+    async def update_listing(
+        self, listing_id: str, request: UpdateListingRequest
+    ) -> dict[str, Any]:
         """PUT /listings/{listing_id} → updated listing dict."""
-        return await self._request("PUT", f"/listings/{listing_id}", json=request.to_dict(listing_id))
+        return cast(
+            dict[str, Any],
+            await self._request(
+                "PUT", f"/listings/{listing_id}", json=request.to_dict(listing_id)
+            ),
+        )
 
     async def delete_listing(self, listing_id: str, private_key: str) -> None:
         """DELETE /listings/{listing_id} with EIP-191 auth query params."""
@@ -468,11 +482,16 @@ class SyncRegistryClient(_RegistryClientBase):
     # /listings
     # ------------------------------------------------------------------
 
-    def publish_listing(self, listing: ListingRequest, private_key: str) -> dict:
+    def publish_listing(
+        self, listing: ListingRequest, private_key: str
+    ) -> dict[str, Any]:
         """POST /listings with EIP-191 auth (signer derived from the key)."""
         body, hdrs = self._publish_listing_body(listing, private_key)
-        return self._request(
-            "POST", "/listings", json=body, headers=hdrs, expected=(201,),
+        return cast(
+            dict[str, Any],
+            self._request(
+                "POST", "/listings", json=body, headers=hdrs, expected=(201,),
+            ),
         )
 
     def validate_publish_listing(
@@ -525,9 +544,16 @@ class SyncRegistryClient(_RegistryClientBase):
         data = self._request("GET", f"/listings/{listing_id}")
         return self._parse_listing(data.get("listing", data) if isinstance(data, dict) else data)
 
-    def update_listing(self, listing_id: str, request: UpdateListingRequest) -> dict:
+    def update_listing(
+        self, listing_id: str, request: UpdateListingRequest
+    ) -> dict[str, Any]:
         """PUT /listings/{listing_id} → updated listing dict."""
-        return self._request("PUT", f"/listings/{listing_id}", json=request.to_dict(listing_id))
+        return cast(
+            dict[str, Any],
+            self._request(
+                "PUT", f"/listings/{listing_id}", json=request.to_dict(listing_id)
+            ),
+        )
 
     def delete_listing(self, listing_id: str, private_key: str) -> None:
         """DELETE /listings/{listing_id} with EIP-191 auth query params."""

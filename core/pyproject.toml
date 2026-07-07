@@ -18,12 +18,23 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/market_core"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"src/market_core/py.typed" = "market_core/py.typed"
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 asyncio_mode = "auto"
 testpaths = ["tests/unit"]
 
+[tool.mypy]
+python_version = "3.10"
+check_untyped_defs = true
+show_error_codes = true
+warn_return_any = true
+warn_unused_ignores = true
+
 [dependency-groups]
 dev = [
+    "mypy>=1.15.0,<2.0.0",
     "pytest>=8.3.4,<9.0.0",
 ]

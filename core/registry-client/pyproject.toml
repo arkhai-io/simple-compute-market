@@ -15,3 +15,19 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/registry_client"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/registry_client/py.typed" = "registry_client/py.typed"
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+show_error_codes = true
+warn_return_any = true
+warn_unused_ignores = true
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0,<2.0.0",
+    "pytest>=8.0",
+]
