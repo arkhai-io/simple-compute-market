@@ -27,6 +27,8 @@ from provisioning_client.models import (
     LeaseUpdate,
 )
 from services.release_executors import (
+    BARE_METAL_EXECUTOR_KIND,
+    BareMetalReleaseExecutor,
     ExecutorReleaseDispatcher,
     VM_EXECUTOR_KIND,
     VmReleaseExecutor,
@@ -76,6 +78,7 @@ class LeaseLifecycleService:
         self._job_svc = job_service
         self._job_queue_provider = job_queue_provider
         dispatcher = release_dispatcher or ExecutorReleaseDispatcher({
+            BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(),
             VM_EXECUTOR_KIND: VmReleaseExecutor(
                 job_service=job_service,
                 job_queue_provider=job_queue_provider,

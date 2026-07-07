@@ -20,6 +20,11 @@ from sqlalchemy.pool import StaticPool
 from db.models import Base
 from core_site.ledger import CapacityLedgerService
 from services.lease_lifecycle_service import LeaseLifecycleService
+from services.release_executors import (
+    BARE_METAL_EXECUTOR_KIND,
+    BareMetalReleaseExecutor,
+    ExecutorReleaseDispatcher,
+)
 
 
 @pytest.fixture
@@ -351,12 +356,77 @@ async def test_missing_executor_kind_falls_back_to_vm_release(session_factory, l
 
 
 @pytest.mark.asyncio
+async def test_bare_metal_executor_releases_locally_and_notifies(session_factory, ledger):
+    allocation = _just_expired_allocation(ledger)
+    ledger.update_lease_fields(
+        allocation["allocation_id"],
+        executor_kind=BARE_METAL_EXECUTOR_KIND,
+        executor_target="node-1",
+        executor_ref={"ssh_user": "tenant-x"},
+    )
+
+    svc = LeaseLifecycleService(
+        settings=_settings(),
+        capacity_ledger=ledger,
+        job_service=None,
+    )
+
+    sf = MagicMock()
+    sf.__aenter__ = AsyncMock(return_value=sf)
+    sf.__aexit__ = AsyncMock(return_value=False)
+    sf.notify_capacity_released = AsyncMock(return_value={})
+
+    with patch("storefront_client.StorefrontClient", return_value=sf):
+        summary = await svc.force_check_leases()
+
+    assert summary["checked"] == 1
+    assert summary["released"] == 1
+    row = ledger.get_allocation(allocation["allocation_id"])
+    assert row["state"] == "released"
+    assert row["release_job_id"] == "direct-release"
+    assert row["vm_remove_job_id"] is None
+    assert ledger.snapshot()[0]["available_units"] == 8
+    sf.notify_capacity_released.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_bare_metal_release_submission_failure_stays_held(session_factory, ledger):
+    allocation = _just_expired_allocation(ledger)
+    ledger.update_lease_fields(
+        allocation["allocation_id"],
+        executor_kind=BARE_METAL_EXECUTOR_KIND,
+        executor_target="node-1",
+    )
+
+    release_delegate = AsyncMock(return_value=None)
+    dispatcher = ExecutorReleaseDispatcher({
+        BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
+            release_delegate=release_delegate,
+        ),
+    })
+    svc = LeaseLifecycleService(
+        settings=_settings(),
+        capacity_ledger=ledger,
+        release_dispatcher=dispatcher,
+    )
+
+    summary = await svc.force_check_leases()
+
+    assert summary["release_failed"] == 1
+    row = ledger.get_allocation(allocation["allocation_id"])
+    assert row["state"] == "release_failed"
+    assert row["failure_reason"] == "release_submit_failed"
+    assert ledger.snapshot()[0]["available_units"] < 8
+    release_delegate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_unknown_executor_kind_stays_held_and_retryable(session_factory, ledger):
     allocation = _just_expired_allocation(ledger)
     ledger.update_lease_fields(
         allocation["allocation_id"],
-        executor_kind="bare_metal",
-        executor_target="node-1",
+        executor_kind="custom_executor",
+        executor_target="target-1",
     )
 
     job_svc = MagicMock()

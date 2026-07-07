@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+import inspect
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 from models.jobs_model import AnsibleJobParams
 
 logger = logging.getLogger(__name__)
 
+BARE_METAL_EXECUTOR_KIND = "bare_metal"
 VM_EXECUTOR_KIND = "vm"
+BareMetalReleaseDelegate = Callable[[dict[str, Any]], Awaitable[str | None] | str | None]
 
 
 class ReleaseExecutor(Protocol):
@@ -65,6 +68,31 @@ class VmReleaseExecutor:
                 exc,
             )
             return None
+
+
+class BareMetalReleaseExecutor:
+    """Release executor for bare-metal allocations.
+
+    The default path is intentionally local/direct: the first bare-metal slice
+    only needs to release accounting after access is revoked out-of-band. A
+    concrete access revocation implementation can be injected as the domain
+    grows.
+    """
+
+    def __init__(
+        self,
+        *,
+        release_delegate: BareMetalReleaseDelegate | None = None,
+    ) -> None:
+        self._release_delegate = release_delegate
+
+    async def submit_release(self, allocation: dict[str, Any]) -> str | None:
+        if self._release_delegate is None:
+            return "direct-release"
+        result = self._release_delegate(allocation)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
 
 
 class ExecutorReleaseDispatcher:
