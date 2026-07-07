@@ -43,6 +43,8 @@ from .db import (
 
 logger = logging.getLogger(__name__)
 
+VM_EXECUTOR_KIND = "vm"
+
 
 class CapacityConflictError(Exception):
     """Raised when a mutation references a row in an incompatible state."""
@@ -299,6 +301,11 @@ class CapacityLedgerService:
                 escrow_uid=deal.get("escrow_uid"),
                 hold_expires_at=hold_expires_at,
                 vm_host=(resource.attributes or {}).get("vm_host"),
+                executor_kind=(
+                    VM_EXECUTOR_KIND
+                    if (resource.attributes or {}).get("vm_host")
+                    else None
+                ),
                 lease_start_utc=window_start.isoformat() if window_start else None,
                 lease_end_utc=window_end.isoformat() if window_end else None,
             )
@@ -409,6 +416,9 @@ class CapacityLedgerService:
         escrow_uid: str | None = None,
         vm_host: str | None = None,
         vm_target: str | None = None,
+        executor_kind: str | None = None,
+        executor_target: str | None = None,
+        executor_ref: Mapping[str, Any] | None = None,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         create_job_id: str | None = None,
@@ -433,6 +443,12 @@ class CapacityLedgerService:
                 allocation.vm_host = vm_host
             if vm_target:
                 allocation.vm_target = vm_target
+            self._sync_executor_fields(
+                allocation,
+                executor_kind=executor_kind,
+                executor_target=executor_target,
+                executor_ref=executor_ref,
+            )
             if lease_start_utc:
                 allocation.lease_start_utc = str(lease_start_utc)
             if lease_end_utc:
@@ -466,7 +482,11 @@ class CapacityLedgerService:
         return due
 
     def begin_releasing(
-        self, allocation_id: str, *, vm_remove_job_id: str | None = None,
+        self,
+        allocation_id: str,
+        *,
+        vm_remove_job_id: str | None = None,
+        release_job_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Transition a leased allocation to releasing (teardown in flight).
 
@@ -478,7 +498,10 @@ class CapacityLedgerService:
             if allocation is None or allocation.state not in HELD_ALLOCATION_STATES:
                 return None
             allocation.state = AllocationState.releasing.value
-            allocation.vm_remove_job_id = vm_remove_job_id
+            self._sync_release_job_fields(
+                allocation,
+                release_job_id=release_job_id or vm_remove_job_id,
+            )
             db.commit()
             return self._allocation_payload(allocation)
 
@@ -488,9 +511,13 @@ class CapacityLedgerService:
         *,
         vm_host: str | None = None,
         vm_target: str | None = None,
+        executor_kind: str | None = None,
+        executor_target: str | None = None,
+        executor_ref: Mapping[str, Any] | None = None,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         vm_remove_job_id: str | None = None,
+        release_job_id: str | None = None,
         create_job_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Update lease-tail fields on a non-terminal allocation.
@@ -514,12 +541,20 @@ class CapacityLedgerService:
                 allocation.vm_host = vm_host
             if vm_target is not None:
                 allocation.vm_target = vm_target
+            self._sync_executor_fields(
+                allocation,
+                executor_kind=executor_kind,
+                executor_target=executor_target,
+                executor_ref=executor_ref,
+            )
             if lease_start_utc is not None:
                 allocation.lease_start_utc = str(lease_start_utc)
             if lease_end_utc is not None:
                 allocation.lease_end_utc = str(lease_end_utc)
-            if vm_remove_job_id is not None:
-                allocation.vm_remove_job_id = vm_remove_job_id
+            self._sync_release_job_fields(
+                allocation,
+                release_job_id=release_job_id or vm_remove_job_id,
+            )
             if create_job_id is not None:
                 allocation.create_job_id = create_job_id
             db.commit()
@@ -557,6 +592,7 @@ class CapacityLedgerService:
         failure_reason: str | None = None,
         failure_message: str | None = None,
         vm_remove_job_id: str | None = None,
+        release_job_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Update a site allocation state without emitting capacity events.
 
@@ -574,8 +610,10 @@ class CapacityLedgerService:
                 allocation.failure_reason = failure_reason
             if failure_message is not None:
                 allocation.failure_message = failure_message
-            if vm_remove_job_id is not None:
-                allocation.vm_remove_job_id = vm_remove_job_id
+            self._sync_release_job_fields(
+                allocation,
+                release_job_id=release_job_id or vm_remove_job_id,
+            )
             db.commit()
             return self._allocation_payload(allocation)
 
@@ -838,6 +876,10 @@ class CapacityLedgerService:
             "deal_ref": dict(allocation.deal_ref or {}),
             "escrow_uid": allocation.escrow_uid,
             "hold_expires_at": allocation.hold_expires_at,
+            "executor_kind": allocation.executor_kind,
+            "executor_target": allocation.executor_target,
+            "release_job_id": allocation.release_job_id,
+            "executor_ref": dict(allocation.executor_ref or {}),
             "vm_host": allocation.vm_host,
             "vm_target": allocation.vm_target,
             "lease_start_utc": allocation.lease_start_utc,
@@ -847,3 +889,38 @@ class CapacityLedgerService:
             "failure_reason": allocation.failure_reason,
             "released_at": allocation.released_at,
         }
+
+    @staticmethod
+    def _sync_executor_fields(
+        allocation: SiteAllocation,
+        *,
+        executor_kind: str | None = None,
+        executor_target: str | None = None,
+        executor_ref: Mapping[str, Any] | None = None,
+    ) -> None:
+        if executor_kind is not None:
+            allocation.executor_kind = executor_kind
+        elif allocation.vm_host and not allocation.executor_kind:
+            allocation.executor_kind = VM_EXECUTOR_KIND
+
+        if executor_target is not None:
+            allocation.executor_target = executor_target
+        elif allocation.vm_target and not allocation.executor_target:
+            allocation.executor_target = allocation.vm_target
+
+        if executor_ref is not None:
+            allocation.executor_ref = dict(executor_ref)
+        elif allocation.vm_host and not allocation.executor_ref:
+            allocation.executor_ref = {"vm_host": allocation.vm_host}
+
+    @staticmethod
+    def _sync_release_job_fields(
+        allocation: SiteAllocation,
+        *,
+        release_job_id: str | None,
+    ) -> None:
+        if release_job_id is None:
+            return
+        allocation.release_job_id = release_job_id
+        if allocation.executor_kind in (None, VM_EXECUTOR_KIND):
+            allocation.vm_remove_job_id = release_job_id

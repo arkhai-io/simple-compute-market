@@ -263,6 +263,9 @@ def test_attach_lease_records_tail_on_allocation(seeded: CapacityLedgerService):
     )
     assert attached["state"] == "leased"
     assert attached["vm_target"] == "tenant-abcd"
+    assert attached["executor_kind"] == "vm"
+    assert attached["executor_target"] == "tenant-abcd"
+    assert attached["executor_ref"] == {"vm_host": "kvm1"}
     assert attached["create_job_id"] == "job-1"
     # No availability change: attach emits no capacity event.
     events, _ = seeded.events_after(0)
@@ -290,6 +293,7 @@ def test_list_lease_due_and_begin_releasing(seeded: CapacityLedgerService):
     )
     assert releasing["state"] == "releasing"
     assert releasing["vm_remove_job_id"] == "check-1"
+    assert releasing["release_job_id"] == "check-1"
     # releasing still holds the units and is no longer "due".
     assert seeded.snapshot()[0]["available_units"] == 7
     assert seeded.list_lease_due(datetime.now(timezone.utc)) == []

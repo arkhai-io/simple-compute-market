@@ -128,9 +128,20 @@ def _migrate_vm_leases_allocation_id(engine: Engine) -> None:
         )
 
 
+def _migrate_site_allocations_executor_fields(engine: Engine) -> None:
+    _add_column_if_missing(engine, "site_allocations", "executor_kind", "VARCHAR")
+    _add_column_if_missing(engine, "site_allocations", "executor_target", "VARCHAR")
+    _add_column_if_missing(engine, "site_allocations", "release_job_id", "VARCHAR")
+    _add_column_if_missing(engine, "site_allocations", "executor_ref", "JSON")
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
     Migration("20260603_003_vm_leases_table", _migrate_vm_leases_table),
     Migration("20260603_004_vm_leases_allocation_id", _migrate_vm_leases_allocation_id),
+    Migration(
+        "20260707_001_site_allocations_executor_fields",
+        _migrate_site_allocations_executor_fields,
+    ),
 )

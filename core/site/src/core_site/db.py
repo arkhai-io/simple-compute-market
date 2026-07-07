@@ -111,6 +111,10 @@ class SiteAllocation(Base):
     deal_ref = Column(JSON, nullable=True)
     escrow_uid = Column(String, nullable=True, index=True)  # lifted from deal_ref
     hold_expires_at = Column(String, nullable=True)  # TTL soft hold (two-phase reserve)
+    executor_kind = Column(String, nullable=True)
+    executor_target = Column(String, nullable=True)
+    release_job_id = Column(String, nullable=True)
+    executor_ref = Column(JSON, nullable=True)
     vm_host = Column(String, nullable=True)
     vm_target = Column(String, nullable=True)
     lease_start_utc = Column(String, nullable=True)

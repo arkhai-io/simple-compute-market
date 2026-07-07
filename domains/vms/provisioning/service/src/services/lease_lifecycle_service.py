@@ -32,6 +32,7 @@ from services.site_resources_service import SiteResourcesService
 logger = logging.getLogger(__name__)
 
 ReleaseDelegate = Callable[[dict[str, Any]], Awaitable[str | None] | str | None]
+VM_EXECUTOR_KIND = "vm"
 
 
 class LeaseLifecycleError(Exception):
@@ -50,6 +51,70 @@ class InvalidLeaseStateError(LeaseLifecycleError):
         self.state = state
 
 
+class VmReleaseExecutor:
+    """Release executor for VM allocations."""
+
+    def __init__(
+        self,
+        *,
+        job_service=None,
+        job_queue_provider: Callable[[], Any] | None = None,
+    ) -> None:
+        self._job_svc = job_service
+        self._job_queue_provider = job_queue_provider
+
+    async def submit_release(self, allocation: dict[str, Any]) -> str | None:
+        return await self._submit_vm_remove_job(
+            vm_host=allocation.get("vm_host"),
+            vm_target=allocation.get("executor_target") or allocation.get("vm_target"),
+        )
+
+    async def _submit_vm_remove_job(self, *, vm_host, vm_target) -> Optional[str]:
+        if self._job_svc is None:
+            return "direct-release"
+        if not vm_host or not vm_target:
+            return None
+        try:
+            if self._job_queue_provider is not None:
+                job_queue = self._job_queue_provider()
+            else:
+                import container as _container_module
+                job_queue = _container_module.resolved_job_queue
+            if job_queue is None:
+                raise RuntimeError("job_queue not initialised")
+            params = AnsibleJobParams(
+                vm_host=vm_host,
+                vm_action="vm_remove",
+                vm_target=vm_target,
+            )
+            submit = await self._job_svc.submit(params, job_queue=job_queue)
+            return submit.job_id
+        except Exception as exc:
+            logger.warning(
+                "[LEASE_LIFECYCLE] Failed to submit vm_remove job for %s/%s: %s",
+                vm_host, vm_target, exc,
+            )
+            return None
+
+
+class ExecutorReleaseDispatcher:
+    """Route release requests by allocation executor kind."""
+
+    def __init__(self, executors: dict[str, VmReleaseExecutor]) -> None:
+        self._executors = dict(executors)
+
+    async def submit_release(self, allocation: dict[str, Any]) -> str | None:
+        executor_kind = allocation.get("executor_kind") or VM_EXECUTOR_KIND
+        executor = self._executors.get(str(executor_kind))
+        if executor is None:
+            logger.warning(
+                "[LEASE_LIFECYCLE] No release executor registered for executor_kind=%s",
+                executor_kind,
+            )
+            return None
+        return await executor.submit_release(allocation)
+
+
 class LeaseLifecycleService:
     """Lease lifecycle state machine over generic site allocations."""
 
@@ -65,12 +130,19 @@ class LeaseLifecycleService:
         job_service=None,
         job_queue_provider: Callable[[], Any] | None = None,
         release_delegate: ReleaseDelegate | None = None,
+        release_dispatcher: ExecutorReleaseDispatcher | None = None,
     ) -> None:
         self._settings = settings
         self._site_resources = site_resources_service or SiteResourcesService(capacity_ledger)
         self._job_svc = job_service
         self._job_queue_provider = job_queue_provider
-        self._release_delegate = release_delegate or self._submit_vm_remove_for_allocation
+        dispatcher = release_dispatcher or ExecutorReleaseDispatcher({
+            VM_EXECUTOR_KIND: VmReleaseExecutor(
+                job_service=job_service,
+                job_queue_provider=job_queue_provider,
+            ),
+        })
+        self._release_delegate = release_delegate or dispatcher.submit_release
         self._paused = False
         self._resume_event = asyncio.Event()
         self._resume_event.set()
@@ -114,6 +186,9 @@ class LeaseLifecycleService:
             escrow_uid=body.escrow_uid,
             vm_host=body.vm_host,
             vm_target=body.vm_target,
+            executor_kind=VM_EXECUTOR_KIND,
+            executor_target=body.vm_target,
+            executor_ref={"vm_host": body.vm_host},
             lease_start_utc=(
                 body.lease_start_utc.isoformat() if body.lease_start_utc else None
             ),
@@ -125,6 +200,9 @@ class LeaseLifecycleService:
                 escrow_uid=body.escrow_uid,
                 vm_host=body.vm_host,
                 vm_target=body.vm_target,
+                executor_kind=VM_EXECUTOR_KIND,
+                executor_target=body.vm_target,
+                executor_ref={"vm_host": body.vm_host},
                 lease_start_utc=(
                     body.lease_start_utc.isoformat() if body.lease_start_utc else None
                 ),
@@ -143,6 +221,9 @@ class LeaseLifecycleService:
             lease_id,
             vm_host=body.vm_host,
             vm_target=body.vm_target,
+            executor_kind=VM_EXECUTOR_KIND if body.vm_host or body.vm_target else None,
+            executor_target=body.vm_target,
+            executor_ref={"vm_host": body.vm_host} if body.vm_host else None,
             lease_start_utc=(
                 body.lease_start_utc.isoformat() if body.lease_start_utc else None
             ),
@@ -150,6 +231,7 @@ class LeaseLifecycleService:
                 body.lease_end_utc.isoformat() if body.lease_end_utc else None
             ),
             vm_remove_job_id=body.vm_remove_job_id,
+            release_job_id=body.vm_remove_job_id,
             create_job_id=body.create_job_id,
         )
         if updated is None:
@@ -192,6 +274,7 @@ class LeaseLifecycleService:
             lease_id,
             state="releasing",
             vm_remove_job_id=job_id,
+            release_job_id=job_id,
         ) or self.get_lease(lease_id)
 
     def release_oversight(
@@ -238,6 +321,7 @@ class LeaseLifecycleService:
             failure_reason=retry_reason,
             failure_message=f"release retry submitted with job {job_id}",
             vm_remove_job_id=job_id,
+            release_job_id=job_id,
         ) or self.get_lease(lease_id)
 
     async def force_release(
@@ -296,6 +380,7 @@ class LeaseLifecycleService:
                         allocation["allocation_id"],
                         state="releasing",
                         vm_remove_job_id=job_id,
+                        release_job_id=job_id,
                     )
                     checked += 1
                     logger.info(
@@ -304,13 +389,23 @@ class LeaseLifecycleService:
                         allocation["allocation_id"],
                     )
                 else:
-                    skipped += 1
+                    self._mark_release_failed(
+                        allocation,
+                        reason="release_submit_failed",
+                        message="release delegate did not return a job id",
+                    )
+                    release_failed += 1
             except Exception as exc:
                 logger.exception(
                     "[LEASE_LIFECYCLE] Failed to begin release for allocation %s: %s",
                     allocation.get("allocation_id"), exc,
                 )
-                skipped += 1
+                self._mark_release_failed(
+                    allocation,
+                    reason="release_submit_error",
+                    message=str(exc),
+                )
+                release_failed += 1
 
         for allocation in self._site_resources.list_allocations(state="releasing"):
             try:
@@ -348,39 +443,6 @@ class LeaseLifecycleService:
             result = await result
         return result
 
-    async def _submit_vm_remove_for_allocation(self, allocation: dict[str, Any]) -> Optional[str]:
-        return await self._submit_vm_remove_job(
-            vm_host=allocation.get("vm_host"),
-            vm_target=allocation.get("vm_target"),
-        )
-
-    async def _submit_vm_remove_job(self, *, vm_host, vm_target) -> Optional[str]:
-        if self._job_svc is None:
-            return "direct-release"
-        if not vm_host or not vm_target:
-            return None
-        try:
-            if self._job_queue_provider is not None:
-                job_queue = self._job_queue_provider()
-            else:
-                import container as _container_module
-                job_queue = _container_module.resolved_job_queue
-            if job_queue is None:
-                raise RuntimeError("job_queue not initialised")
-            params = AnsibleJobParams(
-                vm_host=vm_host,
-                vm_action="vm_remove",
-                vm_target=vm_target,
-            )
-            submit = await self._job_svc.submit(params, job_queue=job_queue)
-            return submit.job_id
-        except Exception as exc:
-            logger.warning(
-                "[LEASE_LIFECYCLE] Failed to submit vm_remove job for %s/%s: %s — will retry next cycle",
-                vm_host, vm_target, exc,
-            )
-            return None
-
     async def _process_releasing_allocation(
         self, allocation: dict, now: datetime, grace_seconds: int
     ) -> str:
@@ -388,7 +450,7 @@ class LeaseLifecycleService:
 
         lease_end = _parse_utc(allocation.get("lease_end_utc")) or now
         past_grace = now >= lease_end + timedelta(seconds=grace_seconds)
-        job_id = allocation.get("vm_remove_job_id")
+        job_id = allocation.get("release_job_id") or allocation.get("vm_remove_job_id")
         if job_id == "direct-release" and self._job_svc is None:
             if not await self._finish_release(allocation):
                 return "skipped"
