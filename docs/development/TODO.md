@@ -400,12 +400,14 @@ bare-metal listing unavailable until all child allocations are gone.
 **Current state:** the VM provisioning service already hosts the site ledger
 and is part-way toward the target architecture: `CapacityLedgerService` owns
 site resources, allocations, and capacity events; `SiteResourcesService` is a
-thin resource/allocation adapter; `LeaseLifecycleService` accepts a release
-delegate. However, the implementation is still VM-shaped. The provisioning
-container declares `required_attributes=("vm_host",)`, allocation rows expose
-`vm_host`, `vm_target`, and `vm_remove_job_id`, market-managed release defaults
-to `vm_remove`, and fulfillment dispatch still goes through VM-specific
-executor paths.
+thin resource/allocation adapter; `LeaseLifecycleService` accepts executor
+release implementations. Allocation rows now carry generic executor metadata
+(`executor_kind`, `executor_target`, `executor_ref`, `release_job_id`) while
+preserving the legacy VM fields. The site ledger also understands
+`physical_host_id` plus `allocation_mode` (`shareable` or `exclusive`) resource
+attributes for cross-mode conflict checks. However, the public provisioning
+surface is still VM-shaped, and real bare-metal access grant/reclaim APIs are
+not implemented yet.
 
 **Design stance:** VM and bare-metal provisioning should be separate executor
 services, or at least separate executor implementations, but they must not own
@@ -448,24 +450,17 @@ refactors should split those roles without breaking existing VM clients.
 
 **Planned fix, before real bare-metal sales:**
 
-1. Add generic executor metadata to allocations, such as `executor_kind`,
-   `executor_target`, `release_job_id`, and/or an opaque `executor_ref`, while
-   keeping compatibility with existing `vm_*` fields during migration.
-2. Extend the site-resource model to represent host-level resources and
-   shareable child capacity, or equivalent conflict metadata keyed by host.
-3. Teach ledger `probe`/`reserve` conflict checks about exclusive host claims
-   and shareable VM-slice claims.
-4. Move market-managed fulfillment dispatch behind an allocation/executor
+1. Move market-managed fulfillment dispatch behind an allocation/executor
    interface keyed by `executor_kind`; VM dispatch calls the existing VM
    provisioner, and bare-metal dispatch can later call `node_grant_access` /
    `node_reclaim`.
-5. Keep direct `/hosts/{host}/vms/*` operator APIs for VM administration, but
+2. Keep direct `/hosts/{host}/vms/*` operator APIs for VM administration, but
    stop treating those APIs as the market-level abstraction for all compute
    fulfillment.
-6. Add unit tests for same-host conflicts: bare metal after VM allocation
-   fails, VM after bare-metal allocation fails, compatible VM slices can
-   coexist, release restores both listing classes, and `release_failed` keeps
-   both listing classes unavailable.
+3. Add real bare-metal access grant/reclaim API/service support using the
+   shared allocation lifecycle and `executor_ref.physical_host_id` convention.
+4. Extend listing/publication flows so VM and bare-metal listings are derived
+   from the same site-authority snapshot and cross-mode availability.
 
 **Acceptance criteria:** one physical host can be registered once, exposed as
 both a whole-host bare-metal offer and one or more VM slice offers, and the

@@ -43,6 +43,10 @@ from .db import (
 
 logger = logging.getLogger(__name__)
 
+ALLOCATION_MODE_ATTR = "allocation_mode"
+ALLOCATION_MODE_EXCLUSIVE = "exclusive"
+ALLOCATION_MODE_SHAREABLE = "shareable"
+PHYSICAL_HOST_ID_ATTR = "physical_host_id"
 VM_EXECUTOR_KIND = "vm"
 
 
@@ -779,6 +783,10 @@ class CapacityLedgerService:
                 for key in self._required_attributes
             ):
                 continue
+            if self._has_physical_host_conflict(
+                db, resource, lease_start, lease_end,
+            ):
+                continue
             available = int(resource.total_units or 0) - self._held_units(
                 db, resource.resource_id, lease_start, lease_end
             )
@@ -817,13 +825,20 @@ class CapacityLedgerService:
             now + timedelta(microseconds=1),
         )
         total = int(row.total_units or 0)
-        available = max(total - held, 0)
-        if available >= total or held <= 0:
-            state = "available"
-        elif available > 0:
-            state = "available"
-        else:
+        blocked = self._has_physical_host_conflict(
+            db, row, now, now + timedelta(microseconds=1),
+        )
+        if blocked:
+            available = 0
             state = "leased"
+        else:
+            available = max(total - held, 0)
+            if available >= total or held <= 0:
+                state = "available"
+            elif available > 0:
+                state = "available"
+            else:
+                state = "leased"
         return {
             "resource_id": row.resource_id,
             "resource_type": row.resource_type,
@@ -835,6 +850,70 @@ class CapacityLedgerService:
             "attributes": dict(row.attributes or {}),
             "enabled": bool(row.enabled),
         }
+
+    def _has_physical_host_conflict(
+        self,
+        db: Session,
+        resource: SiteResource,
+        lease_start: datetime | None = None,
+        lease_end: datetime | None = None,
+    ) -> bool:
+        physical_host_id = self._physical_host_id(resource)
+        mode = self._allocation_mode(resource)
+        if not physical_host_id or mode is None:
+            return False
+
+        rows = (
+            db.query(SiteAllocation)
+            .filter(SiteAllocation.state.in_(HELD_ALLOCATION_STATES))
+            .all()
+        )
+        for allocation in rows:
+            held_resource = db.get(SiteResource, allocation.resource_id)
+            if held_resource is None:
+                continue
+            if self._physical_host_id(held_resource) != physical_host_id:
+                continue
+            held_mode = self._allocation_mode(held_resource)
+            if held_mode is None:
+                continue
+            if not self._allocation_overlaps(allocation, lease_start, lease_end):
+                continue
+            if mode == ALLOCATION_MODE_EXCLUSIVE:
+                return True
+            if held_mode == ALLOCATION_MODE_EXCLUSIVE:
+                return True
+        return False
+
+    @staticmethod
+    def _allocation_overlaps(
+        allocation: SiteAllocation,
+        lease_start: datetime | None = None,
+        lease_end: datetime | None = None,
+    ) -> bool:
+        if allocation.state in {
+            AllocationState.releasing.value,
+            AllocationState.release_failed.value,
+            AllocationState.unmanaged.value,
+        }:
+            return True
+        row_start = parse_utc(allocation.lease_start_utc)
+        row_end = parse_utc(allocation.lease_end_utc)
+        if row_start is None and row_end is None:
+            return True
+        return _windows_overlap(lease_start, lease_end, row_start, row_end)
+
+    @staticmethod
+    def _physical_host_id(resource: SiteResource) -> str | None:
+        value = (resource.attributes or {}).get(PHYSICAL_HOST_ID_ATTR)
+        return str(value) if value else None
+
+    @staticmethod
+    def _allocation_mode(resource: SiteResource) -> str | None:
+        value = str((resource.attributes or {}).get(ALLOCATION_MODE_ATTR) or "")
+        if value in {ALLOCATION_MODE_EXCLUSIVE, ALLOCATION_MODE_SHAREABLE}:
+            return value
+        return None
 
     @staticmethod
     def _match_payload(

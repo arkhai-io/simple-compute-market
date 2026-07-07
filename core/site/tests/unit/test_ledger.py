@@ -10,7 +10,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from core_site.db import Base
-from core_site.ledger import CapacityConflictError, CapacityLedgerService
+from core_site.ledger import (
+    ALLOCATION_MODE_EXCLUSIVE,
+    ALLOCATION_MODE_SHAREABLE,
+    CapacityConflictError,
+    CapacityLedgerService,
+)
 
 
 def _make_ledger(**kwargs) -> CapacityLedgerService:
@@ -323,6 +328,133 @@ def test_release_failed_still_holds_capacity(seeded: CapacityLedgerService):
         failure_reason="vm_remove_failed",
     )
     assert seeded.snapshot()[0]["available_units"] == 6
+
+
+def _shared_host_ledger() -> CapacityLedgerService:
+    ledger = _make_ledger()
+    ledger.register_resource(
+        resource_id="host-1-vm-gpus",
+        total_units=8,
+        attributes={
+            "physical_host_id": "host-1",
+            "allocation_mode": ALLOCATION_MODE_SHAREABLE,
+            "vm_host": "kvm1",
+            "gpu_model": "H200",
+        },
+    )
+    ledger.register_resource(
+        resource_id="host-1-bare-metal",
+        total_units=1,
+        attributes={
+            "physical_host_id": "host-1",
+            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+            "machine_id": "bm-node-1",
+            "gpu_model": "H200",
+        },
+    )
+    return ledger
+
+
+def test_exclusive_bare_metal_claim_fails_after_vm_slice_allocation():
+    ledger = _shared_host_ledger()
+    vm = ledger.reserve(
+        claim={"allocation_mode": ALLOCATION_MODE_SHAREABLE, "gpu_count": 2},
+        deal_ref={"escrow_uid": "0xvm"},
+    )
+    assert vm is not None
+
+    assert ledger.probe(claim={"allocation_mode": ALLOCATION_MODE_EXCLUSIVE}) is None
+    assert ledger.reserve(
+        claim={"allocation_mode": ALLOCATION_MODE_EXCLUSIVE},
+        deal_ref={"escrow_uid": "0xbm"},
+    ) is None
+
+    by_id = {row["resource_id"]: row for row in ledger.snapshot()}
+    assert by_id["host-1-vm-gpus"]["available_units"] == 6
+    assert by_id["host-1-bare-metal"]["available_units"] == 0
+    assert by_id["host-1-bare-metal"]["state"] == "leased"
+
+
+def test_vm_slice_claim_fails_after_exclusive_bare_metal_allocation():
+    ledger = _shared_host_ledger()
+    bare_metal = ledger.reserve(
+        claim={"allocation_mode": ALLOCATION_MODE_EXCLUSIVE},
+        deal_ref={"escrow_uid": "0xbm"},
+    )
+    assert bare_metal is not None
+
+    assert ledger.probe(
+        claim={"allocation_mode": ALLOCATION_MODE_SHAREABLE, "gpu_count": 1},
+    ) is None
+    assert ledger.reserve(
+        claim={"allocation_mode": ALLOCATION_MODE_SHAREABLE, "gpu_count": 1},
+        deal_ref={"escrow_uid": "0xvm"},
+    ) is None
+
+    by_id = {row["resource_id"]: row for row in ledger.snapshot()}
+    assert by_id["host-1-vm-gpus"]["available_units"] == 0
+    assert by_id["host-1-vm-gpus"]["state"] == "leased"
+    assert by_id["host-1-bare-metal"]["available_units"] == 0
+
+
+def test_compatible_vm_slice_claims_still_share_units():
+    ledger = _shared_host_ledger()
+    first = ledger.reserve(
+        claim={"allocation_mode": ALLOCATION_MODE_SHAREABLE, "gpu_count": 2},
+        deal_ref={"escrow_uid": "0xvm1"},
+    )
+    second = ledger.reserve(
+        claim={"allocation_mode": ALLOCATION_MODE_SHAREABLE, "gpu_count": 3},
+        deal_ref={"escrow_uid": "0xvm2"},
+    )
+
+    assert first is not None
+    assert second is not None
+    by_id = {row["resource_id"]: row for row in ledger.snapshot()}
+    assert by_id["host-1-vm-gpus"]["available_units"] == 3
+    assert by_id["host-1-bare-metal"]["available_units"] == 0
+    assert by_id["host-1-bare-metal"]["state"] == "leased"
+
+
+def test_released_shared_host_allocation_restores_cross_mode_availability():
+    ledger = _shared_host_ledger()
+    vm = ledger.reserve(
+        claim={"allocation_mode": ALLOCATION_MODE_SHAREABLE, "gpu_count": 8},
+        deal_ref={"escrow_uid": "0xvm"},
+    )
+    assert ledger.reserve(
+        claim={"allocation_mode": ALLOCATION_MODE_EXCLUSIVE},
+        deal_ref={"escrow_uid": "0xbm-blocked"},
+    ) is None
+
+    ledger.release(allocation_id=vm["allocation_id"])
+
+    bare_metal = ledger.reserve(
+        claim={"allocation_mode": ALLOCATION_MODE_EXCLUSIVE},
+        deal_ref={"escrow_uid": "0xbm"},
+    )
+    assert bare_metal is not None
+
+
+def test_release_failed_shared_host_allocation_blocks_cross_mode_claims():
+    ledger = _shared_host_ledger()
+    vm = ledger.reserve(
+        claim={"allocation_mode": ALLOCATION_MODE_SHAREABLE, "gpu_count": 2},
+        deal_ref={"escrow_uid": "0xvm"},
+    )
+    ledger.update_allocation_state(
+        vm["allocation_id"],
+        state="release_failed",
+        failure_reason="release_submit_failed",
+    )
+
+    assert ledger.reserve(
+        claim={"allocation_mode": ALLOCATION_MODE_EXCLUSIVE},
+        deal_ref={"escrow_uid": "0xbm"},
+    ) is None
+    by_id = {row["resource_id"]: row for row in ledger.snapshot()}
+    assert by_id["host-1-bare-metal"]["available_units"] == 0
+    assert by_id["host-1-bare-metal"]["state"] == "leased"
 
 
 def test_release_can_mark_force_released(seeded: CapacityLedgerService):
