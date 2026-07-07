@@ -136,6 +136,57 @@ async def test_list_allocations_filters(client: cc.RemoteCapacityClient):
     assert await client.list_allocations(state="released") == []
 
 
+@pytest.mark.asyncio
+async def test_sync_site_resources_preserves_shared_host_attributes(site: FakeSite):
+    rows = [
+        {
+            "resource_id": "compute-kvm1-001",
+            "resource_type": "compute.gpu",
+            "resource_subtype": "h200",
+            "value": 8,
+            "state": "available",
+            "attributes": {
+                "vm_host": "kvm1",
+                "physical_host_id": "host-physical-1",
+                "allocation_mode": "shareable",
+                "lease_end_utc": "2099-01-01 00:00",
+            },
+        },
+        {
+            "resource_id": "info-1",
+            "resource_type": "information.note",
+            "value": None,
+            "state": "available",
+            "attributes": {"topic": "market-overview"},
+        },
+    ]
+
+    class FakeDb:
+        async def list_resources(self):
+            return rows
+
+    real_remote = cc.RemoteCapacityClient
+
+    def fake_remote(base_url, admin_key):
+        return real_remote(
+            base_url,
+            admin_key,
+            transport=site.transport(),
+        )
+
+    with patch("market_storefront.utils.config.settings", _settings()):
+        with patch.object(cc, "RemoteCapacityClient", fake_remote):
+            synced = await cc.sync_site_resources(lambda: FakeDb())
+
+    assert synced == 1
+    attrs = site.resources["compute-kvm1-001"]["attributes"]
+    assert attrs["vm_host"] == "kvm1"
+    assert attrs["physical_host_id"] == "host-physical-1"
+    assert attrs["allocation_mode"] == "shareable"
+    assert "lease_end_utc" not in attrs
+    assert "info-1" not in site.resources
+
+
 def test_build_always_aggregates_site_authorities():
     with patch("market_storefront.utils.config.settings", _settings()):
         built = cc.build_capacity_client(lambda: None)
