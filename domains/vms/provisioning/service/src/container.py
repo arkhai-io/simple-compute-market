@@ -6,6 +6,7 @@ from config import settings
 from db.database import create_db_engine, create_session_factory
 from services.ansible_service import AnsibleService
 from services.async_job_queue import AsyncJobQueue
+from services.bare_metal_lease_service import BareMetalLeaseService
 from core_site.ledger import CapacityLedgerService
 from services.host_operations_service import HostOperationsService
 from services.host_service import HostService
@@ -114,6 +115,11 @@ class Container(containers.DeclarativeContainer):
         capacity_service=capacity_ledger_service,
     )
 
+    bare_metal_lease_service = providers.Singleton(
+        BareMetalLeaseService,
+        site_resources_service=site_resources_service,
+    )
+
     lease_lifecycle_service = providers.Singleton(
         LeaseLifecycleService,
         settings=config,
@@ -162,3 +168,4 @@ resolved_host_operations_service: "HostOperationsService | None" = None
 resolved_lease_lifecycle_service: "LeaseLifecycleService | None" = None
 resolved_lease_watchdog: "LeaseWatchdog | None" = None
 resolved_capacity_ledger_service: "CapacityLedgerService | None" = None
+resolved_bare_metal_lease_service: "BareMetalLeaseService | None" = None

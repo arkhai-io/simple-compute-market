@@ -31,6 +31,7 @@ from controllers.jobs_controller import AnsibleJobsController  # noqa: E402
 from controllers.hosts_controller import HostController      # noqa: E402
 from controllers.vms_controller import VmController          # noqa: E402
 from controllers.leases_controller import AdminLeasesController, LeasesController   # noqa: E402
+from controllers.bare_metal_leases_controller import BareMetalLeasesController  # noqa: E402
 from core_site.router import make_capacity_router  # noqa: E402
 
 
@@ -62,6 +63,7 @@ async def lifespan(_: FastAPI):
     _container_module.resolved_lease_lifecycle_service = container.lease_lifecycle_service()
     _container_module.resolved_lease_watchdog = container.lease_watchdog()
     _container_module.resolved_capacity_ledger_service = container.capacity_ledger_service()
+    _container_module.resolved_bare_metal_lease_service = container.bare_metal_lease_service()
 
     # ------------------------------------------------------------------
     # Inventory seeding — runs once at startup if the hosts table is empty.
@@ -225,6 +227,13 @@ app = FastAPI(
             ),
         },
         {
+            "name": "bare-metal",
+            "description": (
+                "Bare-metal domain adapter — register and query SSH-access leases "
+                "against site allocations."
+            ),
+        },
+        {
             "name": "admin",
             "description": "Admin-only repair operations for exceptional lifecycle states.",
         },
@@ -268,6 +277,7 @@ app.add_middleware(
 #   /api/v1/jobs/*                   <- job read + cancel
 #   /api/v1/hosts/*                  <- host registry CRUD, capacity, connectivity
 #   /api/v1/hosts/{host}/vms/*       <- VM lifecycle (VmController composes here)
+#   /api/v1/bare-metal/leases/*      <- bare-metal domain lease adapter
 # ---------------------------------------------------------------------------
 app.include_router(SystemController.make_health_router())                          # /health
 app.include_router(SystemController.make_system_router(), prefix="/api/v1")        # /api/v1/system/*
@@ -275,6 +285,7 @@ app.include_router(AnsibleJobsController.make_router(), prefix="/api/v1")       
 app.include_router(HostController.make_router(), prefix="/api/v1")                 # /api/v1/hosts/*
 app.include_router(VmController.make_router(), prefix="/api/v1")                   # /api/v1/hosts/{host}/vms/*
 app.include_router(LeasesController.make_router(), prefix="/api/v1")               # /api/v1/leases/*
+app.include_router(BareMetalLeasesController.make_router(), prefix="/api/v1")      # /api/v1/bare-metal/leases/*
 app.include_router(AdminLeasesController.make_router(), prefix="/api/v1")          # /api/v1/admin/leases/*
 app.include_router(                                                                # /api/v1/capacity/*
     make_capacity_router(lambda: _container_module.resolved_capacity_ledger_service),

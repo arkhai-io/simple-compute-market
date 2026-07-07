@@ -405,9 +405,11 @@ release implementations. Allocation rows now carry generic executor metadata
 (`executor_kind`, `executor_target`, `executor_ref`, `release_job_id`) while
 preserving the legacy VM fields. The site ledger also understands
 `physical_host_id` plus `allocation_mode` (`shareable` or `exclusive`) resource
-attributes for cross-mode conflict checks. However, the public provisioning
-surface is still VM-shaped, and real bare-metal access grant/reclaim APIs are
-not implemented yet.
+attributes for cross-mode conflict checks. A transitional bare-metal domain
+adapter now exposes `/api/v1/bare-metal/leases/*` using the
+`arkhai-bare-metal-contracts` lease models, but the service package and most
+operator APIs are still VM-shaped, and real bare-metal access grant/reclaim
+executor APIs are not implemented yet.
 
 **Design stance:** VM and bare-metal provisioning should be separate executor
 services, or at least separate executor implementations, but they must not own

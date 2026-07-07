@@ -359,6 +359,9 @@ async def client_and_queue(
     from services.site_resources_service import SiteResourcesService
     site_resources_service = SiteResourcesService(capacity_ledger_service)
 
+    from services.bare_metal_lease_service import BareMetalLeaseService
+    bare_metal_lease_service = BareMetalLeaseService(site_resources_service)
+
     from services.lease_lifecycle_service import LeaseLifecycleService
     lease_lifecycle_service = LeaseLifecycleService(
         settings=mock_settings,
@@ -385,6 +388,7 @@ async def client_and_queue(
     app.container.session_factory.override(session_factory)
     app.container.host_service.override(host_service)
     app.container.site_resources_service.override(site_resources_service)
+    app.container.bare_metal_lease_service.override(bare_metal_lease_service)
     app.container.lease_lifecycle_service.override(lease_lifecycle_service)
     app.container.capacity_ledger_service.override(capacity_ledger_service)
 
@@ -394,6 +398,7 @@ async def client_and_queue(
     _container_module.resolved_ansible_service = fake_ansible
     _container_module.resolved_system_service = system_service
     _container_module.resolved_host_service = host_service
+    _container_module.resolved_bare_metal_lease_service = bare_metal_lease_service
     _container_module.resolved_lease_lifecycle_service = lease_lifecycle_service
     _container_module.resolved_capacity_ledger_service = capacity_ledger_service
 
@@ -437,6 +442,7 @@ async def client_and_queue(
     app.container.session_factory.reset_override()
     app.container.host_service.reset_override()
     app.container.site_resources_service.reset_override()
+    app.container.bare_metal_lease_service.reset_override()
     app.container.lease_lifecycle_service.reset_override()
     app.container.capacity_ledger_service.reset_override()
 
