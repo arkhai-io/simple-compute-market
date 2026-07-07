@@ -44,7 +44,7 @@ def session_factory():
 
 @pytest.fixture
 def ledger(session_factory) -> CapacityLedgerService:
-    svc = CapacityLedgerService(session_factory, required_attributes=("vm_host",))
+    svc = CapacityLedgerService(session_factory)
     svc.register_resource(
         resource_id="compute-kvm1-001",
         total_units=8,
@@ -72,7 +72,10 @@ def _lifecycle(session_factory, ledger, **settings_overrides):
 
 
 def _expired_allocation(ledger: CapacityLedgerService, escrow: str = "0xe") -> dict:
-    reserved = ledger.reserve(claim={"gpu_count": 2}, deal_ref={"escrow_uid": escrow})
+    reserved = ledger.reserve(
+        claim={"gpu_count": 2, "vm_host": "kvm1"},
+        deal_ref={"escrow_uid": escrow},
+    )
     ledger.commit(
         resource_id=reserved["resource_id"],
         allocation_id=reserved["allocation_id"],
@@ -88,7 +91,10 @@ def _expired_allocation(ledger: CapacityLedgerService, escrow: str = "0xe") -> d
 
 
 def _just_expired_allocation(ledger: CapacityLedgerService, escrow: str = "0xe") -> dict:
-    reserved = ledger.reserve(claim={"gpu_count": 2}, deal_ref={"escrow_uid": escrow})
+    reserved = ledger.reserve(
+        claim={"gpu_count": 2, "vm_host": "kvm1"},
+        deal_ref={"escrow_uid": escrow},
+    )
     just_expired_dt = datetime.now(timezone.utc) - timedelta(seconds=1)
     just_expired = just_expired_dt.isoformat()
     ledger.commit(

@@ -106,8 +106,6 @@ class Container(containers.DeclarativeContainer):
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
         session_factory=session_factory,
-        # A slice that names no vm_host can't be fulfilled by this site.
-        required_attributes=("vm_host",),
     )
 
     site_resources_service = providers.Singleton(

@@ -30,8 +30,7 @@ def _make_ledger(**kwargs) -> CapacityLedgerService:
 
 @pytest.fixture
 def ledger() -> CapacityLedgerService:
-    # VM-flavored: the provisioning service's eligibility invariant.
-    return _make_ledger(required_attributes=("vm_host",))
+    return _make_ledger()
 
 
 @pytest.fixture
@@ -66,11 +65,22 @@ def test_probe_mismatched_claim_returns_none(seeded: CapacityLedgerService):
     assert seeded.probe(claim={"gpu_count": 9}) is None
 
 
-def test_resource_without_vm_host_is_ineligible(ledger: CapacityLedgerService):
+def test_vm_claim_with_vm_host_does_not_match_hostless_resource(
+    ledger: CapacityLedgerService,
+):
     ledger.register_resource(
         resource_id="hostless", total_units=8, attributes={"gpu_model": "H200"},
     )
-    assert ledger.probe(claim=None) is None
+    assert ledger.probe(claim={"gpu_count": 1, "vm_host": "kvm1"}) is None
+    assert ledger.probe(claim={"gpu_count": 1}) is not None
+
+
+def test_required_attributes_remains_available_as_local_guard():
+    guarded = _make_ledger(required_attributes=("vm_host",))
+    guarded.register_resource(
+        resource_id="hostless", total_units=8, attributes={"gpu_model": "H200"},
+    )
+    assert guarded.probe(claim={"gpu_count": 1}) is None
 
 
 def test_generic_ledger_has_no_attribute_requirement():

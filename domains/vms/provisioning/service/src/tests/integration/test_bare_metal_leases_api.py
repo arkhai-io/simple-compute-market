@@ -30,8 +30,6 @@ def _reserve_bare_metal(escrow_uid: str) -> dict:
             resource_id="bare-metal-node-1",
             total_units=1,
             attributes={
-                # Transitional VM-service eligibility attribute.
-                "vm_host": "kvm1",
                 "machine_id": "bm-node-1",
                 "physical_host_id": "host-physical-1",
                 "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,

@@ -46,7 +46,8 @@ def _reserve(escrow_uid: str, *, gpu_count: int = 1) -> dict:
             attributes={"vm_host": "kvm1"},
         )
     reserved = ledger.reserve(
-        claim={"gpu_count": gpu_count}, deal_ref={"escrow_uid": escrow_uid},
+        claim={"gpu_count": gpu_count, "vm_host": "kvm1"},
+        deal_ref={"escrow_uid": escrow_uid},
     )
     assert reserved is not None
     return reserved

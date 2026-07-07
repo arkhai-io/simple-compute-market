@@ -10,11 +10,12 @@ the ``/api/v1/capacity`` HTTP surface, which mirrors the
 Matching semantics: a claim is an exact-match attribute mapping plus a
 ``units`` request (``gpu_count`` is the VM domain's alias), checked
 first against the resource's attributes JSON and then against its
-top-level fields. Domain-specific eligibility — the VM domain requires
-that a resource's attributes name a ``vm_host``, mirroring the
-storefront's embedded ledger (``reserve_available_compute_vm``) — is
-declared by the hosting service via ``required_attributes``; a host
-with no such invariant (the tokens service) passes none.
+top-level fields. Domain-specific eligibility should normally be
+expressed in those claims — for example VM claims name ``vm_host`` while
+bare-metal claims name ``physical_host_id`` and ``allocation_mode``.
+``required_attributes`` remains available for single-domain hosts that
+need a coarse local invariant, but multi-domain provisioners should pass
+none.
 
 Mutations serialize on a process-level lock: the site authority is the
 serialization point for reserves across storefronts, and that point is
@@ -167,11 +168,10 @@ class CapacityLedgerService:
         *,
         required_attributes: Sequence[str] = (),
     ) -> None:
-        """``required_attributes`` is the hosting domain's eligibility
+        """``required_attributes`` is an optional coarse local eligibility
         invariant: a resource matches only when its attributes give each
-        named key a non-empty string (the VM provisioning service passes
-        ``("vm_host",)`` — a slice that names no host can't be
-        fulfilled). Domains without such an invariant pass none.
+        named key a non-empty string. Multi-domain provisioners should pass
+        none and put domain-specific eligibility in reservation claims.
         """
         self._session_factory = session_factory
         self._required_attributes = tuple(required_attributes)

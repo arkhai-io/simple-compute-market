@@ -106,7 +106,7 @@ class TestCapacityClientEndpointCoverage:
             attributes={"vm_host": HOST},
         )
         reserved = ledger.reserve(
-            claim={"gpu_count": 1},
+            claim={"gpu_count": 1, "vm_host": HOST},
             deal_ref={"escrow_uid": "escrow-client-capacity"},
         )
         assert reserved is not None
@@ -144,7 +144,7 @@ class TestLeaseClientEndpointCoverage:
                 attributes={"vm_host": HOST},
             )
         reserved = ledger.reserve(
-            claim={"gpu_count": 1},
+            claim={"gpu_count": 1, "vm_host": HOST},
             deal_ref={"escrow_uid": "escrow-client-terminate"},
         )
         assert reserved is not None

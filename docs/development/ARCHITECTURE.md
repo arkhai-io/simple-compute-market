@@ -2051,13 +2051,13 @@ tail as one row, TTL soft holds supported at the ledger) plus the
 service mounts the tables on its engine and the router on its app; the
 VM provisioning service is the first host (the API-credits service is
 the second). The ledger is domain-neutral: claims request a unit count
-via the generic `units` key (`gpu_count` is the VM alias), a host
-declares its eligibility invariant at construction
-(`required_attributes=("vm_host",)` for the provisioning service — a
-slice that names no host can't be fulfilled; the credits service
-declares none), and `commit` without a `lease_end_utc` produces an
-open-ended lease the watchdog never sees (prepaid credits don't
-expire). The surface mirrors
+via the generic `units` key (`gpu_count` is the VM alias), and
+domain-specific eligibility is expressed in claims (`vm_host` for VM
+slices, `physical_host_id`/`allocation_mode` for bare-metal host
+claims). `required_attributes` remains only as an optional coarse guard
+for single-domain hosts. `commit` without a `lease_end_utc` produces an
+open-ended lease the watchdog never sees (prepaid credits don't expire).
+The surface mirrors
 the `CapacityClient` contract defined in `core_storefront.capacity`
 (snapshot/probe/reserve(+TTL)/commit/release/truncate-lease/subscribe,
 plus the anonymous versioned `CapacityDelta` carrier and in-process
