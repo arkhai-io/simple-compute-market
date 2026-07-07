@@ -159,6 +159,18 @@ async def test_sync_site_resources_preserves_shared_host_attributes(site: FakeSi
             "state": "available",
             "attributes": {"topic": "market-overview"},
         },
+        {
+            "resource_id": "bare-metal-1",
+            "resource_type": "compute.gpu",
+            "resource_subtype": "h200",
+            "value": 1,
+            "state": "available",
+            "attributes": {
+                "machine_id": "bm-node-1",
+                "physical_host_id": "host-physical-1",
+                "allocation_mode": "exclusive",
+            },
+        },
     ]
 
     class FakeDb:
@@ -178,12 +190,16 @@ async def test_sync_site_resources_preserves_shared_host_attributes(site: FakeSi
         with patch.object(cc, "RemoteCapacityClient", fake_remote):
             synced = await cc.sync_site_resources(lambda: FakeDb())
 
-    assert synced == 1
+    assert synced == 2
     attrs = site.resources["compute-kvm1-001"]["attributes"]
     assert attrs["vm_host"] == "kvm1"
     assert attrs["physical_host_id"] == "host-physical-1"
     assert attrs["allocation_mode"] == "shareable"
     assert "lease_end_utc" not in attrs
+    bare_metal_attrs = site.resources["bare-metal-1"]["attributes"]
+    assert bare_metal_attrs["machine_id"] == "bm-node-1"
+    assert bare_metal_attrs["physical_host_id"] == "host-physical-1"
+    assert bare_metal_attrs["allocation_mode"] == "exclusive"
     assert "info-1" not in site.resources
 
 
