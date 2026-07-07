@@ -415,6 +415,16 @@ state, and capacity events. Executor services consume allocation decisions and
 report provisioning/release outcomes; they do not independently decide that
 shared hardware is available.
 
+Domain packages own the storefront-facing provisioning contracts for their
+market semantics. A provisioning service may serve multiple domains by
+implementing thin domain adapters over shared local internals, and a domain may
+be served by multiple provisioning implementations that all implement the same
+domain contract. Reusable substrate such as site authority, allocation
+lifecycle, capacity clients, and leased-access helpers belongs in shared kit,
+not in one domain's VM-shaped API. The current VM provisioning service still
+mixes VM contract surface with generic site-authority substrate; future
+refactors should split those roles without breaking existing VM clients.
+
 **Required accounting model:**
 
 - Physical machines are represented once in the site authority with stable

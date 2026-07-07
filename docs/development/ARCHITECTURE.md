@@ -1418,6 +1418,25 @@ POST   /api/v1/admin/leases/{lease_id}/retry-release    Admin repair: retry rele
 POST   /api/v1/admin/leases/{lease_id}/force-release    Admin repair: release capacity without teardown proof
 ```
 
+**Provisioning contract ownership:** domain packages own the
+storefront-facing provisioning contract for their market semantics. A VM
+domain contract can speak in VM image/spec, `vm_host`, `vm_target`, and
+SSH-to-VM connection results; a bare-metal domain contract can speak in
+machine access grants, SSH/user/key policy, exclusive host semantics, and
+node reclaim. A provisioning service implements the domain contracts it
+chooses to serve through thin adapters at its edge, while sharing local
+internals such as inventory, credentials, site authority, allocation
+lifecycle, job queues, and event delivery.
+
+This means the VM provisioning API is not the generic provisioning API. It is
+currently both a VM domain contract and a home for reusable site-authority
+substrate. Over time, reusable pieces should move into shared kit
+(`site_authority`, allocation lifecycle, capacity clients), while VM,
+bare-metal, pod, or other provisioner adapters implement named domain
+contracts. Compatible domains may intentionally share a contract, such as a
+future leased-access contract, but that should be explicit shared kit rather
+than accidental coupling through another domain's API.
+
 ---
 
 #### `monitor` action — what it returns
