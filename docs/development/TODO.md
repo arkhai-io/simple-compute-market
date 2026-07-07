@@ -425,7 +425,11 @@ domain contract. Reusable substrate such as site authority, allocation
 lifecycle, capacity clients, and leased-access helpers belongs in shared kit,
 not in one domain's VM-shaped API. The current VM provisioning service still
 mixes VM contract surface with generic site-authority substrate; future
-refactors should split those roles without breaking existing VM clients.
+refactors should split those roles without breaking existing VM clients. The
+bare-metal storefront-facing contract starts under `domains/bare_metal`; the
+temporary implementation adapter still lives in
+`domains/vms/provisioning/service` until the multi-domain site provisioner is
+moved out of the VM domain tree.
 
 **Required accounting model:**
 

@@ -2,28 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
-from services.lease_lifecycle_service import LeaseNotFoundError
-from services.release_executors import (
+from arkhai_bare_metal_contracts import (
     BARE_METAL_EXECUTOR_KIND,
+    BareMetalLeaseCreate,
     bare_metal_executor_ref,
 )
+from services.lease_lifecycle_service import LeaseNotFoundError
 from services.site_resources_service import SiteResourcesService
-
-
-@dataclass(frozen=True)
-class BareMetalLeaseRegistration:
-    allocation_id: str | None
-    escrow_uid: str
-    machine_id: str
-    physical_host_id: str
-    lease_end_utc: datetime
-    lease_start_utc: datetime | None = None
-    access_ref: dict[str, Any] | None = None
-    create_job_id: str | None = None
 
 
 class BareMetalLeaseService:
@@ -32,7 +19,7 @@ class BareMetalLeaseService:
     def __init__(self, site_resources_service: SiteResourcesService) -> None:
         self._site_resources = site_resources_service
 
-    def register_lease(self, body: BareMetalLeaseRegistration) -> dict[str, Any]:
+    def register_lease(self, body: BareMetalLeaseCreate) -> dict[str, Any]:
         attached = self._site_resources.attach_lease_allocation(
             allocation_id=body.allocation_id,
             escrow_uid=body.escrow_uid,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
+from arkhai_bare_metal_contracts import BareMetalLeaseCreate
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -14,7 +15,6 @@ from core_site.ledger import (
 )
 from db.models import Base
 from services.bare_metal_lease_service import (
-    BareMetalLeaseRegistration,
     BareMetalLeaseService,
 )
 from services.lease_lifecycle_service import LeaseNotFoundError
@@ -60,7 +60,7 @@ def test_register_bare_metal_lease_attaches_executor_metadata(
     svc = BareMetalLeaseService(SiteResourcesService(ledger))
 
     lease = svc.register_lease(
-        BareMetalLeaseRegistration(
+        BareMetalLeaseCreate(
             allocation_id=reserved["allocation_id"],
             escrow_uid="0xbm",
             machine_id="bm-node-1",
@@ -99,7 +99,7 @@ def test_register_bare_metal_lease_by_escrow_when_allocation_id_omitted(
     svc = BareMetalLeaseService(SiteResourcesService(ledger))
 
     lease = svc.register_lease(
-        BareMetalLeaseRegistration(
+        BareMetalLeaseCreate(
             allocation_id=None,
             escrow_uid="0xbm",
             machine_id="bm-node-1",
@@ -120,7 +120,7 @@ def test_register_bare_metal_lease_missing_allocation_raises(
 
     with pytest.raises(LeaseNotFoundError):
         svc.register_lease(
-            BareMetalLeaseRegistration(
+            BareMetalLeaseCreate(
                 allocation_id="missing",
                 escrow_uid="0xmissing",
                 machine_id="bm-node-1",

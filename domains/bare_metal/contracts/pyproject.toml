@@ -1,0 +1,24 @@
+[project]
+name = "arkhai-bare-metal-contracts"
+version = "0.1.0"
+license = "MIT"
+description = "Bare-metal domain contract models for Arkhai provisioner adapters."
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arkhai_bare_metal_contracts"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
