@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 import inspect
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
@@ -13,7 +13,33 @@ logger = logging.getLogger(__name__)
 
 BARE_METAL_EXECUTOR_KIND = "bare_metal"
 VM_EXECUTOR_KIND = "vm"
+PHYSICAL_HOST_ID_REF_KEY = "physical_host_id"
 BareMetalReleaseDelegate = Callable[[dict[str, Any]], Awaitable[str | None] | str | None]
+
+
+def get_physical_host_id(allocation: dict[str, Any]) -> str | None:
+    """Return the shared physical-host identity carried by executor_ref."""
+    executor_ref = allocation.get("executor_ref") or {}
+    if not isinstance(executor_ref, dict):
+        return None
+    physical_host_id = executor_ref.get(PHYSICAL_HOST_ID_REF_KEY)
+    return str(physical_host_id) if physical_host_id else None
+
+
+def bare_metal_executor_ref(
+    physical_host_id: str,
+    *,
+    access_ref: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build executor_ref for a bare-metal lease.
+
+    ``executor_target`` remains a bare-metal executor-local machine id. This
+    shared ref is the cross-domain physical identity used for accounting
+    between bare-metal and VM offers.
+    """
+    ref = dict(access_ref or {})
+    ref[PHYSICAL_HOST_ID_REF_KEY] = physical_host_id
+    return ref
 
 
 class ReleaseExecutor(Protocol):

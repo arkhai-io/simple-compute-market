@@ -24,6 +24,7 @@ from services.release_executors import (
     BARE_METAL_EXECUTOR_KIND,
     BareMetalReleaseExecutor,
     ExecutorReleaseDispatcher,
+    bare_metal_executor_ref,
 )
 
 
@@ -362,7 +363,10 @@ async def test_bare_metal_executor_releases_locally_and_notifies(session_factory
         allocation["allocation_id"],
         executor_kind=BARE_METAL_EXECUTOR_KIND,
         executor_target="node-1",
-        executor_ref={"ssh_user": "tenant-x"},
+        executor_ref=bare_metal_executor_ref(
+            "host-kvm1",
+            access_ref={"ssh_user": "tenant-x"},
+        ),
     )
 
     svc = LeaseLifecycleService(
@@ -385,6 +389,11 @@ async def test_bare_metal_executor_releases_locally_and_notifies(session_factory
     assert row["state"] == "released"
     assert row["release_job_id"] == "direct-release"
     assert row["vm_remove_job_id"] is None
+    assert row["executor_target"] == "node-1"
+    assert row["executor_ref"] == {
+        "physical_host_id": "host-kvm1",
+        "ssh_user": "tenant-x",
+    }
     assert ledger.snapshot()[0]["available_units"] == 8
     sf.notify_capacity_released.assert_awaited_once()
 

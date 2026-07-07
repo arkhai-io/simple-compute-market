@@ -420,6 +420,11 @@ shared hardware is available.
 - Physical machines are represented once in the site authority with stable
   `host_id`/`resource_id`, total units, attributes, supported modes, and
   health/enabled state.
+- Allocation `executor_target` values are executor-local identifiers, not a
+  shared machine namespace. For VMs this is the VM target/domain; for
+  bare-metal this is the bare-metal executor's machine id. Cross-mode
+  accounting must use a shared physical identity carried separately, currently
+  reserved as `executor_ref.physical_host_id`.
 - VM claims consume shareable units from a host, such as GPU count, vCPU, RAM,
   disk, and ports, while the host is not exclusively leased.
 - Bare-metal claims require exclusive host ownership and conflict with any held
