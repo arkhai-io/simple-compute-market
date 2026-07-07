@@ -337,6 +337,7 @@ async def client_and_queue(
         lease_watchdog_enabled=False,  # Don't start background timer in tests
         storefront_url="http://test-storefront:8001",
         storefront_admin_key="test-admin-key",
+        resolved_bare_metal_playbook_path=Path("/fake/bare-metal-node-access.yml"),
     )
 
     host_service = HostService(

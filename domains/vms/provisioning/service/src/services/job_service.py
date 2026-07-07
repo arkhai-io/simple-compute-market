@@ -49,6 +49,8 @@ from services.ansible_service import AnsibleError, AnsibleService
 
 logger = logging.getLogger(__name__)
 
+_BARE_METAL_ACTIONS = {"node_grant_access", "node_reclaim_access"}
+
 
 class AnsibleJobService:
     """Manages the full lifecycle of Ansible jobs.
@@ -367,7 +369,7 @@ class AnsibleJobService:
             )
 
             run = self._ansible.start_playbook(
-                playbook_path=self._settings.resolved_playbook_path,
+                playbook_path=self._playbook_path_for_params(params),
                 inventory_path=inventory_path,
                 extra_vars_path=vars_path,
                 limit=params.vm_host,
@@ -590,6 +592,11 @@ class AnsibleJobService:
             access_ref=params.get("access_ref"),
             max_retries=params.get("max_retries"),
         )
+
+    def _playbook_path_for_params(self, params: AnsibleJobParams):
+        if params.vm_action in _BARE_METAL_ACTIONS:
+            return self._settings.resolved_bare_metal_playbook_path
+        return self._settings.resolved_playbook_path
 
     def _redact_logs(self, logs: str) -> str:
         if not logs:

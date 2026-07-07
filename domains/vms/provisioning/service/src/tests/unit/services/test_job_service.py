@@ -9,6 +9,7 @@ the DB and queue — they are exercised in integration tests.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -40,6 +41,8 @@ def _make_service(**settings_overrides) -> AnsibleJobService:
     settings.frp_server_addr = ""
     settings.frp_domain = ""
     settings.frp_dashboard_password = ""
+    settings.resolved_playbook_path = Path("/playbooks/vm-operations.yaml")
+    settings.resolved_bare_metal_playbook_path = Path("/playbooks/node-access.yaml")
     for k, v in settings_overrides.items():
         setattr(settings, k, v)
 
@@ -144,6 +147,39 @@ class TestBuildParams:
         svc = _make_service()
         params = svc._build_params({})
         assert isinstance(params, AnsibleJobParams)
+
+    def test_bare_metal_fields_mapped(self):
+        svc = _make_service()
+        params = svc._build_params({
+            "vm_host": "bm-node-1",
+            "vm_target": "bm-node-1",
+            "vm_action": "node_grant_access",
+            "escrow_uid": "0xbm",
+            "physical_host_id": "host-physical-1",
+            "ssh_user": "tenant-a",
+            "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
+            "access_ref": {"ssh_user": "tenant-a"},
+        })
+
+        assert params.escrow_uid == "0xbm"
+        assert params.physical_host_id == "host-physical-1"
+        assert params.ssh_user == "tenant-a"
+        assert params.ssh_public_key == "ssh-ed25519 AAAA tenant-a"
+        assert params.access_ref == {"ssh_user": "tenant-a"}
+
+
+class TestPlaybookSelection:
+    def test_vm_actions_use_vm_playbook(self):
+        svc = _make_service()
+        params = AnsibleJobParams(vm_host="kvm1", vm_action="create")
+
+        assert svc._playbook_path_for_params(params) == Path("/playbooks/vm-operations.yaml")
+
+    def test_bare_metal_actions_use_bare_metal_playbook(self):
+        svc = _make_service()
+        params = AnsibleJobParams(vm_host="bm-node-1", vm_action="node_grant_access")
+
+        assert svc._playbook_path_for_params(params) == Path("/playbooks/node-access.yaml")
 
 
 # ---------------------------------------------------------------------------

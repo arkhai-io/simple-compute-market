@@ -137,6 +137,10 @@ class Settings:
         return Path(str(self._source.playbook_path)).resolve()
 
     @property
+    def resolved_bare_metal_playbook_path(self) -> Path:
+        return Path(str(self._source.bare_metal_playbook_path)).resolve()
+
+    @property
     def resolved_inventory_path(self) -> Path:
         return Path(str(self._source.inventory_path)).resolve()
 

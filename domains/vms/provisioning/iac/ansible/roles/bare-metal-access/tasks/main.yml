@@ -1,0 +1,174 @@
+---
+# Bare-metal node access grant/reclaim.
+#
+# These actions operate on the selected inventory host itself. The provisioning
+# service passes vm_host/vm_target as the executor-local machine id, while
+# physical_host_id is the cross-mode accounting identity.
+
+- name: Validate bare-metal grant inputs
+  fail:
+    msg: "node_grant_access requires bare_metal_ssh_user and bare_metal_ssh_public_key"
+  when:
+    - node_action == "node_grant_access"
+    - (bare_metal_ssh_user | default('') | trim == '') or
+      (bare_metal_ssh_public_key | default('') | trim == '')
+
+- name: Validate bare-metal reclaim inputs
+  fail:
+    msg: "node_reclaim_access requires bare_metal_ssh_user"
+  when:
+    - node_action == "node_reclaim_access"
+    - bare_metal_ssh_user | default('') | trim == ''
+
+- name: Ensure bare-metal tenant group exists
+  group:
+    name: "{{ bare_metal_ssh_user }}"
+    state: present
+  become: yes
+  delegate_to: "{{ target_host }}"
+  when: node_action == "node_grant_access"
+
+- name: Ensure bare-metal tenant user exists
+  user:
+    name: "{{ bare_metal_ssh_user }}"
+    group: "{{ bare_metal_ssh_user }}"
+    shell: /bin/bash
+    create_home: yes
+    state: present
+  become: yes
+  delegate_to: "{{ target_host }}"
+  when: node_action == "node_grant_access"
+
+- name: Install bare-metal tenant SSH public key
+  ansible.posix.authorized_key:
+    user: "{{ bare_metal_ssh_user }}"
+    key: "{{ bare_metal_ssh_public_key }}"
+    state: present
+    manage_dir: yes
+    comment: "arkhai bare-metal lease {{ escrow_uid | default('unknown') }}"
+  become: yes
+  delegate_to: "{{ target_host }}"
+  when: node_action == "node_grant_access"
+
+- name: Ensure bare-metal tenant SSH directory permissions
+  file:
+    path: "/home/{{ bare_metal_ssh_user }}/.ssh"
+    owner: "{{ bare_metal_ssh_user }}"
+    group: "{{ bare_metal_ssh_user }}"
+    mode: "0700"
+    state: directory
+  become: yes
+  delegate_to: "{{ target_host }}"
+  when: node_action == "node_grant_access"
+
+- name: Ensure bare-metal tenant authorized_keys permissions
+  file:
+    path: "/home/{{ bare_metal_ssh_user }}/.ssh/authorized_keys"
+    owner: "{{ bare_metal_ssh_user }}"
+    group: "{{ bare_metal_ssh_user }}"
+    mode: "0600"
+    state: file
+  become: yes
+  delegate_to: "{{ target_host }}"
+  when: node_action == "node_grant_access"
+
+- name: Revoke bare-metal tenant SSH public key when provided
+  ansible.posix.authorized_key:
+    user: "{{ bare_metal_ssh_user }}"
+    key: "{{ bare_metal_ssh_public_key }}"
+    state: absent
+    manage_dir: no
+  become: yes
+  delegate_to: "{{ target_host }}"
+  when:
+    - node_action == "node_reclaim_access"
+    - bare_metal_ssh_public_key | default('') | trim != ''
+
+- name: Remove bare-metal tenant authorized_keys when no key was provided
+  file:
+    path: "/home/{{ bare_metal_ssh_user }}/.ssh/authorized_keys"
+    state: absent
+  become: yes
+  delegate_to: "{{ target_host }}"
+  when:
+    - node_action == "node_reclaim_access"
+    - bare_metal_ssh_public_key | default('') | trim == ''
+
+- name: Lock bare-metal tenant account after reclaim
+  user:
+    name: "{{ bare_metal_ssh_user }}"
+    password_lock: yes
+    shell: /usr/sbin/nologin
+    state: present
+  become: yes
+  delegate_to: "{{ target_host }}"
+  register: bare_metal_lock_result
+  failed_when: false
+  when: node_action == "node_reclaim_access"
+
+- name: Get current timestamp for bare-metal node access action
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: node_access_timestamp
+  delegate_to: localhost
+  when: node_action in ["node_grant_access", "node_reclaim_access"]
+
+- name: Create JSON data structure for node_grant_access action
+  set_fact:
+    node_grant_access_data:
+      action: "node_grant_access"
+      machine_id: "{{ machine_id }}"
+      physical_host_id: "{{ physical_host_id | default('') }}"
+      ssh_user: "{{ bare_metal_ssh_user }}"
+      escrow_uid: "{{ escrow_uid | default('') }}"
+      timestamp: "{{ node_access_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "success"
+  when:
+    - node_action == "node_grant_access"
+    - node_access_timestamp is defined
+
+- name: Create JSON formatted output for node_grant_access
+  set_fact:
+    node_grant_access_json: "{{ node_grant_access_data | to_nice_json }}"
+  when: node_action == "node_grant_access" and node_grant_access_data is defined
+
+- name: Output node_grant_access data as parsable JSON
+  debug:
+    var: node_grant_access_data
+  when: node_action == "node_grant_access" and node_grant_access_data is defined
+
+- name: Output node_grant_access JSON string for external parsing
+  debug:
+    msg: "{{ node_grant_access_json }}"
+  when: node_action == "node_grant_access" and node_grant_access_json is defined
+
+- name: Create JSON data structure for node_reclaim_access action
+  set_fact:
+    node_reclaim_access_data:
+      action: "node_reclaim_access"
+      machine_id: "{{ machine_id }}"
+      physical_host_id: "{{ physical_host_id | default('') }}"
+      ssh_user: "{{ bare_metal_ssh_user }}"
+      escrow_uid: "{{ escrow_uid | default('') }}"
+      timestamp: "{{ node_access_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: "success"
+      account_locked: "{{ bare_metal_lock_result.changed | default(false) }}"
+  when:
+    - node_action == "node_reclaim_access"
+    - node_access_timestamp is defined
+
+- name: Create JSON formatted output for node_reclaim_access
+  set_fact:
+    node_reclaim_access_json: "{{ node_reclaim_access_data | to_nice_json }}"
+  when: node_action == "node_reclaim_access" and node_reclaim_access_data is defined
+
+- name: Output node_reclaim_access data as parsable JSON
+  debug:
+    var: node_reclaim_access_data
+  when: node_action == "node_reclaim_access" and node_reclaim_access_data is defined
+
+- name: Output node_reclaim_access JSON string for external parsing
+  debug:
+    msg: "{{ node_reclaim_access_json }}"
+  when: node_action == "node_reclaim_access" and node_reclaim_access_json is defined

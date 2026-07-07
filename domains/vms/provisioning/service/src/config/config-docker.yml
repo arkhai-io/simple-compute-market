@@ -9,6 +9,7 @@
 # ---------------------------------------------------------------------------
 
 playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
+bare_metal_playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/bare-metal/node-access.yaml"
 inventory_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/hosts"
 management_vars_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
 ansible_cfg: "/opt/domains/vms/provisioning/iac/ansible/ansible.cfg"
