@@ -13,9 +13,13 @@ from .schema import (
     BareMetalLeaseCreate,
     BareMetalLeaseView,
     BareMetalListing,
+    BareMetalMaterialization,
     BareMetalMessage,
+    BareMetalReceipt,
     BareMetalTerms,
     bare_metal_executor_ref,
+    materialization_to_lease_create,
+    receipt_from_lease_view,
 )
 
 __all__ = [
@@ -31,7 +35,11 @@ __all__ = [
     "BareMetalLeaseCreate",
     "BareMetalLeaseView",
     "BareMetalListing",
+    "BareMetalMaterialization",
     "BareMetalMessage",
+    "BareMetalReceipt",
     "BareMetalTerms",
     "bare_metal_executor_ref",
+    "materialization_to_lease_create",
+    "receipt_from_lease_view",
 ]

@@ -14,10 +14,15 @@ from arkhai_bare_metal import (
     SSH_ACCESS_METHOD,
     BareMetalAccessResult,
     BareMetalLeaseCreate,
+    BareMetalLeaseView,
     BareMetalListing,
+    BareMetalMaterialization,
     BareMetalMessage,
+    BareMetalReceipt,
     BareMetalTerms,
     bare_metal_executor_ref,
+    materialization_to_lease_create,
+    receipt_from_lease_view,
 )
 
 
@@ -88,6 +93,109 @@ def test_bare_metal_terms_are_canonical_negotiation_handoff():
     assert terms.listing_ref == "listing-1"
     assert "executor_action" not in terms.model_dump()
     assert "playbook" not in terms.model_dump()
+
+
+def test_bare_metal_materialization_is_settlement_handoff():
+    materialization = BareMetalMaterialization(
+        escrow_uid="0xbm",
+        machine_id="bm-node-1",
+        physical_host_id="host-physical-1",
+        lease_start_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
+        lease_end_utc=datetime(2099, 1, 1, 1, tzinfo=timezone.utc),
+        ssh_public_key="ssh-ed25519 AAAA buyer",
+        listing_ref="listing-1",
+        settlement_ref={"chain": "anvil"},
+    )
+
+    assert materialization.kind == BARE_METAL_SCHEMA_KIND
+    assert materialization.access_method == SSH_ACCESS_METHOD
+    assert materialization.settlement_ref == {"chain": "anvil"}
+    assert "playbook" not in materialization.model_dump()
+
+
+def test_bare_metal_materialization_rejects_invalid_window():
+    with pytest.raises(ValidationError):
+        BareMetalMaterialization(
+            escrow_uid="0xbm",
+            machine_id="bm-node-1",
+            physical_host_id="host-physical-1",
+            lease_start_utc=datetime(2099, 1, 1, 1, tzinfo=timezone.utc),
+            lease_end_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
+            ssh_public_key="ssh-ed25519 AAAA buyer",
+        )
+
+
+def test_materialization_to_lease_create_adapts_current_api_request():
+    materialization = BareMetalMaterialization(
+        escrow_uid="0xbm",
+        machine_id="bm-node-1",
+        physical_host_id="host-physical-1",
+        lease_end_utc=datetime(2099, 1, 1, 1, tzinfo=timezone.utc),
+        ssh_public_key="ssh-ed25519 AAAA buyer",
+        access_ref={"ssh_user": "tenant-a"},
+    )
+
+    request = materialization_to_lease_create(
+        materialization,
+        allocation_id="alloc-1",
+        create_job_id="job-1",
+    )
+
+    assert request.allocation_id == "alloc-1"
+    assert request.escrow_uid == "0xbm"
+    assert request.machine_id == "bm-node-1"
+    assert request.physical_host_id == "host-physical-1"
+    assert request.lease_end_utc == materialization.lease_end_utc
+    assert request.create_job_id == "job-1"
+    assert request.access_ref == {
+        "ssh_user": "tenant-a",
+        "ssh_public_key": "ssh-ed25519 AAAA buyer",
+        "access_method": SSH_ACCESS_METHOD,
+    }
+
+
+def test_bare_metal_receipt_is_domain_view_not_executor_result():
+    receipt = BareMetalReceipt(
+        escrow_uid="0xbm",
+        machine_id="bm-node-1",
+        physical_host_id="host-physical-1",
+        lease_start_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
+        lease_end_utc=datetime(2099, 1, 1, 1, tzinfo=timezone.utc),
+        status="leased",
+        access_ref={"ssh_user": "tenant-a"},
+        result_ref={"grant_job_id": "job-1"},
+    )
+
+    assert receipt.kind == BARE_METAL_SCHEMA_KIND
+    assert receipt.status == "leased"
+    assert "executor_action" not in receipt.model_dump()
+
+
+def test_receipt_from_lease_view_adapts_current_api_view():
+    lease = BareMetalLeaseView(
+        allocation_id="alloc-1",
+        escrow_uid="0xbm",
+        machine_id="bm-node-1",
+        physical_host_id="host-physical-1",
+        lease_start_utc="2099-01-01T00:00:00+00:00",
+        lease_end_utc="2099-01-01T01:00:00+00:00",
+        state="leased",
+        release_job_id=None,
+        access_ref={"ssh_user": "tenant-a"},
+    )
+
+    receipt = receipt_from_lease_view(
+        lease,
+        result_ref={"allocation_id": "alloc-1"},
+    )
+
+    assert receipt.escrow_uid == "0xbm"
+    assert receipt.machine_id == "bm-node-1"
+    assert receipt.status == "leased"
+    assert receipt.lease_start_utc == datetime(
+        2099, 1, 1, tzinfo=timezone.utc,
+    )
+    assert receipt.result_ref == {"allocation_id": "alloc-1"}
 
 
 def test_bare_metal_lease_create_keeps_machine_and_physical_ids_separate():

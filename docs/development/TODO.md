@@ -417,8 +417,10 @@ alongside the legacy `vm_*` aliases; the bare-metal playbook consumes the
 neutral values first. The bare-metal domain package owns the access action
 vocabulary and minimal grant/reclaim result shape, and now also defines the
 first market-lifecycle schema shapes:
-`BareMetalListing`, `BareMetalMessage`, and `BareMetalTerms`. The service
-package and most operator APIs are still VM-shaped.
+`BareMetalListing`, `BareMetalMessage`, `BareMetalTerms`,
+`BareMetalMaterialization`, and `BareMetalReceipt`. Conversion helpers adapt
+materializations and lease views to the current transitional provisioning API
+DTOs. The service package and most operator APIs are still VM-shaped.
 
 **Design stance:** VM and bare-metal provisioning should be separate executor
 services, or at least separate executor implementations, but they must not own

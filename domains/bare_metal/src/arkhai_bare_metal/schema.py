@@ -168,6 +168,106 @@ class BareMetalTerms(BaseModel):
         return self
 
 
+class BareMetalMaterialization(BaseModel):
+    """Settlement-to-fulfillment handoff for a bare-metal agreement."""
+
+    kind: Literal["bare_metal.v1"] = BARE_METAL_SCHEMA_KIND
+    escrow_uid: str = Field(description="On-chain escrow UID from the deal.")
+    machine_id: str = Field(
+        description="Bare-metal executor-local machine identity.",
+    )
+    physical_host_id: str = Field(
+        description="Stable physical host identity for cross-mode accounting.",
+    )
+    lease_start_utc: datetime | None = Field(
+        default=None,
+        description="UTC datetime when access should start; omitted means now.",
+    )
+    lease_end_utc: datetime = Field(
+        description="UTC datetime when access must end.",
+    )
+    access_method: str = Field(
+        default=SSH_ACCESS_METHOD,
+        description="Access method to materialize.",
+    )
+    ssh_public_key: str | None = Field(
+        default=None,
+        description="Buyer SSH public key when SSH access is requested.",
+    )
+    access_ref: dict[str, Any] | None = Field(
+        default=None,
+        description="Access metadata/reference consumed by provisioning.",
+    )
+    listing_ref: str | None = Field(
+        default=None,
+        description="Optional registry/storefront listing reference.",
+    )
+    settlement_ref: dict[str, Any] | None = Field(
+        default=None,
+        description="Mechanism-specific settlement reference metadata.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_materialization(self) -> "BareMetalMaterialization":
+        for field_name in (
+            "escrow_uid",
+            "machine_id",
+            "physical_host_id",
+            "access_method",
+        ):
+            if not str(getattr(self, field_name)).strip():
+                raise ValueError(f"{field_name} must be non-empty")
+        if (
+            self.lease_start_utc is not None
+            and self.lease_start_utc >= self.lease_end_utc
+        ):
+            raise ValueError("lease_start_utc must be before lease_end_utc")
+        if self.access_method == SSH_ACCESS_METHOD and not (
+            self.ssh_public_key or self.access_ref
+        ):
+            raise ValueError(
+                "ssh_public_key or access_ref is required for SSH access"
+            )
+        return self
+
+
+class BareMetalReceipt(BaseModel):
+    """Domain receipt for bare-metal fulfillment/servicing state."""
+
+    kind: Literal["bare_metal.v1"] = BARE_METAL_SCHEMA_KIND
+    escrow_uid: str | None = Field(
+        default=None,
+        description="On-chain escrow UID associated with the lease.",
+    )
+    machine_id: str = Field(
+        description="Bare-metal executor-local machine identity.",
+    )
+    physical_host_id: str = Field(
+        description="Stable physical host identity for cross-mode accounting.",
+    )
+    lease_start_utc: datetime | None = None
+    lease_end_utc: datetime | None = None
+    status: str = Field(description="Domain fulfillment/servicing status.")
+    access_ref: dict[str, Any] | None = None
+    result_ref: dict[str, Any] | None = Field(
+        default=None,
+        description="Reference to implementation-specific job/result details.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_receipt(self) -> "BareMetalReceipt":
+        for field_name in ("machine_id", "physical_host_id", "status"):
+            if not str(getattr(self, field_name)).strip():
+                raise ValueError(f"{field_name} must be non-empty")
+        if (
+            self.lease_start_utc is not None
+            and self.lease_end_utc is not None
+            and self.lease_start_utc >= self.lease_end_utc
+        ):
+            raise ValueError("lease_start_utc must be before lease_end_utc")
+        return self
+
+
 class BareMetalLeaseCreate(BaseModel):
     """Request to attach a bare-metal lease tail to a live allocation."""
 
@@ -277,3 +377,51 @@ class BareMetalAccessResult(BaseModel):
         if not self.machine_id.strip():
             raise ValueError("machine_id must be non-empty")
         return self
+
+
+def materialization_to_lease_create(
+    materialization: BareMetalMaterialization,
+    *,
+    allocation_id: str | None = None,
+    create_job_id: str | None = None,
+) -> BareMetalLeaseCreate:
+    """Adapt domain materialization into the current provisioning API request."""
+    access_ref = dict(materialization.access_ref or {})
+    if materialization.ssh_public_key:
+        access_ref.setdefault("ssh_public_key", materialization.ssh_public_key)
+    if materialization.access_method:
+        access_ref.setdefault("access_method", materialization.access_method)
+    return BareMetalLeaseCreate(
+        allocation_id=allocation_id,
+        escrow_uid=materialization.escrow_uid,
+        machine_id=materialization.machine_id,
+        physical_host_id=materialization.physical_host_id,
+        lease_start_utc=materialization.lease_start_utc,
+        lease_end_utc=materialization.lease_end_utc,
+        access_ref=access_ref or None,
+        create_job_id=create_job_id,
+    )
+
+
+def receipt_from_lease_view(
+    lease: BareMetalLeaseView,
+    *,
+    result_ref: dict[str, Any] | None = None,
+) -> BareMetalReceipt:
+    """Adapt the current allocation-backed lease view into a domain receipt."""
+    return BareMetalReceipt(
+        escrow_uid=lease.escrow_uid,
+        machine_id=lease.machine_id,
+        physical_host_id=lease.physical_host_id,
+        lease_start_utc=_parse_optional_datetime(lease.lease_start_utc),
+        lease_end_utc=_parse_optional_datetime(lease.lease_end_utc),
+        status=lease.state,
+        access_ref=lease.access_ref,
+        result_ref=result_ref,
+    )
+
+
+def _parse_optional_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    return datetime.fromisoformat(value)
