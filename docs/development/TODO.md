@@ -432,15 +432,19 @@ shared hardware is available.
 
 Domain packages own the schema and deterministic interpretation for their
 market semantics: listing payloads, messages, agreed terms, materialization,
-receipts, provisioning/executor vocabulary, and pure validators/codecs. Concrete
-seller policies, buyer policies, provisioning services, provider integrations,
-and local service state belong in separate role/implementation packages that
-depend on the domain package plus the relevant core role package. A provisioning
-service may serve multiple domains by implementing thin domain adapters over
-shared local internals, and a domain may be served by multiple provisioning
-implementations that all implement the same domain schema. Reusable substrate
-such as site authority, allocation lifecycle, capacity clients, and
-leased-access helpers belongs in shared kit, not in one domain's VM-shaped API.
+receipts, provisioning/executor vocabulary, pure validators/codecs, and
+schema-implied default/reference behavior. Exact-match seller policy,
+exact-proposal buyer helpers, registry filter helpers, and canonical fixtures
+may live in the domain package because they clarify the market's semantics.
+Operator-specific seller policies, buyer policies, provisioning services,
+provider integrations, and local service state belong in separate
+role/implementation packages that depend on the domain package plus the
+relevant core role package. A provisioning service may serve multiple domains
+by implementing thin domain adapters over shared local internals, and a domain
+may be served by multiple provisioning implementations that all implement the
+same domain schema. Reusable substrate such as site authority, allocation
+lifecycle, capacity clients, and leased-access helpers belongs in shared kit,
+not in one domain's VM-shaped API.
 The current VM provisioning service still mixes VM contract surface with
 generic site-authority substrate; future refactors should split those roles
 without breaking existing VM clients. The bare-metal market schema starts under

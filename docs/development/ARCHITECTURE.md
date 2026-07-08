@@ -126,11 +126,16 @@ execute them. A light domain package should contain only the schema and
 deterministic interpretation needed for independent implementations to agree:
 listing payloads, negotiation messages, agreed terms, settlement
 materialization/receipt vocabulary, provisioning/executor result vocabulary,
-and pure validators/codecs. It should not carry specific seller or buyer
-policies, RL models, provisioning daemons, provider SDK integrations, Ansible
-assets, FastAPI apps, or SQLAlchemy service state. Those implementations depend
-on the domain package plus the relevant core role package. Operators install one
-implementation for each role/capability they need, or write their own.
+pure validators/codecs, and schema-implied default/reference behavior. For
+example, a domain package may include an exact-match seller policy, an exact
+buyer proposal builder, registry filter vocabulary helpers, and canonical
+fixtures because those clarify what the schema means. It should not carry
+operator-specific seller or buyer policies, RL models, provisioning daemons,
+provider SDK integrations, Ansible assets, FastAPI apps, or SQLAlchemy service
+state. Those implementations depend on the domain package plus the relevant
+core role package. Operators install one implementation for each
+role/capability they need, or write their own. Bundled implementation packages
+are fine; they need not be one wheel per policy.
 
 VM-domain code is split by ownership boundary. `arkhai-vms-common`
 (`domains/vms/common/`) carries shared VM-domain model code such as
