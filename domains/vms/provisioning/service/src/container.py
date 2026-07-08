@@ -143,6 +143,7 @@ class Container(containers.DeclarativeContainer):
         job_service=job_service,
         job_queue_provider=_resolved_job_queue,
         settings=config,
+        host_service=host_service,
     )
 
     release_dispatcher = providers.Factory(

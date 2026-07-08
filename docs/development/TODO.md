@@ -495,8 +495,12 @@ admin/operator VM API.
    operation dispatches by `executor_kind`.
 3. Add operational hardening around bare-metal access grant/reclaim:
    configurable reclaim policy (landed: `remove_lease_key`, `lock_user`, or
-   `delete_user`), host inventory conventions for bare-metal nodes, and
-   live-host validation.
+   `delete_user`), host inventory conventions for bare-metal nodes (landed:
+   `BareMetalListing.machine_id` / executor target maps to the provisioning
+   host registry's `hosts.name`, and inventory import accepts
+   `[bare_metal_nodes]` alongside `[kvm_hosts]`), and live-host validation.
+   Access grant/reclaim now validates that the machine exists and is enabled
+   before queueing Ansible work.
 4. Extend listing/publication flows so VM and bare-metal listings are derived
    from the same site-authority snapshot and cross-mode availability.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,6 +14,7 @@ from arkhai_bare_metal import (
 from provisioning_client.models import JobSubmitResponse
 
 from services.bare_metal_operations_service import (
+    BareMetalHostValidationError,
     BareMetalOperationsService,
 )
 
@@ -27,6 +29,9 @@ async def test_grant_access_submits_node_grant_job():
     service = BareMetalOperationsService(
         job_service=job_service,
         job_queue_provider=lambda: queue,
+        host_service=MagicMock(
+            get_host=MagicMock(return_value=SimpleNamespace(enabled=True)),
+        ),
     )
 
     response = await service.grant_access(
@@ -73,6 +78,9 @@ async def test_reclaim_access_submits_node_reclaim_job_from_allocation():
         job_service=job_service,
         job_queue_provider=lambda: queue,
         settings=MagicMock(bare_metal_reclaim_policy="lock_user"),
+        host_service=MagicMock(
+            get_host=MagicMock(return_value=SimpleNamespace(enabled=True)),
+        ),
     )
 
     job_id = await service.reclaim_access_for_allocation({
@@ -118,4 +126,73 @@ async def test_reclaim_access_without_machine_id_returns_none():
     )
 
     assert await service.reclaim_access_for_allocation({}) is None
+    job_service.submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_grant_access_unknown_machine_raises_without_submitting_job():
+    job_service = MagicMock()
+    job_service.submit = AsyncMock()
+    service = BareMetalOperationsService(
+        job_service=job_service,
+        job_queue_provider=lambda: object(),
+        host_service=MagicMock(get_host=MagicMock(return_value=None)),
+    )
+
+    with pytest.raises(BareMetalHostValidationError) as exc_info:
+        await service.grant_access(
+            BareMetalLeaseCreate(
+                escrow_uid="0xbm",
+                machine_id="missing-node",
+                physical_host_id="host-physical-1",
+                lease_end_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
+            ),
+        )
+
+    assert exc_info.value.status_code == 404
+    job_service.submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_grant_access_disabled_machine_raises_without_submitting_job():
+    job_service = MagicMock()
+    job_service.submit = AsyncMock()
+    service = BareMetalOperationsService(
+        job_service=job_service,
+        job_queue_provider=lambda: object(),
+        host_service=MagicMock(
+            get_host=MagicMock(return_value=SimpleNamespace(enabled=False)),
+        ),
+    )
+
+    with pytest.raises(BareMetalHostValidationError) as exc_info:
+        await service.grant_access(
+            BareMetalLeaseCreate(
+                escrow_uid="0xbm",
+                machine_id="disabled-node",
+                physical_host_id="host-physical-1",
+                lease_end_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
+            ),
+        )
+
+    assert exc_info.value.status_code == 409
+    job_service.submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reclaim_access_for_unknown_machine_returns_none_without_submitting_job():
+    job_service = MagicMock()
+    job_service.submit = AsyncMock()
+    service = BareMetalOperationsService(
+        job_service=job_service,
+        job_queue_provider=lambda: object(),
+        host_service=MagicMock(get_host=MagicMock(return_value=None)),
+    )
+
+    result = await service.reclaim_access_for_allocation({
+        "executor_target": "missing-node",
+        "executor_ref": {"physical_host_id": "host-physical-1"},
+    })
+
+    assert result is None
     job_service.submit.assert_not_awaited()

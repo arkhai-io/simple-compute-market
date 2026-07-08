@@ -367,6 +367,7 @@ async def client_and_queue(
         job_service=job_service,
         job_queue_provider=lambda: job_queue,
         settings=mock_settings,
+        host_service=host_service,
     )
 
     from services.release_executors import (

@@ -26,6 +26,7 @@ from services.release_executors import get_physical_host_id
 
 if TYPE_CHECKING:
     from services.job_service import AnsibleJobService
+    from services.host_service import HostService
 
 
 def _access_value(access_ref: dict[str, Any] | None, *keys: str) -> str | None:
@@ -47,12 +48,15 @@ class BareMetalOperationsService:
         job_service: "AnsibleJobService",
         job_queue_provider: Callable[[], AsyncJobQueue],
         settings: Any | None = None,
+        host_service: "HostService | None" = None,
     ) -> None:
         self._job_service = job_service
         self._job_queue_provider = job_queue_provider
         self._settings = settings
+        self._host_service = host_service
 
     async def grant_access(self, body: BareMetalLeaseCreate) -> JobSubmitResponse:
+        self._validate_machine(body.machine_id)
         access_ref = dict(body.access_ref or {})
         return await self._job_service.submit(
             AnsibleJobParams(
@@ -82,11 +86,15 @@ class BareMetalOperationsService:
     ) -> str | None:
         if not allocation.get("executor_target"):
             return None
-        submit = await self.reclaim_access(allocation)
+        try:
+            submit = await self.reclaim_access(allocation)
+        except BareMetalHostValidationError:
+            return None
         return submit.job_id
 
     async def reclaim_access(self, allocation: dict[str, Any]) -> JobSubmitResponse:
         machine_id = str(allocation.get("executor_target") or "")
+        self._validate_machine(machine_id)
         access_ref = bare_metal_access_ref(allocation)
         return await self._job_service.submit(
             AnsibleJobParams(
@@ -116,3 +124,26 @@ class BareMetalOperationsService:
             return str(self._settings.bare_metal_reclaim_policy)
         except AttributeError:
             return DEFAULT_BARE_METAL_RECLAIM_POLICY
+
+    def _validate_machine(self, machine_id: str) -> None:
+        if self._host_service is None:
+            return
+        host = self._host_service.get_host(machine_id)
+        if host is None:
+            raise BareMetalHostValidationError(
+                f"Bare-metal machine {machine_id!r} is not registered in host inventory.",
+                status_code=404,
+            )
+        if not bool(getattr(host, "enabled", False)):
+            raise BareMetalHostValidationError(
+                f"Bare-metal machine {machine_id!r} is disabled in host inventory.",
+                status_code=409,
+            )
+
+
+class BareMetalHostValidationError(Exception):
+    """Raised when a bare-metal machine is not eligible for access jobs."""
+
+    def __init__(self, message: str, *, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code

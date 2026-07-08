@@ -81,12 +81,14 @@ class Credential(Base):
 
 
 class Host(Base):
-    """Registered KVM hypervisor host.
+    """Registered provisioning host.
 
     This is the single source of truth for host inventory. The Ansible INI
     file is an input format only (via ``POST /hosts/import`` or the
     ``PROVISIONING_INVENTORY_INI`` env var at startup); at runtime, all host
-    lookups and inventory rendering use this table.
+    lookups and inventory rendering use this table. Rows may represent KVM
+    hypervisors, bare-metal nodes, or future executor hosts; the row name is
+    the Ansible alias used by executor jobs.
 
     ssh_key_type:
         "path"     — ssh_key_value is a filesystem path (e.g. a mounted

@@ -16,11 +16,33 @@ from httpx import ASGITransport, AsyncClient
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
 from core_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 from db.models import AnsibleJob
+from provisioning_client.models import HostCreate
 from main import app
 
 
 def _future_dt(hours: int = 2) -> str:
     return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+
+
+def _ensure_bare_metal_host(name: str = "bm-node-1", *, enabled: bool = True) -> None:
+    host_service = _container_module.resolved_host_service
+    existing = host_service.get_host(name)
+    if existing is None:
+        host_service.register_host(
+            HostCreate(
+                name=name,
+                kvm_host="192.0.2.10",
+                ssh_user="root",
+                ssh_key_type="path",
+                ssh_key_value="/fake/id_ed25519",
+                gpu_count=0,
+                enabled=enabled,
+            ),
+        )
+    elif enabled:
+        host_service.enable_host(name)
+    else:
+        host_service.disable_host(name)
 
 
 def _reserve_bare_metal(escrow_uid: str) -> dict:
@@ -105,6 +127,7 @@ async def bare_metal_client(client_and_queue):
 async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
     bare_metal_client: BareMetalLeaseTestClient,
 ):
+    _ensure_bare_metal_host()
     reserved = _reserve_bare_metal("escrow-bm-api-1")
 
     lease = await bare_metal_client.register_lease(
@@ -149,6 +172,7 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
 async def test_list_and_get_bare_metal_leases_exclude_vm_leases(
     bare_metal_client: BareMetalLeaseTestClient,
 ):
+    _ensure_bare_metal_host()
     reserved = _reserve_bare_metal("escrow-bm-api-2")
     lease = await bare_metal_client.register_lease(
         allocation_id=reserved["allocation_id"],
@@ -176,6 +200,7 @@ async def test_unknown_bare_metal_lease_returns_404(
 async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
     bare_metal_client: BareMetalLeaseTestClient,
 ):
+    _ensure_bare_metal_host()
     reserved = _reserve_bare_metal("escrow-bm-api-reclaim")
     lease = await bare_metal_client.register_lease(
         allocation_id=reserved["allocation_id"],
@@ -210,3 +235,25 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
         assert job.params["executor_action"] == NODE_RECLAIM_ACCESS_ACTION
         assert job.params["executor_target"] == "bm-node-1"
         assert job.params["bare_metal_reclaim_policy"] == "remove_lease_key"
+
+
+async def test_register_bare_metal_lease_for_unknown_machine_does_not_queue_job(
+    bare_metal_client: BareMetalLeaseTestClient,
+):
+    reserved = _reserve_bare_metal("escrow-bm-api-unknown")
+    session_factory = _container_module.resolved_session_factory
+    with session_factory() as db:
+        job_count_before = db.query(AnsibleJob).count()
+
+    with pytest.raises(BareMetalApiError) as exc_info:
+        await bare_metal_client.register_lease(
+            allocation_id=reserved["allocation_id"],
+            escrow_uid="escrow-bm-api-unknown",
+            machine_id="missing-bm-node",
+            physical_host_id="host-physical-1",
+            lease_end_utc=_future_dt(),
+        )
+
+    assert exc_info.value.status_code == 404
+    with session_factory() as db:
+        assert db.query(AnsibleJob).count() == job_count_before

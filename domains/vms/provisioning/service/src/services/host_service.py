@@ -1,4 +1,4 @@
-"""CRUD service for the KVM host registry.
+"""CRUD service for the provisioning host registry.
 
 The ``hosts`` table is the single source of truth for host inventory.
 All host lookups during job execution and all ``GET /hosts`` queries
@@ -197,8 +197,9 @@ class HostService:
         This is safe to call repeatedly — it is idempotent for the same
         input.
 
-        The INI is expected to contain a ``[kvm_hosts]`` group.  Lines
-        in other groups or without a group header are also parsed.
+        The INI is expected to contain ``[kvm_hosts]`` and/or
+        ``[bare_metal_nodes]`` groups.  Lines in other groups or without a
+        supported group header are skipped.
 
         For ``ssh_key_type='path'``: ``ansible_ssh_private_key_file`` is
         stored verbatim.  Defaults to ``_DEFAULT_KEY_PATH`` if absent.
@@ -320,10 +321,10 @@ class HostService:
 def _parse_ini(ini_text: str) -> list[dict]:
     """Parse an Ansible INI inventory block into a list of host dicts.
 
-    Only entries under the ``[kvm_hosts]`` group are imported.  Other groups
-    (e.g. ``[frp_servers]``, ``[provisioning_servers]``) are skipped — they
-    describe infrastructure that manages the provisioning service itself, not
-    VMs the provisioning service manages.
+    Only entries under ``[kvm_hosts]`` or ``[bare_metal_nodes]`` are imported.
+    Other groups (e.g. ``[frp_servers]``, ``[provisioning_servers]``) are
+    skipped — they describe infrastructure that manages the provisioning
+    service itself, not machines the provisioning service sells.
 
     Returns a list of ``{"name", "kvm_host", "ssh_user", "gpu_count",
     "ansible_ssh_private_key_file"}`` dicts.  Entries missing
@@ -336,7 +337,7 @@ def _parse_ini(ini_text: str) -> list[dict]:
         All other variables              → ignored
     """
     results = []
-    in_kvm_hosts = False
+    in_supported_hosts_group = False
 
     for line in ini_text.splitlines():
         stripped = line.strip()
@@ -344,10 +345,13 @@ def _parse_ini(ini_text: str) -> list[dict]:
             continue
 
         if stripped.startswith("["):
-            in_kvm_hosts = stripped.startswith("[kvm_hosts]")
+            in_supported_hosts_group = stripped in {
+                "[kvm_hosts]",
+                "[bare_metal_nodes]",
+            }
             continue
 
-        if not in_kvm_hosts:
+        if not in_supported_hosts_group:
             continue
 
         parts = stripped.split()

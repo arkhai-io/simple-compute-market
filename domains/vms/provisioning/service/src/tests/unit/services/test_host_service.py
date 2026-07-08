@@ -101,9 +101,20 @@ class TestParseIni:
             "other  ansible_host=9.9.9.9  ansible_user=nobody\n"
         )
         result = _parse_ini(ini)
-        # Both kvm1 and other should be parsed (group membership is not filtered)
         names = {r["name"] for r in result}
         assert "kvm1" in names
+        assert "other" not in names
+
+    def test_parses_bare_metal_nodes_group(self):
+        ini = (
+            "[bare_metal_nodes]\n"
+            "bm-node-1  ansible_host=10.0.1.1  ansible_user=root\n"
+        )
+        result = _parse_ini(ini)
+        assert len(result) == 1
+        assert result[0]["name"] == "bm-node-1"
+        assert result[0]["kvm_host"] == "10.0.1.1"
+        assert result[0]["ssh_user"] == "root"
 
     def test_skips_entry_missing_ansible_host(self):
         ini = "bad_entry  ansible_user=ubuntu\n"

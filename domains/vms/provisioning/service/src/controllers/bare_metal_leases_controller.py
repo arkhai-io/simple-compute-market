@@ -18,7 +18,10 @@ from services.bare_metal_lease_service import (
     BareMetalLeaseService,
     bare_metal_access_ref,
 )
-from services.bare_metal_operations_service import BareMetalOperationsService
+from services.bare_metal_operations_service import (
+    BareMetalHostValidationError,
+    BareMetalOperationsService,
+)
 from services.lease_lifecycle_service import LeaseNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -53,6 +56,8 @@ def _lease_view(allocation: dict[str, Any]) -> BareMetalLeaseView:
 def _http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, LeaseNotFoundError):
         return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, BareMetalHostValidationError):
+        return HTTPException(status_code=exc.status_code, detail=str(exc))
     return HTTPException(status_code=500, detail=str(exc))
 
 
@@ -85,12 +90,12 @@ class BareMetalLeasesController:
         summary="Register a bare-metal lease on its allocation",
     )
     async def create_lease(self, body: BareMetalLeaseCreate) -> BareMetalLeaseView:
-        if not body.create_job_id:
-            grant = await self._operations.grant_access(body)
-            body = body.model_copy(update={"create_job_id": grant.job_id})
         try:
+            if not body.create_job_id:
+                grant = await self._operations.grant_access(body)
+                body = body.model_copy(update={"create_job_id": grant.job_id})
             attached = self._leases.register_lease(body)
-        except LeaseNotFoundError as exc:
+        except (LeaseNotFoundError, BareMetalHostValidationError) as exc:
             raise _http_error(exc) from exc
         logger.info(
             "[BARE_METAL_LEASES] Attached lease to allocation %s (machine=%s escrow=%s)",
