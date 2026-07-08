@@ -13,6 +13,12 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 BARE_METAL_EXECUTOR_KIND = "bare_metal"
+NODE_GRANT_ACCESS_ACTION = "node_grant_access"
+NODE_RECLAIM_ACCESS_ACTION = "node_reclaim_access"
+BARE_METAL_ACCESS_ACTIONS = (
+    NODE_GRANT_ACCESS_ACTION,
+    NODE_RECLAIM_ACCESS_ACTION,
+)
 EXCLUSIVE_ALLOCATION_MODE = "exclusive"
 PHYSICAL_HOST_ID_REF_KEY = "physical_host_id"
 
@@ -91,3 +97,49 @@ class BareMetalLeaseView(BaseModel):
     state: str
     release_job_id: str | None = None
     access_ref: dict[str, Any] | None = None
+
+
+class BareMetalAccessResult(BaseModel):
+    """Result shape for bare-metal grant/reclaim executor slots."""
+
+    action: str = Field(
+        description="Bare-metal executor lifecycle action that completed.",
+    )
+    machine_id: str = Field(
+        description="Executor-local bare-metal machine identity.",
+    )
+    physical_host_id: str | None = Field(
+        default=None,
+        description="Stable cross-mode physical host identity when available.",
+    )
+    ssh_user: str | None = Field(
+        default=None,
+        description="Tenant SSH account touched by the access operation.",
+    )
+    escrow_uid: str | None = Field(
+        default=None,
+        description="On-chain escrow UID associated with the lease.",
+    )
+    timestamp: str | None = Field(
+        default=None,
+        description="Executor-reported completion timestamp.",
+    )
+    status: str = Field(
+        default="success",
+        description="Executor-reported terminal status.",
+    )
+    details: dict[str, Any] | None = Field(
+        default=None,
+        description="Implementation-specific result details.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_action(self) -> "BareMetalAccessResult":
+        if self.action not in BARE_METAL_ACCESS_ACTIONS:
+            raise ValueError(
+                "action must be one of "
+                f"{', '.join(BARE_METAL_ACCESS_ACTIONS)}"
+            )
+        if not self.machine_id.strip():
+            raise ValueError("machine_id must be non-empty")
+        return self

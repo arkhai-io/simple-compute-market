@@ -13,10 +13,10 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from arkhai_bare_metal_contracts import NODE_GRANT_ACCESS_ACTION
 from core_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 from db.models import AnsibleJob
 from main import app
-from services.bare_metal_operations_service import NODE_GRANT_ACCESS_ACTION
 
 
 def _future_dt(hours: int = 2) -> str:

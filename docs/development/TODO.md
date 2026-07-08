@@ -414,8 +414,9 @@ Those actions use a separate bare-metal Ansible playbook/role rather than the
 VM management role. Internal job payloads now carry domain-neutral
 `executor_kind`, `executor_action`, `executor_target`, and `executor_ref`
 alongside the legacy `vm_*` aliases; the bare-metal playbook consumes the
-neutral values first. The service package and most operator APIs are still
-VM-shaped.
+neutral values first. The bare-metal contract package owns the access action
+vocabulary and minimal grant/reclaim result shape. The service package and most
+operator APIs are still VM-shaped.
 
 **Design stance:** VM and bare-metal provisioning should be separate executor
 services, or at least separate executor implementations, but they must not own

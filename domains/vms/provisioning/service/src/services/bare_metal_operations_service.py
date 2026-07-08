@@ -13,6 +13,8 @@ from typing import Any, TYPE_CHECKING
 from arkhai_bare_metal_contracts import (
     BARE_METAL_EXECUTOR_KIND,
     BareMetalLeaseCreate,
+    NODE_GRANT_ACCESS_ACTION,
+    NODE_RECLAIM_ACCESS_ACTION,
     bare_metal_executor_ref,
 )
 from models.jobs_model import AnsibleJobParams
@@ -23,9 +25,6 @@ from services.release_executors import get_physical_host_id
 
 if TYPE_CHECKING:
     from services.job_service import AnsibleJobService
-
-NODE_GRANT_ACCESS_ACTION = "node_grant_access"
-NODE_RECLAIM_ACCESS_ACTION = "node_reclaim_access"
 
 
 def _access_value(access_ref: dict[str, Any] | None, *keys: str) -> str | None:

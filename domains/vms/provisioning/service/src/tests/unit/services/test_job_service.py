@@ -14,6 +14,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from arkhai_bare_metal_contracts import (
+    NODE_GRANT_ACCESS_ACTION,
+    NODE_RECLAIM_ACCESS_ACTION,
+)
 from models.jobs_model import AnsibleJobParams, AnsibleRunResult
 from services.job_service import AnsibleJobService
 
@@ -153,9 +157,9 @@ class TestBuildParams:
         params = svc._build_params({
             "vm_host": "bm-node-1",
             "vm_target": "bm-node-1",
-            "vm_action": "node_grant_access",
+            "vm_action": NODE_GRANT_ACCESS_ACTION,
             "executor_kind": "bare_metal",
-            "executor_action": "node_grant_access",
+            "executor_action": NODE_GRANT_ACCESS_ACTION,
             "executor_target": "bm-node-1",
             "executor_ref": {
                 "physical_host_id": "host-physical-1",
@@ -170,7 +174,7 @@ class TestBuildParams:
 
         assert params.escrow_uid == "0xbm"
         assert params.executor_kind == "bare_metal"
-        assert params.executor_action == "node_grant_access"
+        assert params.executor_action == NODE_GRANT_ACCESS_ACTION
         assert params.executor_target == "bm-node-1"
         assert params.executor_ref == {
             "physical_host_id": "host-physical-1",
@@ -216,7 +220,10 @@ class TestPlaybookSelection:
 
     def test_bare_metal_actions_use_bare_metal_playbook(self):
         svc = _make_service()
-        params = AnsibleJobParams(vm_host="bm-node-1", vm_action="node_grant_access")
+        params = AnsibleJobParams(
+            vm_host="bm-node-1",
+            vm_action=NODE_RECLAIM_ACCESS_ACTION,
+        )
 
         assert svc._playbook_path_for_params(params) == Path("/playbooks/node-access.yaml")
 

@@ -4,12 +4,15 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from arkhai_bare_metal_contracts import BareMetalLeaseCreate, bare_metal_executor_ref
+from arkhai_bare_metal_contracts import (
+    BareMetalLeaseCreate,
+    NODE_GRANT_ACCESS_ACTION,
+    NODE_RECLAIM_ACCESS_ACTION,
+    bare_metal_executor_ref,
+)
 from provisioning_client.models import JobSubmitResponse
 
 from services.bare_metal_operations_service import (
-    NODE_GRANT_ACCESS_ACTION,
-    NODE_RECLAIM_ACCESS_ACTION,
     BareMetalOperationsService,
 )
 

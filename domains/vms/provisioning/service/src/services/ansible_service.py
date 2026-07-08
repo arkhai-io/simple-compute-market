@@ -34,6 +34,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from arkhai_bare_metal_contracts import (
+    NODE_GRANT_ACCESS_ACTION,
+    NODE_RECLAIM_ACCESS_ACTION,
+)
 from config import Settings
 from models.ansible import (
     ConnectivityResult,
@@ -562,8 +566,8 @@ class AnsibleService:
             "monitor": "vm_monitoring_data",
             "reset_password": "vm_password_reset_data",
             "vm_remove": "vm_remove_data",
-            "node_grant_access": "node_grant_access_data",
-            "node_reclaim_access": "node_reclaim_access_data",
+            NODE_GRANT_ACCESS_ACTION: "node_grant_access_data",
+            NODE_RECLAIM_ACCESS_ACTION: "node_reclaim_access_data",
             "check": "check_data",
         }
         fact_name = fact_names.get(action)
