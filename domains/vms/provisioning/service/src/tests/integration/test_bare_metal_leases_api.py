@@ -6,6 +6,7 @@ transitional provisioner still lives under ``domains/vms``.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import container as _container_module
@@ -16,8 +17,42 @@ from httpx import ASGITransport, AsyncClient
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
 from core_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 from db.models import AnsibleJob
+from services.ansible_service import AnsibleResult
+from services.async_job_queue import AsyncJobQueue
 from provisioning_client.models import HostCreate
 from main import app
+
+
+GRANT_STDOUT = """\
+PLAY [Grant bare-metal access] ***********************************************
+
+TASK [debug] *****************************************************************
+ok: [bm-node-1] => {
+    "node_grant_access_data": {
+        "action": "node_grant_access",
+        "status": "granted",
+        "host": "bm-node-1",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "result_message": "access granted"
+    }
+}
+"""
+
+
+RECLAIM_STDOUT = """\
+PLAY [Reclaim bare-metal access] *********************************************
+
+TASK [debug] *****************************************************************
+ok: [bm-node-1] => {
+    "node_reclaim_access_data": {
+        "action": "node_reclaim_access",
+        "status": "reclaimed",
+        "host": "bm-node-1",
+        "timestamp": "2026-01-01T01:00:00Z",
+        "result_message": "access reclaimed"
+    }
+}
+"""
 
 
 def _future_dt(hours: int = 2) -> str:
@@ -68,6 +103,19 @@ def _reserve_bare_metal(escrow_uid: str) -> dict:
     )
     assert reserved is not None
     return reserved
+
+
+def _make_event_seam(job_queue: AsyncJobQueue) -> asyncio.Event:
+    dispatched = asyncio.Event()
+    original_callback = job_queue._on_job_started
+
+    def _on_started(job_id: str) -> None:
+        dispatched.set()
+        if original_callback is not None:
+            original_callback(job_id)
+
+    job_queue._on_job_started = _on_started
+    return dispatched
 
 
 class BareMetalApiError(Exception):
@@ -235,6 +283,76 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
         assert job.params["executor_action"] == NODE_RECLAIM_ACCESS_ACTION
         assert job.params["executor_target"] == "bm-node-1"
         assert job.params["bare_metal_reclaim_policy"] == "remove_lease_key"
+
+
+async def test_bare_metal_grant_and_reclaim_jobs_succeed_with_executor_playbook(
+    client_and_queue,
+    fake_ansible,
+):
+    provisioning_client, job_queue = client_and_queue
+    async with BareMetalLeaseTestClient(ASGITransport(app=app)) as bare_metal_client:
+        _ensure_bare_metal_host()
+        reserved = _reserve_bare_metal("escrow-bm-api-smoke")
+        fake_ansible.wait_for_playbook.side_effect = [
+            AnsibleResult(stdout=GRANT_STDOUT, stderr="", process_id=99999),
+            AnsibleResult(stdout=RECLAIM_STDOUT, stderr="", process_id=99999),
+        ]
+
+        grant_dispatched = _make_event_seam(job_queue)
+        lease = await bare_metal_client.register_lease(
+            allocation_id=reserved["allocation_id"],
+            escrow_uid="escrow-bm-api-smoke",
+            machine_id="bm-node-1",
+            physical_host_id="host-physical-1",
+            access_ref={
+                "ssh_user": "tenant-a",
+                "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
+            },
+            lease_end_utc=_future_dt(),
+        )
+        ledger = _container_module.resolved_capacity_ledger_service
+        allocation = ledger.get_allocation(lease["allocation_id"])
+        grant_job_id = allocation["create_job_id"]
+        await asyncio.wait_for(grant_dispatched.wait(), timeout=5.0)
+        grant_job = await provisioning_client.poll_until_complete(
+            grant_job_id,
+            timeout=5.0,
+            poll_interval=0.05,
+        )
+
+        assert grant_job.status == "succeeded"
+        assert grant_job.result["action"] == NODE_GRANT_ACCESS_ACTION
+        assert grant_job.result["status"] == "granted"
+        assert grant_job.result["host"] == "bm-node-1"
+        first_playbook = fake_ansible.start_playbook.call_args_list[0].kwargs
+        assert first_playbook["playbook_path"].name == "bare-metal-node-access.yml"
+        assert first_playbook["limit"] == "bm-node-1"
+
+        reclaim_dispatched = _make_event_seam(job_queue)
+        terminated = await bare_metal_client.terminate_market_lease(
+            lease["allocation_id"],
+        )
+        allocation = ledger.get_allocation(lease["allocation_id"])
+        release_job_id = allocation["release_job_id"]
+        await asyncio.wait_for(reclaim_dispatched.wait(), timeout=5.0)
+        reclaim_job = await provisioning_client.poll_until_complete(
+            release_job_id,
+            timeout=5.0,
+            poll_interval=0.05,
+        )
+
+        assert reclaim_job.status == "succeeded"
+        assert reclaim_job.result["action"] == NODE_RECLAIM_ACCESS_ACTION
+        assert reclaim_job.result["status"] == "reclaimed"
+        assert reclaim_job.result["host"] == "bm-node-1"
+        second_playbook = fake_ansible.start_playbook.call_args_list[1].kwargs
+        assert second_playbook["playbook_path"].name == "bare-metal-node-access.yml"
+        assert second_playbook["limit"] == "bm-node-1"
+
+        allocation = ledger.get_allocation(lease["allocation_id"])
+        assert allocation["state"] == "releasing"
+        assert allocation["create_job_id"] == grant_job_id
+        assert allocation["release_job_id"] == release_job_id
 
 
 async def test_register_bare_metal_lease_for_unknown_machine_does_not_queue_job(

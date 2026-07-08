@@ -511,8 +511,10 @@ admin/operator VM API.
    publish/reopen/close CLI wiring. Cross-mode site-ledger conflict coverage
    now pins VM-slice versus exclusive bare-metal blocking, and storefront
    publication reconciliation coverage now pins close/reopen behavior for a
-   dual-mode host. Remaining work is a live happy-path smoke around real
-   bare-metal lease grant/reclaim execution.
+   dual-mode host. Provisioning integration coverage now drives bare-metal
+   lease grant/reclaim jobs through the background job processor and verifies
+   that the executor uses the bare-metal playbook. Remaining work is
+   operator-facing runbook/config documentation for live hardware.
 
 **Acceptance criteria:** one physical host can be registered once, exposed as
 both a whole-host bare-metal offer and one or more VM slice offers, and the
