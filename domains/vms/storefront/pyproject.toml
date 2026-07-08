@@ -16,6 +16,7 @@ dependencies = [
     "arkhai-kit-alkahest",
     "arkhai-kit-config",
     "arkhai-kit-policy",
+    "arkhai-bare-metal",
     "arkhai-vms-common",
     "arkhai-vms-provisioning-client>=0.1.1",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",

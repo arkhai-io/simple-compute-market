@@ -505,8 +505,10 @@ admin/operator VM API.
    from the same site-authority snapshot and cross-mode availability. The
    bare-metal domain now provides pure derivation helpers that turn enabled,
    available, `allocation_mode=exclusive` site resources into
-   `BareMetalListing` payloads; storefront publication/reopen/close wiring is
-   still pending.
+   `BareMetalListing` payloads. The VM storefront now has a parallel
+   bare-metal publication planner/tracking table for candidates, duplicate
+   detection, stale-open detection, and closed-available detection; actual
+   publish/reopen/close CLI wiring is still pending.
 
 **Acceptance criteria:** one physical host can be registered once, exposed as
 both a whole-host bare-metal offer and one or more VM slice offers, and the
