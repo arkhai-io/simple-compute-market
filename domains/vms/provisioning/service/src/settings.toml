@@ -39,6 +39,13 @@ bare_metal_playbook_path = "/opt/domains/vms/provisioning/iac/ansible/playbooks/
 inventory_path = "/opt/domains/vms/provisioning/iac/ansible/inventory/hosts"
 management_vars_path = "/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
 
+# Bare-metal reclaim policy for node_reclaim_access.
+# Options:
+#   remove_lease_key — remove only the SSH key recorded for the lease.
+#   lock_user        — remove the lease key and lock the account.
+#   delete_user      — delete the tenant account and home directory.
+bare_metal_reclaim_policy = "remove_lease_key"
+
 # Golden image credentials.
 # Used when image_setup_type=golden. Set via config-production.yml or env vars.
 # Never commit real values here.

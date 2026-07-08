@@ -142,6 +142,7 @@ class Container(containers.DeclarativeContainer):
         BareMetalOperationsService,
         job_service=job_service,
         job_queue_provider=_resolved_job_queue,
+        settings=config,
     )
 
     release_dispatcher = providers.Factory(

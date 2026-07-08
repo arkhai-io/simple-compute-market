@@ -72,6 +72,7 @@ async def test_reclaim_access_submits_node_reclaim_job_from_allocation():
     service = BareMetalOperationsService(
         job_service=job_service,
         job_queue_provider=lambda: queue,
+        settings=MagicMock(bare_metal_reclaim_policy="lock_user"),
     )
 
     job_id = await service.reclaim_access_for_allocation({
@@ -79,7 +80,10 @@ async def test_reclaim_access_submits_node_reclaim_job_from_allocation():
         "executor_target": "bm-node-1",
         "executor_ref": bare_metal_executor_ref(
             "host-physical-1",
-            access_ref={"ssh_user": "tenant-a"},
+            access_ref={
+                "ssh_user": "tenant-a",
+                "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
+            },
         ),
     })
 
@@ -95,10 +99,13 @@ async def test_reclaim_access_submits_node_reclaim_job_from_allocation():
     assert params.executor_ref == {
         "physical_host_id": "host-physical-1",
         "ssh_user": "tenant-a",
+        "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
     }
     assert params.escrow_uid == "0xbm"
     assert params.physical_host_id == "host-physical-1"
     assert params.ssh_user == "tenant-a"
+    assert params.ssh_public_key == "ssh-ed25519 AAAA tenant-a"
+    assert params.bare_metal_reclaim_policy == "lock_user"
 
 
 @pytest.mark.asyncio

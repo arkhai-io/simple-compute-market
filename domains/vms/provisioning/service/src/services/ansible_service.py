@@ -409,6 +409,10 @@ class AnsibleService:
             lines.append(f'bare_metal_ssh_public_key: "{escaped}"')
         if params.access_ref:
             lines.append(f"bare_metal_access_ref: {json.dumps(params.access_ref)}")
+        if params.bare_metal_reclaim_policy:
+            lines.append(
+                f'bare_metal_reclaim_policy: "{params.bare_metal_reclaim_policy}"'
+            )
         if params.image_setup_type == "golden":
             self._inject_golden_image_credentials(lines)
         else:

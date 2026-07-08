@@ -170,6 +170,7 @@ class TestBuildParams:
             "ssh_user": "tenant-a",
             "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
             "access_ref": {"ssh_user": "tenant-a"},
+            "bare_metal_reclaim_policy": "delete_user",
         })
 
         assert params.escrow_uid == "0xbm"
@@ -184,6 +185,7 @@ class TestBuildParams:
         assert params.ssh_user == "tenant-a"
         assert params.ssh_public_key == "ssh-ed25519 AAAA tenant-a"
         assert params.access_ref == {"ssh_user": "tenant-a"}
+        assert params.bare_metal_reclaim_policy == "delete_user"
 
     def test_executor_fields_fall_back_to_legacy_vm_fields(self):
         svc = _make_service()

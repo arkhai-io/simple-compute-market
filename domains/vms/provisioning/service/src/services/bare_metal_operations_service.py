@@ -17,6 +17,7 @@ from arkhai_bare_metal import (
     NODE_RECLAIM_ACCESS_ACTION,
     bare_metal_executor_ref,
 )
+from config import DEFAULT_BARE_METAL_RECLAIM_POLICY
 from models.jobs_model import AnsibleJobParams
 from provisioning_client.models import JobSubmitResponse
 from services.async_job_queue import AsyncJobQueue
@@ -45,9 +46,11 @@ class BareMetalOperationsService:
         *,
         job_service: "AnsibleJobService",
         job_queue_provider: Callable[[], AsyncJobQueue],
+        settings: Any | None = None,
     ) -> None:
         self._job_service = job_service
         self._job_queue_provider = job_queue_provider
+        self._settings = settings
 
     async def grant_access(self, body: BareMetalLeaseCreate) -> JobSubmitResponse:
         access_ref = dict(body.access_ref or {})
@@ -97,7 +100,19 @@ class BareMetalOperationsService:
                 escrow_uid=allocation.get("escrow_uid"),
                 physical_host_id=get_physical_host_id(allocation),
                 ssh_user=_access_value(access_ref, "ssh_user", "user"),
+                ssh_public_key=_access_value(
+                    access_ref, "ssh_public_key", "ssh_pubkey", "public_key",
+                ),
                 access_ref=access_ref,
+                bare_metal_reclaim_policy=self._reclaim_policy(),
             ),
             self._job_queue_provider(),
         )
+
+    def _reclaim_policy(self) -> str:
+        if self._settings is None:
+            return DEFAULT_BARE_METAL_RECLAIM_POLICY
+        try:
+            return str(self._settings.bare_metal_reclaim_policy)
+        except AttributeError:
+            return DEFAULT_BARE_METAL_RECLAIM_POLICY

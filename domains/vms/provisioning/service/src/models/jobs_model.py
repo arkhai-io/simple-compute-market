@@ -78,6 +78,7 @@ class AnsibleJobParams:
     ssh_user: Optional[str] = None
     ssh_public_key: Optional[str] = None
     access_ref: Optional[dict[str, Any]] = None
+    bare_metal_reclaim_policy: Optional[str] = None
 
     # Retry policy (per-job override)
     max_retries: Optional[int] = None

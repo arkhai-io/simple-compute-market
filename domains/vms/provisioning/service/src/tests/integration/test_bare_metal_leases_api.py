@@ -209,3 +209,4 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
         assert job.params["executor_kind"] == "bare_metal"
         assert job.params["executor_action"] == NODE_RECLAIM_ACCESS_ACTION
         assert job.params["executor_target"] == "bm-node-1"
+        assert job.params["bare_metal_reclaim_policy"] == "remove_lease_key"

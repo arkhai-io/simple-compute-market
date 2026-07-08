@@ -494,9 +494,9 @@ admin/operator VM API.
    `/api/v1/leases/*` as the market-managed lifecycle path whose release
    operation dispatches by `executor_kind`.
 3. Add operational hardening around bare-metal access grant/reclaim:
-   configurable reclaim policy (delete user vs lock user vs remove only the
-   lease key), host inventory conventions for bare-metal nodes, and live-host
-   validation.
+   configurable reclaim policy (landed: `remove_lease_key`, `lock_user`, or
+   `delete_user`), host inventory conventions for bare-metal nodes, and
+   live-host validation.
 4. Extend listing/publication flows so VM and bare-metal listings are derived
    from the same site-authority snapshot and cross-mode availability.
 

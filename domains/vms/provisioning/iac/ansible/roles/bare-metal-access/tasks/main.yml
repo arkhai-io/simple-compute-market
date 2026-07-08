@@ -21,6 +21,13 @@
     - node_action == "node_reclaim_access"
     - bare_metal_ssh_user | default('') | trim == ''
 
+- name: Validate bare-metal reclaim policy
+  fail:
+    msg: "bare_metal_reclaim_policy must be one of: remove_lease_key, lock_user, delete_user"
+  when:
+    - node_action == "node_reclaim_access"
+    - (bare_metal_reclaim_policy | default('remove_lease_key')) not in ["remove_lease_key", "lock_user", "delete_user"]
+
 - name: Ensure bare-metal tenant group exists
   group:
     name: "{{ bare_metal_ssh_user }}"
@@ -83,9 +90,10 @@
   delegate_to: "{{ target_host }}"
   when:
     - node_action == "node_reclaim_access"
+    - (bare_metal_reclaim_policy | default('remove_lease_key')) in ["remove_lease_key", "lock_user"]
     - bare_metal_ssh_public_key | default('') | trim != ''
 
-- name: Remove bare-metal tenant authorized_keys when no key was provided
+- name: Remove bare-metal tenant authorized_keys when key-only reclaim has no key
   file:
     path: "/home/{{ bare_metal_ssh_user }}/.ssh/authorized_keys"
     state: absent
@@ -93,6 +101,7 @@
   delegate_to: "{{ target_host }}"
   when:
     - node_action == "node_reclaim_access"
+    - (bare_metal_reclaim_policy | default('remove_lease_key')) == "remove_lease_key"
     - bare_metal_ssh_public_key | default('') | trim == ''
 
 - name: Lock bare-metal tenant account after reclaim
@@ -105,7 +114,22 @@
   delegate_to: "{{ target_host }}"
   register: bare_metal_lock_result
   failed_when: false
-  when: node_action == "node_reclaim_access"
+  when:
+    - node_action == "node_reclaim_access"
+    - (bare_metal_reclaim_policy | default('remove_lease_key')) == "lock_user"
+
+- name: Delete bare-metal tenant account after reclaim
+  user:
+    name: "{{ bare_metal_ssh_user }}"
+    state: absent
+    remove: yes
+  become: yes
+  delegate_to: "{{ target_host }}"
+  register: bare_metal_delete_result
+  failed_when: false
+  when:
+    - node_action == "node_reclaim_access"
+    - (bare_metal_reclaim_policy | default('remove_lease_key')) == "delete_user"
 
 - name: Get current timestamp for bare-metal node access action
   shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -151,10 +175,12 @@
       physical_host_id: "{{ physical_host_id | default('') }}"
       ssh_user: "{{ bare_metal_ssh_user }}"
       escrow_uid: "{{ escrow_uid | default('') }}"
+      reclaim_policy: "{{ bare_metal_reclaim_policy | default('remove_lease_key') }}"
       timestamp: "{{ node_access_timestamp.stdout }}"
       host: "{{ target_host }}"
       status: "success"
       account_locked: "{{ bare_metal_lock_result.changed | default(false) }}"
+      account_deleted: "{{ bare_metal_delete_result.changed | default(false) }}"
   when:
     - node_action == "node_reclaim_access"
     - node_access_timestamp is defined

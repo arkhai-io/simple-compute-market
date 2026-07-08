@@ -18,6 +18,11 @@ def test_bare_metal_actions_have_separate_playbook_and_role():
     assert "node_grant_access_data" in role_text
     assert "node_reclaim_access_data" in role_text
     assert "ansible.posix.authorized_key" in role_text
+    assert "bare_metal_reclaim_policy" in role_text
+    assert "remove_lease_key" in role_text
+    assert "lock_user" in role_text
+    assert "delete_user" in role_text
+    assert "bare_metal_delete_result" in role_text
 
 
 def test_vm_management_role_does_not_dispatch_bare_metal_actions():

@@ -602,6 +602,7 @@ class AnsibleJobService:
             ssh_user=params.get("ssh_user"),
             ssh_public_key=params.get("ssh_public_key"),
             access_ref=params.get("access_ref"),
+            bare_metal_reclaim_policy=params.get("bare_metal_reclaim_policy"),
             max_retries=params.get("max_retries"),
         )
 

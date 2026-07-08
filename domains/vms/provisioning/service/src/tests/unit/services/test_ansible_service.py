@@ -188,6 +188,7 @@ class TestBuildVmVarsCreate:
             ssh_user="tenant-a",
             ssh_public_key="ssh-ed25519 AAAA tenant-a",
             access_ref={"ssh_user": "tenant-a"},
+            bare_metal_reclaim_policy="lock_user",
         )
 
         assert 'escrow_uid: "0xbm"' in yaml
@@ -195,6 +196,7 @@ class TestBuildVmVarsCreate:
         assert 'bare_metal_ssh_user: "tenant-a"' in yaml
         assert 'bare_metal_ssh_public_key: "ssh-ed25519 AAAA tenant-a"' in yaml
         assert 'bare_metal_access_ref: {"ssh_user": "tenant-a"}' in yaml
+        assert 'bare_metal_reclaim_policy: "lock_user"' in yaml
 
     def test_executor_fields_are_serialized_for_playbook_contract(self):
         svc = _make_service()

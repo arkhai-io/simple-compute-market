@@ -8,6 +8,7 @@
 #
 # Available keys (all optional — omit to fall back to settings.toml defaults):
 #   database_url, playbook_path, bare_metal_playbook_path, inventory_path, management_vars_path
+#   bare_metal_reclaim_policy
 #   ansible_cfg, ansible_timeout_seconds, default_vm_host
 #   golden_root_ssh_filename, golden_root_ssh_password, golden_image_name
 #   golden_gcs_bucket, golden_gcs_project

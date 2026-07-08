@@ -338,6 +338,7 @@ async def client_and_queue(
         storefront_url="http://test-storefront:8001",
         storefront_admin_key="test-admin-key",
         resolved_bare_metal_playbook_path=Path("/fake/bare-metal-node-access.yml"),
+        bare_metal_reclaim_policy="remove_lease_key",
     )
 
     host_service = HostService(
@@ -365,6 +366,7 @@ async def client_and_queue(
     bare_metal_operations_service = BareMetalOperationsService(
         job_service=job_service,
         job_queue_provider=lambda: job_queue,
+        settings=mock_settings,
     )
 
     from services.release_executors import (
