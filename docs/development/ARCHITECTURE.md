@@ -98,7 +98,7 @@ Import names and console scripts (`market`, `market-storefront`,
 | Layer | Distribution (path) | Role |
 |---|---|---|
 | core | `arkhai-core` (`core/`) | protocol-carrier wheel: negotiation/settlement wire shapes both roles must derive identically. Stdlib + pydantic only; zero domain vocabulary and zero settlement-mechanism vocabulary (lifecycle universals + `{mechanism, params}` envelope — see "Settlement Lifecycle"). |
-| core | `arkhai-core-buyer` (`core/buyer/`) | buyer role shell: `market` console script, verb skeleton, `market.buyer_plugins` entry-point discovery, registry fan-in, the sync negotiation client (per-unit→absolute scaling by an explicit `unit_count`), scalar buyer-policy surface (`listed_price`/`bisection` registrations), buy orchestration stages, settle/escrow clients, aggregation policies, run-log, deal-recovery helpers |
+| core | `arkhai-core-buyer` (`core/buyer/`) | buyer role shell: `market` console script, verb skeleton, `market.buyer_plugins` entry-point discovery, registry fan-in, the sync negotiation client (per-unit→absolute scaling by an explicit `unit_count`), buyer-policy and aggregation registries/discovery, buy orchestration stages, settle/escrow clients, schema-opaque aggregation helpers, run-log, deal-recovery helpers |
 | core | `arkhai-core-storefront` (`core/storefront/`) | storefront role shell (library, framework-free): sync-negotiation protocol, registry publication + multi-registry fan-out client, market-state SQLite persistence + versioned migrations (domain tables via subclass hooks), settle-time escrow verification, refund/ERC-20 transfer, stage log, auth, HTTP models, capacity-client contract + remote site client/event poller, claims engine |
 | core | `arkhai-core-registry` (`core/registry/`) | registry service; schema injected as `filter-spec.yaml` config |
 | core | `arkhai-core-registry-client`, `arkhai-core-storefront-client` | protocol clients |
@@ -659,11 +659,14 @@ callbacks, and the dynamic listing reconciler opens/closes registry
 listings from the resulting pool availability. The three places where
 policy plugs in are:
 
-- **Buyer-side aggregation** (buyer-only) — `aggregate(negotiate, listings)`
-  in `domains/vms/buyer/aggregation.py` owns the iteration shape across
-  listing candidates. Built-ins: `best_price`, `cheapest_first`,
-  `registry_order`. Custom strategies plug in via entry-point or file
-  discovery.
+- **Buyer-side aggregation** (buyer-only) — `core_buyer.aggregation` owns the
+  registry/discovery interface and schema-opaque control-flow helpers across
+  listing candidates. Settlement- or domain-shaped comparison policies live with
+  the package whose vocabulary they inspect; for example Alkahest scalar
+  policies such as `best_price`, `cheapest_first`, and `priceless_last` are
+  implemented in `market_alkahest.aggregation` and registered through the core
+  buyer registry for compatibility. Custom strategies plug in via entry-point
+  or file discovery.
 - **Seller-side per-round negotiation policies** (seller-only) — an
   ordered list of middlewares with signature
   `(history, context) -> (Maybe<Response>, Context)`. Guards short-
@@ -1166,9 +1169,9 @@ domains/vms/buyer/
 │                           # network, config, logs
 ├── buy_orchestrator.py     # the one-shot buy flow
 ├── buyer_client.py         # signed HTTP client for /negotiate, /api/v1/settle
-├── policy_surface.py       # BuyerPolicy objects: listed_price + bisection
+├── policy_surface.py       # BuyerPolicy registry compatibility surface
 ├── deal_helpers.py         # run-log recovery + chain settings helpers
-├── aggregation.py          # across-seller aggregation policies
+├── aggregation.py          # aggregation registry + schema-opaque helpers
 ├── run_log.py              # JSONL run logs under XDG_STATE_HOME
 └── common.py               # config-resolution + REPO_ROOT helpers
 ```

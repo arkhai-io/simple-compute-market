@@ -436,6 +436,11 @@ receipts, provisioning/executor vocabulary, pure validators/codecs, and
 schema-implied default/reference behavior. Exact-match seller policy,
 exact-proposal buyer helpers, registry filter helpers, and canonical fixtures
 may live in the domain package because they clarify the market's semantics.
+Settlement-kit-specific comparison helpers belong with the kit whose payment
+vocabulary they inspect; for example Alkahest scalar `best_price`,
+`cheapest_first`, and `priceless_last` aggregation policies live in
+`market_alkahest.aggregation`, while `core_buyer` owns the aggregation
+registry/discovery and schema-opaque control-flow helpers.
 Operator-specific seller policies, buyer policies, provisioning services,
 provider integrations, and local service state belong in separate
 role/implementation packages that depend on the domain package plus the
