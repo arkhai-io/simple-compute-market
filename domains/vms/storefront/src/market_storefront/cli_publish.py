@@ -55,6 +55,14 @@ from domains.vms.listings.reconciler import (
     reopen_local_derived_listing,
     stale_open_listing_ids,
 )
+from market_storefront.services.bare_metal_publication import (
+    bare_metal_listing_candidates,
+    load_derived_bare_metal_listing,
+    mark_derived_bare_metal_listings_closed,
+    open_bare_metal_listing_keys,
+    record_derived_bare_metal_listing,
+    stale_open_bare_metal_listing_ids,
+)
 
 
 def _normalize_max_duration_seconds(value: Any) -> int | None:
@@ -138,6 +146,33 @@ def _member_availability_sync() -> dict[tuple[str | None, str], int] | None:
     return view if answered else None
 
 
+def _capacity_snapshot_resources_sync() -> list[dict[str, Any]]:
+    """Aggregated site capacity snapshot rows for publication planning."""
+    import httpx
+
+    from market_storefront.services.capacity_client import _capacity_settings
+
+    try:
+        sites, admin_key, _ = _capacity_settings()
+    except Exception:
+        return []
+    headers = {"X-Admin-Key": admin_key} if admin_key else {}
+    resources: list[dict[str, Any]] = []
+    for _site_name, url in sites.items():
+        try:
+            with httpx.Client(timeout=10) as http:
+                resp = http.get(
+                    f"{url}/api/v1/capacity/snapshot", headers=headers,
+                )
+                resp.raise_for_status()
+                rows = resp.json().get("resources") or []
+        except Exception as exc:
+            typer.echo(f"[capacity] snapshot failed for {url}: {exc}", err=True)
+            continue
+        resources.extend(row for row in rows if isinstance(row, dict))
+    return resources
+
+
 def _available_resources(db_path: str) -> list[dict]:
     return available_compute_slices(
         db_path, member_availability=_member_availability_sync(),
@@ -154,6 +189,22 @@ def _stale_open_listing_ids(db_path: str) -> list[str]:
         # No authority answered — closing on ignorance over-closes.
         return []
     return stale_open_listing_ids(db_path, member_availability=availability)
+
+
+def _available_bare_metal_listing_candidates(db_path: str) -> list[dict[str, Any]]:
+    del db_path
+    return bare_metal_listing_candidates(_capacity_snapshot_resources_sync())
+
+
+def _open_bare_metal_listing_keys(db_path: str) -> set[str]:
+    return open_bare_metal_listing_keys(db_path)
+
+
+def _stale_open_bare_metal_listing_ids(db_path: str) -> list[str]:
+    resources = _capacity_snapshot_resources_sync()
+    if not resources:
+        return []
+    return stale_open_bare_metal_listing_ids(db_path, resources)
 
 
 def _open_order_resource_ids(db_path: str) -> set[str]:
@@ -339,6 +390,74 @@ def _reopen_derived_listing_if_present(
     )
 
 
+def _reopen_bare_metal_listing_if_present(
+    *,
+    db_path: str,
+    base_url: str,
+    candidate: dict[str, Any],
+    offer: dict[str, Any],
+    accepted_escrows: list[dict],
+    demands: list[dict],
+    max_duration_seconds: int | None,
+    private_key: Optional[str],
+) -> dict | None:
+    derived = load_derived_bare_metal_listing(
+        db_path,
+        machine_id=str(candidate["machine_id"]),
+    )
+    if not derived or not derived.get("listing_id"):
+        return None
+    listing_id = str(derived["listing_id"])
+    if derived.get("listing_status") == "open":
+        return None
+
+    conn = sqlite3.connect(db_path)
+    try:
+        listing_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(listings)").fetchall()
+        }
+        updates = ["status = 'open'"]
+        params: list[Any] = []
+        if "paused" in listing_cols:
+            updates.append("paused = 0")
+        if "updated_at" in listing_cols:
+            updates.append("updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')")
+        column_values = {
+            "offer_resource": json.dumps(offer),
+            "accepted_escrows": json.dumps(accepted_escrows),
+            "demands": json.dumps(demands),
+            "max_duration_seconds": max_duration_seconds,
+            "seller": base_url,
+        }
+        for column, value in column_values.items():
+            if column in listing_cols:
+                updates.append(f"{column} = ?")
+                params.append(value)
+        params.append(listing_id)
+        conn.execute(
+            f"UPDATE listings SET {', '.join(updates)} WHERE listing_id = ?",
+            tuple(params),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    record_derived_bare_metal_listing(
+        db_path,
+        listing_id=listing_id,
+        listing=candidate["listing"],
+        status="open",
+    )
+    return _publish_existing_listing_to_registries(
+        listing_id=listing_id,
+        offer=offer,
+        accepted_escrows=accepted_escrows,
+        demands=demands,
+        max_duration_seconds=max_duration_seconds,
+        storefront_url=base_url,
+        private_key=private_key,
+    )
+
+
 def _open_listing_ids(db_path: str) -> list[str]:
     """Return every status='open' listing_id from the agent DB."""
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
@@ -382,6 +501,21 @@ def _close_stale_derived_listings(
         if str(resp.get("status", "?")) in ("closed", "skipped", "queued"):
             closed_listing_ids.append(listing_id)
     mark_derived_listings_closed(db_path, closed_listing_ids)
+    return closed_listing_ids
+
+
+def _close_stale_bare_metal_listings(
+    *,
+    db_path: str,
+    base_url: str,
+    private_key: Optional[str],
+) -> list[str]:
+    closed_listing_ids: list[str] = []
+    for listing_id in _stale_open_bare_metal_listing_ids(db_path):
+        resp = _close_order(base_url, listing_id, private_key)
+        if str(resp.get("status", "?")) in ("closed", "skipped", "queued"):
+            closed_listing_ids.append(listing_id)
+    mark_derived_bare_metal_listings_closed(db_path, closed_listing_ids)
     return closed_listing_ids
 
 
@@ -644,6 +778,118 @@ def _offer_resource_for_listing(res: dict[str, Any]) -> dict[str, Any]:
         offer["interruptible"] = True
         offer["settlement_model"] = "splitter_refund"
     return offer
+
+
+def _default_alkahest_payload(
+    *,
+    resource: dict[str, Any],
+    default_min_price: Optional[str],
+    default_token_address: Optional[str],
+    default_max_duration_seconds: int | None,
+    wallet_address: str,
+    publish_priceless: bool,
+) -> tuple[list[dict], list[dict], int | None] | str:
+    min_price = default_min_price
+    token_address = default_token_address
+    if not token_address:
+        return (
+            "no token (set [seller.pricing].default_token_address in config.toml)"
+        )
+    if not token_address.startswith("0x") or len(token_address) != 42:
+        return (
+            f"invalid token {token_address!r} — must be a 0x ERC-20 address "
+            f"(symbol shorthand is no longer supported)"
+        )
+    from market_alkahest.token import resolve_token, TokenResolutionError
+    from .utils.config import CHAINS
+    if not CHAINS:
+        return "no [chains.<name>] tables configured"
+    token_meta = None
+    token_resolve_errors: list[str] = []
+    for chain in CHAINS.values():
+        try:
+            token_meta = resolve_token(
+                token_address, rpc_url=chain.rpc_url, chain_id=chain.chain_id,
+            )
+            break
+        except TokenResolutionError as exc:
+            token_resolve_errors.append(f"{chain.name}: {exc}")
+            continue
+    if token_meta is None:
+        return (
+            f"chain resolve failed for {token_address}: "
+            + "; ".join(token_resolve_errors)
+        )
+    token_address = token_meta.contract_address.lower()
+    token_decimals = token_meta.decimals
+
+    if min_price is None:
+        if not publish_priceless:
+            return (
+                "no min_price (set [seller.pricing].default_min_price, "
+                "or set [seller.pricing].publish_priceless=true)"
+            )
+        advertised_amount: Any = None
+    else:
+        try:
+            human = Decimal(str(min_price))
+        except (InvalidOperation, ValueError, TypeError):
+            return f"unparseable min_price={min_price!r}; expected numeric string"
+        scaled = human * (Decimal(10) ** token_decimals)
+        if scaled != scaled.to_integral_value():
+            return (
+                f"min_price={min_price!r} has more decimals than the "
+                f"token's {token_decimals}"
+            )
+        if scaled < 0:
+            return f"min_price={min_price!r} is negative"
+        advertised_amount = str(int(scaled))
+
+    raw_max_duration_seconds = (
+        resource.get("max_duration_seconds")
+        if resource.get("max_duration_seconds") is not None
+        else default_max_duration_seconds
+    )
+    max_duration_seconds = _normalize_max_duration_seconds(
+        raw_max_duration_seconds
+    )
+    from market_alkahest.alkahest import get_erc20_escrow_obligation_default
+    accepted_escrows: list[dict] = []
+    per_chain_errors: list[str] = []
+    for chain in CHAINS.values():
+        try:
+            escrow_address = get_erc20_escrow_obligation_default(
+                chain.name,
+                config_path=chain.alkahest_address_config_path,
+            )
+        except Exception as exc:
+            per_chain_errors.append(f"{chain.name}: {exc}")
+            continue
+        accepted_escrows.append({
+            "chain_name": chain.name,
+            "escrow_address": escrow_address.lower(),
+            "literal_fields": {"token": token_address},
+            "rates": [{
+                "field": "amount",
+                "per": "hour",
+                "value": advertised_amount,
+            }] if advertised_amount is not None else [],
+        })
+    if not accepted_escrows:
+        return (
+            "alkahest config could not resolve ERC20 escrow address on any "
+            f"configured chain: {'; '.join(per_chain_errors)}"
+        )
+    chain_names = {
+        str(e.get("chain_name"))
+        for e in accepted_escrows
+        if isinstance(e, dict) and e.get("chain_name")
+    }
+    try:
+        demands = _demands_for_chains(CHAINS, chain_names, wallet_address)
+    except Exception as exc:
+        return f"listing demands: {exc}"
+    return accepted_escrows, demands, max_duration_seconds
 
 
 def _publish_round(
@@ -969,6 +1215,76 @@ def _publish_round(
         except Exception as exc:
             failed.append((res, str(exc)))
 
+    for candidate in _available_bare_metal_listing_candidates(db_path):
+        resource_key = str(candidate["derivation_key"])
+        if resource_key in skip_ids or candidate.get("machine_id") in skip_ids:
+            skipped.append(candidate)
+            continue
+        offer = dict(candidate["offer_resource"])
+        payload = _default_alkahest_payload(
+            resource=offer,
+            default_min_price=default_min_price,
+            default_token_address=default_token_address,
+            default_max_duration_seconds=default_max_duration_seconds,
+            wallet_address=wallet_address,
+            publish_priceless=publish_priceless,
+        )
+        if isinstance(payload, str):
+            failed.append((candidate, payload))
+            continue
+        accepted_escrows, demands, max_duration_seconds = payload
+        try:
+            reopened = _reopen_bare_metal_listing_if_present(
+                db_path=db_path,
+                base_url=base_url,
+                candidate=candidate,
+                offer=offer,
+                accepted_escrows=accepted_escrows,
+                demands=demands,
+                max_duration_seconds=max_duration_seconds,
+                private_key=private_key,
+            )
+        except Exception as exc:
+            failed.append((candidate, f"reopen derived bare-metal listing: {exc}"))
+            continue
+        if reopened is not None:
+            if reopened.get("status") in {"published", "disabled"}:
+                published.append({
+                    "resource": candidate,
+                    "response": reopened,
+                    "accepted_escrows": accepted_escrows,
+                    "demands": demands,
+                })
+            else:
+                failed.append((candidate, reopened.get("message") or str(reopened)))
+            continue
+        try:
+            resp = _publish_offer(
+                base_url,
+                offer,
+                accepted_escrows,
+                demands,
+                max_duration_seconds,
+                wallet_address,
+                private_key,
+            )
+            if resp.get("listing_id"):
+                record_derived_bare_metal_listing(
+                    db_path,
+                    listing_id=str(resp["listing_id"]),
+                    listing=candidate["listing"],
+                )
+            published.append({
+                "resource": candidate,
+                "response": resp,
+                "accepted_escrows": accepted_escrows,
+                "demands": demands,
+            })
+        except typer.Exit:
+            failed.append((candidate, "HTTP error (see above)"))
+        except Exception as exc:
+            failed.append((candidate, str(exc)))
+
     return published, failed, skipped
 
 
@@ -1009,7 +1325,13 @@ def run_watch_loop(
                 _close_stale_derived_listings(
                     db_path=db_path, base_url=base_url, private_key=private_key,
                 )
-                covered = _open_listing_resource_keys(db_path)
+                _close_stale_bare_metal_listings(
+                    db_path=db_path, base_url=base_url, private_key=private_key,
+                )
+                covered = (
+                    _open_listing_resource_keys(db_path)
+                    | _open_bare_metal_listing_keys(db_path)
+                )
                 published, failed, skipped = _publish_round(
                     db_path=db_path, base_url=base_url,
                     wallet_address=wallet_address, private_key=private_key,
@@ -1071,19 +1393,47 @@ def _print_publish_table(console: Console, published: list[dict], failed: list[t
         first_escrow = (entry["accepted_escrows"] or [{}])[0]
         price = primary_rate_value(first_escrow)
         token = accepted_token_address(first_escrow) or "-"
+        offer = res.get("offer_resource") if isinstance(res.get("offer_resource"), dict) else res
+        resource_label = (
+            res.get("pool_id")
+            or res.get("resource_id")
+            or res.get("machine_id")
+            or "-"
+        )
+        gpu_model = offer.get("gpu_model") or offer.get("capabilities", {}).get("gpu_model")
+        gpu_count = offer.get("gpu_count")
+        gpu_label = (
+            f"{gpu_model} x{gpu_count}"
+            if gpu_count is not None
+            else str(gpu_model or offer.get("kind") or "-")
+        )
         summary.add_row(
-            str(res.get("pool_id") or res.get("resource_id")),
-            f"{res['gpu_model']} x{res['gpu_count']}",
-            res["region"] or "-",
+            str(resource_label),
+            gpu_label,
+            str(offer.get("region") or offer.get("site", {}).get("region") or "-"),
             f"{price if price is not None else 'hidden'} {token}",
             str(resp.get("listing_id", "-")),
             str(resp.get("status", "-")),
         )
     for res, reason in failed:
+        offer = res.get("offer_resource") if isinstance(res.get("offer_resource"), dict) else res
+        resource_label = (
+            res.get("pool_id")
+            or res.get("resource_id")
+            or res.get("machine_id")
+            or "-"
+        )
+        gpu_model = offer.get("gpu_model") or offer.get("capabilities", {}).get("gpu_model")
+        gpu_count = offer.get("gpu_count")
+        gpu_label = (
+            f"{gpu_model} x{gpu_count}"
+            if gpu_count is not None
+            else str(gpu_model or offer.get("kind") or "-")
+        )
         summary.add_row(
-            str(res.get("pool_id") or res.get("resource_id")),
-            f"{res['gpu_model']} x{res['gpu_count']}",
-            res["region"] or "-",
+            str(resource_label),
+            gpu_label,
+            str(offer.get("region") or offer.get("site", {}).get("region") or "-"),
             "-",
             "-",
             f"[red]failed: {reason}[/red]",
@@ -1242,7 +1592,13 @@ def register(app: typer.Typer) -> None:
             _close_stale_derived_listings(
                 db_path=db_path, base_url=base_url, private_key=private_key,
             )
-            covered = _open_listing_resource_keys(db_path)
+            _close_stale_bare_metal_listings(
+                db_path=db_path, base_url=base_url, private_key=private_key,
+            )
+            covered = (
+                _open_listing_resource_keys(db_path)
+                | _open_bare_metal_listing_keys(db_path)
+            )
             published, failed, _skipped = _publish_round(
                 db_path=db_path, base_url=base_url,
                 wallet_address=wallet_address, private_key=private_key,

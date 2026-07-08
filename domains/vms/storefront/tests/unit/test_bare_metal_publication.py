@@ -7,6 +7,8 @@ from market_storefront.services.bare_metal_publication import (
     bare_metal_listing_candidates,
     closed_available_bare_metal_listing_ids,
     ensure_derived_bare_metal_listings_table,
+    load_derived_bare_metal_listing,
+    mark_derived_bare_metal_listings_closed,
     open_bare_metal_listing_keys,
     record_derived_bare_metal_listing,
     stale_open_bare_metal_listing_ids,
@@ -178,3 +180,45 @@ def test_record_derived_bare_metal_listing_upserts_by_machine_key(tmp_path):
         conn.close()
 
     assert rows == [("bm-new", "open", "bare-metal:bm-node-1")]
+
+
+def test_load_derived_bare_metal_listing_includes_storefront_status(tmp_path):
+    db = str(tmp_path / "storefront.db")
+    _init_db(db)
+    candidate = bare_metal_listing_candidates([_exclusive_resource()])[0]
+    _insert_listing(db, "bm-1", "closed", candidate["offer_resource"])
+    record_derived_bare_metal_listing(
+        db,
+        listing_id="bm-1",
+        listing=candidate["listing"],
+        status="closed",
+    )
+
+    row = load_derived_bare_metal_listing(db, machine_id="bm-node-1")
+
+    assert row == {
+        "listing_id": "bm-1",
+        "machine_id": "bm-node-1",
+        "physical_host_id": "host-physical-1",
+        "status": "closed",
+        "derivation_key": "bare-metal:bm-node-1",
+        "listing_status": "closed",
+    }
+
+
+def test_mark_derived_bare_metal_listings_closed(tmp_path):
+    db = str(tmp_path / "storefront.db")
+    _init_db(db)
+    candidate = bare_metal_listing_candidates([_exclusive_resource()])[0]
+    record_derived_bare_metal_listing(
+        db,
+        listing_id="bm-1",
+        listing=candidate["listing"],
+        status="open",
+    )
+
+    mark_derived_bare_metal_listings_closed(db, ["bm-1"])
+
+    row = load_derived_bare_metal_listing(db, machine_id="bm-node-1")
+    assert row is not None
+    assert row["status"] == "closed"

@@ -137,6 +137,41 @@ def closed_available_bare_metal_listing_ids(
     return [str(row[0]) for row in rows]
 
 
+def load_derived_bare_metal_listing(
+    db_path: str,
+    *,
+    machine_id: str,
+) -> dict[str, Any] | None:
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
+    try:
+        if not _table_exists(conn, "derived_bare_metal_listings"):
+            return None
+        row = conn.execute(
+            """
+            SELECT d.listing_id, d.machine_id, d.physical_host_id, d.status,
+                   d.derivation_key, l.status AS listing_status
+            FROM derived_bare_metal_listings d
+            LEFT JOIN listings l ON l.listing_id = d.listing_id
+            WHERE d.derivation_key = ?
+            LIMIT 1
+            """,
+            (bare_metal_listing_key(machine_id),),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    keys = [
+        "listing_id",
+        "machine_id",
+        "physical_host_id",
+        "status",
+        "derivation_key",
+        "listing_status",
+    ]
+    return dict(zip(keys, row))
+
+
 def record_derived_bare_metal_listing(
     db_path: str,
     *,
@@ -168,6 +203,30 @@ def record_derived_bare_metal_listing(
                 status,
                 bare_metal_listing_key(listing.machine_id),
             ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def mark_derived_bare_metal_listings_closed(
+    db_path: str,
+    listing_ids: list[str],
+) -> None:
+    if not listing_ids:
+        return
+    conn = sqlite3.connect(db_path)
+    try:
+        ensure_derived_bare_metal_listings_table(conn)
+        placeholders = ", ".join("?" for _ in listing_ids)
+        conn.execute(
+            f"""
+            UPDATE derived_bare_metal_listings
+            SET status = 'closed',
+                last_reconciled_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE listing_id IN ({placeholders})
+            """,
+            tuple(listing_ids),
         )
         conn.commit()
     finally:

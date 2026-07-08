@@ -22,11 +22,17 @@ import pytest
 from market_storefront import cli_publish
 from market_storefront.cli_publish import (
     _available_resources,
+    _close_stale_bare_metal_listings,
+    _open_bare_metal_listing_keys,
     _open_listing_ids,
     _open_listing_resource_keys,
     _open_order_resource_ids,
     _publish_round,
     _stale_open_listing_ids,
+)
+from market_storefront.services.bare_metal_publication import (
+    bare_metal_listing_candidates,
+    record_derived_bare_metal_listing,
 )
 from market_alkahest.token import ERC20TokenMetadata
 from tests._settings_overrides import settings_overrides
@@ -210,6 +216,24 @@ def _insert_order(path: str, order_id: str, status: str, resource_id: str | None
         conn.commit()
     finally:
         conn.close()
+
+
+def _exclusive_bare_metal_resource(
+    *,
+    available_units: int = 1,
+    enabled: bool = True,
+) -> dict:
+    return {
+        "resource_id": "host-1-bare-metal",
+        "available_units": available_units,
+        "enabled": enabled,
+        "attributes": {
+            "allocation_mode": "exclusive",
+            "physical_host_id": "host-physical-1",
+            "machine_id": "bm-node-1",
+            "gpu_model": "H200",
+        },
+    }
 
 
 def _round_kwargs(**overrides):
@@ -578,6 +602,186 @@ def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch
     finally:
         conn.close()
     assert status == "open"
+    assert derived_status == "open"
+
+
+def test_publish_round_publishes_bare_metal_candidate(tmp_path, monkeypatch):
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    monkeypatch.setattr(
+        cli_publish,
+        "_capacity_snapshot_resources_sync",
+        lambda: [_exclusive_bare_metal_resource()],
+    )
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_offer",
+        lambda agent_url, offer, accepted_escrows, *a, **k: (
+            calls.append({"offer": offer, "accepted_escrows": accepted_escrows})
+            or {"status": "created", "listing_id": "bm-listing-1"}
+        ),
+    )
+
+    published, failed, skipped = _publish_round(db_path=db, **_round_kwargs())
+
+    assert not failed
+    assert not skipped
+    assert [p["response"]["listing_id"] for p in published] == ["bm-listing-1"]
+    assert calls[0]["offer"]["kind"] == "bare_metal.v1"
+    assert calls[0]["offer"]["machine_id"] == "bm-node-1"
+    assert calls[0]["accepted_escrows"][0]["rates"] == [
+        {"field": "amount", "per": "hour", "value": "100"}
+    ]
+
+    conn = sqlite3.connect(db)
+    try:
+        rows = conn.execute(
+            """
+            SELECT listing_id, machine_id, status, derivation_key
+            FROM derived_bare_metal_listings
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [("bm-listing-1", "bm-node-1", "open", "bare-metal:bm-node-1")]
+
+
+def test_publish_round_skips_covered_bare_metal_candidate(tmp_path, monkeypatch):
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    monkeypatch.setattr(
+        cli_publish,
+        "_capacity_snapshot_resources_sync",
+        lambda: [_exclusive_bare_metal_resource()],
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_offer",
+        lambda *a, **k: pytest.fail("covered bare-metal machine should not publish"),
+    )
+
+    published, failed, skipped = _publish_round(
+        db_path=db,
+        skip_ids={"bare-metal:bm-node-1"},
+        **_round_kwargs(),
+    )
+
+    assert not published
+    assert not failed
+    assert [s["derivation_key"] for s in skipped] == ["bare-metal:bm-node-1"]
+
+
+def test_open_bare_metal_listing_keys_feed_publish_skip_set(tmp_path):
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    candidate = bare_metal_listing_candidates([_exclusive_bare_metal_resource()])[0]
+    _insert_order(db, "bm-listing-1", "open", None)
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "UPDATE listings SET offer_resource = ? WHERE listing_id = ?",
+            (json.dumps(candidate["offer_resource"]), "bm-listing-1"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert _open_bare_metal_listing_keys(db) == {"bare-metal:bm-node-1"}
+
+
+def test_close_stale_bare_metal_listings_marks_tracking_closed(tmp_path, monkeypatch):
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    available = _exclusive_bare_metal_resource()
+    stale = _exclusive_bare_metal_resource(available_units=0)
+    candidate = bare_metal_listing_candidates([available])[0]
+    _insert_order(db, "bm-listing-1", "open", None)
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "UPDATE listings SET offer_resource = ? WHERE listing_id = ?",
+            (json.dumps(candidate["offer_resource"]), "bm-listing-1"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    record_derived_bare_metal_listing(
+        db,
+        listing_id="bm-listing-1",
+        listing=candidate["listing"],
+    )
+    monkeypatch.setattr(cli_publish, "_capacity_snapshot_resources_sync", lambda: [stale])
+    monkeypatch.setattr(
+        cli_publish,
+        "_close_order",
+        lambda agent_url, listing_id, private_key: {"status": "closed"},
+    )
+
+    closed = _close_stale_bare_metal_listings(
+        db_path=db,
+        base_url="http://agent",
+        private_key=None,
+    )
+
+    assert closed == ["bm-listing-1"]
+    conn = sqlite3.connect(db)
+    try:
+        status = conn.execute(
+            "SELECT status FROM derived_bare_metal_listings WHERE listing_id = ?",
+            ("bm-listing-1",),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert status == "closed"
+
+
+def test_publish_round_reopens_existing_bare_metal_listing_id(tmp_path, monkeypatch):
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    candidate = bare_metal_listing_candidates([_exclusive_bare_metal_resource()])[0]
+    _insert_order(db, "bm-listing-old", "closed", None)
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "UPDATE listings SET offer_resource = ? WHERE listing_id = ?",
+            (json.dumps(candidate["offer_resource"]), "bm-listing-old"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    record_derived_bare_metal_listing(
+        db,
+        listing_id="bm-listing-old",
+        listing=candidate["listing"],
+        status="closed",
+    )
+    monkeypatch.setattr(
+        cli_publish,
+        "_capacity_snapshot_resources_sync",
+        lambda: [_exclusive_bare_metal_resource()],
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_offer",
+        lambda *a, **k: pytest.fail("tracked closed bare-metal listing should reopen"),
+    )
+
+    with settings_overrides(enable_registry_discovery=False):
+        published, failed, skipped = _publish_round(db_path=db, **_round_kwargs())
+
+    assert not failed
+    assert not skipped
+    assert [p["response"]["listing_id"] for p in published] == ["bm-listing-old"]
+    conn = sqlite3.connect(db)
+    try:
+        listing_status = conn.execute(
+            "SELECT status FROM listings WHERE listing_id = 'bm-listing-old'"
+        ).fetchone()[0]
+        derived_status = conn.execute(
+            "SELECT status FROM derived_bare_metal_listings WHERE listing_id = 'bm-listing-old'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert listing_status == "open"
     assert derived_status == "open"
 
 
