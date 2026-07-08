@@ -1,8 +1,8 @@
 DIST_DIR ?= ../.dist
 
-.PHONY: test test-core test-core-buyer test-core-site test-core-storefront test-core-storefront-client typecheck typecheck-core typecheck-core-registry-client
+.PHONY: test test-core test-core-buyer test-core-storefront test-core-storefront-client typecheck typecheck-core typecheck-core-registry-client
 
-test: test-core test-core-buyer test-core-site test-core-storefront test-core-storefront-client
+test: test-core test-core-buyer test-core-storefront test-core-storefront-client
 
 typecheck: typecheck-core typecheck-core-registry-client
 
@@ -17,9 +17,6 @@ typecheck-core-registry-client:
 
 test-core-buyer:
 	cd buyer && make test
-
-test-core-site:
-	cd site && make test
 
 test-core-storefront:
 	cd storefront && make test

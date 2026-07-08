@@ -2,7 +2,7 @@
 
 This adapter intentionally speaks in resource/allocation/event language rather
 than lease or VM lifecycle language.  The underlying implementation still lives
-in ``core_site`` today; this service is the local seam for the planned shared
+in ``market_site`` today; this service is the local seam for the planned shared
 SiteResourcesService boundary.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from core_site.ledger import CapacityLedgerService
+from market_site.ledger import CapacityLedgerService
 
 
 class SiteResourcesService:

@@ -8,7 +8,7 @@ from services.ansible_service import AnsibleService
 from services.async_job_queue import AsyncJobQueue
 from services.bare_metal_lease_service import BareMetalLeaseService
 from services.bare_metal_operations_service import BareMetalOperationsService
-from core_site.ledger import CapacityLedgerService
+from market_site.ledger import CapacityLedgerService
 from services.host_operations_service import HostOperationsService
 from services.host_service import HostService
 from services.job_service import AnsibleJobService

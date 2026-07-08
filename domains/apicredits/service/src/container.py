@@ -11,7 +11,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session, sessionmaker
 
 from config import settings
-from core_site.ledger import CapacityLedgerService
+from market_site.ledger import CapacityLedgerService
 from db.database import create_db_engine, create_session_factory, init_db
 from services.keys_service import KeysService
 

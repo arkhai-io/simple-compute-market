@@ -181,6 +181,18 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-bare-metal"
+version = "0.1.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "pydantic" },
+]
+sdist = { path = "arkhai_bare_metal-0.1.0.tar.gz" }
+wheels = [
+    { path = "arkhai_bare_metal-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-core"
 version = "0.1.0"
 source = { registry = "../.dist" }
@@ -374,7 +386,7 @@ dependencies = [
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-policy" },
-    { name = "arkhai-vms-common" },
+    { name = "arkhai-vms" },
     { name = "eth-account" },
     { name = "pyinstaller" },
     { name = "pyyaml" },
@@ -386,14 +398,14 @@ wheels = [
 ]
 
 [[package]]
-name = "arkhai-vms-common"
+name = "arkhai-vms"
 version = "0.1.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_common-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_vms-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -414,6 +426,7 @@ version = "0.1.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
+    { name = "arkhai-bare-metal" },
     { name = "arkhai-core" },
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-core-storefront" },
@@ -422,7 +435,7 @@ dependencies = [
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
-    { name = "arkhai-vms-common" },
+    { name = "arkhai-vms" },
     { name = "arkhai-vms-provisioning-client" },
     { name = "dynaconf" },
     { name = "eth-account" },

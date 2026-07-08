@@ -152,7 +152,7 @@ wheels = [
 ]
 
 [[package]]
-name = "arkhai-core-site"
+name = "arkhai-kit-site"
 version = "0.1.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
@@ -161,7 +161,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_core_site-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -183,7 +183,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "arkhai-bare-metal" },
-    { name = "arkhai-core-site" },
+    { name = "arkhai-kit-site" },
     { name = "arkhai-core-storefront-client" },
     { name = "arkhai-vms-provisioning-client" },
     { name = "cachetools" },
@@ -212,7 +212,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "arkhai-bare-metal", specifier = ">=0.1.0" },
-    { name = "arkhai-core-site", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-site", specifier = ">=0.1.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.11.0" },
     { name = "arkhai-vms-provisioning-client", specifier = ">=0.1.1" },
     { name = "cachetools", specifier = ">=5.3" },

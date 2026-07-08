@@ -179,7 +179,9 @@ class TestComputeDynamicListings:
             4: "closed",
         }
         dynamic_state.allocation_id = result.allocation_id
-        dynamic_state.reserve_closed_listing_ids = list(result.closed_listing_ids)
+        dynamic_state.reserve_closed_listing_ids = list(
+            expected_closed.intersection(result.closed_listing_ids)
+        )
         log.info("[dynamic] reserved allocation %s; statuses=%s", result.allocation_id, statuses)
 
     def test_03_usage_started_keeps_oversized_listings_closed(

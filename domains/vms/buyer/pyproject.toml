@@ -20,7 +20,7 @@ dependencies = [
   "arkhai-kit-alkahest",
   "arkhai-kit-config",
   "arkhai-kit-policy",
-  "arkhai-vms-common",
+  "arkhai-vms",
 ]
 
 [dependency-groups]

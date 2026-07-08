@@ -9,8 +9,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from core_site.db import Base
-from core_site.ledger import (
+from market_site.db import Base
+from market_site.ledger import (
     ALLOCATION_MODE_EXCLUSIVE,
     ALLOCATION_MODE_SHAREABLE,
     CapacityConflictError,
@@ -327,7 +327,7 @@ def test_ttl_hold_expires_without_commit(seeded: CapacityLedgerService):
     assert seeded.reserve(claim={"gpu_count": 1}, deal_ref={}) is None
 
     # Backdate the hold past its TTL; the next read lapses it.
-    from core_site.db import SiteAllocation
+    from market_site.db import SiteAllocation
     with seeded._session_factory() as db:
         row = db.get(SiteAllocation, reserved["allocation_id"])
         row.hold_expires_at = (

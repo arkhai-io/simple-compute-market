@@ -24,11 +24,11 @@ RUN sed -E -i 's|registry = "[^"]*\.dist"|registry = "/.dist"|' uv.lock || true
 # same way `make serve` / the tests run them (top-level main/config/...).
 # --refresh-package: internal wheels are rebuilt into /.dist without a
 # version bump, so a cached same-version wheel in the uv cache mount
-# would otherwise shadow fresh content (e.g. arkhai-core-site missing
+# would otherwise shadow fresh content (e.g. arkhai-kit-site missing
 # the generic `units` capacity claim key).
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-sources --no-dev --no-install-project --find-links /.dist \
-        --refresh-package arkhai-core-site
+        --refresh-package arkhai-kit-site
 
 # Stage 2: lean runtime.
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime

@@ -34,7 +34,7 @@ wheels = [
 ]
 
 [[package]]
-name = "arkhai-core-site"
+name = "arkhai-kit-site"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

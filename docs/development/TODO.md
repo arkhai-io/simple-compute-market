@@ -173,7 +173,7 @@ blocking feature work on a strictness cliff.
    - Add packaging tests that verify the marker is included in built wheels.
    - Track typed public surfaces package by package: `arkhai-core`,
      `arkhai-core-registry-client`, `arkhai-core-storefront-client`,
-     `arkhai-core-buyer`, `arkhai-core-storefront`, `arkhai-core-site`, and
+     `arkhai-core-buyer`, `arkhai-core-storefront`, `arkhai-kit-site`, and
      `arkhai-core-registry`.
 
 2. **Establish a shared non-strict baseline.**
@@ -203,7 +203,7 @@ blocking feature work on a strictness cliff.
 
 5. **Ratchet strictness package by package.**
    - Start with `arkhai-core`, registry-client, and storefront-client.
-   - Then tighten `core-site` and `core-storefront` service helpers.
+   - Then tighten `kit-site` and `core-storefront` service helpers.
    - Leave FastAPI route modules, SQLAlchemy rows, and migration scripts for
      later; these carry the most framework-driven dynamic typing and lowest
      immediate contract value.
@@ -379,9 +379,9 @@ See `ARCHITECTURE.md` "Lease Lifecycle — allocation-backed watchdog" for the c
 
 Lease lifecycle policy should sit above that generic site resource layer. A reusable lease lifecycle service can be moved into a shared wheel by accepting a release delegate/callback for the concrete teardown operation. VM provisioning supplies a `vm_remove` delegate; a pod provisioning service could supply a pod-delete delegate; a bare-metal rental service could supply a node-reclaim delegate. Token or bandwidth allocations might use `SiteResourcesService` without any lease lifecycle layer at all.
 
-**Current state:** VM provisioning has a local `SiteResourcesService` adapter over the existing `core_site` capacity implementation. `LeaseLifecycleService` owns the lease state machine and uses a release delegate so the lifecycle layer is easier to migrate into the shared wheel later. Admin repair routes are available for operator recovery: `POST /api/v1/admin/leases/{lease_id}/retry-release` resubmits the release delegate for `release_failed` leases, and `POST /api/v1/admin/leases/{lease_id}/force-release` releases capacity without teardown proof after manual verification. The force-release route requires an operator reason and can include evidence because it can make capacity available despite incomplete infrastructure cleanup.
+**Current state:** VM provisioning has a local `SiteResourcesService` adapter over the existing `market_site` capacity implementation. `LeaseLifecycleService` owns the lease state machine and uses a release delegate so the lifecycle layer is easier to migrate into the shared wheel later. Admin repair routes are available for operator recovery: `POST /api/v1/admin/leases/{lease_id}/retry-release` resubmits the release delegate for `release_failed` leases, and `POST /api/v1/admin/leases/{lease_id}/force-release` releases capacity without teardown proof after manual verification. The force-release route requires an operator reason and can include evidence because it can make capacity available despite incomplete infrastructure cleanup.
 
-**Remaining shared-layer refactor:** narrow the lower `core_site` implementation behind the generic site-resource boundary. The lower implementation still exposes ledger-named and lease-shaped methods; future code should depend on focused site resource/allocation/event service wrappers instead of reaching through those details. Once the lower boundary is generic, move the delegate-based lease lifecycle service into the shared wheel so VM, pod, and bare-metal provisioning services can reuse the state machine with different release delegates.
+**Remaining shared-layer refactor:** narrow the lower `market_site` implementation behind the generic site-resource boundary. The lower implementation still exposes ledger-named and lease-shaped methods; future code should depend on focused site resource/allocation/event service wrappers instead of reaching through those details. Once the lower boundary is generic, move the delegate-based lease lifecycle service into the shared wheel so VM, pod, and bare-metal provisioning services can reuse the state machine with different release delegates.
 
 **Monitoring work:** `release_failed` requires polling the provisioning service or inspecting logs. Add admin monitoring/alerting for failed releases with `lease_id`, resource id, host, VM target, `vm_remove_job_id`, failure reason/message, and suggested recovery actions. Do not notify the storefront with a capacity-released event unless capacity was actually released.
 

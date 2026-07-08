@@ -30,17 +30,17 @@ constrained with lower bounds (see Versioning policy).
 | `arkhai-core-storefront-client` | `core/storefront-client/` | 0.15.0 | none |
 | `arkhai-core-registry-client` | `core/registry-client/` | 0.10.0 | none |
 | `arkhai-core-registry` | `core/registry/` | 0.1.0 | `arkhai-kit-identity` |
-| `arkhai-core-site` | `core/site/` | 0.1.0 | none |
+| `arkhai-kit-site` | `kit/site/` | 0.1.0 | none |
 | `arkhai-kit-identity` | `kit/identity/` | 0.1.0 | none |
 | `arkhai-kit-policy` | `kit/policy/` | 0.1.0 | none |
 | `arkhai-kit-alkahest` | `kit/alkahest/` | 0.1.0 | none |
 | `arkhai-kit-config` | `kit/config/` | 0.1.0 | `arkhai-kit-alkahest` |
 | `arkhai-vms-buyer` | `domains/vms/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
 | `arkhai-vms-storefront` | `domains/vms/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-vms-provisioning` |
-| `arkhai-vms-provisioning` | `domains/vms/provisioning/service/` | 0.5.0 | `arkhai-core-site`, `arkhai-core-storefront-client` |
+| `arkhai-vms-provisioning` | `domains/vms/provisioning/service/` | 0.5.0 | `arkhai-kit-site`, `arkhai-core-storefront-client` |
 | `arkhai-apicredits-buyer` | `domains/apicredits/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
 | `arkhai-apicredits-storefront` | `domains/apicredits/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy` |
-| `arkhai-apicredits-service` | `domains/apicredits/service/` | 0.1.0 | `arkhai-core-site` |
+| `arkhai-apicredits-service` | `domains/apicredits/service/` | 0.1.0 | `arkhai-kit-site` |
 | `arkhai-apicredits-middleware` | `domains/apicredits/middleware/python/` | 0.1.0 | none |
 
 This set is defined once, by the `PACKAGES` table in the workflow's

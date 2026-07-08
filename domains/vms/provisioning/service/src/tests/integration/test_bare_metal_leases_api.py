@@ -15,7 +15,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
-from core_site.ledger import ALLOCATION_MODE_EXCLUSIVE
+from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 from db.models import AnsibleJob
 from services.ansible_service import AnsibleResult
 from services.async_job_queue import AsyncJobQueue

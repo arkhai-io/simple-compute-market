@@ -102,14 +102,14 @@ Import names and console scripts (`market`, `market-storefront`,
 | core | `arkhai-core-storefront` (`core/storefront/`) | storefront role shell (library, framework-free): sync-negotiation protocol, registry publication + multi-registry fan-out client, market-state SQLite persistence + versioned migrations (domain tables via subclass hooks), settle-time escrow verification, refund/ERC-20 transfer, stage log, auth, HTTP models, capacity-client contract + remote site client/event poller, claims engine |
 | core | `arkhai-core-registry` (`core/registry/`) | registry service; schema injected as `filter-spec.yaml` config |
 | core | `arkhai-core-registry-client`, `arkhai-core-storefront-client` | protocol clients |
-| core | `arkhai-core-site` (`core/site/`) | site-authority scaffold: capacity ledger, ledger tables, `/api/v1/capacity/*` router — mounted by a hosting service per site |
+| kit | `arkhai-kit-site` (`kit/site/`) | site-authority scaffold: capacity ledger, ledger tables, `/api/v1/capacity/*` router — mounted by a hosting service per site |
 | kit | `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-alkahest`, `arkhai-kit-config` | from-below capabilities; alkahest is the first *settlement-mechanism codec* |
-| domain | `arkhai-vms-common` (`domains/vms/common/`) | shared VM-domain models/helpers consumed by both buyer and storefront; currently owns the `compute.v1` provision-term interpretation (`arkhai_vms_common.provision_terms`) |
+| domain | `arkhai-vms` (`domains/vms/domain/`) | shared VM-domain models/helpers consumed by both buyer and storefront; currently owns the `compute.v1` provision-term interpretation (`arkhai_vms.provision_terms`) |
 | domain | `arkhai-vms-buyer` (`domains/vms/buyer/`) | no console script — publishes the `vms.compute` plugin the core `market` CLI discovers |
 | domain | `arkhai-apicredits-buyer` (`domains/apicredits/buyer/`) | no console script — publishes the `api_credits` plugin; verbs namespaced under `market credits …` so both plugins compose in one binary |
 | domain | `arkhai-vms-storefront` (`domains/vms/storefront/`) | the VM storefront executable/composition root (FastAPI adapters over core) |
 | domain | `arkhai-vms-provisioning` (`domains/vms/provisioning/service/`) | the VM fulfillment executor service |
-| domain | `arkhai-apicredits-service` (`domains/apicredits/service/`) | the credits service: API keys/credit grants/consumption + the quota ledger (mounts `core_site`) |
+| domain | `arkhai-apicredits-service` (`domains/apicredits/service/`) | the credits service: API keys/credit grants/consumption + the quota ledger (mounts `market_site`) |
 | domain | `arkhai-apicredits-storefront` (`domains/apicredits/storefront/`) | the API-credits storefront executable/composition root: quota-backed listings, quantity/key-ownership negotiation guards, issuance-backed settlement |
 | domain | `arkhai-apicredits-middleware` (`domains/apicredits/middleware/python/`) | seller-side ASGI gate that meters a downstream app on prepaid credits (verify cache + synchronous/batched consume + 402-with-purchase-pointer); the reference implementation |
 | domain | `@arkhai/apicredits-middleware` (`domains/apicredits/middleware/typescript/`) | TypeScript port of the gate (Connect/Express + Web-fetch adapters); reproduces `middleware/conformance/session.json` |
@@ -137,9 +137,9 @@ core role package. Operators install one implementation for each
 role/capability they need, or write their own. Bundled implementation packages
 are fine; they need not be one wheel per policy.
 
-VM-domain code is split by ownership boundary. `arkhai-vms-common`
-(`domains/vms/common/`) carries shared VM-domain model code such as
-`compute.v1` provision-term interpretation (`arkhai_vms_common.provision_terms`).
+VM-domain code is split by ownership boundary. `arkhai-vms`
+(`domains/vms/domain/`) carries shared VM-domain model code such as
+`compute.v1` provision-term interpretation (`arkhai_vms.provision_terms`).
 The VM storefront composition root owns seller-side provisioning orchestration:
 resource capacity validation in
 `market_storefront.services.resource_capacity_validator`, settlement-time VM
@@ -2058,8 +2058,8 @@ service stood; the storefront's SQLite holds market state only).
 
 ### Current implementation
 
-The site-authority scaffold is the shared `arkhai-core-site` package
-(`core/site/`, import `core_site`): the ledger
+The site-authority scaffold is the shared `arkhai-kit-site` package
+(`kit/site/`, import `market_site`): the ledger
 (`CapacityLedgerService`), its tables — `site_resources` /
 `site_allocations` (the storefront's hold and the lease's temporal
 tail as one row, TTL soft holds supported at the ledger) plus the
@@ -2190,7 +2190,7 @@ gated service. It is the second instance that made the "wait for a
 second schema" seams concrete: schema identity for registries
 (`filter-spec.yaml`'s `schema: {id, version}` header), the second
 storefront composition root, non-per-hour price scaling, and the
-site-authority ledger extraction (`core_site`). Concept modules live in
+site-authority ledger extraction (`market_site`). Concept modules live in
 `domains/apicredits/{listings,negotiation,settlement}`; the packages are
 in the layout table above (`arkhai-apicredits-{buyer,storefront,service,
 middleware,sample-app}`).
@@ -3246,7 +3246,7 @@ Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockf
 | `arkhai-kit-alkahest` | `market_alkahest-*.whl` | `kit/alkahest/` | `buyer`, `storefront`, `e2e-tests` |
 | `arkhai-kit-config` | `market_config-*.whl` | `kit/config/` | `buyer`, `storefront` |
 | `arkhai-kit-policy` | `market_policy-*.whl` | `kit/policy/` | `buyer`, `storefront` |
-| `arkhai-vms-common` | `arkhai_vms_common-*.whl` | `domains/vms/common/` | `buyer`, `storefront` |
+| `arkhai-vms` | `arkhai_vms-*.whl` | `domains/vms/domain/` | `buyer`, `storefront` |
 | `arkhai-vms-provisioning-client` | `arkhai_vms_provisioning_client-*.whl` | `domains/vms/provisioning/client/` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
 | `arkhai-core-storefront-client` | `arkhai_storefront_client-*.whl` | `core/storefront-client/` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
 | `arkhai-core-registry-client` | `arkhai_core_registry_client-*.whl` | `core/registry-client/` | `e2e-tests` |

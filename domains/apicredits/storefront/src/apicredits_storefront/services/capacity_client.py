@@ -1,7 +1,7 @@
 """Quota-ledger capacity client wiring.
 
 The authoritative quota ledger lives in the credits service (it mounts
-the shared ``core_site`` ledger); the storefront is strictly a client.
+the shared ``market_site`` ledger); the storefront is strictly a client.
 The composed shape mirrors the VM storefront: per-site
 ``RemoteCapacityClient``s behind one ``AggregateCapacityClient``, with
 capacity deltas arriving by tailing each authority's versioned event

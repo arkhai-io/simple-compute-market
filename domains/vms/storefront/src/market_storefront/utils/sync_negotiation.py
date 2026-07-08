@@ -60,7 +60,7 @@ from core_storefront.negotiation_sync import (
     record_buyer_exit_message as _record_buyer_exit_message,
     record_seller_decision_message as _record_seller_decision_message,
 )
-from arkhai_vms_common import provision_duration_seconds, provision_start_utc
+from arkhai_vms import provision_duration_seconds, provision_start_utc
 from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
 
 logger = logging.getLogger(__name__)

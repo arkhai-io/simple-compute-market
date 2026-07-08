@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from core_site.ledger import ALLOCATION_MODE_EXCLUSIVE, ALLOCATION_MODE_SHAREABLE
+from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE, ALLOCATION_MODE_SHAREABLE
 from main import app
 
 

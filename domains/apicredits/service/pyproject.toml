@@ -9,7 +9,7 @@ license = "MIT"
 description = "API-credits service: keys, credit grants, consumption, and the site quota ledger"
 requires-python = ">=3.12"
 dependencies = [
-    "arkhai-core-site>=0.1.0",
+    "arkhai-kit-site>=0.1.0",
     "dynaconf>=3.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",

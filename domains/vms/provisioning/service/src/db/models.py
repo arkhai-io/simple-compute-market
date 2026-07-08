@@ -123,11 +123,11 @@ class Host(Base):
 
 
 # The site-authority ledger (AllocationState, SiteResource,
-# SiteAllocation, CapacityEvent) lives in the shared core_site
+# SiteAllocation, CapacityEvent) lives in the shared market_site
 # package; re-exported here because the service's modules and tests
 # reach all persistence models through db.models. The tables ride
-# core_site's own metadata — init_db creates both.
-from core_site.db import (  # noqa: F401
+# market_site's own metadata — init_db creates both.
+from market_site.db import (  # noqa: F401
     HELD_ALLOCATION_STATES,
     AllocationState,
     CapacityEvent,

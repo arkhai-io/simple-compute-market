@@ -38,7 +38,7 @@ from typing import Any, Mapping, Optional
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from core_site.ledger import CapacityConflictError, CapacityLedgerService
+from market_site.ledger import CapacityConflictError, CapacityLedgerService
 from db.models import ApiKey, ConsumptionEvent, CreditGrant
 
 #: Reject vocabulary shared with the negotiation guards

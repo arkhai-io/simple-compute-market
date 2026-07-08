@@ -38,7 +38,7 @@ name = "arkhai-apicredits-service"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "arkhai-core-site" },
+    { name = "arkhai-kit-site" },
     { name = "dynaconf" },
     { name = "fastapi" },
     { name = "pydantic" },
@@ -54,7 +54,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-core-site", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-site", specifier = ">=0.1.0" },
     { name = "dynaconf", specifier = ">=3.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "pydantic", specifier = ">=2.7" },
@@ -69,7 +69,7 @@ dev = [
 ]
 
 [[package]]
-name = "arkhai-core-site"
+name = "arkhai-kit-site"
 version = "0.1.0"
 source = { registry = "../../../.dist" }
 dependencies = [
@@ -78,7 +78,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_core_site-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

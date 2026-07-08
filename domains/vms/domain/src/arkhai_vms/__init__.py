@@ -1,6 +1,6 @@
 """Shared VM-domain helpers used across buyer and storefront packages."""
 
-from arkhai_vms_common.provision_terms import (
+from arkhai_vms.provision_terms import (
     VM_PROVISION_KIND,
     VmProvisionTerms,
     make_vm_provision_terms,

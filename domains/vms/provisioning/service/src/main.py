@@ -32,7 +32,7 @@ from controllers.hosts_controller import HostController      # noqa: E402
 from controllers.vms_controller import VmController          # noqa: E402
 from controllers.leases_controller import AdminLeasesController, LeasesController   # noqa: E402
 from controllers.bare_metal_leases_controller import BareMetalLeasesController  # noqa: E402
-from core_site.router import make_capacity_router  # noqa: E402
+from market_site.router import make_capacity_router  # noqa: E402
 
 
 @asynccontextmanager

@@ -1,7 +1,7 @@
 """Keys API: issuance (market-facing), consume/verify (middleware-facing),
 and the admin/guard surface.
 
-Router-factory style (like ``core_site.router``): endpoints resolve the
+Router-factory style (like ``market_site.router``): endpoints resolve the
 service per request through ``get_service`` so the composition root owns
 construction order.
 """

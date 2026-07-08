@@ -33,6 +33,6 @@ def create_session_factory(engine: Engine) -> sessionmaker[Session]:
 def init_db(engine: Engine) -> None:
     """Create all tables. Called once during application startup."""
     Base.metadata.create_all(bind=engine)
-    # Site-authority quota ledger tables ride core_site's own metadata.
-    from core_site.db import Base as SiteBase
+    # Site-authority quota ledger tables ride market_site's own metadata.
+    from market_site.db import Base as SiteBase
     SiteBase.metadata.create_all(bind=engine)

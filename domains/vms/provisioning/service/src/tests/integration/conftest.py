@@ -222,8 +222,8 @@ def db_engine():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
-    # Site-ledger tables ride core_site's own metadata.
-    from core_site.db import Base as SiteBase
+    # Site-ledger tables ride market_site's own metadata.
+    from market_site.db import Base as SiteBase
     SiteBase.metadata.create_all(bind=engine)
     return engine
 
@@ -353,7 +353,7 @@ async def client_and_queue(
         host_service=host_service,
     )
 
-    from core_site.ledger import CapacityLedgerService
+    from market_site.ledger import CapacityLedgerService
     capacity_ledger_service = CapacityLedgerService(session_factory=session_factory)
 
     from services.site_resources_service import SiteResourcesService

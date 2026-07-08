@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from db.models import Base
-from core_site.ledger import CapacityLedgerService
+from market_site.ledger import CapacityLedgerService
 from services.lease_lifecycle_service import LeaseLifecycleService
 from services.release_executors import (
     BARE_METAL_EXECUTOR_KIND,
@@ -36,8 +36,8 @@ def session_factory():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
-    # Site-ledger tables ride core_site's own metadata.
-    from core_site.db import Base as SiteBase
+    # Site-ledger tables ride market_site's own metadata.
+    from market_site.db import Base as SiteBase
     SiteBase.metadata.create_all(bind=engine)
     return sessionmaker(bind=engine)
 
@@ -331,7 +331,7 @@ async def test_due_leased_allocation_submits_vm_remove_job(session_factory, ledg
 async def test_missing_executor_kind_falls_back_to_vm_release(session_factory, ledger):
     allocation = _just_expired_allocation(ledger)
 
-    from core_site.db import SiteAllocation
+    from market_site.db import SiteAllocation
 
     with session_factory() as db:
         row = db.get(SiteAllocation, allocation["allocation_id"])

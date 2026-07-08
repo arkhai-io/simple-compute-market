@@ -7,8 +7,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from core_site.db import Base as SiteBase
-from core_site.ledger import CapacityLedgerService
+from market_site.db import Base as SiteBase
+from market_site.ledger import CapacityLedgerService
 from db.models import Base
 from services.keys_service import IssuanceError, KeysService, derive_key_id
 

@@ -8,8 +8,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from core_site.db import Base as SiteBase
-from core_site.ledger import (
+from market_site.db import Base as SiteBase
+from market_site.ledger import (
     ALLOCATION_MODE_EXCLUSIVE,
     CapacityLedgerService,
 )

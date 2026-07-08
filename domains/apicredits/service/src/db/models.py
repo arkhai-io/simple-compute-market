@@ -13,7 +13,7 @@ Bearer secrets are hashed at rest (`secret_hash`); ``owner_scheme`` /
 ``owner_id`` is the scheme-tagged ownership claim ("wallet" in v1) that
 the negotiation guards consult and issuance re-checks authoritatively.
 
-The site-authority quota ledger tables ride ``core_site``'s own
+The site-authority quota ledger tables ride ``market_site``'s own
 metadata — ``init_db`` creates both.
 """
 

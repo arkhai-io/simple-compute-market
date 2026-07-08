@@ -77,7 +77,8 @@ jobs:
             core-storefront-client: ['core/storefront-client/**', '.github/workflows/publish-pypi.yml']
             core-registry-client: ['core/registry-client/**', '.github/workflows/publish-pypi.yml']
             core-registry: ['core/registry/**', '.github/workflows/publish-pypi.yml']
-            core-site: ['core/site/**', '.github/workflows/publish-pypi.yml']
+            kit-site: ['kit/site/**', '.github/workflows/publish-pypi.yml']
+            vms: ['domains/vms/domain/**', '.github/workflows/publish-pypi.yml']
             vms-buyer: ['domains/vms/buyer/**', '.github/workflows/publish-pypi.yml']
             vms-provisioning: ['domains/vms/provisioning/service/**', '.github/workflows/publish-pypi.yml']
             vms-storefront: ['domains/vms/storefront/**', '.github/workflows/publish-pypi.yml']
@@ -106,7 +107,8 @@ jobs:
             {"key": "core-storefront-client", "path": "core/storefront-client",           "dist": "arkhai-core-storefront-client"},
             {"key": "core-registry-client",   "path": "core/registry-client",             "dist": "arkhai-core-registry-client"},
             {"key": "core-registry",          "path": "core/registry",                    "dist": "arkhai-core-registry"},
-            {"key": "core-site",              "path": "core/site",                        "dist": "arkhai-core-site"},
+            {"key": "kit-site",              "path": "kit/site",                        "dist": "arkhai-kit-site"},
+            {"key": "vms",                   "path": "domains/vms/domain",              "dist": "arkhai-vms"},
             {"key": "vms-buyer",              "path": "domains/vms/buyer",                "dist": "arkhai-vms-buyer", "wheel_only": true},
             {"key": "vms-provisioning",       "path": "domains/vms/provisioning/service", "dist": "arkhai-vms-provisioning"},
             {"key": "vms-storefront",         "path": "domains/vms/storefront",           "dist": "arkhai-vms-storefront"},

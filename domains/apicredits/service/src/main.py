@@ -11,7 +11,7 @@ import container as _container_module
 from config import settings
 from controllers.keys_controller import make_keys_router
 from controllers.system_controller import make_health_router, make_system_router
-from core_site.router import make_capacity_router
+from market_site.router import make_capacity_router
 from middleware.auth import AdminKeyAuthMiddleware
 
 
@@ -87,7 +87,7 @@ app.add_middleware(
 #   /api/v1/system/*                 <- versioned health + version
 #   /api/v1/issuance                 <- deal fulfillment (storefront)
 #   /api/v1/keys/*                   <- consume/verify, admin, guard lookup
-#   /api/v1/capacity/*               <- site quota ledger (core_site)
+#   /api/v1/capacity/*               <- site quota ledger (market_site)
 # ---------------------------------------------------------------------------
 app.include_router(make_health_router())                                       # /health
 app.include_router(make_system_router(), prefix="/api/v1")                     # /api/v1/system/*
