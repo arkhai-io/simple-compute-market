@@ -7,7 +7,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
-from arkhai_bare_metal_contracts import (
+from arkhai_bare_metal import (
     BARE_METAL_EXECUTOR_KIND,
     PHYSICAL_HOST_ID_REF_KEY,
     bare_metal_executor_ref,

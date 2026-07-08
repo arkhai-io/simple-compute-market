@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from arkhai_bare_metal_contracts import (
+from arkhai_bare_metal import (
     BARE_METAL_EXECUTOR_KIND,
     BareMetalLeaseCreate,
     PHYSICAL_HOST_ID_REF_KEY,

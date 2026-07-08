@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
-from arkhai_bare_metal_contracts import BareMetalLeaseCreate
+from arkhai_bare_metal import BareMetalLeaseCreate
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool

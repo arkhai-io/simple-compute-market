@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
-from arkhai_bare_metal_contracts import (
+from arkhai_bare_metal import (
     BARE_METAL_EXECUTOR_KIND,
     BareMetalLeaseCreate,
     NODE_GRANT_ACCESS_ACTION,

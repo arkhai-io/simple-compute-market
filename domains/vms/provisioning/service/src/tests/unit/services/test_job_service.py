@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from arkhai_bare_metal_contracts import (
+from arkhai_bare_metal import (
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
 )

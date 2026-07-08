@@ -121,6 +121,17 @@ The *concept* modules (`domains/vms/{listings,negotiation,settlement}`,
 service packages. Most ship inside the buyer/storefront wheels and implement
 core hook shapes by injection, without importing core.
 
+Domain packages specify concrete markets; role and implementation packages
+execute them. A light domain package should contain only the schema and
+deterministic interpretation needed for independent implementations to agree:
+listing payloads, negotiation messages, agreed terms, settlement
+materialization/receipt vocabulary, provisioning/executor result vocabulary,
+and pure validators/codecs. It should not carry specific seller or buyer
+policies, RL models, provisioning daemons, provider SDK integrations, Ansible
+assets, FastAPI apps, or SQLAlchemy service state. Those implementations depend
+on the domain package plus the relevant core role package. Operators install one
+implementation for each role/capability they need, or write their own.
+
 VM-domain code is split by ownership boundary. `arkhai-vms-common`
 (`domains/vms/common/`) carries shared VM-domain model code such as
 `compute.v1` provision-term interpretation (`arkhai_vms_common.provision_terms`).

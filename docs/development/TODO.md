@@ -407,7 +407,7 @@ preserving the legacy VM fields. The site ledger also understands
 `physical_host_id` plus `allocation_mode` (`shareable` or `exclusive`) resource
 attributes for cross-mode conflict checks. A transitional bare-metal domain
 adapter now exposes `/api/v1/bare-metal/leases/*` using the
-`arkhai-bare-metal-contracts` lease models. Lease registration now submits a
+`arkhai-bare-metal` lease models. Lease registration now submits a
 queued `node_grant_access` job and stores `create_job_id`; bare-metal release
 routes through `executor_kind=bare_metal` and submits `node_reclaim_access`.
 Those actions use a separate bare-metal Ansible playbook/role rather than the
@@ -426,17 +426,21 @@ state, and capacity events. Executor services consume allocation decisions and
 report provisioning/release outcomes; they do not independently decide that
 shared hardware is available.
 
-Domain packages own the storefront-facing provisioning contracts for their
-market semantics. A provisioning service may serve multiple domains by
-implementing thin domain adapters over shared local internals, and a domain may
-be served by multiple provisioning implementations that all implement the same
-domain contract. Reusable substrate such as site authority, allocation
-lifecycle, capacity clients, and leased-access helpers belongs in shared kit,
-not in one domain's VM-shaped API. The current VM provisioning service still
-mixes VM contract surface with generic site-authority substrate; future
-refactors should split those roles without breaking existing VM clients. The
-bare-metal storefront-facing contract starts under `domains/bare_metal`; the
-temporary implementation adapter still lives in
+Domain packages own the schema and deterministic interpretation for their
+market semantics: listing payloads, messages, agreed terms, materialization,
+receipts, provisioning/executor vocabulary, and pure validators/codecs. Concrete
+seller policies, buyer policies, provisioning services, provider integrations,
+and local service state belong in separate role/implementation packages that
+depend on the domain package plus the relevant core role package. A provisioning
+service may serve multiple domains by implementing thin domain adapters over
+shared local internals, and a domain may be served by multiple provisioning
+implementations that all implement the same domain schema. Reusable substrate
+such as site authority, allocation lifecycle, capacity clients, and
+leased-access helpers belongs in shared kit, not in one domain's VM-shaped API.
+The current VM provisioning service still mixes VM contract surface with
+generic site-authority substrate; future refactors should split those roles
+without breaking existing VM clients. The bare-metal market schema starts under
+`domains/bare_metal`; the temporary implementation adapter still lives in
 `domains/vms/provisioning/service` until the multi-domain site provisioner is
 moved out of the VM domain tree.
 

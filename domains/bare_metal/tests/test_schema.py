@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from arkhai_bare_metal_contracts import (
+from arkhai_bare_metal import (
     BARE_METAL_ACCESS_ACTIONS,
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
@@ -51,7 +51,7 @@ def test_bare_metal_lease_create_rejects_blank_identity_fields():
         )
 
 
-def test_bare_metal_access_actions_are_contract_owned():
+def test_bare_metal_access_actions_are_domain_owned():
     assert BARE_METAL_ACCESS_ACTIONS == (
         NODE_GRANT_ACCESS_ACTION,
         NODE_RECLAIM_ACCESS_ACTION,

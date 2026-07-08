@@ -1,4 +1,4 @@
-DIST_DIR ?= ../../../.dist
+DIST_DIR ?= ../../.dist
 
 .PHONY: build test
 

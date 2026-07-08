@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from arkhai_bare_metal_contracts import (
+from arkhai_bare_metal import (
     PHYSICAL_HOST_ID_REF_KEY,
     BareMetalLeaseCreate,
     BareMetalLeaseView,

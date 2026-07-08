@@ -1,6 +1,6 @@
-"""Bare-metal domain contracts."""
+"""Bare-metal market domain schema."""
 
-from .models import (
+from .schema import (
     BARE_METAL_ACCESS_ACTIONS,
     BARE_METAL_EXECUTOR_KIND,
     EXCLUSIVE_ALLOCATION_MODE,

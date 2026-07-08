@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from arkhai_bare_metal_contracts import BARE_METAL_ACCESS_ACTIONS
+from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
 from config import Settings
 from db.models import (
     AnsibleJob,

@@ -1,8 +1,8 @@
-"""Bare-metal domain contract models.
+"""Bare-metal market schema and public domain vocabulary.
 
-These models describe the storefront-facing bare-metal provisioning contract.
-Provisioner implementations can adapt them onto their local site-authority,
-inventory, and access-control internals.
+The domain package specifies the shared market vocabulary. Runtime choices such
+as seller policies, provisioning implementations, host inventory backends, and
+provider integrations live in separate packages that depend on this package.
 """
 
 from __future__ import annotations
