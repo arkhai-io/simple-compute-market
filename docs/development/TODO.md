@@ -456,6 +456,9 @@ without breaking existing VM clients. The bare-metal market schema starts under
 `domains/bare_metal`; the temporary implementation adapter still lives in
 `domains/vms/provisioning/service` until the multi-domain site provisioner is
 moved out of the VM domain tree.
+The generic market lease lifecycle endpoint now describes release as
+executor-dispatched, while `/hosts/{host}/vms/*` remains a direct
+admin/operator VM API.
 
 **Required accounting model:**
 
@@ -487,7 +490,9 @@ moved out of the VM domain tree.
    executor job fields, and separate bare-metal playbook path are landed.
 2. Keep direct `/hosts/{host}/vms/*` operator APIs for VM administration, but
    stop treating those APIs as the market-level abstraction for all compute
-   fulfillment.
+   fulfillment. The controller/client wording and integration coverage now pin
+   `/api/v1/leases/*` as the market-managed lifecycle path whose release
+   operation dispatches by `executor_kind`.
 3. Add operational hardening around bare-metal access grant/reclaim:
    configurable reclaim policy (delete user vs lock user vs remove only the
    lease key), host inventory conventions for bare-metal nodes, and live-host

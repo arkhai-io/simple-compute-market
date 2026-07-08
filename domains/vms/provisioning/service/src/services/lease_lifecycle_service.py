@@ -2,12 +2,14 @@
 
 The provisioning service interprets selected site allocations as time-bounded
 leases.  The lower site resource service persists resource/allocation/event
-state; this service owns lease lifecycle policy and VM-specific enforcement.
+state; this service owns lease lifecycle policy and delegates concrete release
+work to the allocation's executor.
 
-The concrete release operation is injected as a delegate.  VM provisioning uses
-that delegate to submit ``vm_remove``.  This keeps the state machine close to a
-future shared lease lifecycle layer where pod, bare-metal, or other provisioning
-services can provide their own release delegate.
+The concrete release operation is injected as an executor dispatcher. VM leases
+submit ``vm_remove``; bare-metal leases submit access reclaim when that delegate
+is configured. This keeps the state machine close to a future shared lease
+lifecycle layer where pod, bare-metal, or other provisioning services can
+provide their own executor slots.
 """
 
 from __future__ import annotations

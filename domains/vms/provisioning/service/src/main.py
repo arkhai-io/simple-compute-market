@@ -279,7 +279,8 @@ app.add_middleware(
 #   /api/v1/system/ansible/readiness
 #   /api/v1/jobs/*                   <- job read + cancel
 #   /api/v1/hosts/*                  <- host registry CRUD, capacity, connectivity
-#   /api/v1/hosts/{host}/vms/*       <- VM lifecycle (VmController composes here)
+#   /api/v1/hosts/{host}/vms/*       <- direct VM admin/operator lifecycle
+#   /api/v1/leases/*                 <- market-managed lease lifecycle
 #   /api/v1/bare-metal/leases/*      <- bare-metal domain lease adapter
 # ---------------------------------------------------------------------------
 app.include_router(SystemController.make_health_router())                          # /health

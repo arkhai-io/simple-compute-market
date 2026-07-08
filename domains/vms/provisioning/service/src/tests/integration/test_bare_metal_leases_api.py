@@ -13,7 +13,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION
+from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
 from core_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 from db.models import AnsibleJob
 from main import app
@@ -81,6 +81,9 @@ class BareMetalLeaseTestClient:
 
     async def register_lease(self, **body) -> dict:
         return await self._post("/api/v1/bare-metal/leases/", body)
+
+    async def terminate_market_lease(self, allocation_id: str) -> dict:
+        return await self._post(f"/api/v1/leases/{allocation_id}/terminate", {})
 
     async def list_leases(self) -> list[dict]:
         return await self._get("/api/v1/bare-metal/leases/")  # type: ignore[return-value]
@@ -168,3 +171,41 @@ async def test_unknown_bare_metal_lease_returns_404(
         await bare_metal_client.get_lease("missing")
 
     assert exc_info.value.status_code == 404
+
+
+async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
+    bare_metal_client: BareMetalLeaseTestClient,
+):
+    reserved = _reserve_bare_metal("escrow-bm-api-reclaim")
+    lease = await bare_metal_client.register_lease(
+        allocation_id=reserved["allocation_id"],
+        escrow_uid="escrow-bm-api-reclaim",
+        machine_id="bm-node-1",
+        physical_host_id="host-physical-1",
+        access_ref={"ssh_user": "tenant-a"},
+        lease_end_utc=_future_dt(),
+    )
+
+    terminated = await bare_metal_client.terminate_market_lease(
+        lease["allocation_id"],
+    )
+
+    assert terminated["id"] == lease["allocation_id"]
+    assert terminated["status"] == "releasing"
+
+    ledger = _container_module.resolved_capacity_ledger_service
+    allocation = ledger.get_allocation(lease["allocation_id"])
+    assert allocation["state"] == "releasing"
+    assert allocation["executor_kind"] == "bare_metal"
+    assert allocation["release_job_id"]
+    assert allocation["vm_remove_job_id"] is None
+
+    session_factory = _container_module.resolved_session_factory
+    with session_factory() as db:
+        job = db.get(AnsibleJob, allocation["release_job_id"])
+        assert job is not None
+        assert job.params["vm_action"] == NODE_RECLAIM_ACCESS_ACTION
+        assert job.params["vm_host"] == "bm-node-1"
+        assert job.params["executor_kind"] == "bare_metal"
+        assert job.params["executor_action"] == NODE_RECLAIM_ACCESS_ACTION
+        assert job.params["executor_target"] == "bm-node-1"
