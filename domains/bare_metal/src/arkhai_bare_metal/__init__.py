@@ -1,5 +1,9 @@
 """Bare-metal market domain schema."""
 
+from .publication import (
+    available_bare_metal_listings,
+    bare_metal_listing_key,
+)
 from .schema import (
     BARE_METAL_ACCESS_ACTIONS,
     BARE_METAL_EXECUTOR_KIND,
@@ -39,6 +43,8 @@ __all__ = [
     "BareMetalMessage",
     "BareMetalReceipt",
     "BareMetalTerms",
+    "available_bare_metal_listings",
+    "bare_metal_listing_key",
     "bare_metal_executor_ref",
     "materialization_to_lease_create",
     "receipt_from_lease_view",

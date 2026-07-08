@@ -502,7 +502,11 @@ admin/operator VM API.
    Access grant/reclaim now validates that the machine exists and is enabled
    before queueing Ansible work.
 4. Extend listing/publication flows so VM and bare-metal listings are derived
-   from the same site-authority snapshot and cross-mode availability.
+   from the same site-authority snapshot and cross-mode availability. The
+   bare-metal domain now provides pure derivation helpers that turn enabled,
+   available, `allocation_mode=exclusive` site resources into
+   `BareMetalListing` payloads; storefront publication/reopen/close wiring is
+   still pending.
 
 **Acceptance criteria:** one physical host can be registered once, exposed as
 both a whole-host bare-metal offer and one or more VM slice offers, and the
