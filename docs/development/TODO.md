@@ -507,8 +507,10 @@ admin/operator VM API.
    available, `allocation_mode=exclusive` site resources into
    `BareMetalListing` payloads. The VM storefront now has a parallel
    bare-metal publication planner/tracking table for candidates, duplicate
-   detection, stale-open detection, and closed-available detection; actual
-   publish/reopen/close CLI wiring is still pending.
+   detection, stale-open detection, closed-available detection, and
+   publish/reopen/close CLI wiring. Remaining work is to pin the cross-mode
+   site-ledger conflict behavior with explicit acceptance coverage and then
+   exercise the end-to-end publication/lease flow.
 
 **Acceptance criteria:** one physical host can be registered once, exposed as
 both a whole-host bare-metal offer and one or more VM slice offers, and the

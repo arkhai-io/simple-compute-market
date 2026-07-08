@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from core_site.ledger import ALLOCATION_MODE_EXCLUSIVE
+from core_site.ledger import ALLOCATION_MODE_EXCLUSIVE, ALLOCATION_MODE_SHAREABLE
 from main import app
 
 
@@ -174,6 +174,56 @@ async def test_vm_and_bare_metal_claims_use_domain_attributes(capacity: Capacity
     assert reserved is not None
     assert reserved["resource_id"] == "bare-metal-node-1"
     assert reserved["vm_host"] is None
+
+
+@pytest.mark.asyncio
+async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityApi):
+    await capacity.register(
+        "compute-host-1",
+        total_units=8,
+        resource_subtype="h200",
+        attributes={
+            "vm_host": "kvm1",
+            "gpu_model": "H200",
+            "physical_host_id": "host-physical-1",
+            "allocation_mode": ALLOCATION_MODE_SHAREABLE,
+        },
+    )
+    await capacity.register(
+        "bare-metal-node-1",
+        total_units=1,
+        resource_subtype="h200",
+        attributes={
+            "machine_id": "node-1",
+            "gpu_model": "H200",
+            "physical_host_id": "host-physical-1",
+            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+        },
+    )
+
+    initial = {row["resource_id"]: row for row in await capacity.snapshot()}
+    assert initial["compute-host-1"]["available_units"] == 8
+    assert initial["bare-metal-node-1"]["available_units"] == 1
+
+    reserved = await capacity.reserve(
+        {"gpu_count": 2, "vm_host": "kvm1"},
+        {"escrow_uid": "0xvm-cross-mode"},
+    )
+
+    assert reserved is not None
+    blocked = {row["resource_id"]: row for row in await capacity.snapshot()}
+    assert blocked["compute-host-1"]["available_units"] == 6
+    assert blocked["bare-metal-node-1"]["available_units"] == 0
+    assert await capacity.probe({
+        "physical_host_id": "host-physical-1",
+        "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+    }) is None
+
+    released = await capacity.release(allocation_id=reserved["allocation_id"])
+    assert released is not None
+    restored = {row["resource_id"]: row for row in await capacity.snapshot()}
+    assert restored["compute-host-1"]["available_units"] == 8
+    assert restored["bare-metal-node-1"]["available_units"] == 1
 
 
 @pytest.mark.asyncio

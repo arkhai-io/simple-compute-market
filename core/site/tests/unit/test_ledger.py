@@ -75,6 +75,137 @@ def test_vm_claim_with_vm_host_does_not_match_hostless_resource(
     assert ledger.probe(claim={"gpu_count": 1}) is not None
 
 
+def _register_dual_mode_host(ledger: CapacityLedgerService) -> None:
+    ledger.register_resource(
+        resource_id="compute-host-1",
+        total_units=8,
+        resource_subtype="h200",
+        attributes={
+            "vm_host": "kvm1",
+            "gpu_model": "H200",
+            "physical_host_id": "physical-host-1",
+            "allocation_mode": ALLOCATION_MODE_SHAREABLE,
+        },
+    )
+    ledger.register_resource(
+        resource_id="bare-metal-host-1",
+        total_units=1,
+        resource_subtype="h200",
+        attributes={
+            "machine_id": "node-1",
+            "gpu_model": "H200",
+            "physical_host_id": "physical-host-1",
+            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+        },
+    )
+
+
+def test_dual_mode_host_snapshot_exposes_vm_and_bare_metal_when_free(
+    ledger: CapacityLedgerService,
+):
+    _register_dual_mode_host(ledger)
+
+    by_id = {row["resource_id"]: row for row in ledger.snapshot()}
+
+    assert by_id["compute-host-1"]["available_units"] == 8
+    assert by_id["bare-metal-host-1"]["available_units"] == 1
+    assert ledger.probe(
+        claim={"gpu_count": 2, "vm_host": "kvm1"},
+    )["resource_id"] == "compute-host-1"
+    assert ledger.probe(
+        claim={
+            "physical_host_id": "physical-host-1",
+            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+        },
+    )["resource_id"] == "bare-metal-host-1"
+
+
+def test_vm_slice_allocation_blocks_bare_metal_on_same_physical_host(
+    ledger: CapacityLedgerService,
+):
+    _register_dual_mode_host(ledger)
+
+    vm = ledger.reserve(
+        claim={"gpu_count": 2, "vm_host": "kvm1"},
+        deal_ref={"escrow_uid": "0xvm"},
+    )
+
+    assert vm is not None
+    by_id = {row["resource_id"]: row for row in ledger.snapshot()}
+    assert by_id["compute-host-1"]["available_units"] == 6
+    assert by_id["bare-metal-host-1"]["available_units"] == 0
+    assert by_id["bare-metal-host-1"]["state"] == "leased"
+    assert ledger.probe(
+        claim={
+            "physical_host_id": "physical-host-1",
+            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+        },
+    ) is None
+
+    second_vm = ledger.reserve(
+        claim={"gpu_count": 6, "vm_host": "kvm1"},
+        deal_ref={"escrow_uid": "0xvm2"},
+    )
+    assert second_vm is not None
+    assert second_vm["resource_id"] == "compute-host-1"
+
+
+def test_bare_metal_allocation_blocks_vm_slices_on_same_physical_host(
+    ledger: CapacityLedgerService,
+):
+    _register_dual_mode_host(ledger)
+
+    bare_metal = ledger.reserve(
+        claim={
+            "physical_host_id": "physical-host-1",
+            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+        },
+        deal_ref={"escrow_uid": "0xbm"},
+    )
+
+    assert bare_metal is not None
+    by_id = {row["resource_id"]: row for row in ledger.snapshot()}
+    assert by_id["bare-metal-host-1"]["available_units"] == 0
+    assert by_id["compute-host-1"]["available_units"] == 0
+    assert by_id["compute-host-1"]["state"] == "leased"
+    assert ledger.probe(claim={"gpu_count": 1, "vm_host": "kvm1"}) is None
+
+
+def test_releasing_cross_mode_allocation_keeps_sibling_capacity_blocked(
+    ledger: CapacityLedgerService,
+):
+    _register_dual_mode_host(ledger)
+    bare_metal = ledger.reserve(
+        claim={
+            "physical_host_id": "physical-host-1",
+            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+        },
+        deal_ref={"escrow_uid": "0xbm"},
+    )
+
+    ledger.update_allocation_state(bare_metal["allocation_id"], state="releasing")
+
+    by_id = {row["resource_id"]: row for row in ledger.snapshot()}
+    assert by_id["compute-host-1"]["available_units"] == 0
+    assert ledger.probe(claim={"gpu_count": 1, "vm_host": "kvm1"}) is None
+
+
+def test_release_restores_cross_mode_sibling_capacity(
+    ledger: CapacityLedgerService,
+):
+    _register_dual_mode_host(ledger)
+    vm = ledger.reserve(
+        claim={"gpu_count": 2, "vm_host": "kvm1"},
+        deal_ref={"escrow_uid": "0xvm"},
+    )
+
+    ledger.release(allocation_id=vm["allocation_id"])
+
+    by_id = {row["resource_id"]: row for row in ledger.snapshot()}
+    assert by_id["compute-host-1"]["available_units"] == 8
+    assert by_id["bare-metal-host-1"]["available_units"] == 1
+
+
 def test_required_attributes_remains_available_as_local_guard():
     guarded = _make_ledger(required_attributes=("vm_host",))
     guarded.register_resource(
