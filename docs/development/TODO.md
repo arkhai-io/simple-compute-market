@@ -508,9 +508,11 @@ admin/operator VM API.
    `BareMetalListing` payloads. The VM storefront now has a parallel
    bare-metal publication planner/tracking table for candidates, duplicate
    detection, stale-open detection, closed-available detection, and
-   publish/reopen/close CLI wiring. Remaining work is to pin the cross-mode
-   site-ledger conflict behavior with explicit acceptance coverage and then
-   exercise the end-to-end publication/lease flow.
+   publish/reopen/close CLI wiring. Cross-mode site-ledger conflict coverage
+   now pins VM-slice versus exclusive bare-metal blocking, and storefront
+   publication reconciliation coverage now pins close/reopen behavior for a
+   dual-mode host. Remaining work is a live happy-path smoke around real
+   bare-metal lease grant/reclaim execution.
 
 **Acceptance criteria:** one physical host can be registered once, exposed as
 both a whole-host bare-metal offer and one or more VM slice offers, and the

@@ -785,6 +785,192 @@ def test_publish_round_reopens_existing_bare_metal_listing_id(tmp_path, monkeypa
     assert derived_status == "open"
 
 
+def test_publish_reconciliation_closes_and_reopens_dual_mode_host_listings(
+    tmp_path,
+    monkeypatch,
+):
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_resource(
+        db,
+        "compute-host-1",
+        "available",
+        {
+            "gpu_model": "H200",
+            "sla": 99.0,
+            "region": "California, US",
+            "vm_host": "kvm1",
+            "physical_host_id": "host-physical-1",
+            "allocation_mode": "shareable",
+        },
+        gpu_count=1,
+    )
+
+    available_bare_metal = _exclusive_bare_metal_resource()
+    unavailable_bare_metal = _exclusive_bare_metal_resource(available_units=0)
+    member_availability = {(None, "compute-host-1"): 1}
+    snapshot_resources = [available_bare_metal]
+
+    monkeypatch.setattr(
+        cli_publish,
+        "_member_availability_sync",
+        lambda: member_availability,
+    )
+    monkeypatch.setattr(
+        cli_publish,
+        "_capacity_snapshot_resources_sync",
+        lambda: snapshot_resources,
+    )
+
+    created_listing_ids: list[str] = []
+
+    def fake_publish(
+        agent_url,
+        offer,
+        accepted_escrows,
+        demands,
+        max_duration_seconds,
+        wallet_address,
+        private_key,
+    ):
+        listing_id = (
+            "bm-listing-1"
+            if offer.get("kind") == "bare_metal.v1"
+            else "vm-listing-1"
+        )
+        created_listing_ids.append(listing_id)
+        conn = sqlite3.connect(db)
+        try:
+            conn.execute(
+                "INSERT INTO listings (listing_id, status, offer_resource) "
+                "VALUES (?, 'open', ?)",
+                (listing_id, json.dumps(offer)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return {"status": "created", "listing_id": listing_id}
+
+    def fake_close(agent_url, listing_id, private_key):
+        conn = sqlite3.connect(db)
+        try:
+            conn.execute(
+                "UPDATE listings SET status = 'closed' WHERE listing_id = ?",
+                (listing_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return {"status": "closed"}
+
+    monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
+    monkeypatch.setattr(cli_publish, "_close_order", fake_close)
+
+    published, failed, skipped = _publish_round(
+        db_path=db,
+        skip_ids=(
+            _open_listing_resource_keys(db) | _open_bare_metal_listing_keys(db)
+        ),
+        **_round_kwargs(),
+    )
+
+    assert not failed
+    assert not skipped
+    assert {p["response"]["listing_id"] for p in published} == {
+        "vm-listing-1",
+        "bm-listing-1",
+    }
+    assert sorted(created_listing_ids) == ["bm-listing-1", "vm-listing-1"]
+
+    member_availability = {(None, "compute-host-1"): 0}
+    snapshot_resources = [unavailable_bare_metal]
+
+    closed_vm = cli_publish._close_stale_derived_listings(
+        db_path=db,
+        base_url="http://agent",
+        private_key=None,
+    )
+    closed_bare_metal = _close_stale_bare_metal_listings(
+        db_path=db,
+        base_url="http://agent",
+        private_key=None,
+    )
+
+    assert closed_vm == ["vm-listing-1"]
+    assert closed_bare_metal == ["bm-listing-1"]
+    conn = sqlite3.connect(db)
+    try:
+        listing_statuses = dict(
+            conn.execute(
+                "SELECT listing_id, status FROM listings ORDER BY listing_id"
+            ).fetchall()
+        )
+        compute_status = conn.execute(
+            "SELECT status FROM derived_compute_listings WHERE listing_id = ?",
+            ("vm-listing-1",),
+        ).fetchone()[0]
+        bare_metal_status = conn.execute(
+            "SELECT status FROM derived_bare_metal_listings WHERE listing_id = ?",
+            ("bm-listing-1",),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert listing_statuses == {
+        "bm-listing-1": "closed",
+        "vm-listing-1": "closed",
+    }
+    assert compute_status == "closed"
+    assert bare_metal_status == "closed"
+
+    member_availability = {(None, "compute-host-1"): 1}
+    snapshot_resources = [available_bare_metal]
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_offer",
+        lambda *a, **k: pytest.fail("closed derived listings should reopen"),
+    )
+
+    with settings_overrides(enable_registry_discovery=False):
+        reopened, failed, skipped = _publish_round(
+            db_path=db,
+            skip_ids=(
+                _open_listing_resource_keys(db) | _open_bare_metal_listing_keys(db)
+            ),
+            **_round_kwargs(),
+        )
+
+    assert not failed
+    assert not skipped
+    assert {p["response"]["listing_id"] for p in reopened} == {
+        "vm-listing-1",
+        "bm-listing-1",
+    }
+    conn = sqlite3.connect(db)
+    try:
+        listing_statuses = dict(
+            conn.execute(
+                "SELECT listing_id, status FROM listings ORDER BY listing_id"
+            ).fetchall()
+        )
+        listing_count = conn.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
+        compute_status = conn.execute(
+            "SELECT status FROM derived_compute_listings WHERE listing_id = ?",
+            ("vm-listing-1",),
+        ).fetchone()[0]
+        bare_metal_status = conn.execute(
+            "SELECT status FROM derived_bare_metal_listings WHERE listing_id = ?",
+            ("bm-listing-1",),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert listing_count == 2
+    assert listing_statuses == {
+        "bm-listing-1": "open",
+        "vm-listing-1": "open",
+    }
+    assert compute_status == "open"
+    assert bare_metal_status == "open"
+
+
 def test_publish_round_normalizes_zero_duration_to_unlimited(tmp_path, monkeypatch):
     db = str(tmp_path / "agent.db")
     _init_db(db)
