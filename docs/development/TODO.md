@@ -444,6 +444,22 @@ vocabulary they inspect; for example Alkahest scalar `best_price`,
 `cheapest_first`, and `priceless_last` aggregation policies live in
 `market_alkahest.aggregation`, while `core_buyer` owns the aggregation
 registry/discovery and schema-opaque control-flow helpers.
+Buyer-side discovery should follow the same ownership rule. Domain packages
+own domain compatibility filters such as GPU model, region, duration, access
+method, service name, or quantity. Kit packages own kit compatibility filters
+such as supported settlement mechanism, chain, token, price shape, identity
+credential scheme, allowlist/denylist compatibility, and kit-specific local
+candidate checks. Core buyer should compose these filters before aggregation
+and negotiation rather than baking kit compatibility into each domain plugin.
+The current CLI exposes named domain flags plus repeatable `--filter
+name=value` passthroughs. The target filter API should move toward one
+string DSL, e.g. `filters="gpu_model == 'H200' and settlement.mechanism in
+['alkahest.erc20.v1'] and token == '0x...'"`, parsed once by core and split
+into registry-side predicates when the registry filter-spec can serve them
+and local candidate predicates when the payload is opaque or kit-specific.
+Installed domain and kit packages should register filter vocabulary/compilers
+for that DSL, so a buyer can combine domain and kit compatibility constraints
+without each domain reimplementing every settlement or identity filter.
 Operator-specific seller policies, buyer policies, provisioning services,
 provider integrations, and local service state belong in separate
 role/implementation packages that depend on the domain package plus the
