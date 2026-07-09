@@ -508,20 +508,20 @@ admin/operator VM API.
    from the same site-authority snapshot and cross-mode availability. The
    bare-metal domain now provides pure derivation helpers that turn enabled,
    available, `allocation_mode=exclusive` site resources into
-   `BareMetalListing` payloads. The VM storefront currently has a transitional
-   bare-metal publication planner/tracking table for candidates, duplicate
-   detection, stale-open detection, closed-available detection, and
-   publish/reopen/close CLI wiring. Target organization is one storefront per
-   domain, so this planner should move to a bare-metal storefront package while
-   still reading the same site-authority capacity snapshot. Cross-mode
-   site-ledger conflict coverage now pins VM-slice versus exclusive bare-metal
-   blocking, and storefront publication reconciliation coverage now pins
-   close/reopen behavior for a dual-mode host. Provisioning integration
-   coverage now drives bare-metal lease grant/reclaim jobs through the
-   background job processor and verifies that the executor uses the bare-metal
-   playbook. The bare-metal seller quickstart now documents live-hardware
-   setup, inventory conventions, reclaim policy, validation checks, and publish
-   inspection.
+   `BareMetalListing` payloads. Bare-metal storefront publication tracking
+   helpers now live in `arkhai-bare-metal` so future bare-metal storefront code
+   does not need to import the VM storefront package. The VM storefront
+   currently still has transitional publish/reopen/close CLI wiring for those
+   helpers. Target organization is one storefront per domain, so that CLI
+   wiring should move to a bare-metal storefront package while still reading
+   the same site-authority capacity snapshot. Cross-mode site-ledger conflict
+   coverage now pins VM-slice versus exclusive bare-metal blocking, and
+   storefront publication reconciliation coverage now pins close/reopen
+   behavior for a dual-mode host. Provisioning integration coverage now drives
+   bare-metal lease grant/reclaim jobs through the background job processor and
+   verifies that the executor uses the bare-metal playbook. The bare-metal
+   seller quickstart now documents live-hardware setup, inventory conventions,
+   reclaim policy, validation checks, and publish inspection.
 
 **Acceptance criteria:** one physical host can be registered once, exposed as
 both a whole-host bare-metal offer and one or more VM slice offers, and the

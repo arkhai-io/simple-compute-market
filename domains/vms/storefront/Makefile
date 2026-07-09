@@ -19,6 +19,7 @@ reinit: ## Force-reinstall internal wheels without bumping versions. Use after m
 	uv sync --find-links $(DIST_DIR) \
 	--upgrade-package arkhai-core                    --reinstall-package arkhai-core \
 	--upgrade-package arkhai-core-storefront         --reinstall-package arkhai-core-storefront \
+	--upgrade-package arkhai-bare-metal             --reinstall-package arkhai-bare-metal \
 	--upgrade-package arkhai-kit-identity            --reinstall-package arkhai-kit-identity \
 	--upgrade-package arkhai-kit-alkahest            --reinstall-package arkhai-kit-alkahest \
 	--upgrade-package arkhai-kit-config              --reinstall-package arkhai-kit-config \

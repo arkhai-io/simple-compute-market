@@ -30,7 +30,7 @@ from market_storefront.cli_publish import (
     _publish_round,
     _stale_open_listing_ids,
 )
-from market_storefront.services.bare_metal_publication import (
+from arkhai_bare_metal.storefront_publication import (
     bare_metal_listing_candidates,
     record_derived_bare_metal_listing,
 )

@@ -55,7 +55,7 @@ from domains.vms.listings.reconciler import (
     reopen_local_derived_listing,
     stale_open_listing_ids,
 )
-from market_storefront.services.bare_metal_publication import (
+from arkhai_bare_metal.storefront_publication import (
     bare_metal_listing_candidates,
     load_derived_bare_metal_listing,
     mark_derived_bare_metal_listings_closed,

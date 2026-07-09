@@ -1,4 +1,4 @@
-"""Bare-metal publication planning for storefront capacity snapshots."""
+"""Storefront publication tracking for bare-metal listing derivation."""
 
 from __future__ import annotations
 
@@ -6,11 +6,8 @@ import json
 import sqlite3
 from typing import Any
 
-from arkhai_bare_metal import (
-    BareMetalListing,
-    available_bare_metal_listings,
-    bare_metal_listing_key,
-)
+from .publication import available_bare_metal_listings, bare_metal_listing_key
+from .schema import BareMetalListing
 
 
 def ensure_derived_bare_metal_listings_table(conn: sqlite3.Connection) -> None:

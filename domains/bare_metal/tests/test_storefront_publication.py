@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from market_storefront.services.bare_metal_publication import (
+from arkhai_bare_metal.storefront_publication import (
     bare_metal_listing_candidates,
     closed_available_bare_metal_listing_ids,
     ensure_derived_bare_metal_listings_table,
