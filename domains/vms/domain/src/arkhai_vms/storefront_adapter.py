@@ -59,6 +59,27 @@ def vm_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
     return keys
 
 
+def vm_offer_resource_for_listing(
+    candidate: dict[str, Any],
+    *,
+    interruptible: bool = False,
+) -> dict[str, Any]:
+    """Build the VM-domain listing payload for a publication candidate."""
+    offer = {
+        "pool_id": candidate.get("pool_id"),
+        "gpu_model": candidate["gpu_model"],
+        "gpu_count": candidate["gpu_count"],
+        "sla": candidate["sla"],
+        "region": candidate["region"],
+    }
+    if candidate.get("resource_id"):
+        offer["resource_id"] = candidate["resource_id"]
+    if interruptible:
+        offer["interruptible"] = True
+        offer["settlement_model"] = "splitter_refund"
+    return offer
+
+
 def vm_publication_adapter(
     *,
     open_keys: OpenKeysCallback,

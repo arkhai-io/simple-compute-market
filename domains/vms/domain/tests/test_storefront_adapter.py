@@ -7,6 +7,7 @@ pytest.importorskip("core_storefront.publication_sources")
 from arkhai_vms.storefront_adapter import (  # noqa: E402
     vm_candidate_skip_keys,
     vm_listing_resource_key,
+    vm_offer_resource_for_listing,
     vm_publication_adapter,
 )
 
@@ -91,3 +92,39 @@ def test_vm_publication_adapter_fills_core_publication_source_slots() -> None:
     }
     assert adapter.reopen_error_label == "reopen derived listing"
     assert vm_listing_resource_key("host-a", 2) == "host-a:gpus:2"
+
+
+def test_vm_offer_resource_for_listing_builds_domain_payload() -> None:
+    offer = vm_offer_resource_for_listing({
+        "pool_id": "pool-a",
+        "resource_id": "host-a",
+        "gpu_model": "H200",
+        "gpu_count": 2,
+        "sla": 0.99,
+        "region": "California, US",
+    })
+
+    assert offer == {
+        "pool_id": "pool-a",
+        "resource_id": "host-a",
+        "gpu_model": "H200",
+        "gpu_count": 2,
+        "sla": 0.99,
+        "region": "California, US",
+    }
+
+
+def test_vm_offer_resource_for_listing_marks_interruptible() -> None:
+    offer = vm_offer_resource_for_listing(
+        {
+            "pool_id": "pool-a",
+            "gpu_model": "H200",
+            "gpu_count": 2,
+            "sla": 0.99,
+            "region": "California, US",
+        },
+        interruptible=True,
+    )
+
+    assert offer["interruptible"] is True
+    assert offer["settlement_model"] == "splitter_refund"

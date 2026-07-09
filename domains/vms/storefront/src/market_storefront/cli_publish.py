@@ -57,6 +57,7 @@ from domains.vms.listings.reconciler import (
 )
 from arkhai_vms.storefront_adapter import (
     vm_candidate_skip_keys,
+    vm_offer_resource_for_listing,
     vm_publication_adapter,
 )
 from arkhai_bare_metal.storefront_adapter import (
@@ -850,19 +851,10 @@ def _demands_for_chains(
 def _offer_resource_for_listing(res: dict[str, Any]) -> dict[str, Any]:
     from market_storefront.utils.config import settings
 
-    offer = {
-        "pool_id": res.get("pool_id"),
-        "gpu_model": res["gpu_model"],
-        "gpu_count": res["gpu_count"],
-        "sla": res["sla"],
-        "region": res["region"],
-    }
-    if res.get("resource_id"):
-        offer["resource_id"] = res["resource_id"]
-    if getattr(settings, "interruptible_listings", False):
-        offer["interruptible"] = True
-        offer["settlement_model"] = "splitter_refund"
-    return offer
+    return vm_offer_resource_for_listing(
+        res,
+        interruptible=bool(getattr(settings, "interruptible_listings", False)),
+    )
 
 
 def _default_alkahest_payload(
