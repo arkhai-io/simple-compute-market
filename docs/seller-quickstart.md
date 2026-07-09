@@ -1,4 +1,4 @@
-# Seller quickstart
+# VM seller quickstart
 
 How to bring up a compute storefront: publish listings (signed with
 your wallet key), and (optionally) provision real KVM VMs to buyers.
@@ -7,8 +7,10 @@ For the buyer side see [`buyer-quickstart.md`](./buyer-quickstart.md).
 To run your own listing registry instead of pointing at an existing one,
 see [`indexer-quickstart.md`](./indexer-quickstart.md). To expose VMs
 via wildcard subdomains instead of direct port-forward NAT, see
-[`seller-frp-setup.md`](./seller-frp-setup.md). To sell request quota
-for an OpenAI-compatible vLLM server instead of VMs, see the
+[`seller-frp-setup.md`](./seller-frp-setup.md). To sell whole-machine
+SSH access instead of VM slices, see
+[`bare-metal-seller-quickstart.md`](./bare-metal-seller-quickstart.md).
+To sell request quota for an OpenAI-compatible vLLM server instead, see the
 [`vLLM API-credits cookbook`](./cookbooks/vllm-apicredits-seller.md).
 
 ## Prerequisites
@@ -120,7 +122,7 @@ slice-001,compute.gpu,H200,count,1,available,2,0x036CbD53842c5426634e7929541eC23
   service's ansible inventory (§6). For mock mode any string works.
 - `attribute.physical_host_id` — stable identity for the underlying physical
   machine. Used by the site authority to avoid double-selling the same host
-  as both VM slices and bare metal. If omitted for a VM resource,
+  if you also run a bare-metal storefront for the same hardware. If omitted,
   `attribute.vm_host` is used as the default.
 - `attribute.allocation_mode` — `shareable` for VM-slice listings. If omitted
   for a VM resource with `attribute.vm_host`, it defaults to `shareable`.
@@ -259,4 +261,7 @@ touching libvirt. To create real VMs:
   free offering.
 - **`attribute.vm_host` must match an inventory alias.** Wrong alias =
   settle fails with "host not found".
+- **When co-selling VM slices and bare metal from the same host, use one
+  stable `attribute.physical_host_id` in both domain storefront inventories.**
+  Otherwise the site ledger cannot prevent cross-mode double selling.
 - **`agent_id` must be a Python identifier** — no dashes.

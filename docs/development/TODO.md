@@ -21,7 +21,7 @@ Pending architectural work and known operational issues for the Arkhai market st
 | [Golden image configuration](#golden-image-configuration-management-varsyaml) | Provisioning Service | Needs review |
 | [Host capacity resource filters](#host-capacity-resource-filters) | Provisioning Service | Needs review |
 | [Site resources and shared lease lifecycle boundaries](#site-resources-and-shared-lease-lifecycle-boundaries) | Provisioning Service | Needs review |
-| [Shared host accounting for VM and bare-metal offers](#shared-host-accounting-for-vm-and-bare-metal-offers) | Provisioning Service | Planned |
+| [Shared host accounting for VM and bare-metal offers](#shared-host-accounting-for-vm-and-bare-metal-offers) | Provisioning Service | Implemented, storefront split pending |
 | [Seller-side spot automation](#seller-side-spot-automation) | Provisioning Service | Planned |
 | [Multi-Provider Resource Pool Architecture](#multi-provider-resource-pool-architecture) | Provisioning Service | Needs review |
 | [`StorefrontCallbackClient` extraction](#storefrontcallbackclient-extraction-conditional) | Provisioning Service | Conditional |
@@ -389,7 +389,10 @@ Lease lifecycle policy should sit above that generic site resource layer. A reus
 
 ### Shared host accounting for VM and bare-metal offers
 
-**Status:** Planned.
+**Status:** Implemented through transitional VM storefront/provisioning
+packages. Remaining architectural work is the package split: bare-metal
+publication should move behind a bare-metal storefront, and the multi-domain
+site provisioner should move out of `domains/vms`.
 
 **Goal:** allow a seller to offer the same underlying physical machine as
 exclusive bare metal or as VM slices, depending on demand, without double
@@ -505,16 +508,20 @@ admin/operator VM API.
    from the same site-authority snapshot and cross-mode availability. The
    bare-metal domain now provides pure derivation helpers that turn enabled,
    available, `allocation_mode=exclusive` site resources into
-   `BareMetalListing` payloads. The VM storefront now has a parallel
+   `BareMetalListing` payloads. The VM storefront currently has a transitional
    bare-metal publication planner/tracking table for candidates, duplicate
    detection, stale-open detection, closed-available detection, and
-   publish/reopen/close CLI wiring. Cross-mode site-ledger conflict coverage
-   now pins VM-slice versus exclusive bare-metal blocking, and storefront
-   publication reconciliation coverage now pins close/reopen behavior for a
-   dual-mode host. Provisioning integration coverage now drives bare-metal
-   lease grant/reclaim jobs through the background job processor and verifies
-   that the executor uses the bare-metal playbook. Remaining work is
-   operator-facing runbook/config documentation for live hardware.
+   publish/reopen/close CLI wiring. Target organization is one storefront per
+   domain, so this planner should move to a bare-metal storefront package while
+   still reading the same site-authority capacity snapshot. Cross-mode
+   site-ledger conflict coverage now pins VM-slice versus exclusive bare-metal
+   blocking, and storefront publication reconciliation coverage now pins
+   close/reopen behavior for a dual-mode host. Provisioning integration
+   coverage now drives bare-metal lease grant/reclaim jobs through the
+   background job processor and verifies that the executor uses the bare-metal
+   playbook. The bare-metal seller quickstart now documents live-hardware
+   setup, inventory conventions, reclaim policy, validation checks, and publish
+   inspection.
 
 **Acceptance criteria:** one physical host can be registered once, exposed as
 both a whole-host bare-metal offer and one or more VM slice offers, and the

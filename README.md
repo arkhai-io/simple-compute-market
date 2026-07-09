@@ -31,7 +31,8 @@ Pick the role you're standing up:
 
 - **Understand market roles** → [`docs/roles.md`](./docs/roles.md)
 - **Buy compute** → [`docs/buyer-quickstart.md`](./docs/buyer-quickstart.md)
-- **Sell compute** → [`docs/seller-quickstart.md`](./docs/seller-quickstart.md)
+- **Sell VM compute** → [`docs/seller-quickstart.md`](./docs/seller-quickstart.md)
+- **Sell bare-metal compute** → [`docs/bare-metal-seller-quickstart.md`](./docs/bare-metal-seller-quickstart.md)
 - **Run your own listing registry** → [`docs/indexer-quickstart.md`](./docs/indexer-quickstart.md)
 - **Implement a new market domain** → [`docs/domain-authoring/`](./docs/domain-authoring/)
 - **Deploy cookbook examples** → [`docs/cookbooks/`](./docs/cookbooks/)
