@@ -8,6 +8,7 @@ import pytest
 
 pytest.importorskip("core_storefront.publication_sources")
 
+from core_storefront.publication_runner import publish_round  # noqa: E402
 from arkhai_bare_metal.storefront_adapter import (  # noqa: E402
     bare_metal_candidate_skip_keys,
     bare_metal_publication_adapter,
@@ -130,3 +131,45 @@ def test_candidate_skip_keys_ignore_absent_values() -> None:
     assert bare_metal_candidate_skip_keys({"machine_id": "bm-node-1"}) == {
         "bm-node-1",
     }
+
+
+def test_bare_metal_adapter_runs_through_core_publication_runner(tmp_path) -> None:
+    db_path = str(tmp_path / "storefront.db")
+    _db(db_path)
+    adapter = bare_metal_publication_adapter(
+        capacity_snapshot=lambda: [_resource()],
+        close_listing=lambda *args: {"status": "closed"},
+        publish_existing_listing=lambda **kwargs: {"status": "published"},
+    )
+
+    def publish_offer(
+        offer: dict[str, Any],
+        _escrows: list[dict[str, Any]],
+        _demands: list[dict[str, Any]],
+        _duration: int | None,
+    ) -> dict[str, Any]:
+        listing_id = f"listing-{offer['machine_id']}"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "INSERT INTO listings(listing_id, offer_resource, status) VALUES (?, ?, 'open')",
+                (listing_id, json.dumps(offer)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return {"status": "published", "listing_id": listing_id}
+
+    published, failed, skipped = publish_round(
+        [adapter],
+        db_path=db_path,
+        base_url="http://storefront",
+        private_key=None,
+        build_payload=lambda _source, _candidate, _offer: ([{"escrow": "e"}], [{"demand": "d"}], None),
+        publish_offer=publish_offer,
+    )
+
+    assert failed == []
+    assert skipped == []
+    assert published[0]["response"]["listing_id"] == "listing-bm-node-1"
+    assert open_bare_metal_publication_keys(db_path) == {"bare-metal:bm-node-1"}

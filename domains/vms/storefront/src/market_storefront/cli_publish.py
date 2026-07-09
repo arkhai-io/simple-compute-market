@@ -44,6 +44,12 @@ from registry_client import (
     UpdateListingRequest,
 )
 from core_storefront.publication_sources import PublicationSource
+from core_storefront.publication_plugins import build_publication_source
+from core_storefront.publication_runner import (
+    close_stale_publication_listings as run_close_stale_publication_listings,
+    open_publication_keys as run_open_publication_keys,
+    publish_round as run_publication_round,
+)
 
 from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
 from domains.vms.listings.reconciler import (
@@ -58,17 +64,6 @@ from domains.vms.listings.reconciler import (
 from arkhai_vms.storefront_adapter import (
     vm_candidate_skip_keys,
     vm_offer_resource_for_listing,
-    vm_publication_adapter,
-)
-from arkhai_bare_metal.storefront_adapter import (
-    available_bare_metal_listing_candidates,
-    bare_metal_candidate_skip_keys,
-    bare_metal_publication_adapter,
-    close_stale_bare_metal_publications,
-    open_bare_metal_publication_keys,
-    record_published_bare_metal_listing,
-    reopen_bare_metal_listing_adapter,
-    stale_open_bare_metal_publication_ids,
 )
 
 
@@ -153,33 +148,6 @@ def _member_availability_sync() -> dict[tuple[str | None, str], int] | None:
     return view if answered else None
 
 
-def _capacity_snapshot_resources_sync() -> list[dict[str, Any]]:
-    """Aggregated site capacity snapshot rows for publication planning."""
-    import httpx
-
-    from market_storefront.services.capacity_client import _capacity_settings
-
-    try:
-        sites, admin_key, _ = _capacity_settings()
-    except Exception:
-        return []
-    headers = {"X-Admin-Key": admin_key} if admin_key else {}
-    resources: list[dict[str, Any]] = []
-    for _site_name, url in sites.items():
-        try:
-            with httpx.Client(timeout=10) as http:
-                resp = http.get(
-                    f"{url}/api/v1/capacity/snapshot", headers=headers,
-                )
-                resp.raise_for_status()
-                rows = resp.json().get("resources") or []
-        except Exception as exc:
-            typer.echo(f"[capacity] snapshot failed for {url}: {exc}", err=True)
-            continue
-        resources.extend(row for row in rows if isinstance(row, dict))
-    return resources
-
-
 def _available_resources(db_path: str) -> list[dict]:
     return available_compute_slices(
         db_path, member_availability=_member_availability_sync(),
@@ -196,24 +164,6 @@ def _stale_open_listing_ids(db_path: str) -> list[str]:
         # No authority answered — closing on ignorance over-closes.
         return []
     return stale_open_listing_ids(db_path, member_availability=availability)
-
-
-def _available_bare_metal_listing_candidates(db_path: str) -> list[dict[str, Any]]:
-    return available_bare_metal_listing_candidates(
-        db_path,
-        capacity_snapshot=_capacity_snapshot_resources_sync,
-    )
-
-
-def _open_bare_metal_listing_keys(db_path: str) -> set[str]:
-    return open_bare_metal_publication_keys(db_path)
-
-
-def _stale_open_bare_metal_listing_ids(db_path: str) -> list[str]:
-    return stale_open_bare_metal_publication_ids(
-        db_path,
-        capacity_snapshot=_capacity_snapshot_resources_sync,
-    )
 
 
 def _open_order_resource_ids(db_path: str) -> set[str]:
@@ -399,30 +349,6 @@ def _reopen_derived_listing_if_present(
     )
 
 
-def _reopen_bare_metal_listing_if_present(
-    *,
-    db_path: str,
-    base_url: str,
-    candidate: dict[str, Any],
-    offer: dict[str, Any],
-    accepted_escrows: list[dict],
-    demands: list[dict],
-    max_duration_seconds: int | None,
-    private_key: Optional[str],
-) -> dict | None:
-    return reopen_bare_metal_listing_adapter(
-        db_path,
-        base_url,
-        candidate,
-        offer,
-        accepted_escrows,
-        demands,
-        max_duration_seconds,
-        private_key,
-        publish_existing_listing=_publish_existing_listing_to_registries,
-    )
-
-
 def _open_listing_ids(db_path: str) -> list[str]:
     """Return every status='open' listing_id from the agent DB."""
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
@@ -469,27 +395,8 @@ def _close_stale_derived_listings(
     return closed_listing_ids
 
 
-def _close_stale_bare_metal_listings(
-    *,
-    db_path: str,
-    base_url: str,
-    private_key: Optional[str],
-) -> list[str]:
-    return close_stale_bare_metal_publications(
-        db_path=db_path,
-        base_url=base_url,
-        private_key=private_key,
-        capacity_snapshot=_capacity_snapshot_resources_sync,
-        close_listing=_close_order,
-    )
-
-
 def _vm_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
     return vm_candidate_skip_keys(candidate)
-
-
-def _bare_metal_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
-    return bare_metal_candidate_skip_keys(candidate)
 
 
 def _record_published_vm_listing(
@@ -504,14 +411,6 @@ def _record_published_vm_listing(
         resource_id=str(candidate["resource_id"]) if candidate.get("resource_id") else None,
         gpu_count=int(candidate["gpu_count"]),
     )
-
-
-def _record_published_bare_metal_listing(
-    db_path: str,
-    candidate: dict[str, Any],
-    listing_id: str,
-) -> None:
-    record_published_bare_metal_listing(db_path, candidate, listing_id)
 
 
 def _reopen_vm_listing_if_present(
@@ -536,31 +435,16 @@ def _reopen_vm_listing_if_present(
     )
 
 
-def _reopen_bare_metal_listing_adapter(
-    db_path: str,
-    base_url: str,
-    candidate: dict[str, Any],
-    offer: dict[str, Any],
-    accepted_escrows: list[dict],
-    demands: list[dict],
-    max_duration_seconds: int | None,
-    private_key: Optional[str],
-) -> dict | None:
-    return _reopen_bare_metal_listing_if_present(
-        db_path=db_path,
-        base_url=base_url,
-        candidate=candidate,
-        offer=offer,
-        accepted_escrows=accepted_escrows,
-        demands=demands,
-        max_duration_seconds=max_duration_seconds,
-        private_key=private_key,
-    )
-
-
 def _publication_adapters() -> tuple[PublicationSource, ...]:
+    """VM storefront publication sources.
+
+    Bare-metal publication now belongs to the core storefront composition path
+    with the bare-metal domain adapter; this transitional VM storefront only
+    publishes VM slice listings.
+    """
     return (
-        vm_publication_adapter(
+        build_publication_source(
+            "vms",
             open_keys=_open_listing_resource_keys,
             close_stale=lambda db_path, base_url, private_key: (
                 _close_stale_derived_listings(
@@ -573,11 +457,6 @@ def _publication_adapters() -> tuple[PublicationSource, ...]:
             offer_resource=_offer_resource_for_listing,
             record_published=_record_published_vm_listing,
             reopen_existing=_reopen_vm_listing_if_present,
-        ),
-        bare_metal_publication_adapter(
-            capacity_snapshot=_capacity_snapshot_resources_sync,
-            close_listing=_close_order,
-            publish_existing_listing=_publish_existing_listing_to_registries,
         ),
     )
 
@@ -592,17 +471,16 @@ def _close_stale_publication_listings(
     base_url: str,
     private_key: Optional[str],
 ) -> dict[str, list[str]]:
-    return {
-        adapter.name: adapter.close_stale(db_path, base_url, private_key)
-        for adapter in _publication_lifecycle_adapters()
-    }
+    return run_close_stale_publication_listings(
+        _publication_lifecycle_adapters(),
+        db_path=db_path,
+        base_url=base_url,
+        private_key=private_key,
+    )
 
 
 def _open_publication_keys(db_path: str) -> set[str]:
-    covered: set[str] = set()
-    for adapter in _publication_lifecycle_adapters():
-        covered.update(adapter.open_keys(db_path))
-    return covered
+    return run_open_publication_keys(_publication_lifecycle_adapters(), db_path)
 
 
 def _resolve_pricing(
@@ -1054,86 +932,48 @@ def _publish_round(
     Returns (published, failed, skipped) — each a list of dicts keyed on
     the resource.
     """
-    skip_ids = skip_ids or set()
+    def build_payload(
+        adapter: PublicationSource,
+        candidate: dict[str, Any],
+        offer: dict[str, Any],
+    ) -> tuple[list[dict], list[dict], int | None] | str:
+        return _alkahest_payload_for_candidate(
+            pricing_resource=adapter.pricing_resource(candidate, offer),
+            default_min_price=default_min_price,
+            default_token_address=default_token_address,
+            default_max_duration_seconds=default_max_duration_seconds,
+            wallet_address=wallet_address,
+            publish_priceless=publish_priceless,
+        )
 
-    published: list[dict] = []
-    failed: list[tuple[dict, str]] = []
-    skipped: list[dict] = []
-
-    for adapter in _publication_adapters():
-        for candidate in adapter.available_candidates(db_path):
-            if adapter.skip_keys(candidate) & skip_ids:
-                skipped.append(candidate)
-                continue
-            offer = adapter.offer_resource(candidate)
-            payload = _alkahest_payload_for_candidate(
-                pricing_resource=adapter.pricing_resource(candidate, offer),
-                default_min_price=default_min_price,
-                default_token_address=default_token_address,
-                default_max_duration_seconds=default_max_duration_seconds,
-                wallet_address=wallet_address,
-                publish_priceless=publish_priceless,
+    def publish_offer(
+        offer: dict[str, Any],
+        accepted_escrows: list[dict],
+        demands: list[dict],
+        max_duration_seconds: int | None,
+    ) -> dict[str, Any]:
+        try:
+            return _publish_offer(
+                base_url,
+                offer,
+                accepted_escrows,
+                demands,
+                max_duration_seconds,
+                wallet_address,
+                private_key,
             )
-            if isinstance(payload, str):
-                failed.append((candidate, payload))
-                continue
-            accepted_escrows, demands, max_duration_seconds = payload
-            try:
-                reopened = adapter.reopen_existing(
-                    db_path,
-                    base_url,
-                    candidate,
-                    offer,
-                    accepted_escrows,
-                    demands,
-                    max_duration_seconds,
-                    private_key,
-                )
-            except Exception as exc:
-                failed.append((candidate, f"{adapter.reopen_error_label}: {exc}"))
-                continue
-            if reopened is not None:
-                if reopened.get("status") in {"published", "disabled"}:
-                    published.append({
-                        "resource": candidate,
-                        "response": reopened,
-                        "accepted_escrows": accepted_escrows,
-                        "demands": demands,
-                    })
-                else:
-                    failed.append((
-                        candidate,
-                        reopened.get("message") or str(reopened),
-                    ))
-                continue
-            try:
-                resp = _publish_offer(
-                    base_url,
-                    offer,
-                    accepted_escrows,
-                    demands,
-                    max_duration_seconds,
-                    wallet_address,
-                    private_key,
-                )
-                if resp.get("listing_id"):
-                    adapter.record_published(
-                        db_path,
-                        candidate,
-                        str(resp["listing_id"]),
-                    )
-                published.append({
-                    "resource": candidate,
-                    "response": resp,
-                    "accepted_escrows": accepted_escrows,
-                    "demands": demands,
-                })
-            except typer.Exit:
-                failed.append((candidate, "HTTP error (see above)"))
-            except Exception as exc:
-                failed.append((candidate, str(exc)))
+        except typer.Exit as exc:
+            raise RuntimeError("HTTP error (see above)") from exc
 
-    return published, failed, skipped
+    return run_publication_round(
+        _publication_adapters(),
+        db_path=db_path,
+        base_url=base_url,
+        private_key=private_key,
+        build_payload=build_payload,
+        publish_offer=publish_offer,
+        skip_ids=skip_ids,
+    )
 
 
 def run_watch_loop(

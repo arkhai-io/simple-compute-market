@@ -13,6 +13,9 @@ storefront = [
     "arkhai-core-storefront",
 ]
 
+[project.entry-points."market.storefront_publication_sources"]
+vms = "arkhai_vms.storefront_adapter:vm_publication_adapter"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -13,6 +13,9 @@ storefront = [
     "arkhai-core-storefront",
 ]
 
+[project.entry-points."market.storefront_publication_sources"]
+bare_metal = "arkhai_bare_metal.storefront_adapter:bare_metal_publication_adapter"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

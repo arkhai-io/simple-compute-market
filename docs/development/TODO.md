@@ -21,7 +21,7 @@ Pending architectural work and known operational issues for the Arkhai market st
 | [Golden image configuration](#golden-image-configuration-management-varsyaml) | Provisioning Service | Needs review |
 | [Host capacity resource filters](#host-capacity-resource-filters) | Provisioning Service | Needs review |
 | [Site resources and shared lease lifecycle boundaries](#site-resources-and-shared-lease-lifecycle-boundaries) | Provisioning Service | Needs review |
-| [Shared host accounting for VM and bare-metal offers](#shared-host-accounting-for-vm-and-bare-metal-offers) | Provisioning Service | Implemented, storefront split pending |
+| [Shared host accounting for VM and bare-metal offers](#shared-host-accounting-for-vm-and-bare-metal-offers) | Provisioning Service | Implemented, core storefront/provisioner split pending |
 | [Seller-side spot automation](#seller-side-spot-automation) | Provisioning Service | Planned |
 | [Multi-Provider Resource Pool Architecture](#multi-provider-resource-pool-architecture) | Provisioning Service | Needs review |
 | [`StorefrontCallbackClient` extraction](#storefrontcallbackclient-extraction-conditional) | Provisioning Service | Conditional |
@@ -389,10 +389,11 @@ Lease lifecycle policy should sit above that generic site resource layer. A reus
 
 ### Shared host accounting for VM and bare-metal offers
 
-**Status:** Implemented through transitional VM storefront/provisioning
-packages. Remaining architectural work is the package split: bare-metal
-publication should move behind a bare-metal storefront, and the multi-domain
-site provisioner should move out of `domains/vms`.
+**Status:** Implemented through transitional VM provisioning packages. The
+publication-source interface and VM/bare-metal domain adapters are now
+core/domain-owned; remaining architectural work is the core storefront
+executable/server composition path and moving the multi-domain site provisioner
+out of `domains/vms`.
 
 **Goal:** allow a seller to offer the same underlying physical machine as
 exclusive bare metal or as VM slices, depending on demand, without double
@@ -502,15 +503,19 @@ when a role adapter needs dependencies that would otherwise bloat unrelated
 users. The current VM and API-credits storefront executable packages are
 transitional composition roots; the target is core-owned executables loading
 domain adapters.
-The current `PublicationAdapter` in the VM storefront is only a local
-seller-publication refactor seam for the transitional CLI. It is not yet the
-core storefront role API. The target core-storefront API should be smaller and
-domain-agnostic, then VM, bare-metal, API-credits, and future domains should
-fill that API with their domain packages and any required kit/user
-dependencies. API-credits does not currently implement this local
-`PublicationAdapter` because it lacks this VM-style automated capacity
-publication path; that should not be read as exemption from the eventual core
-storefront role API.
+The core-owned automated publication seam now lives in
+`core_storefront.publication_sources.PublicationSource`, with schema-opaque
+iteration / single-source execution helpers in
+`core_storefront.publication_runner` and entry-point discovery in
+`core_storefront.publication_plugins` (`market.storefront_publication_sources`).
+VM and bare-metal domain packages fill that seam with lightweight adapters;
+concrete storefront composition roots inject local inventory,
+registry/storefront publication, and settlement payload callbacks. This
+publication source is still narrower than the complete storefront role API: it
+covers optional seller automation for "derive local inventory into listings",
+not every domain's seller behavior.
+API-credits does not currently implement a comparable capacity publication
+source because it lacks this VM-style automated inventory path.
 The first core-owned storefront domain runtime interface now lives at
 `core_storefront.domain_runtime.StorefrontDomainRuntime`; it is a callable
 bundle for domain codecs over listing, message, terms, materialization,
@@ -576,12 +581,15 @@ admin/operator VM API.
    available, `allocation_mode=exclusive` site resources into
    `BareMetalListing` payloads. Bare-metal storefront publication tracking
    primitives and the lightweight storefront publication adapter live in
-   `arkhai-bare-metal` under optional role dependencies, so future bare-metal
-   storefront code does not need to import the VM storefront package. The VM
-   storefront still composes that adapter during the transitional shared-site
-   split; the remaining work is a core storefront executable/server path that
-   loads the bare-metal domain adapter around the same site-authority capacity
-   snapshot. Cross-mode site-ledger conflict coverage now pins VM-slice versus
+   `arkhai-bare-metal` under optional role dependencies, so bare-metal
+   publication no longer has to be owned by the VM storefront package. The VM
+   storefront's publish loop now composes only the VM publication source via
+   the core loader. The core loader can discover selected domain publication
+   adapters by entry point; the remaining work is a core storefront
+   executable/server path that supplies the concrete infrastructure callbacks
+   around a selected domain adapter and the same site-authority capacity
+   snapshot.
+   Cross-mode site-ledger conflict coverage now pins VM-slice versus
    exclusive bare-metal blocking, and
    storefront publication reconciliation coverage now pins close/reopen
    behavior for a dual-mode host. Provisioning integration coverage now drives
