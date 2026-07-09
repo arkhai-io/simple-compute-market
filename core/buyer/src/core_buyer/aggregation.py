@@ -28,15 +28,13 @@ Built-in control-flow flavors:
   sequential-first-agreed.
 - ``random_shuffle`` — shuffle for load spreading, sequential-first-agreed.
 
-Settlement-shape-specific policies are registered here for compatibility but
-implemented by the owning kit. Today ``best_price``, ``cheapest_first``, and
-``priceless_last`` are Alkahest scalar-price policies implemented in
-``market_alkahest.aggregation``.
+Settlement-shape-specific policies are owned by their kit packages and loaded
+through entry points, e.g. Alkahest scalar ``best_price``/``cheapest_first``.
 
 Forward compatibility: returning ``tuple | None`` rather than a list
 means today's single-settlement orchestrator can consume the result as
 is. When multi-buy lands (plural ``BuyResult`` + plural settlement),
-widen this return to ``list[tuple]`` — four built-ins to port, no
+widen this return to ``list[tuple]`` — three core built-ins to port, no
 deeper structural change.
 
 Failure semantics: ``negotiate`` propagates exceptions. The policy
@@ -77,8 +75,6 @@ import random as _random
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from market_alkahest import aggregation as alkahest_aggregation
-
 from .negotiation_client import NegotiationOutcome
 
 logger = logging.getLogger(__name__)
@@ -99,7 +95,7 @@ AggregationPolicy = Callable[
 
 _REGISTRY: dict[str, AggregationPolicy] = {}
 
-DEFAULT_POLICY_NAME = "best_price"
+DEFAULT_POLICY_NAME = "registry_order"
 
 _FILE_POLICIES_DISCOVERED = False
 
@@ -323,11 +319,6 @@ async def gather_outcomes(
     return await asyncio.gather(*(_one(c) for c in candidates))
 
 
-def _extract_advertised_price(match: dict[str, Any]) -> float | None:
-    """Compatibility alias for Alkahest scalar advertised-rate extraction."""
-    return alkahest_aggregation.extract_advertised_scalar_price(match)
-
-
 async def _sequential_first_agreed(
     candidates: list[dict[str, Any]],
     negotiate: NegotiateFn,
@@ -343,15 +334,6 @@ async def _sequential_first_agreed(
 # ---------------------------------------------------------------------------
 # Built-in policies
 # ---------------------------------------------------------------------------
-
-
-@register_aggregation_policy("cheapest_first")
-async def _cheapest_first(
-    candidates: list[dict[str, Any]],
-    negotiate: NegotiateFn,
-) -> tuple[dict[str, Any], NegotiationOutcome] | None:
-    """Alkahest scalar policy: cheapest advertised rate first."""
-    return await alkahest_aggregation.cheapest_first(candidates, negotiate)
 
 
 @register_aggregation_policy("registry_order")
@@ -372,59 +354,6 @@ async def _random_shuffle(
     shuffled = list(candidates)
     _random.shuffle(shuffled)
     return await _sequential_first_agreed(shuffled, negotiate)
-
-
-@register_aggregation_policy("priceless_last")
-async def _priceless_last(
-    candidates: list[dict[str, Any]],
-    negotiate: NegotiateFn,
-) -> tuple[dict[str, Any], NegotiationOutcome] | None:
-    """Alkahest scalar policy: priced cheapest first, then hidden reserve."""
-    return await alkahest_aggregation.priceless_last(candidates, negotiate)
-
-
-def _resolve_best_price_timeout() -> float | None:
-    """Optional wall-clock budget for ``best_price`` (seconds).
-
-    Read from ``[aggregation] best_price_timeout`` in TOML. Unset,
-    non-numeric, or non-positive → no timeout (the policy waits for
-    every candidate). A positive value caps the comparison at the
-    given number of seconds; any candidate still negotiating when the
-    timeout fires is cancelled and excluded from the winner pool.
-    """
-    cfg = _load_buyer_config()
-    try:
-        from market_config.config_loader import get_dotted
-    except Exception:
-        return None
-    raw = get_dotted(cfg, "aggregation.best_price_timeout")
-    if raw is None:
-        return None
-    try:
-        v = float(raw)
-    except (TypeError, ValueError):
-        return None
-    return v if v > 0 else None
-
-
-def _pick_min_agreed(
-    results: list[tuple[dict[str, Any], NegotiationOutcome | BaseException]],
-) -> tuple[dict[str, Any], NegotiationOutcome] | None:
-    """Compatibility alias for Alkahest scalar agreed-amount comparison."""
-    return alkahest_aggregation.pick_lowest_agreed_scalar_result(results)
-
-
-@register_aggregation_policy("best_price")
-async def _best_price(
-    candidates: list[dict[str, Any]],
-    negotiate: NegotiateFn,
-) -> tuple[dict[str, Any], NegotiationOutcome] | None:
-    """Alkahest scalar policy: pick the lowest agreed amount."""
-    return await alkahest_aggregation.best_price(
-        candidates,
-        negotiate,
-        timeout=_resolve_best_price_timeout(),
-    )
 
 
 @register_aggregation_policy("fastest_agreed")

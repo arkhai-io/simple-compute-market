@@ -163,3 +163,34 @@ async def best_price(
             task.cancel()
         if pending_now:
             await asyncio.gather(*pending_now, return_exceptions=True)
+
+
+def resolve_best_price_timeout() -> float | None:
+    """Resolve optional `[aggregation].best_price_timeout` from buyer config."""
+    try:
+        from market_config.config_loader import get_dotted, load_user_config
+    except Exception:
+        return None
+    try:
+        raw = get_dotted(load_user_config() or {}, "aggregation.best_price_timeout")
+    except Exception:
+        return None
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+async def best_price_from_config(
+    candidates: list[dict[str, Any]],
+    negotiate: NegotiateFn,
+) -> tuple[dict[str, Any], NegotiationLike] | None:
+    """Entry-point policy: Alkahest scalar best price with config timeout."""
+    return await best_price(
+        candidates,
+        negotiate,
+        timeout=resolve_best_price_timeout(),
+    )

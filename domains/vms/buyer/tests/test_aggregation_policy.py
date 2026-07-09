@@ -2,7 +2,7 @@
 
 Verifies:
 - The policy receives a curried `negotiate` callback.
-- `best_price` (the default) picks the lowest *agreed* price, not the lowest advertised.
+- `best_price` picks the lowest *agreed* price, not the lowest advertised.
 - Opting into `cheapest_first` preserves the historical first-agreed loop semantics.
 - A custom registered policy can short-circuit / re-order arbitrarily.
 

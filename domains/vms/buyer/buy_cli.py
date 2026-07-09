@@ -668,10 +668,10 @@ def register(app: typer.Typer) -> None:
                 # No advertised price, or the user declined the picks.
                 raise typer.Exit(2)
 
-        # Resolve aggregation policy: --aggregate-by > [aggregation].policy > default.
+        # Resolve aggregation policy: --aggregate-by > [aggregation].policy > VM default.
         aggregation_policy = aggregate_by or resolve_config_value(
             toml_path="aggregation.policy",
-        ) or None
+        ) or "best_price"
 
         config = BuyConfig(
             registry_urls=reg_urls,

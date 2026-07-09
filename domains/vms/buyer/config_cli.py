@@ -135,9 +135,10 @@ _INIT_USER_TEMPLATE = """\
 # verbatim (scheme, host, port, no trailing slash). Empty = public.
 
 [aggregation]
-# policy = "best_price"                        # across-seller match policy: best_price (default) |
-                                                # fastest_agreed | cheapest_first | registry_order |
-                                                # random_shuffle | priceless_last | any custom name registered
+# policy = "best_price"                        # across-seller match policy. Alkahest installs
+                                                # best_price, cheapest_first, and priceless_last.
+                                                # Core installs fastest_agreed | registry_order |
+                                                # random_shuffle | any custom name registered
                                                 # via domains.vms.buyer.aggregation.register_aggregation_policy,
                                                 # or a folder name under
                                                 # $XDG_CONFIG_HOME/arkhai/aggregation_policies/.

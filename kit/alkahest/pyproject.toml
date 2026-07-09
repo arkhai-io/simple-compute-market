@@ -12,6 +12,11 @@ dependencies = [
 [project.scripts]
 alkahest-oracle = "market_alkahest.oracle_cli:main"
 
+[project.entry-points."market.buyer_aggregation_policies"]
+best_price = "market_alkahest.aggregation:best_price_from_config"
+cheapest_first = "market_alkahest.aggregation:cheapest_first"
+priceless_last = "market_alkahest.aggregation:priceless_last"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -664,9 +664,9 @@ policy plugs in are:
   listing candidates. Settlement- or domain-shaped comparison policies live with
   the package whose vocabulary they inspect; for example Alkahest scalar
   policies such as `best_price`, `cheapest_first`, and `priceless_last` are
-  implemented in `market_alkahest.aggregation` and registered through the core
-  buyer registry for compatibility. Custom strategies plug in via entry-point
-  or file discovery.
+  implemented in `market_alkahest.aggregation` and exposed through
+  `market.buyer_aggregation_policies` entry points. Custom strategies plug in
+  via entry-point or file discovery.
 - **Seller-side per-round negotiation policies** (seller-only) — an
   ordered list of middlewares with signature
   `(history, context) -> (Maybe<Response>, Context)`. Guards short-
