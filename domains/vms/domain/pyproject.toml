@@ -17,4 +17,8 @@ packages = ["src/arkhai_vms"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]

@@ -10,10 +10,24 @@ from arkhai_vms.provision_terms import (
     provision_ssh_public_key,
     provision_start_utc,
 )
+from arkhai_vms.schema import (
+    VmListing,
+    VmMaterialization,
+    VmMessage,
+    VmReceipt,
+    VmResult,
+    VmTerms,
+)
 
 __all__ = [
     "VM_PROVISION_KIND",
+    "VmListing",
+    "VmMaterialization",
+    "VmMessage",
     "VmProvisionTerms",
+    "VmReceipt",
+    "VmResult",
+    "VmTerms",
     "make_vm_provision_terms",
     "provision_compute_resource",
     "provision_duration_seconds",
