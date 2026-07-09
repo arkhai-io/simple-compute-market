@@ -45,7 +45,7 @@ from registry_client import (
 )
 
 from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
-from .services.publication_adapters import PublicationLifecycleAdapter
+from .services.publication_adapters import PublicationAdapter
 from domains.vms.listings.reconciler import (
     available_compute_slices,
     listing_resource_key,
@@ -481,9 +481,104 @@ def _close_stale_bare_metal_listings(
     )
 
 
-def _publication_lifecycle_adapters() -> tuple[PublicationLifecycleAdapter, ...]:
+def _vm_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
+    keys: set[str] = set()
+    resource_key = candidate.get("resource_key") or listing_resource_key(
+        candidate.get("resource_id") or candidate.get("pool_id"),
+        candidate.get("gpu_count"),
+    )
+    for value in (
+        resource_key,
+        candidate.get("legacy_resource_key"),
+        candidate.get("resource_id"),
+        candidate.get("pool_id"),
+    ):
+        if value is not None:
+            keys.add(str(value))
+    return keys
+
+
+def _bare_metal_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
+    keys: set[str] = set()
+    for value in (candidate.get("derivation_key"), candidate.get("machine_id")):
+        if value is not None:
+            keys.add(str(value))
+    return keys
+
+
+def _record_published_vm_listing(
+    db_path: str,
+    candidate: dict[str, Any],
+    listing_id: str,
+) -> None:
+    record_derived_listing(
+        db_path,
+        listing_id=listing_id,
+        pool_id=str(candidate["pool_id"]) if candidate.get("pool_id") else None,
+        resource_id=str(candidate["resource_id"]) if candidate.get("resource_id") else None,
+        gpu_count=int(candidate["gpu_count"]),
+    )
+
+
+def _record_published_bare_metal_listing(
+    db_path: str,
+    candidate: dict[str, Any],
+    listing_id: str,
+) -> None:
+    record_derived_bare_metal_listing(
+        db_path,
+        listing_id=listing_id,
+        listing=candidate["listing"],
+    )
+
+
+def _reopen_vm_listing_if_present(
+    db_path: str,
+    base_url: str,
+    candidate: dict[str, Any],
+    offer: dict[str, Any],
+    accepted_escrows: list[dict],
+    demands: list[dict],
+    max_duration_seconds: int | None,
+    private_key: Optional[str],
+) -> dict | None:
+    return _reopen_derived_listing_if_present(
+        db_path=db_path,
+        base_url=base_url,
+        resource=candidate,
+        offer=offer,
+        accepted_escrows=accepted_escrows,
+        demands=demands,
+        max_duration_seconds=max_duration_seconds,
+        private_key=private_key,
+    )
+
+
+def _reopen_bare_metal_listing_adapter(
+    db_path: str,
+    base_url: str,
+    candidate: dict[str, Any],
+    offer: dict[str, Any],
+    accepted_escrows: list[dict],
+    demands: list[dict],
+    max_duration_seconds: int | None,
+    private_key: Optional[str],
+) -> dict | None:
+    return _reopen_bare_metal_listing_if_present(
+        db_path=db_path,
+        base_url=base_url,
+        candidate=candidate,
+        offer=offer,
+        accepted_escrows=accepted_escrows,
+        demands=demands,
+        max_duration_seconds=max_duration_seconds,
+        private_key=private_key,
+    )
+
+
+def _publication_adapters() -> tuple[PublicationAdapter, ...]:
     return (
-        PublicationLifecycleAdapter(
+        PublicationAdapter(
             name="vms",
             open_keys=_open_listing_resource_keys,
             close_stale=lambda db_path, base_url, private_key: (
@@ -493,8 +588,14 @@ def _publication_lifecycle_adapters() -> tuple[PublicationLifecycleAdapter, ...]
                     private_key=private_key,
                 )
             ),
+            available_candidates=_available_resources,
+            skip_keys=_vm_candidate_skip_keys,
+            offer_resource=_offer_resource_for_listing,
+            record_published=_record_published_vm_listing,
+            reopen_existing=_reopen_vm_listing_if_present,
+            reopen_error_label="reopen derived listing",
         ),
-        PublicationLifecycleAdapter(
+        PublicationAdapter(
             name="bare_metal",
             open_keys=_open_bare_metal_listing_keys,
             close_stale=lambda db_path, base_url, private_key: (
@@ -504,8 +605,18 @@ def _publication_lifecycle_adapters() -> tuple[PublicationLifecycleAdapter, ...]
                     private_key=private_key,
                 )
             ),
+            available_candidates=_available_bare_metal_listing_candidates,
+            skip_keys=_bare_metal_candidate_skip_keys,
+            offer_resource=lambda candidate: dict(candidate["offer_resource"]),
+            record_published=_record_published_bare_metal_listing,
+            reopen_existing=_reopen_bare_metal_listing_adapter,
+            reopen_error_label="reopen derived bare-metal listing",
         ),
     )
+
+
+def _publication_lifecycle_adapters() -> tuple[PublicationAdapter, ...]:
+    return _publication_adapters()
 
 
 def _close_stale_publication_listings(
@@ -900,6 +1011,180 @@ def _default_alkahest_payload(
     return accepted_escrows, demands, max_duration_seconds
 
 
+def _vm_alkahest_payload(
+    *,
+    resource: dict[str, Any],
+    default_min_price: Optional[str],
+    default_token_address: Optional[str],
+    default_max_duration_seconds: int | None,
+    wallet_address: str,
+    publish_priceless: bool,
+) -> tuple[list[dict], list[dict], int | None] | str:
+    template_entries = resource.get("accepted_escrows")
+    if template_entries:
+        from .utils.config import CHAINS
+        if not CHAINS:
+            return "no [chains.<name>] tables configured"
+        try:
+            accepted_escrows = _scale_template_entries(template_entries, CHAINS)
+        except ValueError as exc:
+            return str(exc)
+        chain_names = {
+            str(e.get("chain_name"))
+            for e in accepted_escrows
+            if isinstance(e, dict) and e.get("chain_name")
+        }
+        try:
+            demands = _demands_for_chains(CHAINS, chain_names, wallet_address)
+        except Exception as exc:
+            return f"listing demands: {exc}"
+        raw_max_duration_seconds = (
+            resource.get("max_duration_seconds")
+            if resource.get("max_duration_seconds") is not None
+            else default_max_duration_seconds
+        )
+        max_duration_seconds = _normalize_max_duration_seconds(
+            raw_max_duration_seconds
+        )
+        return accepted_escrows, demands, max_duration_seconds
+
+    min_price, token_address = _resolve_pricing(
+        resource,
+        default_min_price=default_min_price,
+        default_token_address=default_token_address,
+    )
+    if not token_address:
+        return (
+            "no token (set the CSV `token` column to a 0x ERC-20 address, "
+            "or [seller.pricing].default_token_address in config.toml)"
+        )
+    if not token_address.startswith("0x") or len(token_address) != 42:
+        return (
+            f"invalid token {token_address!r} — must be a 0x ERC-20 address "
+            f"(symbol shorthand is no longer supported)"
+        )
+    from market_alkahest.token import resolve_token, TokenResolutionError
+    from .utils.config import CHAINS
+    if not CHAINS:
+        return "no [chains.<name>] tables configured"
+    token_meta = None
+    token_resolve_errors: list[str] = []
+    for chain in CHAINS.values():
+        try:
+            token_meta = resolve_token(
+                token_address, rpc_url=chain.rpc_url, chain_id=chain.chain_id,
+            )
+            break
+        except TokenResolutionError as exc:
+            token_resolve_errors.append(f"{chain.name}: {exc}")
+            continue
+    if token_meta is None:
+        return (
+            f"chain resolve failed for {token_address}: "
+            + "; ".join(token_resolve_errors)
+        )
+    token_address = token_meta.contract_address.lower()
+    token_decimals = token_meta.decimals
+
+    if min_price is None:
+        if not publish_priceless:
+            return (
+                "no min_price (set per-row in CSV or [seller.pricing].default_min_price, "
+                "or set [seller.pricing].publish_priceless=true to advertise as hidden-reserve)"
+            )
+        advertised_amount: Any = None
+    else:
+        try:
+            human = Decimal(str(min_price))
+        except (InvalidOperation, ValueError, TypeError):
+            return f"unparseable min_price={min_price!r}; expected numeric string"
+        scaled = human * (Decimal(10) ** token_decimals)
+        if scaled != scaled.to_integral_value():
+            return (
+                f"min_price={min_price!r} has more decimals than the "
+                f"token's {token_decimals}"
+            )
+        if scaled < 0:
+            return f"min_price={min_price!r} is negative"
+        advertised_amount = str(int(scaled))
+
+    raw_max_duration_seconds = (
+        resource.get("max_duration_seconds")
+        if resource.get("max_duration_seconds") is not None
+        else default_max_duration_seconds
+    )
+    max_duration_seconds = _normalize_max_duration_seconds(
+        raw_max_duration_seconds
+    )
+    from market_alkahest.alkahest import get_erc20_escrow_obligation_default
+    accepted_escrows: list[dict] = []
+    per_chain_errors: list[str] = []
+    for chain in CHAINS.values():
+        try:
+            escrow_address = get_erc20_escrow_obligation_default(
+                chain.name,
+                config_path=chain.alkahest_address_config_path,
+            )
+        except Exception as exc:
+            per_chain_errors.append(f"{chain.name}: {exc}")
+            continue
+        accepted_escrows.append({
+            "chain_name": chain.name,
+            "escrow_address": escrow_address.lower(),
+            "literal_fields": {"token": token_address},
+            "rates": [{
+                "field": "amount",
+                "per": "hour",
+                "value": advertised_amount,
+            }] if advertised_amount is not None else [],
+        })
+    if not accepted_escrows:
+        return (
+            "alkahest config could not resolve ERC20 escrow address on any "
+            f"configured chain: {'; '.join(per_chain_errors)}"
+        )
+    chain_names = {
+        str(e.get("chain_name"))
+        for e in accepted_escrows
+        if isinstance(e, dict) and e.get("chain_name")
+    }
+    try:
+        demands = _demands_for_chains(CHAINS, chain_names, wallet_address)
+    except Exception as exc:
+        return f"listing demands: {exc}"
+    return accepted_escrows, demands, max_duration_seconds
+
+
+def _alkahest_payload_for_candidate(
+    *,
+    adapter: PublicationAdapter,
+    candidate: dict[str, Any],
+    offer: dict[str, Any],
+    default_min_price: Optional[str],
+    default_token_address: Optional[str],
+    default_max_duration_seconds: int | None,
+    wallet_address: str,
+    publish_priceless: bool,
+) -> tuple[list[dict], list[dict], int | None] | str:
+    if adapter.name == "bare_metal":
+        return _default_alkahest_payload(
+            resource=offer,
+            default_min_price=default_min_price,
+            default_token_address=default_token_address,
+            default_max_duration_seconds=default_max_duration_seconds,
+            wallet_address=wallet_address,
+            publish_priceless=publish_priceless,
+        )
+    return _vm_alkahest_payload(
+        resource=candidate,
+        default_min_price=default_min_price,
+        default_token_address=default_token_address,
+        default_max_duration_seconds=default_max_duration_seconds,
+        wallet_address=wallet_address,
+        publish_priceless=publish_priceless,
+    )
+
+
 def _publish_round(
     *,
     db_path: str,
@@ -934,364 +1219,86 @@ def _publish_round(
     Returns (published, failed, skipped) — each a list of dicts keyed on
     the resource.
     """
-    resources = _available_resources(db_path)
     skip_ids = skip_ids or set()
 
     published: list[dict] = []
     failed: list[tuple[dict, str]] = []
     skipped: list[dict] = []
 
-    for res in resources:
-        resource_key = res.get("resource_key") or listing_resource_key(
-            res.get("resource_id") or res.get("pool_id"), res.get("gpu_count"),
-        )
-        if (
-            resource_key in skip_ids
-            or (res.get("legacy_resource_key") in skip_ids)
-            or (res.get("resource_id") in skip_ids)
-            or (res.get("pool_id") in skip_ids)
-        ):
-            skipped.append(res)
-            continue
-
-        # Template-materialized path: the CSV importer wrote a fully
-        # resolved ``accepted_escrows`` list onto the row. We only need
-        # to scale rate values to base units (token decimals lookup) and
-        # publish — no CHAINS broadcast, no min_price/token reading,
-        # no get_erc20_escrow_obligation_default.
-        template_entries = res.get("accepted_escrows")
-        if template_entries:
-            from .utils.config import CHAINS
-            if not CHAINS:
-                failed.append((res, "no [chains.<name>] tables configured"))
+    for adapter in _publication_adapters():
+        for candidate in adapter.available_candidates(db_path):
+            if adapter.skip_keys(candidate) & skip_ids:
+                skipped.append(candidate)
                 continue
-            try:
-                accepted_escrows = _scale_template_entries(
-                    template_entries,
-                    CHAINS,
-                )
-            except ValueError as exc:
-                failed.append((res, str(exc)))
+            offer = adapter.offer_resource(candidate)
+            payload = _alkahest_payload_for_candidate(
+                adapter=adapter,
+                candidate=candidate,
+                offer=offer,
+                default_min_price=default_min_price,
+                default_token_address=default_token_address,
+                default_max_duration_seconds=default_max_duration_seconds,
+                wallet_address=wallet_address,
+                publish_priceless=publish_priceless,
+            )
+            if isinstance(payload, str):
+                failed.append((candidate, payload))
                 continue
-            chain_names = {
-                str(e.get("chain_name"))
-                for e in accepted_escrows
-                if isinstance(e, dict) and e.get("chain_name")
-            }
+            accepted_escrows, demands, max_duration_seconds = payload
             try:
-                demands = _demands_for_chains(
-                    CHAINS, chain_names, wallet_address,
+                reopened = adapter.reopen_existing(
+                    db_path,
+                    base_url,
+                    candidate,
+                    offer,
+                    accepted_escrows,
+                    demands,
+                    max_duration_seconds,
+                    private_key,
                 )
             except Exception as exc:
-                failed.append((res, f"listing demands: {exc}"))
-                continue
-            raw_max_duration_seconds = (
-                res.get("max_duration_seconds")
-                if res.get("max_duration_seconds") is not None
-                else default_max_duration_seconds
-            )
-            max_duration_seconds = _normalize_max_duration_seconds(
-                raw_max_duration_seconds
-            )
-            offer = _offer_resource_for_listing(res)
-            try:
-                reopened = _reopen_derived_listing_if_present(
-                    db_path=db_path,
-                    base_url=base_url,
-                    resource=res,
-                    offer=offer,
-                    accepted_escrows=accepted_escrows,
-                    demands=demands,
-                    max_duration_seconds=max_duration_seconds,
-                    private_key=private_key,
-                )
-            except Exception as exc:
-                failed.append((res, f"reopen derived listing: {exc}"))
+                failed.append((candidate, f"{adapter.reopen_error_label}: {exc}"))
                 continue
             if reopened is not None:
                 if reopened.get("status") in {"published", "disabled"}:
                     published.append({
-                        "resource": res,
+                        "resource": candidate,
                         "response": reopened,
                         "accepted_escrows": accepted_escrows,
                         "demands": demands,
                     })
                 else:
-                    failed.append((res, reopened.get("message") or str(reopened)))
+                    failed.append((
+                        candidate,
+                        reopened.get("message") or str(reopened),
+                    ))
                 continue
             try:
                 resp = _publish_offer(
-                    base_url, offer, accepted_escrows, demands, max_duration_seconds,
-                    wallet_address, private_key,
+                    base_url,
+                    offer,
+                    accepted_escrows,
+                    demands,
+                    max_duration_seconds,
+                    wallet_address,
+                    private_key,
                 )
                 if resp.get("listing_id"):
-                    record_derived_listing(
+                    adapter.record_published(
                         db_path,
-                        listing_id=str(resp["listing_id"]),
-                        pool_id=str(res["pool_id"]) if res.get("pool_id") else None,
-                        resource_id=str(res["resource_id"]) if res.get("resource_id") else None,
-                        gpu_count=int(res["gpu_count"]),
+                        candidate,
+                        str(resp["listing_id"]),
                     )
                 published.append({
-                    "resource": res,
+                    "resource": candidate,
                     "response": resp,
                     "accepted_escrows": accepted_escrows,
                     "demands": demands,
                 })
             except typer.Exit:
-                failed.append((res, "HTTP error (see above)"))
+                failed.append((candidate, "HTTP error (see above)"))
             except Exception as exc:
-                failed.append((res, str(exc)))
-            continue
-
-        min_price, token_address = _resolve_pricing(
-            res,
-            default_min_price=default_min_price,
-            default_token_address=default_token_address,
-        )
-        if not token_address:
-            failed.append((
-                res,
-                "no token (set the CSV `token` column to a 0x ERC-20 address, "
-                "or [seller.pricing].default_token_address in config.toml)",
-            ))
-            continue
-        if not token_address.startswith("0x") or len(token_address) != 42:
-            failed.append((
-                res,
-                f"invalid token {token_address!r} — must be a 0x ERC-20 address "
-                f"(symbol shorthand is no longer supported)",
-            ))
-            continue
-        from market_alkahest.token import resolve_token, TokenResolutionError
-        from .utils.config import CHAINS
-        if not CHAINS:
-            failed.append((res, "no [chains.<name>] tables configured"))
-            continue
-        token_meta = None
-        token_resolve_errors: list[str] = []
-        for chain in CHAINS.values():
-            try:
-                token_meta = resolve_token(
-                    token_address, rpc_url=chain.rpc_url, chain_id=chain.chain_id,
-                )
-                break
-            except TokenResolutionError as exc:
-                token_resolve_errors.append(f"{chain.name}: {exc}")
-                continue
-        if token_meta is None:
-            failed.append((
-                res,
-                f"chain resolve failed for {token_address}: "
-                + "; ".join(token_resolve_errors),
-            ))
-            continue
-        token_address = token_meta.contract_address.lower()
-        token_decimals = token_meta.decimals
-
-        if min_price is None:
-            if not publish_priceless:
-                failed.append((
-                    res,
-                    "no min_price (set per-row in CSV or [seller.pricing].default_min_price, "
-                    "or set [seller.pricing].publish_priceless=true to advertise as hidden-reserve)",
-                ))
-                continue
-            # Hidden-reserve mode: publish with amount=None. Seller's
-            # negotiation strategy falls back to default_min_price (if
-            # set) for the floor; otherwise refuses the negotiation
-            # cleanly with reason=no_floor_price.
-            advertised_amount: Any = None
-        else:
-            # min_price is "0" (free) or "N" (public price); scale to
-            # base units using the resolved token's decimals. The wire
-            # form is a decimal-digit string (uint256-safe).
-            try:
-                human = Decimal(str(min_price))
-            except (InvalidOperation, ValueError, TypeError):
-                failed.append((
-                    res,
-                    f"unparseable min_price={min_price!r}; expected numeric string",
-                ))
-                continue
-            scaled = human * (Decimal(10) ** token_decimals)
-            if scaled != scaled.to_integral_value():
-                failed.append((
-                    res,
-                    f"min_price={min_price!r} has more decimals than the "
-                    f"token's {token_decimals}",
-                ))
-                continue
-            if scaled < 0:
-                failed.append((res, f"min_price={min_price!r} is negative"))
-                continue
-            advertised_amount = str(int(scaled))
-        raw_max_duration_seconds = (
-            res.get("max_duration_seconds")
-            if res.get("max_duration_seconds") is not None
-            else default_max_duration_seconds
-        )
-        max_duration_seconds = _normalize_max_duration_seconds(
-            raw_max_duration_seconds
-        )
-        offer = _offer_resource_for_listing(res)
-        from market_alkahest.alkahest import get_erc20_escrow_obligation_default
-        accepted_escrows: list[dict] = []
-        per_chain_errors: list[str] = []
-        for chain in CHAINS.values():
-            try:
-                escrow_address = get_erc20_escrow_obligation_default(
-                    chain.name,
-                    config_path=chain.alkahest_address_config_path,
-                )
-            except Exception as exc:
-                per_chain_errors.append(f"{chain.name}: {exc}")
-                continue
-            accepted_escrows.append({
-                "chain_name": chain.name,
-                "escrow_address": escrow_address.lower(),
-                "literal_fields": {"token": token_address},
-                "rates": [{
-                    "field": "amount",
-                    "per": "hour",
-                    "value": advertised_amount,
-                }] if advertised_amount is not None else [],
-            })
-        if not accepted_escrows:
-            failed.append((
-                res,
-                "alkahest config could not resolve ERC20 escrow address on any "
-                f"configured chain: {'; '.join(per_chain_errors)}",
-            ))
-            continue
-        chain_names = {
-            str(e.get("chain_name"))
-            for e in accepted_escrows
-            if isinstance(e, dict) and e.get("chain_name")
-        }
-        try:
-            demands = _demands_for_chains(CHAINS, chain_names, wallet_address)
-        except Exception as exc:
-            failed.append((res, f"listing demands: {exc}"))
-            continue
-        try:
-            reopened = _reopen_derived_listing_if_present(
-                db_path=db_path,
-                base_url=base_url,
-                resource=res,
-                offer=offer,
-                accepted_escrows=accepted_escrows,
-                demands=demands,
-                max_duration_seconds=max_duration_seconds,
-                private_key=private_key,
-            )
-        except Exception as exc:
-            failed.append((res, f"reopen derived listing: {exc}"))
-            continue
-        if reopened is not None:
-            if reopened.get("status") in {"published", "disabled"}:
-                published.append({
-                    "resource": res,
-                    "response": reopened,
-                    "accepted_escrows": accepted_escrows,
-                    "demands": demands,
-                })
-            else:
-                failed.append((res, reopened.get("message") or str(reopened)))
-            continue
-        try:
-            resp = _publish_offer(
-                base_url, offer, accepted_escrows, demands, max_duration_seconds,
-                wallet_address, private_key,
-            )
-            if resp.get("listing_id"):
-                record_derived_listing(
-                    db_path,
-                    listing_id=str(resp["listing_id"]),
-                    pool_id=str(res["pool_id"]) if res.get("pool_id") else None,
-                    resource_id=str(res["resource_id"]) if res.get("resource_id") else None,
-                    gpu_count=int(res["gpu_count"]),
-                )
-            published.append({
-                "resource": res,
-                "response": resp,
-                "accepted_escrows": accepted_escrows,
-                "demands": demands,
-            })
-        except typer.Exit:
-            failed.append((res, "HTTP error (see above)"))
-        except Exception as exc:
-            failed.append((res, str(exc)))
-
-    for candidate in _available_bare_metal_listing_candidates(db_path):
-        resource_key = str(candidate["derivation_key"])
-        if resource_key in skip_ids or candidate.get("machine_id") in skip_ids:
-            skipped.append(candidate)
-            continue
-        offer = dict(candidate["offer_resource"])
-        payload = _default_alkahest_payload(
-            resource=offer,
-            default_min_price=default_min_price,
-            default_token_address=default_token_address,
-            default_max_duration_seconds=default_max_duration_seconds,
-            wallet_address=wallet_address,
-            publish_priceless=publish_priceless,
-        )
-        if isinstance(payload, str):
-            failed.append((candidate, payload))
-            continue
-        accepted_escrows, demands, max_duration_seconds = payload
-        try:
-            reopened = _reopen_bare_metal_listing_if_present(
-                db_path=db_path,
-                base_url=base_url,
-                candidate=candidate,
-                offer=offer,
-                accepted_escrows=accepted_escrows,
-                demands=demands,
-                max_duration_seconds=max_duration_seconds,
-                private_key=private_key,
-            )
-        except Exception as exc:
-            failed.append((candidate, f"reopen derived bare-metal listing: {exc}"))
-            continue
-        if reopened is not None:
-            if reopened.get("status") in {"published", "disabled"}:
-                published.append({
-                    "resource": candidate,
-                    "response": reopened,
-                    "accepted_escrows": accepted_escrows,
-                    "demands": demands,
-                })
-            else:
-                failed.append((candidate, reopened.get("message") or str(reopened)))
-            continue
-        try:
-            resp = _publish_offer(
-                base_url,
-                offer,
-                accepted_escrows,
-                demands,
-                max_duration_seconds,
-                wallet_address,
-                private_key,
-            )
-            if resp.get("listing_id"):
-                record_derived_bare_metal_listing(
-                    db_path,
-                    listing_id=str(resp["listing_id"]),
-                    listing=candidate["listing"],
-                )
-            published.append({
-                "resource": candidate,
-                "response": resp,
-                "accepted_escrows": accepted_escrows,
-                "demands": demands,
-            })
-        except typer.Exit:
-            failed.append((candidate, "HTTP error (see above)"))
-        except Exception as exc:
-            failed.append((candidate, str(exc)))
+                failed.append((candidate, str(exc)))
 
     return published, failed, skipped
 
