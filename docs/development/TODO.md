@@ -504,6 +504,12 @@ dependencies. API-credits does not currently implement this local
 `PublicationAdapter` because it lacks this VM-style automated capacity
 publication path; that should not be read as exemption from the eventual core
 storefront role API.
+The first core-owned storefront domain runtime interface now lives at
+`core_storefront.domain_runtime.StorefrontDomainRuntime`; it is a callable
+bundle for domain codecs over listing, message, terms, materialization,
+receipt, and result payloads. Concrete VM, bare-metal, and API-credits
+domain-runtime instances still need to move into their domain packages and be
+wired into the storefront composition roots.
 The current VM provisioning service still mixes VM contract surface with
 generic site-authority substrate; future refactors should split those roles
 without breaking existing VM clients. The bare-metal market schema starts under
