@@ -515,8 +515,10 @@ The first core-owned storefront domain runtime interface now lives at
 `core_storefront.domain_runtime.StorefrontDomainRuntime`; it is a callable
 bundle for domain codecs over listing, message, terms, materialization,
 receipt, and result payloads. Concrete VM, bare-metal, and API-credits
-domain-runtime instances still need to move into their domain packages and be
-wired into the storefront composition roots.
+domain-runtime instances now live with their domain schema code and are wired
+through thin storefront composition roots. The next storefront-runtime work is
+to make more storefront services consume this core runtime boundary directly
+instead of importing domain helpers ad hoc.
 The current VM provisioning service still mixes VM contract surface with
 generic site-authority substrate; future refactors should split those roles
 without breaking existing VM clients. The bare-metal market schema starts under

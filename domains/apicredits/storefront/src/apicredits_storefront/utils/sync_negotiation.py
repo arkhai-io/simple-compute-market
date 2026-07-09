@@ -113,6 +113,29 @@ def _seller_reference_amount(listing: dict[str, Any], quantity: int | None) -> i
     return int(unit * int(quantity if quantity is not None else 1))
 
 
+def _normalize_api_credits_message_terms(provision_terms: Any) -> Any | None:
+    """Normalize provision terms through the injected API-credits runtime."""
+    if provision_terms is None:
+        return None
+    raw = (
+        provision_terms.model_dump()
+        if hasattr(provision_terms, "model_dump")
+        else provision_terms
+    )
+    try:
+        from apicredits_storefront.domain_runtime import (
+            get_storefront_domain_runtime,
+        )
+
+        return get_storefront_domain_runtime().message(raw)
+    except Exception:
+        # Legacy behavior tolerated foreign/empty provision envelopes by
+        # treating them as absent API-credit delivery terms.
+        if provision_quantity(provision_terms) is None:
+            return None
+        raise
+
+
 def _accepted_escrow_artifacts(
     *,
     proposal: EscrowProposal | dict[str, Any] | None,
@@ -238,9 +261,10 @@ async def start_sync_negotiation(
             listing_id=our_listing_id,
         )
 
-    quantity = provision_quantity(provision_terms)
-    key_mode = provision_key_mode(provision_terms)
-    key_id = provision_key_id(provision_terms)
+    normalized_terms = _normalize_api_credits_message_terms(provision_terms)
+    quantity = provision_quantity(normalized_terms)
+    key_mode = provision_key_mode(normalized_terms)
+    key_id = provision_key_id(normalized_terms)
 
     proposal_dict = (
         proposal.model_dump()
@@ -351,11 +375,11 @@ async def start_sync_negotiation(
         decision_reason=decision.reason,
     )
     response: dict[str, Any] = {"negotiation_id": neg_id, **decision.to_dict()}
-    if provision_terms is not None:
+    if normalized_terms is not None:
         response["accepted_provision_terms"] = (
-            provision_terms.model_dump()
-            if hasattr(provision_terms, "model_dump")
-            else dict(provision_terms)
+            normalized_terms.model_dump()
+            if hasattr(normalized_terms, "model_dump")
+            else dict(normalized_terms)
         )
     if accepted_proposal is not None:
         artifacts = _accepted_escrow_artifacts(

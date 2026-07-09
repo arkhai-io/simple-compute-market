@@ -14,6 +14,7 @@ import pytest
 
 from apicredits_storefront.utils.sync_negotiation import (
     OfferUnfulfillableError,
+    _normalize_api_credits_message_terms,
     continue_sync_negotiation,
     start_sync_negotiation,
 )
@@ -132,6 +133,29 @@ def _terms(quantity=3, key_mode="new", key_id=None) -> ProvisionTerms:
         kind="api_credits.v1",
         payload={"quantity": quantity, "key": key},
     )
+
+
+def test_normalize_api_credits_message_terms_uses_domain_runtime() -> None:
+    normalized = _normalize_api_credits_message_terms(
+        ProvisionTerms(
+            kind="api_credits.v1",
+            payload={
+                "quantity": "5",
+                "key": {"mode": "existing", "key_id": "ak_existing"},
+            },
+        )
+    )
+
+    assert normalized is not None
+    assert normalized.quantity == 5
+    assert normalized.key_mode == "existing"
+    assert normalized.key_id == "ak_existing"
+
+
+def test_normalize_api_credits_message_terms_tolerates_foreign_terms() -> None:
+    terms = ProvisionTerms(kind="compute.v1", payload={"duration_seconds": 60})
+
+    assert _normalize_api_credits_message_terms(terms) is None
 
 
 async def _start(db, *, amount=300, quantity=3, key_mode="new", key_id=None):
