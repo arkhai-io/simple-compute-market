@@ -45,7 +45,7 @@ class VmMessage(BaseModel):
     """VM-domain negotiation message payload."""
 
     kind: Literal["compute.v1"] = VM_PROVISION_KIND
-    duration_seconds: int = Field(ge=1)
+    duration_seconds: int
     ssh_public_key: str = Field(default="")
     start_utc: str | None = None
     compute_resource: dict[str, Any] | None = None
@@ -62,12 +62,6 @@ class VmMessage(BaseModel):
             payload.setdefault("kind", value.get("kind", VM_PROVISION_KIND))
             return payload
         return value
-
-    @model_validator(mode="after")
-    def _validate_message(self) -> "VmMessage":
-        if not self.ssh_public_key.strip():
-            raise ValueError("ssh_public_key must be non-empty")
-        return self
 
 
 class VmTerms(BaseModel):
@@ -170,4 +164,3 @@ class VmResult(BaseModel):
         if not self.status.strip():
             raise ValueError("status must be non-empty")
         return self
-

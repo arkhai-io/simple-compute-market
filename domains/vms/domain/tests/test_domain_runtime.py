@@ -64,9 +64,7 @@ def test_storefront_runtime_normalizes_vm_schema_slots() -> None:
 def test_storefront_runtime_surfaces_vm_validation_errors() -> None:
     runtime = storefront_runtime()
 
-    with pytest.raises(ValidationError, match="ssh_public_key must be non-empty"):
+    with pytest.raises(ValidationError, match="duration_seconds"):
         runtime.message({
-            "duration_seconds": 3600,
-            "ssh_public_key": "",
+            "duration_seconds": "not-an-int",
         })
-

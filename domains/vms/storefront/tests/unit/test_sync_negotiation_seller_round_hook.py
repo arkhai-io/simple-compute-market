@@ -10,6 +10,7 @@ from market_policy.identity import Identity
 from market_storefront.utils.sync_negotiation import (
     SellerRoundResult,
     continue_sync_negotiation,
+    _normalize_vm_message_terms,
     start_sync_negotiation,
 )
 from market_core.schemas import EscrowProposal, ProvisionTerms
@@ -64,6 +65,29 @@ def _proposal(amount: int) -> EscrowProposal:
         rates=[{"field": "amount", "per": "hour", "value": "100"}],
         expiration_unix=1_800_000_000,
     )
+
+
+def test_normalize_vm_message_terms_uses_domain_runtime() -> None:
+    terms = ProvisionTerms.model_validate({
+        "kind": "compute.v1",
+        "payload": {
+            "duration_seconds": "3600",
+            "start_utc": "2030-01-01T00:00:00Z",
+            "ssh_public_key": "ssh-rsa AAAA",
+        },
+    })
+
+    normalized = _normalize_vm_message_terms(terms)
+
+    assert normalized is not None
+    assert normalized.duration_seconds == 3600
+    assert normalized.start_utc == "2030-01-01T00:00:00Z"
+
+
+def test_normalize_vm_message_terms_tolerates_foreign_terms() -> None:
+    terms = ProvisionTerms(kind="fiat.v1", payload={"invoice_id": "inv-1"})
+
+    assert _normalize_vm_message_terms(terms) is None
 
 
 @pytest.mark.asyncio

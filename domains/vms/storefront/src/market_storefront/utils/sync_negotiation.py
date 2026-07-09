@@ -146,6 +146,32 @@ def _chain_config_paths() -> dict[str, str | None]:
     }
 
 
+def _normalize_vm_message_terms(provision_terms: Any) -> Any | None:
+    """Normalize provision terms through the injected VM domain runtime."""
+    if provision_terms is None:
+        return None
+    raw = (
+        provision_terms.model_dump()
+        if hasattr(provision_terms, "model_dump")
+        else provision_terms
+    )
+    try:
+        from market_storefront.domain_runtime import (
+            get_storefront_domain_runtime,
+        )
+
+        return get_storefront_domain_runtime().message(raw)
+    except Exception:
+        # Legacy behavior tolerated foreign/empty provision envelopes by
+        # treating them as absent VM delivery terms.
+        if (
+            provision_duration_seconds(provision_terms) is None
+            and provision_start_utc(provision_terms) is None
+        ):
+            return None
+        raise
+
+
 def _accepted_escrow_artifacts(
     *,
     proposal: EscrowProposal | dict[str, Any] | None,
@@ -333,11 +359,16 @@ async def start_sync_negotiation(
     listing) or if the buyer's duration / proposal doesn't match what
     the listing accepts.
     """
+    vm_message_terms = _normalize_vm_message_terms(provision_terms)
     requested_duration_seconds = (
-        provision_duration_seconds(provision_terms) if provision_terms is not None else None
+        vm_message_terms.duration_seconds
+        if vm_message_terms is not None
+        else None
     )
     requested_start_utc = (
-        provision_start_utc(provision_terms) if provision_terms is not None else None
+        vm_message_terms.start_utc
+        if vm_message_terms is not None
+        else None
     )
     # Imports deferred so unit tests can patch the registry without paying for
     # the whole import graph.
