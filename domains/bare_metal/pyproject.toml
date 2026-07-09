@@ -8,6 +8,11 @@ dependencies = [
     "pydantic>=2.7",
 ]
 
+[project.optional-dependencies]
+storefront = [
+    "arkhai-core-storefront",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -21,5 +26,6 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
+    "arkhai-core-storefront",
     "pytest>=8.0",
 ]

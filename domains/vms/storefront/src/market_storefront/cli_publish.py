@@ -56,7 +56,7 @@ from domains.vms.listings.reconciler import (
     reopen_local_derived_listing,
     stale_open_listing_ids,
 )
-from arkhai_bare_metal_storefront.publication import (
+from arkhai_bare_metal.storefront_adapter import (
     available_bare_metal_listing_candidates,
     bare_metal_candidate_skip_keys,
     bare_metal_publication_adapter,

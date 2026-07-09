@@ -1,8 +1,9 @@
-"""Bare-metal storefront publication source.
+"""Bare-metal storefront publication adapter.
 
-This package owns the storefront-side composition for bare-metal automated
-publication. The caller supplies concrete storefront infrastructure callbacks
-for capacity snapshots, local listing close, and registry publication.
+The bare-metal domain package owns this adapter because it is domain semantics:
+turn shared site capacity into bare-metal listing candidates and track derived
+bare-metal listings. Concrete storefront executables still come from core role
+packages and inject local infrastructure callbacks.
 """
 
 from __future__ import annotations
@@ -10,7 +11,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from arkhai_bare_metal.storefront_publication import (
+from core_storefront.publication_sources import PublicationSource
+
+from .storefront_publication import (
     bare_metal_listing_candidates,
     close_stale_bare_metal_listings,
     open_bare_metal_listing_keys,
@@ -18,7 +21,6 @@ from arkhai_bare_metal.storefront_publication import (
     reopen_derived_bare_metal_listing_if_present,
     stale_open_bare_metal_listing_ids,
 )
-from core_storefront.publication_sources import PublicationSource
 
 CapacitySnapshot = Callable[[], list[dict[str, Any]]]
 CloseListing = Callable[[str, str, str | None], dict[str, Any]]

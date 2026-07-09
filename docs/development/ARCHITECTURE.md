@@ -105,14 +105,13 @@ Import names and console scripts (`market`, `market-storefront`,
 | kit | `arkhai-kit-site` (`kit/site/`) | site-authority scaffold: capacity ledger, ledger tables, `/api/v1/capacity/*` router — mounted by a hosting service per site |
 | kit | `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-alkahest`, `arkhai-kit-config` | from-below capabilities; alkahest is the first *settlement-mechanism codec* |
 | domain | `arkhai-vms` (`domains/vms/domain/`) | shared VM-domain models/helpers consumed by both buyer and storefront; currently owns the `compute.v1` provision-term interpretation (`arkhai_vms.provision_terms`) |
-| domain | `arkhai-bare-metal` (`domains/bare_metal/`) | shared bare-metal domain models/helpers consumed by storefront/provisioning implementations; owns the `bare_metal.v1` schema and pure listing derivation |
-| domain | `arkhai-bare-metal-storefront` (`domains/bare_metal/storefront/`) | bare-metal storefront publication composition helpers; VM storefront imports this only during the transitional shared-site split |
+| domain | `arkhai-bare-metal` (`domains/bare_metal/`) | shared bare-metal domain models/helpers consumed by storefront/provisioning implementations; owns the `bare_metal.v1` schema, pure listing derivation, and lightweight role adapters behind optional extras |
 | domain | `arkhai-vms-buyer` (`domains/vms/buyer/`) | no console script — publishes the `vms.compute` plugin the core `market` CLI discovers |
 | domain | `arkhai-apicredits-buyer` (`domains/apicredits/buyer/`) | no console script — publishes the `api_credits` plugin; verbs namespaced under `market credits …` so both plugins compose in one binary |
-| domain | `arkhai-vms-storefront` (`domains/vms/storefront/`) | the VM storefront executable/composition root (FastAPI adapters over core) |
+| domain | `arkhai-vms-storefront` (`domains/vms/storefront/`) | transitional VM storefront executable/composition root; target is a core storefront executable loading the VM domain adapter |
 | domain | `arkhai-vms-provisioning` (`domains/vms/provisioning/service/`) | the VM fulfillment executor service |
 | domain | `arkhai-apicredits-service` (`domains/apicredits/service/`) | the credits service: API keys/credit grants/consumption + the quota ledger (mounts `market_site`) |
-| domain | `arkhai-apicredits-storefront` (`domains/apicredits/storefront/`) | the API-credits storefront executable/composition root: quota-backed listings, quantity/key-ownership negotiation guards, issuance-backed settlement |
+| domain | `arkhai-apicredits-storefront` (`domains/apicredits/storefront/`) | transitional API-credits storefront executable/composition root; target is a core storefront executable loading the API-credits domain adapter |
 | domain | `arkhai-apicredits-middleware` (`domains/apicredits/middleware/python/`) | seller-side ASGI gate that meters a downstream app on prepaid credits (verify cache + synchronous/batched consume + 402-with-purchase-pointer); the reference implementation |
 | domain | `@arkhai/apicredits-middleware` (`domains/apicredits/middleware/typescript/`) | TypeScript port of the gate (Connect/Express + Web-fetch adapters); reproduces `middleware/conformance/session.json` |
 | domain | `arkhai-apicredits-middleware` crate (`domains/apicredits/middleware/rust/`) | Rust port of the gate (tower/axum layer); reproduces `middleware/conformance/session.json` |
@@ -2047,7 +2046,7 @@ job-kind → executor (a plugin at the site).
 | Site authority   | per-site resource ledger: resources, allocations (incl. lease timing), job queue, watchdog/scheduler; emits all events | resource domain only; no market schema | hosted by the provisioning service process; one per datacenter / failure domain |
 | Executor         | nothing durable — pulls jobs, drives infra, reports status to the ledger | one per fulfillment kind | in-process plugin of the site authority |
 | Aggregator       | nothing authoritative — fungible pool view over N sites, placement/routing, listing derivation | follows its storefront's market domain | library module inside the storefront process |
-| Storefront       | market state: listings, pricing/terms, negotiation threads, deals, settlement lifecycle | one market schema domain per process | domain-owned executable |
+| Storefront       | market state: listings, pricing/terms, negotiation threads, deals, settlement lifecycle | one market schema domain per process | core-owned executable with domain adapter |
 
 The ledger is its own service boundary because it is the serialization
 point for reserves across processes and allocations outlive any deal

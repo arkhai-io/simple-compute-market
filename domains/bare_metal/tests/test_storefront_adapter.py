@@ -4,15 +4,19 @@ import json
 import sqlite3
 from typing import Any
 
-from arkhai_bare_metal.storefront_publication import (
-    bare_metal_listing_candidates,
-    record_derived_bare_metal_listing,
-)
-from arkhai_bare_metal_storefront.publication import (
+import pytest
+
+pytest.importorskip("core_storefront.publication_sources")
+
+from arkhai_bare_metal.storefront_adapter import (  # noqa: E402
     bare_metal_candidate_skip_keys,
     bare_metal_publication_adapter,
     close_stale_bare_metal_publications,
     open_bare_metal_publication_keys,
+)
+from arkhai_bare_metal.storefront_publication import (  # noqa: E402
+    bare_metal_listing_candidates,
+    record_derived_bare_metal_listing,
 )
 
 

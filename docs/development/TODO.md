@@ -495,6 +495,13 @@ may be served by multiple provisioning implementations that all implement the
 same domain schema. Reusable substrate such as site authority, allocation
 lifecycle, capacity clients, and leased-access helpers belongs in shared kit,
 not in one domain's VM-shaped API.
+Core role packages should own executable entrypoints consistently across roles;
+domain packages should own the role adapters/specs those executables load.
+Domain packages can expose extras such as `buyer`, `storefront`, or `registry`
+when a role adapter needs dependencies that would otherwise bloat unrelated
+users. The current VM and API-credits storefront executable packages are
+transitional composition roots; the target is core-owned executables loading
+domain adapters.
 The current `PublicationAdapter` in the VM storefront is only a local
 seller-publication refactor seam for the transitional CLI. It is not yet the
 core storefront role API. The target core-storefront API should be smaller and
@@ -566,12 +573,12 @@ admin/operator VM API.
    bare-metal domain now provides pure derivation helpers that turn enabled,
    available, `allocation_mode=exclusive` site resources into
    `BareMetalListing` payloads. Bare-metal storefront publication tracking
-   primitives remain in `arkhai-bare-metal`, and the storefront publication
-   adapter now lives in `arkhai-bare-metal-storefront` so future bare-metal
+   primitives and the lightweight storefront publication adapter live in
+   `arkhai-bare-metal` under optional role dependencies, so future bare-metal
    storefront code does not need to import the VM storefront package. The VM
    storefront still composes that adapter during the transitional shared-site
-   split; the remaining work is a first-class bare-metal storefront
-   executable/server around the same adapter and site-authority capacity
+   split; the remaining work is a core storefront executable/server path that
+   loads the bare-metal domain adapter around the same site-authority capacity
    snapshot. Cross-mode site-ledger conflict coverage now pins VM-slice versus
    exclusive bare-metal blocking, and
    storefront publication reconciliation coverage now pins close/reopen
