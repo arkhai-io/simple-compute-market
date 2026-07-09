@@ -98,6 +98,8 @@ async def test_publish_from_quota_requires_registered_sellable_resource(
     offer = json.loads(offer) if isinstance(offer, str) else offer
     assert offer["resource_id"] == "svc-quota"
     assert offer["kind"] == "api_credits.v1"
+    assert offer["service_name"] == "Acme Inference"
+    assert offer["description"] is None
 
     with pytest.raises(ValueError, match="no sellable units"):
         await svc.publish_from_quota(
@@ -112,6 +114,31 @@ async def test_publish_from_quota_requires_registered_sellable_resource(
             resource_id="svc-unknown",
             service_name="Ghost",
             accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}],
+        )
+
+
+async def test_publish_from_quota_validates_listing_through_domain_runtime(
+    db, monkeypatch,
+):
+    from apicredits_storefront.services import capacity_client as cc_module
+    from apicredits_storefront.services.listing_service import ListingService
+
+    remote = _quota_remote({"svc-quota": 42})
+    monkeypatch.setattr(
+        cc_module, "build_capacity_client", lambda factory: remote,
+    )
+
+    svc = ListingService(sqlite_client=db)
+    with pytest.raises(ValueError, match="service_name"):
+        await svc.publish_from_quota(
+            resource_id="svc-quota",
+            service_name=" ",
+            accepted_escrows=[{
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "literal_fields": {"token": "0x" + "01" * 20},
+                "rates": [{"field": "amount", "per": "token", "value": "100"}],
+            }],
         )
 
 

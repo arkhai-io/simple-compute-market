@@ -15,7 +15,6 @@ from datetime import datetime
 from typing import Any
 
 from core_storefront.stage_log import stage_event
-from domains.apicredits.listings.models import ApiCreditsResource
 
 logger = logging.getLogger(__name__)
 
@@ -78,13 +77,21 @@ class ListingService:
                 f"(available={available})."
             )
 
-        offer = ApiCreditsResource(
-            service_name=service_name,
-            description=description,
-            openapi_url=openapi_url,
-            base_url=base_url,
-            resource_id=resource_id,
+        from apicredits_storefront.domain_runtime import (
+            get_storefront_domain_runtime,
         )
+
+        listing = get_storefront_domain_runtime().listing({
+            "offer_resource": {
+                "service_name": service_name,
+                "description": description,
+                "openapi_url": openapi_url,
+                "base_url": base_url,
+                "resource_id": resource_id,
+            },
+            "accepted_escrows": accepted_escrows,
+            "demands": [],
+        })
         listing_id = str(uuid.uuid4())
         now_iso = datetime.now().isoformat()
         await self._db.upsert_listing(
@@ -92,9 +99,9 @@ class ListingService:
             status="open",
             created_at=now_iso,
             updated_at=now_iso,
-            offer_resource=offer.model_dump(mode="json"),
-            accepted_escrows=accepted_escrows,
-            demands=[],
+            offer_resource=listing.offer_resource.model_dump(mode="json"),
+            accepted_escrows=listing.accepted_escrows,
+            demands=listing.demands,
             fulfillment_resource=None,
             max_duration_seconds=None,
             seller=BASE_URL_OVERRIDE,

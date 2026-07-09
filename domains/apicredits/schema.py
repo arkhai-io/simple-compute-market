@@ -37,6 +37,17 @@ class ApiCreditsListing(BaseModel):
             return value
         return {"offer_resource": value}
 
+    @model_validator(mode="after")
+    def _validate_listing(self) -> "ApiCreditsListing":
+        if not self.offer_resource.service_name.strip():
+            raise ValueError("offer_resource.service_name must be non-empty")
+        if (
+            self.offer_resource.resource_id is not None
+            and not self.offer_resource.resource_id.strip()
+        ):
+            raise ValueError("offer_resource.resource_id must be non-empty")
+        return self
+
 
 class ApiCreditsMessage(ApiCreditsProvisionTerms):
     """API-credits negotiation message payload."""
