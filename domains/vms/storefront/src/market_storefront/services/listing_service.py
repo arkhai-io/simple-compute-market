@@ -214,9 +214,13 @@ class ListingService:
     ) -> tuple[Any, list[dict[str, Any]], list[dict[str, Any]]]:
         from domains.vms.listings.models import ComputeResource
         try:
-            offer_resource = parse_resource_from_dict(
-                self._normalize_token_resource(request.offer)
+            normalized_offer = self._normalize_token_resource(request.offer)
+            from market_storefront.domain_runtime import (
+                get_storefront_domain_runtime,
             )
+
+            get_storefront_domain_runtime().listing(normalized_offer)
+            offer_resource = parse_resource_from_dict(normalized_offer)
         except Exception as exc:
             raise ValueError(f"Invalid offer resource: {exc}") from exc
         if not isinstance(offer_resource, ComputeResource):
