@@ -49,6 +49,8 @@ jobs:
           - { name: core-storefront-client, dir: core/storefront-client }
           - { name: core-registry,          dir: core/registry, predist: true }
           - { name: kit-site,              dir: kit/site }
+          - { name: bare-metal,            dir: domains/bare_metal }
+          - { name: bare-metal-storefront, dir: domains/bare_metal/storefront, predist: true }
           # The deselected tests assert that injected/static option flags
           # appear in `typer --help` output; under headless pytest capture
           # in CI the Rich-rendered options panel comes back empty (passes
@@ -75,6 +77,9 @@ jobs:
         if: matrix.predist
         run: |
           uv build --no-sources --out-dir .dist domains/vms/domain
+          uv build --no-sources --out-dir .dist domains/bare_metal
+          uv build --no-sources --out-dir .dist core
+          uv build --no-sources --out-dir .dist core/storefront
           uv build --no-sources --out-dir .dist kit/site
           uv build --no-sources --out-dir .dist core/storefront-client
           uv build --no-sources --out-dir .dist core/registry-client

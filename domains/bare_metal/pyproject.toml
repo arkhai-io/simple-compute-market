@@ -17,6 +17,7 @@ packages = ["src/arkhai_bare_metal"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+testpaths = ["tests"]
 
 [dependency-groups]
 dev = [

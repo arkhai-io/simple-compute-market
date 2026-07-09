@@ -1,0 +1,37 @@
+[project]
+name = "arkhai-bare-metal-storefront"
+version = "0.1.0"
+license = "MIT"
+description = "Seller-side storefront helpers for the bare-metal domain."
+requires-python = ">=3.12"
+dependencies = [
+    "arkhai-bare-metal",
+    "arkhai-core-storefront",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4,<10.0.0",
+]
+
+[tool.uv]
+# Internal wheels resolve from the repo's .dist/ via the CLI flag.
+environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arkhai_bare_metal_storefront"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "../src"]
+testpaths = ["tests"]

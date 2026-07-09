@@ -35,6 +35,8 @@ constrained with lower bounds (see Versioning policy).
 | `arkhai-kit-policy` | `kit/policy/` | 0.1.0 | none |
 | `arkhai-kit-alkahest` | `kit/alkahest/` | 0.1.0 | none |
 | `arkhai-kit-config` | `kit/config/` | 0.1.0 | `arkhai-kit-alkahest` |
+| `arkhai-bare-metal` | `domains/bare_metal/` | 0.1.0 | none |
+| `arkhai-bare-metal-storefront` | `domains/bare_metal/storefront/` | 0.1.0 | `arkhai-bare-metal`, `arkhai-core-storefront` |
 | `arkhai-vms-buyer` | `domains/vms/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
 | `arkhai-vms-storefront` | `domains/vms/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-vms-provisioning` |
 | `arkhai-vms-provisioning` | `domains/vms/provisioning/service/` | 0.5.0 | `arkhai-kit-site`, `arkhai-core-storefront-client` |

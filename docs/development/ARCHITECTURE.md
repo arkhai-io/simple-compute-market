@@ -105,6 +105,8 @@ Import names and console scripts (`market`, `market-storefront`,
 | kit | `arkhai-kit-site` (`kit/site/`) | site-authority scaffold: capacity ledger, ledger tables, `/api/v1/capacity/*` router — mounted by a hosting service per site |
 | kit | `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-alkahest`, `arkhai-kit-config` | from-below capabilities; alkahest is the first *settlement-mechanism codec* |
 | domain | `arkhai-vms` (`domains/vms/domain/`) | shared VM-domain models/helpers consumed by both buyer and storefront; currently owns the `compute.v1` provision-term interpretation (`arkhai_vms.provision_terms`) |
+| domain | `arkhai-bare-metal` (`domains/bare_metal/`) | shared bare-metal domain models/helpers consumed by storefront/provisioning implementations; owns the `bare_metal.v1` schema and pure listing derivation |
+| domain | `arkhai-bare-metal-storefront` (`domains/bare_metal/storefront/`) | bare-metal storefront publication composition helpers; VM storefront imports this only during the transitional shared-site split |
 | domain | `arkhai-vms-buyer` (`domains/vms/buyer/`) | no console script — publishes the `vms.compute` plugin the core `market` CLI discovers |
 | domain | `arkhai-apicredits-buyer` (`domains/apicredits/buyer/`) | no console script — publishes the `api_credits` plugin; verbs namespaced under `market credits …` so both plugins compose in one binary |
 | domain | `arkhai-vms-storefront` (`domains/vms/storefront/`) | the VM storefront executable/composition root (FastAPI adapters over core) |

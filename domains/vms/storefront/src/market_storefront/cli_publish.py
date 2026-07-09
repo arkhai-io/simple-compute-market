@@ -56,13 +56,15 @@ from domains.vms.listings.reconciler import (
     reopen_local_derived_listing,
     stale_open_listing_ids,
 )
-from arkhai_bare_metal.storefront_publication import (
-    bare_metal_listing_candidates,
-    close_stale_bare_metal_listings,
-    open_bare_metal_listing_keys,
-    record_derived_bare_metal_listing,
-    reopen_derived_bare_metal_listing_if_present,
-    stale_open_bare_metal_listing_ids,
+from arkhai_bare_metal_storefront.publication import (
+    available_bare_metal_listing_candidates,
+    bare_metal_candidate_skip_keys,
+    bare_metal_publication_adapter,
+    close_stale_bare_metal_publications,
+    open_bare_metal_publication_keys,
+    record_published_bare_metal_listing,
+    reopen_bare_metal_listing_adapter,
+    stale_open_bare_metal_publication_ids,
 )
 
 
@@ -193,19 +195,21 @@ def _stale_open_listing_ids(db_path: str) -> list[str]:
 
 
 def _available_bare_metal_listing_candidates(db_path: str) -> list[dict[str, Any]]:
-    del db_path
-    return bare_metal_listing_candidates(_capacity_snapshot_resources_sync())
+    return available_bare_metal_listing_candidates(
+        db_path,
+        capacity_snapshot=_capacity_snapshot_resources_sync,
+    )
 
 
 def _open_bare_metal_listing_keys(db_path: str) -> set[str]:
-    return open_bare_metal_listing_keys(db_path)
+    return open_bare_metal_publication_keys(db_path)
 
 
 def _stale_open_bare_metal_listing_ids(db_path: str) -> list[str]:
-    resources = _capacity_snapshot_resources_sync()
-    if not resources:
-        return []
-    return stale_open_bare_metal_listing_ids(db_path, resources)
+    return stale_open_bare_metal_publication_ids(
+        db_path,
+        capacity_snapshot=_capacity_snapshot_resources_sync,
+    )
 
 
 def _open_order_resource_ids(db_path: str) -> set[str]:
@@ -402,15 +406,15 @@ def _reopen_bare_metal_listing_if_present(
     max_duration_seconds: int | None,
     private_key: Optional[str],
 ) -> dict | None:
-    return reopen_derived_bare_metal_listing_if_present(
-        db_path=db_path,
-        base_url=base_url,
-        candidate=candidate,
-        offer=offer,
-        accepted_escrows=accepted_escrows,
-        demands=demands,
-        max_duration_seconds=max_duration_seconds,
-        private_key=private_key,
+    return reopen_bare_metal_listing_adapter(
+        db_path,
+        base_url,
+        candidate,
+        offer,
+        accepted_escrows,
+        demands,
+        max_duration_seconds,
+        private_key,
         publish_existing_listing=_publish_existing_listing_to_registries,
     )
 
@@ -467,17 +471,12 @@ def _close_stale_bare_metal_listings(
     base_url: str,
     private_key: Optional[str],
 ) -> list[str]:
-    resources = _capacity_snapshot_resources_sync()
-    if not resources:
-        return []
-    return close_stale_bare_metal_listings(
+    return close_stale_bare_metal_publications(
         db_path=db_path,
-        resources=resources,
-        close_listing=lambda listing_id: _close_order(
-            base_url,
-            listing_id,
-            private_key,
-        ),
+        base_url=base_url,
+        private_key=private_key,
+        capacity_snapshot=_capacity_snapshot_resources_sync,
+        close_listing=_close_order,
     )
 
 
@@ -499,11 +498,7 @@ def _vm_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
 
 
 def _bare_metal_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
-    keys: set[str] = set()
-    for value in (candidate.get("derivation_key"), candidate.get("machine_id")):
-        if value is not None:
-            keys.add(str(value))
-    return keys
+    return bare_metal_candidate_skip_keys(candidate)
 
 
 def _record_published_vm_listing(
@@ -525,11 +520,7 @@ def _record_published_bare_metal_listing(
     candidate: dict[str, Any],
     listing_id: str,
 ) -> None:
-    record_derived_bare_metal_listing(
-        db_path,
-        listing_id=listing_id,
-        listing=candidate["listing"],
-    )
+    record_published_bare_metal_listing(db_path, candidate, listing_id)
 
 
 def _reopen_vm_listing_if_present(
@@ -595,22 +586,10 @@ def _publication_adapters() -> tuple[PublicationAdapter, ...]:
             reopen_existing=_reopen_vm_listing_if_present,
             reopen_error_label="reopen derived listing",
         ),
-        PublicationAdapter(
-            name="bare_metal",
-            open_keys=_open_bare_metal_listing_keys,
-            close_stale=lambda db_path, base_url, private_key: (
-                _close_stale_bare_metal_listings(
-                    db_path=db_path,
-                    base_url=base_url,
-                    private_key=private_key,
-                )
-            ),
-            available_candidates=_available_bare_metal_listing_candidates,
-            skip_keys=_bare_metal_candidate_skip_keys,
-            offer_resource=lambda candidate: dict(candidate["offer_resource"]),
-            record_published=_record_published_bare_metal_listing,
-            reopen_existing=_reopen_bare_metal_listing_adapter,
-            reopen_error_label="reopen derived bare-metal listing",
+        bare_metal_publication_adapter(
+            capacity_snapshot=_capacity_snapshot_resources_sync,
+            close_listing=_close_order,
+            publish_existing_listing=_publish_existing_listing_to_registries,
         ),
     )
 

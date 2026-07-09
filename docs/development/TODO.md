@@ -141,7 +141,7 @@ remaining follow-on work, with design context in
      entry).
 
 5. **PyPI trusted-publishing one-time setup:** the publish CI
-   (`.github/workflows/publish-pypi.yml`) now covers all 18 consumable
+   (`.github/workflows/publish-pypi.yml`) covers the consumable
    packages (kit/core libraries, SDK clients, buyer/storefront plugins,
    the listing registry, provisioning + tokens services, the tokens
    middleware) — every userland role, not the e2e harness/demo/tooling. Names keep the
@@ -566,13 +566,14 @@ admin/operator VM API.
    bare-metal domain now provides pure derivation helpers that turn enabled,
    available, `allocation_mode=exclusive` site resources into
    `BareMetalListing` payloads. Bare-metal storefront publication tracking
-   helpers now live in `arkhai-bare-metal` so future bare-metal storefront code
-   does not need to import the VM storefront package. The VM storefront
-   currently still has transitional publish/reopen/close CLI wiring for those
-   helpers. Target organization is one storefront per domain, so that CLI
-   wiring should move to a bare-metal storefront package while still reading
-   the same site-authority capacity snapshot. Cross-mode site-ledger conflict
-   coverage now pins VM-slice versus exclusive bare-metal blocking, and
+   primitives remain in `arkhai-bare-metal`, and the storefront publication
+   adapter now lives in `arkhai-bare-metal-storefront` so future bare-metal
+   storefront code does not need to import the VM storefront package. The VM
+   storefront still composes that adapter during the transitional shared-site
+   split; the remaining work is a first-class bare-metal storefront
+   executable/server around the same adapter and site-authority capacity
+   snapshot. Cross-mode site-ledger conflict coverage now pins VM-slice versus
+   exclusive bare-metal blocking, and
    storefront publication reconciliation coverage now pins close/reopen
    behavior for a dual-mode host. Provisioning integration coverage now drives
    bare-metal lease grant/reclaim jobs through the background job processor and
