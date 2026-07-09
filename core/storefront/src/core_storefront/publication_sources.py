@@ -8,7 +8,7 @@ the storefront to publish. It is not the complete domain storefront API.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -37,4 +37,9 @@ class PublicationSource:
         dict[str, Any] | None,
     ]
     reopen_error_label: str
-
+    pricing_resource: Callable[
+        [dict[str, Any], dict[str, Any]],
+        dict[str, Any],
+    ] = field(
+        default=lambda candidate, _offer: candidate,
+    )

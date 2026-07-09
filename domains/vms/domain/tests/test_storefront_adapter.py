@@ -86,6 +86,10 @@ def test_vm_publication_adapter_fills_core_publication_source_slots() -> None:
         {"resource_id": "host-a", "gpu_count": 1},
     ]
     assert adapter.offer_resource({"gpu_count": 1}) == {"gpu_count": 1}
+    assert adapter.pricing_resource(
+        {"min_price": "1"},
+        {"gpu_count": 1},
+    ) == {"min_price": "1"}
     assert adapter.skip_keys({"resource_id": "host-a", "gpu_count": 1}) == {
         "host-a:gpus:1",
         "host-a",

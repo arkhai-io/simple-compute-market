@@ -173,6 +173,7 @@ def bare_metal_publication_adapter(
         ),
         skip_keys=bare_metal_candidate_skip_keys,
         offer_resource=lambda candidate: dict(candidate["offer_resource"]),
+        pricing_resource=lambda _candidate, offer: offer,
         record_published=record_published_bare_metal_listing,
         reopen_existing=reopen_existing,
         reopen_error_label="reopen derived bare-metal listing",

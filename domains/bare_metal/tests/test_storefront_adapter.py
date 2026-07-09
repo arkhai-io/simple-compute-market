@@ -76,6 +76,10 @@ def test_bare_metal_adapter_derives_candidates_from_capacity_snapshot(tmp_path):
     assert adapter.name == "bare_metal"
     assert len(candidates) == 1
     assert adapter.offer_resource(candidates[0])["kind"] == "bare_metal.v1"
+    assert adapter.pricing_resource(
+        candidates[0],
+        {"kind": "bare_metal.v1"},
+    ) == {"kind": "bare_metal.v1"}
     assert adapter.skip_keys(candidates[0]) == {
         "bare-metal:bm-node-1",
         "bm-node-1",

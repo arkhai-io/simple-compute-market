@@ -866,118 +866,6 @@ def _default_alkahest_payload(
     wallet_address: str,
     publish_priceless: bool,
 ) -> tuple[list[dict], list[dict], int | None] | str:
-    min_price = default_min_price
-    token_address = default_token_address
-    if not token_address:
-        return (
-            "no token (set [seller.pricing].default_token_address in config.toml)"
-        )
-    if not token_address.startswith("0x") or len(token_address) != 42:
-        return (
-            f"invalid token {token_address!r} — must be a 0x ERC-20 address "
-            f"(symbol shorthand is no longer supported)"
-        )
-    from market_alkahest.token import resolve_token, TokenResolutionError
-    from .utils.config import CHAINS
-    if not CHAINS:
-        return "no [chains.<name>] tables configured"
-    token_meta = None
-    token_resolve_errors: list[str] = []
-    for chain in CHAINS.values():
-        try:
-            token_meta = resolve_token(
-                token_address, rpc_url=chain.rpc_url, chain_id=chain.chain_id,
-            )
-            break
-        except TokenResolutionError as exc:
-            token_resolve_errors.append(f"{chain.name}: {exc}")
-            continue
-    if token_meta is None:
-        return (
-            f"chain resolve failed for {token_address}: "
-            + "; ".join(token_resolve_errors)
-        )
-    token_address = token_meta.contract_address.lower()
-    token_decimals = token_meta.decimals
-
-    if min_price is None:
-        if not publish_priceless:
-            return (
-                "no min_price (set [seller.pricing].default_min_price, "
-                "or set [seller.pricing].publish_priceless=true)"
-            )
-        advertised_amount: Any = None
-    else:
-        try:
-            human = Decimal(str(min_price))
-        except (InvalidOperation, ValueError, TypeError):
-            return f"unparseable min_price={min_price!r}; expected numeric string"
-        scaled = human * (Decimal(10) ** token_decimals)
-        if scaled != scaled.to_integral_value():
-            return (
-                f"min_price={min_price!r} has more decimals than the "
-                f"token's {token_decimals}"
-            )
-        if scaled < 0:
-            return f"min_price={min_price!r} is negative"
-        advertised_amount = str(int(scaled))
-
-    raw_max_duration_seconds = (
-        resource.get("max_duration_seconds")
-        if resource.get("max_duration_seconds") is not None
-        else default_max_duration_seconds
-    )
-    max_duration_seconds = _normalize_max_duration_seconds(
-        raw_max_duration_seconds
-    )
-    from market_alkahest.alkahest import get_erc20_escrow_obligation_default
-    accepted_escrows: list[dict] = []
-    per_chain_errors: list[str] = []
-    for chain in CHAINS.values():
-        try:
-            escrow_address = get_erc20_escrow_obligation_default(
-                chain.name,
-                config_path=chain.alkahest_address_config_path,
-            )
-        except Exception as exc:
-            per_chain_errors.append(f"{chain.name}: {exc}")
-            continue
-        accepted_escrows.append({
-            "chain_name": chain.name,
-            "escrow_address": escrow_address.lower(),
-            "literal_fields": {"token": token_address},
-            "rates": [{
-                "field": "amount",
-                "per": "hour",
-                "value": advertised_amount,
-            }] if advertised_amount is not None else [],
-        })
-    if not accepted_escrows:
-        return (
-            "alkahest config could not resolve ERC20 escrow address on any "
-            f"configured chain: {'; '.join(per_chain_errors)}"
-        )
-    chain_names = {
-        str(e.get("chain_name"))
-        for e in accepted_escrows
-        if isinstance(e, dict) and e.get("chain_name")
-    }
-    try:
-        demands = _demands_for_chains(CHAINS, chain_names, wallet_address)
-    except Exception as exc:
-        return f"listing demands: {exc}"
-    return accepted_escrows, demands, max_duration_seconds
-
-
-def _vm_alkahest_payload(
-    *,
-    resource: dict[str, Any],
-    default_min_price: Optional[str],
-    default_token_address: Optional[str],
-    default_max_duration_seconds: int | None,
-    wallet_address: str,
-    publish_priceless: bool,
-) -> tuple[list[dict], list[dict], int | None] | str:
     template_entries = resource.get("accepted_escrows")
     if template_entries:
         from .utils.config import CHAINS
@@ -1115,26 +1003,15 @@ def _vm_alkahest_payload(
 
 def _alkahest_payload_for_candidate(
     *,
-    adapter: PublicationSource,
-    candidate: dict[str, Any],
-    offer: dict[str, Any],
+    pricing_resource: dict[str, Any],
     default_min_price: Optional[str],
     default_token_address: Optional[str],
     default_max_duration_seconds: int | None,
     wallet_address: str,
     publish_priceless: bool,
 ) -> tuple[list[dict], list[dict], int | None] | str:
-    if adapter.name == "bare_metal":
-        return _default_alkahest_payload(
-            resource=offer,
-            default_min_price=default_min_price,
-            default_token_address=default_token_address,
-            default_max_duration_seconds=default_max_duration_seconds,
-            wallet_address=wallet_address,
-            publish_priceless=publish_priceless,
-        )
-    return _vm_alkahest_payload(
-        resource=candidate,
+    return _default_alkahest_payload(
+        resource=pricing_resource,
         default_min_price=default_min_price,
         default_token_address=default_token_address,
         default_max_duration_seconds=default_max_duration_seconds,
@@ -1190,9 +1067,7 @@ def _publish_round(
                 continue
             offer = adapter.offer_resource(candidate)
             payload = _alkahest_payload_for_candidate(
-                adapter=adapter,
-                candidate=candidate,
-                offer=offer,
+                pricing_resource=adapter.pricing_resource(candidate, offer),
                 default_min_price=default_min_price,
                 default_token_address=default_token_address,
                 default_max_duration_seconds=default_max_duration_seconds,
