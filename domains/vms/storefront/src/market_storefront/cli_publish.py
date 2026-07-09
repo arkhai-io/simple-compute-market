@@ -48,13 +48,16 @@ from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
 from .services.publication_adapters import PublicationAdapter
 from domains.vms.listings.reconciler import (
     available_compute_slices,
-    listing_resource_key,
     load_derived_listing_for_slice,
     mark_derived_listings_closed,
     open_listing_resource_keys,
     record_derived_listing,
     reopen_local_derived_listing,
     stale_open_listing_ids,
+)
+from arkhai_vms.storefront_adapter import (
+    vm_candidate_skip_keys,
+    vm_publication_adapter,
 )
 from arkhai_bare_metal.storefront_adapter import (
     available_bare_metal_listing_candidates,
@@ -481,20 +484,7 @@ def _close_stale_bare_metal_listings(
 
 
 def _vm_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
-    keys: set[str] = set()
-    resource_key = candidate.get("resource_key") or listing_resource_key(
-        candidate.get("resource_id") or candidate.get("pool_id"),
-        candidate.get("gpu_count"),
-    )
-    for value in (
-        resource_key,
-        candidate.get("legacy_resource_key"),
-        candidate.get("resource_id"),
-        candidate.get("pool_id"),
-    ):
-        if value is not None:
-            keys.add(str(value))
-    return keys
+    return vm_candidate_skip_keys(candidate)
 
 
 def _bare_metal_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
@@ -569,8 +559,7 @@ def _reopen_bare_metal_listing_adapter(
 
 def _publication_adapters() -> tuple[PublicationAdapter, ...]:
     return (
-        PublicationAdapter(
-            name="vms",
+        vm_publication_adapter(
             open_keys=_open_listing_resource_keys,
             close_stale=lambda db_path, base_url, private_key: (
                 _close_stale_derived_listings(
@@ -580,11 +569,9 @@ def _publication_adapters() -> tuple[PublicationAdapter, ...]:
                 )
             ),
             available_candidates=_available_resources,
-            skip_keys=_vm_candidate_skip_keys,
             offer_resource=_offer_resource_for_listing,
             record_published=_record_published_vm_listing,
             reopen_existing=_reopen_vm_listing_if_present,
-            reopen_error_label="reopen derived listing",
         ),
         bare_metal_publication_adapter(
             capacity_snapshot=_capacity_snapshot_resources_sync,
