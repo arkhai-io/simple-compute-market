@@ -141,6 +141,63 @@ async def test_chain_failure_after_issuance_rolls_back(monkeypatch):
     assert [e[1] for e in events] == ["credits_issued", "failed_after_issuance"]
 
 
+async def test_fulfillment_service_normalizes_order_through_domain_runtime(
+    monkeypatch,
+):
+    from apicredits_storefront.services import fulfillment_service
+
+    captured = {}
+
+    async def fake_fulfill(**kwargs):
+        captured.update(kwargs)
+        return {"status": "fulfilled", "fulfillment_uid": "fulfill-1"}
+
+    monkeypatch.setattr(
+        fulfillment_service,
+        "fulfill_api_credits_obligation",
+        fake_fulfill,
+    )
+
+    result = await fulfillment_service.fulfill_credit_obligation(
+        client=None,
+        escrow_uid="0xescrow-runtime",
+        order={"offer_resource": dict(_OFFER)},
+        quantity=3,
+    )
+
+    assert result["status"] == "fulfilled"
+    assert captured["offer_resource"]["kind"] == "api_credits.v1"
+    assert captured["offer_resource"]["service_name"] == _OFFER["service_name"]
+    assert captured["offer_resource"]["resource_id"] == _OFFER["resource_id"]
+
+
+async def test_fulfillment_service_rejects_invalid_domain_listing(monkeypatch):
+    from apicredits_storefront.services import fulfillment_service
+
+    async def fake_fulfill(**kwargs):
+        raise AssertionError("issuance should not be called")
+
+    monkeypatch.setattr(
+        fulfillment_service,
+        "fulfill_api_credits_obligation",
+        fake_fulfill,
+    )
+
+    with pytest.raises(ValueError, match="service_name"):
+        await fulfillment_service.fulfill_credit_obligation(
+            client=None,
+            escrow_uid="0xescrow-invalid",
+            order={
+                "offer_resource": {
+                    "kind": "api_credits.v1",
+                    "service_name": " ",
+                    "resource_id": "svc-quota",
+                },
+            },
+            quantity=3,
+        )
+
+
 # ---------------------------------------------------------------------------
 # start_settlement_job — fail-closed verification + credentials channel
 # ---------------------------------------------------------------------------

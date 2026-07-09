@@ -68,8 +68,10 @@ async def fulfill_credit_obligation(
     reserve. Consume-once: the hold row's job is done either way.
     """
     from core_storefront.stage_log import stage_event
-    from domains.apicredits.listings.models import coerce_resource_dict
 
+    from apicredits_storefront.domain_runtime import (
+        get_storefront_domain_runtime,
+    )
     from apicredits_storefront.utils import config
 
     held_allocation: dict | None = None
@@ -81,10 +83,11 @@ async def fulfill_credit_obligation(
             held_allocation.setdefault("allocation_id", hold.get("allocation_id"))
             await db.delete_capacity_hold(negotiation_id=negotiation_id)
 
+    listing = get_storefront_domain_runtime().listing(order)
     return await fulfill_api_credits_obligation(
         client=client,
         escrow_uid=escrow_uid,
-        offer_resource=coerce_resource_dict(order.get("offer_resource")),
+        offer_resource=listing.offer_resource.model_dump(mode="json"),
         quantity=quantity,
         key_mode=key_mode,
         key_id=key_id,
