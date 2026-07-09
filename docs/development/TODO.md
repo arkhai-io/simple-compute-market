@@ -433,12 +433,32 @@ state, and capacity events. Executor services consume allocation decisions and
 report provisioning/release outcomes; they do not independently decide that
 shared hardware is available.
 
+The package architecture target is a layered dependency chain:
+`core -> domain -> kit/user implementation`, where each layer fills the
+dependencies of the layer above and may introduce narrower dependencies of its
+own. There is one core API for each role to fit into. Core should define the
+market skeleton in terms of injected dependencies: schema codecs,
+listing/message/terms/materialization/receipt/result handling, buyer
+discovery/aggregation hooks, seller/storefront negotiation and publication
+hooks, registry validation hooks, and settlement/provisioning orchestration
+slots. Domain packages fill the core role dependencies for one concrete market
+and define the deterministic market semantics: the schema shapes plus any
+function-like defaults needed to make the market fully specified. Those
+defaults may still depend on below-domain interfaces when the market genuinely
+requires configurable settlement, identity, capacity, or provisioning
+semantics. Kit packages are below-domain dependencies, not universal plugins:
+a kit is reusable across domains only when those domains choose compatible
+interfaces. User/operator packages may fill remaining policy or infrastructure
+slots when the domain intentionally leaves them open.
+
 Domain packages own the schema and deterministic interpretation for their
 market semantics: listing payloads, messages, agreed terms, materialization,
-receipts, provisioning/executor vocabulary, pure validators/codecs, and
-schema-implied default/reference behavior. Exact-match seller policy,
-exact-proposal buyer helpers, registry filter helpers, and canonical fixtures
-may live in the domain package because they clarify the market's semantics.
+receipts, results, provisioning/executor vocabulary, pure validators/codecs,
+and schema-implied default/reference behavior. Exact-match seller policy,
+exact-proposal buyer helpers, registry filter helpers, canonical fixtures, and
+other obvious default implementations may live in the domain package because
+they clarify the market's semantics and keep a concrete market usable without
+unnecessary extra packages.
 Settlement-kit-specific comparison helpers belong with the kit whose payment
 vocabulary they inspect; for example Alkahest scalar `best_price`,
 `cheapest_first`, and `priceless_last` aggregation policies live in
@@ -475,6 +495,15 @@ may be served by multiple provisioning implementations that all implement the
 same domain schema. Reusable substrate such as site authority, allocation
 lifecycle, capacity clients, and leased-access helpers belongs in shared kit,
 not in one domain's VM-shaped API.
+The current `PublicationAdapter` in the VM storefront is only a local
+seller-publication refactor seam for the transitional CLI. It is not yet the
+core storefront role API. The target core-storefront API should be smaller and
+domain-agnostic, then VM, bare-metal, API-credits, and future domains should
+fill that API with their domain packages and any required kit/user
+dependencies. API-credits does not currently implement this local
+`PublicationAdapter` because it lacks this VM-style automated capacity
+publication path; that should not be read as exemption from the eventual core
+storefront role API.
 The current VM provisioning service still mixes VM contract surface with
 generic site-authority substrate; future refactors should split those roles
 without breaking existing VM clients. The bare-metal market schema starts under
