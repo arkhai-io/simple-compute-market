@@ -45,6 +45,7 @@ from registry_client import (
 )
 
 from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
+from .services.publication_adapters import PublicationLifecycleAdapter
 from domains.vms.listings.reconciler import (
     available_compute_slices,
     listing_resource_key,
@@ -478,6 +479,52 @@ def _close_stale_bare_metal_listings(
             private_key,
         ),
     )
+
+
+def _publication_lifecycle_adapters() -> tuple[PublicationLifecycleAdapter, ...]:
+    return (
+        PublicationLifecycleAdapter(
+            name="vms",
+            open_keys=_open_listing_resource_keys,
+            close_stale=lambda db_path, base_url, private_key: (
+                _close_stale_derived_listings(
+                    db_path=db_path,
+                    base_url=base_url,
+                    private_key=private_key,
+                )
+            ),
+        ),
+        PublicationLifecycleAdapter(
+            name="bare_metal",
+            open_keys=_open_bare_metal_listing_keys,
+            close_stale=lambda db_path, base_url, private_key: (
+                _close_stale_bare_metal_listings(
+                    db_path=db_path,
+                    base_url=base_url,
+                    private_key=private_key,
+                )
+            ),
+        ),
+    )
+
+
+def _close_stale_publication_listings(
+    *,
+    db_path: str,
+    base_url: str,
+    private_key: Optional[str],
+) -> dict[str, list[str]]:
+    return {
+        adapter.name: adapter.close_stale(db_path, base_url, private_key)
+        for adapter in _publication_lifecycle_adapters()
+    }
+
+
+def _open_publication_keys(db_path: str) -> set[str]:
+    covered: set[str] = set()
+    for adapter in _publication_lifecycle_adapters():
+        covered.update(adapter.open_keys(db_path))
+    return covered
 
 
 def _resolve_pricing(
@@ -1283,16 +1330,10 @@ def run_watch_loop(
         while True:
             cycle += 1
             try:
-                _close_stale_derived_listings(
+                _close_stale_publication_listings(
                     db_path=db_path, base_url=base_url, private_key=private_key,
                 )
-                _close_stale_bare_metal_listings(
-                    db_path=db_path, base_url=base_url, private_key=private_key,
-                )
-                covered = (
-                    _open_listing_resource_keys(db_path)
-                    | _open_bare_metal_listing_keys(db_path)
-                )
+                covered = _open_publication_keys(db_path)
                 published, failed, skipped = _publish_round(
                     db_path=db_path, base_url=base_url,
                     wallet_address=wallet_address, private_key=private_key,
@@ -1550,16 +1591,10 @@ def register(app: typer.Typer) -> None:
         # One-shot path
         # ------------------------------------------------------------------
         if not watch:
-            _close_stale_derived_listings(
+            _close_stale_publication_listings(
                 db_path=db_path, base_url=base_url, private_key=private_key,
             )
-            _close_stale_bare_metal_listings(
-                db_path=db_path, base_url=base_url, private_key=private_key,
-            )
-            covered = (
-                _open_listing_resource_keys(db_path)
-                | _open_bare_metal_listing_keys(db_path)
-            )
+            covered = _open_publication_keys(db_path)
             published, failed, _skipped = _publish_round(
                 db_path=db_path, base_url=base_url,
                 wallet_address=wallet_address, private_key=private_key,
