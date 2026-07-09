@@ -27,12 +27,14 @@ from .schema import (
 )
 from .storefront_publication import (
     bare_metal_listing_candidates,
+    close_stale_bare_metal_listings,
     closed_available_bare_metal_listing_ids,
     ensure_derived_bare_metal_listings_table,
     load_derived_bare_metal_listing,
     mark_derived_bare_metal_listings_closed,
     open_bare_metal_listing_keys,
     record_derived_bare_metal_listing,
+    reopen_derived_bare_metal_listing_if_present,
     stale_open_bare_metal_listing_ids,
 )
 
@@ -57,6 +59,7 @@ __all__ = [
     "bare_metal_listing_key",
     "bare_metal_listing_candidates",
     "bare_metal_executor_ref",
+    "close_stale_bare_metal_listings",
     "closed_available_bare_metal_listing_ids",
     "ensure_derived_bare_metal_listings_table",
     "load_derived_bare_metal_listing",
@@ -64,6 +67,7 @@ __all__ = [
     "materialization_to_lease_create",
     "open_bare_metal_listing_keys",
     "record_derived_bare_metal_listing",
+    "reopen_derived_bare_metal_listing_if_present",
     "receipt_from_lease_view",
     "stale_open_bare_metal_listing_ids",
 ]

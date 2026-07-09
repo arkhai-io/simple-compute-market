@@ -230,6 +230,93 @@ def mark_derived_bare_metal_listings_closed(
         conn.close()
 
 
+def reopen_derived_bare_metal_listing_if_present(
+    *,
+    db_path: str,
+    base_url: str,
+    candidate: dict[str, Any],
+    offer: dict[str, Any],
+    accepted_escrows: list[dict[str, Any]],
+    demands: list[dict[str, Any]],
+    max_duration_seconds: int | None,
+    private_key: str | None,
+    publish_existing_listing: Any,
+) -> dict[str, Any] | None:
+    """Reopen a tracked bare-metal listing and republish it via callback."""
+    derived = load_derived_bare_metal_listing(
+        db_path,
+        machine_id=str(candidate["machine_id"]),
+    )
+    if not derived or not derived.get("listing_id"):
+        return None
+    listing_id = str(derived["listing_id"])
+    if derived.get("listing_status") == "open":
+        return None
+
+    conn = sqlite3.connect(db_path)
+    try:
+        listing_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(listings)").fetchall()
+        }
+        updates = ["status = 'open'"]
+        params: list[Any] = []
+        if "paused" in listing_cols:
+            updates.append("paused = 0")
+        if "updated_at" in listing_cols:
+            updates.append("updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')")
+        column_values = {
+            "offer_resource": json.dumps(offer),
+            "accepted_escrows": json.dumps(accepted_escrows),
+            "demands": json.dumps(demands),
+            "max_duration_seconds": max_duration_seconds,
+            "seller": base_url,
+        }
+        for column, value in column_values.items():
+            if column in listing_cols:
+                updates.append(f"{column} = ?")
+                params.append(value)
+        params.append(listing_id)
+        conn.execute(
+            f"UPDATE listings SET {', '.join(updates)} WHERE listing_id = ?",
+            tuple(params),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    record_derived_bare_metal_listing(
+        db_path,
+        listing_id=listing_id,
+        listing=candidate["listing"],
+        status="open",
+    )
+    return publish_existing_listing(
+        listing_id=listing_id,
+        offer=offer,
+        accepted_escrows=accepted_escrows,
+        demands=demands,
+        max_duration_seconds=max_duration_seconds,
+        storefront_url=base_url,
+        private_key=private_key,
+    )
+
+
+def close_stale_bare_metal_listings(
+    *,
+    db_path: str,
+    resources: list[dict[str, Any]],
+    close_listing: Any,
+) -> list[str]:
+    """Close stale open bare-metal listings and mark their derived rows closed."""
+    closed_listing_ids: list[str] = []
+    for listing_id in stale_open_bare_metal_listing_ids(db_path, resources):
+        resp = close_listing(listing_id)
+        if str(resp.get("status", "?")) in ("closed", "skipped", "queued"):
+            closed_listing_ids.append(listing_id)
+    mark_derived_bare_metal_listings_closed(db_path, closed_listing_ids)
+    return closed_listing_ids
+
+
 def _parse_bare_metal_offer(raw: str | bytes | None) -> BareMetalListing | None:
     if not raw:
         return None
