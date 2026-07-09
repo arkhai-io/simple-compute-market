@@ -50,6 +50,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-kit-alkahest \
             --refresh-package arkhai-kit-identity \
             --refresh-package arkhai-kit-config \
+            --refresh-package arkhai-vms \
+            --refresh-package arkhai-bare-metal \
             --refresh-package arkhai-vms-storefront \
             --refresh-package arkhai-vms-provisioning-client; \
     else \
@@ -62,6 +64,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-kit-alkahest \
             --refresh-package arkhai-kit-identity \
             --refresh-package arkhai-kit-config \
+            --refresh-package arkhai-vms \
+            --refresh-package arkhai-bare-metal \
             --refresh-package arkhai-vms-storefront \
             --refresh-package arkhai-vms-provisioning-client; \
     fi
@@ -141,6 +145,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --refresh-package arkhai-kit-alkahest \
         --refresh-package arkhai-kit-identity \
         --refresh-package arkhai-kit-config \
+        --refresh-package arkhai-vms \
+        --refresh-package arkhai-bare-metal \
         --refresh-package arkhai-vms-storefront \
         --refresh-package arkhai-vms-provisioning-client
 
