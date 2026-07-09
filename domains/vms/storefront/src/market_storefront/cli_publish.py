@@ -43,9 +43,9 @@ from registry_client import (
     SyncRegistryClient,
     UpdateListingRequest,
 )
+from core_storefront.publication_sources import PublicationSource
 
 from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
-from .services.publication_adapters import PublicationAdapter
 from domains.vms.listings.reconciler import (
     available_compute_slices,
     load_derived_listing_for_slice,
@@ -557,7 +557,7 @@ def _reopen_bare_metal_listing_adapter(
     )
 
 
-def _publication_adapters() -> tuple[PublicationAdapter, ...]:
+def _publication_adapters() -> tuple[PublicationSource, ...]:
     return (
         vm_publication_adapter(
             open_keys=_open_listing_resource_keys,
@@ -581,7 +581,7 @@ def _publication_adapters() -> tuple[PublicationAdapter, ...]:
     )
 
 
-def _publication_lifecycle_adapters() -> tuple[PublicationAdapter, ...]:
+def _publication_lifecycle_adapters() -> tuple[PublicationSource, ...]:
     return _publication_adapters()
 
 
@@ -1123,7 +1123,7 @@ def _vm_alkahest_payload(
 
 def _alkahest_payload_for_candidate(
     *,
-    adapter: PublicationAdapter,
+    adapter: PublicationSource,
     candidate: dict[str, Any],
     offer: dict[str, Any],
     default_min_price: Optional[str],
