@@ -43,6 +43,11 @@ from registry_client import (
     SyncRegistryClient,
     UpdateListingRequest,
 )
+from core_storefront.publication_composition import (
+    build_bare_metal_publication_selection,
+    build_multi_domain_publication_selection,
+    build_vm_publication_selection,
+)
 from core_storefront.publication_sources import PublicationSource
 from core_storefront.publication_runner import (
     PublicationCommandResult,
@@ -479,37 +484,30 @@ def _bare_metal_publication_source_kwargs() -> dict[str, Any]:
     }
 
 
-def _publication_source_kwargs_by_name() -> dict[str, dict[str, Any]]:
-    return {
-        "vms": _publication_source_kwargs(),
-        "bare_metal": _bare_metal_publication_source_kwargs(),
-    }
-
-
 def _publication_source_selection(
     source_names: tuple[str, ...] = ("vms",),
 ) -> PublicationSourceSelection:
     """Storefront publication source selection.
 
     The legacy VM CLI still defaults to VM slice publication only. Passing
-    selected source names lets core compose the bare-metal domain adapter with
-    the same command surface without making the VM adapter own bare-metal
+    selected source names lets the core composition helper build bare-metal or
+    combined source selections without making the VM adapter own bare-metal
     semantics.
     """
-    kwargs_by_name = _publication_source_kwargs_by_name()
-    return PublicationSourceSelection(
+    if source_names == ("vms",):
+        return build_vm_publication_selection(_publication_source_kwargs())
+    return build_multi_domain_publication_selection(
+        vm_source_kwargs=_publication_source_kwargs(),
+        bare_metal_source_kwargs=_bare_metal_publication_source_kwargs(),
         source_names=source_names,
-        source_kwargs_by_name={
-            name: kwargs_by_name[name]
-            for name in source_names
-            if name in kwargs_by_name
-        },
     )
 
 
 def _bare_metal_publication_source_selection() -> PublicationSourceSelection:
     """Bare-metal-only publication selection for future composition roots."""
-    return _publication_source_selection(("bare_metal",))
+    return build_bare_metal_publication_selection(
+        _bare_metal_publication_source_kwargs(),
+    )
 
 
 def _publication_adapters() -> tuple[PublicationSource, ...]:

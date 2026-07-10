@@ -390,13 +390,13 @@ Lease lifecycle policy should sit above that generic site resource layer. A reus
 ### Shared host accounting for VM and bare-metal offers
 
 **Status:** Implemented through transitional VM provisioning packages. The
-publication-source interface, VM/bare-metal domain adapters, and reusable
-core publication command/selection surface are now core/domain-owned. The VM
-storefront has a transitional selected-source composition helper that can build
-VM-only, bare-metal-only, or combined VM+bare-metal publication selections;
-remaining architectural work is the core storefront executable/server
-composition path and moving the multi-domain site provisioner out of
-`domains/vms`.
+publication-source interface, VM/bare-metal domain adapters, reusable
+core publication command surface, and selected-source composition helpers are
+now core/domain-owned. The VM storefront has transitional infrastructure
+callback wiring for VM-only, bare-metal-only, or combined VM+bare-metal
+publication selections; remaining architectural work is the core storefront
+executable/server composition path and moving the multi-domain site provisioner
+out of `domains/vms`.
 
 **Goal:** allow a seller to offer the same underlying physical machine as
 exclusive bare metal or as VM slices, depending on demand, without double
