@@ -43,6 +43,11 @@ from registry_client import (
     SyncRegistryClient,
     UpdateListingRequest,
 )
+from core_storefront.publication_command import (
+    StorefrontPublicationCommandCallbacks,
+    StorefrontPublicationCommandConfig,
+    run_storefront_publication_command,
+)
 from core_storefront.publication_composition import (
     build_bare_metal_publication_selection,
     build_multi_domain_publication_selection,
@@ -1015,15 +1020,20 @@ def _publish_command_round(
         except typer.Exit as exc:
             raise RuntimeError("HTTP error (see above)") from exc
 
-    return _publication_source_selection().run_command(
-        db_path=db_path,
-        base_url=base_url,
-        private_key=private_key,
-        build_payload=build_payload,
-        publish_offer=publish_offer,
+    return run_storefront_publication_command(
+        _publication_source_selection(),
+        config=StorefrontPublicationCommandConfig(
+            db_path=db_path,
+            base_url=base_url,
+            private_key=private_key,
+            close_stale=close_stale,
+            skip_open=skip_open,
+        ),
+        callbacks=StorefrontPublicationCommandCallbacks(
+            build_payload=build_payload,
+            publish_offer=publish_offer,
+        ),
         skip_ids=skip_ids,
-        close_stale=close_stale,
-        skip_open=skip_open,
     )
 
 
