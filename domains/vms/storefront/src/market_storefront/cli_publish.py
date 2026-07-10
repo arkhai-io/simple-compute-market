@@ -100,13 +100,8 @@ def _import_csv(csv_path: str, db: Optional[str]) -> None:
     subprocess.run(cmd, cwd=str(package_root), check=True)
 
 
-def _member_availability_sync() -> dict[tuple[str | None, str], int] | None:
-    """Aggregated site availability, fetched synchronously for CLI flows.
-
-    Keyed ``(site, resource_id)`` like ``member_availability_view``;
-    ``None`` when no authority answers — publishing then assumes
-    members are fully available and the reserve path corrects it.
-    """
+def _capacity_snapshot_sync() -> list[dict[str, Any]] | None:
+    """Aggregated site capacity snapshot, fetched synchronously for CLI flows."""
     import httpx
 
     from market_storefront.services.capacity_client import _capacity_settings
@@ -116,7 +111,7 @@ def _member_availability_sync() -> dict[tuple[str | None, str], int] | None:
     except Exception:
         return None
     headers = {"X-Admin-Key": admin_key} if admin_key else {}
-    view: dict[tuple[str | None, str], int] = {}
+    resources: list[dict[str, Any]] = []
     answered = False
     home_site = next(iter(sites))
     for site_name, url in sites.items():
@@ -135,15 +130,40 @@ def _member_availability_sync() -> dict[tuple[str | None, str], int] | None:
             continue
         answered = True
         for row in rows:
-            resource_id = row.get("resource_id")
-            available = row.get("available_units")
-            if not resource_id or available is None:
-                continue
-            available = max(int(available), 0)
+            item = dict(row)
+            item.setdefault("site", site_name)
             if site_name == home_site:
-                view[(None, str(resource_id))] = available
-            view[(str(site_name), str(resource_id))] = available
-    return view if answered else None
+                item.setdefault("home_site", True)
+            resources.append(item)
+    return resources if answered else None
+
+
+def _member_availability_sync() -> dict[tuple[str | None, str], int] | None:
+    """Aggregated site availability, fetched synchronously for CLI flows.
+
+    Keyed ``(site, resource_id)`` like ``member_availability_view``;
+    ``None`` when no authority answers — publishing then assumes
+    members are fully available and the reserve path corrects it.
+    """
+    snapshot = _capacity_snapshot_sync()
+    if snapshot is None:
+        return None
+    view: dict[tuple[str | None, str], int] = {}
+    home_site = next(
+        (str(row.get("site")) for row in snapshot if row.get("home_site")),
+        None,
+    )
+    for row in snapshot:
+        resource_id = row.get("resource_id")
+        available = row.get("available_units")
+        if not resource_id or available is None:
+            continue
+        site = str(row.get("site")) if row.get("site") else None
+        available = max(int(available), 0)
+        if site is not None and site == home_site:
+            view[(None, str(resource_id))] = available
+        view[(site, str(resource_id))] = available
+    return view
 
 
 def _available_resources(db_path: str) -> list[dict]:
@@ -450,17 +470,46 @@ def _publication_source_kwargs() -> dict[str, Any]:
     }
 
 
-def _publication_source_selection() -> PublicationSourceSelection:
-    """VM storefront publication source selection.
+def _bare_metal_publication_source_kwargs() -> dict[str, Any]:
+    """Infrastructure callbacks for the bare-metal publication adapter."""
+    return {
+        "capacity_snapshot": lambda: _capacity_snapshot_sync() or [],
+        "close_listing": _close_order,
+        "publish_existing_listing": _publish_existing_listing_to_registries,
+    }
 
-    Bare-metal publication now belongs to the core storefront composition path
-    with the bare-metal domain adapter; this transitional VM storefront only
-    publishes VM slice listings.
+
+def _publication_source_kwargs_by_name() -> dict[str, dict[str, Any]]:
+    return {
+        "vms": _publication_source_kwargs(),
+        "bare_metal": _bare_metal_publication_source_kwargs(),
+    }
+
+
+def _publication_source_selection(
+    source_names: tuple[str, ...] = ("vms",),
+) -> PublicationSourceSelection:
+    """Storefront publication source selection.
+
+    The legacy VM CLI still defaults to VM slice publication only. Passing
+    selected source names lets core compose the bare-metal domain adapter with
+    the same command surface without making the VM adapter own bare-metal
+    semantics.
     """
+    kwargs_by_name = _publication_source_kwargs_by_name()
     return PublicationSourceSelection(
-        source_names=("vms",),
-        source_kwargs_by_name={"vms": _publication_source_kwargs()},
+        source_names=source_names,
+        source_kwargs_by_name={
+            name: kwargs_by_name[name]
+            for name in source_names
+            if name in kwargs_by_name
+        },
     )
+
+
+def _bare_metal_publication_source_selection() -> PublicationSourceSelection:
+    """Bare-metal-only publication selection for future composition roots."""
+    return _publication_source_selection(("bare_metal",))
 
 
 def _publication_adapters() -> tuple[PublicationSource, ...]:

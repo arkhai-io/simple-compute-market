@@ -26,6 +26,8 @@ from market_storefront.cli_publish import (
     _open_listing_resource_keys,
     _open_order_resource_ids,
     _publication_adapters,
+    _bare_metal_publication_source_selection,
+    _publication_source_selection,
     _publish_round,
     _stale_open_listing_ids,
 )
@@ -585,6 +587,36 @@ def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch
 def test_vm_publish_adapters_do_not_include_bare_metal() -> None:
     assert [adapter.name for adapter in _publication_adapters()] == ["vms"]
 
+
+def test_publication_selection_can_compose_bare_metal(monkeypatch) -> None:
+    def fake_build_source(name, **_kwargs):
+        from core_storefront.publication_sources import PublicationSource
+
+        return PublicationSource(
+            name=name,
+            open_keys=lambda _db: set(),
+            close_stale=lambda _db, _url, _key: [],
+            available_candidates=lambda _db: [],
+            skip_keys=lambda _candidate: set(),
+            offer_resource=lambda candidate: candidate,
+            record_published=lambda *_args: None,
+            reopen_existing=lambda *_args: None,
+            reopen_error_label="reopen fake",
+        )
+
+    monkeypatch.setattr(
+        "core_storefront.publication_runner.build_publication_source",
+        fake_build_source,
+    )
+
+    assert [
+        source.name
+        for source in _bare_metal_publication_source_selection().build_sources()
+    ] == ["bare_metal"]
+    assert [
+        source.name
+        for source in _publication_source_selection(("vms", "bare_metal")).build_sources()
+    ] == ["vms", "bare_metal"]
 
 
 def test_publish_round_normalizes_zero_duration_to_unlimited(tmp_path, monkeypatch):

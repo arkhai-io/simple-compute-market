@@ -4,6 +4,7 @@ from typing import Any
 
 from core_storefront.publication_runner import (
     PublicationSourceSelection,
+    build_publication_source_selection,
     close_stale_publication_listings,
     open_publication_keys,
     publish_round,
@@ -169,6 +170,42 @@ def test_publication_source_selection_wraps_command_cycle(monkeypatch) -> None:
         "price": "3",
         "listing_id": "vms",
     }
+
+
+def test_build_publication_source_selection_composes_named_sources(monkeypatch) -> None:
+    import core_storefront.publication_runner as runner
+
+    monkeypatch.setattr(
+        runner,
+        "build_publication_source",
+        lambda name, **kwargs: _source(candidate={"resource_id": name, **kwargs}),
+    )
+
+    def run(source_names: tuple[str, ...]) -> list[str]:
+        selection = build_publication_source_selection(
+            source_names,
+            source_kwargs_by_name={
+                "vms": {"price": "vm-price"},
+                "bare_metal": {"price": "bm-price"},
+            },
+        )
+        result = selection.run_command(
+            db_path="db.sqlite",
+            base_url="http://seller",
+            private_key=None,
+            build_payload=lambda *_args: ([{}], [], None),
+            publish_offer=lambda offer, *_args: {
+                "status": "published",
+                "listing_id": offer["resource_id"],
+            },
+            close_stale=False,
+            skip_open=False,
+        )
+        return [item["response"]["listing_id"] for item in result.published]
+
+    assert run(("vms",)) == ["vms"]
+    assert run(("bare_metal",)) == ["bare_metal"]
+    assert run(("vms", "bare_metal")) == ["vms", "bare_metal"]
 
 
 def test_publication_command_result_exposes_summary_counts(monkeypatch) -> None:

@@ -260,6 +260,18 @@ def open_publication_keys(
     return covered
 
 
+def build_publication_source_selection(
+    source_names: Sequence[str],
+    *,
+    source_kwargs_by_name: Mapping[str, Mapping[str, Any]] | None = None,
+) -> PublicationSourceSelection:
+    """Build a command-facing selected-source composition by entry-point name."""
+    return PublicationSourceSelection(
+        source_names=tuple(source_names),
+        source_kwargs_by_name=source_kwargs_by_name or {},
+    )
+
+
 def build_publication_sources_by_name(
     source_names: Sequence[str],
     *,
@@ -415,12 +427,11 @@ def run_publication_command_by_name(
     skip_open: bool = True,
 ) -> PublicationCommandResult:
     """Build selected sources by name and run the CLI-facing command."""
-    selection = PublicationSourceSelection(
-        source_names=source_names,
-        source_kwargs_by_name=source_kwargs_by_name or {},
-    )
     return run_publication_command(
-        selection,
+        build_publication_source_selection(
+            source_names,
+            source_kwargs_by_name=source_kwargs_by_name,
+        ),
         db_path=db_path,
         base_url=base_url,
         private_key=private_key,
