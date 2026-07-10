@@ -8,8 +8,8 @@ control flow over sources.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 
 from .publication_plugins import build_publication_source
@@ -41,6 +41,73 @@ class PublicationCycleResult:
     skipped: list[dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class PublicationSourceSelection:
+    """Core-owned selection of domain publication sources.
+
+    Storefront composition roots use this as the small command-facing wrapper:
+    choose source entry-point names, provide per-source infrastructure kwargs,
+    then let core build sources and run publication cycles.
+    """
+
+    source_names: Sequence[str]
+    source_kwargs_by_name: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+
+    def build_sources(self) -> tuple[PublicationSource, ...]:
+        """Build the selected publication source adapters."""
+        return build_publication_sources_by_name(
+            self.source_names,
+            source_kwargs_by_name={
+                name: dict(kwargs)
+                for name, kwargs in self.source_kwargs_by_name.items()
+            },
+        )
+
+    def close_stale(
+        self,
+        *,
+        db_path: str,
+        base_url: str,
+        private_key: str | None,
+    ) -> dict[str, list[str]]:
+        """Close stale listings for the selected sources."""
+        return close_stale_publication_listings(
+            self.build_sources(),
+            db_path=db_path,
+            base_url=base_url,
+            private_key=private_key,
+        )
+
+    def open_keys(self, db_path: str) -> set[str]:
+        """Return open publication keys for the selected sources."""
+        return open_publication_keys(self.build_sources(), db_path)
+
+    def run_cycle(
+        self,
+        *,
+        db_path: str,
+        base_url: str,
+        private_key: str | None,
+        build_payload: PayloadBuilder,
+        publish_offer: PublishOffer,
+        skip_ids: set[str] | None = None,
+        close_stale: bool = True,
+        skip_open: bool = True,
+    ) -> PublicationCycleResult:
+        """Run one publication cycle for the selected sources."""
+        return run_publication_cycle(
+            self.build_sources(),
+            db_path=db_path,
+            base_url=base_url,
+            private_key=private_key,
+            build_payload=build_payload,
+            publish_offer=publish_offer,
+            skip_ids=skip_ids,
+            close_stale=close_stale,
+            skip_open=skip_open,
+        )
+
+
 def close_stale_publication_listings(
     sources: Iterable[PublicationSource],
     *,
@@ -69,7 +136,7 @@ def open_publication_keys(
 def build_publication_sources_by_name(
     source_names: Sequence[str],
     *,
-    source_kwargs_by_name: dict[str, dict[str, Any]] | None = None,
+    source_kwargs_by_name: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[PublicationSource, ...]:
     """Build selected domain publication sources from entry-point names."""
     kwargs_by_name = source_kwargs_by_name or {}
@@ -155,7 +222,7 @@ def run_publication_cycle(
 def run_publication_cycle_by_name(
     source_names: Sequence[str],
     *,
-    source_kwargs_by_name: dict[str, dict[str, Any]] | None = None,
+    source_kwargs_by_name: Mapping[str, Mapping[str, Any]] | None = None,
     db_path: str,
     base_url: str,
     private_key: str | None,

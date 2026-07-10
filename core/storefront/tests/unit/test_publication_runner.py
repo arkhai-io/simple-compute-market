@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from core_storefront.publication_runner import (
+    PublicationSourceSelection,
     close_stale_publication_listings,
     open_publication_keys,
     publish_round,
@@ -126,6 +127,47 @@ def test_run_publication_cycle_by_name_builds_selected_sources(monkeypatch) -> N
     assert result.failed == []
     assert result.skipped == []
     assert result.published[0]["response"]["listing_id"] == "vms"
+
+
+def test_publication_source_selection_wraps_command_cycle(monkeypatch) -> None:
+    import core_storefront.publication_runner as runner
+
+    monkeypatch.setattr(
+        runner,
+        "build_publication_source",
+        lambda name, **kwargs: _source(
+            candidate={"resource_id": name, **kwargs},
+            open_keys={"already-open"},
+        ),
+    )
+
+    selection = PublicationSourceSelection(
+        source_names=("vms",),
+        source_kwargs_by_name={"vms": {"price": "3"}},
+    )
+
+    assert [source.name for source in selection.build_sources()] == ["test"]
+    assert selection.open_keys("db.sqlite") == {"already-open"}
+
+    result = selection.run_cycle(
+        db_path="db.sqlite",
+        base_url="http://seller",
+        private_key=None,
+        build_payload=lambda *_args: ([{}], [], None),
+        publish_offer=lambda offer, *_args: {
+            "status": "published",
+            "listing_id": offer["resource_id"],
+        },
+    )
+
+    assert result.closed == {"test": ["stale-1"]}
+    assert result.failed == []
+    assert result.skipped == []
+    assert result.published[0]["resource"] == {
+        "resource_id": "vms",
+        "price": "3",
+        "listing_id": "vms",
+    }
 
 
 def test_publish_source_by_name_loads_source(monkeypatch) -> None:

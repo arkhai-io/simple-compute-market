@@ -44,12 +44,7 @@ from registry_client import (
     UpdateListingRequest,
 )
 from core_storefront.publication_sources import PublicationSource
-from core_storefront.publication_plugins import build_publication_source
-from core_storefront.publication_runner import (
-    close_stale_publication_listings as run_close_stale_publication_listings,
-    open_publication_keys as run_open_publication_keys,
-    run_publication_cycle,
-)
+from core_storefront.publication_runner import PublicationSourceSelection
 
 from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
 from domains.vms.listings.reconciler import (
@@ -452,18 +447,21 @@ def _publication_source_kwargs() -> dict[str, Any]:
     }
 
 
-def _publication_adapters() -> tuple[PublicationSource, ...]:
-    """VM storefront publication sources.
+def _publication_source_selection() -> PublicationSourceSelection:
+    """VM storefront publication source selection.
 
     Bare-metal publication now belongs to the core storefront composition path
     with the bare-metal domain adapter; this transitional VM storefront only
     publishes VM slice listings.
     """
-    return (build_publication_source("vms", **_publication_source_kwargs()),)
+    return PublicationSourceSelection(
+        source_names=("vms",),
+        source_kwargs_by_name={"vms": _publication_source_kwargs()},
+    )
 
 
-def _publication_lifecycle_adapters() -> tuple[PublicationSource, ...]:
-    return _publication_adapters()
+def _publication_adapters() -> tuple[PublicationSource, ...]:
+    return _publication_source_selection().build_sources()
 
 
 def _close_stale_publication_listings(
@@ -472,8 +470,7 @@ def _close_stale_publication_listings(
     base_url: str,
     private_key: Optional[str],
 ) -> dict[str, list[str]]:
-    return run_close_stale_publication_listings(
-        _publication_lifecycle_adapters(),
+    return _publication_source_selection().close_stale(
         db_path=db_path,
         base_url=base_url,
         private_key=private_key,
@@ -481,7 +478,7 @@ def _close_stale_publication_listings(
 
 
 def _open_publication_keys(db_path: str) -> set[str]:
-    return run_open_publication_keys(_publication_lifecycle_adapters(), db_path)
+    return _publication_source_selection().open_keys(db_path)
 
 
 def _resolve_pricing(
@@ -968,8 +965,7 @@ def _publish_round(
         except typer.Exit as exc:
             raise RuntimeError("HTTP error (see above)") from exc
 
-    result = run_publication_cycle(
-        _publication_adapters(),
+    result = _publication_source_selection().run_cycle(
         db_path=db_path,
         base_url=base_url,
         private_key=private_key,
