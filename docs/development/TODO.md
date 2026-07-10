@@ -395,9 +395,10 @@ core publication command surface, executable-facing command config/callback
 helper, selected-source composition helpers, VM storefront publication
 wiring module, shared storefront FastAPI app shell, shared storefront
 lifespan singleton/startup assembly, shared ordered startup-step helpers, the
-shared site resource/allocation service boundary, and shared lease lifecycle
-state-machine orchestration are now core/domain-owned or isolated from the CLI.
-The VM storefront still supplies transitional infrastructure callbacks for
+shared site resource/allocation service boundary, shared release executor
+dispatch, and shared lease lifecycle state-machine orchestration are now
+core/domain-owned or isolated from the CLI. The VM storefront still supplies
+transitional infrastructure callbacks for
 VM-only, bare-metal-only, or combined VM+bare-metal publication selections;
 remaining architectural work is moving the multi-domain site provisioner out of
 `domains/vms` and continuing to split VM-specific startup/provisioning steps

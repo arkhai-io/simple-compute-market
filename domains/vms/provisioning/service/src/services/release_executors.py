@@ -5,7 +5,12 @@ from __future__ import annotations
 import inspect
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any, Protocol
+from typing import Any
+
+from core_storefront.release_dispatcher import (
+    ExecutorReleaseDispatcher as CoreExecutorReleaseDispatcher,
+    ReleaseExecutor,
+)
 
 from arkhai_bare_metal import (
     BARE_METAL_EXECUTOR_KIND,
@@ -27,11 +32,6 @@ def get_physical_host_id(allocation: dict[str, Any]) -> str | None:
         return None
     physical_host_id = executor_ref.get(PHYSICAL_HOST_ID_REF_KEY)
     return str(physical_host_id) if physical_host_id else None
-
-
-class ReleaseExecutor(Protocol):
-    async def submit_release(self, allocation: dict[str, Any]) -> str | None:
-        """Submit release work for an allocation and return its job id."""
 
 
 class VmReleaseExecutor:
@@ -108,19 +108,8 @@ class BareMetalReleaseExecutor:
         return result
 
 
-class ExecutorReleaseDispatcher:
-    """Route release requests by allocation executor kind."""
+class ExecutorReleaseDispatcher(CoreExecutorReleaseDispatcher):
+    """VM compatibility dispatcher that defaults legacy allocations to VM release."""
 
     def __init__(self, executors: dict[str, ReleaseExecutor]) -> None:
-        self._executors = dict(executors)
-
-    async def submit_release(self, allocation: dict[str, Any]) -> str | None:
-        executor_kind = allocation.get("executor_kind") or VM_EXECUTOR_KIND
-        executor = self._executors.get(str(executor_kind))
-        if executor is None:
-            logger.warning(
-                "[LEASE_LIFECYCLE] No release executor registered for executor_kind=%s",
-                executor_kind,
-            )
-            return None
-        return await executor.submit_release(allocation)
+        super().__init__(executors, default_executor_kind=VM_EXECUTOR_KIND)
