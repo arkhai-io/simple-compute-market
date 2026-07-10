@@ -402,7 +402,9 @@ from the CLI. The VM storefront still supplies transitional infrastructure callb
 VM-only, bare-metal-only, or combined VM+bare-metal publication selections;
 remaining architectural work is moving the multi-domain site provisioner out of
 `domains/vms` and continuing to split VM-specific startup/provisioning steps
-from cross-domain storefront/site authority policy.
+from cross-domain storefront/site authority policy. The controller/container
+ownership map and extraction sequence are tracked in
+[`provisioning-migration-plan.md`](provisioning-migration-plan.md).
 
 **Goal:** allow a seller to offer the same underlying physical machine as
 exclusive bare metal or as VM slices, depending on demand, without double
