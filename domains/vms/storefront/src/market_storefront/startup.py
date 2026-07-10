@@ -8,6 +8,12 @@ step, no agent-card publication, and no heartbeat loop.
 import asyncio
 import logging
 
+from core_storefront.app_startup import (
+    StorefrontBackgroundTask,
+    StorefrontStartupStep,
+    run_storefront_startup_steps,
+    start_storefront_background_task,
+)
 from market_storefront.utils.config import (
     BASE_URL_OVERRIDE,
     CHAINS,
@@ -139,14 +145,7 @@ def _maybe_join_zerotier_network() -> None:
         )
 
 
-async def _startup_tasks() -> None:
-    """Initialize background tasks. Called from server.py lifespan."""
-    from market_storefront.negotiation_watchdog import (
-        watchdog_loop as _neg_watchdog_loop,
-    )
-
-    _maybe_join_zerotier_network()
-
+def _initialize_negotiation_thread_store() -> None:
     import market_storefront.container as _container
     from market_policy.identity import Identity
     from market_policy.negotiation_thread import get_thread_store
@@ -161,65 +160,123 @@ async def _startup_tasks() -> None:
         storefront_url,
     )
 
-    try:
-        result = await _container.resolved_system_service.seed_resources_if_empty(
-            csv_inline=settings.resources_csv_inline,
-            csv_path=settings.resources_csv_path,
+
+async def _seed_resources_if_empty() -> None:
+    import market_storefront.container as _container
+
+    result = await _container.resolved_system_service.seed_resources_if_empty(
+        csv_inline=settings.resources_csv_inline,
+        csv_path=settings.resources_csv_path,
+    )
+    if result["seeded"]:
+        logger.info(
+            "[STARTUP] Seeded %d resource(s) from %s",
+            result["imported_count"],
+            result["source"],
         )
-        if result["seeded"]:
-            logger.info(
-                "[STARTUP] Seeded %d resource(s) from %s",
-                result["imported_count"],
-                result["source"],
-            )
-        elif result["source"] is None:
-            logger.info(
-                "[STARTUP] No resource source configured - starting with empty inventory"
-            )
-        else:
-            logger.info(
-                "[STARTUP] Resource seeding skipped - %d resource(s) already present",
-                result["imported_count"],
-            )
-    except Exception as exc:
-        logger.error("[STARTUP] Resource seeding failed: %s", exc)
-        raise
+    elif result["source"] is None:
+        logger.info(
+            "[STARTUP] No resource source configured - starting with empty inventory"
+        )
+    else:
+        logger.info(
+            "[STARTUP] Resource seeding skipped - %d resource(s) already present",
+            result["imported_count"],
+        )
 
-    await _probe_chain_addresses()
 
-    asyncio.create_task(_neg_watchdog_loop())
-    logger.info(
-        "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)",
-        settings.negotiation_watchdog_interval,
-        settings.negotiation_timeout_seconds,
+def _start_negotiation_watchdog() -> None:
+    from market_storefront.negotiation_watchdog import (
+        watchdog_loop as _neg_watchdog_loop,
     )
 
+    start_storefront_background_task(
+        StorefrontBackgroundTask(
+            name="negotiation_watchdog",
+            task_factory=_neg_watchdog_loop,
+            log_message=(
+                "[STARTUP] Negotiation watchdog started "
+                "(interval=%ds, timeout=%ds)"
+            ),
+            log_args=(
+                settings.negotiation_watchdog_interval,
+                settings.negotiation_timeout_seconds,
+            ),
+        ),
+        logger=logger,
+    )
+
+
+def _start_claims_engine() -> None:
     from market_storefront.services.claims_runtime import claims_engine_loop
 
-    asyncio.create_task(claims_engine_loop())
-    logger.info(
-        "[STARTUP] Claims engine started (interval=%ss)",
-        getattr(settings, "claims_sweep_interval", 30),
+    start_storefront_background_task(
+        StorefrontBackgroundTask(
+            name="claims_engine",
+            task_factory=claims_engine_loop,
+            log_message="[STARTUP] Claims engine started (interval=%ss)",
+            log_args=(getattr(settings, "claims_sweep_interval", 30),),
+        ),
+        logger=logger,
     )
 
-    await _preflight_provisioning()
 
-    # Mirror inventory into the home site authority's ledger and start
-    # tailing every authority's capacity-event feed. Runs after the
-    # provisioning preflight because that process hosts the site
-    # authority.
-    from market_storefront.services.capacity_client import (
-        capacity_events_poller_loop,
-        sync_site_resources,
+async def _sync_site_resources() -> None:
+    # Mirror inventory into the home site authority's ledger. Runs after the
+    # provisioning preflight because that process hosts the site authority.
+    from market_storefront.services.capacity_client import sync_site_resources
+
+    await sync_site_resources()
+
+
+def _start_capacity_events_poller() -> None:
+    # Tail every authority's capacity-event feed after the site sync step.
+    from market_storefront.services.capacity_client import capacity_events_poller_loop
+
+    start_storefront_background_task(
+        StorefrontBackgroundTask(
+            name="capacity_events_poller",
+            task_factory=capacity_events_poller_loop,
+        ),
+        logger=logger,
     )
 
-    try:
-        await sync_site_resources()
-    except Exception as exc:
-        logger.error(
-            "[STARTUP] Site-authority resource sync failed: %s — the ledger "
-            "may be empty; reserves will not match until inventory is "
-            "registered",
-            exc,
-        )
-    asyncio.create_task(capacity_events_poller_loop())
+
+async def _startup_tasks() -> None:
+    """Initialize background tasks. Called from server.py lifespan."""
+    await run_storefront_startup_steps(
+        (
+            StorefrontStartupStep("join_zerotier", _maybe_join_zerotier_network),
+            StorefrontStartupStep(
+                "negotiation_thread_store",
+                _initialize_negotiation_thread_store,
+            ),
+            StorefrontStartupStep(
+                "seed_resources",
+                _seed_resources_if_empty,
+                error_message="[STARTUP] Resource seeding failed: %s",
+            ),
+            StorefrontStartupStep("probe_chain_addresses", _probe_chain_addresses),
+            StorefrontStartupStep(
+                "negotiation_watchdog",
+                _start_negotiation_watchdog,
+            ),
+            StorefrontStartupStep("claims_engine", _start_claims_engine),
+            StorefrontStartupStep("preflight_provisioning", _preflight_provisioning),
+            StorefrontStartupStep(
+                "sync_site_resources",
+                _sync_site_resources,
+                continue_on_error=True,
+                error_message=(
+                    "[STARTUP] Site-authority resource sync failed: %s — the ledger "
+                    "may be empty; reserves will not match until inventory is "
+                    "registered"
+                ),
+            ),
+            StorefrontStartupStep(
+                "capacity_events_poller",
+                _start_capacity_events_poller,
+            ),
+        ),
+        logger=logger,
+    )
