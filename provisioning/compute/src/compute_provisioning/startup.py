@@ -1,4 +1,4 @@
-"""Reusable startup assembly helpers for provisioning executables."""
+"""Reusable startup assembly helpers for compute provisioners."""
 
 from __future__ import annotations
 
@@ -6,9 +6,15 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from core_storefront.app_startup import maybe_await
+from .lifecycle import cancel_background_tasks, create_background_task
 
-from .provisioning_lifecycle import cancel_background_tasks, create_background_task
+
+async def maybe_await(value: Any) -> Any:
+    """Await awaitables; return plain values unchanged."""
+
+    if hasattr(value, "__await__"):
+        return await value
+    return value
 
 
 class LoggerLike(Protocol):
@@ -17,8 +23,8 @@ class LoggerLike(Protocol):
 
 
 @dataclass(frozen=True)
-class ProvisioningStartupStep:
-    """One ordered provisioning startup action."""
+class ComputeProvisioningStartupStep:
+    """One ordered compute provisioning startup action."""
 
     name: str
     action: Callable[[], Any]
@@ -27,7 +33,7 @@ class ProvisioningStartupStep:
 
 
 @dataclass(frozen=True)
-class ProvisioningBackgroundTask:
+class ComputeProvisioningBackgroundTask:
     """A background coroutine scheduled after startup steps complete."""
 
     name: str
@@ -37,8 +43,8 @@ class ProvisioningBackgroundTask:
 
 
 @dataclass(frozen=True)
-class ProvisioningShutdownStep:
-    """One ordered provisioning shutdown action."""
+class ComputeProvisioningShutdownStep:
+    """One ordered compute provisioning shutdown action."""
 
     name: str
     action: Callable[[], Any]
@@ -47,18 +53,18 @@ class ProvisioningShutdownStep:
 
 
 @dataclass(frozen=True)
-class ProvisioningRuntime:
-    """Handles returned by provisioning startup assembly."""
+class ComputeProvisioningRuntime:
+    """Handles returned by compute provisioning startup assembly."""
 
     background_tasks: tuple[Any, ...] = ()
 
 
-async def run_provisioning_startup_steps(
-    steps: Sequence[ProvisioningStartupStep],
+async def run_compute_provisioning_startup_steps(
+    steps: Sequence[ComputeProvisioningStartupStep],
     *,
     logger: LoggerLike | None = None,
 ) -> None:
-    """Run provisioning startup steps in order, fail-fast by default."""
+    """Run compute provisioning startup steps in order, fail-fast by default."""
 
     for step in steps:
         try:
@@ -70,8 +76,8 @@ async def run_provisioning_startup_steps(
                 raise
 
 
-def start_provisioning_background_task(
-    task: ProvisioningBackgroundTask,
+def start_compute_provisioning_background_task(
+    task: ComputeProvisioningBackgroundTask,
     *,
     logger: LoggerLike | None = None,
     create_task: Callable[..., Any] = create_background_task,
@@ -84,39 +90,39 @@ def start_provisioning_background_task(
     return handle
 
 
-async def start_provisioning_runtime(
+async def start_compute_provisioning_runtime(
     *,
-    startup_steps: Sequence[ProvisioningStartupStep] = (),
-    background_tasks: Sequence[ProvisioningBackgroundTask]
-    | Callable[[], Sequence[ProvisioningBackgroundTask]] = (),
+    startup_steps: Sequence[ComputeProvisioningStartupStep] = (),
+    background_tasks: Sequence[ComputeProvisioningBackgroundTask]
+    | Callable[[], Sequence[ComputeProvisioningBackgroundTask]] = (),
     logger: LoggerLike | None = None,
     create_task: Callable[..., Any] = create_background_task,
-) -> ProvisioningRuntime:
+) -> ComputeProvisioningRuntime:
     """Run startup steps, then schedule background tasks.
 
     ``background_tasks`` may be a factory so task specifications can depend on
     services resolved by preceding startup steps.
     """
 
-    await run_provisioning_startup_steps(startup_steps, logger=logger)
+    await run_compute_provisioning_startup_steps(startup_steps, logger=logger)
     task_specs = background_tasks() if callable(background_tasks) else background_tasks
     handles = tuple(
-        start_provisioning_background_task(
+        start_compute_provisioning_background_task(
             task,
             logger=logger,
             create_task=create_task,
         )
         for task in task_specs
     )
-    return ProvisioningRuntime(background_tasks=handles)
+    return ComputeProvisioningRuntime(background_tasks=handles)
 
 
-async def run_provisioning_shutdown_steps(
-    steps: Sequence[ProvisioningShutdownStep],
+async def run_compute_provisioning_shutdown_steps(
+    steps: Sequence[ComputeProvisioningShutdownStep],
     *,
     logger: LoggerLike | None = None,
 ) -> None:
-    """Run provisioning shutdown steps in order, fail-fast by default."""
+    """Run compute provisioning shutdown steps in order, fail-fast by default."""
 
     for step in steps:
         try:
@@ -128,13 +134,13 @@ async def run_provisioning_shutdown_steps(
                 raise
 
 
-async def stop_provisioning_runtime(
-    runtime: ProvisioningRuntime,
+async def stop_compute_provisioning_runtime(
+    runtime: ComputeProvisioningRuntime,
     *,
-    shutdown_steps: Sequence[ProvisioningShutdownStep] = (),
+    shutdown_steps: Sequence[ComputeProvisioningShutdownStep] = (),
     logger: LoggerLike | None = None,
 ) -> None:
     """Cancel background tasks and run shutdown steps."""
 
     await cancel_background_tasks(*runtime.background_tasks)
-    await run_provisioning_shutdown_steps(shutdown_steps, logger=logger)
+    await run_compute_provisioning_shutdown_steps(shutdown_steps, logger=logger)

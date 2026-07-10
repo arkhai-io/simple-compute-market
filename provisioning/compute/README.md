@@ -1,6 +1,6 @@
 # Compute provisioning
 
-This directory is the planned home for cross-domain compute provisioning code.
+This directory is the home for shared cross-domain compute provisioning code.
 It is intentionally outside `core/`, `domains/`, and `kit/`:
 
 - `core/` defines marketplace role skeletons and shared storefront/site
@@ -13,6 +13,11 @@ It is intentionally outside `core/`, `domains/`, and `kit/`:
 The current transitional implementation remains in
 `domains/vms/provisioning/service` until the compute provisioner can be moved
 without breaking existing VM clients, Docker images, or Helm/developer flows.
+
+Current package:
+
+- `arkhai-compute-provisioning` — shared app/lifecycle/startup helpers for
+  compute provisioning services.
 
 Expected future split:
 

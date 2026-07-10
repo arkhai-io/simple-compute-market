@@ -7,19 +7,18 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from core_storefront.provisioning_app import (
-    ProvisioningAppConfig,
-    ProvisioningMiddlewareMount,
-    ProvisioningRouterMount,
-    build_provisioning_app,
+from compute_provisioning.app import (
+    ComputeProvisioningAppConfig,
+    ComputeProvisioningMiddlewareMount,
+    ComputeProvisioningRouterMount,
+    build_compute_provisioning_app,
 )
-from core_storefront.provisioning_startup import (
-    ProvisioningBackgroundTask,
-    ProvisioningRuntime,
-    ProvisioningShutdownStep,
-    ProvisioningStartupStep,
-    start_provisioning_runtime,
-    stop_provisioning_runtime,
+from compute_provisioning.startup import (
+    ComputeProvisioningBackgroundTask,
+    ComputeProvisioningShutdownStep,
+    ComputeProvisioningStartupStep,
+    start_compute_provisioning_runtime,
+    stop_compute_provisioning_runtime,
 )
 
 import container as _container_module
@@ -148,27 +147,27 @@ def _create_job_queue() -> None:
     )
 
 
-def _startup_steps() -> tuple[ProvisioningStartupStep, ...]:
+def _startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
     return (
-        ProvisioningStartupStep("apply-ansible-config", _apply_ansible_config),
-        ProvisioningStartupStep(
+        ComputeProvisioningStartupStep("apply-ansible-config", _apply_ansible_config),
+        ComputeProvisioningStartupStep(
             "initialise-container-resources",
             _initialise_container_resources,
         ),
-        ProvisioningStartupStep(
+        ComputeProvisioningStartupStep(
             "resolve-request-path-services",
             _resolve_request_path_services,
         ),
-        ProvisioningStartupStep("seed-inventory", _seed_inventory_if_empty),
-        ProvisioningStartupStep("create-job-queue", _create_job_queue),
+        ComputeProvisioningStartupStep("seed-inventory", _seed_inventory_if_empty),
+        ComputeProvisioningStartupStep("create-job-queue", _create_job_queue),
     )
 
 
-def _background_tasks() -> tuple[ProvisioningBackgroundTask, ...]:
+def _background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
     job_queue = _container_module.resolved_job_queue
 
-    tasks: list[ProvisioningBackgroundTask] = [
-        ProvisioningBackgroundTask(
+    tasks: list[ComputeProvisioningBackgroundTask] = [
+        ComputeProvisioningBackgroundTask(
             "job-processing-loop",
             lambda: job_queue.start(
                 _container_module.resolved_job_service._process_job
@@ -185,7 +184,7 @@ def _background_tasks() -> tuple[ProvisioningBackgroundTask, ...]:
         getattr(settings, "retry_scheduler_poll_interval_seconds", 10)
     )
     tasks.append(
-        ProvisioningBackgroundTask(
+        ComputeProvisioningBackgroundTask(
             "retry-scheduler",
             lambda: _container_module.resolved_job_service.run_retry_scheduler(
                 job_queue, retry_poll_interval
@@ -199,7 +198,7 @@ def _background_tasks() -> tuple[ProvisioningBackgroundTask, ...]:
     watchdog_enabled = bool(getattr(settings, "lease_watchdog_enabled", True))
     if watchdog_enabled:
         tasks.append(
-            ProvisioningBackgroundTask(
+            ComputeProvisioningBackgroundTask(
                 "lease-watchdog",
                 lambda: _container_module.resolved_lease_watchdog.run(),
                 "Lease watchdog started (interval=%ds grace=%ds)",
@@ -215,9 +214,12 @@ def _background_tasks() -> tuple[ProvisioningBackgroundTask, ...]:
     return tuple(tasks)
 
 
-def _shutdown_steps() -> tuple[ProvisioningShutdownStep, ...]:
+def _shutdown_steps() -> tuple[ComputeProvisioningShutdownStep, ...]:
     return (
-        ProvisioningShutdownStep("shutdown-container-resources", container.shutdown_resources),
+        ComputeProvisioningShutdownStep(
+            "shutdown-container-resources",
+            container.shutdown_resources,
+        ),
     )
 
 
@@ -225,7 +227,7 @@ def _shutdown_steps() -> tuple[ProvisioningShutdownStep, ...]:
 async def lifespan(_: FastAPI):
     logger.info("Starting provisioning service...")
 
-    runtime = await start_provisioning_runtime(
+    runtime = await start_compute_provisioning_runtime(
         startup_steps=_startup_steps(),
         background_tasks=_background_tasks,
         logger=logger,
@@ -235,7 +237,7 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         logger.info("Shutdown initiated...")
-        await stop_provisioning_runtime(
+        await stop_compute_provisioning_runtime(
             runtime,
             shutdown_steps=_shutdown_steps(),
             logger=logger,
@@ -324,8 +326,8 @@ PROVISIONING_OPENAPI_TAGS = [
 #   /api/v1/leases/*                 <- market-managed lease lifecycle
 #   /api/v1/bare-metal/leases/*      <- bare-metal domain lease adapter
 # ---------------------------------------------------------------------------
-app = build_provisioning_app(
-    config=ProvisioningAppConfig(
+app = build_compute_provisioning_app(
+    config=ComputeProvisioningAppConfig(
         title="Provisioning Service",
         version="0.2.0",
         description=PROVISIONING_DESCRIPTION,
@@ -334,18 +336,18 @@ app = build_provisioning_app(
     lifespan=lifespan,
     # Middleware order matches the previous direct add_middleware calls.
     middlewares=(
-        ProvisioningMiddlewareMount(
+        ComputeProvisioningMiddlewareMount(
             AgentRateLimitMiddleware,
             {
                 "enabled": settings.enable_rate_limiting,
                 "max_requests": settings.rate_limit_requests_per_minute,
             },
         ),
-        ProvisioningMiddlewareMount(
+        ComputeProvisioningMiddlewareMount(
             StorefrontAuthMiddleware,
             {"admin_key": str(settings.storefront_admin_key or "")},
         ),
-        ProvisioningMiddlewareMount(
+        ComputeProvisioningMiddlewareMount(
             CORSMiddleware,
             {
                 "allow_origins": ["*"],
@@ -356,15 +358,15 @@ app = build_provisioning_app(
         ),
     ),
     routers=(
-        ProvisioningRouterMount(SystemController.make_health_router()),
-        ProvisioningRouterMount(SystemController.make_system_router(), "/api/v1"),
-        ProvisioningRouterMount(AnsibleJobsController.make_router(), "/api/v1"),
-        ProvisioningRouterMount(HostController.make_router(), "/api/v1"),
-        ProvisioningRouterMount(VmController.make_router(), "/api/v1"),
-        ProvisioningRouterMount(LeasesController.make_router(), "/api/v1"),
-        ProvisioningRouterMount(BareMetalLeasesController.make_router(), "/api/v1"),
-        ProvisioningRouterMount(AdminLeasesController.make_router(), "/api/v1"),
-        ProvisioningRouterMount(
+        ComputeProvisioningRouterMount(SystemController.make_health_router()),
+        ComputeProvisioningRouterMount(SystemController.make_system_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(AnsibleJobsController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(HostController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(VmController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(LeasesController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(BareMetalLeasesController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(AdminLeasesController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(
             make_capacity_router(
                 lambda: _container_module.resolved_capacity_ledger_service
             ),

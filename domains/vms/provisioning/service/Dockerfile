@@ -87,6 +87,7 @@ COPY --chown=appuser:appuser domains/vms/provisioning/service/src ./src
 # otherwise pin a stale copy from an earlier build.
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
     uv sync --no-dev --no-install-project --find-links /dist \
+        --refresh-package arkhai-compute-provisioning \
         --refresh-package arkhai-core-storefront \
         --refresh-package arkhai-core-storefront-client \
         --refresh-package arkhai-kit-site \

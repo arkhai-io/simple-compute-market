@@ -23,15 +23,19 @@ provisioning/
     contracts/    # shared DTOs/contracts, if they outgrow the client package
 ```
 
-Potential distribution names:
+Current distribution:
+
+- `arkhai-compute-provisioning` — shared app/lifecycle/startup helpers for
+  compute provisioning services.
+
+Potential future split:
 
 - `arkhai-compute-provisioning-service`
 - `arkhai-compute-provisioning-client`
 - `arkhai-compute-provisioning-contracts`
 
-The exact split can remain lazy. A single `arkhai-compute-provisioning` package
-is acceptable initially if service, client, and contract code are not yet large
-enough to justify separate wheels.
+The exact split can remain lazy while service, client, and contract code are not
+yet large enough to justify separate wheels.
 
 ## Ownership model
 
@@ -79,9 +83,9 @@ it is not a universal requirement for all storefront domains.
 
 ## Already extracted shared helpers
 
-Some reusable primitives currently live in `core_storefront` because they are
-also storefront/site-authority primitives or generic app/lifecycle utilities.
-Keep them narrow; do not grow them into a provisioning-service interface.
+Reusable primitives are split by ownership. Storefront/site-authority primitives
+remain in `core_storefront`; compute-provisioning app/runtime helpers live under
+`provisioning/compute`.
 
 | Boundary | Current module | Transitional VM provisioning status |
 | --- | --- | --- |
@@ -89,14 +93,13 @@ Keep them narrow; do not grow them into a provisioning-service interface.
 | Lease lifecycle state machine | `core_storefront.lease_lifecycle` | `services.lease_lifecycle_service` wires VM/bare-metal delegates. |
 | Release executor dispatch | `core_storefront.release_dispatcher` | `services.release_executors.ExecutorReleaseDispatcher` preserves VM default. |
 | Executor lease registration/listing | `core_storefront.executor_leases` | `BareMetalLeaseService` maps bare-metal models to shared registration. |
-| Provisioning app shell | `core_storefront.provisioning_app` | `main.py` uses injected middleware/router mounts. |
-| Provisioning background lifecycle | `core_storefront.provisioning_lifecycle` | `main.py` uses named task creation/cancellation helpers. |
-| Provisioning startup runner | `core_storefront.provisioning_startup` | `main.py` uses ordered startup/shutdown/background-task assembly. |
+| Compute provisioning app shell | `compute_provisioning.app` | `main.py` uses injected middleware/router mounts. |
+| Compute provisioning background lifecycle | `compute_provisioning.lifecycle` | `main.py` uses named task creation/cancellation helpers. |
+| Compute provisioning startup runner | `compute_provisioning.startup` | `main.py` uses ordered startup/shutdown/background-task assembly. |
 
-These helpers are migration scaffolding and reusable infrastructure. The future
-compute provisioning service may keep using them, but compute-specific contracts
-should move to `provisioning/compute` or a kit package, not deeper into core
-storefront.
+Do not add provisioning-specific service contracts to core storefront. Future
+compute-specific contracts should move to `provisioning/compute` or a kit
+package, not deeper into core storefront.
 
 ## Current ownership map
 
@@ -157,18 +160,18 @@ updated.
 ## Extraction sequence
 
 1. **Provisioning app shell** — implemented as a first low-risk slice.
-   - `core_storefront.provisioning_app` accepts routers and middleware settings
-     and builds the FastAPI app shell.
-   - `core_storefront.provisioning_lifecycle` centralizes named background task
-     creation and cancellation.
+   - `compute_provisioning.app` accepts routers and middleware settings and
+     builds the FastAPI app shell.
+   - `compute_provisioning.lifecycle` centralizes named background task creation
+     and cancellation.
    - Current `main.py` uses these helpers without changing routes.
    - Validation: focused provisioning API tests; e2e recommended because startup
      lifecycle changes are runtime-sensitive.
 
 2. **Startup/service resolution assembly** — implemented as transitional
    infrastructure.
-   - `core_storefront.provisioning_startup` centralizes ordered startup steps,
-     named background task scheduling, shutdown steps, and background task
+   - `compute_provisioning.startup` centralizes ordered startup steps, named
+     background task scheduling, shutdown steps, and background task
      cancellation.
    - Current `main.py` uses this shared sequence for DB init, service
      resolution, inventory seeding, job queue startup, retry scheduler, lease

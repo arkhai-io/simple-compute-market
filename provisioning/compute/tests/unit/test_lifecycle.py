@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from core_storefront.provisioning_lifecycle import (
+from compute_provisioning.lifecycle import (
     cancel_background_tasks,
     create_background_task,
 )

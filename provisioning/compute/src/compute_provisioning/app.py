@@ -1,4 +1,4 @@
-"""Reusable FastAPI app shell composition for provisioning executables."""
+"""Reusable FastAPI app shell composition for compute provisioners."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from typing import Any
 
 
 @dataclass(frozen=True)
-class ProvisioningAppConfig:
-    """Configuration for a provisioning FastAPI app shell."""
+class ComputeProvisioningAppConfig:
+    """Configuration for a compute provisioning FastAPI app shell."""
 
     title: str
     description: str
@@ -18,7 +18,7 @@ class ProvisioningAppConfig:
 
 
 @dataclass(frozen=True)
-class ProvisioningMiddlewareMount:
+class ComputeProvisioningMiddlewareMount:
     """Middleware class plus keyword arguments to install on the app."""
 
     middleware_class: Any
@@ -26,30 +26,29 @@ class ProvisioningMiddlewareMount:
 
 
 @dataclass(frozen=True)
-class ProvisioningRouterMount:
+class ComputeProvisioningRouterMount:
     """Router plus optional prefix to register on the app."""
 
     router: Any
     prefix: str = ""
 
 
-DEFAULT_PROVISIONING_DESCRIPTION = (
+DEFAULT_COMPUTE_PROVISIONING_DESCRIPTION = (
     "Asynchronous provisioning for a multi-agent compute marketplace."
 )
 
 
-def build_provisioning_app(
+def build_compute_provisioning_app(
     *,
-    config: ProvisioningAppConfig,
+    config: ComputeProvisioningAppConfig,
     lifespan: Any | None = None,
-    middlewares: Iterable[ProvisioningMiddlewareMount] = (),
-    routers: Iterable[ProvisioningRouterMount] = (),
+    middlewares: Iterable[ComputeProvisioningMiddlewareMount] = (),
+    routers: Iterable[ComputeProvisioningRouterMount] = (),
 ) -> Any:
-    """Build a FastAPI provisioning app and register middleware/routers.
+    """Build a FastAPI compute provisioning app and register mounts.
 
-    FastAPI remains a lazy import for the core package. Concrete provisioning
-    executables already depend on FastAPI, while core unit tests can import this
-    module without importing FastAPI unless they call the builder.
+    FastAPI remains a lazy import so callers can import the package without
+    also importing FastAPI unless they call the builder.
     """
 
     from fastapi import FastAPI
