@@ -402,10 +402,11 @@ lifecycle state-machine orchestration are now core/domain-owned or isolated
 from the CLI.
 The VM storefront still supplies transitional infrastructure callbacks for
 VM-only, bare-metal-only, or combined VM+bare-metal publication selections;
-remaining architectural work is moving the multi-domain site provisioner out of
-`domains/vms` and continuing to split VM-specific startup/provisioning steps
-from cross-domain storefront/site authority policy. The controller/container
-ownership map and extraction sequence are tracked in
+remaining architectural work is moving compute provisioning out of
+`domains/vms` into a new top-level `provisioning/compute` category and
+continuing to split VM-specific startup/provisioning steps from shared compute
+provisioner policy. The controller/container ownership map and extraction
+sequence are tracked in
 [`provisioning-migration-plan.md`](provisioning-migration-plan.md).
 
 **Goal:** allow a seller to offer the same underlying physical machine as
@@ -447,11 +448,14 @@ state, and capacity events. Executor services consume allocation decisions and
 report provisioning/release outcomes; they do not independently decide that
 shared hardware is available.
 
-The package architecture target is a layered dependency chain:
-`core -> domain -> kit/user implementation`, where each layer fills the
+The package architecture target is a layered dependency chain with a separate
+provisioning category for deployable provisioners:
+`core -> domain -> kit/user implementation`, plus `provisioning/<category>`
+packages for services that serve multiple domains. Each layer fills the
 dependencies of the layer above and may introduce narrower dependencies of its
-own. There is one core API for each role to fit into. Core should define the
-market skeleton in terms of injected dependencies: schema codecs,
+own. There is one core API for each marketplace role to fit into, but not every
+operational role belongs in core. Core should define the market skeleton in
+terms of injected dependencies: schema codecs,
 listing/message/terms/materialization/receipt/result handling, buyer
 discovery/aggregation hooks, seller/storefront negotiation and publication
 hooks, registry validation hooks, and settlement/provisioning orchestration
@@ -500,15 +504,20 @@ vocabulary/compilers for that syntax, so a buyer can combine domain and kit
 compatibility constraints without each domain reimplementing every settlement
 or identity filter. A more expression-like language with `==`, `and`, or
 general infix operators is not the near-term target.
-Operator-specific seller policies, buyer policies, provisioning services,
-provider integrations, and local service state belong in separate
-role/implementation packages that depend on the domain package plus the
-relevant core role package. A provisioning service may serve multiple domains
-by implementing thin domain adapters over shared local internals, and a domain
-may be served by multiple provisioning implementations that all implement the
-same domain schema. Reusable substrate such as site authority, allocation
-lifecycle, capacity clients, and leased-access helpers belongs in shared kit,
-not in one domain's VM-shaped API.
+Operator-specific seller policies, buyer policies, provider integrations, and
+local service state belong in separate role/implementation packages that depend
+on the domain package plus the relevant core role package. Deployable
+provisioning services that serve multiple domains belong in a top-level
+`provisioning/<category>` package rather than in `core`, `kit`, or a single
+domain. The current target category is `provisioning/compute`: a compute
+provisioner may serve VM, bare-metal, and future compute domains by
+implementing thin domain adapters over shared local internals, and a domain may
+be served by multiple provisioning implementations that all implement the same
+domain schema. Shared caller contracts or helper libraries for provisioning can
+be kit packages when domains opt into compatible provisioning semantics.
+Reusable substrate such as site authority, allocation lifecycle, capacity
+clients, and leased-access helpers should not live in one domain's VM-shaped
+API.
 Core role packages should own executable entrypoints consistently across roles;
 domain packages should own the role adapters/specs those executables load.
 Domain packages can expose extras such as `buyer`, `storefront`, or `registry`
@@ -541,8 +550,8 @@ The current VM provisioning service still mixes VM contract surface with
 generic site-authority substrate; future refactors should split those roles
 without breaking existing VM clients. The bare-metal market schema starts under
 `domains/bare_metal`; the temporary implementation adapter still lives in
-`domains/vms/provisioning/service` until the multi-domain site provisioner is
-moved out of the VM domain tree.
+`domains/vms/provisioning/service` until compute provisioning is moved out of
+the VM domain tree into `provisioning/compute`.
 The generic market lease lifecycle endpoint now describes release as
 executor-dispatched, while `/hosts/{host}/vms/*` remains a direct
 admin/operator VM API.

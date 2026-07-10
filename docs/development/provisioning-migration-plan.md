@@ -1,55 +1,121 @@
-# Provisioning migration plan
+# Compute provisioning migration plan
 
 This document maps the current transitional provisioning service in
-`domains/vms/provisioning/service` into the pieces that should move to a
-site/multi-domain provisioning package and the pieces that should remain owned
-by concrete domains such as VM and bare metal.
+`domains/vms/provisioning/service` into a new top-level **provisioning** category.
+The first target under that category is **compute provisioning**: a deployable
+service for compute-like resources that can serve VM, bare-metal, and future
+compute executors without being owned by any one domain package.
 
-## Target shape
+This is intentionally not a `core_storefront` API. Not every storefront domain
+needs provisioning, and not every provisioned resource is compute. Shared pieces
+that domains use to talk to a compute provisioner may become kit packages, while
+the provisioner itself belongs under the provisioning category.
 
-The deployable service should become a **site provisioning service** with a
-composition root that wires domain adapters:
+## Target package/category shape
 
-- shared site authority / lifecycle services from core;
-- VM provisioning adapters from `domains/vms`;
-- bare-metal provisioning adapters from `domains/bare_metal` or a bare-metal
-  provisioning package;
-- compatibility import paths in `domains/vms/provisioning/service` until callers
-  and images are migrated.
+Near-term target layout:
 
-The shared service should not import VM request models, Ansible VM playbook
-parameters, or bare-metal access models directly. Those remain adapter inputs.
+```text
+provisioning/
+  compute/
+    service/      # deployable multi-executor compute provisioner
+    client/       # HTTP/generated client for callers, if split from service
+    contracts/    # shared DTOs/contracts, if they outgrow the client package
+```
 
-## Already extracted into core storefront
+Potential distribution names:
 
-| Boundary | Core module | VM provisioning status |
+- `arkhai-compute-provisioning-service`
+- `arkhai-compute-provisioning-client`
+- `arkhai-compute-provisioning-contracts`
+
+The exact split can remain lazy. A single `arkhai-compute-provisioning` package
+is acceptable initially if service, client, and contract code are not yet large
+enough to justify separate wheels.
+
+## Ownership model
+
+### Compute provisioning service owns
+
+The standalone compute provisioner owns cross-domain compute orchestration and
+operator surfaces:
+
+- FastAPI app shell and route composition for the deployable provisioning API;
+- job queue / job state machine abstractions used by compute executors;
+- capacity/resource authority for shared compute inventory;
+- lease lifecycle orchestration and watchdog scheduling;
+- executor release dispatch;
+- domain/executor adapter registration and composition;
+- generic system/job/lease/capacity routes that are not VM- or bare-metal-shaped.
+
+### Domain packages own concrete compute semantics
+
+Domain packages keep their deterministic market semantics and concrete executor
+adapters:
+
+- `domains/vms` owns VM request/result schema, VM action construction, KVM host
+  operations, Ansible VM playbook shapes, VM release execution, and VM operator
+  routes.
+- `domains/bare_metal` owns bare-metal listing/terms/materialization/receipt
+  schema, access grant/reclaim action vocabulary, bare-metal lease adapters,
+  bare-metal release execution, and any bare-metal operator routes.
+
+The compute provisioner should depend on these through explicit adapters rather
+than importing VM request models, VM playbook parameters, or bare-metal access
+models directly in generic code.
+
+### Kit packages may own shared caller contracts
+
+If multiple domains or apps need shared provisioning-facing helpers, those
+belong in kit packages rather than core storefront. Examples:
+
+- shared provisioning reference/receipt DTOs;
+- generated HTTP client helpers;
+- reusable capability/action codecs;
+- helper types for provisioning-backed materializations.
+
+A kit remains opt-in for domains that choose compatible provisioning semantics;
+it is not a universal requirement for all storefront domains.
+
+## Already extracted shared helpers
+
+Some reusable primitives currently live in `core_storefront` because they are
+also storefront/site-authority primitives or generic app/lifecycle utilities.
+Keep them narrow; do not grow them into a provisioning-service interface.
+
+| Boundary | Current module | Transitional VM provisioning status |
 | --- | --- | --- |
 | Site resource/allocation adapter | `core_storefront.site_resources` | `services.site_resources_service` is a re-export shim. |
 | Lease lifecycle state machine | `core_storefront.lease_lifecycle` | `services.lease_lifecycle_service` wires VM/bare-metal delegates. |
 | Release executor dispatch | `core_storefront.release_dispatcher` | `services.release_executors.ExecutorReleaseDispatcher` preserves VM default. |
-| Executor lease registration/listing | `core_storefront.executor_leases` | `BareMetalLeaseService` maps bare-metal models to core registration. |
+| Executor lease registration/listing | `core_storefront.executor_leases` | `BareMetalLeaseService` maps bare-metal models to shared registration. |
+| Provisioning app shell | `core_storefront.provisioning_app` | `main.py` uses injected middleware/router mounts. |
+| Provisioning background lifecycle | `core_storefront.provisioning_lifecycle` | `main.py` uses named task creation/cancellation helpers. |
+| Provisioning startup runner | `core_storefront.provisioning_startup` | `main.py` uses ordered startup/shutdown/background-task assembly. |
 
-These are the main lifecycle seams needed before the provisioning service can be
-moved out of `domains/vms` without also moving concrete VM implementation code.
+These helpers are migration scaffolding and reusable infrastructure. The future
+compute provisioning service may keep using them, but compute-specific contracts
+should move to `provisioning/compute` or a kit package, not deeper into core
+storefront.
 
 ## Current ownership map
 
-### Should move to site/multi-domain provisioning
+### Should move to `provisioning/compute/service`
 
-These pieces are site authority or deployable-service infrastructure, not
-intrinsically VM-specific:
+These pieces are compute provisioner authority or deployable-service
+infrastructure, not intrinsically VM-specific:
 
 | Current file | Notes |
 | --- | --- |
 | `main.py` app shell | FastAPI app, shared middleware wiring, route composition, startup/shutdown task lifecycle. Needs adapter/router injection before moving. |
-| `container.py` composition root | Currently wires VM and bare-metal together. Should become the new site provisioning composition root with domain adapter registration. |
-| `controllers/system_controller.py` | Health/status/version/check-leases/watchdog control. `ansible/readiness` is executor-backend specific and should be injected or split. |
+| `container.py` composition root | Currently wires VM and bare-metal together. Should become the compute provisioner composition root with domain/executor adapter registration. |
+| `controllers/system_controller.py` generic parts | Health/status/version/check-leases/watchdog control. `ansible/readiness` is executor-backend specific and should be injected or split. |
 | `controllers/jobs_controller.py` | Generic job read/cancel surface as long as the service uses the shared job runner. |
 | `controllers/leases_controller.py` lifecycle operations | Generic lease lifecycle endpoints are mostly executor-neutral; VM-shaped create/update response models need adapter treatment. |
-| `market_site.router.make_capacity_router(...)` mounting | Site capacity authority should remain with site provisioning. |
-| `services/lease_watchdog.py` | Generic timer around the core lifecycle service. |
+| `market_site.router.make_capacity_router(...)` mounting | Shared compute capacity authority should remain with compute provisioning. |
+| `services/lease_watchdog.py` | Generic timer around the lifecycle service. |
 | `services/system_service.py` health/watchdog parts | Split filesystem/Ansible readiness from generic health/watchdog/status parts. |
-| `services/async_job_queue.py` | Generic in-process job queue if retained for all provisioning executors. |
+| `services/async_job_queue.py` | Generic in-process job queue if retained for all compute executors. |
 | `services/job_service.py` job state machine | Mostly generic job persistence/retry/log/credential lifecycle; still coupled to `AnsibleJobParams` and VM result parsing. Needs a job runner protocol before moving. |
 
 ### Should remain VM domain-owned
@@ -71,7 +137,7 @@ intrinsically VM-specific:
 | Current file | Notes |
 | --- | --- |
 | `controllers/bare_metal_leases_controller.py` | Transitional adapter. Should move with bare-metal provisioning/access domain. |
-| `services/bare_metal_lease_service.py` | Thin model-to-core registration adapter; should move when bare-metal package owns provisioning APIs. |
+| `services/bare_metal_lease_service.py` | Thin model-to-registration adapter; should move when bare-metal package owns provisioning APIs. |
 | `services/bare_metal_operations_service.py` | Bare-metal access grant/reclaim job construction and host validation. |
 | `BareMetalReleaseExecutor` in `services/release_executors.py` | Concrete reclaim delegate wrapper. |
 | Bare-metal action constants/models in `arkhai_bare_metal` | Already domain-owned. |
@@ -91,40 +157,51 @@ updated.
 ## Extraction sequence
 
 1. **Provisioning app shell** — implemented as a first low-risk slice.
-   - `core_storefront.provisioning_app` now accepts routers and middleware
-     settings and builds the FastAPI app shell.
+   - `core_storefront.provisioning_app` accepts routers and middleware settings
+     and builds the FastAPI app shell.
    - `core_storefront.provisioning_lifecycle` centralizes named background task
      creation and cancellation.
    - Current `main.py` uses these helpers without changing routes.
    - Validation: focused provisioning API tests; e2e recommended because startup
      lifecycle changes are runtime-sensitive.
 
-2. **Startup/service resolution assembly** — partially implemented.
+2. **Startup/service resolution assembly** — implemented as transitional
+   infrastructure.
    - `core_storefront.provisioning_startup` centralizes ordered startup steps,
      named background task scheduling, shutdown steps, and background task
      cancellation.
    - Current `main.py` uses this shared sequence for DB init, service
      resolution, inventory seeding, job queue startup, retry scheduler, lease
      watchdog startup, and shutdown.
-   - Remaining: introduce a service registry/container adapter that resolves
-     generic dependencies without importing VM-specific provisioning code.
    - Keep concrete service factories in VM provisioning for now.
    - Validation: focused provisioning tests plus e2e.
 
-3. **Generic job runner seam**
-   - Introduce a core protocol for queued jobs: submit, get, list, logs,
-     credentials, cancel, retry scheduler.
+3. **Destination scaffold for compute provisioning**
+   - Add the `provisioning/compute` package directory and minimal package/docs
+     once the first code is ready to move.
+   - Treat current `domains/vms/provisioning/service` as the compatibility host
+     until the new service package has a Dockerfile and route parity.
+
+4. **Generic job runner seam**
+   - Introduce a compute-provisioning job runner protocol for submit, get, list,
+     logs, credentials, cancel, and retry scheduling.
    - Keep `AnsibleJobService` concrete in VM provisioning initially.
    - This is the main prerequisite for moving `jobs_controller.py` and generic
      system health without importing VM job internals.
 
-4. **Lease controller adapter split**
-   - Move executor-neutral lifecycle endpoints to site provisioning.
+5. **Domain/executor adapter registry**
+   - Define adapter registration in `provisioning/compute`, not in
+     `core_storefront`.
+   - VM and bare-metal packages register routers, release executors, job action
+     factories, readiness checks, and optional operator surfaces.
+
+6. **Lease controller adapter split**
+   - Move executor-neutral lifecycle endpoints to compute provisioning.
    - Keep VM-specific `LeaseCreate`, `LeaseUpdate`, and `LeaseResponse` mapping
      as a VM adapter or compatibility route.
    - Bare-metal lease registration remains a bare-metal adapter.
 
-5. **New site provisioning package/image**
+7. **New compute provisioning package/image**
    - Create the destination package and Dockerfile.
    - Register/mount VM and bare-metal adapters from domain packages.
    - Keep the old VM provisioning package as a compatibility distribution or
@@ -132,8 +209,13 @@ updated.
 
 ## Next checkpoint recommendation
 
-The next low-risk code checkpoint should be the **service registry/container
-adapter** for generic provisioning dependencies. It should keep concrete VM and
-bare-metal execution untouched while making the composition root easier to move
-out of the VM provisioning package. Run focused provisioning tests; reserve full
-e2e for the next deployable/lifespan-sensitive checkpoint.
+The next low-risk checkpoint should be a **VM-owned composition cleanup**, not a
+new core interface: move remaining request-path service resolution/background
+wiring out of `main.py` into a local VM provisioning composition module. That
+prepares code for movement while avoiding a false `core_storefront` provisioning
+contract.
+
+After that, start the **job runner seam** in the future compute-provisioning
+shape. Run focused provisioning tests for the composition cleanup; reserve full
+e2e for the first checkpoint that changes runtime startup semantics or creates
+the new deployable package/image.
