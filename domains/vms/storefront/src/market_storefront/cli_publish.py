@@ -48,7 +48,7 @@ from core_storefront.publication_plugins import build_publication_source
 from core_storefront.publication_runner import (
     close_stale_publication_listings as run_close_stale_publication_listings,
     open_publication_keys as run_open_publication_keys,
-    publish_round as run_publication_round,
+    run_publication_cycle,
 )
 
 from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
@@ -435,6 +435,23 @@ def _reopen_vm_listing_if_present(
     )
 
 
+def _publication_source_kwargs() -> dict[str, Any]:
+    return {
+        "open_keys": _open_listing_resource_keys,
+        "close_stale": lambda db_path, base_url, private_key: (
+            _close_stale_derived_listings(
+                db_path=db_path,
+                base_url=base_url,
+                private_key=private_key,
+            )
+        ),
+        "available_candidates": _available_resources,
+        "offer_resource": _offer_resource_for_listing,
+        "record_published": _record_published_vm_listing,
+        "reopen_existing": _reopen_vm_listing_if_present,
+    }
+
+
 def _publication_adapters() -> tuple[PublicationSource, ...]:
     """VM storefront publication sources.
 
@@ -442,23 +459,7 @@ def _publication_adapters() -> tuple[PublicationSource, ...]:
     with the bare-metal domain adapter; this transitional VM storefront only
     publishes VM slice listings.
     """
-    return (
-        build_publication_source(
-            "vms",
-            open_keys=_open_listing_resource_keys,
-            close_stale=lambda db_path, base_url, private_key: (
-                _close_stale_derived_listings(
-                    db_path=db_path,
-                    base_url=base_url,
-                    private_key=private_key,
-                )
-            ),
-            available_candidates=_available_resources,
-            offer_resource=_offer_resource_for_listing,
-            record_published=_record_published_vm_listing,
-            reopen_existing=_reopen_vm_listing_if_present,
-        ),
-    )
+    return (build_publication_source("vms", **_publication_source_kwargs()),)
 
 
 def _publication_lifecycle_adapters() -> tuple[PublicationSource, ...]:
@@ -911,6 +912,8 @@ def _publish_round(
     chain_id: int,
     publish_priceless: bool = False,
     skip_ids: set[str] | None = None,
+    close_stale: bool = False,
+    skip_open: bool = False,
 ) -> tuple[list[dict], list[tuple[dict, str]], list[dict]]:
     """Publish one listing for every priced available resource slice.
 
@@ -965,7 +968,7 @@ def _publish_round(
         except typer.Exit as exc:
             raise RuntimeError("HTTP error (see above)") from exc
 
-    return run_publication_round(
+    result = run_publication_cycle(
         _publication_adapters(),
         db_path=db_path,
         base_url=base_url,
@@ -973,7 +976,10 @@ def _publish_round(
         build_payload=build_payload,
         publish_offer=publish_offer,
         skip_ids=skip_ids,
+        close_stale=close_stale,
+        skip_open=skip_open,
     )
+    return result.published, result.failed, result.skipped
 
 
 def run_watch_loop(
@@ -1010,10 +1016,6 @@ def run_watch_loop(
         while True:
             cycle += 1
             try:
-                _close_stale_publication_listings(
-                    db_path=db_path, base_url=base_url, private_key=private_key,
-                )
-                covered = _open_publication_keys(db_path)
                 published, failed, skipped = _publish_round(
                     db_path=db_path, base_url=base_url,
                     wallet_address=wallet_address, private_key=private_key,
@@ -1022,7 +1024,8 @@ def run_watch_loop(
                     default_max_duration_seconds=default_max_duration_seconds,
                     rpc_url=rpc_url, chain_id=chain_id,
                     publish_priceless=publish_priceless,
-                    skip_ids=covered,
+                    close_stale=True,
+                    skip_open=True,
                 )
             except Exception as exc:
                 ts = datetime.now().strftime("%H:%M:%S")
@@ -1049,7 +1052,7 @@ def run_watch_loop(
                 available_count = len(_available_resources(db_path))
                 out_console.print(
                     f"[dim]{ts}[/dim] cycle {cycle}: no new orders "
-                    f"(available={available_count}, already-open={len(covered)})"
+                    f"(available={available_count}, already-open={len(skipped)})"
                 )
 
             time.sleep(poll_interval)
@@ -1271,10 +1274,6 @@ def register(app: typer.Typer) -> None:
         # One-shot path
         # ------------------------------------------------------------------
         if not watch:
-            _close_stale_publication_listings(
-                db_path=db_path, base_url=base_url, private_key=private_key,
-            )
-            covered = _open_publication_keys(db_path)
             published, failed, _skipped = _publish_round(
                 db_path=db_path, base_url=base_url,
                 wallet_address=wallet_address, private_key=private_key,
@@ -1283,7 +1282,8 @@ def register(app: typer.Typer) -> None:
                 default_max_duration_seconds=default_max_duration_seconds,
                 rpc_url=rpc_url, chain_id=chain_id,
                 publish_priceless=settings.pricing.publish_priceless,
-                skip_ids=covered,
+                close_stale=True,
+                skip_open=True,
             )
             if not published and not failed:
                 console.print(

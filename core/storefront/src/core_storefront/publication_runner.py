@@ -8,7 +8,8 @@ control flow over sources.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from .publication_plugins import build_publication_source
@@ -28,6 +29,16 @@ PublishOffer = Callable[
     ],
     dict[str, Any],
 ]
+
+
+@dataclass(frozen=True)
+class PublicationCycleResult:
+    """Result from one core-owned publication command cycle."""
+
+    closed: dict[str, list[str]]
+    published: list[dict[str, Any]]
+    failed: list[tuple[dict[str, Any], str]]
+    skipped: list[dict[str, Any]]
 
 
 def close_stale_publication_listings(
@@ -55,6 +66,19 @@ def open_publication_keys(
     return covered
 
 
+def build_publication_sources_by_name(
+    source_names: Sequence[str],
+    *,
+    source_kwargs_by_name: dict[str, dict[str, Any]] | None = None,
+) -> tuple[PublicationSource, ...]:
+    """Build selected domain publication sources from entry-point names."""
+    kwargs_by_name = source_kwargs_by_name or {}
+    return tuple(
+        build_publication_source(name, **kwargs_by_name.get(name, {}))
+        for name in source_names
+    )
+
+
 def publish_source_by_name(
     source_name: str,
     *,
@@ -76,6 +100,86 @@ def publish_source_by_name(
         build_payload=build_payload,
         publish_offer=publish_offer,
         skip_ids=skip_ids,
+    )
+
+
+def run_publication_cycle(
+    sources: Iterable[PublicationSource],
+    *,
+    db_path: str,
+    base_url: str,
+    private_key: str | None,
+    build_payload: PayloadBuilder,
+    publish_offer: PublishOffer,
+    skip_ids: set[str] | None = None,
+    close_stale: bool = True,
+    skip_open: bool = True,
+) -> PublicationCycleResult:
+    """Run one command-style publication cycle over selected sources.
+
+    The cycle closes stale source listings, computes open publication keys, and
+    publishes candidates not already represented by an open listing. Concrete
+    storefronts inject settlement payload construction and listing creation.
+    """
+    selected = tuple(sources)
+    closed = (
+        close_stale_publication_listings(
+            selected,
+            db_path=db_path,
+            base_url=base_url,
+            private_key=private_key,
+        )
+        if close_stale
+        else {}
+    )
+    covered = open_publication_keys(selected, db_path) if skip_open else set()
+    if skip_ids:
+        covered |= skip_ids
+    published, failed, skipped = publish_round(
+        selected,
+        db_path=db_path,
+        base_url=base_url,
+        private_key=private_key,
+        build_payload=build_payload,
+        publish_offer=publish_offer,
+        skip_ids=covered,
+    )
+    return PublicationCycleResult(
+        closed=closed,
+        published=published,
+        failed=failed,
+        skipped=skipped,
+    )
+
+
+def run_publication_cycle_by_name(
+    source_names: Sequence[str],
+    *,
+    source_kwargs_by_name: dict[str, dict[str, Any]] | None = None,
+    db_path: str,
+    base_url: str,
+    private_key: str | None,
+    build_payload: PayloadBuilder,
+    publish_offer: PublishOffer,
+    skip_ids: set[str] | None = None,
+    close_stale: bool = True,
+    skip_open: bool = True,
+) -> PublicationCycleResult:
+    """Build selected sources by name and run one publication cycle."""
+    sources = build_publication_sources_by_name(
+        source_names,
+        source_kwargs_by_name=source_kwargs_by_name,
+    )
+    return run_publication_cycle(
+        sources,
+        db_path=db_path,
+        base_url=base_url,
+        private_key=private_key,
+        build_payload=build_payload,
+        publish_offer=publish_offer,
+        skip_ids=skip_ids,
+        close_stale=close_stale,
+        skip_open=skip_open,
     )
 
 

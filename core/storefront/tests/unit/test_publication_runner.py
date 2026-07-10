@@ -7,6 +7,8 @@ from core_storefront.publication_runner import (
     open_publication_keys,
     publish_round,
     publish_source_by_name,
+    run_publication_cycle,
+    run_publication_cycle_by_name,
 )
 from core_storefront.publication_sources import PublicationSource
 
@@ -79,6 +81,51 @@ def test_publish_round_skips_covered_candidate() -> None:
     assert published == []
     assert failed == []
     assert skipped == [{"resource_id": "r1", "price": "1"}]
+
+
+def test_run_publication_cycle_closes_stale_and_skips_open_keys() -> None:
+    source = _source(open_keys={"r1"})
+
+    result = run_publication_cycle(
+        [source],
+        db_path="db.sqlite",
+        base_url="http://seller",
+        private_key=None,
+        build_payload=lambda *_args: ([{}], [], None),
+        publish_offer=lambda *_args: {"status": "published"},
+    )
+
+    assert result.closed == {"test": ["stale-1"]}
+    assert result.published == []
+    assert result.failed == []
+    assert result.skipped == [{"resource_id": "r1", "price": "1"}]
+
+
+def test_run_publication_cycle_by_name_builds_selected_sources(monkeypatch) -> None:
+    import core_storefront.publication_runner as runner
+
+    monkeypatch.setattr(
+        runner,
+        "build_publication_source",
+        lambda name, **kwargs: _source(candidate={"resource_id": name, **kwargs}),
+    )
+
+    result = run_publication_cycle_by_name(
+        ["vms"],
+        source_kwargs_by_name={"vms": {"price": "2"}},
+        db_path="db.sqlite",
+        base_url="http://seller",
+        private_key=None,
+        build_payload=lambda *_args: ([{}], [], None),
+        publish_offer=lambda offer, *_args: {
+            "status": "published",
+            "listing_id": offer["resource_id"],
+        },
+    )
+
+    assert result.failed == []
+    assert result.skipped == []
+    assert result.published[0]["response"]["listing_id"] == "vms"
 
 
 def test_publish_source_by_name_loads_source(monkeypatch) -> None:
