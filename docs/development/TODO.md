@@ -392,8 +392,9 @@ Lease lifecycle policy should sit above that generic site resource layer. A reus
 **Status:** Implemented through transitional VM provisioning packages. The
 publication-source interface, VM/bare-metal domain adapters, reusable
 core publication command surface, executable-facing command config/callback
-helper, and selected-source composition helpers are now core/domain-owned. The
-VM storefront has transitional infrastructure callback wiring for VM-only,
+helper, selected-source composition helpers, and VM storefront publication
+wiring module are now core/domain-owned or isolated from the CLI. The VM
+storefront still supplies transitional infrastructure callbacks for VM-only,
 bare-metal-only, or combined VM+bare-metal publication selections; remaining
 architectural work is the core storefront executable/server composition path
 and moving the multi-domain site provisioner out of `domains/vms`.

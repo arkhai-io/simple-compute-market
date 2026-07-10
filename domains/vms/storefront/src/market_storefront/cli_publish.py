@@ -48,18 +48,22 @@ from core_storefront.publication_command import (
     StorefrontPublicationCommandConfig,
     run_storefront_publication_command,
 )
-from core_storefront.publication_composition import (
-    build_bare_metal_publication_selection,
-    build_multi_domain_publication_selection,
-    build_vm_publication_selection,
-)
 from core_storefront.publication_sources import PublicationSource
 from core_storefront.publication_runner import (
     PublicationCommandResult,
+    PublicationCycleResult,
     PublicationSourceSelection,
 )
 
 from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
+from .publication_wiring import (
+    BareMetalPublicationSourceCallbacks,
+    VmPublicationSourceCallbacks,
+    build_bare_metal_publication_source_kwargs,
+    build_bare_metal_storefront_publication_selection,
+    build_storefront_publication_selection,
+    build_vm_publication_source_kwargs,
+)
 from domains.vms.listings.reconciler import (
     available_compute_slices,
     load_derived_listing_for_slice,
@@ -463,30 +467,40 @@ def _reopen_vm_listing_if_present(
     )
 
 
-def _publication_source_kwargs() -> dict[str, Any]:
-    return {
-        "open_keys": _open_listing_resource_keys,
-        "close_stale": lambda db_path, base_url, private_key: (
+def _vm_publication_source_callbacks() -> VmPublicationSourceCallbacks:
+    return VmPublicationSourceCallbacks(
+        open_keys=_open_listing_resource_keys,
+        close_stale=lambda db_path, base_url, private_key: (
             _close_stale_derived_listings(
                 db_path=db_path,
                 base_url=base_url,
                 private_key=private_key,
             )
         ),
-        "available_candidates": _available_resources,
-        "offer_resource": _offer_resource_for_listing,
-        "record_published": _record_published_vm_listing,
-        "reopen_existing": _reopen_vm_listing_if_present,
-    }
+        available_candidates=_available_resources,
+        offer_resource=_offer_resource_for_listing,
+        record_published=_record_published_vm_listing,
+        reopen_existing=_reopen_vm_listing_if_present,
+    )
+
+
+def _bare_metal_publication_source_callbacks() -> BareMetalPublicationSourceCallbacks:
+    return BareMetalPublicationSourceCallbacks(
+        capacity_snapshot=_capacity_snapshot_sync,
+        close_listing=_close_order,
+        publish_existing_listing=_publish_existing_listing_to_registries,
+    )
+
+
+def _publication_source_kwargs() -> dict[str, Any]:
+    return build_vm_publication_source_kwargs(_vm_publication_source_callbacks())
 
 
 def _bare_metal_publication_source_kwargs() -> dict[str, Any]:
     """Infrastructure callbacks for the bare-metal publication adapter."""
-    return {
-        "capacity_snapshot": lambda: _capacity_snapshot_sync() or [],
-        "close_listing": _close_order,
-        "publish_existing_listing": _publish_existing_listing_to_registries,
-    }
+    return build_bare_metal_publication_source_kwargs(
+        _bare_metal_publication_source_callbacks(),
+    )
 
 
 def _publication_source_selection(
@@ -499,19 +513,17 @@ def _publication_source_selection(
     combined source selections without making the VM adapter own bare-metal
     semantics.
     """
-    if source_names == ("vms",):
-        return build_vm_publication_selection(_publication_source_kwargs())
-    return build_multi_domain_publication_selection(
-        vm_source_kwargs=_publication_source_kwargs(),
-        bare_metal_source_kwargs=_bare_metal_publication_source_kwargs(),
+    return build_storefront_publication_selection(
         source_names=source_names,
+        vm_callbacks=_vm_publication_source_callbacks(),
+        bare_metal_callbacks=_bare_metal_publication_source_callbacks(),
     )
 
 
 def _bare_metal_publication_source_selection() -> PublicationSourceSelection:
     """Bare-metal-only publication selection for future composition roots."""
-    return build_bare_metal_publication_selection(
-        _bare_metal_publication_source_kwargs(),
+    return build_bare_metal_storefront_publication_selection(
+        _bare_metal_publication_source_callbacks(),
     )
 
 
@@ -1337,7 +1349,7 @@ def register(app: typer.Typer) -> None:
         # One-shot path
         # ------------------------------------------------------------------
         if not watch:
-            result = _publish_command_round(
+            published, failed, skipped = _publish_round(
                 db_path=db_path, base_url=base_url,
                 wallet_address=wallet_address, private_key=private_key,
                 default_min_price=default_min_price,
@@ -1345,8 +1357,17 @@ def register(app: typer.Typer) -> None:
                 default_max_duration_seconds=default_max_duration_seconds,
                 rpc_url=rpc_url, chain_id=chain_id,
                 publish_priceless=settings.pricing.publish_priceless,
+                skip_ids=_open_publication_keys(db_path),
                 close_stale=True,
                 skip_open=True,
+            )
+            result = PublicationCommandResult(
+                PublicationCycleResult(
+                    closed={},
+                    published=published,
+                    failed=failed,
+                    skipped=skipped,
+                ),
             )
             if result.no_new_listings:
                 console.print(
