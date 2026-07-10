@@ -13,9 +13,13 @@ from core_storefront.provisioning_app import (
     ProvisioningRouterMount,
     build_provisioning_app,
 )
-from core_storefront.provisioning_lifecycle import (
-    cancel_background_tasks,
-    create_background_task,
+from core_storefront.provisioning_startup import (
+    ProvisioningBackgroundTask,
+    ProvisioningRuntime,
+    ProvisioningShutdownStep,
+    ProvisioningStartupStep,
+    start_provisioning_runtime,
+    stop_provisioning_runtime,
 )
 
 import container as _container_module
@@ -44,20 +48,22 @@ from controllers.bare_metal_leases_controller import BareMetalLeasesController  
 from market_site.router import make_capacity_router  # noqa: E402
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    logger.info("Starting provisioning service...")
+def _apply_ansible_config() -> None:
+    """Apply ANSIBLE_CONFIG from the active profile if configured."""
 
-    # Apply ANSIBLE_CONFIG from the active profile if configured.
     ansible_cfg = str(getattr(settings, "ansible_cfg", "") or "").strip()
     if ansible_cfg:
         os.environ["ANSIBLE_CONFIG"] = ansible_cfg
         logger.info("ANSIBLE_CONFIG set to %s", ansible_cfg)
 
+
+def _initialise_container_resources() -> None:
     container.init_resources()
     init_db(container.db_engine())
     logger.info("Database initialised")
 
+
+def _resolve_request_path_services() -> None:
     # Resolve services as plain module-level variables so controllers
     # can retrieve them via a simple lambda, avoiding any provider
     # machinery on the request path (prevents asyncio.get_event_loop()
@@ -77,6 +83,8 @@ async def lifespan(_: FastAPI):
         container.bare_metal_operations_service()
     )
 
+
+def _seed_inventory_if_empty() -> None:
     # ------------------------------------------------------------------
     # Inventory seeding — runs once at startup if the hosts table is empty.
     #
@@ -94,44 +102,81 @@ async def lifespan(_: FastAPI):
     host_service = _container_module.resolved_host_service
     existing_hosts = host_service.list_hosts(enabled_only=False)
     if existing_hosts:
-        logger.info("Inventory seeding: skipped — %d host(s) already registered", len(existing_hosts))
+        logger.info(
+            "Inventory seeding: skipped — %d host(s) already registered",
+            len(existing_hosts),
+        )
+        return
+
+    inventory_ini = str(getattr(settings, "inventory_ini", "") or "").strip()
+    inventory_path = getattr(settings, "resolved_inventory_path", None)
+
+    ini_text: str | None = None
+    source: str | None = None
+
+    if inventory_ini:
+        ini_text = inventory_ini
+        source = "inventory_ini setting (provisioning-secrets profile)"
+    elif inventory_path and inventory_path.exists():
+        try:
+            ini_text = inventory_path.read_text(encoding="utf-8")
+            source = str(inventory_path)
+        except OSError as exc:
+            logger.warning("Inventory seeding: could not read %s: %s", inventory_path, exc)
+
+    if ini_text:
+        try:
+            seeded = host_service.seed_from_ini(ini_text)
+            logger.info(
+                "Inventory seeding: registered %d host(s) from %s",
+                len(seeded),
+                source,
+            )
+        except Exception as exc:
+            logger.error("Inventory seeding failed (source: %s): %s", source, exc)
     else:
-        inventory_ini = str(getattr(settings, "inventory_ini", "") or "").strip()
-        inventory_path = getattr(settings, "resolved_inventory_path", None)
+        logger.info(
+            "Inventory seeding: no inventory source configured — "
+            "starting with empty host registry"
+        )
 
-        ini_text: str | None = None
-        source: str | None = None
 
-        if inventory_ini:
-            ini_text = inventory_ini
-            source = "inventory_ini setting (provisioning-secrets profile)"
-        elif inventory_path and inventory_path.exists():
-            try:
-                ini_text = inventory_path.read_text(encoding="utf-8")
-                source = str(inventory_path)
-            except OSError as exc:
-                logger.warning("Inventory seeding: could not read %s: %s", inventory_path, exc)
-
-        if ini_text:
-            try:
-                seeded = host_service.seed_from_ini(ini_text)
-                logger.info("Inventory seeding: registered %d host(s) from %s", len(seeded), source)
-            except Exception as exc:
-                logger.error("Inventory seeding failed (source: %s): %s", source, exc)
-        else:
-            logger.info("Inventory seeding: no inventory source configured — starting with empty host registry")
-
+def _create_job_queue() -> None:
     # AsyncJobQueue is a plain object; instantiate inside the running event loop.
-    job_queue = AsyncJobQueue(max_concurrent=settings.max_concurrent_jobs)
-    _container_module.resolved_job_queue = job_queue
+    _container_module.resolved_job_queue = AsyncJobQueue(
+        max_concurrent=settings.max_concurrent_jobs
+    )
 
-    processing_task = create_background_task(
-        job_queue.start(_container_module.resolved_job_service._process_job),
-        name="job-processing-loop",
+
+def _startup_steps() -> tuple[ProvisioningStartupStep, ...]:
+    return (
+        ProvisioningStartupStep("apply-ansible-config", _apply_ansible_config),
+        ProvisioningStartupStep(
+            "initialise-container-resources",
+            _initialise_container_resources,
+        ),
+        ProvisioningStartupStep(
+            "resolve-request-path-services",
+            _resolve_request_path_services,
+        ),
+        ProvisioningStartupStep("seed-inventory", _seed_inventory_if_empty),
+        ProvisioningStartupStep("create-job-queue", _create_job_queue),
     )
-    logger.info(
-        "Job processing loop started (max_concurrent=%d)", settings.max_concurrent_jobs
-    )
+
+
+def _background_tasks() -> tuple[ProvisioningBackgroundTask, ...]:
+    job_queue = _container_module.resolved_job_queue
+
+    tasks: list[ProvisioningBackgroundTask] = [
+        ProvisioningBackgroundTask(
+            "job-processing-loop",
+            lambda: job_queue.start(
+                _container_module.resolved_job_service._process_job
+            ),
+            "Job processing loop started (max_concurrent=%d)",
+            (settings.max_concurrent_jobs,),
+        )
+    ]
 
     # Retry scheduler — re-enqueues queued jobs whose backoff delay has
     # elapsed (the failure path stamps next_retry_at but does not re-enqueue,
@@ -139,37 +184,63 @@ async def lifespan(_: FastAPI):
     retry_poll_interval = float(
         getattr(settings, "retry_scheduler_poll_interval_seconds", 10)
     )
-    retry_task = create_background_task(
-        _container_module.resolved_job_service.run_retry_scheduler(
-            job_queue, retry_poll_interval
-        ),
-        name="retry-scheduler",
+    tasks.append(
+        ProvisioningBackgroundTask(
+            "retry-scheduler",
+            lambda: _container_module.resolved_job_service.run_retry_scheduler(
+                job_queue, retry_poll_interval
+            ),
+            "Retry scheduler started (interval=%ds)",
+            (int(retry_poll_interval),),
+        )
     )
-    logger.info("Retry scheduler started (interval=%ds)", int(retry_poll_interval))
 
     # Lease watchdog — only started when enabled in config (default: true).
-    watchdog_task = None
     watchdog_enabled = bool(getattr(settings, "lease_watchdog_enabled", True))
     if watchdog_enabled:
-        watchdog_task = create_background_task(
-            _container_module.resolved_lease_watchdog.run(),
-            name="lease-watchdog",
-        )
-        logger.info(
-            "Lease watchdog started (interval=%ds grace=%ds)",
-            getattr(settings, "lease_watchdog_poll_interval_seconds", 60),
-            getattr(settings, "lease_watchdog_grace_period_seconds", 300),
+        tasks.append(
+            ProvisioningBackgroundTask(
+                "lease-watchdog",
+                lambda: _container_module.resolved_lease_watchdog.run(),
+                "Lease watchdog started (interval=%ds grace=%ds)",
+                (
+                    getattr(settings, "lease_watchdog_poll_interval_seconds", 60),
+                    getattr(settings, "lease_watchdog_grace_period_seconds", 300),
+                ),
+            )
         )
     else:
         logger.info("Lease watchdog disabled (lease_watchdog_enabled=false)")
 
-    yield
+    return tuple(tasks)
 
-    logger.info("Shutdown initiated...")
-    await cancel_background_tasks(processing_task, retry_task, watchdog_task)
 
-    container.shutdown_resources()
-    logger.info("Shutdown complete")
+def _shutdown_steps() -> tuple[ProvisioningShutdownStep, ...]:
+    return (
+        ProvisioningShutdownStep("shutdown-container-resources", container.shutdown_resources),
+    )
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    logger.info("Starting provisioning service...")
+
+    runtime = await start_provisioning_runtime(
+        startup_steps=_startup_steps(),
+        background_tasks=_background_tasks,
+        logger=logger,
+    )
+
+    try:
+        yield
+    finally:
+        logger.info("Shutdown initiated...")
+        await stop_provisioning_runtime(
+            runtime,
+            shutdown_steps=_shutdown_steps(),
+            logger=logger,
+        )
+        logger.info("Shutdown complete")
 
 
 PROVISIONING_DESCRIPTION = (

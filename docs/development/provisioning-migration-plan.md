@@ -96,14 +96,18 @@ updated.
    - `core_storefront.provisioning_lifecycle` centralizes named background task
      creation and cancellation.
    - Current `main.py` uses these helpers without changing routes.
-   - Remaining: extract startup/service resolution assembly from the lifespan.
    - Validation: focused provisioning API tests; e2e recommended because startup
      lifecycle changes are runtime-sensitive.
 
-2. **Startup/service resolution assembly**
-   - Extract the ordered startup sequence from `main.py`: DB init, service
+2. **Startup/service resolution assembly** — partially implemented.
+   - `core_storefront.provisioning_startup` centralizes ordered startup steps,
+     named background task scheduling, shutdown steps, and background task
+     cancellation.
+   - Current `main.py` uses this shared sequence for DB init, service
      resolution, inventory seeding, job queue startup, retry scheduler, lease
-     watchdog startup, shutdown cancellation.
+     watchdog startup, and shutdown.
+   - Remaining: introduce a service registry/container adapter that resolves
+     generic dependencies without importing VM-specific provisioning code.
    - Keep concrete service factories in VM provisioning for now.
    - Validation: focused provisioning tests plus e2e.
 
@@ -128,8 +132,8 @@ updated.
 
 ## Next checkpoint recommendation
 
-The next low-risk code checkpoint should be **shared provisioning app/lifespan
-assembly**. It is the first move that reduces ownership of the deployable
-service itself while keeping concrete VM and bare-metal execution untouched.
-Because it changes runtime startup/shutdown behavior, run focused provisioning
-tests and then a full e2e run after the checkpoint.
+The next low-risk code checkpoint should be the **service registry/container
+adapter** for generic provisioning dependencies. It should keep concrete VM and
+bare-metal execution untouched while making the composition root easier to move
+out of the VM provisioning package. Run focused provisioning tests; reserve full
+e2e for the next deployable/lifespan-sensitive checkpoint.
