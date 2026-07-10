@@ -90,10 +90,13 @@ updated.
 
 ## Extraction sequence
 
-1. **Provisioning app shell**
-   - Add a shared app builder/lifespan helper that accepts routers, middleware
-     settings, startup callbacks, and background task callbacks.
-   - Refactor current `main.py` to use it without changing routes.
+1. **Provisioning app shell** — implemented as a first low-risk slice.
+   - `core_storefront.provisioning_app` now accepts routers and middleware
+     settings and builds the FastAPI app shell.
+   - `core_storefront.provisioning_lifecycle` centralizes named background task
+     creation and cancellation.
+   - Current `main.py` uses these helpers without changing routes.
+   - Remaining: extract startup/service resolution assembly from the lifespan.
    - Validation: focused provisioning API tests; e2e recommended because startup
      lifecycle changes are runtime-sensitive.
 

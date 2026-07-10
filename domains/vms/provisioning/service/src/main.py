@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -8,6 +7,16 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from core_storefront.provisioning_app import (
+    ProvisioningAppConfig,
+    ProvisioningMiddlewareMount,
+    ProvisioningRouterMount,
+    build_provisioning_app,
+)
+from core_storefront.provisioning_lifecycle import (
+    cancel_background_tasks,
+    create_background_task,
+)
 
 import container as _container_module
 from container import Container, container
@@ -116,7 +125,7 @@ async def lifespan(_: FastAPI):
     job_queue = AsyncJobQueue(max_concurrent=settings.max_concurrent_jobs)
     _container_module.resolved_job_queue = job_queue
 
-    processing_task = asyncio.create_task(
+    processing_task = create_background_task(
         job_queue.start(_container_module.resolved_job_service._process_job),
         name="job-processing-loop",
     )
@@ -130,7 +139,7 @@ async def lifespan(_: FastAPI):
     retry_poll_interval = float(
         getattr(settings, "retry_scheduler_poll_interval_seconds", 10)
     )
-    retry_task = asyncio.create_task(
+    retry_task = create_background_task(
         _container_module.resolved_job_service.run_retry_scheduler(
             job_queue, retry_poll_interval
         ),
@@ -142,7 +151,7 @@ async def lifespan(_: FastAPI):
     watchdog_task = None
     watchdog_enabled = bool(getattr(settings, "lease_watchdog_enabled", True))
     if watchdog_enabled:
-        watchdog_task = asyncio.create_task(
+        watchdog_task = create_background_task(
             _container_module.resolved_lease_watchdog.run(),
             name="lease-watchdog",
         )
@@ -157,117 +166,78 @@ async def lifespan(_: FastAPI):
     yield
 
     logger.info("Shutdown initiated...")
-    processing_task.cancel()
-    try:
-        await processing_task
-    except asyncio.CancelledError:
-        pass
-
-    retry_task.cancel()
-    try:
-        await retry_task
-    except asyncio.CancelledError:
-        pass
-
-    if watchdog_task is not None:
-        watchdog_task.cancel()
-        try:
-            await watchdog_task
-        except asyncio.CancelledError:
-            pass
+    await cancel_background_tasks(processing_task, retry_task, watchdog_task)
 
     container.shutdown_resources()
     logger.info("Shutdown complete")
 
 
-app = FastAPI(
-    title="Provisioning Service",
-    version="0.2.0",
-    description=(
-        "Asynchronous VM provisioning for a multi-agent compute marketplace.\n\n"
-        "## Authentication\n\n"
-        "The service is an internal dependency of a single storefront. When an\n"
-        "admin key is configured, every non-health request must present it:\n\n"
-        "```\nX-Admin-Key: <admin_api_key>\n```\n\n"
-        "This is the same shared secret the provisioning→storefront callback\n"
-        "uses, so the link can cross an untrusted network. `/health`, `/docs`,\n"
-        "and `/redoc` bypass authentication entirely.\n\n"
-        "## Job lifecycle\n\n"
-        "```\n"
-        "queued --> running --> succeeded\n"
-        "              +-> failed  (non-retryable or max retries exceeded)\n"
-        "              +-> queued  (retryable -- re-enqueued with backoff)\n"
-        "queued --> cancelled  (user-initiated)\n"
-        "running --> cancelled (user-initiated, SIGTERM sent)\n"
-        "```\n"
-    ),
-    openapi_tags=[
-        {
-            "name": "vms",
-            "description": (
-                "Admin/operator VM operations (create, start, shutdown, etc.). "
-                "Tenant self-service requires lease-owner authorization and is "
-                "not exposed by this controller."
-            ),
-        },
-        {
-            "name": "hosts",
-            "description": "KVM host registry — CRUD, capacity checks, and connectivity tests.",
-        },
-        {
-            "name": "jobs",
-            "description": "Query and cancel Ansible jobs.",
-        },
-        {
-            "name": "system",
-            "description": "Health, version, and Ansible readiness diagnostics.",
-        },
-        {
-            "name": "leases",
-            "description": (
-                "VM lease lifecycle — register, query, terminate, release oversight, "
-                "and admin repair actions."
-            ),
-        },
-        {
-            "name": "bare-metal",
-            "description": (
-                "Bare-metal domain adapter — register and query SSH-access leases "
-                "against site allocations."
-            ),
-        },
-        {
-            "name": "admin",
-            "description": "Admin-only repair operations for exceptional lifecycle states.",
-        },
-        {
-            "name": "capacity",
-            "description": (
-                "Site-authority capacity ledger — snapshot, probe, "
-                "reserve/commit/release, and the versioned event feed."
-            ),
-        },
-    ],
-    lifespan=lifespan,
+PROVISIONING_DESCRIPTION = (
+    "Asynchronous VM provisioning for a multi-agent compute marketplace.\n\n"
+    "## Authentication\n\n"
+    "The service is an internal dependency of a single storefront. When an\n"
+    "admin key is configured, every non-health request must present it:\n\n"
+    "```\nX-Admin-Key: <admin_api_key>\n```\n\n"
+    "This is the same shared secret the provisioning→storefront callback\n"
+    "uses, so the link can cross an untrusted network. `/health`, `/docs`,\n"
+    "and `/redoc` bypass authentication entirely.\n\n"
+    "## Job lifecycle\n\n"
+    "```\n"
+    "queued --> running --> succeeded\n"
+    "              +-> failed  (non-retryable or max retries exceeded)\n"
+    "              +-> queued  (retryable -- re-enqueued with backoff)\n"
+    "queued --> cancelled  (user-initiated)\n"
+    "running --> cancelled (user-initiated, SIGTERM sent)\n"
+    "```\n"
 )
 
-# Middleware (outermost applied last)
-app.add_middleware(
-    AgentRateLimitMiddleware,
-    enabled=settings.enable_rate_limiting,
-    max_requests=settings.rate_limit_requests_per_minute,
-)
-app.add_middleware(
-    StorefrontAuthMiddleware,
-    admin_key=str(settings.storefront_admin_key or ""),
-)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+PROVISIONING_OPENAPI_TAGS = [
+    {
+        "name": "vms",
+        "description": (
+            "Admin/operator VM operations (create, start, shutdown, etc.). "
+            "Tenant self-service requires lease-owner authorization and is "
+            "not exposed by this controller."
+        ),
+    },
+    {
+        "name": "hosts",
+        "description": "KVM host registry — CRUD, capacity checks, and connectivity tests.",
+    },
+    {
+        "name": "jobs",
+        "description": "Query and cancel Ansible jobs.",
+    },
+    {
+        "name": "system",
+        "description": "Health, version, and Ansible readiness diagnostics.",
+    },
+    {
+        "name": "leases",
+        "description": (
+            "VM lease lifecycle — register, query, terminate, release oversight, "
+            "and admin repair actions."
+        ),
+    },
+    {
+        "name": "bare-metal",
+        "description": (
+            "Bare-metal domain adapter — register and query SSH-access leases "
+            "against site allocations."
+        ),
+    },
+    {
+        "name": "admin",
+        "description": "Admin-only repair operations for exceptional lifecycle states.",
+    },
+    {
+        "name": "capacity",
+        "description": (
+            "Site-authority capacity ledger — snapshot, probe, "
+            "reserve/commit/release, and the versioned event feed."
+        ),
+    },
+]
 
 # ---------------------------------------------------------------------------
 # Routers
@@ -283,17 +253,53 @@ app.add_middleware(
 #   /api/v1/leases/*                 <- market-managed lease lifecycle
 #   /api/v1/bare-metal/leases/*      <- bare-metal domain lease adapter
 # ---------------------------------------------------------------------------
-app.include_router(SystemController.make_health_router())                          # /health
-app.include_router(SystemController.make_system_router(), prefix="/api/v1")        # /api/v1/system/*
-app.include_router(AnsibleJobsController.make_router(), prefix="/api/v1")          # /api/v1/jobs/*
-app.include_router(HostController.make_router(), prefix="/api/v1")                 # /api/v1/hosts/*
-app.include_router(VmController.make_router(), prefix="/api/v1")                   # /api/v1/hosts/{host}/vms/*
-app.include_router(LeasesController.make_router(), prefix="/api/v1")               # /api/v1/leases/*
-app.include_router(BareMetalLeasesController.make_router(), prefix="/api/v1")      # /api/v1/bare-metal/leases/*
-app.include_router(AdminLeasesController.make_router(), prefix="/api/v1")          # /api/v1/admin/leases/*
-app.include_router(                                                                # /api/v1/capacity/*
-    make_capacity_router(lambda: _container_module.resolved_capacity_ledger_service),
-    prefix="/api/v1",
+app = build_provisioning_app(
+    config=ProvisioningAppConfig(
+        title="Provisioning Service",
+        version="0.2.0",
+        description=PROVISIONING_DESCRIPTION,
+        openapi_tags=PROVISIONING_OPENAPI_TAGS,
+    ),
+    lifespan=lifespan,
+    # Middleware order matches the previous direct add_middleware calls.
+    middlewares=(
+        ProvisioningMiddlewareMount(
+            AgentRateLimitMiddleware,
+            {
+                "enabled": settings.enable_rate_limiting,
+                "max_requests": settings.rate_limit_requests_per_minute,
+            },
+        ),
+        ProvisioningMiddlewareMount(
+            StorefrontAuthMiddleware,
+            {"admin_key": str(settings.storefront_admin_key or "")},
+        ),
+        ProvisioningMiddlewareMount(
+            CORSMiddleware,
+            {
+                "allow_origins": ["*"],
+                "allow_credentials": True,
+                "allow_methods": ["*"],
+                "allow_headers": ["*"],
+            },
+        ),
+    ),
+    routers=(
+        ProvisioningRouterMount(SystemController.make_health_router()),
+        ProvisioningRouterMount(SystemController.make_system_router(), "/api/v1"),
+        ProvisioningRouterMount(AnsibleJobsController.make_router(), "/api/v1"),
+        ProvisioningRouterMount(HostController.make_router(), "/api/v1"),
+        ProvisioningRouterMount(VmController.make_router(), "/api/v1"),
+        ProvisioningRouterMount(LeasesController.make_router(), "/api/v1"),
+        ProvisioningRouterMount(BareMetalLeasesController.make_router(), "/api/v1"),
+        ProvisioningRouterMount(AdminLeasesController.make_router(), "/api/v1"),
+        ProvisioningRouterMount(
+            make_capacity_router(
+                lambda: _container_module.resolved_capacity_ledger_service
+            ),
+            "/api/v1",
+        ),
+    ),
 )
 
 # Test controller — only mounted when mock profile is active.
