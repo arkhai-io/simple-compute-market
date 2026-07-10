@@ -16,14 +16,15 @@ Global pause state
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager
-
-from fastapi import FastAPI
 
 import market_storefront.container as _container
 from core_storefront.app_composition import (
     build_storefront_app,
     default_storefront_app_config,
+)
+from core_storefront.app_lifecycle import (
+    StorefrontLifecycleCallbacks,
+    build_storefront_lifespan,
 )
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
@@ -65,41 +66,67 @@ def run_serve(
 # Lifespan
 # ---------------------------------------------------------------------------
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
+
+def _build_alkahest_clients() -> dict:
     from market_storefront.services import alkahest_service
+
+    return alkahest_service.build_clients()
+
+
+def _build_listing_service(**kwargs):
     from market_storefront.services.listing_service import ListingService
-    from market_storefront.services.system_service import SystemService
-    from market_storefront.startup import _startup_tasks
 
-    sqlite_client = get_sqlite_client()
-    set_stage_event_db_path(sqlite_client.db_path)
-    alkahest_clients = alkahest_service.build_clients()
+    return ListingService(**kwargs)
 
-    listing_svc = ListingService(
-        sqlite_client=sqlite_client,
-        alkahest_clients=alkahest_clients,
-    )
-    negotiation_svc = NegotiationService(
+
+def _build_negotiation_service(*, sqlite_client):
+    return NegotiationService(
         sqlite_client=sqlite_client,
         continue_negotiation=continue_sync_negotiation,
         stage_event=stage_event,
     )
-    system_svc = SystemService(sqlite_client=sqlite_client, agent_id=AGENT_ID)
 
+
+def _build_system_service(*, sqlite_client):
+    from market_storefront.services.system_service import SystemService
+
+    return SystemService(sqlite_client=sqlite_client, agent_id=AGENT_ID)
+
+
+def _populate_container(
+    *,
+    sqlite_client,
+    alkahest_clients,
+    listing_service,
+    negotiation_service,
+    system_service,
+) -> None:
     _container.resolved_sqlite_client = sqlite_client
     _container.resolved_alkahest_clients = alkahest_clients
-    _container.resolved_listing_service = listing_svc
-    _container.resolved_negotiation_service = negotiation_svc
-    _container.resolved_system_service = system_svc
+    _container.resolved_listing_service = listing_service
+    _container.resolved_negotiation_service = negotiation_service
+    _container.resolved_system_service = system_service
 
-    logger.info("[STARTUP] Singletons initialized")
+
+async def _run_startup_tasks() -> None:
+    from market_storefront.startup import _startup_tasks
+
     await _startup_tasks()
-    logger.info("[STARTUP] Background tasks started")
 
-    yield
 
-    logger.info("[SHUTDOWN] Storefront shutting down")
+lifespan = build_storefront_lifespan(
+    StorefrontLifecycleCallbacks(
+        get_sqlite_client=get_sqlite_client,
+        set_stage_event_db_path=set_stage_event_db_path,
+        build_alkahest_clients=_build_alkahest_clients,
+        build_listing_service=_build_listing_service,
+        build_negotiation_service=_build_negotiation_service,
+        build_system_service=_build_system_service,
+        populate_container=_populate_container,
+        startup_tasks=_run_startup_tasks,
+        logger=logger,
+    )
+)
 
 
 # ---------------------------------------------------------------------------
