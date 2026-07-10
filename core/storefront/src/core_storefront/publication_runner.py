@@ -42,6 +42,90 @@ class PublicationCycleResult:
 
 
 @dataclass(frozen=True)
+class PublicationCommandResult:
+    """Command-facing publication result with reusable summary semantics."""
+
+    cycle: PublicationCycleResult
+
+    @property
+    def closed(self) -> dict[str, list[str]]:
+        return self.cycle.closed
+
+    @property
+    def published(self) -> list[dict[str, Any]]:
+        return self.cycle.published
+
+    @property
+    def failed(self) -> list[tuple[dict[str, Any], str]]:
+        return self.cycle.failed
+
+    @property
+    def skipped(self) -> list[dict[str, Any]]:
+        return self.cycle.skipped
+
+    @property
+    def published_count(self) -> int:
+        return len(self.published)
+
+    @property
+    def failed_count(self) -> int:
+        return len(self.failed)
+
+    @property
+    def skipped_count(self) -> int:
+        return len(self.skipped)
+
+    @property
+    def closed_count(self) -> int:
+        return sum(len(listing_ids) for listing_ids in self.closed.values())
+
+    @property
+    def has_publications(self) -> bool:
+        return self.published_count > 0
+
+    @property
+    def has_failures(self) -> bool:
+        return self.failed_count > 0
+
+    @property
+    def no_new_listings(self) -> bool:
+        """True when the command did not publish or fail any candidate."""
+        return not self.has_publications and not self.has_failures
+
+
+@dataclass(frozen=True)
+class PublicationCommand:
+    """Reusable command surface for selected domain publication sources."""
+
+    selection: "PublicationSourceSelection"
+    db_path: str
+    base_url: str
+    private_key: str | None
+    build_payload: PayloadBuilder
+    publish_offer: PublishOffer
+
+    def run(
+        self,
+        *,
+        skip_ids: set[str] | None = None,
+        close_stale: bool = True,
+        skip_open: bool = True,
+    ) -> PublicationCommandResult:
+        """Run one publication command cycle."""
+        return run_publication_command(
+            self.selection,
+            db_path=self.db_path,
+            base_url=self.base_url,
+            private_key=self.private_key,
+            build_payload=self.build_payload,
+            publish_offer=self.publish_offer,
+            skip_ids=skip_ids,
+            close_stale=close_stale,
+            skip_open=skip_open,
+        )
+
+
+@dataclass(frozen=True)
 class PublicationSourceSelection:
     """Core-owned selection of domain publication sources.
 
@@ -82,6 +166,25 @@ class PublicationSourceSelection:
         """Return open publication keys for the selected sources."""
         return open_publication_keys(self.build_sources(), db_path)
 
+    def command(
+        self,
+        *,
+        db_path: str,
+        base_url: str,
+        private_key: str | None,
+        build_payload: PayloadBuilder,
+        publish_offer: PublishOffer,
+    ) -> PublicationCommand:
+        """Create a reusable command object for this source selection."""
+        return PublicationCommand(
+            selection=self,
+            db_path=db_path,
+            base_url=base_url,
+            private_key=private_key,
+            build_payload=build_payload,
+            publish_offer=publish_offer,
+        )
+
     def run_cycle(
         self,
         *,
@@ -95,8 +198,32 @@ class PublicationSourceSelection:
         skip_open: bool = True,
     ) -> PublicationCycleResult:
         """Run one publication cycle for the selected sources."""
-        return run_publication_cycle(
-            self.build_sources(),
+        return self.run_command(
+            db_path=db_path,
+            base_url=base_url,
+            private_key=private_key,
+            build_payload=build_payload,
+            publish_offer=publish_offer,
+            skip_ids=skip_ids,
+            close_stale=close_stale,
+            skip_open=skip_open,
+        ).cycle
+
+    def run_command(
+        self,
+        *,
+        db_path: str,
+        base_url: str,
+        private_key: str | None,
+        build_payload: PayloadBuilder,
+        publish_offer: PublishOffer,
+        skip_ids: set[str] | None = None,
+        close_stale: bool = True,
+        skip_open: bool = True,
+    ) -> PublicationCommandResult:
+        """Run one command-style publication cycle for the selected sources."""
+        return run_publication_command(
+            self,
             db_path=db_path,
             base_url=base_url,
             private_key=private_key,
@@ -233,12 +360,67 @@ def run_publication_cycle_by_name(
     skip_open: bool = True,
 ) -> PublicationCycleResult:
     """Build selected sources by name and run one publication cycle."""
-    sources = build_publication_sources_by_name(
+    return run_publication_command_by_name(
         source_names,
         source_kwargs_by_name=source_kwargs_by_name,
+        db_path=db_path,
+        base_url=base_url,
+        private_key=private_key,
+        build_payload=build_payload,
+        publish_offer=publish_offer,
+        skip_ids=skip_ids,
+        close_stale=close_stale,
+        skip_open=skip_open,
+    ).cycle
+
+
+def run_publication_command(
+    selection: PublicationSourceSelection,
+    *,
+    db_path: str,
+    base_url: str,
+    private_key: str | None,
+    build_payload: PayloadBuilder,
+    publish_offer: PublishOffer,
+    skip_ids: set[str] | None = None,
+    close_stale: bool = True,
+    skip_open: bool = True,
+) -> PublicationCommandResult:
+    """Run the CLI-facing publication command for a source selection."""
+    cycle = run_publication_cycle(
+        selection.build_sources(),
+        db_path=db_path,
+        base_url=base_url,
+        private_key=private_key,
+        build_payload=build_payload,
+        publish_offer=publish_offer,
+        skip_ids=skip_ids,
+        close_stale=close_stale,
+        skip_open=skip_open,
     )
-    return run_publication_cycle(
-        sources,
+    return PublicationCommandResult(cycle=cycle)
+
+
+def run_publication_command_by_name(
+    source_names: Sequence[str],
+    *,
+    source_kwargs_by_name: Mapping[str, Mapping[str, Any]] | None = None,
+    db_path: str,
+    base_url: str,
+    private_key: str | None,
+    build_payload: PayloadBuilder,
+    publish_offer: PublishOffer,
+    skip_ids: set[str] | None = None,
+    close_stale: bool = True,
+    skip_open: bool = True,
+) -> PublicationCommandResult:
+    """Build selected sources by name and run the CLI-facing command."""
+    selection = PublicationSourceSelection(
+        source_names=source_names,
+        source_kwargs_by_name=source_kwargs_by_name or {},
+    )
+    return run_publication_command(
+        selection,
         db_path=db_path,
         base_url=base_url,
         private_key=private_key,

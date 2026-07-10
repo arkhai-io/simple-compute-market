@@ -44,7 +44,10 @@ from registry_client import (
     UpdateListingRequest,
 )
 from core_storefront.publication_sources import PublicationSource
-from core_storefront.publication_runner import PublicationSourceSelection
+from core_storefront.publication_runner import (
+    PublicationCommandResult,
+    PublicationSourceSelection,
+)
 
 from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
 from domains.vms.listings.reconciler import (
@@ -896,7 +899,7 @@ def _alkahest_payload_for_candidate(
     )
 
 
-def _publish_round(
+def _publish_command_round(
     *,
     db_path: str,
     base_url: str,
@@ -911,7 +914,7 @@ def _publish_round(
     skip_ids: set[str] | None = None,
     close_stale: bool = False,
     skip_open: bool = False,
-) -> tuple[list[dict], list[tuple[dict, str]], list[dict]]:
+) -> PublicationCommandResult:
     """Publish one listing for every priced available resource slice.
 
     Pricing is per-row: ``resources.min_price`` / ``resources.token`` win
@@ -965,7 +968,7 @@ def _publish_round(
         except typer.Exit as exc:
             raise RuntimeError("HTTP error (see above)") from exc
 
-    result = _publication_source_selection().run_cycle(
+    return _publication_source_selection().run_command(
         db_path=db_path,
         base_url=base_url,
         private_key=private_key,
@@ -975,6 +978,13 @@ def _publish_round(
         close_stale=close_stale,
         skip_open=skip_open,
     )
+
+
+def _publish_round(
+    **kwargs: Any,
+) -> tuple[list[dict], list[tuple[dict, str]], list[dict]]:
+    """Compatibility wrapper returning the legacy publish-round tuple."""
+    result = _publish_command_round(**kwargs)
     return result.published, result.failed, result.skipped
 
 
@@ -1012,7 +1022,7 @@ def run_watch_loop(
         while True:
             cycle += 1
             try:
-                published, failed, skipped = _publish_round(
+                result = _publish_command_round(
                     db_path=db_path, base_url=base_url,
                     wallet_address=wallet_address, private_key=private_key,
                     default_min_price=default_min_price,
@@ -1032,23 +1042,23 @@ def run_watch_loop(
                 time.sleep(poll_interval)
                 continue
 
-            total_published += len(published)
-            total_failed += len(failed)
+            total_published += result.published_count
+            total_failed += result.failed_count
 
             ts = datetime.now().strftime("%H:%M:%S")
-            if published or failed:
+            if not result.no_new_listings:
                 out_console.print(
                     f"[dim]{ts}[/dim] cycle {cycle}: "
-                    f"[green]+{len(published)}[/green] new"
-                    + (f" [red]/{len(failed)} failed[/red]" if failed else "")
-                    + (f" [dim](skipped {len(skipped)} already-open)[/dim]" if skipped else "")
+                    f"[green]+{result.published_count}[/green] new"
+                    + (f" [red]/{result.failed_count} failed[/red]" if result.has_failures else "")
+                    + (f" [dim](skipped {result.skipped_count} already-open)[/dim]" if result.skipped else "")
                 )
-                _print_publish_table(out_console, published, failed)
+                _print_publish_table(out_console, result.published, result.failed)
             elif log_silent_cycles:
                 available_count = len(_available_resources(db_path))
                 out_console.print(
                     f"[dim]{ts}[/dim] cycle {cycle}: no new orders "
-                    f"(available={available_count}, already-open={len(skipped)})"
+                    f"(available={available_count}, already-open={result.skipped_count})"
                 )
 
             time.sleep(poll_interval)
@@ -1270,7 +1280,7 @@ def register(app: typer.Typer) -> None:
         # One-shot path
         # ------------------------------------------------------------------
         if not watch:
-            published, failed, _skipped = _publish_round(
+            result = _publish_command_round(
                 db_path=db_path, base_url=base_url,
                 wallet_address=wallet_address, private_key=private_key,
                 default_min_price=default_min_price,
@@ -1281,27 +1291,27 @@ def register(app: typer.Typer) -> None:
                 close_stale=True,
                 skip_open=True,
             )
-            if not published and not failed:
+            if result.no_new_listings:
                 console.print(
                     "[yellow]No available compute resources in the agent DB.[/yellow] "
                     "Pass --inventory <csv> or seed the DB first.",
                 )
                 raise typer.Exit(3)
 
-            _print_publish_table(console, published, failed)
+            _print_publish_table(console, result.published, result.failed)
             totals = Table.grid(padding=(0, 2))
             totals.add_column(style="bold")
             totals.add_column()
-            totals.add_row("Published", str(len(published)))
-            totals.add_row("Failed", str(len(failed)))
+            totals.add_row("Published", str(result.published_count))
+            totals.add_row("Failed", str(result.failed_count))
             totals.add_row("Agent", base_url)
             totals.add_row(
                 "Default price",
                 f"{default_min_price or '-'} {default_token_address or '(per-row required)'}",
             )
-            console.print(Panel(totals, title="Summary", border_style="green" if not failed else "yellow"))
+            console.print(Panel(totals, title="Summary", border_style="green" if not result.has_failures else "yellow"))
 
-            if failed and not published:
+            if result.has_failures and not result.has_publications:
                 raise typer.Exit(4)
             return
 

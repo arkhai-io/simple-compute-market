@@ -8,6 +8,7 @@ from core_storefront.publication_runner import (
     open_publication_keys,
     publish_round,
     publish_source_by_name,
+    run_publication_command_by_name,
     run_publication_cycle,
     run_publication_cycle_by_name,
 )
@@ -168,6 +169,56 @@ def test_publication_source_selection_wraps_command_cycle(monkeypatch) -> None:
         "price": "3",
         "listing_id": "vms",
     }
+
+
+def test_publication_command_result_exposes_summary_counts(monkeypatch) -> None:
+    import core_storefront.publication_runner as runner
+
+    monkeypatch.setattr(
+        runner,
+        "build_publication_source",
+        lambda name, **kwargs: _source(candidate={"resource_id": name, **kwargs}),
+    )
+
+    result = run_publication_command_by_name(
+        ["vms"],
+        source_kwargs_by_name={"vms": {"price": "4"}},
+        db_path="db.sqlite",
+        base_url="http://seller",
+        private_key=None,
+        build_payload=lambda *_args: ([{}], [], None),
+        publish_offer=lambda offer, *_args: {
+            "status": "published",
+            "listing_id": offer["resource_id"],
+        },
+    )
+
+    assert result.published_count == 1
+    assert result.failed_count == 0
+    assert result.skipped_count == 0
+    assert result.closed_count == 1
+    assert result.has_publications is True
+    assert result.has_failures is False
+    assert result.no_new_listings is False
+    assert result.published[0]["response"]["listing_id"] == "vms"
+
+
+def test_publication_command_no_new_when_only_skipped() -> None:
+    selection = PublicationSourceSelection(source_names=())
+    command = selection.command(
+        db_path="db.sqlite",
+        base_url="http://seller",
+        private_key=None,
+        build_payload=lambda *_args: ([{}], [], None),
+        publish_offer=lambda *_args: {"status": "published"},
+    )
+
+    result = command.run()
+
+    assert result.published_count == 0
+    assert result.failed_count == 0
+    assert result.skipped_count == 0
+    assert result.no_new_listings is True
 
 
 def test_publish_source_by_name_loads_source(monkeypatch) -> None:
