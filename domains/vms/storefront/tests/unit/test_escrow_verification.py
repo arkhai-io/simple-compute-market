@@ -111,6 +111,13 @@ class _FakeAttestationV1ObligationData:
             self.attestation = _FakeAttestationRequest()
 
 
+@dataclass
+class _FakeAttestationReferenceObligationData:
+    arbiter: str = ARBITER
+    demand: bytes = b"\x11\x22"
+    referenced_attestation_uid: bytes = b"\x44" * 32
+
+
 def _good_obligation(**overrides: Any) -> dict[str, Any]:
     """Build the ``{'attestation': ..., 'data': ...}`` dict alkahest's
     get_obligation returns, applying overrides to whichever sub-record
@@ -280,6 +287,13 @@ class TestReadChainObligationData:
                     "value": 0,
                 },
             },
+        }
+
+    def test_reads_attestation_reference_shape(self):
+        assert _read_chain_obligation_data(_FakeAttestationReferenceObligationData()) == {
+            "arbiter": ARBITER_LOWER,
+            "demand": "0x1122",
+            "attestationUid": "0x" + "44" * 32,
         }
 
 

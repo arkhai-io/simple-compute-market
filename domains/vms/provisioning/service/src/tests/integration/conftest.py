@@ -222,8 +222,8 @@ def db_engine():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
-    # Site-ledger tables ride core_site's own metadata.
-    from core_site.db import Base as SiteBase
+    # Site-ledger tables ride market_site's own metadata.
+    from market_site.db import Base as SiteBase
     SiteBase.metadata.create_all(bind=engine)
     return engine
 
@@ -337,6 +337,8 @@ async def client_and_queue(
         lease_watchdog_enabled=False,  # Don't start background timer in tests
         storefront_url="http://test-storefront:8001",
         storefront_admin_key="test-admin-key",
+        resolved_bare_metal_playbook_path=Path("/fake/bare-metal-node-access.yml"),
+        bare_metal_reclaim_policy="remove_lease_key",
     )
 
     host_service = HostService(
@@ -351,19 +353,43 @@ async def client_and_queue(
         host_service=host_service,
     )
 
-    from core_site.ledger import CapacityLedgerService
-    capacity_ledger_service = CapacityLedgerService(
-        session_factory=session_factory, required_attributes=("vm_host",),
-    )
+    from market_site.ledger import CapacityLedgerService
+    capacity_ledger_service = CapacityLedgerService(session_factory=session_factory)
 
     from services.site_resources_service import SiteResourcesService
     site_resources_service = SiteResourcesService(capacity_ledger_service)
+
+    from services.bare_metal_lease_service import BareMetalLeaseService
+    bare_metal_lease_service = BareMetalLeaseService(site_resources_service)
+
+    from services.bare_metal_operations_service import BareMetalOperationsService
+    bare_metal_operations_service = BareMetalOperationsService(
+        job_service=job_service,
+        job_queue_provider=lambda: job_queue,
+        settings=mock_settings,
+        host_service=host_service,
+    )
+
+    from services.release_executors import (
+        BARE_METAL_EXECUTOR_KIND,
+        BareMetalReleaseExecutor,
+        ExecutorReleaseDispatcher,
+        VM_EXECUTOR_KIND,
+        VmReleaseExecutor,
+    )
+    release_dispatcher = ExecutorReleaseDispatcher({
+        BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
+            release_delegate=bare_metal_operations_service.reclaim_access_for_allocation,
+        ),
+        VM_EXECUTOR_KIND: VmReleaseExecutor(job_service=None),
+    })
 
     from services.lease_lifecycle_service import LeaseLifecycleService
     lease_lifecycle_service = LeaseLifecycleService(
         settings=mock_settings,
         site_resources_service=site_resources_service,
-        job_service=None,  # tests use the direct-release path; no real Ansible jobs
+        job_service=None,  # tests poll direct-release only when a release executor returns it
+        release_dispatcher=release_dispatcher,
     )
 
     # Fresh queue per test — caller can inject on_job_started via fixture params
@@ -385,6 +411,8 @@ async def client_and_queue(
     app.container.session_factory.override(session_factory)
     app.container.host_service.override(host_service)
     app.container.site_resources_service.override(site_resources_service)
+    app.container.bare_metal_lease_service.override(bare_metal_lease_service)
+    app.container.bare_metal_operations_service.override(bare_metal_operations_service)
     app.container.lease_lifecycle_service.override(lease_lifecycle_service)
     app.container.capacity_ledger_service.override(capacity_ledger_service)
 
@@ -394,6 +422,8 @@ async def client_and_queue(
     _container_module.resolved_ansible_service = fake_ansible
     _container_module.resolved_system_service = system_service
     _container_module.resolved_host_service = host_service
+    _container_module.resolved_bare_metal_lease_service = bare_metal_lease_service
+    _container_module.resolved_bare_metal_operations_service = bare_metal_operations_service
     _container_module.resolved_lease_lifecycle_service = lease_lifecycle_service
     _container_module.resolved_capacity_ledger_service = capacity_ledger_service
 
@@ -437,6 +467,8 @@ async def client_and_queue(
     app.container.session_factory.reset_override()
     app.container.host_service.reset_override()
     app.container.site_resources_service.reset_override()
+    app.container.bare_metal_lease_service.reset_override()
+    app.container.bare_metal_operations_service.reset_override()
     app.container.lease_lifecycle_service.reset_override()
     app.container.capacity_ledger_service.reset_override()
 

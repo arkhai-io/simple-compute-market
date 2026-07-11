@@ -2,7 +2,7 @@
 
 ``RemoteCapacityClient`` speaks one site authority's
 ``/api/v1/capacity`` HTTP surface (the shared ledger router from
-``core_site``); ``site_events_poller`` tails that authority's versioned
+``market_site``); ``site_events_poller`` tails that authority's versioned
 capacity-event feed into the local bus. Both are domain-neutral: the
 storefront composition root supplies settings resolution, aggregation,
 and the listing-reconcile reaction (``full_reconcile``) — see the VM

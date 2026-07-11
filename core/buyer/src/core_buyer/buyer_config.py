@@ -3,7 +3,7 @@
 Wallet, chain, negotiation-policy, and storefront-URL resolution from
 the buyer's TOML (via ``market_config``) with CLI overrides taking
 precedence. Moved verbatim from the VM buyer's ``common`` module when
-the API-tokens domain became the second schema plugin; domain packages
+the API-credits domain became the second schema plugin; domain packages
 keep what interprets their own vocabulary (the VM SSH key resolver,
 repo paths) and re-export these.
 """

@@ -74,6 +74,28 @@ def test_sqlite_schema_includes_derived_compute_listings(client):
     } <= cols
 
 
+def test_sqlite_schema_includes_derived_bare_metal_listings(client):
+    conn = sqlite3.connect(client.db_path)
+    try:
+        cols = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(derived_bare_metal_listings)"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert {
+        "listing_id",
+        "machine_id",
+        "physical_host_id",
+        "status",
+        "derivation_key",
+        "last_reconciled_at",
+    } <= cols
+
+
 def test_sqlite_schema_includes_compute_allocation_correlation_fields(client):
     conn = sqlite3.connect(client.db_path)
     try:

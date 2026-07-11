@@ -123,8 +123,8 @@ def test_publish_inventory_success_then_publishes_with_cli_args(monkeypatch, tmp
     publish_calls: list[dict] = []
 
     monkeypatch.setattr("market_storefront.cli_publish._import_csv", lambda csv_path, db: imports.append((csv_path, db)))
-    monkeypatch.setattr("market_storefront.cli_publish._close_stale_derived_listings", lambda **_kwargs: [])
-    monkeypatch.setattr("market_storefront.cli_publish._open_listing_resource_keys", lambda _db: {"already-open"})
+    monkeypatch.setattr("market_storefront.cli_publish._close_stale_publication_listings", lambda **_kwargs: {})
+    monkeypatch.setattr("market_storefront.cli_publish._open_publication_keys", lambda _db: {"already-open"})
     monkeypatch.setattr(
         "market_storefront.cli_publish._publish_round",
         lambda **kwargs: publish_calls.append(kwargs) or ([build_published_entry()], [], []),
@@ -155,8 +155,8 @@ def test_publish_inventory_success_then_publishes_with_cli_args(monkeypatch, tmp
 
 def test_publish_oneshot_no_resources(monkeypatch, runner, app):
     _patch_publish_prereqs(monkeypatch)
-    monkeypatch.setattr("market_storefront.cli_publish._close_stale_derived_listings", lambda **_kwargs: [])
-    monkeypatch.setattr("market_storefront.cli_publish._open_listing_resource_keys", lambda _db: set())
+    monkeypatch.setattr("market_storefront.cli_publish._close_stale_publication_listings", lambda **_kwargs: {})
+    monkeypatch.setattr("market_storefront.cli_publish._open_publication_keys", lambda _db: set())
     monkeypatch.setattr("market_storefront.cli_publish._publish_round", lambda **_kwargs: ([], [], []))
 
     result = runner.invoke(app, ["publish"])
@@ -166,8 +166,8 @@ def test_publish_oneshot_no_resources(monkeypatch, runner, app):
 
 def test_publish_oneshot_all_published(monkeypatch, runner, app):
     _patch_publish_prereqs(monkeypatch)
-    monkeypatch.setattr("market_storefront.cli_publish._close_stale_derived_listings", lambda **_kwargs: [])
-    monkeypatch.setattr("market_storefront.cli_publish._open_listing_resource_keys", lambda _db: set())
+    monkeypatch.setattr("market_storefront.cli_publish._close_stale_publication_listings", lambda **_kwargs: {})
+    monkeypatch.setattr("market_storefront.cli_publish._open_publication_keys", lambda _db: set())
     monkeypatch.setattr(
         "market_storefront.cli_publish._publish_round",
         lambda **_kwargs: ([build_published_entry()], [], []),
@@ -180,8 +180,8 @@ def test_publish_oneshot_all_published(monkeypatch, runner, app):
 
 def test_publish_oneshot_all_failed(monkeypatch, runner, app):
     _patch_publish_prereqs(monkeypatch)
-    monkeypatch.setattr("market_storefront.cli_publish._close_stale_derived_listings", lambda **_kwargs: [])
-    monkeypatch.setattr("market_storefront.cli_publish._open_listing_resource_keys", lambda _db: set())
+    monkeypatch.setattr("market_storefront.cli_publish._close_stale_publication_listings", lambda **_kwargs: {})
+    monkeypatch.setattr("market_storefront.cli_publish._open_publication_keys", lambda _db: set())
     monkeypatch.setattr("market_storefront.cli_publish._publish_round", lambda **_kwargs: ([], [(build_failed_resource(), "RPC error")], []))
 
     result = runner.invoke(app, ["publish"])

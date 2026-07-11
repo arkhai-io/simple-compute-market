@@ -405,8 +405,8 @@ def register(app: typer.Typer) -> None:
         # (the seller still validates it). Resume mode skips the
         # round-0 send and these fields are ignored.
         from market_alkahest.schemas import EscrowProposal
-        from arkhai_vms_common import VmProvisionTerms
-        from arkhai_vms_common import make_vm_provision_terms
+        from arkhai_vms import VmProvisionTerms
+        from arkhai_vms import make_vm_provision_terms
         from domains.vms.settlement import escrow_proposal_from_accepted_entry
         import time as _time
         provision_terms: Optional[VmProvisionTerms] = None

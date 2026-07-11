@@ -16,4 +16,5 @@ storefront/src/market_storefront/data/*.csv
 .uv-cache
 .snapshot
 **/node_modules
+**/target
 dev-env/state

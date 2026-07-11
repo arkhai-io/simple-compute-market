@@ -444,7 +444,7 @@ class ProvisioningClient(_ProvisioningClientBase):
         create_job_id: Optional[str] = None,
         allocation_id: Optional[str] = None,
     ) -> dict:
-        """POST /api/v1/leases — register a new VM lease."""
+        """POST /api/v1/leases — register a VM lease on a live allocation."""
         body: dict = {
             "resource_id": resource_id,
             "escrow_uid": escrow_uid,
@@ -490,7 +490,7 @@ class ProvisioningClient(_ProvisioningClientBase):
         return await self._patch(f"/api/v1/leases/{lease_id}", kwargs)
 
     async def terminate_lease(self, lease_id: str, **kwargs) -> dict:
-        """POST /api/v1/leases/{lease_id}/terminate — submit vm_remove teardown."""
+        """POST /api/v1/leases/{lease_id}/terminate — submit executor release."""
         return await self._post(f"/api/v1/leases/{lease_id}/terminate", kwargs)
 
     async def release_lease_oversight(self, lease_id: str, *, reason: str) -> dict:
@@ -839,7 +839,7 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         create_job_id: Optional[str] = None,
         allocation_id: Optional[str] = None,
     ) -> dict:
-        """POST /api/v1/leases — register a new VM lease."""
+        """POST /api/v1/leases — register a VM lease on a live allocation."""
         body: dict = {
             "resource_id": resource_id,
             "escrow_uid": escrow_uid,
@@ -885,7 +885,7 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         return self._patch(f"/api/v1/leases/{lease_id}", kwargs)
 
     def terminate_lease(self, lease_id: str, **kwargs) -> dict:
-        """POST /api/v1/leases/{lease_id}/terminate — submit vm_remove teardown."""
+        """POST /api/v1/leases/{lease_id}/terminate — submit executor release."""
         return self._post(f"/api/v1/leases/{lease_id}/terminate", kwargs)
 
     def release_lease_oversight(self, lease_id: str, *, reason: str) -> dict:

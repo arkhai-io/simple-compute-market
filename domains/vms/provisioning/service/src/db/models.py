@@ -81,12 +81,14 @@ class Credential(Base):
 
 
 class Host(Base):
-    """Registered KVM hypervisor host.
+    """Registered provisioning host.
 
     This is the single source of truth for host inventory. The Ansible INI
     file is an input format only (via ``POST /hosts/import`` or the
     ``PROVISIONING_INVENTORY_INI`` env var at startup); at runtime, all host
-    lookups and inventory rendering use this table.
+    lookups and inventory rendering use this table. Rows may represent KVM
+    hypervisors, bare-metal nodes, or future executor hosts; the row name is
+    the Ansible alias used by executor jobs.
 
     ssh_key_type:
         "path"     — ssh_key_value is a filesystem path (e.g. a mounted
@@ -121,11 +123,11 @@ class Host(Base):
 
 
 # The site-authority ledger (AllocationState, SiteResource,
-# SiteAllocation, CapacityEvent) lives in the shared core_site
+# SiteAllocation, CapacityEvent) lives in the shared market_site
 # package; re-exported here because the service's modules and tests
 # reach all persistence models through db.models. The tables ride
-# core_site's own metadata — init_db creates both.
-from core_site.db import (  # noqa: F401
+# market_site's own metadata — init_db creates both.
+from market_site.db import (  # noqa: F401
     HELD_ALLOCATION_STATES,
     AllocationState,
     CapacityEvent,

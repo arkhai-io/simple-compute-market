@@ -1,7 +1,7 @@
 """VM shim over the core buyer negotiation client.
 
 The round loop, chain loading, and outcome parsing moved to
-``core_buyer.negotiation_client`` when the API-tokens domain became the
+``core_buyer.negotiation_client`` when the API-credits domain became the
 second schema plugin. The seam that moved with it: listings broadcast
 **per-unit** rates and the core client scales them to absolute amounts
 by ``unit_count`` — this module supplies the VM unit, the lease hour
@@ -36,7 +36,7 @@ from core_buyer.negotiation_client import (
 from market_alkahest.schemas import EscrowProposal
 from market_policy.negotiation_middleware import NegotiationMiddleware
 
-from arkhai_vms_common import VmProvisionTerms
+from arkhai_vms import VmProvisionTerms
 
 
 def _register_rl_middleware() -> None:

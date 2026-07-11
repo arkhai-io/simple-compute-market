@@ -9,10 +9,15 @@ the DB and queue — they are exercised in integration tests.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
+from arkhai_bare_metal import (
+    NODE_GRANT_ACCESS_ACTION,
+    NODE_RECLAIM_ACCESS_ACTION,
+)
 from models.jobs_model import AnsibleJobParams, AnsibleRunResult
 from services.job_service import AnsibleJobService
 
@@ -40,6 +45,8 @@ def _make_service(**settings_overrides) -> AnsibleJobService:
     settings.frp_server_addr = ""
     settings.frp_domain = ""
     settings.frp_dashboard_password = ""
+    settings.resolved_playbook_path = Path("/playbooks/vm-operations.yaml")
+    settings.resolved_bare_metal_playbook_path = Path("/playbooks/node-access.yaml")
     for k, v in settings_overrides.items():
         setattr(settings, k, v)
 
@@ -144,6 +151,94 @@ class TestBuildParams:
         svc = _make_service()
         params = svc._build_params({})
         assert isinstance(params, AnsibleJobParams)
+
+    def test_bare_metal_fields_mapped(self):
+        svc = _make_service()
+        params = svc._build_params({
+            "vm_host": "bm-node-1",
+            "vm_target": "bm-node-1",
+            "vm_action": NODE_GRANT_ACCESS_ACTION,
+            "executor_kind": "bare_metal",
+            "executor_action": NODE_GRANT_ACCESS_ACTION,
+            "executor_target": "bm-node-1",
+            "executor_ref": {
+                "physical_host_id": "host-physical-1",
+                "ssh_user": "tenant-a",
+            },
+            "escrow_uid": "0xbm",
+            "physical_host_id": "host-physical-1",
+            "ssh_user": "tenant-a",
+            "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
+            "access_ref": {"ssh_user": "tenant-a"},
+            "bare_metal_reclaim_policy": "delete_user",
+        })
+
+        assert params.escrow_uid == "0xbm"
+        assert params.executor_kind == "bare_metal"
+        assert params.executor_action == NODE_GRANT_ACCESS_ACTION
+        assert params.executor_target == "bm-node-1"
+        assert params.executor_ref == {
+            "physical_host_id": "host-physical-1",
+            "ssh_user": "tenant-a",
+        }
+        assert params.physical_host_id == "host-physical-1"
+        assert params.ssh_user == "tenant-a"
+        assert params.ssh_public_key == "ssh-ed25519 AAAA tenant-a"
+        assert params.access_ref == {"ssh_user": "tenant-a"}
+        assert params.bare_metal_reclaim_policy == "delete_user"
+
+    def test_executor_fields_fall_back_to_legacy_vm_fields(self):
+        svc = _make_service()
+        params = svc._build_params({
+            "vm_host": "kvm1",
+            "vm_target": "test-vm",
+            "vm_action": "shutdown",
+        })
+
+        assert params.executor_kind == "vm"
+        assert params.executor_action == "shutdown"
+        assert params.executor_target == "test-vm"
+
+    def test_executor_target_does_not_force_vm_target(self):
+        svc = _make_service()
+        params = svc._build_params({
+            "vm_host": "kvm1",
+            "vm_action": "list",
+            "executor_kind": "vm",
+            "executor_action": "list",
+            "executor_target": "kvm1",
+        })
+
+        assert params.vm_target is None
+        assert params.executor_target == "kvm1"
+
+
+class TestPlaybookSelection:
+    def test_vm_actions_use_vm_playbook(self):
+        svc = _make_service()
+        params = AnsibleJobParams(vm_host="kvm1", vm_action="create")
+
+        assert svc._playbook_path_for_params(params) == Path("/playbooks/vm-operations.yaml")
+
+    def test_bare_metal_actions_use_bare_metal_playbook(self):
+        svc = _make_service()
+        params = AnsibleJobParams(
+            vm_host="bm-node-1",
+            vm_action=NODE_RECLAIM_ACCESS_ACTION,
+        )
+
+        assert svc._playbook_path_for_params(params) == Path("/playbooks/node-access.yaml")
+
+    def test_bare_metal_executor_kind_uses_bare_metal_playbook(self):
+        svc = _make_service()
+        params = AnsibleJobParams(
+            vm_host="bm-node-1",
+            vm_action="grant_access",
+            executor_kind="bare_metal",
+            executor_action="grant_access",
+        )
+
+        assert svc._playbook_path_for_params(params) == Path("/playbooks/node-access.yaml")
 
 
 # ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 The policies for the scalar-amount escrow vocabulary every Alkahest
 market domain trades in: ``EscrowProposal``-shaped messages whose
 negotiable quantity is ``proposal.fields["amount"]``, advertised through
-listing ``accepted_escrows`` entries. Shared by the VM and API-tokens
+listing ``accepted_escrows`` entries. Shared by the VM and API-credits
 domains (and any future scalar-escrow domain); the generic middleware
 chain lives in ``market_policy.negotiation_middleware``.
 
@@ -14,7 +14,7 @@ call-path import — kit-policy does not hard-depend on kit-alkahest; the
 composition roots that load these chains always ship both.
 
 History: extracted verbatim from ``domains.vms.negotiation.policies``
-when the API-tokens domain became the second plugin; the VM module
+when the API-credits domain became the second plugin; the VM module
 re-exports every name from here, so existing import paths keep working.
 """
 

@@ -1,7 +1,7 @@
 """VM shim over the core buyer orchestration stages.
 
 The discover → negotiate → settle plumbing moved to
-``core_buyer.orchestration`` when the API-tokens domain became the
+``core_buyer.orchestration`` when the API-credits domain became the
 second schema plugin. This module keeps the VM instantiation: the
 legacy hook factories translate ``VmProvisionTerms`` into the core
 seams — ``unit_count`` (lease hours, ``duration_seconds / 3600``),
@@ -45,7 +45,7 @@ from core_buyer.orchestration import (
     make_settle_hook as _core_make_settle_hook,
 )
 from core_buyer.policy_surface import extract_seller_min_price  # noqa: F401
-from arkhai_vms_common import VmProvisionTerms
+from arkhai_vms import VmProvisionTerms
 from core_buyer.escrow_client import BuildEscrowTermsFn, CreateEscrowFn
 
 from .buyer_client import _sign  # noqa: F401 — re-export for service_cli/tests

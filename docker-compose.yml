@@ -2,16 +2,16 @@
 #
 # Assembles every market domain on one shared dev chain, reproducing the
 # previous monolithic topology. `docker compose up` here brings up Anvil, the
-# VM compute market, and the API-tokens market together — what the e2e suite
+# VM compute market, and the API-credits market together — what the e2e suite
 # expects.
 #
 # Domains are independent: bring just one up with its wrapper instead —
 #   docker compose -f compose.vms.yml up
-#   docker compose -f compose.apitokens.yml up
+#   docker compose -f compose.apicredits.yml up
 # Each domain owns its services in domains/<domain>/compose.yml; compose.dev.yml
 # owns the shared Anvil chain. `include:` merges them (an included file's
 # relative paths resolve against its own directory).
 include:
   - compose.dev.yml
   - domains/vms/compose.yml
-  - domains/apitokens/compose.yml
+  - domains/apicredits/compose.yml

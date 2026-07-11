@@ -254,7 +254,11 @@ class TestAdminImportResources:
         assert result.imported_count >= 1
 
 
-async def _seed_dynamic_listing_pool_rows(db: SQLiteClient) -> None:
+async def _seed_dynamic_listing_pool_rows(
+    db: SQLiteClient,
+    *,
+    record_derived: bool = True,
+) -> None:
     await db.upsert_resource(
         resource_id="pool-h200-1",
         resource_type="compute.gpu",
@@ -293,12 +297,13 @@ async def _seed_dynamic_listing_pool_rows(db: SQLiteClient) -> None:
             max_duration_seconds=3600,
             seller="http://seller",
         )
-        record_derived_listing(
-            db.db_path,
-            listing_id=listing_id,
-            resource_id="pool-h200-1",
-            gpu_count=gpu_count,
-        )
+        if record_derived:
+            record_derived_listing(
+                db.db_path,
+                listing_id=listing_id,
+                resource_id="pool-h200-1",
+                gpu_count=gpu_count,
+            )
 
 
 def _fake_pool_site():
@@ -468,6 +473,46 @@ class TestFulfillmentEvents:
         }
         assert fake.allocations[allocation_id]["state"] == "released"
         assert fake._available("pool-h200-1") == 4
+
+    async def test_manual_compute_listings_reopen_after_release(self, client):
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db, record_derived=False)
+        fake = _fake_pool_site()
+
+        with site_capacity(fake) as capacity:
+            allocation_id = await _ledger_hold(capacity, gpu_count=2)
+            closed = await c._post(
+                "/api/v1/admin/fulfillment/events/usage-started",
+                {"allocation_id": allocation_id, "escrow_uid": "escrow-2x"},
+                extra_headers=c._admin_headers(),
+            )
+            assert sorted(closed["closed_listing_ids"]) == [
+                "listing-3x", "listing-4x",
+            ]
+
+            response = await c._post(
+                "/api/v1/admin/fulfillment/events/capacity-released",
+                {"allocation_id": allocation_id},
+                extra_headers=c._admin_headers(),
+            )
+
+        assert sorted(response["reopened_listing_ids"]) == [
+            "listing-3x", "listing-4x",
+        ]
+        statuses = {
+            gpu_count: (await db.load_listing(listing_id=f"listing-{gpu_count}x"))[
+                "status"
+            ]
+            for gpu_count in range(1, 5)
+        }
+        assert statuses == {
+            1: "open",
+            2: "open",
+            3: "open",
+            4: "open",
+        }
 
     async def test_fulfillment_failed_releases_with_failure_metadata(self, client):
         from tests.fake_site import site_capacity

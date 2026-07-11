@@ -34,6 +34,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from arkhai_bare_metal import (
+    NODE_GRANT_ACCESS_ACTION,
+    NODE_RECLAIM_ACCESS_ACTION,
+)
 from config import Settings
 from models.ansible import (
     ConnectivityResult,
@@ -349,7 +353,12 @@ class AnsibleService:
         lines = [
             f"vm_host: {params.vm_host}",
             f"vm_action: {params.vm_action}",
+            f"executor_kind: {params.executor_kind}",
+            f"executor_action: {params.executor_action}",
+            f"executor_target: {params.executor_target}",
         ]
+        if params.executor_ref:
+            lines.append(f"executor_ref: {json.dumps(params.executor_ref)}")
         if params.vm_target:
             lines.append(f"vm_target: {params.vm_target}")
         if params.vm_action == "create":
@@ -389,6 +398,21 @@ class AnsibleService:
             lines.append(f"gcs_bucket_url: {params.gcs_bucket_url}")
         if params.gcs_image_path:
             lines.append(f"gcs_image_path: {params.gcs_image_path}")
+        if params.escrow_uid:
+            lines.append(f'escrow_uid: "{params.escrow_uid}"')
+        if params.physical_host_id:
+            lines.append(f'physical_host_id: "{params.physical_host_id}"')
+        if params.ssh_user:
+            lines.append(f'bare_metal_ssh_user: "{params.ssh_user}"')
+        if params.ssh_public_key:
+            escaped = params.ssh_public_key.replace('"', '\\"')
+            lines.append(f'bare_metal_ssh_public_key: "{escaped}"')
+        if params.access_ref:
+            lines.append(f"bare_metal_access_ref: {json.dumps(params.access_ref)}")
+        if params.bare_metal_reclaim_policy:
+            lines.append(
+                f'bare_metal_reclaim_policy: "{params.bare_metal_reclaim_policy}"'
+            )
         if params.image_setup_type == "golden":
             self._inject_golden_image_credentials(lines)
         else:
@@ -546,6 +570,8 @@ class AnsibleService:
             "monitor": "vm_monitoring_data",
             "reset_password": "vm_password_reset_data",
             "vm_remove": "vm_remove_data",
+            NODE_GRANT_ACCESS_ACTION: "node_grant_access_data",
+            NODE_RECLAIM_ACCESS_ACTION: "node_reclaim_access_data",
             "check": "check_data",
         }
         fact_name = fact_names.get(action)

@@ -7,7 +7,7 @@ interpret it, used by the storefront on wire-received terms.
 
 from __future__ import annotations
 
-from arkhai_vms_common import (
+from arkhai_vms import (
     make_vm_provision_terms,
     provision_compute_resource,
     provision_duration_seconds,

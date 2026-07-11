@@ -1,7 +1,9 @@
-"""VM lease lifecycle controller.
+"""Market-managed lease lifecycle controller.
 
 The controller owns HTTP concerns only. Lease lifecycle state transitions are
-implemented by ``LeaseLifecycleService``.
+implemented by ``LeaseLifecycleService``. VM-shaped lease creation remains here
+for the current VM domain adapter; release operations are executor-dispatched
+and are not tied to the direct ``/hosts/{host}/vms`` operator API.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi_utils.cbv import cbv
 
 import container as _container_module
-from core_site.ledger import parse_utc as _parse_utc
+from market_site.ledger import parse_utc as _parse_utc
 from provisioning_client.models import (
     LeaseCreate,
     LeaseForceReleaseRequest,
@@ -165,9 +167,10 @@ class LeasesController:
         summary="Terminate a market-managed lease",
         description=(
             "Submits the lease release operation for this provisioning service "
-            "(vm_remove for VM leases) and moves the lease to releasing. "
-            "Capacity is released only after vm_remove succeeds. Failed, "
-            "cancelled, or timed-out teardown leaves the lease in release_failed."
+            "based on the allocation's executor_kind and moves the lease to "
+            "releasing. Capacity is released only after the delegated release "
+            "job succeeds. Failed, cancelled, or timed-out teardown leaves the "
+            "lease in release_failed."
         ),
     )
     async def terminate_lease(
@@ -186,9 +189,9 @@ class LeasesController:
         response_model=LeaseResponse,
         summary="Release lifecycle oversight without releasing capacity",
         description=(
-            "Moves a leased allocation to unmanaged. This does not delete the VM, "
-            "does not submit vm_remove, and does not release capacity. An admin "
-            "must later clean up the workload and force-release capacity."
+            "Moves a leased allocation to unmanaged. This does not run the "
+            "executor release operation and does not release capacity. An admin "
+            "must later clean up the workload/access and force-release capacity."
         ),
     )
     def release_oversight(
@@ -221,7 +224,7 @@ class AdminLeasesController:
         summary="Retry a failed lease release",
         description=(
             "Admin repair action for release_failed leases. Submits the service's "
-            "release delegate again (vm_remove for VM leases), returns the lease to "
+            "executor-dispatched release operation again, returns the lease to "
             "releasing, and keeps capacity held until the retry succeeds."
         ),
     )

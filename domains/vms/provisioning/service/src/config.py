@@ -40,6 +40,13 @@ from typing import List
 
 from dynaconf import Dynaconf
 
+BARE_METAL_RECLAIM_POLICIES = frozenset({
+    "remove_lease_key",
+    "lock_user",
+    "delete_user",
+})
+DEFAULT_BARE_METAL_RECLAIM_POLICY = "remove_lease_key"
+
 # ---------------------------------------------------------------------------
 # Resolve config directory and active profiles
 # ---------------------------------------------------------------------------
@@ -135,6 +142,28 @@ class Settings:
     @property
     def resolved_playbook_path(self) -> Path:
         return Path(str(self._source.playbook_path)).resolve()
+
+    @property
+    def resolved_bare_metal_playbook_path(self) -> Path:
+        return Path(str(self._source.bare_metal_playbook_path)).resolve()
+
+    @property
+    def bare_metal_reclaim_policy(self) -> str:
+        policy = str(
+            getattr(
+                self._source,
+                "bare_metal_reclaim_policy",
+                DEFAULT_BARE_METAL_RECLAIM_POLICY,
+            )
+            or DEFAULT_BARE_METAL_RECLAIM_POLICY
+        ).strip()
+        if policy not in BARE_METAL_RECLAIM_POLICIES:
+            allowed = ", ".join(sorted(BARE_METAL_RECLAIM_POLICIES))
+            raise ValueError(
+                "Invalid bare_metal_reclaim_policy "
+                f"{policy!r}; expected one of: {allowed}"
+            )
+        return policy
 
     @property
     def resolved_inventory_path(self) -> Path:

@@ -7,10 +7,12 @@
 # The real `hosts` file is gitignored so operator-specific IPs, usernames,
 # and per-host overrides don't get committed.
 #
-# `[kvm_hosts]` is the group the storefront's `attribute.vm_host` column
-# in `resources.csv` resolves against. The other groups are only used if
-# you also operate FRP proxies or remote provisioning workers; for a
-# single-box seller you can leave them empty.
+# `[kvm_hosts]` is the group the storefront's VM `attribute.vm_host`
+# column in `resources.csv` resolves against. `[bare_metal_nodes]` is
+# the group the bare-metal `attribute.machine_id` column resolves
+# against. The other groups are only used if you also operate FRP proxies
+# or remote provisioning workers; for a single-box seller you can leave
+# them empty.
 # =============================================================================
 
 [frp_servers]
@@ -26,6 +28,15 @@
 # Optional per-host args:
 #   ansible_port=<port>     — if SSH isn't on 22
 #   gpus=<count>            — used by the provisioning service's capacity checks
+
+[bare_metal_nodes]
+# Alias used in resources.csv (attribute.machine_id) and in bare-metal
+# listings. Use a distinct alias from any VM target names.
+# bm-host1 ansible_host=<IP> ansible_user=<user> ansible_ssh_private_key_file=~/.ssh/id_ed25519
+#
+# Optional per-host args:
+#   ansible_port=<port>     — if SSH isn't on 22
+#   public_host=<IP/DNS>    — address buyers should use if different from ansible_host
 
 [kvms]
 # Reserved for future use. Leave empty.

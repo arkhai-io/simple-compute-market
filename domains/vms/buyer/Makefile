@@ -14,7 +14,7 @@ reinit:
 	--upgrade-package arkhai-kit-alkahest --reinstall-package arkhai-kit-alkahest \
 	--upgrade-package arkhai-kit-config   --reinstall-package arkhai-kit-config \
 	--upgrade-package arkhai-kit-policy   --reinstall-package arkhai-kit-policy \
-	--upgrade-package arkhai-vms-common   --reinstall-package arkhai-vms-common
+	--upgrade-package arkhai-vms   --reinstall-package arkhai-vms
 
 test: reinit
 	uv run --find-links $(DIST_DIR) pytest tests -q

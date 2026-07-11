@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'domains/apitokens/middleware/typescript/**'
+      - 'domains/apicredits/middleware/typescript/**'
       - '.github/workflows/publish-npm.yml'
   workflow_dispatch:
 
@@ -16,7 +16,7 @@ permissions:
   contents: read
   id-token: write   # OIDC: tokenless trusted publishing + provenance
 
-# Publishes @arkhai/apitokens-middleware to npm via OIDC trusted publishing
+# Publishes @arkhai/apicredits-middleware to npm via OIDC trusted publishing
 # (no NPM_TOKEN secret), the npm analog of the PyPI trusted publishing used
 # by publish-pypi.yml.
 #
@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: domains/apitokens/middleware/typescript
+        working-directory: domains/apicredits/middleware/typescript
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

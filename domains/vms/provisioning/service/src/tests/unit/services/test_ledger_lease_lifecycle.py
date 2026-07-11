@@ -18,8 +18,14 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from db.models import Base
-from core_site.ledger import CapacityLedgerService
+from market_site.ledger import CapacityLedgerService
 from services.lease_lifecycle_service import LeaseLifecycleService
+from services.release_executors import (
+    BARE_METAL_EXECUTOR_KIND,
+    BareMetalReleaseExecutor,
+    ExecutorReleaseDispatcher,
+    bare_metal_executor_ref,
+)
 
 
 @pytest.fixture
@@ -30,15 +36,15 @@ def session_factory():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
-    # Site-ledger tables ride core_site's own metadata.
-    from core_site.db import Base as SiteBase
+    # Site-ledger tables ride market_site's own metadata.
+    from market_site.db import Base as SiteBase
     SiteBase.metadata.create_all(bind=engine)
     return sessionmaker(bind=engine)
 
 
 @pytest.fixture
 def ledger(session_factory) -> CapacityLedgerService:
-    svc = CapacityLedgerService(session_factory, required_attributes=("vm_host",))
+    svc = CapacityLedgerService(session_factory)
     svc.register_resource(
         resource_id="compute-kvm1-001",
         total_units=8,
@@ -66,7 +72,10 @@ def _lifecycle(session_factory, ledger, **settings_overrides):
 
 
 def _expired_allocation(ledger: CapacityLedgerService, escrow: str = "0xe") -> dict:
-    reserved = ledger.reserve(claim={"gpu_count": 2}, deal_ref={"escrow_uid": escrow})
+    reserved = ledger.reserve(
+        claim={"gpu_count": 2, "vm_host": "kvm1"},
+        deal_ref={"escrow_uid": escrow},
+    )
     ledger.commit(
         resource_id=reserved["resource_id"],
         allocation_id=reserved["allocation_id"],
@@ -77,6 +86,28 @@ def _expired_allocation(ledger: CapacityLedgerService, escrow: str = "0xe") -> d
         allocation_id=reserved["allocation_id"],
         vm_host="kvm1", vm_target="tenant-x",
         lease_end_utc="2020-01-01 00:00",
+    )
+    return reserved
+
+
+def _just_expired_allocation(ledger: CapacityLedgerService, escrow: str = "0xe") -> dict:
+    reserved = ledger.reserve(
+        claim={"gpu_count": 2, "vm_host": "kvm1"},
+        deal_ref={"escrow_uid": escrow},
+    )
+    just_expired_dt = datetime.now(timezone.utc) - timedelta(seconds=1)
+    just_expired = just_expired_dt.isoformat()
+    ledger.commit(
+        resource_id=reserved["resource_id"],
+        allocation_id=reserved["allocation_id"],
+        lease_start_utc=(just_expired_dt - timedelta(seconds=3600)).isoformat(),
+        lease_end_utc=just_expired,
+    )
+    ledger.attach_lease(
+        allocation_id=reserved["allocation_id"],
+        vm_host="kvm1",
+        vm_target="tenant-x",
+        lease_end_utc=just_expired,
     )
     return reserved
 
@@ -265,20 +296,7 @@ async def test_failed_vm_remove_marks_release_failed_without_notification(sessio
 async def test_due_leased_allocation_submits_vm_remove_job(session_factory, ledger):
     # Lease ended seconds ago — within grace, so the same cycle that
     # submits the vm_remove job must NOT force-release it.
-    reserved = ledger.reserve(claim={"gpu_count": 2}, deal_ref={"escrow_uid": "0xe"})
-    just_expired_dt = datetime.now(timezone.utc) - timedelta(seconds=1)
-    just_expired = just_expired_dt.isoformat()
-    ledger.commit(
-        resource_id=reserved["resource_id"],
-        allocation_id=reserved["allocation_id"],
-        lease_start_utc=(just_expired_dt - timedelta(seconds=3600)).isoformat(),
-        lease_end_utc=just_expired,
-    )
-    allocation = ledger.attach_lease(
-        allocation_id=reserved["allocation_id"],
-        vm_host="kvm1", vm_target="tenant-x",
-        lease_end_utc=just_expired,
-    )
+    allocation = _just_expired_allocation(ledger)
 
     job_svc = MagicMock()
     submit = MagicMock()
@@ -301,9 +319,182 @@ async def test_due_leased_allocation_submits_vm_remove_job(session_factory, ledg
     row = ledger.get_allocation(allocation["allocation_id"])
     assert row["state"] == "releasing"
     assert row["vm_remove_job_id"] == "remove-42"
+    assert row["release_job_id"] == "remove-42"
+    assert row["executor_kind"] == "vm"
+    assert row["executor_target"] == "tenant-x"
     params = job_svc.submit.await_args.args[0]
     assert params.vm_action == "vm_remove"
     assert params.vm_target == "tenant-x"
+
+
+@pytest.mark.asyncio
+async def test_missing_executor_kind_falls_back_to_vm_release(session_factory, ledger):
+    allocation = _just_expired_allocation(ledger)
+
+    from market_site.db import SiteAllocation
+
+    with session_factory() as db:
+        row = db.get(SiteAllocation, allocation["allocation_id"])
+        row.executor_kind = None
+        row.executor_target = None
+        db.commit()
+
+    job_svc = MagicMock()
+    submit = MagicMock()
+    submit.job_id = "remove-legacy"
+    job_svc.submit = AsyncMock(return_value=submit)
+
+    svc = LeaseLifecycleService(
+        settings=_settings(),
+        capacity_ledger=ledger,
+        job_service=job_svc,
+        job_queue_provider=lambda: MagicMock(),
+    )
+
+    summary = await svc.force_check_leases()
+
+    assert summary["checked"] == 1
+    row = ledger.get_allocation(allocation["allocation_id"])
+    assert row["state"] == "releasing"
+    assert row["release_job_id"] == "remove-legacy"
+    params = job_svc.submit.await_args.args[0]
+    assert params.vm_action == "vm_remove"
+    assert params.vm_target == "tenant-x"
+
+
+@pytest.mark.asyncio
+async def test_bare_metal_executor_releases_locally_and_notifies(session_factory, ledger):
+    allocation = _just_expired_allocation(ledger)
+    ledger.update_lease_fields(
+        allocation["allocation_id"],
+        executor_kind=BARE_METAL_EXECUTOR_KIND,
+        executor_target="node-1",
+        executor_ref=bare_metal_executor_ref(
+            "host-kvm1",
+            access_ref={"ssh_user": "tenant-x"},
+        ),
+    )
+
+    svc = LeaseLifecycleService(
+        settings=_settings(),
+        capacity_ledger=ledger,
+        job_service=None,
+    )
+
+    sf = MagicMock()
+    sf.__aenter__ = AsyncMock(return_value=sf)
+    sf.__aexit__ = AsyncMock(return_value=False)
+    sf.notify_capacity_released = AsyncMock(return_value={})
+
+    with patch("storefront_client.StorefrontClient", return_value=sf):
+        summary = await svc.force_check_leases()
+
+    assert summary["checked"] == 1
+    assert summary["released"] == 1
+    row = ledger.get_allocation(allocation["allocation_id"])
+    assert row["state"] == "released"
+    assert row["release_job_id"] == "direct-release"
+    assert row["vm_remove_job_id"] is None
+    assert row["executor_target"] == "node-1"
+    assert row["executor_ref"] == {
+        "physical_host_id": "host-kvm1",
+        "ssh_user": "tenant-x",
+    }
+    assert ledger.snapshot()[0]["available_units"] == 8
+    sf.notify_capacity_released.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_bare_metal_executor_submits_reclaim_job_when_delegate_configured(
+    session_factory, ledger,
+):
+    allocation = _just_expired_allocation(ledger)
+    ledger.update_lease_fields(
+        allocation["allocation_id"],
+        executor_kind=BARE_METAL_EXECUTOR_KIND,
+        executor_target="node-1",
+        executor_ref=bare_metal_executor_ref(
+            "host-kvm1",
+            access_ref={"ssh_user": "tenant-x"},
+        ),
+    )
+    release_delegate = AsyncMock(return_value="reclaim-42")
+    dispatcher = ExecutorReleaseDispatcher({
+        BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
+            release_delegate=release_delegate,
+        ),
+    })
+    svc = LeaseLifecycleService(
+        settings=_settings(),
+        capacity_ledger=ledger,
+        release_dispatcher=dispatcher,
+    )
+
+    summary = await svc.force_check_leases()
+
+    assert summary["checked"] == 1
+    row = ledger.get_allocation(allocation["allocation_id"])
+    assert row["state"] == "releasing"
+    assert row["release_job_id"] == "reclaim-42"
+    release_delegate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_bare_metal_release_submission_failure_stays_held(session_factory, ledger):
+    allocation = _just_expired_allocation(ledger)
+    ledger.update_lease_fields(
+        allocation["allocation_id"],
+        executor_kind=BARE_METAL_EXECUTOR_KIND,
+        executor_target="node-1",
+    )
+
+    release_delegate = AsyncMock(return_value=None)
+    dispatcher = ExecutorReleaseDispatcher({
+        BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
+            release_delegate=release_delegate,
+        ),
+    })
+    svc = LeaseLifecycleService(
+        settings=_settings(),
+        capacity_ledger=ledger,
+        release_dispatcher=dispatcher,
+    )
+
+    summary = await svc.force_check_leases()
+
+    assert summary["release_failed"] == 1
+    row = ledger.get_allocation(allocation["allocation_id"])
+    assert row["state"] == "release_failed"
+    assert row["failure_reason"] == "release_submit_failed"
+    assert ledger.snapshot()[0]["available_units"] < 8
+    release_delegate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_unknown_executor_kind_stays_held_and_retryable(session_factory, ledger):
+    allocation = _just_expired_allocation(ledger)
+    ledger.update_lease_fields(
+        allocation["allocation_id"],
+        executor_kind="custom_executor",
+        executor_target="target-1",
+    )
+
+    job_svc = MagicMock()
+    svc = LeaseLifecycleService(
+        settings=_settings(),
+        capacity_ledger=ledger,
+        job_service=job_svc,
+        job_queue_provider=lambda: MagicMock(),
+    )
+
+    summary = await svc.force_check_leases()
+
+    assert summary["release_failed"] == 1
+    row = ledger.get_allocation(allocation["allocation_id"])
+    assert row["state"] == "release_failed"
+    assert row["failure_reason"] == "release_submit_failed"
+    assert ledger.snapshot()[0]["available_units"] < 8
+    job_svc.submit.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -333,6 +524,7 @@ async def test_admin_retry_release_resubmits_delegate(session_factory, ledger):
 
     assert updated["state"] == "releasing"
     assert updated["vm_remove_job_id"] == "remove-retry-1"
+    assert updated["release_job_id"] == "remove-retry-1"
     assert ledger.snapshot()[0]["available_units"] < 8
     delegate.assert_awaited_once()
 

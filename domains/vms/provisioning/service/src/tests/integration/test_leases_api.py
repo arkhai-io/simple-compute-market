@@ -46,7 +46,8 @@ def _reserve(escrow_uid: str, *, gpu_count: int = 1) -> dict:
             attributes={"vm_host": "kvm1"},
         )
     reserved = ledger.reserve(
-        claim={"gpu_count": gpu_count}, deal_ref={"escrow_uid": escrow_uid},
+        claim={"gpu_count": gpu_count, "vm_host": "kvm1"},
+        deal_ref={"escrow_uid": escrow_uid},
     )
     assert reserved is not None
     return reserved
@@ -78,6 +79,9 @@ class TestCreateLease:
         allocation = ledger.get_allocation(lease["allocation_id"])
         assert allocation["state"] == "leased"
         assert allocation["vm_target"] == lease["vm_target"]
+        assert allocation["executor_kind"] == "vm"
+        assert allocation["executor_target"] == lease["vm_target"]
+        assert allocation["executor_ref"] == {"vm_host": "kvm1"}
 
     async def test_create_unknown_allocation_returns_404(self, client_and_queue):
         client, _ = client_and_queue
@@ -214,6 +218,8 @@ class TestUpdateLease:
         ledger = _container_module.resolved_capacity_ledger_service
         allocation = ledger.get_allocation(lease["allocation_id"])
         assert allocation["state"] in ("released", "releasing")
+        if allocation["state"] == "releasing":
+            assert allocation["release_job_id"] == allocation["vm_remove_job_id"]
 
 
 class TestReleaseOversight:

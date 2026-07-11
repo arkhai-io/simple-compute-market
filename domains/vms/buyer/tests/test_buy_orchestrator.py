@@ -23,7 +23,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from market_core.schemas import EscrowProposal, EscrowTerms
-from arkhai_vms_common import VmProvisionTerms, make_vm_provision_terms
+from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
 
 _ESCROW_ADDR = "0x" + "cd" * 20
 
@@ -406,7 +406,7 @@ def test_happy_path_drives_to_ready():
 def test_first_match_exits_second_agrees():
     # Use cheapest_first (sequential) since this test exercises
     # the "first match exits, fall through to second" semantic.
-    # The default best_price runs negotiations in parallel, which
+    # best_price runs negotiations in parallel, which
     # races for the FIFO urlopen mock and makes the test flaky.
     config = BuyConfig(
         registry_urls=[_REGISTRY],

@@ -226,6 +226,18 @@ class SQLiteClient(CoreSQLiteClient):
             )
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS derived_bare_metal_listings (
+              listing_id TEXT PRIMARY KEY,
+              machine_id TEXT NOT NULL,
+              physical_host_id TEXT NOT NULL,
+              status TEXT NOT NULL,
+              derivation_key TEXT NOT NULL UNIQUE,
+              last_reconciled_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            )
+            """
+        )
 
     def _ensure_domain_indexes(self, cur: sqlite3.Cursor) -> None:
         cur.execute(
@@ -239,6 +251,14 @@ class SQLiteClient(CoreSQLiteClient):
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_status "
             "ON derived_compute_listings(status)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_derived_bare_metal_listings_machine "
+            "ON derived_bare_metal_listings(machine_id)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_derived_bare_metal_listings_status "
+            "ON derived_bare_metal_listings(status)"
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_resources_resource_id ON resources(resource_id)"

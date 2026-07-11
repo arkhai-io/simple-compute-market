@@ -12,7 +12,7 @@ Naming conventions:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -35,6 +35,13 @@ class AnsibleJobParams:
     vm_host: str
     vm_action: str
     vm_target: Optional[str] = None
+
+    # Domain-neutral executor contract.  ``vm_*`` remains the compatibility
+    # alias for the existing VM playbook, mock API, and persisted jobs.
+    executor_kind: str = "vm"
+    executor_action: Optional[str] = None
+    executor_target: Optional[str] = None
+    executor_ref: Optional[dict[str, Any]] = None
 
     # VM sizing (create only)
     image_setup_type: str = "scratch"
@@ -66,8 +73,23 @@ class AnsibleJobParams:
     # Deal linkage — on-chain escrow UID for recovery queries
     escrow_uid: Optional[str] = None
 
+    # Bare-metal access jobs (server-internal, used by node_* actions)
+    physical_host_id: Optional[str] = None
+    ssh_user: Optional[str] = None
+    ssh_public_key: Optional[str] = None
+    access_ref: Optional[dict[str, Any]] = None
+    bare_metal_reclaim_policy: Optional[str] = None
+
     # Retry policy (per-job override)
     max_retries: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if not self.executor_action:
+            self.executor_action = self.vm_action
+        if self.executor_target is None:
+            self.executor_target = self.vm_target or self.vm_host
+        if not self.vm_action:
+            self.vm_action = self.executor_action
 
 
 # ---------------------------------------------------------------------------

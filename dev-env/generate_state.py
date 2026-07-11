@@ -59,7 +59,8 @@ ADDRESSES_PATH = (
 SECTION_FIELDS: dict[str, list[str]] = {
     "arbiters_addresses": [
         "eas", "trivial_arbiter", "trusted_oracle_arbiter", "intrinsics_arbiter",
-        "references_escrow_arbiter", "erc8004_arbiter", "any_arbiter", "all_arbiter",
+        "commitment_trusted_oracle_arbiter", "references_escrow_arbiter",
+        "erc8004_arbiter", "any_arbiter", "all_arbiter",
         "attester_arbiter", "expiration_time_after_arbiter", "expiration_time_before_arbiter",
         "expiration_time_equal_arbiter", "recipient_arbiter", "ref_uid_arbiter",
         "revocable_arbiter", "schema_arbiter", "time_after_arbiter", "time_before_arbiter",
@@ -75,6 +76,19 @@ SECTION_FIELDS: dict[str, list[str]] = {
     "attestation_addresses": ["eas", "eas_schema_registry", "atomic_attestation_utils", "escrow_obligation_default", "escrow_obligation_unconditional", "attestation_reference_escrow_obligation_default", "attestation_reference_escrow_obligation_unconditional"],
     "string_obligation_addresses": ["eas", "obligation"],
     "commit_reveal_obligation_addresses": ["eas", "obligation"],
+    "hook_based_addresses": [
+        "eas", "hook_escrow_obligation", "hooks_escrow_obligation",
+        "erc20_escrow_hook", "erc721_escrow_hook", "erc1155_escrow_hook",
+        "native_token_escrow_hook", "attestation_escrow_hook",
+        "attestation_reference_escrow_hook",
+    ],
+    "splitters_addresses": [
+        "commitment_erc20_splitter", "commitment_erc1155_splitter",
+        "commitment_native_token_splitter", "commitment_token_bundle_splitter",
+        "commitment_token_bundle_splitter_unvalidated",
+        "erc20_splitter", "erc1155_splitter", "native_token_splitter",
+        "token_bundle_splitter", "token_bundle_splitter_unvalidated",
+    ],
 }
 
 

@@ -126,12 +126,11 @@ class TestCheapestFirst:
         _drive(policy, matches, neg)
         assert seen == ["b", "a"]
 
-    def test_default_is_best_price(self):
-        # Comparison shopping over cross-seller parallel negotiation is
-        # the headline reason the orchestrator owns this seam. The
-        # sequential alternatives are still available, but only need
-        # to be opted into.
-        assert DEFAULT_POLICY_NAME == "best_price"
+    def test_core_default_is_registry_order(self):
+        # Settlement-kit comparison policies such as Alkahest best_price
+        # are loaded by name from kit entry points. Core's fallback is
+        # schema-opaque.
+        assert DEFAULT_POLICY_NAME == "registry_order"
 
 
 class TestRegistryOrder:
@@ -352,26 +351,23 @@ class TestBestPrice:
 
 
 class TestBestPriceTimeoutResolver:
-    """Direct tests of ``_resolve_best_price_timeout`` so the policy
+    """Direct tests of ``resolve_best_price_timeout`` so the policy
     body can assume the value is either a positive float or None."""
 
     def _with_cfg(self, raw):
         from unittest.mock import patch
 
-        import core_buyer.aggregation as agg
+        import market_alkahest.aggregation as agg
 
-        # Patch the config load to return a single key. get_dotted
-        # then traverses it normally — so we exercise the real
-        # parsing path, not a stub.
         cfg = {"aggregation": {"best_price_timeout": raw}}
-        with patch.object(agg, "_load_buyer_config", lambda: cfg):
-            return agg._resolve_best_price_timeout()
+        with patch("market_config.config_loader.load_user_config", lambda: cfg):
+            return agg.resolve_best_price_timeout()
 
     def test_unset_returns_none(self):
-        import core_buyer.aggregation as agg
+        import market_alkahest.aggregation as agg
         from unittest.mock import patch
-        with patch.object(agg, "_load_buyer_config", lambda: {}):
-            assert agg._resolve_best_price_timeout() is None
+        with patch("market_config.config_loader.load_user_config", lambda: {}):
+            assert agg.resolve_best_price_timeout() is None
 
     def test_positive_float_passes_through(self):
         assert self._with_cfg(30.0) == 30.0
@@ -408,7 +404,7 @@ class TestBestPriceTimeout:
         completions wins."""
         from unittest.mock import patch
 
-        import core_buyer.aggregation as agg
+        import market_alkahest.aggregation as agg
 
         slow_completed = 0
 
@@ -441,8 +437,8 @@ class TestBestPriceTimeout:
             _match("fast_cheap"),
             _match("slow_cheapest"),
         ]
-        with patch.object(agg, "_resolve_best_price_timeout", lambda: 0.05):
-            result = _drive(agg.load_aggregation_policy("best_price"), matches, _negotiate)
+        with patch.object(agg, "resolve_best_price_timeout", lambda: 0.05):
+            result = _drive(agg.best_price_from_config, matches, _negotiate)
 
         assert result is not None
         winner, outcome = result
@@ -456,7 +452,7 @@ class TestBestPriceTimeout:
     def test_returns_none_when_nobody_agrees_in_time(self):
         from unittest.mock import patch
 
-        import core_buyer.aggregation as agg
+        import market_alkahest.aggregation as agg
 
         async def _all_slow(_m: dict[str, Any]) -> NegotiationOutcome:
             await asyncio.sleep(0.5)
@@ -464,9 +460,9 @@ class TestBestPriceTimeout:
                 status="agreed", negotiation_id="x", agreed_amount=10,
             )
 
-        with patch.object(agg, "_resolve_best_price_timeout", lambda: 0.05):
+        with patch.object(agg, "resolve_best_price_timeout", lambda: 0.05):
             result = _drive(
-                agg.load_aggregation_policy("best_price"),
+                agg.best_price_from_config,
                 [_match("a"), _match("b")],
                 _all_slow,
             )
@@ -477,7 +473,7 @@ class TestBestPriceTimeout:
         slowest seller's outcome still counts toward the comparison."""
         from unittest.mock import patch
 
-        import core_buyer.aggregation as agg
+        import market_alkahest.aggregation as agg
 
         async def _negotiate(match: dict[str, Any]) -> NegotiationOutcome:
             if match["listing_id"] == "slow_cheapest":
@@ -494,9 +490,9 @@ class TestBestPriceTimeout:
                 agreed_amount=100,
             )
 
-        with patch.object(agg, "_resolve_best_price_timeout", lambda: None):
+        with patch.object(agg, "resolve_best_price_timeout", lambda: None):
             result = _drive(
-                agg.load_aggregation_policy("best_price"),
+                agg.best_price_from_config,
                 [_match("fast"), _match("slow_cheapest")],
                 _negotiate,
             )
@@ -517,7 +513,7 @@ class TestRegistry:
             load_aggregation_policy("does_not_exist")
 
     def test_none_returns_default(self):
-        assert load_aggregation_policy(None) is load_aggregation_policy("best_price")
+        assert load_aggregation_policy(None) is load_aggregation_policy("registry_order")
 
     def test_register_custom_policy(self):
         @register_aggregation_policy("test_reverse")

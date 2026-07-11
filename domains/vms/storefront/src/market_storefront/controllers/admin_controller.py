@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -628,6 +629,7 @@ class AdminController:
     async def _close_oversized_compute_listings(self) -> list[str]:
         from domains.vms.listings.reconciler import (
             mark_derived_listings_closed,
+            record_derived_listing,
             stale_open_listing_ids,
         )
 
@@ -637,6 +639,43 @@ class AdminController:
         closed_listing_ids = stale_open_listing_ids(
             self._db.db_path, member_availability=availability,
         )
+        if closed_listing_ids:
+            conn = sqlite3.connect(
+                f"file:{self._db.db_path}?mode=ro&nolock=1",
+                uri=True,
+                timeout=5,
+            )
+            try:
+                placeholders = ", ".join("?" for _ in closed_listing_ids)
+                rows = conn.execute(
+                    f"""
+                    SELECT listing_id, offer_resource
+                    FROM listings
+                    WHERE listing_id IN ({placeholders})
+                    """,
+                    tuple(closed_listing_ids),
+                ).fetchall()
+            finally:
+                conn.close()
+            for listing_id, raw_offer in rows:
+                try:
+                    offer = json.loads(raw_offer or "{}")
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(offer, dict) or offer.get("gpu_count") is None:
+                    continue
+                resource_id = offer.get("resource_id")
+                pool_id = offer.get("pool_id")
+                if not resource_id and not pool_id:
+                    continue
+                record_derived_listing(
+                    self._db.db_path,
+                    listing_id=str(listing_id),
+                    resource_id=str(resource_id) if resource_id else None,
+                    pool_id=str(pool_id) if pool_id else None,
+                    gpu_count=int(offer["gpu_count"]),
+                    status="closed",
+                )
         for listing_id in closed_listing_ids:
             await self._db.update_listing(listing_id=listing_id, status="closed")
         mark_derived_listings_closed(self._db.db_path, closed_listing_ids)

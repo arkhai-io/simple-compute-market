@@ -19,7 +19,7 @@ the plugin's seam, not the policy's.
 
 Importing this module registers the policies, mirroring how middleware
 registration works; the buyer CLIs import it during app assembly.
-Moved here from the VM buyer when the API-tokens domain became the
+Moved here from the VM buyer when the API-credits domain became the
 second schema plugin (one registry — two plugins re-registering the
 same names would silently shadow each other).
 """

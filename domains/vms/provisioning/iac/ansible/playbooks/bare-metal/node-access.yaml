@@ -1,0 +1,21 @@
+---
+- name: Bare-metal Node Access Operations
+  hosts: kvm_hosts
+  gather_facts: no
+  vars:
+    target_host: "{{ executor_target | default(vm_host | default('localhost')) }}"
+    machine_id: "{{ executor_target | default(vm_target | default(vm_host | default(''))) }}"
+    node_action: "{{ executor_action | default(vm_action | default('node_grant_access')) }}"
+
+  roles:
+    - ../../roles/bare-metal-access
+
+  post_tasks:
+    - name: Summary of bare-metal node access operation
+      debug:
+        msg: |
+          Bare-metal Node Access Summary:
+          - Target Host: {{ target_host }}
+          - Machine ID: {{ machine_id }}
+          - Action Performed: {{ node_action }}
+          - Operation completed successfully

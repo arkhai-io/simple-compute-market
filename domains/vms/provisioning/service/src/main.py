@@ -1,21 +1,28 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from compute_provisioning.app import (
+    ComputeProvisioningAppConfig,
+    ComputeProvisioningMiddlewareMount,
+    ComputeProvisioningRouterMount,
+    build_compute_provisioning_app,
+)
+from compute_provisioning.startup import (
+    start_compute_provisioning_runtime,
+    stop_compute_provisioning_runtime,
+)
 
+import app_runtime
 import container as _container_module
-from container import Container, container
+from container import container
 from config import settings
-from db.database import init_db
 from middleware.auth import StorefrontAuthMiddleware
 from middleware.rate_limit import AgentRateLimitMiddleware
-from services.async_job_queue import AsyncJobQueue
 
 
 logging.basicConfig(
@@ -31,231 +38,99 @@ from controllers.jobs_controller import AnsibleJobsController  # noqa: E402
 from controllers.hosts_controller import HostController      # noqa: E402
 from controllers.vms_controller import VmController          # noqa: E402
 from controllers.leases_controller import AdminLeasesController, LeasesController   # noqa: E402
-from core_site.router import make_capacity_router  # noqa: E402
+from controllers.bare_metal_leases_controller import BareMetalLeasesController  # noqa: E402
+from market_site.router import make_capacity_router  # noqa: E402
+
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     logger.info("Starting provisioning service...")
 
-    # Apply ANSIBLE_CONFIG from the active profile if configured.
-    ansible_cfg = str(getattr(settings, "ansible_cfg", "") or "").strip()
-    if ansible_cfg:
-        os.environ["ANSIBLE_CONFIG"] = ansible_cfg
-        logger.info("ANSIBLE_CONFIG set to %s", ansible_cfg)
-
-    container.init_resources()
-    init_db(container.db_engine())
-    logger.info("Database initialised")
-
-    # Resolve services as plain module-level variables so controllers
-    # can retrieve them via a simple lambda, avoiding any provider
-    # machinery on the request path (prevents asyncio.get_event_loop()
-    # errors in AnyIO worker threads).
-    _container_module.resolved_job_service = container.job_service()
-    _container_module.resolved_session_factory = container.session_factory()
-    _container_module.resolved_ansible_service = container.ansible_service()
-    _container_module.resolved_system_service = container.system_service()
-    _container_module.resolved_host_service = container.host_service()
-    _container_module.resolved_vm_operations_service = container.vm_operations_service()
-    _container_module.resolved_host_operations_service = container.host_operations_service()
-    _container_module.resolved_lease_lifecycle_service = container.lease_lifecycle_service()
-    _container_module.resolved_lease_watchdog = container.lease_watchdog()
-    _container_module.resolved_capacity_ledger_service = container.capacity_ledger_service()
-
-    # ------------------------------------------------------------------
-    # Inventory seeding — runs once at startup if the hosts table is empty.
-    #
-    # Source priority:
-    #   1. inventory_ini setting (non-empty string) — used by the Helm chart,
-    #      injected via the provisioning-secrets config profile.
-    #   2. inventory_path on disk — used by the Docker profile, which points
-    #      at the IAC hosts file baked into the image.
-    #
-    # Seeding is skipped when the hosts table already has rows, so that
-    # operator changes made via the API (POST /hosts, PUT /hosts/{host}, etc.)
-    # are not overwritten on pod restart.  To force a re-seed, use
-    # POST /api/v1/hosts/import which always upserts regardless of table state.
-    # ------------------------------------------------------------------
-    host_service = _container_module.resolved_host_service
-    existing_hosts = host_service.list_hosts(enabled_only=False)
-    if existing_hosts:
-        logger.info("Inventory seeding: skipped — %d host(s) already registered", len(existing_hosts))
-    else:
-        inventory_ini = str(getattr(settings, "inventory_ini", "") or "").strip()
-        inventory_path = getattr(settings, "resolved_inventory_path", None)
-
-        ini_text: str | None = None
-        source: str | None = None
-
-        if inventory_ini:
-            ini_text = inventory_ini
-            source = "inventory_ini setting (provisioning-secrets profile)"
-        elif inventory_path and inventory_path.exists():
-            try:
-                ini_text = inventory_path.read_text(encoding="utf-8")
-                source = str(inventory_path)
-            except OSError as exc:
-                logger.warning("Inventory seeding: could not read %s: %s", inventory_path, exc)
-
-        if ini_text:
-            try:
-                seeded = host_service.seed_from_ini(ini_text)
-                logger.info("Inventory seeding: registered %d host(s) from %s", len(seeded), source)
-            except Exception as exc:
-                logger.error("Inventory seeding failed (source: %s): %s", source, exc)
-        else:
-            logger.info("Inventory seeding: no inventory source configured — starting with empty host registry")
-
-    # AsyncJobQueue is a plain object; instantiate inside the running event loop.
-    job_queue = AsyncJobQueue(max_concurrent=settings.max_concurrent_jobs)
-    _container_module.resolved_job_queue = job_queue
-
-    processing_task = asyncio.create_task(
-        job_queue.start(_container_module.resolved_job_service._process_job),
-        name="job-processing-loop",
-    )
-    logger.info(
-        "Job processing loop started (max_concurrent=%d)", settings.max_concurrent_jobs
+    runtime = await start_compute_provisioning_runtime(
+        startup_steps=app_runtime.startup_steps(),
+        background_tasks=app_runtime.background_tasks,
+        logger=logger,
     )
 
-    # Retry scheduler — re-enqueues queued jobs whose backoff delay has
-    # elapsed (the failure path stamps next_retry_at but does not re-enqueue,
-    # since the queue is in-process/transient).
-    retry_poll_interval = float(
-        getattr(settings, "retry_scheduler_poll_interval_seconds", 10)
-    )
-    retry_task = asyncio.create_task(
-        _container_module.resolved_job_service.run_retry_scheduler(
-            job_queue, retry_poll_interval
+    try:
+        yield
+    finally:
+        logger.info("Shutdown initiated...")
+        await stop_compute_provisioning_runtime(
+            runtime,
+            shutdown_steps=app_runtime.shutdown_steps(),
+            logger=logger,
+        )
+        logger.info("Shutdown complete")
+
+
+PROVISIONING_DESCRIPTION = (
+    "Asynchronous VM provisioning for a multi-agent compute marketplace.\n\n"
+    "## Authentication\n\n"
+    "The service is an internal dependency of a single storefront. When an\n"
+    "admin key is configured, every non-health request must present it:\n\n"
+    "```\nX-Admin-Key: <admin_api_key>\n```\n\n"
+    "This is the same shared secret the provisioning→storefront callback\n"
+    "uses, so the link can cross an untrusted network. `/health`, `/docs`,\n"
+    "and `/redoc` bypass authentication entirely.\n\n"
+    "## Job lifecycle\n\n"
+    "```\n"
+    "queued --> running --> succeeded\n"
+    "              +-> failed  (non-retryable or max retries exceeded)\n"
+    "              +-> queued  (retryable -- re-enqueued with backoff)\n"
+    "queued --> cancelled  (user-initiated)\n"
+    "running --> cancelled (user-initiated, SIGTERM sent)\n"
+    "```\n"
+)
+
+PROVISIONING_OPENAPI_TAGS = [
+    {
+        "name": "vms",
+        "description": (
+            "Admin/operator VM operations (create, start, shutdown, etc.). "
+            "Tenant self-service requires lease-owner authorization and is "
+            "not exposed by this controller."
         ),
-        name="retry-scheduler",
-    )
-    logger.info("Retry scheduler started (interval=%ds)", int(retry_poll_interval))
-
-    # Lease watchdog — only started when enabled in config (default: true).
-    watchdog_task = None
-    watchdog_enabled = bool(getattr(settings, "lease_watchdog_enabled", True))
-    if watchdog_enabled:
-        watchdog_task = asyncio.create_task(
-            _container_module.resolved_lease_watchdog.run(),
-            name="lease-watchdog",
-        )
-        logger.info(
-            "Lease watchdog started (interval=%ds grace=%ds)",
-            getattr(settings, "lease_watchdog_poll_interval_seconds", 60),
-            getattr(settings, "lease_watchdog_grace_period_seconds", 300),
-        )
-    else:
-        logger.info("Lease watchdog disabled (lease_watchdog_enabled=false)")
-
-    yield
-
-    logger.info("Shutdown initiated...")
-    processing_task.cancel()
-    try:
-        await processing_task
-    except asyncio.CancelledError:
-        pass
-
-    retry_task.cancel()
-    try:
-        await retry_task
-    except asyncio.CancelledError:
-        pass
-
-    if watchdog_task is not None:
-        watchdog_task.cancel()
-        try:
-            await watchdog_task
-        except asyncio.CancelledError:
-            pass
-
-    container.shutdown_resources()
-    logger.info("Shutdown complete")
-
-
-app = FastAPI(
-    title="Provisioning Service",
-    version="0.2.0",
-    description=(
-        "Asynchronous VM provisioning for a multi-agent compute marketplace.\n\n"
-        "## Authentication\n\n"
-        "The service is an internal dependency of a single storefront. When an\n"
-        "admin key is configured, every non-health request must present it:\n\n"
-        "```\nX-Admin-Key: <admin_api_key>\n```\n\n"
-        "This is the same shared secret the provisioning→storefront callback\n"
-        "uses, so the link can cross an untrusted network. `/health`, `/docs`,\n"
-        "and `/redoc` bypass authentication entirely.\n\n"
-        "## Job lifecycle\n\n"
-        "```\n"
-        "queued --> running --> succeeded\n"
-        "              +-> failed  (non-retryable or max retries exceeded)\n"
-        "              +-> queued  (retryable -- re-enqueued with backoff)\n"
-        "queued --> cancelled  (user-initiated)\n"
-        "running --> cancelled (user-initiated, SIGTERM sent)\n"
-        "```\n"
-    ),
-    openapi_tags=[
-        {
-            "name": "vms",
-            "description": (
-                "Admin/operator VM operations (create, start, shutdown, etc.). "
-                "Tenant self-service requires lease-owner authorization and is "
-                "not exposed by this controller."
-            ),
-        },
-        {
-            "name": "hosts",
-            "description": "KVM host registry — CRUD, capacity checks, and connectivity tests.",
-        },
-        {
-            "name": "jobs",
-            "description": "Query and cancel Ansible jobs.",
-        },
-        {
-            "name": "system",
-            "description": "Health, version, and Ansible readiness diagnostics.",
-        },
-        {
-            "name": "leases",
-            "description": (
-                "VM lease lifecycle — register, query, terminate, release oversight, "
-                "and admin repair actions."
-            ),
-        },
-        {
-            "name": "admin",
-            "description": "Admin-only repair operations for exceptional lifecycle states.",
-        },
-        {
-            "name": "capacity",
-            "description": (
-                "Site-authority capacity ledger — snapshot, probe, "
-                "reserve/commit/release, and the versioned event feed."
-            ),
-        },
-    ],
-    lifespan=lifespan,
-)
-
-# Middleware (outermost applied last)
-app.add_middleware(
-    AgentRateLimitMiddleware,
-    enabled=settings.enable_rate_limiting,
-    max_requests=settings.rate_limit_requests_per_minute,
-)
-app.add_middleware(
-    StorefrontAuthMiddleware,
-    admin_key=str(settings.storefront_admin_key or ""),
-)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    },
+    {
+        "name": "hosts",
+        "description": "KVM host registry — CRUD, capacity checks, and connectivity tests.",
+    },
+    {
+        "name": "jobs",
+        "description": "Query and cancel Ansible jobs.",
+    },
+    {
+        "name": "system",
+        "description": "Health, version, and Ansible readiness diagnostics.",
+    },
+    {
+        "name": "leases",
+        "description": (
+            "VM lease lifecycle — register, query, terminate, release oversight, "
+            "and admin repair actions."
+        ),
+    },
+    {
+        "name": "bare-metal",
+        "description": (
+            "Bare-metal domain adapter — register and query SSH-access leases "
+            "against site allocations."
+        ),
+    },
+    {
+        "name": "admin",
+        "description": "Admin-only repair operations for exceptional lifecycle states.",
+    },
+    {
+        "name": "capacity",
+        "description": (
+            "Site-authority capacity ledger — snapshot, probe, "
+            "reserve/commit/release, and the versioned event feed."
+        ),
+    },
+]
 
 # ---------------------------------------------------------------------------
 # Routers
@@ -267,18 +142,57 @@ app.add_middleware(
 #   /api/v1/system/ansible/readiness
 #   /api/v1/jobs/*                   <- job read + cancel
 #   /api/v1/hosts/*                  <- host registry CRUD, capacity, connectivity
-#   /api/v1/hosts/{host}/vms/*       <- VM lifecycle (VmController composes here)
+#   /api/v1/hosts/{host}/vms/*       <- direct VM admin/operator lifecycle
+#   /api/v1/leases/*                 <- market-managed lease lifecycle
+#   /api/v1/bare-metal/leases/*      <- bare-metal domain lease adapter
 # ---------------------------------------------------------------------------
-app.include_router(SystemController.make_health_router())                          # /health
-app.include_router(SystemController.make_system_router(), prefix="/api/v1")        # /api/v1/system/*
-app.include_router(AnsibleJobsController.make_router(), prefix="/api/v1")          # /api/v1/jobs/*
-app.include_router(HostController.make_router(), prefix="/api/v1")                 # /api/v1/hosts/*
-app.include_router(VmController.make_router(), prefix="/api/v1")                   # /api/v1/hosts/{host}/vms/*
-app.include_router(LeasesController.make_router(), prefix="/api/v1")               # /api/v1/leases/*
-app.include_router(AdminLeasesController.make_router(), prefix="/api/v1")          # /api/v1/admin/leases/*
-app.include_router(                                                                # /api/v1/capacity/*
-    make_capacity_router(lambda: _container_module.resolved_capacity_ledger_service),
-    prefix="/api/v1",
+app = build_compute_provisioning_app(
+    config=ComputeProvisioningAppConfig(
+        title="Provisioning Service",
+        version="0.2.0",
+        description=PROVISIONING_DESCRIPTION,
+        openapi_tags=PROVISIONING_OPENAPI_TAGS,
+    ),
+    lifespan=lifespan,
+    # Middleware order matches the previous direct add_middleware calls.
+    middlewares=(
+        ComputeProvisioningMiddlewareMount(
+            AgentRateLimitMiddleware,
+            {
+                "enabled": settings.enable_rate_limiting,
+                "max_requests": settings.rate_limit_requests_per_minute,
+            },
+        ),
+        ComputeProvisioningMiddlewareMount(
+            StorefrontAuthMiddleware,
+            {"admin_key": str(settings.storefront_admin_key or "")},
+        ),
+        ComputeProvisioningMiddlewareMount(
+            CORSMiddleware,
+            {
+                "allow_origins": ["*"],
+                "allow_credentials": True,
+                "allow_methods": ["*"],
+                "allow_headers": ["*"],
+            },
+        ),
+    ),
+    routers=(
+        ComputeProvisioningRouterMount(SystemController.make_health_router()),
+        ComputeProvisioningRouterMount(SystemController.make_system_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(AnsibleJobsController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(HostController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(VmController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(LeasesController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(BareMetalLeasesController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(AdminLeasesController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(
+            make_capacity_router(
+                lambda: _container_module.resolved_capacity_ledger_service
+            ),
+            "/api/v1",
+        ),
+    ),
 )
 
 # Test controller — only mounted when mock profile is active.

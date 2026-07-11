@@ -6,12 +6,21 @@ from config import settings
 from db.database import create_db_engine, create_session_factory
 from services.ansible_service import AnsibleService
 from services.async_job_queue import AsyncJobQueue
-from core_site.ledger import CapacityLedgerService
+from services.bare_metal_lease_service import BareMetalLeaseService
+from services.bare_metal_operations_service import BareMetalOperationsService
+from market_site.ledger import CapacityLedgerService
 from services.host_operations_service import HostOperationsService
 from services.host_service import HostService
 from services.job_service import AnsibleJobService
 from services.lease_lifecycle_service import LeaseLifecycleService
 from services.lease_watchdog import LeaseWatchdog
+from services.release_executors import (
+    BARE_METAL_EXECUTOR_KIND,
+    BareMetalReleaseExecutor,
+    ExecutorReleaseDispatcher,
+    VM_EXECUTOR_KIND,
+    VmReleaseExecutor,
+)
 from services.site_resources_service import SiteResourcesService
 from services.system_service import SystemService
 from services.vm_operations_service import VmOperationsService
@@ -39,6 +48,18 @@ def _make_engine():
 
 def _make_session_factory(engine):
     return create_session_factory(engine)
+
+
+def _make_release_dispatcher(bare_metal_operations_service, job_service):
+    return ExecutorReleaseDispatcher({
+        BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
+            release_delegate=bare_metal_operations_service.reclaim_access_for_allocation,
+        ),
+        VM_EXECUTOR_KIND: VmReleaseExecutor(
+            job_service=job_service,
+            job_queue_provider=_resolved_job_queue,
+        ),
+    })
 
 
 class Container(containers.DeclarativeContainer):
@@ -105,13 +126,30 @@ class Container(containers.DeclarativeContainer):
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
         session_factory=session_factory,
-        # A slice that names no vm_host can't be fulfilled by this site.
-        required_attributes=("vm_host",),
     )
 
     site_resources_service = providers.Singleton(
         SiteResourcesService,
         capacity_service=capacity_ledger_service,
+    )
+
+    bare_metal_lease_service = providers.Singleton(
+        BareMetalLeaseService,
+        site_resources_service=site_resources_service,
+    )
+
+    bare_metal_operations_service = providers.Factory(
+        BareMetalOperationsService,
+        job_service=job_service,
+        job_queue_provider=_resolved_job_queue,
+        settings=config,
+        host_service=host_service,
+    )
+
+    release_dispatcher = providers.Factory(
+        _make_release_dispatcher,
+        bare_metal_operations_service=bare_metal_operations_service,
+        job_service=job_service,
     )
 
     lease_lifecycle_service = providers.Singleton(
@@ -120,6 +158,7 @@ class Container(containers.DeclarativeContainer):
         site_resources_service=site_resources_service,
         job_service=job_service,
         job_queue_provider=_resolved_job_queue,
+        release_dispatcher=release_dispatcher,
     )
 
     lease_watchdog = providers.Singleton(
@@ -162,3 +201,5 @@ resolved_host_operations_service: "HostOperationsService | None" = None
 resolved_lease_lifecycle_service: "LeaseLifecycleService | None" = None
 resolved_lease_watchdog: "LeaseWatchdog | None" = None
 resolved_capacity_ledger_service: "CapacityLedgerService | None" = None
+resolved_bare_metal_lease_service: "BareMetalLeaseService | None" = None
+resolved_bare_metal_operations_service: "BareMetalOperationsService | None" = None

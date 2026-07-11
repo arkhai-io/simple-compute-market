@@ -39,11 +39,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --refresh-package arkhai-core \
         --refresh-package arkhai-core-buyer \
         --refresh-package arkhai-core-storefront \
-        --refresh-package arkhai-core-site \
-        --refresh-package arkhai-apitokens-service \
-        --refresh-package arkhai-apitokens-storefront \
+        --refresh-package arkhai-kit-site \
+        --refresh-package arkhai-apicredits-service \
+        --refresh-package arkhai-apicredits-storefront \
         --refresh-package arkhai-vms-buyer \
-        --refresh-package arkhai-apitokens-buyer \
+        --refresh-package arkhai-vms \
+        --refresh-package arkhai-apicredits-buyer \
         --refresh-package arkhai-kit-policy \
         --refresh-package arkhai-vms-storefront \
         --refresh-package arkhai-vms-provisioning-client \

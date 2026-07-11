@@ -14,6 +14,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from arkhai_bare_metal import (
+    NODE_GRANT_ACCESS_ACTION,
+    NODE_RECLAIM_ACCESS_ACTION,
+)
 from models.jobs_model import AnsibleJobParams
 from services.ansible_service import AnsibleService
 
@@ -171,6 +175,45 @@ class TestBuildVmVarsCreate:
         assert "frp_server_addr" not in yaml
         assert "frp_domain" not in yaml
         assert "frp_dashboard_password" not in yaml
+
+    def test_bare_metal_fields_are_serialized_for_node_actions(self):
+        svc = _make_service()
+        yaml = _build(
+            svc,
+            vm_host="bm-node-1",
+            vm_target="bm-node-1",
+            vm_action=NODE_GRANT_ACCESS_ACTION,
+            escrow_uid="0xbm",
+            physical_host_id="host-physical-1",
+            ssh_user="tenant-a",
+            ssh_public_key="ssh-ed25519 AAAA tenant-a",
+            access_ref={"ssh_user": "tenant-a"},
+            bare_metal_reclaim_policy="lock_user",
+        )
+
+        assert 'escrow_uid: "0xbm"' in yaml
+        assert 'physical_host_id: "host-physical-1"' in yaml
+        assert 'bare_metal_ssh_user: "tenant-a"' in yaml
+        assert 'bare_metal_ssh_public_key: "ssh-ed25519 AAAA tenant-a"' in yaml
+        assert 'bare_metal_access_ref: {"ssh_user": "tenant-a"}' in yaml
+        assert 'bare_metal_reclaim_policy: "lock_user"' in yaml
+
+    def test_executor_fields_are_serialized_for_playbook_contract(self):
+        svc = _make_service()
+        yaml = _build(
+            svc,
+            vm_host="bm-node-1",
+            vm_action=NODE_GRANT_ACCESS_ACTION,
+            executor_kind="bare_metal",
+            executor_action=NODE_GRANT_ACCESS_ACTION,
+            executor_target="bm-node-1",
+            executor_ref={"physical_host_id": "host-physical-1"},
+        )
+
+        assert "executor_kind: bare_metal" in yaml
+        assert f"executor_action: {NODE_GRANT_ACCESS_ACTION}" in yaml
+        assert "executor_target: bm-node-1" in yaml
+        assert 'executor_ref: {"physical_host_id": "host-physical-1"}' in yaml
 
     def test_gcs_fields_included_when_set(self):
         svc = _make_service()
@@ -363,6 +406,8 @@ class TestExtractAnsibleJson:
             ("monitor", "vm_monitoring_data"),
             ("reset_password", "vm_password_reset_data"),
             ("vm_remove", "vm_remove_data"),
+            (NODE_GRANT_ACCESS_ACTION, "node_grant_access_data"),
+            (NODE_RECLAIM_ACCESS_ACTION, "node_reclaim_access_data"),
             ("check", "check_data"),
         ]
         for action, fact_name in actions:

@@ -26,6 +26,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
 from config import Settings
 from db.models import (
     AnsibleJob,
@@ -48,6 +49,8 @@ from provisioning_client.models import (
 from services.ansible_service import AnsibleError, AnsibleService
 
 logger = logging.getLogger(__name__)
+
+_BARE_METAL_ACTIONS = set(BARE_METAL_ACCESS_ACTIONS)
 
 
 class AnsibleJobService:
@@ -367,7 +370,7 @@ class AnsibleJobService:
             )
 
             run = self._ansible.start_playbook(
-                playbook_path=self._settings.resolved_playbook_path,
+                playbook_path=self._playbook_path_for_params(params),
                 inventory_path=inventory_path,
                 extra_vars_path=vars_path,
                 limit=params.vm_host,
@@ -562,10 +565,21 @@ class AnsibleJobService:
 
     def _build_params(self, params: dict) -> AnsibleJobParams:
         """Reconstruct an ``AnsibleJobParams`` from the DB JSON params column."""
+        executor_action = params.get("executor_action") or params.get(
+            "vm_action", "create"
+        )
+        executor_target = params.get("executor_target") or params.get("vm_target")
         return AnsibleJobParams(
-            vm_host=params.get("vm_host", self._settings.default_vm_host),
+            vm_host=params.get(
+                "vm_host",
+                executor_target or self._settings.default_vm_host,
+            ),
             vm_target=params.get("vm_target"),
-            vm_action=params.get("vm_action", "create"),
+            vm_action=params.get("vm_action") or executor_action,
+            executor_kind=params.get("executor_kind", "vm"),
+            executor_action=executor_action,
+            executor_target=executor_target,
+            executor_ref=params.get("executor_ref"),
             image_setup_type=params.get("image_setup_type", "scratch"),
             vm_ram=params.get("vm_ram"),
             vm_vcpus=params.get("vm_vcpus"),
@@ -583,8 +597,22 @@ class AnsibleJobService:
             golden_image_name=params.get("golden_image_name"),
             gcs_bucket_url=params.get("gcs_bucket_url"),
             gcs_image_path=params.get("gcs_image_path"),
+            escrow_uid=params.get("escrow_uid"),
+            physical_host_id=params.get("physical_host_id"),
+            ssh_user=params.get("ssh_user"),
+            ssh_public_key=params.get("ssh_public_key"),
+            access_ref=params.get("access_ref"),
+            bare_metal_reclaim_policy=params.get("bare_metal_reclaim_policy"),
             max_retries=params.get("max_retries"),
         )
+
+    def _playbook_path_for_params(self, params: AnsibleJobParams):
+        if (
+            params.executor_kind == "bare_metal"
+            or params.executor_action in _BARE_METAL_ACTIONS
+        ):
+            return self._settings.resolved_bare_metal_playbook_path
+        return self._settings.resolved_playbook_path
 
     def _redact_logs(self, logs: str) -> str:
         if not logs:

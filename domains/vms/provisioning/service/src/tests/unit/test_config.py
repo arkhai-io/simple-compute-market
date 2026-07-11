@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 
 import pytest
+from dynaconf import Dynaconf
 
 
 @pytest.fixture
@@ -69,3 +70,29 @@ class TestResolveStorefrontAdminKeyFromMount:
         storefront_toml('admin_api_key = "from-override"\n')
         from config import _resolve_storefront_admin_key_from_mount
         assert _resolve_storefront_admin_key_from_mount() == "from-override"
+
+
+class TestBareMetalReclaimPolicy:
+    def test_default_is_remove_lease_key(self):
+        from config import Settings
+
+        settings = Settings(Dynaconf(environments=False))
+
+        assert settings.bare_metal_reclaim_policy == "remove_lease_key"
+
+    def test_accepts_supported_policy(self):
+        from config import Settings
+
+        settings = Settings(Dynaconf(environments=False))
+        settings._source.set("bare_metal_reclaim_policy", "lock_user")
+
+        assert settings.bare_metal_reclaim_policy == "lock_user"
+
+    def test_rejects_unknown_policy(self):
+        from config import Settings
+
+        settings = Settings(Dynaconf(environments=False))
+        settings._source.set("bare_metal_reclaim_policy", "wipe_disk")
+
+        with pytest.raises(ValueError, match="Invalid bare_metal_reclaim_policy"):
+            _ = settings.bare_metal_reclaim_policy

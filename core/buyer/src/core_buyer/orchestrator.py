@@ -257,8 +257,10 @@ def run_buy(
         return BuyResult(status="no_matches")
 
     capped = matches[:max_matches_to_try]
+    from core_buyer.aggregation import DEFAULT_POLICY_NAME
+
     _event("aggregated", {
-        "policy": config.aggregation_policy or "best_price",
+        "policy": config.aggregation_policy or DEFAULT_POLICY_NAME,
         "match_count_after_cap": len(capped),
     })
 

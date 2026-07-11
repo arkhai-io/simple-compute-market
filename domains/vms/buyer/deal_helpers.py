@@ -1,7 +1,7 @@
 """VM shim over the core deal-recovery helpers.
 
 Run-log scraping and chain-settings resolution moved to
-``core_buyer.deal_helpers`` when the API-tokens domain became the
+``core_buyer.deal_helpers`` when the API-credits domain became the
 second schema plugin. This module keeps the VM instantiation:
 SSH-key resolution (and its missing-key guard) wraps the core
 resolver, since the key is the VM domain's provisioning payload.

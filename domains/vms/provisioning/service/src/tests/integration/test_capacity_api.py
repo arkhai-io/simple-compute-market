@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE, ALLOCATION_MODE_SHAREABLE
 from main import app
 
 
@@ -108,11 +109,12 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
     )
 
     assert (await capacity.snapshot())[0]["available_units"] == 8
-    assert await capacity.probe({"gpu_model": "H200"}) is not None
+    assert await capacity.probe({"gpu_model": "H200", "vm_host": "kvm1"}) is not None
     assert await capacity.probe({"gpu_model": "A100"}) is None
 
     reserved = await capacity.reserve(
-        {"gpu_count": 3}, {"listing_id": "lst-1", "escrow_uid": "0xesc"},
+        {"gpu_count": 3, "vm_host": "kvm1"},
+        {"listing_id": "lst-1", "escrow_uid": "0xesc"},
     )
     assert reserved["vm_host"] == "kvm1"
     assert reserved["available_gpu_count"] == 5
@@ -150,6 +152,81 @@ async def test_no_capacity_is_a_null_answer_not_an_error(capacity: CapacityApi):
 
 
 @pytest.mark.asyncio
+async def test_vm_and_bare_metal_claims_use_domain_attributes(capacity: CapacityApi):
+    await capacity.register(
+        "bare-metal-node-1",
+        total_units=1,
+        attributes={
+            "physical_host_id": "host-physical-1",
+            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+        },
+    )
+
+    assert await capacity.probe({"gpu_count": 1, "vm_host": "kvm1"}) is None
+    reserved = await capacity.reserve(
+        {
+            "physical_host_id": "host-physical-1",
+            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+        },
+        {"escrow_uid": "0xbm-capacity"},
+    )
+
+    assert reserved is not None
+    assert reserved["resource_id"] == "bare-metal-node-1"
+    assert reserved["vm_host"] is None
+
+
+@pytest.mark.asyncio
+async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityApi):
+    await capacity.register(
+        "compute-host-1",
+        total_units=8,
+        resource_subtype="h200",
+        attributes={
+            "vm_host": "kvm1",
+            "gpu_model": "H200",
+            "physical_host_id": "host-physical-1",
+            "allocation_mode": ALLOCATION_MODE_SHAREABLE,
+        },
+    )
+    await capacity.register(
+        "bare-metal-node-1",
+        total_units=1,
+        resource_subtype="h200",
+        attributes={
+            "machine_id": "node-1",
+            "gpu_model": "H200",
+            "physical_host_id": "host-physical-1",
+            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+        },
+    )
+
+    initial = {row["resource_id"]: row for row in await capacity.snapshot()}
+    assert initial["compute-host-1"]["available_units"] == 8
+    assert initial["bare-metal-node-1"]["available_units"] == 1
+
+    reserved = await capacity.reserve(
+        {"gpu_count": 2, "vm_host": "kvm1"},
+        {"escrow_uid": "0xvm-cross-mode"},
+    )
+
+    assert reserved is not None
+    blocked = {row["resource_id"]: row for row in await capacity.snapshot()}
+    assert blocked["compute-host-1"]["available_units"] == 6
+    assert blocked["bare-metal-node-1"]["available_units"] == 0
+    assert await capacity.probe({
+        "physical_host_id": "host-physical-1",
+        "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+    }) is None
+
+    released = await capacity.release(allocation_id=reserved["allocation_id"])
+    assert released is not None
+    restored = {row["resource_id"]: row for row in await capacity.snapshot()}
+    assert restored["compute-host-1"]["available_units"] == 8
+    assert restored["bare-metal-node-1"]["available_units"] == 1
+
+
+@pytest.mark.asyncio
 async def test_register_lease_attaches_to_ledger_allocation(capacity: CapacityApi):
     """POST /leases records the lease tail on the allocation row — the
     leases surface is a view over the ledger."""
@@ -158,7 +235,10 @@ async def test_register_lease_attaches_to_ledger_allocation(capacity: CapacityAp
     await capacity.register(
         "compute-kvm1-001", total_units=8, attributes={"vm_host": "kvm1"},
     )
-    reserved = await capacity.reserve({"gpu_count": 1}, {"escrow_uid": "0xlease"})
+    reserved = await capacity.reserve(
+        {"gpu_count": 1, "vm_host": "kvm1"},
+        {"escrow_uid": "0xlease"},
+    )
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http:

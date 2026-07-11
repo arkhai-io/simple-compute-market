@@ -1,0 +1,141 @@
+# API-credits (api_credits) market — domain stack.
+#
+# The seller side of the token-gated-API market: a registry/indexer instance
+# speaking the api_credits schema, the credits service (keys / prepaid credits /
+# quota ledger), the credits storefront (self-seeds one quota-backed listing on
+# startup), and a sample gated app behind the Python token-gating middleware.
+# The buyer drives it with `market credits buy`; its schema filter routes
+# discovery to the api-credits registry and leaves the vms.compute registry
+# alone.
+#
+# Chain-touching services gate on a service named `anvil` (the local dev
+# chain) which this file does NOT define — the root `compose.dev.yml` supplies
+# it. Bring this domain up with that overlay via the repo-root wrapper:
+#   docker compose -f compose.apicredits.yml up
+# (compose.apicredits.yml just `include:`s compose.dev.yml + this file.) The
+# full multi-domain stack is the root `docker-compose.yml`.
+#
+# Paths below are relative to THIS file's directory (domains/apicredits/) —
+# Compose `include:` resolves an included file's relative paths against its
+# own location.
+
+services:
+  # 1. Registry for the api_credits schema — same image as the vms.compute
+  # registry, different filter-spec (selected via REGISTRY_FILTER_SPEC_PATH).
+  api-credits-registry:
+    image: arkhai:registry
+    depends_on:
+      anvil:
+        condition: service_healthy
+    ports:
+      - "8090:8080"
+    env_file:
+      - ../../core/registry/.env.docker-compose
+    environment:
+      - REGISTRY_FILTER_SPEC_PATH=/app/filter-spec-apicredits.yaml
+    volumes:
+      - ../../shared-env:/app/shared-env
+      - ./registry/filter-spec.yaml:/app/filter-spec-apicredits.yaml:ro
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # 2. Credits service — keys, prepaid credit grants, consumption, and the
+  # quota ledger. Admin-gated (X-Admin-Key); no chain dependency.
+  credits-service:
+    image: arkhai:apicredits-service
+    ports:
+      - "8092:8082"
+    environment:
+      - APICREDITS_STOREFRONT_ADMIN_KEY=test-api-key
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 384m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8082/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  # 3. Sample gated app — one metered endpoint (/api/forecast) behind the
+  # Python token-gating middleware. Verifies/consumes against credits-service.
+  sample-app:
+    image: arkhai:apicredits-sample-app
+    depends_on:
+      credits-service:
+        condition: service_healthy
+    ports:
+      - "8095:8085"
+    environment:
+      - APICREDITS_MIDDLEWARE_SERVICE_URL=http://credits-service:8082
+      - APICREDITS_MIDDLEWARE_ADMIN_KEY=test-api-key
+      - APICREDITS_MIDDLEWARE_AMOUNT_PER_REQUEST=1
+      # Short verify cache so a re-purchase (top-up) becomes visible to
+      # the gate quickly — the e2e polls through this window.
+      - APICREDITS_MIDDLEWARE_VERIFY_TTL_SECONDS=3
+      - APICREDITS_MIDDLEWARE_PURCHASE_SERVICE_NAME=weather-api
+      - APICREDITS_MIDDLEWARE_PURCHASE_STOREFRONT_URL=http://credits-storefront:8000
+      - APICREDITS_MIDDLEWARE_PURCHASE_REGISTRY_URL=http://api-credits-registry:8080
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8085/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  # 4. Credits storefront — quota-backed listings + issuance-backed
+  # settlement. Self-seeds one listing on startup (storefront.credits.toml
+  # [seed] block) pointing at the sample app.
+  credits-storefront:
+    image: arkhai:apicredits-storefront
+    platform: linux/amd64
+    depends_on:
+      anvil:
+        condition: service_healthy
+      api-credits-registry:
+        condition: service_healthy
+      credits-service:
+        condition: service_healthy
+      sample-app:
+        condition: service_healthy
+    ports:
+      - "8093:8000"
+    environment:
+      - XDG_CONFIG_HOME=/etc
+      - PYTHONPATH=/app
+    volumes:
+      # Chain-/seller-specific config is the one environment-supplied mount;
+      # override $APICREDITS_STOREFRONT_CONFIG to point at a different chain's
+      # TOML (the default is the dev/anvil seller config).
+      - ${APICREDITS_STOREFRONT_CONFIG:-./storefront/storefront.credits.toml}:/etc/arkhai/storefront.toml:ro
+      # The dev chain's deployed Alkahest contract addresses, borrowed from
+      # the VM storefront's data tree (the canonical anvil address book). A
+      # non-Anvil deployment supplies its own address book here.
+      - ../vms/storefront/src/market_storefront/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s

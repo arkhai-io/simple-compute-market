@@ -19,30 +19,22 @@ to abort settlement (no candidate met its bar). The orchestrator then
 settles exactly that one pair. The policy is the only thing that
 knows the comparison rule, so the orchestrator stays dumb.
 
-Built-in flavors:
+Built-in control-flow flavors:
 
-- ``best_price`` (default) — negotiate with *all* candidates in parallel,
-  pick the lowest agreed_amount. The canonical "comparison shopping"
-  example. Default because the sequential alternatives give up the
-  comparison's headline benefit (cross-seller price discovery) in
-  exchange for slightly less per-buy work; with ``max_matches_to_try``
-  bounding fan-out, the cost is acceptable.
 - ``fastest_agreed`` — race all candidates in parallel, take whichever
   agrees first; cancel the rest. For "provision ASAP, price-insensitive"
   buys.
-- ``cheapest_first`` — sort by advertised price, negotiate sequentially,
-  first agreed wins. Pre-callback historical behavior. Useful when each
-  negotiation has nontrivial side effects (audit-log reveal, future-price
-  signaling) you want to minimize.
 - ``registry_order`` — pass through in registry order, otherwise
   sequential-first-agreed.
 - ``random_shuffle`` — shuffle for load spreading, sequential-first-agreed.
-- ``priceless_last`` — priced cheapest first, priceless after.
+
+Settlement-shape-specific policies are owned by their kit packages and loaded
+through entry points, e.g. Alkahest scalar ``best_price``/``cheapest_first``.
 
 Forward compatibility: returning ``tuple | None`` rather than a list
 means today's single-settlement orchestrator can consume the result as
 is. When multi-buy lands (plural ``BuyResult`` + plural settlement),
-widen this return to ``list[tuple]`` — four built-ins to port, no
+widen this return to ``list[tuple]`` — three core built-ins to port, no
 deeper structural change.
 
 Failure semantics: ``negotiate`` propagates exceptions. The policy
@@ -77,7 +69,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-import json
 import logging
 import os
 import random as _random
@@ -104,7 +95,7 @@ AggregationPolicy = Callable[
 
 _REGISTRY: dict[str, AggregationPolicy] = {}
 
-DEFAULT_POLICY_NAME = "best_price"
+DEFAULT_POLICY_NAME = "registry_order"
 
 _FILE_POLICIES_DISCOVERED = False
 
@@ -328,33 +319,6 @@ async def gather_outcomes(
     return await asyncio.gather(*(_one(c) for c in candidates))
 
 
-def _extract_advertised_price(match: dict[str, Any]) -> float | None:
-    """Pull the advertised unit rate from a match's first accepted escrow.
-
-    Mirrors what the seller advertises: ``accepted_escrows[0]`` primary
-    rate (0 for free; ``None`` for hidden reserve, i.e. empty ``rates``).
-    Returns ``None`` if no usable rate is published — callers fall back
-    to their own ``initial_price``.
-    """
-    from market_alkahest.schemas import primary_rate_value
-
-    accepted = match.get("accepted_escrows") or []
-    if isinstance(accepted, str):
-        try:
-            accepted = json.loads(accepted)
-        except (ValueError, TypeError):
-            return None
-    if not isinstance(accepted, list) or not accepted:
-        return None
-    first = accepted[0]
-    if not isinstance(first, dict):
-        return None
-    amount = primary_rate_value(first)
-    if amount is None or amount <= 0:
-        return None
-    return float(amount)
-
-
 async def _sequential_first_agreed(
     candidates: list[dict[str, Any]],
     negotiate: NegotiateFn,
@@ -370,25 +334,6 @@ async def _sequential_first_agreed(
 # ---------------------------------------------------------------------------
 # Built-in policies
 # ---------------------------------------------------------------------------
-
-
-@register_aggregation_policy("cheapest_first")
-async def _cheapest_first(
-    candidates: list[dict[str, Any]],
-    negotiate: NegotiateFn,
-) -> tuple[dict[str, Any], NegotiationOutcome] | None:
-    """Sort by advertised price ascending, negotiate sequentially, first agreed wins.
-
-    Priceless listings sort to the end. Same effective behavior as the
-    pre-callback loop default — preserves backward compatibility.
-    """
-    def _key(m: dict[str, Any]) -> tuple[int, int]:
-        price = _extract_advertised_price(m)
-        if price is None:
-            return (1, 0)
-        return (0, price)
-
-    return await _sequential_first_agreed(sorted(candidates, key=_key), negotiate)
 
 
 @register_aggregation_policy("registry_order")
@@ -409,120 +354,6 @@ async def _random_shuffle(
     shuffled = list(candidates)
     _random.shuffle(shuffled)
     return await _sequential_first_agreed(shuffled, negotiate)
-
-
-@register_aggregation_policy("priceless_last")
-async def _priceless_last(
-    candidates: list[dict[str, Any]],
-    negotiate: NegotiateFn,
-) -> tuple[dict[str, Any], NegotiationOutcome] | None:
-    """Priced cheapest first, then priceless. Sequential-first-agreed."""
-    priced: list[tuple[int, int, dict[str, Any]]] = []
-    priceless: list[tuple[int, dict[str, Any]]] = []
-    for idx, m in enumerate(candidates):
-        p = _extract_advertised_price(m)
-        if p is None:
-            priceless.append((idx, m))
-        else:
-            priced.append((p, idx, m))
-    priced.sort(key=lambda t: (t[0], t[1]))
-    priceless.sort(key=lambda t: t[0])
-    ordered = [m for _, _, m in priced] + [m for _, m in priceless]
-    return await _sequential_first_agreed(ordered, negotiate)
-
-
-def _resolve_best_price_timeout() -> float | None:
-    """Optional wall-clock budget for ``best_price`` (seconds).
-
-    Read from ``[aggregation] best_price_timeout`` in TOML. Unset,
-    non-numeric, or non-positive → no timeout (the policy waits for
-    every candidate). A positive value caps the comparison at the
-    given number of seconds; any candidate still negotiating when the
-    timeout fires is cancelled and excluded from the winner pool.
-    """
-    cfg = _load_buyer_config()
-    try:
-        from market_config.config_loader import get_dotted
-    except Exception:
-        return None
-    raw = get_dotted(cfg, "aggregation.best_price_timeout")
-    if raw is None:
-        return None
-    try:
-        v = float(raw)
-    except (TypeError, ValueError):
-        return None
-    return v if v > 0 else None
-
-
-def _pick_min_agreed(
-    results: list[tuple[dict[str, Any], NegotiationOutcome | BaseException]],
-) -> tuple[dict[str, Any], NegotiationOutcome] | None:
-    """Pick the candidate with the lowest agreed_amount from a result set."""
-    agreed: list[tuple[dict[str, Any], NegotiationOutcome]] = []
-    for c, r in results:
-        if (
-            isinstance(r, NegotiationOutcome)
-            and r.status == "agreed"
-            and r.agreed_amount is not None
-        ):
-            agreed.append((c, r))
-    if not agreed:
-        return None
-    return min(agreed, key=lambda p: p[1].agreed_amount or 0)
-
-
-@register_aggregation_policy("best_price")
-async def _best_price(
-    candidates: list[dict[str, Any]],
-    negotiate: NegotiateFn,
-) -> tuple[dict[str, Any], NegotiationOutcome] | None:
-    """Negotiate with every candidate in parallel; pick the lowest agreed price.
-
-    The canonical "comparison shopping" example. Bound the candidate
-    list upstream (``max_matches_to_try``) to control fan-out;
-    optionally cap wall time with ``[aggregation] best_price_timeout``
-    so one slow seller can't hold up the whole buy.
-
-    Without a timeout, costs N negotiations of wall time at most. With
-    a timeout, returns the best of whoever completed by the deadline;
-    pending negotiations are cancelled and their outcomes discarded.
-    Per-candidate failures (network, signature) are skipped, not
-    raised — if you want failures to abort the buy, write a policy
-    that doesn't use ``gather_outcomes``.
-    """
-    timeout = _resolve_best_price_timeout()
-    if timeout is None:
-        return _pick_min_agreed(await gather_outcomes(negotiate, candidates))
-
-    async def _one(
-        c: dict[str, Any],
-    ) -> tuple[dict[str, Any], NegotiationOutcome | BaseException]:
-        try:
-            return (c, await negotiate(c))
-        except BaseException as exc:  # noqa: BLE001 — comparison swallows per-task
-            return (c, exc)
-
-    tasks = [asyncio.create_task(_one(c)) for c in candidates]
-    try:
-        done, _pending = await asyncio.wait(
-            tasks, timeout=timeout, return_when=asyncio.ALL_COMPLETED,
-        )
-        if len(done) < len(tasks):
-            logger.info(
-                "[AGG-POLICY] best_price timeout fired at %.2fs; "
-                "settling on %d/%d completed candidates",
-                timeout, len(done), len(tasks),
-            )
-        return _pick_min_agreed([t.result() for t in done])
-    finally:
-        pending_now = [t for t in tasks if not t.done()]
-        for t in pending_now:
-            t.cancel()
-        if pending_now:
-            # Drain so cancellation propagates and we don't leak
-            # warnings about un-awaited tasks at shutdown.
-            await asyncio.gather(*pending_now, return_exceptions=True)
 
 
 @register_aggregation_policy("fastest_agreed")

@@ -44,6 +44,8 @@ async def test_upsert_resources_from_csv_reports_matched_and_unrecognized(tmp_pa
     by_id = {r["resource_id"]: r for r in resources}
     assert by_id["compute-1"]["resource_type"] == "compute.gpu"
     assert by_id["compute-1"]["attributes"]["vm_host"] == "vm1"
+    assert by_id["compute-1"]["attributes"]["physical_host_id"] == "vm1"
+    assert by_id["compute-1"]["attributes"]["allocation_mode"] == "shareable"
     assert by_id["info-1"]["resource_type"] == "information.note"
     assert by_id["info-1"]["attributes"]["topic"] == "market-overview"
 
@@ -110,6 +112,63 @@ async def test_upsert_resources_from_csv_persists_per_row_pricing(tmp_path: Path
     # Empty cells become NULL, signaling "fall back to [seller.pricing] defaults".
     assert by_id["compute-default"]["min_price"] is None
     assert by_id["compute-default"]["token"] is None
+
+
+@pytest.mark.asyncio
+async def test_compute_resource_import_preserves_explicit_shared_host_metadata(
+    tmp_path: Path,
+):
+    db_path = str(tmp_path / "agent.db")
+    csv_path = tmp_path / "resources_physical_host.csv"
+    sqlite_client = SQLiteClient(db_path=db_path)
+
+    _write_csv(
+        csv_path,
+        "\n".join(
+            [
+                "resource_id,resource_type,resource_subtype,unit,value,state,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.physical_host_id,attribute.allocation_mode",
+                "compute-1,compute.gpu,h200,count,1,available,H200,99.0,\"California, US\",kvm-alias-1,host-physical-1,shareable",
+            ]
+        ),
+    )
+
+    report = await sqlite_client.upsert_resources_from_csv(csv_path=str(csv_path))
+    resources = await sqlite_client.list_resources()
+
+    assert report["imported_count"] == 1
+    attrs = resources[0]["attributes"]
+    assert attrs["vm_host"] == "kvm-alias-1"
+    assert attrs["physical_host_id"] == "host-physical-1"
+    assert attrs["allocation_mode"] == "shareable"
+
+
+@pytest.mark.asyncio
+async def test_bare_metal_compute_resource_import_preserves_exclusive_metadata(
+    tmp_path: Path,
+):
+    db_path = str(tmp_path / "agent.db")
+    csv_path = tmp_path / "resources_bare_metal.csv"
+    sqlite_client = SQLiteClient(db_path=db_path)
+
+    _write_csv(
+        csv_path,
+        "\n".join(
+            [
+                "resource_id,resource_type,resource_subtype,unit,value,state,attribute.gpu_model,attribute.sla,attribute.region,attribute.machine_id,attribute.physical_host_id,attribute.allocation_mode",
+                "bare-metal-1,compute.gpu,h200,count,1,available,H200,99.0,\"California, US\",bm-node-1,host-physical-1,exclusive",
+            ]
+        ),
+    )
+
+    report = await sqlite_client.upsert_resources_from_csv(csv_path=str(csv_path))
+    resources = await sqlite_client.list_resources()
+
+    assert report["imported_count"] == 1
+    attrs = resources[0]["attributes"]
+    assert attrs["machine_id"] == "bm-node-1"
+    assert attrs["physical_host_id"] == "host-physical-1"
+    assert attrs["allocation_mode"] == "exclusive"
+    assert "vm_host" not in attrs
 
 
 @pytest.mark.asyncio

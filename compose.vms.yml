@@ -1,6 +1,6 @@
 # VM compute market on the local dev chain — standalone bring-up.
 #   docker compose -f compose.vms.yml up
-# Just the shared Anvil chain + the VM domain stack, with no API-tokens
+# Just the shared Anvil chain + the VM domain stack, with no API-credits
 # services. See domains/vms/compose.yml.
 include:
   - compose.dev.yml

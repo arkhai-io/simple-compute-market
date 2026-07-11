@@ -11,6 +11,7 @@ Pending architectural work and known operational issues for the Arkhai market st
 | [Init container migration & schema drift guard](#init-container-migration-pattern-and-schema-drift-guard) | State Management | Planned |
 | [Registry: Postgres migration](#registry-postgres-migration) | State Management | Planned |
 | [Market Core Extraction follow-ons](#market-core-extraction-follow-ons) | Core Stack | In progress |
+| [Gradual typing for core packages](#gradual-typing-for-core-packages) | Core Stack | Planned |
 | [Native Launch CLI for Provisioning Service](#native-launch-cli-for-provisioning-service) | Core Stack | Planned |
 | [Storefront DB Pruning](#storefront-db-pruning) | Core Stack | Planned |
 | [Registry Filter-Spec side indexes](#registry-filter-spec-indexed-true-side-indexes) | Core Stack | Deferred |
@@ -20,7 +21,9 @@ Pending architectural work and known operational issues for the Arkhai market st
 | [Golden image configuration](#golden-image-configuration-management-varsyaml) | Provisioning Service | Needs review |
 | [Host capacity resource filters](#host-capacity-resource-filters) | Provisioning Service | Needs review |
 | [Site resources and shared lease lifecycle boundaries](#site-resources-and-shared-lease-lifecycle-boundaries) | Provisioning Service | Needs review |
-| [Resource Pool Architecture — POOLS-1 through POOLS-6](#resource-pool-architecture-pools-1-through-pools-6) | Provisioning Service | In progress |
+| [Shared host accounting for VM and bare-metal offers](#shared-host-accounting-for-vm-and-bare-metal-offers) | Provisioning Service | Implemented, core storefront/provisioner split pending |
+| [Seller-side spot automation](#seller-side-spot-automation) | Provisioning Service | Planned |
+| [Multi-Provider Resource Pool Architecture](#multi-provider-resource-pool-architecture) | Provisioning Service | Needs review |
 | [`StorefrontCallbackClient` extraction](#storefrontcallbackclient-extraction-conditional) | Provisioning Service | Conditional |
 | [Alkahest contracts in baked state](#alkahest-contracts-in-the-baked-state) | Documentation Gaps | Needs review |
 | [Symmetric Order Concept](#symmetric-order-concept) | Documentation Gaps | Needs review |
@@ -138,7 +141,7 @@ remaining follow-on work, with design context in
      entry).
 
 5. **PyPI trusted-publishing one-time setup:** the publish CI
-   (`.github/workflows/publish-pypi.yml`) now covers all 18 consumable
+   (`.github/workflows/publish-pypi.yml`) covers the consumable
    packages (kit/core libraries, SDK clients, buyer/storefront plugins,
    the listing registry, provisioning + tokens services, the tokens
    middleware) — every userland role, not the e2e harness/demo/tooling. Names keep the
@@ -146,6 +149,71 @@ remaining follow-on work, with design context in
    prefix is the namespace. Each package still needs its PyPI project +
    trusted-publisher environment created per `RELEASING.md` before its
    first publish succeeds (nothing is on PyPI yet).
+
+---
+
+### Gradual typing for core packages
+
+**Status:** Planned.
+
+**Problem:** The `core/` packages are type-friendly but not fully typed or
+consistently checked. Most production modules already use annotations and
+Pydantic/dataclass carriers, but there is no shared type-checking policy, no
+`py.typed` markers in the core wheels, and only `core/registry` has a Makefile
+path that invokes mypy. The current dynamic boundaries around generated SDK
+clients, Alkahest native objects, JSON wire payloads, and plugin hooks mean API
+drift can still escape static checks and surface only in e2e.
+
+**Planned fix:** phase in typing where it most reduces contract drift, without
+blocking feature work on a strictness cliff.
+
+1. **Inventory and package markers.**
+   - Add `py.typed` to core library/client wheels once each package's exported
+     public API is intentionally annotated.
+   - Add packaging tests that verify the marker is included in built wheels.
+   - Track typed public surfaces package by package: `arkhai-core`,
+     `arkhai-core-registry-client`, `arkhai-core-storefront-client`,
+     `arkhai-core-buyer`, `arkhai-core-storefront`, `arkhai-kit-site`, and
+     `arkhai-core-registry`.
+
+2. **Establish a shared non-strict baseline.**
+   - Add a repo-local mypy or basedpyright config for `core/` with pragmatic
+     defaults: check untyped function bodies, report missing imports only where
+     stubs should exist, and avoid `Any` bans until SDK/client seams are wrapped.
+   - Add `uv run` Makefile targets for each core package and one aggregate
+     root target.
+   - Run the baseline in CI as advisory first, then required once stable.
+
+3. **Tighten carrier and generated-client contracts first.**
+   - Make `market_core.schemas` pass a stricter profile before service shells;
+     this is the highest-leverage wire contract layer.
+   - Tighten registry/storefront client models and method signatures next,
+     because downstream packages rely on these as SDKs.
+   - Prefer explicit `TypedDict`, Pydantic models, or dataclasses at wire
+     boundaries over `dict[str, Any]` where the shape is stable.
+
+4. **Wrap dynamic boundaries instead of leaking `Any`.**
+   - Add narrow protocols/adapters for Alkahest SDK objects returned through
+     `kit/alkahest` and storefront escrow verification.
+   - Type plugin registration hooks and buyer/storefront extension points at
+     the trait/protocol level, so domain packages can type-check against the
+     contract rather than concrete implementations.
+   - Keep raw JSON helpers local to edge modules; normalize into typed carriers
+     before crossing core package boundaries.
+
+5. **Ratchet strictness package by package.**
+   - Start with `arkhai-core`, registry-client, and storefront-client.
+   - Then tighten `kit-site` and `core-storefront` service helpers.
+   - Leave FastAPI route modules, SQLAlchemy rows, and migration scripts for
+     later; these carry the most framework-driven dynamic typing and lowest
+     immediate contract value.
+   - Only enable `disallow_untyped_defs` / `disallow_untyped_calls` after the
+     package has a clean baseline and typed public API.
+
+**Acceptance criteria:** a fresh checkout can run one aggregate `core` type-check
+target with `uv`; all exported core wheels that claim typed support include
+`py.typed`; and new SDK/API compatibility breaks in core-facing code are caught
+by type checks or focused unit tests before e2e.
 
 ---
 
@@ -164,6 +232,21 @@ The `arkhai-vms-provisioning` wheel stays its own distributable — it's operate
 
 **Status:** Planned.
 
+**Problem:** The ARCHITECTURE.md rule prohibits `[tool.uv.sources]` `path` entries containing `../` in any `pyproject.toml`. Such paths bake the monorepo's filesystem topology into `uv.lock`, breaking Docker builds and preventing customers from installing the package outside the checkout. The following packages still have `../` path sources:
+
+**Wheel packages (highest priority — customer-facing):**
+
+- `domains/apicredits/buyer/pyproject.toml` — 5 editable path sources (core, core-buyer, alkahest, config, policy). Domain wheel plugin.
+- `domains/vms/buyer/pyproject.toml` — 5 editable path sources (same set). Already has a Makefile; needs sources removal and `reinit` target additions.
+
+**Docker service packages (lower priority — monorepo-root build context makes the referenced paths available inside containers):**
+
+- `core/registry/pyproject.toml` — 1 editable path source (`arkhai-kit-identity`).
+- `domains/vms/storefront/pyproject.toml` — 6 editable path sources.
+- `domains/apicredits/storefront/pyproject.toml` — 7 editable path sources.
+- `domains/apicredits/sample-app/pyproject.toml` — 1 editable path source (`arkhai-apicredits-middleware = { path = "../middleware/python" }`), intra-domain sibling reference.
+
+**Planned fix:** apply the `core/buyer` pattern to each wheel package in priority order: remove `[tool.uv.sources]`, add or update the package Makefile to pass `--find-links $(DIST_DIR)` through `init`, `reinit`, and `test` targets, regenerate `uv.lock`. Service packages follow after the wheel packages are clean.
 
 ---
 
@@ -296,15 +379,298 @@ See `ARCHITECTURE.md` "Lease Lifecycle — allocation-backed watchdog" for the c
 
 Lease lifecycle policy should sit above that generic site resource layer. A reusable lease lifecycle service can be moved into a shared wheel by accepting a release delegate/callback for the concrete teardown operation. VM provisioning supplies a `vm_remove` delegate; a pod provisioning service could supply a pod-delete delegate; a bare-metal rental service could supply a node-reclaim delegate. Token or bandwidth allocations might use `SiteResourcesService` without any lease lifecycle layer at all.
 
-**Current state:** VM provisioning has a local `SiteResourcesService` adapter over the existing `core_site` capacity implementation. `LeaseLifecycleService` owns the lease state machine and uses a release delegate so the lifecycle layer is easier to migrate into the shared wheel later. Admin repair routes are available for operator recovery: `POST /api/v1/admin/leases/{lease_id}/retry-release` resubmits the release delegate for `release_failed` leases, and `POST /api/v1/admin/leases/{lease_id}/force-release` releases capacity without teardown proof after manual verification. The force-release route requires an operator reason and can include evidence because it can make capacity available despite incomplete infrastructure cleanup.
+**Current state:** VM provisioning has a local `SiteResourcesService` adapter over the existing `market_site` capacity implementation. `LeaseLifecycleService` owns the lease state machine and uses a release delegate so the lifecycle layer is easier to migrate into the shared wheel later. Admin repair routes are available for operator recovery: `POST /api/v1/admin/leases/{lease_id}/retry-release` resubmits the release delegate for `release_failed` leases, and `POST /api/v1/admin/leases/{lease_id}/force-release` releases capacity without teardown proof after manual verification. The force-release route requires an operator reason and can include evidence because it can make capacity available despite incomplete infrastructure cleanup.
 
-**Remaining shared-layer refactor:** narrow the lower `core_site` implementation behind the generic site-resource boundary. The lower implementation still exposes ledger-named and lease-shaped methods; future code should depend on focused site resource/allocation/event service wrappers instead of reaching through those details. Once the lower boundary is generic, move the delegate-based lease lifecycle service into the shared wheel so VM, pod, and bare-metal provisioning services can reuse the state machine with different release delegates.
+**Remaining shared-layer refactor:** narrow the lower `market_site` implementation behind the generic site-resource boundary. The lower implementation still exposes ledger-named and lease-shaped methods; future code should depend on focused site resource/allocation/event service wrappers instead of reaching through those details. Once the lower boundary is generic, move the delegate-based lease lifecycle service into the shared wheel so VM, pod, and bare-metal provisioning services can reuse the state machine with different release delegates.
 
 **Monitoring work:** `release_failed` requires polling the provisioning service or inspecting logs. Add admin monitoring/alerting for failed releases with `lease_id`, resource id, host, VM target, `vm_remove_job_id`, failure reason/message, and suggested recovery actions. Do not notify the storefront with a capacity-released event unless capacity was actually released.
 
 ---
 
-### Resource Pool Architecture (POOLS-1 through POOLS-6)
+### Shared host accounting for VM and bare-metal offers
+
+**Status:** Implemented through transitional VM provisioning packages. The
+publication-source interface, VM/bare-metal domain adapters, reusable
+core publication command surface, executable-facing command config/callback
+helper, selected-source composition helpers, VM storefront publication
+wiring module, shared storefront FastAPI app shell, shared storefront
+lifespan singleton/startup assembly, shared ordered startup-step helpers, the
+shared site resource/allocation service boundary, shared release executor
+dispatch, shared executor lease registration/listing helpers, shared
+compute provisioning app shell/background task/startup helpers, and shared
+lease lifecycle state-machine orchestration are now compute-provisioning,
+core/domain-owned, or isolated from the CLI.
+The VM storefront still supplies transitional infrastructure callbacks for
+VM-only, bare-metal-only, or combined VM+bare-metal publication selections;
+remaining architectural work is moving compute provisioning out of
+`domains/vms` into a new top-level `provisioning/compute` category and
+continuing to split VM-specific startup/provisioning steps from shared compute
+provisioner policy. The controller/container ownership map and extraction
+sequence are tracked in
+[`provisioning-migration-plan.md`](provisioning-migration-plan.md).
+
+**Goal:** allow a seller to offer the same underlying physical machine as
+exclusive bare metal or as VM slices, depending on demand, without double
+selling capacity. A bare-metal lease of a host must make all VM slice listings
+for that host unavailable. VM slice allocations must make the exclusive
+bare-metal listing unavailable until all child allocations are gone.
+
+**Current state:** the VM provisioning service already hosts the site ledger
+and is part-way toward the target architecture: `CapacityLedgerService` owns
+site resources, allocations, and capacity events; `SiteResourcesService` is a
+thin resource/allocation adapter; `LeaseLifecycleService` accepts executor
+release implementations. Allocation rows now carry generic executor metadata
+(`executor_kind`, `executor_target`, `executor_ref`, `release_job_id`) while
+preserving the legacy VM fields. The site ledger also understands
+`physical_host_id` plus `allocation_mode` (`shareable` or `exclusive`) resource
+attributes for cross-mode conflict checks. A transitional bare-metal domain
+adapter now exposes `/api/v1/bare-metal/leases/*` using the
+`arkhai-bare-metal` lease models. Lease registration now submits a
+queued `node_grant_access` job and stores `create_job_id`; bare-metal release
+routes through `executor_kind=bare_metal` and submits `node_reclaim_access`.
+Those actions use a separate bare-metal Ansible playbook/role rather than the
+VM management role. Internal job payloads now carry domain-neutral
+`executor_kind`, `executor_action`, `executor_target`, and `executor_ref`
+alongside the legacy `vm_*` aliases; the bare-metal playbook consumes the
+neutral values first. The bare-metal domain package owns the access action
+vocabulary and minimal grant/reclaim result shape, and now also defines the
+first market-lifecycle schema shapes:
+`BareMetalListing`, `BareMetalMessage`, `BareMetalTerms`,
+`BareMetalMaterialization`, and `BareMetalReceipt`. Conversion helpers adapt
+materializations and lease views to the current transitional provisioning API
+DTOs. The service package and most operator APIs are still VM-shaped.
+
+**Design stance:** VM and bare-metal provisioning should be separate executor
+services, or at least separate executor implementations, but they must not own
+separate capacity ledgers for the same hardware. The site authority is the
+single source of truth for physical inventory, reservations, conflicts, lease
+state, and capacity events. Executor services consume allocation decisions and
+report provisioning/release outcomes; they do not independently decide that
+shared hardware is available.
+
+The package architecture target is a layered dependency chain with a separate
+provisioning category for deployable provisioners:
+`core -> domain -> kit/user implementation`, plus `provisioning/<category>`
+packages for services that serve multiple domains. Each layer fills the
+dependencies of the layer above and may introduce narrower dependencies of its
+own. There is one core API for each marketplace role to fit into, but not every
+operational role belongs in core. Core should define the market skeleton in
+terms of injected dependencies: schema codecs,
+listing/message/terms/materialization/receipt/result handling, buyer
+discovery/aggregation hooks, seller/storefront negotiation and publication
+hooks, registry validation hooks, and settlement/provisioning orchestration
+slots. Domain packages fill the core role dependencies for one concrete market
+and define the deterministic market semantics: the schema shapes plus any
+function-like defaults needed to make the market fully specified. Those
+defaults may still depend on below-domain interfaces when the market genuinely
+requires configurable settlement, identity, capacity, or provisioning
+semantics. Kit packages are below-domain dependencies, not universal plugins:
+a kit is reusable across domains only when those domains choose compatible
+interfaces. User/operator packages may fill remaining policy or infrastructure
+slots when the domain intentionally leaves them open.
+
+Domain packages own the schema and deterministic interpretation for their
+market semantics: listing payloads, messages, agreed terms, materialization,
+receipts, results, provisioning/executor vocabulary, pure validators/codecs,
+and schema-implied default/reference behavior. Exact-match seller policy,
+exact-proposal buyer helpers, registry filter helpers, canonical fixtures, and
+other obvious default implementations may live in the domain package because
+they clarify the market's semantics and keep a concrete market usable without
+unnecessary extra packages.
+Settlement-kit-specific comparison helpers belong with the kit whose payment
+vocabulary they inspect; for example Alkahest scalar `best_price`,
+`cheapest_first`, and `priceless_last` aggregation policies live in
+`market_alkahest.aggregation`, while `core_buyer` owns the aggregation
+registry/discovery and schema-opaque control-flow helpers.
+Buyer-side discovery should follow the same ownership rule. Domain packages
+own domain compatibility filters such as GPU model, region, duration, access
+method, service name, or quantity. Kit packages own kit compatibility filters
+such as supported settlement mechanism, chain, token, price shape, identity
+credential scheme, allowlist/denylist compatibility, and kit-specific local
+candidate checks. Core buyer should compose these filters before aggregation
+and negotiation rather than baking kit compatibility into each domain plugin.
+The current CLI exposes named domain flags plus repeatable `--filter
+name=value` passthroughs. The target filter API should first preserve that
+surface exactly while replacing repeated flags with one whitespace-separated
+string, e.g. `filters="gpu_model=H200 ram_gb_min=range:[32,128]
+strict.token=true token=in:[USDC,DAI]"`. This should mirror the registry's
+current filter-spec capabilities directly: default equality/membership sugar,
+declared `in:[...]`, `not_in:[...]`, `range:[...]`, `exists:true|false`, and
+`strict.<filter>=true|false` overrides. Core should parse that string once and
+split constraints into registry-side predicates when the registry filter-spec
+can serve them and local candidate predicates when the payload is opaque or
+kit-specific. Installed domain and kit packages should register filter
+vocabulary/compilers for that syntax, so a buyer can combine domain and kit
+compatibility constraints without each domain reimplementing every settlement
+or identity filter. A more expression-like language with `==`, `and`, or
+general infix operators is not the near-term target.
+Operator-specific seller policies, buyer policies, provider integrations, and
+local service state belong in separate role/implementation packages that depend
+on the domain package plus the relevant core role package. Deployable
+provisioning services that serve multiple domains belong in a top-level
+`provisioning/<category>` package rather than in `core`, `kit`, or a single
+domain. The current target category is `provisioning/compute`: a compute
+provisioner may serve VM, bare-metal, and future compute domains by
+implementing thin domain adapters over shared local internals, and a domain may
+be served by multiple provisioning implementations that all implement the same
+domain schema. Shared caller contracts or helper libraries for provisioning can
+be kit packages when domains opt into compatible provisioning semantics.
+Reusable substrate such as site authority, allocation lifecycle, capacity
+clients, and leased-access helpers should not live in one domain's VM-shaped
+API.
+Core role packages should own executable entrypoints consistently across roles;
+domain packages should own the role adapters/specs those executables load.
+Domain packages can expose extras such as `buyer`, `storefront`, or `registry`
+when a role adapter needs dependencies that would otherwise bloat unrelated
+users. The current VM and API-credits storefront executable packages are
+transitional composition roots; the target is core-owned executables loading
+domain adapters.
+The core-owned automated publication seam now lives in
+`core_storefront.publication_sources.PublicationSource`, with schema-opaque
+iteration / single-source execution helpers in
+`core_storefront.publication_runner` and entry-point discovery in
+`core_storefront.publication_plugins` (`market.storefront_publication_sources`).
+VM and bare-metal domain packages fill that seam with lightweight adapters;
+concrete storefront composition roots inject local inventory,
+registry/storefront publication, and settlement payload callbacks. This
+publication source is still narrower than the complete storefront role API: it
+covers optional seller automation for "derive local inventory into listings",
+not every domain's seller behavior.
+API-credits does not currently implement a comparable capacity publication
+source because it lacks this VM-style automated inventory path.
+The first core-owned storefront domain runtime interface now lives at
+`core_storefront.domain_runtime.StorefrontDomainRuntime`; it is a callable
+bundle for domain codecs over listing, message, terms, materialization,
+receipt, and result payloads. Concrete VM, bare-metal, and API-credits
+domain-runtime instances now live with their domain schema code and are wired
+through thin storefront composition roots. The next storefront-runtime work is
+to make more storefront services consume this core runtime boundary directly
+instead of importing domain helpers ad hoc.
+The current VM provisioning service still mixes VM contract surface with
+generic site-authority substrate; future refactors should split those roles
+without breaking existing VM clients. The bare-metal market schema starts under
+`domains/bare_metal`; the temporary implementation adapter still lives in
+`domains/vms/provisioning/service` until compute provisioning is moved out of
+the VM domain tree into `provisioning/compute`.
+The generic market lease lifecycle endpoint now describes release as
+executor-dispatched, while `/hosts/{host}/vms/*` remains a direct
+admin/operator VM API.
+
+**Required accounting model:**
+
+- Physical machines are represented once in the site authority with stable
+  `host_id`/`resource_id`, total units, attributes, supported modes, and
+  health/enabled state.
+- Allocation `executor_target` values are executor-local identifiers, not a
+  shared machine namespace. For VMs this is the VM target/domain; for
+  bare-metal this is the bare-metal executor's machine id. Cross-mode
+  accounting must use a shared physical identity carried separately, currently
+  reserved as `executor_ref.physical_host_id`.
+- VM claims consume shareable units from a host, such as GPU count, vCPU, RAM,
+  disk, and ports, while the host is not exclusively leased.
+- Bare-metal claims require exclusive host ownership and conflict with any held
+  allocation on the same host.
+- Capacity matching must understand parent/child conflicts: bare metal blocks
+  VM slices; VM slices block bare metal; compatible VM slices can coexist while
+  unit capacity remains.
+- Listings are derived from remaining ledger availability. The storefront
+  should publish/reopen/close VM and bare-metal listings from the same capacity
+  snapshot rather than from executor-local state.
+
+**Planned fix, before real bare-metal sales:**
+
+1. Move market-managed fulfillment dispatch behind an allocation/executor
+   interface keyed by `executor_kind`; VM dispatch calls the existing VM
+   provisioner, and bare-metal dispatch calls `node_grant_access` /
+   `node_reclaim_access`. The transitional service-side dispatch, neutral
+   executor job fields, and separate bare-metal playbook path are landed.
+2. Keep direct `/hosts/{host}/vms/*` operator APIs for VM administration, but
+   stop treating those APIs as the market-level abstraction for all compute
+   fulfillment. The controller/client wording and integration coverage now pin
+   `/api/v1/leases/*` as the market-managed lifecycle path whose release
+   operation dispatches by `executor_kind`.
+3. Add operational hardening around bare-metal access grant/reclaim:
+   configurable reclaim policy (landed: `remove_lease_key`, `lock_user`, or
+   `delete_user`), host inventory conventions for bare-metal nodes (landed:
+   `BareMetalListing.machine_id` / executor target maps to the provisioning
+   host registry's `hosts.name`, and inventory import accepts
+   `[bare_metal_nodes]` alongside `[kvm_hosts]`), and live-host validation.
+   Access grant/reclaim now validates that the machine exists and is enabled
+   before queueing Ansible work.
+4. Extend listing/publication flows so VM and bare-metal listings are derived
+   from the same site-authority snapshot and cross-mode availability. The
+   bare-metal domain now provides pure derivation helpers that turn enabled,
+   available, `allocation_mode=exclusive` site resources into
+   `BareMetalListing` payloads. Bare-metal storefront publication tracking
+   primitives and the lightweight storefront publication adapter live in
+   `arkhai-bare-metal` under optional role dependencies, so bare-metal
+   publication no longer has to be owned by the VM storefront package. The VM
+   storefront's publish loop now composes only the VM publication source via
+   the core loader. The core loader can discover selected domain publication
+   adapters by entry point; the remaining work is a core storefront
+   executable/server path that supplies the concrete infrastructure callbacks
+   around a selected domain adapter and the same site-authority capacity
+   snapshot.
+   Cross-mode site-ledger conflict coverage now pins VM-slice versus
+   exclusive bare-metal blocking, and
+   storefront publication reconciliation coverage now pins close/reopen
+   behavior for a dual-mode host. Provisioning integration coverage now drives
+   bare-metal lease grant/reclaim jobs through the background job processor and
+   verifies that the executor uses the bare-metal playbook. The bare-metal
+   seller quickstart now documents live-hardware setup, inventory conventions,
+   reclaim policy, validation checks, and publish inspection.
+
+**Acceptance criteria:** one physical host can be registered once, exposed as
+both a whole-host bare-metal offer and one or more VM slice offers, and the
+site ledger prevents all cross-mode double-sell cases before any executor job
+starts.
+
+---
+
+### Seller-side spot automation
+
+**Status:** Planned.
+
+**Current state:** interruptible VM listings can publish splitter-backed
+settlement demands, and the storefront has an admin interruption endpoint that
+validates an interruptible deal and truncates its capacity lease. The on-chain
+splitter declaration and seller automation loop remain separate follow-on work.
+
+**Design stance:** keep the storefront/provisioning HTTP APIs as the public
+control surface first. Seller-side spot automation should be configurable, but
+does not need to become a protocol-level structured policy API until another
+in-protocol participant needs to consume or verify it. In the near term, sellers
+can run free implementation code against public endpoints, using shared
+middleware/utilities for discovery, safety guards, scoring, dry-runs,
+settlement split calculation, and audit logging.
+
+**Public, structured terms vs private automation:** buyer-facing interruption
+terms may need a structured listing/negotiation shape earlier than the seller's
+private scheduling logic. Public terms include fields such as `interruptible`,
+minimum notice, refund formula, protected runtime, preemption limits, and any
+penalty or bond semantics. Private automation decides when to interrupt within
+those terms, based on seller capacity pressure, fixed-demand opportunity cost,
+buyer/account protections, and local operating policy.
+
+**Planned fix:**
+
+1. Add/read missing control-plane views needed by automation: active
+   interruptible deals, current allocations, capacity pressure, and dry-run
+   interruption plans.
+2. Wire the settlement half of interruption: compute/validate splitter amounts
+   and submit or prepare the on-chain splitter declaration after capacity lease
+   truncation.
+3. Ship a seller-side reference runner or library that composes reusable guards
+   and scoring helpers over the public API, recording policy name/version,
+   config, selected deal, reason, dry-run result, and settlement split in stage
+   logs.
+4. Promote a formal structured policy/plugin API only after at least two
+   materially different seller automation strategies or another in-protocol
+   consumer require a stable decision vocabulary.
+
+---
+
+### Multi-Provider Resource Pool Architecture
 
 **Status:** Design Review.
 

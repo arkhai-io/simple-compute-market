@@ -47,7 +47,7 @@ def test_get_trusted_oracle_arbiter_ethereum_sepolia():
     addr = get_trusted_oracle_arbiter("ethereum_sepolia")
     # alkahest-py SDK normalises addresses to lowercase hex (alloy
     # ``Address`` Display); compare case-insensitively.
-    assert addr.lower() == "0x61dc9c2d757a1c9d0d38a281288d9ef918e77baa"
+    assert addr.lower() == "0x53517f742a7390dea3604206b66a2469e1cb8568"
 
 
 def test_resolve_alkahest_address_config_base_sepolia_returns_none():
