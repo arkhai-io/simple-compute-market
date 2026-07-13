@@ -1,35 +1,28 @@
-"""Storefront-specific orchestration around the provisioning service client.
-
-The ``provisioning_client`` wheel owns the inter-service HTTP contract and low-level
-client methods.  This module owns storefront workflow glue: submit a VM create job,
-optionally persist the job id through a callback, wait for completion, and merge the
-credential response into the fulfillment payload shape expected by storefront callers.
-"""
+"""Storefront orchestration over the versioned compute-provisioning contract."""
 
 from __future__ import annotations
 
 import logging
 from typing import Any, Awaitable, Callable
 
-import provisioning_client
-from provisioning_client import CreateVmRequest
+from compute_provisioning import (
+    ComputeProvisioningClient,
+    CredentialEnvelope,
+    ExecutorActionEnvelope,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def _credentials_auth_payload(
-    credentials: provisioning_client.CredentialListResponse,
+    credentials: list[CredentialEnvelope],
 ) -> dict[str, Any]:
     """Convert provisioning credentials into the storefront auth payload shape."""
     auth: dict[str, Any] = {}
-    for credential in credentials.credentials:
-        if credential.role:
-            auth[credential.role] = {
-                "password": credential.password,
-                "ssh_commands": credential.ssh_commands,
-                "ssh_key_path_host": credential.ssh_key_path_host,
-                "key_type": credential.key_type,
-            }
+    for credential in credentials:
+        role = credential.credential_kind
+        if role:
+            auth[role] = dict(credential.value)
     return auth
 
 
@@ -40,7 +33,9 @@ async def create_vm_and_wait_with_credentials(
     timeout: float,
     poll_interval: float,
     vm_host: str,
-    request: CreateVmRequest,
+    allocation_id: str,
+    deal_ref: dict[str, Any],
+    parameters: dict[str, Any],
     on_job_submitted: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Submit a VM create job, poll it to completion, and merge credentials.
@@ -49,13 +44,19 @@ async def create_vm_and_wait_with_credentials(
     ``authentication`` field keyed by credential role.  Callback failures and
     credential-fetch failures are logged but do not mask a successful VM create job.
     """
-    async with provisioning_client.ProvisioningClient(
+    async with ComputeProvisioningClient(
         service_url,
         admin_key=admin_key,
         timeout=timeout,
     ) as client:
-        submit = await client.create_vm(vm_host, request)
-
+        submit = await client.submit_action(ExecutorActionEnvelope(
+            allocation_id=allocation_id,
+            deal_ref=deal_ref,
+            executor_kind="vm",
+            action_kind="create",
+            idempotency_key=f"{allocation_id}:create",
+            parameters=parameters,
+        ))
         if on_job_submitted is not None:
             try:
                 await on_job_submitted(submit.job_id)
@@ -71,11 +72,11 @@ async def create_vm_and_wait_with_credentials(
             timeout=timeout,
             poll_interval=poll_interval,
         )
-        result = job.result or {}
+        result = dict(job.result.value) if job.result is not None else {}
 
         try:
-            creds_resp = await client.get_job_credentials(submit.job_id)
-            auth = _credentials_auth_payload(creds_resp)
+            credentials = await client.get_job_credentials(submit.job_id)
+            auth = _credentials_auth_payload(credentials)
             if auth:
                 result["authentication"] = auth
         except Exception as exc:

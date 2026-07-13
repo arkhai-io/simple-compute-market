@@ -154,13 +154,15 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-site" },
+    { name = "httpx" },
+    { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -198,7 +200,7 @@ dependencies = [
     { name = "arkhai-compute-provisioning" },
     { name = "arkhai-core-storefront-client" },
     { name = "arkhai-kit-site" },
-    { name = "arkhai-vms-provisioning-client" },
+    { name = "arkhai-vms-provisioning-operator-client" },
     { name = "cachetools" },
     { name = "cryptography" },
     { name = "dependency-injector" },
@@ -225,10 +227,10 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "arkhai-bare-metal", specifier = ">=0.1.0" },
-    { name = "arkhai-compute-provisioning", specifier = ">=0.2.0" },
+    { name = "arkhai-compute-provisioning", specifier = ">=0.3.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.11.0" },
     { name = "arkhai-kit-site", specifier = ">=0.2.0" },
-    { name = "arkhai-vms-provisioning-client", specifier = ">=0.1.1" },
+    { name = "arkhai-vms-provisioning-operator-client", specifier = ">=0.2.0" },
     { name = "cachetools", specifier = ">=5.3" },
     { name = "cryptography", specifier = ">=42.0" },
     { name = "dependency-injector", specifier = ">=4.41.0" },
@@ -252,15 +254,15 @@ dev = [
 ]
 
 [[package]]
-name = "arkhai-vms-provisioning-client"
-version = "0.1.1"
+name = "arkhai-vms-provisioning-operator-client"
+version = "0.2.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_provisioning_client-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_vms_provisioning_operator_client-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]

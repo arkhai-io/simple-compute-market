@@ -208,6 +208,19 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-compute-provisioning"
+version = "0.3.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "arkhai-kit-site" },
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_compute_provisioning-0.3.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-core"
 version = "0.2.0"
 source = { registry = "../.dist" }
@@ -288,7 +301,7 @@ dependencies = [
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-vms-buyer" },
-    { name = "arkhai-vms-provisioning-client" },
+    { name = "arkhai-vms-provisioning-operator-client" },
     { name = "arkhai-vms-storefront" },
     { name = "dynaconf" },
     { name = "eth-account" },
@@ -321,8 +334,8 @@ requires-dist = [
     { name = "arkhai-kit-alkahest", specifier = ">=0.1.0" },
     { name = "arkhai-kit-policy", specifier = ">=0.1.0" },
     { name = "arkhai-vms-buyer", specifier = ">=0.2.0" },
-    { name = "arkhai-vms-provisioning-client", specifier = ">=0.1.1" },
-    { name = "arkhai-vms-storefront", specifier = ">=0.2.0" },
+    { name = "arkhai-vms-provisioning-operator-client", specifier = ">=0.2.0" },
+    { name = "arkhai-vms-storefront", specifier = ">=0.3.0" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.0" },
     { name = "dynaconf", specifier = ">=3.2" },
     { name = "eth-account", specifier = ">=0.12" },
@@ -391,6 +404,19 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-site"
+version = "0.2.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "pydantic" },
+    { name = "sqlalchemy" },
+]
+wheels = [
+    { path = "arkhai_kit_site-0.2.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-vms"
 version = "0.2.0"
 source = { registry = "../.dist" }
@@ -425,24 +451,25 @@ wheels = [
 ]
 
 [[package]]
-name = "arkhai-vms-provisioning-client"
-version = "0.1.1"
+name = "arkhai-vms-provisioning-operator-client"
+version = "0.2.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_provisioning_client-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_vms_provisioning_operator_client-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
     { name = "arkhai-bare-metal" },
+    { name = "arkhai-compute-provisioning" },
     { name = "arkhai-core" },
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-core-storefront" },
@@ -452,7 +479,6 @@ dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-vms" },
-    { name = "arkhai-vms-provisioning-client" },
     { name = "dynaconf" },
     { name = "eth-account" },
     { name = "fastapi" },
@@ -469,7 +495,7 @@ dependencies = [
     { name = "websockets" },
 ]
 wheels = [
-    { path = "arkhai_vms_storefront-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_vms_storefront-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]

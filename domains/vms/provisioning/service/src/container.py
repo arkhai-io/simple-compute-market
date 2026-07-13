@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dependency_injector import containers, providers
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
+from compute_provisioning.executor_leases import ExecutorLeaseService
 from compute_provisioning.release import ExecutorReleaseDispatcher
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
@@ -11,8 +12,9 @@ from db.database import create_db_engine, create_session_factory
 from services.ansible_service import AnsibleService
 from services.async_job_queue import AsyncJobQueue
 from services.bare_metal_lease_service import BareMetalLeaseService
+from services.compute_contract_service import build_compute_contract_service
 from services.bare_metal_operations_service import BareMetalOperationsService
-from services.deal_event_sink import notify_storefront_capacity_released
+from services.deal_event_sink import StorefrontLifecycleEventSink, notify_storefront_capacity_released
 from services.host_operations_service import HostOperationsService
 from services.host_service import HostService
 from services.job_service import AnsibleJobService
@@ -66,7 +68,9 @@ def _make_release_dispatcher(bare_metal_operations_service, job_service):
     )
 
 
-def _make_lease_lifecycle(cfg, site_authority, release_dispatcher, job_service):
+def _make_lease_lifecycle(
+    cfg, site_authority, release_dispatcher, job_service, lifecycle_event_sink
+):
     return LeaseLifecycleService(
         cfg,
         site_authority,
@@ -74,7 +78,9 @@ def _make_lease_lifecycle(cfg, site_authority, release_dispatcher, job_service):
         release_jobs=job_service,
         default_executor_kind=VM_EXECUTOR_KIND,
         capacity_released_notifier=(
-            lambda allocation: notify_storefront_capacity_released(cfg, allocation)
+            lambda allocation: notify_storefront_capacity_released(
+                cfg, allocation, sink=lifecycle_event_sink
+            )
         ),
     )
 
@@ -163,10 +169,28 @@ class Container(containers.DeclarativeContainer):
         host_service=host_service,
     )
 
+    executor_lease_service = providers.Singleton(
+        ExecutorLeaseService,
+        site_authority=site_authority,
+    )
+
+    compute_contract_service = providers.Factory(
+        build_compute_contract_service,
+        site_authority=site_authority,
+        job_service=job_service,
+        vm_operations=vm_operations_service,
+        bare_metal_operations=bare_metal_operations_service,
+    )
+
     release_dispatcher = providers.Factory(
         _make_release_dispatcher,
         bare_metal_operations_service=bare_metal_operations_service,
         job_service=job_service,
+    )
+
+    lifecycle_event_sink = providers.Singleton(
+        StorefrontLifecycleEventSink,
+        settings=config,
     )
 
     lease_lifecycle_service = providers.Singleton(
@@ -175,6 +199,7 @@ class Container(containers.DeclarativeContainer):
         site_authority=site_authority,
         release_dispatcher=release_dispatcher,
         job_service=job_service,
+        lifecycle_event_sink=lifecycle_event_sink,
     )
 
     lease_watchdog = providers.Singleton(
@@ -219,3 +244,5 @@ resolved_lease_watchdog: "LeaseWatchdog | None" = None
 resolved_capacity_ledger_service: "CapacityLedgerService | None" = None
 resolved_bare_metal_lease_service: "BareMetalLeaseService | None" = None
 resolved_bare_metal_operations_service: "BareMetalOperationsService | None" = None
+resolved_executor_lease_service: "ExecutorLeaseService | None" = None
+resolved_compute_contract_service = None

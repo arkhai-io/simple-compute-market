@@ -39,6 +39,7 @@ from controllers.hosts_controller import HostController      # noqa: E402
 from controllers.vms_controller import VmController          # noqa: E402
 from controllers.leases_controller import AdminLeasesController, LeasesController   # noqa: E402
 from controllers.bare_metal_leases_controller import BareMetalLeasesController  # noqa: E402
+from controllers.compute_contract_controller import ComputeContractController  # noqa: E402
 from market_site.router import make_capacity_router  # noqa: E402
 
 
@@ -180,6 +181,7 @@ app = build_compute_provisioning_app(
     routers=(
         ComputeProvisioningRouterMount(SystemController.make_health_router()),
         ComputeProvisioningRouterMount(SystemController.make_system_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(ComputeContractController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(AnsibleJobsController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(HostController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(VmController.make_router(), "/api/v1"),

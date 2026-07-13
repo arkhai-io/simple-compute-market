@@ -21,8 +21,8 @@ import asyncio
 
 import pytest
 
-from provisioning_client import ProvisioningError
-from provisioning_client.models import CreateVmRequest
+from vm_provisioning_operator import ProvisioningError
+from vm_provisioning_operator.models import CreateVmRequest
 from services.async_job_queue import AsyncJobQueue
 
 

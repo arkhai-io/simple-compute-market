@@ -1,24 +1,17 @@
-"""arkhai-vms-provisioning-client — async and sync HTTP clients for the
-Arkhai provisioning service REST API.
+"""VM provisioning operator client and direct VM administration models.
 
-Usage::
-
-    from provisioning_client import ProvisioningClient, SyncProvisioningClient
-    from provisioning_client import CreateVmRequest, HostCreate, JobStatusResponse
-
-The ``ProvisioningClient`` (async) and ``SyncProvisioningClient`` (sync) share
-identical method signatures.  Both own their HTTP session internally and accept
-a ``transport=`` kwarg for in-process test injection.
+This package is intentionally separate from the shared, executor-neutral
+``compute_provisioning`` contract used by storefront and domain callers.
 """
 
-from provisioning_client.client import (
+from vm_provisioning_operator.client import (
     ProvisioningClient,
     ProvisioningError,
     ProvisioningJobError,
     ProvisioningTimeoutError,
     SyncProvisioningClient,
 )
-from provisioning_client.models import (
+from vm_provisioning_operator.models import (
     AnsibleReadinessResponse,
     CreateVmRequest,
     CredentialListResponse,

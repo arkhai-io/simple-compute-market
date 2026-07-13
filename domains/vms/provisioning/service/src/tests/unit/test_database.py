@@ -89,6 +89,14 @@ def test_init_db_applies_versioned_migrations_to_old_sqlite_schema():
     }
 
     assert "escrow_uid" in ansible_columns
+    assert {
+        "contract_version",
+        "allocation_id",
+        "deal_ref",
+        "executor_kind",
+        "action_kind",
+        "idempotency_key",
+    }.issubset(ansible_columns)
     assert "public_host" in host_columns
     assert "vm_leases" in inspector.get_table_names()
     assert "allocation_id" in lease_columns
@@ -117,6 +125,7 @@ def test_init_db_applies_versioned_migrations_to_old_sqlite_schema():
         "20260603_003_vm_leases_table",
         "20260603_004_vm_leases_allocation_id",
         "20260707_001_site_allocations_executor_fields",
+        "20260713_001_ansible_jobs_contract_fields",
     }
 
 
@@ -140,6 +149,12 @@ def test_init_db_migrations_are_idempotent():
     ]
 
     assert ansible_columns.count("escrow_uid") == 1
+    assert ansible_columns.count("contract_version") == 1
+    assert ansible_columns.count("allocation_id") == 1
+    assert ansible_columns.count("deal_ref") == 1
+    assert ansible_columns.count("executor_kind") == 1
+    assert ansible_columns.count("action_kind") == 1
+    assert ansible_columns.count("idempotency_key") == 1
     assert host_columns.count("public_host") == 1
     assert lease_columns.count("allocation_id") == 1
     assert allocation_columns.count("executor_kind") == 1
@@ -151,4 +166,4 @@ def test_init_db_migrations_are_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 5
+    assert migration_count == 6

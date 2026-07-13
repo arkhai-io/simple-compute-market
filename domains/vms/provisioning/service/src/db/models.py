@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 
@@ -45,6 +45,14 @@ class LeaseStatus(str, enum.Enum):
 
 class AnsibleJob(Base):
     __tablename__ = "ansible_jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "allocation_id",
+            "action_kind",
+            "idempotency_key",
+            name="uq_ansible_jobs_contract_idempotency",
+        ),
+    )
 
     id = Column(String, primary_key=True)
     status = Column(String, nullable=False)
@@ -57,6 +65,12 @@ class AnsibleJob(Base):
     max_retries = Column(Integer, default=3, nullable=False)  # Maximum retry attempts allowed
     next_retry_at = Column(DateTime(timezone=True), nullable=True)  # Scheduled time for next retry
     escrow_uid = Column(String, nullable=True, index=True)  # On-chain escrow UID linking this job to a deal
+    contract_version = Column(String, nullable=True)
+    allocation_id = Column(String, nullable=True, index=True)
+    deal_ref = Column(JSON, nullable=True)
+    executor_kind = Column(String, nullable=True)
+    action_kind = Column(String, nullable=True)
+    idempotency_key = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

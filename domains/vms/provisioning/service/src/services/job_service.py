@@ -24,8 +24,10 @@ import signal
 import uuid
 from datetime import datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from compute_provisioning.contracts import ExecutorActionEnvelope
 from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
 from config import Settings
 from db.models import (
@@ -38,7 +40,7 @@ from models.jobs_model import (
     AnsibleJobParams,
     AnsibleRunResult,
 )
-from provisioning_client.models import (
+from vm_provisioning_operator.models import (
     CredentialListResponse,
     CredentialResponse,
     JobListResponse,
@@ -85,18 +87,29 @@ class AnsibleJobService:
         self,
         params: AnsibleJobParams,
         job_queue,
+        *,
+        contract: ExecutorActionEnvelope | None = None,
     ) -> JobSubmitResponse:
-        """Persist a new job and place it on the in-process queue."""
-        job_id = str(uuid.uuid4())
+        """Persist and enqueue a job, deduplicating versioned contract commands."""
         max_retries = (
             params.max_retries
             if params.max_retries is not None
             else self._settings.default_max_retries
         )
-
         raw_params = dataclasses.asdict(params)
+        job_id = str(uuid.uuid4())
+        created = False
 
         with self._session_factory() as db:
+            if contract is not None:
+                existing = self._contract_job(
+                    db,
+                    allocation_id=contract.allocation_id,
+                    action_kind=contract.action_kind,
+                    idempotency_key=contract.idempotency_key,
+                )
+                if existing is not None:
+                    return JobSubmitResponse(job_id=existing.id, status=existing.status)
             job = AnsibleJob(
                 id=job_id,
                 status=JobStatus.queued.value,
@@ -105,11 +118,34 @@ class AnsibleJobService:
                 retry_count=0,
                 max_retries=max_retries,
                 next_retry_at=None,
+                contract_version=contract.contract_version if contract else None,
+                allocation_id=contract.allocation_id if contract else None,
+                deal_ref=contract.deal_ref if contract else None,
+                executor_kind=contract.executor_kind if contract else params.executor_kind,
+                action_kind=contract.action_kind if contract else params.executor_action,
+                idempotency_key=contract.idempotency_key if contract else None,
             )
             db.add(job)
-            db.commit()
+            try:
+                db.commit()
+                created = True
+            except IntegrityError:
+                db.rollback()
+                if contract is None:
+                    raise
+                existing = self._contract_job(
+                    db,
+                    allocation_id=contract.allocation_id,
+                    action_kind=contract.action_kind,
+                    idempotency_key=contract.idempotency_key,
+                )
+                if existing is None:
+                    raise
+                job_id = existing.id
+                return JobSubmitResponse(job_id=existing.id, status=existing.status)
 
-        await job_queue.enqueue(job_id)
+        if created:
+            await job_queue.enqueue(job_id)
         return JobSubmitResponse(job_id=job_id, status=JobStatus.queued.value)
 
     # ------------------------------------------------------------------
@@ -214,6 +250,47 @@ class AnsibleJobService:
                 raise LookupError(f"Job {job_id} not found")
             return self._to_status_response(job)
 
+    def get_contract_job_record(self, job_id: str) -> dict:
+        """Return persisted contract correlation and executor-owned payloads."""
+        with self._session_factory() as db:
+            job = db.query(AnsibleJob).filter(AnsibleJob.id == job_id).one_or_none()
+            if job is None:
+                raise LookupError(f"Job {job_id} not found")
+            if not job.contract_version:
+                raise LookupError(f"Job {job_id} is not a contract job")
+            credentials = (
+                db.query(Credential)
+                .filter(Credential.job_id == job_id)
+                .all()
+            )
+            return {
+                "contract_version": job.contract_version,
+                "job_id": job.id,
+                "status": job.status,
+                "allocation_id": job.allocation_id,
+                "deal_ref": dict(job.deal_ref or {}),
+                "executor_kind": job.executor_kind,
+                "action_kind": job.action_kind,
+                "idempotency_key": job.idempotency_key,
+                "result": dict(job.result or {}) if job.result is not None else None,
+                "credentials": [
+                    {
+                        "role": credential.role,
+                        "password": credential.password,
+                        "ssh_commands": credential.ssh_commands,
+                        "ssh_key_path_host": credential.ssh_key_path_host,
+                        "key_type": credential.key_type,
+                    }
+                    for credential in credentials
+                ],
+                "error": job.error,
+                "logs": job.logs,
+                "retry_count": job.retry_count,
+                "max_retries": job.max_retries,
+                "created_at": job.created_at,
+                "updated_at": job.updated_at,
+            }
+
     def get_credentials(self, job_id: str) -> CredentialListResponse:
         """Return all credentials for a job. Raises LookupError for 404.
 
@@ -305,6 +382,24 @@ class AnsibleJobService:
             "status": JobStatus.cancelled.value,
             "message": "Job cancelled successfully",
         }
+
+    @staticmethod
+    def _contract_job(
+        db: Session,
+        *,
+        allocation_id: str,
+        action_kind: str,
+        idempotency_key: str,
+    ) -> AnsibleJob | None:
+        return (
+            db.query(AnsibleJob)
+            .filter(
+                AnsibleJob.allocation_id == allocation_id,
+                AnsibleJob.action_kind == action_kind,
+                AnsibleJob.idempotency_key == idempotency_key,
+            )
+            .one_or_none()
+        )
 
     # ------------------------------------------------------------------
     # Job processor -- passed as handler to AsyncJobQueue.start()

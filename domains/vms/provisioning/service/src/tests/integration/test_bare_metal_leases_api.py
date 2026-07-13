@@ -19,7 +19,7 @@ from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 from db.models import AnsibleJob
 from services.ansible_service import AnsibleResult
 from services.async_job_queue import AsyncJobQueue
-from provisioning_client.models import HostCreate
+from vm_provisioning_operator.models import HostCreate
 from main import app
 
 

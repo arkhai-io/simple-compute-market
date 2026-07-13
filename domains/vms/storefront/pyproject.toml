@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-storefront"
-version = "0.2.0"
+version = "0.3.0"
 license = "MIT"
 description = "Provider-side storefront server: hosts /orders, /negotiate, /settle, /alerts/resource endpoints. The provider-side counterpart to arkhai-vms-buyer."
 authors = [
@@ -18,7 +18,7 @@ dependencies = [
     "arkhai-kit-policy",
     "arkhai-bare-metal>=0.2.0",
     "arkhai-vms>=0.2.0",
-    "arkhai-vms-provisioning-client>=0.1.1",
+    "arkhai-compute-provisioning>=0.3.0",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
     "google-cloud-logging>=3.12.0,<4.0.0",
     "fastapi~=0.115.8",
@@ -80,9 +80,8 @@ lint = [
 # No find-links entry here: a relative path can't normalize inside the
 # Docker build, where /app is the project root.
 # Restrict resolution to platforms that have alkahest_py wheels.
-# Without this, uv attempts to solve for all platforms and fails to
-# find arkhai-vms-provisioning-client wheels for platforms
-# where it has no local find-links path to check.
+# Restricting the supported environments also keeps internal wheel-only
+# dependencies from being resolved for platforms absent from local find-links.
 environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'",

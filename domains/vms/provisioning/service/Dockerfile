@@ -90,7 +90,7 @@ RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
         --refresh-package arkhai-compute-provisioning \
         --refresh-package arkhai-core-storefront-client \
         --refresh-package arkhai-kit-site \
-        --refresh-package arkhai-vms-provisioning-client
+        --refresh-package arkhai-vms-provisioning-operator-client
 
 # Stage 2: Runtime
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime

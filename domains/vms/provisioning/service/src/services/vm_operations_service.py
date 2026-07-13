@@ -11,7 +11,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Optional
 
-from provisioning_client.models import CreateVmRequest, JobSubmitResponse, VmActionRequest
+from compute_provisioning.contracts import ExecutorActionEnvelope
+from vm_provisioning_operator.models import CreateVmRequest, JobSubmitResponse, VmActionRequest
 from models.vm_request_model import build_create_params, build_simple_params
 from services.async_job_queue import AsyncJobQueue
 
@@ -31,11 +32,18 @@ class VmOperationsService:
         self._job_service = job_service
         self._job_queue_provider = job_queue_provider
 
-    async def create_vm(self, *, host: str, body: CreateVmRequest) -> JobSubmitResponse:
+    async def create_vm(
+        self,
+        *,
+        host: str,
+        body: CreateVmRequest,
+        contract: ExecutorActionEnvelope | None = None,
+    ) -> JobSubmitResponse:
         """Submit a VM creation job for ``host``."""
         return await self._job_service.submit(
             build_create_params(host, body),
             self._job_queue_provider(),
+            contract=contract,
         )
 
     async def list_vms(self, *, host: str, body: VmActionRequest) -> JobSubmitResponse:

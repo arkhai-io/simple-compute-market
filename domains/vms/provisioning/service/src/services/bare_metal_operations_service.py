@@ -17,9 +17,10 @@ from arkhai_bare_metal import (
     NODE_RECLAIM_ACCESS_ACTION,
     bare_metal_executor_ref,
 )
+from compute_provisioning.contracts import ExecutorActionEnvelope
 from config import DEFAULT_BARE_METAL_RECLAIM_POLICY
 from models.jobs_model import AnsibleJobParams
-from provisioning_client.models import JobSubmitResponse
+from vm_provisioning_operator.models import JobSubmitResponse
 from services.async_job_queue import AsyncJobQueue
 from services.bare_metal_lease_service import bare_metal_access_ref
 from services.release_executors import get_physical_host_id
@@ -55,7 +56,12 @@ class BareMetalOperationsService:
         self._settings = settings
         self._host_service = host_service
 
-    async def grant_access(self, body: BareMetalLeaseCreate) -> JobSubmitResponse:
+    async def grant_access(
+        self,
+        body: BareMetalLeaseCreate,
+        *,
+        contract: ExecutorActionEnvelope | None = None,
+    ) -> JobSubmitResponse:
         self._validate_machine(body.machine_id)
         access_ref = dict(body.access_ref or {})
         return await self._job_service.submit(
@@ -79,6 +85,7 @@ class BareMetalOperationsService:
                 access_ref=access_ref or None,
             ),
             self._job_queue_provider(),
+            contract=contract,
         )
 
     async def reclaim_access_for_allocation(

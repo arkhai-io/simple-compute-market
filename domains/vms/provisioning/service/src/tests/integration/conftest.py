@@ -38,7 +38,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import container as _container_module
-from provisioning_client import ProvisioningClient
+from vm_provisioning_operator import ProvisioningClient
 from db.database import create_session_factory
 
 from db.models import Base
@@ -438,6 +438,17 @@ async def client_and_queue(
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()
+    from compute_provisioning.executor_leases import ExecutorLeaseService
+    from services.compute_contract_service import build_compute_contract_service
+    _container_module.resolved_executor_lease_service = ExecutorLeaseService(
+        site_authority
+    )
+    _container_module.resolved_compute_contract_service = build_compute_contract_service(
+        site_authority=site_authority,
+        job_service=job_service,
+        vm_operations=_container_module.resolved_vm_operations_service,
+        bare_metal_operations=bare_metal_operations_service,
+    )
     _container_module.resolved_host_operations_service = app.container.host_operations_service()
 
     processing_task = asyncio.create_task(

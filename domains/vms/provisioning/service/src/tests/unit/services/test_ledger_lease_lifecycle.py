@@ -506,7 +506,7 @@ async def test_admin_retry_release_resubmits_delegate(session_factory, ledger):
     delegate = AsyncMock(return_value="remove-retry-1")
     svc = _lifecycle(session_factory, ledger, release_delegate=delegate)
 
-    from provisioning_client.models import LeaseRetryReleaseRequest
+    from vm_provisioning_operator.models import LeaseRetryReleaseRequest
 
     updated = await svc.retry_release(
         allocation["allocation_id"],
@@ -537,7 +537,7 @@ async def test_admin_force_release_unmanaged_releases_capacity_and_notifies(sess
     sf.__aexit__ = AsyncMock(return_value=False)
     sf.notify_capacity_released = AsyncMock(return_value={})
 
-    from provisioning_client.models import LeaseForceReleaseRequest
+    from vm_provisioning_operator.models import LeaseForceReleaseRequest
 
     with patch("storefront_client.StorefrontClient", return_value=sf):
         released = await svc.force_release(

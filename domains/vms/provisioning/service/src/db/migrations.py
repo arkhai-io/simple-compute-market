@@ -135,6 +135,31 @@ def _migrate_site_allocations_executor_fields(engine: Engine) -> None:
     _add_column_if_missing(engine, "site_allocations", "executor_ref", "JSON")
 
 
+def _migrate_ansible_jobs_contract_fields(engine: Engine) -> None:
+    for column_name, column_sql in (
+        ("contract_version", "VARCHAR"),
+        ("allocation_id", "VARCHAR"),
+        ("deal_ref", "JSON"),
+        ("executor_kind", "VARCHAR"),
+        ("action_kind", "VARCHAR"),
+        ("idempotency_key", "VARCHAR"),
+    ):
+        _add_column_if_missing(engine, "ansible_jobs", column_name, column_sql)
+    if _table_exists(engine, "ansible_jobs"):
+        _create_index_if_missing(
+            engine,
+            "ix_ansible_jobs_allocation_id",
+            "CREATE INDEX IF NOT EXISTS ix_ansible_jobs_allocation_id "
+            "ON ansible_jobs (allocation_id)",
+        )
+        _create_index_if_missing(
+            engine,
+            "uq_ansible_jobs_contract_idempotency",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_ansible_jobs_contract_idempotency "
+            "ON ansible_jobs (allocation_id, action_kind, idempotency_key)",
+        )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -143,5 +168,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260707_001_site_allocations_executor_fields",
         _migrate_site_allocations_executor_fields,
+    ),
+    Migration(
+        "20260713_001_ansible_jobs_contract_fields",
+        _migrate_ansible_jobs_contract_fields,
     ),
 )

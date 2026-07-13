@@ -17,7 +17,7 @@ reinit:
 		--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
 		--upgrade-package arkhai-kit-site              --reinstall-package arkhai-kit-site \
 		--upgrade-package arkhai-core-storefront-client --reinstall-package arkhai-core-storefront-client \
-		--upgrade-package arkhai-vms-provisioning-client  --reinstall-package arkhai-vms-provisioning-client
+		--upgrade-package arkhai-vms-provisioning-operator-client --reinstall-package arkhai-vms-provisioning-operator-client
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 # Absolute path to the sibling VM provisioning IaC tree, resolved from this Makefile's

@@ -13,8 +13,8 @@ import logging
 
 import pytest
 
-from provisioning_client import ProvisioningError, SyncProvisioningClient
-from provisioning_client import HostCreate, HostUpdate, CreateVmRequest
+from vm_provisioning_operator import ProvisioningError, SyncProvisioningClient
+from vm_provisioning_operator import HostCreate, HostUpdate, CreateVmRequest
 
 log = logging.getLogger(__name__)
 

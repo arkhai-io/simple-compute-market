@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import container as _container_module
 import pytest
 
-from provisioning_client.models import CreateVmRequest, HostCreate
+from vm_provisioning_operator.models import CreateVmRequest, HostCreate
 
 
 HOST = "kvm1"

@@ -24,7 +24,7 @@ from sqlalchemy.pool import StaticPool
 
 from db.database import create_session_factory
 from db.models import Base, Host
-from provisioning_client.models import HostCreate, HostUpdate
+from vm_provisioning_operator.models import HostCreate, HostUpdate
 from services.host_service import HostService, _parse_ini
 
 

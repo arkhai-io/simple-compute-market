@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import provisioning_client
 from market_storefront.services import publication_service
 from market_storefront.services import fulfillment_service
 from domains.vms.listings.reconciler import record_derived_listing
@@ -100,8 +99,8 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
         async def __aexit__(self, *args):
             return None
 
-        async def register_lease(self, **kwargs):
-            return {"id": "lease-1", **kwargs}
+        async def register_lease(self, registration):
+            return registration
 
     await _seed_compute_pool(client)
     fake = FakeSite()
@@ -112,8 +111,8 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
     monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(
-        provisioning_client,
-        "ProvisioningClient",
+        fulfillment_service,
+        "ComputeProvisioningClient",
         FakeProvisioningClient,
     )
     monkeypatch.setattr(
@@ -163,8 +162,8 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         async def __aexit__(self, *args):
             return None
 
-        async def register_lease(self, **kwargs):
-            return {"id": "lease-1", **kwargs}
+        async def register_lease(self, registration):
+            return registration
 
     await _seed_compute_pool(client)
     await client.upsert_resource(
@@ -189,8 +188,8 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
     monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(
-        provisioning_client,
-        "ProvisioningClient",
+        fulfillment_service,
+        "ComputeProvisioningClient",
         FakeProvisioningClient,
     )
     monkeypatch.setattr(

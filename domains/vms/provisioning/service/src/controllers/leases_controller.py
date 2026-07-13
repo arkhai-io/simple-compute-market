@@ -17,7 +17,7 @@ from fastapi_utils.cbv import cbv
 
 import container as _container_module
 from market_site.ledger import parse_utc as _parse_utc
-from provisioning_client.models import (
+from vm_provisioning_operator.models import (
     LeaseCreate,
     LeaseForceReleaseRequest,
     LeaseListResponse,

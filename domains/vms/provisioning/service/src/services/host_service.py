@@ -28,7 +28,7 @@ from typing import Optional
 from sqlalchemy.orm import Session, sessionmaker
 
 from db.models import Host
-from provisioning_client.models import HostCreate, HostUpdate
+from vm_provisioning_operator.models import HostCreate, HostUpdate
 
 logger = logging.getLogger(__name__)
 

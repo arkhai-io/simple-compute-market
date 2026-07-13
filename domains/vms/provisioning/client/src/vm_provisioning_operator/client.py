@@ -43,7 +43,7 @@ from typing import Any, Optional
 
 import httpx
 
-from provisioning_client.models import (
+from vm_provisioning_operator.models import (
     AnsibleReadinessResponse,
     CreateVmRequest,
     CredentialListResponse,

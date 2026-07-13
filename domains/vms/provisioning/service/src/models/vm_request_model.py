@@ -1,7 +1,7 @@
 """Server-side helpers for building internal AnsibleJobParams from VM request models.
 
-``CreateVmRequest`` and ``VmActionRequest`` have moved to
-``arkhai-vms-provisioning-client`` (``provisioning_client.models``).
+``CreateVmRequest`` and ``VmActionRequest`` live in the direct VM operator
+package (``vm_provisioning_operator.models``).
 
 This file retains the server-side conversion helpers that produce the
 internal ``AnsibleJobParams`` DTO consumed by ``AnsibleJobService``.
@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Optional
 
 from models.jobs_model import AnsibleJobParams
-from provisioning_client.models import CreateVmRequest, VmActionRequest
+from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
 
 
 def build_create_params(host: str, body: CreateVmRequest) -> AnsibleJobParams:

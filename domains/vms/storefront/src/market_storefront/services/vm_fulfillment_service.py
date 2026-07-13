@@ -237,6 +237,8 @@ async def fulfill_vm_obligation(
             ssh_public_key,
             vm_host=reserved_vm_host,
             vm_target=vm_target,
+            allocation_id=reserved_allocation_id,
+            deal_ref={"escrow_uid": escrow_uid, "listing_id": listing_id or order_id},
             on_job_submitted=_record_job_id,
         )
         authentication: dict[str, Any] | None = None
