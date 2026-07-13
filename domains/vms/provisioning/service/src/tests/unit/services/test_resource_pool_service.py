@@ -5,7 +5,7 @@ Scope (per ARCHITECTURE.md — Unit Tests jurisdiction):
   - CRUD: create/get/list/replace/patch/enable/disable
   - Tag-filtered lookup
   - Provider config validation (ansible required fields; unknown providers rejected)
-  - YAML import: created/updated/disabled/unchanged/rejected diff, idempotency,
+  - YAML import: created/updated/disabled/unchanged diff, idempotency,
     validate_only (no writes)
 
 External boundary: SQLAlchemy with an in-memory SQLite DB (not mocked) —
@@ -247,7 +247,6 @@ class TestImportPools:
         diff = svc.import_pools(_YAML)
         assert set(diff.created) == {"default", "hetzner-eu-central", "equinix-us-west"}
         assert diff.updated == []
-        assert diff.rejected == []
         assert svc.get_pool("hetzner-eu-central") is not None
 
     def test_reimporting_same_yaml_is_unchanged(self, svc):
@@ -333,9 +332,45 @@ pools:
         assert svc.list_pools() == []
 
     def test_validate_only_computes_diff_without_writing(self, svc):
-        diff = svc.import_pools(_YAML, validate_only=True)
-        assert set(diff.created) == {"default", "hetzner-eu-central", "equinix-us-west"}
+        response = svc.validate_pools(_YAML)
+        assert response.valid is True
+        assert response.problems == []
+        assert response.diff is not None
+        assert set(response.diff.created) == {"default", "hetzner-eu-central", "equinix-us-west"}
         assert svc.list_pools() == []
+
+    def test_validate_accumulates_all_detectable_problems(self, svc):
+        response = svc.validate_pools("""
+unknown_root: true
+pools:
+  - id: default
+    label: ""
+    provider: ansible
+    enabld: true
+    provider_config:
+      unexpected: value
+  - id: default
+    label: Duplicate
+    provider: missing-provider
+    enabled: nope
+    policy_tags: []
+    provider_config: {}
+""")
+        assert response.valid is False
+        assert response.diff is None
+        codes = [problem.code for problem in response.problems]
+        assert codes.count("unknown_field") >= 2
+        assert "duplicate_id" in codes
+        assert "required_field" in codes
+        assert "unknown_provider" in codes
+        assert codes.count("invalid_type") >= 2
+        assert len(response.problems) >= 8
+
+    def test_validate_reports_invalid_yaml_as_response(self, svc):
+        response = svc.validate_pools("not: valid: yaml: [")
+        assert response.valid is False
+        assert response.diff is None
+        assert response.problems[0].code == "invalid_yaml"
 
     def test_invalid_yaml_raises(self, svc):
         with pytest.raises(PoolValidationError):
@@ -344,3 +379,51 @@ pools:
     def test_missing_pools_key_raises(self, svc):
         with pytest.raises(PoolValidationError):
             svc.import_pools("other_key: []")
+
+class _StubPoolConfigHandler:
+    def __init__(self, provider: str) -> None:
+        self.provider = provider
+        self.configs: dict[str, dict] = {}
+        self.deleted: list[str] = []
+        self.replaced: list[str] = []
+
+    def validate_config(self, config):
+        return dict(config)
+
+    def validate_config_problems(self, config):
+        return dict(config), ()
+
+    def read_config(self, db, pool_id: str):
+        return dict(self.configs.get(pool_id, {}))
+
+    def replace_config(self, db, pool_id: str, config):
+        self.replaced.append(pool_id)
+        self.configs[pool_id] = dict(config)
+
+    def delete_config(self, db, pool_id: str):
+        self.deleted.append(pool_id)
+        self.configs.pop(pool_id, None)
+
+
+def test_replace_provider_cleans_up_old_provider_config(session_factory):
+    old_handler = _StubPoolConfigHandler("old")
+    new_handler = _StubPoolConfigHandler("new")
+    service = ResourcePoolService(
+        session_factory=session_factory,
+        handlers={"old": old_handler, "new": new_handler},
+    )
+    service.create_pool(PoolCreate(
+        id="switchable", label="Switchable", provider="old",
+        provider_config={"old_setting": True},
+    ))
+
+    replaced = service.replace_pool("switchable", PoolReplace(
+        label="Switched", provider="new", enabled=True,
+        policy_tags={}, provider_config={"new_setting": True},
+    ))
+
+    assert replaced.provider == "new"
+    assert old_handler.deleted == ["switchable"]
+    assert "switchable" not in old_handler.configs
+    assert new_handler.replaced == ["switchable"]
+    assert new_handler.configs["switchable"] == {"new_setting": True}

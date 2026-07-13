@@ -9,7 +9,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from compute_provisioning import PoolConfigHandler
 from db.models import DEFAULT_POOL_ID, ResourcePool
-from provisioning_client.models import PoolCreate, PoolImportDiff, PoolReplace, PoolUpdate
+from provisioning_client.models import (
+    PoolCreate, PoolImportDiff, PoolReplace, PoolUpdate,
+    PoolValidateResponse, PoolValidationProblem,
+)
 
 
 class PoolNotFoundError(Exception): pass
@@ -25,6 +28,16 @@ class PoolDefinition:
     enabled: bool
     policy_tags: dict[str, Any]
     provider_config: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class DocumentValidationResult:
+    definitions: tuple[PoolDefinition, ...]
+    problems: tuple[PoolValidationProblem, ...]
+
+    @property
+    def valid(self) -> bool:
+        return not self.problems
 
 
 @dataclass(frozen=True)
@@ -135,48 +148,144 @@ class ResourcePoolService:
         return self.update_pool(pool_id, PoolUpdate(enabled=False))
 
     def delete_pool(self, pool_id: str) -> None:
+        """Defensive guard: resource pools intentionally support disable, not hard-delete.
+
+        The DELETE route calls ``disable_pool``. This method exists so a future
+        internal caller cannot accidentally introduce hard deletion without
+        revisiting the pool lifecycle and referential-integrity rules.
+        """
         if pool_id == DEFAULT_POOL_ID:
             raise PoolValidationError("the default pool cannot be deleted")
         raise PoolValidationError("resource pools use disable semantics and cannot be hard-deleted")
 
-    def _validate_document(self, yaml_text: str) -> tuple[PoolDefinition, ...]:
+    def _validate_document(self, yaml_text: str) -> DocumentValidationResult:
+        problems: list[PoolValidationProblem] = []
         try:
             parsed = yaml.safe_load(yaml_text)
         except yaml.YAMLError as exc:
-            raise PoolValidationError(f"invalid YAML: {exc}") from exc
+            return DocumentValidationResult((), (PoolValidationProblem(
+                path="$", code="invalid_yaml", message=f"invalid YAML: {exc}",
+            ),))
         if not isinstance(parsed, dict):
-            raise PoolValidationError("YAML root must be a mapping")
-        unknown_root = set(parsed) - self._ROOT_FIELDS
-        if unknown_root:
-            raise PoolValidationError(f"unknown top-level fields: {', '.join(sorted(unknown_root))}")
+            return DocumentValidationResult((), (PoolValidationProblem(
+                path="$", code="invalid_type", message="YAML root must be a mapping",
+            ),))
+        for field in sorted(set(parsed) - self._ROOT_FIELDS):
+            problems.append(PoolValidationProblem(
+                path=field, code="unknown_field",
+                message=f"unknown top-level field '{field}'",
+            ))
         entries = parsed.get("pools")
         if not isinstance(entries, list):
-            raise PoolValidationError("YAML must have a top-level 'pools' list")
+            problems.append(PoolValidationProblem(
+                path="pools", code="invalid_type",
+                message="YAML must have a top-level 'pools' list",
+            ))
+            return DocumentValidationResult((), tuple(problems))
+
         definitions: list[PoolDefinition] = []
         seen: set[str] = set()
+        declared_ids: set[str] = set()
         for index, entry in enumerate(entries):
+            base = f"pools[{index}]"
             if not isinstance(entry, dict):
-                raise PoolValidationError(f"pools[{index}] must be a mapping")
-            unknown = set(entry) - self._POOL_FIELDS
-            if unknown:
-                raise PoolValidationError(f"pool entry has unknown fields: {', '.join(sorted(unknown))}")
+                problems.append(PoolValidationProblem(
+                    path=base, code="invalid_type", message=f"{base} must be a mapping",
+                ))
+                continue
+            for field in sorted(set(entry) - self._POOL_FIELDS):
+                problems.append(PoolValidationProblem(
+                    path=f"{base}.{field}", code="unknown_field",
+                    message=f"unknown pool field '{field}'",
+                ))
+
             pool_id = entry.get("id")
             label = entry.get("label")
             provider = entry.get("provider")
-            if not isinstance(pool_id, str) or not pool_id.strip(): raise PoolValidationError(f"pools[{index}].id is required")
-            if pool_id in seen: raise PoolValidationError(f"duplicate pool id '{pool_id}'")
-            seen.add(pool_id)
-            if not isinstance(label, str) or not label.strip(): raise PoolValidationError(f"pool '{pool_id}' label is required")
-            if not isinstance(provider, str) or not provider.strip(): raise PoolValidationError(f"pool '{pool_id}' provider is required")
+            entry_valid = True
+            if not isinstance(pool_id, str) or not pool_id.strip():
+                problems.append(PoolValidationProblem(
+                    path=f"{base}.id", code="required_field", message="pool id is required",
+                ))
+                entry_valid = False
+                pool_id = None
+            else:
+                declared_ids.add(pool_id)
+                if pool_id in seen:
+                    problems.append(PoolValidationProblem(
+                        path=f"{base}.id", code="duplicate_id",
+                        message=f"duplicate pool id '{pool_id}'",
+                    ))
+                    entry_valid = False
+                else:
+                    seen.add(pool_id)
+            if not isinstance(label, str) or not label.strip():
+                problems.append(PoolValidationProblem(
+                    path=f"{base}.label", code="required_field", message="pool label is required",
+                ))
+                entry_valid = False
+            if not isinstance(provider, str) or not provider.strip():
+                problems.append(PoolValidationProblem(
+                    path=f"{base}.provider", code="required_field", message="pool provider is required",
+                ))
+                entry_valid = False
+
             enabled = entry.get("enabled", True)
             tags = entry.get("policy_tags", {})
-            if not isinstance(enabled, bool): raise PoolValidationError(f"pool '{pool_id}' enabled must be boolean")
-            if not isinstance(tags, dict): raise PoolValidationError(f"pool '{pool_id}' policy_tags must be a mapping")
-            config = self._normalize_config(provider, entry.get("provider_config", {}))
-            definitions.append(PoolDefinition(pool_id, label, provider, enabled, dict(tags), config))
-        if DEFAULT_POOL_ID not in seen:
-            raise PoolValidationError(f"authoritative pool definitions must include '{DEFAULT_POOL_ID}'")
-        return tuple(definitions)
+            config = entry.get("provider_config", {})
+            if not isinstance(enabled, bool):
+                problems.append(PoolValidationProblem(
+                    path=f"{base}.enabled", code="invalid_type", message="enabled must be boolean",
+                ))
+                entry_valid = False
+            if not isinstance(tags, dict):
+                problems.append(PoolValidationProblem(
+                    path=f"{base}.policy_tags", code="invalid_type",
+                    message="policy_tags must be a mapping",
+                ))
+                entry_valid = False
+            if not isinstance(config, Mapping):
+                problems.append(PoolValidationProblem(
+                    path=f"{base}.provider_config", code="invalid_type",
+                    message="provider_config must be a mapping",
+                ))
+                entry_valid = False
+                normalized = None
+            elif isinstance(provider, str) and provider.strip():
+                handler = self._handlers.get(provider)
+                if handler is None:
+                    problems.append(PoolValidationProblem(
+                        path=f"{base}.provider", code="unknown_provider",
+                        message=f"no pool config handler registered for provider '{provider}'",
+                    ))
+                    entry_valid = False
+                    normalized = None
+                else:
+                    normalized, config_problems = handler.validate_config_problems(config)
+                    for problem in config_problems:
+                        problems.append(PoolValidationProblem(
+                            path=f"{base}.provider_config.{problem.path}",
+                            code=problem.code,
+                            message=problem.message,
+                        ))
+                    if config_problems:
+                        entry_valid = False
+            else:
+                normalized = None
+
+            if entry_valid:
+                assert pool_id is not None and isinstance(label, str) and isinstance(provider, str)
+                assert isinstance(tags, dict) and normalized is not None
+                definitions.append(PoolDefinition(
+                    pool_id, label, provider, enabled, dict(tags), normalized,
+                ))
+
+        if DEFAULT_POOL_ID not in declared_ids:
+            problems.append(PoolValidationProblem(
+                path="pools", code="missing_default_pool",
+                message=f"authoritative pool definitions must include '{DEFAULT_POOL_ID}'",
+            ))
+        return DocumentValidationResult(tuple(definitions), tuple(problems))
 
     def _calculate_reconciliation(self, db: Session, desired: tuple[PoolDefinition, ...]) -> ReconciliationPlan:
         existing = {p.id: p for p in db.query(ResourcePool).all()}
@@ -219,18 +328,30 @@ class ResourcePoolService:
 
     @staticmethod
     def _diff(plan: ReconciliationPlan) -> PoolImportDiff:
-        return PoolImportDiff(created=[p.id for p in plan.created], updated=[p.id for p in plan.updated], disabled=list(plan.disabled), unchanged=list(plan.unchanged), rejected=[])
+        return PoolImportDiff(created=[p.id for p in plan.created], updated=[p.id for p in plan.updated], disabled=list(plan.disabled), unchanged=list(plan.unchanged))
+
+    def validate_pools(self, yaml_text: str) -> PoolValidateResponse:
+        validation = self._validate_document(yaml_text)
+        if not validation.valid:
+            return PoolValidateResponse(valid=False, problems=list(validation.problems), diff=None)
+        with self._session_factory() as db:
+            diff = self._diff(self._calculate_reconciliation(db, validation.definitions))
+        return PoolValidateResponse(valid=True, problems=[], diff=diff)
 
     def import_pools(self, yaml_text: str, validate_only: bool = False) -> PoolImportDiff:
-        desired = self._validate_document(yaml_text)
-        with self._session_factory() as db:
-            if validate_only:
-                return self._diff(self._calculate_reconciliation(db, desired))
-            with db.begin():
-                plan = self._calculate_reconciliation(db, desired)
-                diff = self._diff(plan)
-                self._apply_reconciliation(db, plan)
-            return diff
+        validation = self._validate_document(yaml_text)
+        if not validation.valid:
+            message = "; ".join(problem.message for problem in validation.problems)
+            raise PoolValidationError(message)
+        if validate_only:
+            response = self.validate_pools(yaml_text)
+            assert response.diff is not None
+            return response.diff
+        with self._session_factory() as db, db.begin():
+            plan = self._calculate_reconciliation(db, validation.definitions)
+            diff = self._diff(plan)
+            self._apply_reconciliation(db, plan)
+        return diff
 
     def export_pools_yaml(self) -> str:
         pools = self.list_pools()

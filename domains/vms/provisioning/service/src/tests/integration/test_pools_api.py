@@ -11,7 +11,7 @@ Coverage:
   - PUT and PATCH share behavior (both are partial updates).
   - DELETE disables, never hard-deletes — the pool remains gettable.
   - Import/validate round-trip through the client and produce the expected
-    created/updated/disabled/unchanged/rejected diff.
+    created/updated/disabled/unchanged diff.
   - Hosts can be created against a pool created through this API, and
     reassigned via PUT/PATCH on /hosts/{name}.
 
@@ -187,9 +187,12 @@ pools:
     provider: kubernetes
     provider_config: {}
 """
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.validate_pools(bad_yaml)
-        assert exc_info.value.status_code == 400
+        result = await client.validate_pools(bad_yaml)
+        assert result.valid is False
+        assert result.diff is None
+        assert {problem.code for problem in result.problems} >= {
+            "unknown_provider", "missing_default_pool",
+        }
 
     async def test_export_round_trips(self, client_and_queue):
         client, _ = client_and_queue

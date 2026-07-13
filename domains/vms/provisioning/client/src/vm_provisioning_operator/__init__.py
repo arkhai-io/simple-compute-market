@@ -45,6 +45,7 @@ from vm_provisioning_operator.models import (
     PoolReplace,
     PoolUpdate,
     PoolValidateResponse,
+    PoolValidationProblem,
     SshKeyInfo,
     VersionResponse,
     VmActionRequest,
@@ -93,6 +94,7 @@ __all__ = [
     "PoolImportResponse",
     "PoolImportDiff",
     "PoolValidateResponse",
+    "PoolValidationProblem",
     # System models
     "HealthResponse",
     "VersionResponse",

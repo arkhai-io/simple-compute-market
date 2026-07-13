@@ -714,7 +714,7 @@ class PoolImportRequest(BaseModel):
 
 
 class PoolImportDiff(BaseModel):
-    """Diff produced by import/validate: pool ids grouped by outcome."""
+    """Diff produced for a valid authoritative pool document."""
 
     created: list[str] = Field(default_factory=list)
     updated: list[str] = Field(default_factory=list)
@@ -723,10 +723,14 @@ class PoolImportDiff(BaseModel):
         description="Pools present in the DB but absent from the YAML — disabled, not deleted.",
     )
     unchanged: list[str] = Field(default_factory=list)
-    rejected: list[dict[str, str]] = Field(
-        default_factory=list,
-        description="Entries that failed validation: [{'id': ..., 'reason': ...}].",
-    )
+
+
+class PoolValidationProblem(BaseModel):
+    """One problem found while validating an authoritative pool document."""
+
+    path: str = Field(description="Location in the submitted YAML document.")
+    code: str = Field(description="Stable machine-readable problem code.")
+    message: str = Field(description="Operator-facing explanation of the problem.")
 
 
 class PoolImportResponse(BaseModel):
@@ -739,5 +743,9 @@ class PoolImportResponse(BaseModel):
 class PoolValidateResponse(BaseModel):
     """Response body for ``POST /api/v1/pools/validate``."""
 
-    diff: PoolImportDiff
-    valid: bool = Field(description="True if there are no rejected entries.")
+    valid: bool
+    problems: list[PoolValidationProblem] = Field(default_factory=list)
+    diff: Optional[PoolImportDiff] = Field(
+        default=None,
+        description="Proposed reconciliation when the document is valid.",
+    )

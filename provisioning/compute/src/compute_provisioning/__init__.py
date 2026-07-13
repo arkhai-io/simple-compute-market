@@ -106,6 +106,6 @@ __all__ = [
     "stop_compute_provisioning_runtime",
 ]
 
-from .pool_config_handler import PoolConfigHandler
+from .pool_config_handler import PoolConfigHandler, PoolConfigValidationProblem
 
 __all__.append("PoolConfigHandler")

@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from sqlalchemy.orm import Session
 
+from compute_provisioning import PoolConfigValidationProblem
 from db.models import AnsiblePoolConfig
 
 
@@ -14,23 +15,46 @@ class AnsiblePoolConfigHandler:
     _FIELDS = frozenset({"playbook_path", "inventory_group", "extra_vars"})
 
     def validate_config(self, config: Mapping[str, Any]) -> dict[str, Any]:
-        unknown = set(config) - self._FIELDS
-        if unknown:
-            raise ValueError(f"unknown ansible provider_config fields: {', '.join(sorted(unknown))}")
+        normalized, problems = self.validate_config_problems(config)
+        if problems:
+            raise ValueError(problems[0].message)
+        assert normalized is not None
+        return normalized
+
+    def validate_config_problems(
+        self, config: Mapping[str, Any]
+    ) -> tuple[dict[str, Any] | None, tuple[PoolConfigValidationProblem, ...]]:
+        problems: list[PoolConfigValidationProblem] = []
+        for field in sorted(set(config) - self._FIELDS):
+            problems.append(PoolConfigValidationProblem(
+                path=field, code="unknown_field",
+                message=f"unknown ansible provider_config field '{field}'",
+            ))
         playbook_path = config.get("playbook_path")
         inventory_group = config.get("inventory_group")
         extra_vars = config.get("extra_vars", {})
         if not isinstance(playbook_path, str) or not playbook_path.strip():
-            raise ValueError("provider_config.playbook_path is required for provider='ansible'")
+            problems.append(PoolConfigValidationProblem(
+                path="playbook_path", code="required_field",
+                message="provider_config.playbook_path is required for provider='ansible'",
+            ))
         if not isinstance(inventory_group, str) or not inventory_group.strip():
-            raise ValueError("provider_config.inventory_group is required for provider='ansible'")
+            problems.append(PoolConfigValidationProblem(
+                path="inventory_group", code="required_field",
+                message="provider_config.inventory_group is required for provider='ansible'",
+            ))
         if not isinstance(extra_vars, dict):
-            raise ValueError("provider_config.extra_vars must be a mapping")
+            problems.append(PoolConfigValidationProblem(
+                path="extra_vars", code="invalid_type",
+                message="provider_config.extra_vars must be a mapping",
+            ))
+        if problems:
+            return None, tuple(problems)
         return {
             "playbook_path": playbook_path,
             "inventory_group": inventory_group,
             "extra_vars": dict(extra_vars),
-        }
+        }, ()
 
     def read_config(self, db: Session, pool_id: str) -> dict[str, Any]:
         row = db.query(AnsiblePoolConfig).filter(AnsiblePoolConfig.pool_id == pool_id).one_or_none()

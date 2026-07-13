@@ -7,9 +7,19 @@ commit or roll back transactions themselves.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, TypeVar
 
 UnitOfWorkT = TypeVar("UnitOfWorkT")
+
+
+@dataclass(frozen=True)
+class PoolConfigValidationProblem:
+    """One provider-specific configuration problem, relative to provider_config."""
+
+    path: str
+    code: str
+    message: str
 
 
 class PoolConfigHandler(Protocol[UnitOfWorkT]):
@@ -18,6 +28,10 @@ class PoolConfigHandler(Protocol[UnitOfWorkT]):
     provider: str
 
     def validate_config(self, config: Mapping[str, Any]) -> dict[str, Any]: ...
+
+    def validate_config_problems(
+        self, config: Mapping[str, Any]
+    ) -> tuple[dict[str, Any] | None, tuple[PoolConfigValidationProblem, ...]]: ...
 
     def read_config(self, unit_of_work: UnitOfWorkT, pool_id: str) -> dict[str, Any]: ...
 

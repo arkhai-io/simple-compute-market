@@ -191,11 +191,8 @@ class PoolController:
         summary="Dry-run a pool-definitions import without writing",
     )
     def validate_pools(self, body: PoolImportRequest) -> PoolValidateResponse:
-        try:
-            diff = self._pools.import_pools(body.yaml_text, validate_only=True)
-        except PoolValidationError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        return PoolValidateResponse(diff=diff, valid=len(diff.rejected) == 0)
+        """Return all detectable document problems without applying writes."""
+        return self._pools.validate_pools(body.yaml_text)
 
     @classmethod
     def make_router(cls) -> APIRouter:
