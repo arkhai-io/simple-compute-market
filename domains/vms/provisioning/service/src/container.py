@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from dependency_injector import containers, providers
+from compute_provisioning.lease_lifecycle import LeaseLifecycleService
+from compute_provisioning.release import ExecutorReleaseDispatcher
+from market_site.authority import LedgerSiteAuthority
+from market_site.ledger import CapacityLedgerService
 
 from config import settings
 from db.database import create_db_engine, create_session_factory
@@ -8,20 +12,17 @@ from services.ansible_service import AnsibleService
 from services.async_job_queue import AsyncJobQueue
 from services.bare_metal_lease_service import BareMetalLeaseService
 from services.bare_metal_operations_service import BareMetalOperationsService
-from market_site.ledger import CapacityLedgerService
+from services.deal_event_sink import notify_storefront_capacity_released
 from services.host_operations_service import HostOperationsService
 from services.host_service import HostService
 from services.job_service import AnsibleJobService
-from services.lease_lifecycle_service import LeaseLifecycleService
 from services.lease_watchdog import LeaseWatchdog
 from services.release_executors import (
     BARE_METAL_EXECUTOR_KIND,
     BareMetalReleaseExecutor,
-    ExecutorReleaseDispatcher,
     VM_EXECUTOR_KIND,
     VmReleaseExecutor,
 )
-from services.site_resources_service import SiteResourcesService
 from services.system_service import SystemService
 from services.vm_operations_service import VmOperationsService
 
@@ -51,15 +52,31 @@ def _make_session_factory(engine):
 
 
 def _make_release_dispatcher(bare_metal_operations_service, job_service):
-    return ExecutorReleaseDispatcher({
-        BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
-            release_delegate=bare_metal_operations_service.reclaim_access_for_allocation,
+    return ExecutorReleaseDispatcher(
+        {
+            BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
+                release_delegate=bare_metal_operations_service.reclaim_access_for_allocation,
+            ),
+            VM_EXECUTOR_KIND: VmReleaseExecutor(
+                job_service=job_service,
+                job_queue_provider=_resolved_job_queue,
+            ),
+        },
+        default_executor_kind=VM_EXECUTOR_KIND,
+    )
+
+
+def _make_lease_lifecycle(cfg, site_authority, release_dispatcher, job_service):
+    return LeaseLifecycleService(
+        cfg,
+        site_authority,
+        executor_release=release_dispatcher,
+        release_jobs=job_service,
+        default_executor_kind=VM_EXECUTOR_KIND,
+        capacity_released_notifier=(
+            lambda allocation: notify_storefront_capacity_released(cfg, allocation)
         ),
-        VM_EXECUTOR_KIND: VmReleaseExecutor(
-            job_service=job_service,
-            job_queue_provider=_resolved_job_queue,
-        ),
-    })
+    )
 
 
 class Container(containers.DeclarativeContainer):
@@ -128,14 +145,14 @@ class Container(containers.DeclarativeContainer):
         session_factory=session_factory,
     )
 
-    site_resources_service = providers.Singleton(
-        SiteResourcesService,
-        capacity_service=capacity_ledger_service,
+    site_authority = providers.Singleton(
+        LedgerSiteAuthority,
+        ledger=capacity_ledger_service,
     )
 
     bare_metal_lease_service = providers.Singleton(
         BareMetalLeaseService,
-        site_resources_service=site_resources_service,
+        site_authority=site_authority,
     )
 
     bare_metal_operations_service = providers.Factory(
@@ -153,12 +170,11 @@ class Container(containers.DeclarativeContainer):
     )
 
     lease_lifecycle_service = providers.Singleton(
-        LeaseLifecycleService,
-        settings=config,
-        site_resources_service=site_resources_service,
-        job_service=job_service,
-        job_queue_provider=_resolved_job_queue,
+        _make_lease_lifecycle,
+        cfg=config,
+        site_authority=site_authority,
         release_dispatcher=release_dispatcher,
+        job_service=job_service,
     )
 
     lease_watchdog = providers.Singleton(

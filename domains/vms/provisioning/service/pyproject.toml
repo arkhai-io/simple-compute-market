@@ -4,14 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "arkhai-vms-provisioning"
-version = "0.5.0"
+version = "0.6.0"
 license = "MIT"
 description = "Async VM provisioning service"
 requires-python = ">=3.12"
 dependencies = [
-    "arkhai-kit-site>=0.1.0",
-    "arkhai-compute-provisioning>=0.1.0",
-    "arkhai-core-storefront>=0.1.0",
+    "arkhai-kit-site>=0.2.0",
+    "arkhai-compute-provisioning>=0.2.0",
     "arkhai-core-storefront-client>=0.11.0",
     "arkhai-bare-metal>=0.1.0",
     "arkhai-vms-provisioning-client>=0.1.1",

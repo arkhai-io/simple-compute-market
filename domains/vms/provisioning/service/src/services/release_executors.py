@@ -7,10 +7,6 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from core_storefront.release_dispatcher import (
-    ExecutorReleaseDispatcher as CoreExecutorReleaseDispatcher,
-    ReleaseExecutor,
-)
 
 from arkhai_bare_metal import (
     BARE_METAL_EXECUTOR_KIND,
@@ -106,10 +102,3 @@ class BareMetalReleaseExecutor:
         if inspect.isawaitable(result):
             result = await result
         return result
-
-
-class ExecutorReleaseDispatcher(CoreExecutorReleaseDispatcher):
-    """VM compatibility dispatcher that defaults legacy allocations to VM release."""
-
-    def __init__(self, executors: dict[str, ReleaseExecutor]) -> None:
-        super().__init__(executors, default_executor_kind=VM_EXECUTOR_KIND)

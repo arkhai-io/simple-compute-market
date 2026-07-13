@@ -22,7 +22,7 @@ from services.bare_metal_operations_service import (
     BareMetalHostValidationError,
     BareMetalOperationsService,
 )
-from services.lease_lifecycle_service import LeaseNotFoundError
+from compute_provisioning.lease_lifecycle import LeaseNotFoundError
 
 logger = logging.getLogger(__name__)
 

@@ -356,11 +356,11 @@ async def client_and_queue(
     from market_site.ledger import CapacityLedgerService
     capacity_ledger_service = CapacityLedgerService(session_factory=session_factory)
 
-    from services.site_resources_service import SiteResourcesService
-    site_resources_service = SiteResourcesService(capacity_ledger_service)
+    from market_site.authority import LedgerSiteAuthority
+    site_authority = LedgerSiteAuthority(capacity_ledger_service)
 
     from services.bare_metal_lease_service import BareMetalLeaseService
-    bare_metal_lease_service = BareMetalLeaseService(site_resources_service)
+    bare_metal_lease_service = BareMetalLeaseService(site_authority)
 
     from services.bare_metal_operations_service import BareMetalOperationsService
     bare_metal_operations_service = BareMetalOperationsService(
@@ -370,26 +370,35 @@ async def client_and_queue(
         host_service=host_service,
     )
 
+    from compute_provisioning.release import ExecutorReleaseDispatcher
     from services.release_executors import (
         BARE_METAL_EXECUTOR_KIND,
         BareMetalReleaseExecutor,
-        ExecutorReleaseDispatcher,
         VM_EXECUTOR_KIND,
         VmReleaseExecutor,
     )
-    release_dispatcher = ExecutorReleaseDispatcher({
-        BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
-            release_delegate=bare_metal_operations_service.reclaim_access_for_allocation,
-        ),
-        VM_EXECUTOR_KIND: VmReleaseExecutor(job_service=None),
-    })
+    release_dispatcher = ExecutorReleaseDispatcher(
+        {
+            BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
+                release_delegate=bare_metal_operations_service.reclaim_access_for_allocation,
+            ),
+            VM_EXECUTOR_KIND: VmReleaseExecutor(job_service=None),
+        },
+        default_executor_kind=VM_EXECUTOR_KIND,
+    )
 
-    from services.lease_lifecycle_service import LeaseLifecycleService
+    from services.deal_event_sink import notify_storefront_capacity_released
+    from compute_provisioning.lease_lifecycle import LeaseLifecycleService
     lease_lifecycle_service = LeaseLifecycleService(
         settings=mock_settings,
-        site_resources_service=site_resources_service,
-        job_service=None,  # tests poll direct-release only when a release executor returns it
-        release_dispatcher=release_dispatcher,
+        site_authority=site_authority,
+        release_jobs=None,
+        executor_release=release_dispatcher,
+        capacity_released_notifier=(
+            lambda allocation: notify_storefront_capacity_released(
+                mock_settings, allocation
+            )
+        ),
     )
 
     # Fresh queue per test — caller can inject on_job_started via fixture params
@@ -410,7 +419,7 @@ async def client_and_queue(
     app.container.system_service.override(system_service)
     app.container.session_factory.override(session_factory)
     app.container.host_service.override(host_service)
-    app.container.site_resources_service.override(site_resources_service)
+    app.container.site_authority.override(site_authority)
     app.container.bare_metal_lease_service.override(bare_metal_lease_service)
     app.container.bare_metal_operations_service.override(bare_metal_operations_service)
     app.container.lease_lifecycle_service.override(lease_lifecycle_service)
@@ -466,7 +475,7 @@ async def client_and_queue(
     app.container.system_service.reset_override()
     app.container.session_factory.reset_override()
     app.container.host_service.reset_override()
-    app.container.site_resources_service.reset_override()
+    app.container.site_authority.reset_override()
     app.container.bare_metal_lease_service.reset_override()
     app.container.bare_metal_operations_service.reset_override()
     app.container.lease_lifecycle_service.reset_override()

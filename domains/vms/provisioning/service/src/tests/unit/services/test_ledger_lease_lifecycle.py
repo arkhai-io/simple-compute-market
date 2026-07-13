@@ -9,6 +9,7 @@ capacity-released event, and the resource PATCH callback never fires.
 
 from __future__ import annotations
 
+import inspect
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -18,12 +19,16 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from db.models import Base
+from compute_provisioning.release import ExecutorReleaseDispatcher
+from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
-from services.lease_lifecycle_service import LeaseLifecycleService
+from compute_provisioning.lease_lifecycle import LeaseLifecycleService
+from services.deal_event_sink import notify_storefront_capacity_released
 from services.release_executors import (
     BARE_METAL_EXECUTOR_KIND,
     BareMetalReleaseExecutor,
-    ExecutorReleaseDispatcher,
+    VM_EXECUTOR_KIND,
+    VmReleaseExecutor,
     bare_metal_executor_ref,
 )
 
@@ -63,11 +68,49 @@ def _settings(**overrides):
     return s
 
 
-def _lifecycle(session_factory, ledger, **settings_overrides):
+class DelegateReleaseExecutor:
+    def __init__(self, delegate):
+        self._delegate = delegate
+
+    async def submit_release(self, allocation):
+        result = self._delegate(allocation)
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
+
+def _lifecycle(
+    session_factory,
+    ledger,
+    *,
+    job_service=None,
+    executor_release=None,
+    release_delegate=None,
+    **settings_overrides,
+):
+    if executor_release is None:
+        executors = {
+            BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(),
+            VM_EXECUTOR_KIND: VmReleaseExecutor(
+                job_service=job_service,
+                job_queue_provider=lambda: MagicMock(),
+            ),
+        }
+        if release_delegate is not None:
+            executors[VM_EXECUTOR_KIND] = DelegateReleaseExecutor(release_delegate)
+        executor_release = ExecutorReleaseDispatcher(
+            executors,
+            default_executor_kind=VM_EXECUTOR_KIND,
+        )
+    settings = _settings(**settings_overrides)
     return LeaseLifecycleService(
-        settings=_settings(**settings_overrides),
-        capacity_ledger=ledger,
-        job_service=None,  # direct-release path; vm_remove jobs covered elsewhere
+        settings=settings,
+        site_authority=LedgerSiteAuthority(ledger),
+        executor_release=executor_release,
+        release_jobs=job_service,
+        capacity_released_notifier=(
+            lambda allocation: notify_storefront_capacity_released(settings, allocation)
+        ),
     )
 
 
@@ -179,12 +222,7 @@ async def test_releasing_allocation_past_grace_marks_release_failed(
     running.status = "running"
     job_svc.get_job.return_value = running
 
-    svc = LeaseLifecycleService(
-        settings=_settings(),
-        capacity_ledger=ledger,
-        job_service=job_svc,
-        job_queue_provider=lambda: MagicMock(),
-    )
+    svc = _lifecycle(session_factory, ledger, job_service=job_svc)
 
     sf = MagicMock()
     sf.__aenter__ = AsyncMock(return_value=sf)
@@ -220,12 +258,7 @@ async def test_releasing_allocation_within_grace_skips(session_factory, ledger):
     running.status = "running"
     job_svc.get_job.return_value = running
 
-    svc = LeaseLifecycleService(
-        settings=_settings(),
-        capacity_ledger=ledger,
-        job_service=job_svc,
-        job_queue_provider=lambda: MagicMock(),
-    )
+    svc = _lifecycle(session_factory, ledger, job_service=job_svc)
     summary = await svc.force_check_leases()
     assert summary["skipped"] == 1
     assert ledger.get_allocation(reserved["allocation_id"])["state"] == "releasing"
@@ -241,12 +274,7 @@ async def test_succeeded_vm_remove_releases_normally(session_factory, ledger):
     done.status = "succeeded"
     job_svc.get_job.return_value = done
 
-    svc = LeaseLifecycleService(
-        settings=_settings(),
-        capacity_ledger=ledger,
-        job_service=job_svc,
-        job_queue_provider=lambda: MagicMock(),
-    )
+    svc = _lifecycle(session_factory, ledger, job_service=job_svc)
 
     sf = MagicMock()
     sf.__aenter__ = AsyncMock(return_value=sf)
@@ -271,12 +299,7 @@ async def test_failed_vm_remove_marks_release_failed_without_notification(sessio
     failed.error = "cleanup script missing"
     job_svc.get_job.return_value = failed
 
-    svc = LeaseLifecycleService(
-        settings=_settings(),
-        capacity_ledger=ledger,
-        job_service=job_svc,
-        job_queue_provider=lambda: MagicMock(),
-    )
+    svc = _lifecycle(session_factory, ledger, job_service=job_svc)
 
     sf = MagicMock()
     sf.__aenter__ = AsyncMock(return_value=sf)
@@ -306,12 +329,7 @@ async def test_due_leased_allocation_submits_vm_remove_job(session_factory, ledg
     running.status = "running"
     job_svc.get_job.return_value = running
 
-    svc = LeaseLifecycleService(
-        settings=_settings(),
-        capacity_ledger=ledger,
-        job_service=job_svc,
-        job_queue_provider=lambda: MagicMock(),
-    )
+    svc = _lifecycle(session_factory, ledger, job_service=job_svc)
 
     summary = await svc.force_check_leases()
 
@@ -344,12 +362,7 @@ async def test_missing_executor_kind_falls_back_to_vm_release(session_factory, l
     submit.job_id = "remove-legacy"
     job_svc.submit = AsyncMock(return_value=submit)
 
-    svc = LeaseLifecycleService(
-        settings=_settings(),
-        capacity_ledger=ledger,
-        job_service=job_svc,
-        job_queue_provider=lambda: MagicMock(),
-    )
+    svc = _lifecycle(session_factory, ledger, job_service=job_svc)
 
     summary = await svc.force_check_leases()
 
@@ -375,11 +388,7 @@ async def test_bare_metal_executor_releases_locally_and_notifies(session_factory
         ),
     )
 
-    svc = LeaseLifecycleService(
-        settings=_settings(),
-        capacity_ledger=ledger,
-        job_service=None,
-    )
+    svc = _lifecycle(session_factory, ledger)
 
     sf = MagicMock()
     sf.__aenter__ = AsyncMock(return_value=sf)
@@ -424,11 +433,7 @@ async def test_bare_metal_executor_submits_reclaim_job_when_delegate_configured(
             release_delegate=release_delegate,
         ),
     })
-    svc = LeaseLifecycleService(
-        settings=_settings(),
-        capacity_ledger=ledger,
-        release_dispatcher=dispatcher,
-    )
+    svc = _lifecycle(session_factory, ledger, executor_release=dispatcher)
 
     summary = await svc.force_check_leases()
 
@@ -454,11 +459,7 @@ async def test_bare_metal_release_submission_failure_stays_held(session_factory,
             release_delegate=release_delegate,
         ),
     })
-    svc = LeaseLifecycleService(
-        settings=_settings(),
-        capacity_ledger=ledger,
-        release_dispatcher=dispatcher,
-    )
+    svc = _lifecycle(session_factory, ledger, executor_release=dispatcher)
 
     summary = await svc.force_check_leases()
 
@@ -480,12 +481,7 @@ async def test_unknown_executor_kind_stays_held_and_retryable(session_factory, l
     )
 
     job_svc = MagicMock()
-    svc = LeaseLifecycleService(
-        settings=_settings(),
-        capacity_ledger=ledger,
-        job_service=job_svc,
-        job_queue_provider=lambda: MagicMock(),
-    )
+    svc = _lifecycle(session_factory, ledger, job_service=job_svc)
 
     summary = await svc.force_check_leases()
 
@@ -508,12 +504,7 @@ async def test_admin_retry_release_resubmits_delegate(session_factory, ledger):
     )
 
     delegate = AsyncMock(return_value="remove-retry-1")
-    svc = LeaseLifecycleService(
-        settings=_settings(),
-        capacity_ledger=ledger,
-        job_service=None,
-        release_delegate=delegate,
-    )
+    svc = _lifecycle(session_factory, ledger, release_delegate=delegate)
 
     from provisioning_client.models import LeaseRetryReleaseRequest
 

@@ -1,4 +1,4 @@
-"""Shared lease lifecycle orchestration over site resource allocations."""
+"""Compute lease, watchdog, retry, and force-release orchestration."""
 
 from __future__ import annotations
 
@@ -7,15 +7,21 @@ import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Protocol
 
-from core_storefront.site_resources import SiteResourcesService
+from market_site.authority import SiteAuthorityPort
+
+from .release import ExecutorReleasePort
 
 logger = logging.getLogger(__name__)
 
-ReleaseDelegate = Callable[[dict[str, Any]], Awaitable[str | None] | str | None]
 CapacityReleasedNotifier = Callable[[dict[str, Any]], Awaitable[bool] | bool]
 ParseUtc = Callable[[Any], datetime | None]
+
+class ReleaseJobPort(Protocol):
+    """Read executor job outcomes without importing a concrete job runner."""
+
+    def get_job(self, job_id: str) -> Any: ...
 
 
 class LeaseLifecycleError(Exception):
@@ -54,6 +60,13 @@ def parse_utc(value: Any) -> datetime | None:
     return None
 
 
+def _datetime_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    isoformat = getattr(value, "isoformat", None)
+    return isoformat() if callable(isoformat) else str(value)
+
+
 class LeaseLifecycleService:
     """Lease lifecycle state machine over generic site allocations."""
 
@@ -63,18 +76,18 @@ class LeaseLifecycleService:
     def __init__(
         self,
         settings: Any,
-        site_resources_service: SiteResourcesService,
+        site_authority: SiteAuthorityPort,
         *,
-        release_delegate: ReleaseDelegate,
-        job_service: Any = None,
+        executor_release: ExecutorReleasePort,
+        release_jobs: ReleaseJobPort | None = None,
         default_executor_kind: str | None = None,
         capacity_released_notifier: CapacityReleasedNotifier | None = None,
         parse_utc_value: ParseUtc = parse_utc,
     ) -> None:
         self._settings = settings
-        self._site_resources = site_resources_service
-        self._release_delegate = release_delegate
-        self._job_svc = job_service
+        self._site_authority = site_authority
+        self._executor_release = executor_release
+        self._release_jobs = release_jobs
         self._default_executor_kind = default_executor_kind
         self._capacity_released_notifier = capacity_released_notifier
         self._parse_utc = parse_utc_value
@@ -97,13 +110,13 @@ class LeaseLifecycleService:
         return not self._resume_event.is_set()
 
     def get_lease(self, lease_id: str) -> dict[str, Any]:
-        allocation = self._site_resources.get_allocation(lease_id)
+        allocation = self._site_authority.get_allocation(lease_id)
         if allocation is None:
             raise LeaseNotFoundError(f"Lease '{lease_id}' not found")
         return allocation
 
     def get_lease_by_escrow(self, escrow_uid: str) -> dict[str, Any]:
-        allocation = self._site_resources.get_allocation_by_escrow(escrow_uid)
+        allocation = self._site_authority.get_allocation_by_escrow(escrow_uid)
         if allocation is None or not allocation.get("lease_end_utc"):
             raise LeaseNotFoundError(f"No lease found for escrow_uid={escrow_uid!r}")
         return allocation
@@ -111,37 +124,29 @@ class LeaseLifecycleService:
     def list_leases(self) -> list[dict[str, Any]]:
         return [
             allocation
-            for allocation in self._site_resources.list_allocations()
+            for allocation in self._site_authority.list_allocations()
             if allocation.get("lease_end_utc")
         ]
 
     def register_lease(self, body: Any) -> dict[str, Any]:
-        attached = self._site_resources.attach_lease_allocation(
+        attached = self._site_authority.attach_lease_allocation(
             allocation_id=body.allocation_id,
             escrow_uid=body.escrow_uid,
-            vm_host=body.vm_host,
-            vm_target=body.vm_target,
-            executor_kind=self._default_executor_kind,
-            executor_target=body.vm_target,
-            executor_ref={"vm_host": body.vm_host},
-            lease_start_utc=(
-                body.lease_start_utc.isoformat() if body.lease_start_utc else None
-            ),
-            lease_end_utc=body.lease_end_utc.isoformat(),
+            executor_kind=body.executor_kind or self._default_executor_kind,
+            executor_target=body.executor_target,
+            executor_ref=body.executor_ref,
+            lease_start_utc=_datetime_value(body.lease_start_utc),
+            lease_end_utc=_datetime_value(body.lease_end_utc),
             create_job_id=body.create_job_id,
         )
         if attached is None and not body.allocation_id:
-            attached = self._site_resources.attach_lease_allocation(
+            attached = self._site_authority.attach_lease_allocation(
                 escrow_uid=body.escrow_uid,
-                vm_host=body.vm_host,
-                vm_target=body.vm_target,
-                executor_kind=self._default_executor_kind,
-                executor_target=body.vm_target,
-                executor_ref={"vm_host": body.vm_host},
-                lease_start_utc=(
-                    body.lease_start_utc.isoformat() if body.lease_start_utc else None
-                ),
-                lease_end_utc=body.lease_end_utc.isoformat(),
+                executor_kind=body.executor_kind or self._default_executor_kind,
+                executor_target=body.executor_target,
+                executor_ref=body.executor_ref,
+                lease_start_utc=_datetime_value(body.lease_start_utc),
+                lease_end_utc=_datetime_value(body.lease_end_utc),
                 create_job_id=body.create_job_id,
             )
         if attached is None:
@@ -152,23 +157,14 @@ class LeaseLifecycleService:
         return attached
 
     def update_lease(self, lease_id: str, body: Any) -> dict[str, Any]:
-        updated = self._site_resources.update_allocation_fields(
+        updated = self._site_authority.update_allocation_fields(
             lease_id,
-            vm_host=body.vm_host,
-            vm_target=body.vm_target,
-            executor_kind=(
-                self._default_executor_kind if body.vm_host or body.vm_target else None
-            ),
-            executor_target=body.vm_target,
-            executor_ref={"vm_host": body.vm_host} if body.vm_host else None,
-            lease_start_utc=(
-                body.lease_start_utc.isoformat() if body.lease_start_utc else None
-            ),
-            lease_end_utc=(
-                body.lease_end_utc.isoformat() if body.lease_end_utc else None
-            ),
-            vm_remove_job_id=body.vm_remove_job_id,
-            release_job_id=body.vm_remove_job_id,
+            executor_kind=body.executor_kind,
+            executor_target=body.executor_target,
+            executor_ref=body.executor_ref,
+            lease_start_utc=_datetime_value(body.lease_start_utc),
+            lease_end_utc=_datetime_value(body.lease_end_utc),
+            release_job_id=body.release_job_id,
             create_job_id=body.create_job_id,
         )
         if updated is None:
@@ -200,10 +196,8 @@ class LeaseLifecycleService:
                 f"Could not submit release job for lease '{lease_id}'.",
                 state=state,
             )
-        return self._site_resources.update_allocation_state(
+        return self._site_authority.begin_release(
             lease_id,
-            state="releasing",
-            vm_remove_job_id=job_id,
             release_job_id=job_id,
         ) or self.get_lease(lease_id)
 
@@ -217,11 +211,10 @@ class LeaseLifecycleService:
                 f"Lease '{lease_id}' is {state}; only leased allocations can release oversight.",
                 state=state,
             )
-        return self._site_resources.update_allocation_state(
+        return self._site_authority.record_unmanaged(
             lease_id,
-            state="unmanaged",
-            failure_reason="oversight_released",
-            failure_message=body.reason,
+            reason="oversight_released",
+            message=body.reason,
         ) or self.get_lease(lease_id)
 
     async def retry_release(self, lease_id: str, body: Any | None = None) -> dict[str, Any]:
@@ -238,13 +231,8 @@ class LeaseLifecycleService:
                 f"Could not submit release retry job for lease '{lease_id}'.",
                 state=state,
             )
-        retry_reason = body.reason if body and body.reason else "release_retry_requested"
-        return self._site_resources.update_allocation_state(
+        return self._site_authority.begin_release(
             lease_id,
-            state="releasing",
-            failure_reason=retry_reason,
-            failure_message=f"release retry submitted with job {job_id}",
-            vm_remove_job_id=job_id,
             release_job_id=job_id,
         ) or self.get_lease(lease_id)
 
@@ -262,11 +250,11 @@ class LeaseLifecycleService:
         message = body.reason
         if body.evidence:
             message = f"{body.reason} Evidence: {body.evidence}"
-        released = self._site_resources.release_allocation(
+        released = self._site_authority.record_release_success(
             lease_id,
-            state="force_released",
-            failure_reason="admin_force_release",
-            failure_message=message,
+            forced=True,
+            reason="admin_force_release",
+            message=message,
         )
         if released is None:
             raise LeaseNotFoundError(f"Lease '{lease_id}' not found or is not held.")
@@ -293,14 +281,12 @@ class LeaseLifecycleService:
         release_failed = 0
         skipped = 0
 
-        for allocation in self._site_resources.list_time_bounded_allocations_due(now):
+        for allocation in self._site_authority.list_time_bounded_allocations_due(now):
             try:
                 job_id = await self._run_release_delegate(allocation)
                 if job_id is not None:
-                    self._site_resources.update_allocation_state(
+                    self._site_authority.begin_release(
                         allocation["allocation_id"],
-                        state="releasing",
-                        vm_remove_job_id=job_id,
                         release_job_id=job_id,
                     )
                     checked += 1
@@ -328,7 +314,7 @@ class LeaseLifecycleService:
                 )
                 release_failed += 1
 
-        for allocation in self._site_resources.list_allocations(state="releasing"):
+        for allocation in self._site_authority.list_allocations(state="releasing"):
             try:
                 outcome = await self._process_releasing_allocation(
                     allocation, now, grace_seconds,
@@ -359,10 +345,7 @@ class LeaseLifecycleService:
         }
 
     async def _run_release_delegate(self, allocation: dict[str, Any]) -> str | None:
-        result = self._release_delegate(allocation)
-        if inspect.isawaitable(result):
-            result = await result
-        return result
+        return await self._executor_release.submit_release(allocation)
 
     async def _process_releasing_allocation(
         self, allocation: dict[str, Any], now: datetime, grace_seconds: int
@@ -370,14 +353,14 @@ class LeaseLifecycleService:
         lease_end = self._parse_utc(allocation.get("lease_end_utc")) or now
         past_grace = now >= lease_end + timedelta(seconds=grace_seconds)
         job_id = allocation.get("release_job_id") or allocation.get("vm_remove_job_id")
-        if job_id == "direct-release" and self._job_svc is None:
+        if job_id == "direct-release" and self._release_jobs is None:
             if not await self._finish_release(allocation):
                 return "skipped"
             return "released"
 
-        if job_id and self._job_svc is not None:
+        if job_id and self._release_jobs is not None:
             try:
-                job = self._job_svc.get_job(job_id)
+                job = self._release_jobs.get_job(job_id)
                 if job.status == "succeeded":
                     if not await self._finish_release(allocation):
                         return "skipped"
@@ -411,16 +394,15 @@ class LeaseLifecycleService:
             "[LEASE_LIFECYCLE] Release failed for allocation %s: %s %s",
             allocation.get("allocation_id"), reason, message or "",
         )
-        self._site_resources.update_allocation_state(
+        self._site_authority.record_release_failure(
             allocation["allocation_id"],
-            state="release_failed",
-            failure_reason=reason,
-            failure_message=message,
+            reason=reason,
+            message=message,
         )
 
     async def _finish_release(self, allocation: dict[str, Any]) -> bool:
-        released = self._site_resources.release_allocation(
-            allocation["allocation_id"], state="released",
+        released = self._site_authority.record_release_success(
+            allocation["allocation_id"],
         )
         if released is None:
             return False

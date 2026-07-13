@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from core_storefront.release_dispatcher import ExecutorReleaseDispatcher
+from compute_provisioning.release import ExecutorReleaseDispatcher
 
 
 class RecordingReleaseExecutor:

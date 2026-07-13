@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 
     from services.host_service import HostService
     from services.async_job_queue import AsyncJobQueue
-    from services.lease_lifecycle_service import LeaseLifecycleService
+    from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 
 
 # ---------------------------------------------------------------------------

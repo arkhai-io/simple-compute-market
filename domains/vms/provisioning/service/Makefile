@@ -14,6 +14,7 @@ install: ## Install dependencies using uv
 reinit:
 	uv sync --dev --find-links $(DIST_DIR) \
 		--upgrade-package arkhai-bare-metal   --reinstall-package arkhai-bare-metal \
+		--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
 		--upgrade-package arkhai-kit-site              --reinstall-package arkhai-kit-site \
 		--upgrade-package arkhai-core-storefront-client --reinstall-package arkhai-core-storefront-client \
 		--upgrade-package arkhai-vms-provisioning-client  --reinstall-package arkhai-vms-provisioning-client

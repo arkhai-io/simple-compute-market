@@ -10,20 +10,19 @@ from arkhai_bare_metal import (
     PHYSICAL_HOST_ID_REF_KEY,
     bare_metal_executor_ref,
 )
-from core_storefront.executor_leases import (
+from compute_provisioning.executor_leases import (
     ExecutorLeaseRegistration,
     ExecutorLeaseService,
 )
-from services.lease_lifecycle_service import LeaseNotFoundError
-from services.site_resources_service import SiteResourcesService
+from market_site.authority import SiteAuthorityPort
 
 
 class BareMetalLeaseService:
     """Register bare-metal lease metadata on site allocations."""
 
-    def __init__(self, site_resources_service: SiteResourcesService) -> None:
+    def __init__(self, site_authority: SiteAuthorityPort) -> None:
         self._leases = ExecutorLeaseService(
-            site_resources_service,
+            site_authority,
             executor_kind=BARE_METAL_EXECUTOR_KIND,
             not_found_label="Bare-metal lease",
         )

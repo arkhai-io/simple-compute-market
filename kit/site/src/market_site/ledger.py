@@ -380,7 +380,14 @@ class CapacityLedgerService:
                 db, allocation_id=allocation_id,
                 escrow_uid=None if allocation_id else escrow_uid,
             )
-            if allocation is None or allocation.state not in HELD_ALLOCATION_STATES:
+            if allocation is None:
+                return None
+            if allocation.state in {
+                AllocationState.released.value,
+                AllocationState.force_released.value,
+            }:
+                return self._allocation_payload(allocation)
+            if allocation.state not in HELD_ALLOCATION_STATES:
                 return None
             allocation.state = state
             allocation.released_at = datetime.now(timezone.utc).isoformat()
@@ -396,7 +403,7 @@ class CapacityLedgerService:
         allocation_id: str,
         lease_end_utc: str,
     ) -> dict[str, Any] | None:
-        """End a lease early; teardown stays with the ledger's watchdog."""
+        """End a lease early; injected compute lifecycle observes the new expiry."""
         with self._lock, self._session_factory() as db:
             allocation = self._find_allocation(db, allocation_id=allocation_id)
             if allocation is None or allocation.state not in HELD_ALLOCATION_STATES:

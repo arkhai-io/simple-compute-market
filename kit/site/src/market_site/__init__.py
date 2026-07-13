@@ -9,6 +9,11 @@ hosting service (the VM provisioning service; the API-credits service)
 mounts the tables on its engine and the router on its app.
 """
 
+from .authority import (  # noqa: F401
+    LedgerSiteAuthority,
+    SiteAuthorityLedger,
+    SiteAuthorityPort,
+)
 from .db import (  # noqa: F401
     HELD_ALLOCATION_STATES,
     AllocationState,

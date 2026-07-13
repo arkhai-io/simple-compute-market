@@ -1,4 +1,4 @@
-"""Shared release executor dispatch for leased site allocations."""
+"""Executor-neutral release port and kind-based dispatcher."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any, Protocol
 logger = logging.getLogger(__name__)
 
 
-class ReleaseExecutor(Protocol):
+class ExecutorReleasePort(Protocol):
     async def submit_release(self, allocation: dict[str, Any]) -> str | None:
         """Submit release work for an allocation and return its job id."""
 
@@ -18,7 +18,7 @@ class ExecutorReleaseDispatcher:
 
     def __init__(
         self,
-        executors: dict[str, ReleaseExecutor],
+        executors: dict[str, ExecutorReleasePort],
         *,
         default_executor_kind: str | None = None,
     ) -> None:

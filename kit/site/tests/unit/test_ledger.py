@@ -263,8 +263,13 @@ def test_reserve_decrements_and_releases_restore(seeded: CapacityLedgerService):
     assert released is not None and released["state"] == "released"
     assert seeded.snapshot()[0]["available_units"] == 8
 
-    # Idempotent: a second release finds nothing held.
-    assert seeded.release(deal_ref={"escrow_uid": "0xesc"}) is None
+    # Idempotent: duplicate release returns the authoritative terminal row
+    # without advancing the anonymous capacity event version.
+    _, version_before = seeded.events_after(0)
+    duplicate = seeded.release(allocation_id=reserved["allocation_id"])
+    _, version_after = seeded.events_after(0)
+    assert duplicate == released
+    assert version_after == version_before
 
 
 def test_future_reservation_ignores_non_overlapping_current_lease(seeded: CapacityLedgerService):
