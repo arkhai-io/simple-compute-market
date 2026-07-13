@@ -48,7 +48,7 @@ See [site capacity](../../openspec/specs/site-capacity/spec.md) and [physical pr
 
 - OpenSpec index and contributor workflow: [`openspec/README.md`](../../openspec/README.md)
 - Active and deferred changes: [`openspec/changes/`](../../openspec/changes/)
-- Operational gotchas: [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md)
+- Role-facing setup and troubleshooting: [`buyer-quickstart.md`](../buyer-quickstart.md), [`seller-quickstart.md`](../seller-quickstart.md), and [`indexer-quickstart.md`](../indexer-quickstart.md)
 - Configuration reference: [`../configuration.md`](../configuration.md)
 - Role boundaries: [`../roles.md`](../roles.md)
 - Validation runbook: [`VALIDATION_RUNBOOK.md`](VALIDATION_RUNBOOK.md)

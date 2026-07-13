@@ -65,4 +65,4 @@ These intentionally have no implementation task list until their activation cond
 5. Run focused behavioral checks and strict OpenSpec validation.
 6. Synchronize the delta and archive the completed change.
 
-`docs/development/ARCHITECTURE.md` is now a non-normative orientation page. Operational warnings remain in `docs/development/KNOWN_ISSUES.md`.
+`docs/development/ARCHITECTURE.md` is the non-normative orientation page. User-facing current behavior and troubleshooting belong in the relevant buyer, seller, or registry documentation; intended changes and their current behavioral context belong in OpenSpec.

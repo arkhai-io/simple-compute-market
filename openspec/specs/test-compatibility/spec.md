@@ -27,6 +27,13 @@ End-to-end stages MUST fail at the stage that violates a required contract and M
 - **WHEN** a downstream stage cannot obtain a prerequisite produced by an earlier stage
 - **THEN** the suite identifies the missing prerequisite and originating failure deterministically
 
+### Requirement: Exact e2e state dependencies
+Every staged e2e state field MUST use one exact producer/consumer name, and every field introduced for downstream behavior MUST have at least one explicit `require_state` consumer.
+
+#### Scenario: Test author adds staged state
+- **WHEN** a test adds a field to `DealState`
+- **THEN** a downstream stage consumes that exact attribute name and coverage verifies the transition
+
 ### Requirement: Compatible client rollout
 Clients MUST tolerate additive response fields and, during a staged rollout, tolerate absence of newly introduced optional fields until all servers are upgraded.
 

@@ -96,6 +96,13 @@ grouping is purely navigational and does not change how tests are run.
    stages consume it. Tests for the stage itself override or introspect
    how the output was produced.
 
+6. **Exact stage-state dependencies.** A stage that consumes prior
+   `DealState` uses `require_state(deal_state, "field")` with the exact
+   dataclass attribute name. When adding a field, add at least one
+   downstream consumer and verify the producer/consumer transition.
+   Misspelled or unconsumed fields otherwise turn the originating failure
+   into a misleading downstream skip.
+
 ## Running
 
 Docker-compose must be up with all four layers running. For local

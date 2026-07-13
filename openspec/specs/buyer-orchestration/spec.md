@@ -27,6 +27,13 @@ Negotiation policies MUST own their compatibility checks, CLI parameter surfaces
 - **WHEN** the selected buyer policy rejects every advertised tuple
 - **THEN** the buyer reports no compatible format rather than negotiating malformed terms
 
+### Requirement: Policy-specific opening constraints
+Buyer role documentation MUST expose any configured policy constraint that can terminate negotiation before a counter-round. For the current maximizing bisection policy, an explicit opening below the seller's advertised primary rate is unsupported; the default listed-price policy opens at that rate.
+
+#### Scenario: Buyer chooses a bisection opening
+- **WHEN** a buyer explicitly configures the maximizing bisection policy
+- **THEN** role guidance tells the buyer to choose an initial price at least as high as the listing's advertised primary rate
+
 ### Requirement: Schema-opaque aggregation
 Core aggregation control flow MUST order and select candidates through registered policies without embedding domain or settlement-kit price vocabulary.
 

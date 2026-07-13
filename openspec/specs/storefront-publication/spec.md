@@ -13,6 +13,17 @@ A storefront MUST expose authenticated listing, negotiation, settlement, identit
 - **WHEN** the buyer submits a settlement request for an accepted negotiation
 - **THEN** the storefront verifies the agreed terms and settlement evidence before scheduling fulfillment
 
+### Requirement: Operator-visible acceptance state
+The storefront MUST expose enough operator state to distinguish global negotiation pause from listing state and an empty resource projection from an inventory import failure.
+
+#### Scenario: Storefront is globally paused
+- **WHEN** a buyer starts a negotiation while global pause is active
+- **THEN** the storefront rejects it with HTTP 503 and a global-pause reason until an authenticated operator resumes the process
+
+#### Scenario: Storefront has no imported resources
+- **WHEN** the active storefront database contains no resource rows
+- **THEN** system status reports `resource_count` as zero and new negotiations cannot match inventory
+
 ### Requirement: Registry publication ownership
 A storefront MUST publish, update, close, and reconcile its listings against one or more configured registries using its publisher identity.
 

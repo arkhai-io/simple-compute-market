@@ -1,22 +1,27 @@
 ## Context
 
-This change is split from the legacy planning corpus so it can be reviewed, implemented, verified, and archived independently. Planned and independently implementable.
+The planning migration removed the monolithic architecture/backlog documents, but its first pass created a mixed-audience `KNOWN_ISSUES.md`. Buyer, seller, registry, provisioner, and test-author guidance should instead live where that role looks for setup and troubleshooting. OpenSpec owns current normative contracts and proposed changes.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Operators and contributors can find verified explanations for baked contracts, escrow mechanics, schema, watchdog recovery, and GPU passthrough.
+- Give every verified documentation gap a named role audience and a role-facing destination.
+- Keep current normative behavior in the owning capability spec and intended changes in active changes.
+- Remove mixed generic issue pages after their entries are classified and moved.
 
 **Non-Goals:**
-- Do not duplicate normative OpenSpec requirements in prose documentation.
+- Do not duplicate normative requirements or implementation plans in role-facing prose.
+- Do not publish unverified recovery instructions.
 
 ## Decisions
 
-- Keep ownership aligned with `test-compatibility` and its baseline specification.
-- Preserve existing wire, persistence, and deployment compatibility unless the proposal explicitly calls for a coordinated cutover.
-- Remove obsolete in-repository callers or paths in the same implementation; do not leave indefinite aliases.
+- Classify each entry as current role guidance, current normative behavior, or intended change before writing prose.
+- Put buyer/seller/registry/provisioner behavior in that role's quickstart or operator guide; put test architecture in the e2e contributor guide.
+- Keep unresolved negotiation-watchdog recovery in this change until code and focused tests establish the safe procedure.
+- Link role guides to OpenSpec when readers need the normative contract or an intended change; do not restate the change plan.
+- Delete generic issue pages rather than maintaining a second taxonomy.
 
 ## Risks / Trade-offs
 
-- Legacy prose may describe landed and pending work together; implementation MUST re-check current code before editing.
-- Cross-service changes require focused contract tests at each changed boundary.
+- Role-specific material can be duplicated accidentally across quickstarts; link to one owning page when audiences overlap.
+- Current behavior may be undesirable; documenting it in a spec does not close or supersede a change intended to alter it.
