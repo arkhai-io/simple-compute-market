@@ -41,4 +41,11 @@ Shareable VM slices and exclusive bare-metal allocations referring to the same p
 - **WHEN** an exclusive bare-metal reservation targets the same physical host
 - **THEN** the site ledger rejects the exclusive reservation
 
-<!-- Provenance: ARCHITECTURE.md “Capacity and the Site Authority”, API-credits domain capacity notes; evidence: kit/site ledger and core_storefront capacity/aggregation tests -->
+## Evidence
+
+- Reserve/commit/release, hold TTL, versioned anonymous events, and cross-mode conflicts: `kit/site/tests/unit/test_ledger.py`.
+- Site-tagged soft-state aggregation and failure isolation: `core/storefront/tests/unit/test_aggregation.py`.
+- Storefront-to-site HTTP contract: `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`.
+- “Do not close on ignorance” reconciliation: `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py`.
+
+Job-kind dispatch and deal-event routing across multiple storefront domains are not established by this capacity baseline; they remain proposed in `prove-multi-domain-capacity`.

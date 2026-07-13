@@ -30,8 +30,15 @@ The protocol engine MUST delegate schema-specific per-turn decisions to an injec
 ### Requirement: Protocol state persistence
 The seller MUST persist negotiation threads, messages, terminal state, and agreed terms needed to authenticate continuation and inspect negotiation outcomes.
 
-#### Scenario: Process restarts between rounds
-- **WHEN** a buyer continues a nonterminal persisted thread after restart
-- **THEN** the seller validates continuation against the stored transcript rather than accepting an unrelated history
+#### Scenario: Buyer continues an existing thread
+- **WHEN** a buyer submits a continuation for a persisted nonterminal negotiation
+- **THEN** the seller loads the stored thread, appends the next protocol-visible messages, and updates terminal/agreed state as appropriate
 
-<!-- Provenance: ARCHITECTURE.md “What the core owns”, storefront negotiation sections; evidence: core/storefront sync negotiation implementation and focused negotiation tests -->
+## Evidence
+
+- Synchronous new/continue HTTP behavior and persisted amounts: `domains/vms/storefront/tests/integration/test_negotiate_controller.py`.
+- Thread message ordering and terminal detection: `domains/vms/storefront/tests/unit/test_negotiation_thread.py`.
+- History reconstruction and policy-chain primitives: `core/storefront/tests/unit/test_negotiation_sync.py`.
+- Agreed-term commit behavior: `domains/vms/storefront/tests/services/test_negotiation_service.py`.
+
+The stronger claim that a restart preserves every in-flight continuation path is not independently covered by the cited tests and is therefore not stated as a baseline scenario.

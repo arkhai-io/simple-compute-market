@@ -2,16 +2,16 @@
 
 ## Purpose
 
-Define mechanism-neutral settlement plans and the long-running servicing lifecycle for obligations, claims, and heartbeats.
+Define the implemented mechanism-neutral settlement-plan carrier, persisted claim servicing, and signed heartbeat evidence.
 
 ## Requirements
 
-### Requirement: Negotiation-settlement-servicing phases
-The market flow MUST preserve Terms as the deterministic handoff from negotiation to settlement, materialize Terms into a settlement Plan, and service that Plan to a Receipt as a separate long-running phase.
+### Requirement: Negotiation-to-plan handoff
+Negotiation MUST produce deterministic Terms and the current settlement path MUST carry the materialized obligations as a mechanism-neutral Settlement Plan. Long-running claim collection runs separately from the synchronous settlement request.
 
-#### Scenario: Settlement requires later collection
-- **WHEN** escrows are materialized but an obligation is not yet collectible
-- **THEN** servicing persists and schedules the claim independently of the synchronous settlement call
+#### Scenario: Settlement creates a later claim
+- **WHEN** an Alkahest obligation is materialized but is not yet collectible
+- **THEN** the storefront persists a claim for the separate claims engine rather than waiting for collection in the settlement request
 
 ### Requirement: Mechanism-neutral plan carrier
 Core settlement plan and claim carriers MUST express lifecycle-universal fields and carry mechanism-specific data in tagged `{mechanism, params}` envelopes.
@@ -41,4 +41,11 @@ Alkahest-specific plan, claim, and arbiter encoding MUST live in the Alkahest ki
 - **WHEN** it needs mechanism-specific readiness or collection behavior
 - **THEN** it dispatches through the registered Alkahest codec
 
-<!-- Provenance: ARCHITECTURE.md “Settlement Lifecycle”; evidence: market_core settlement carriers, core_storefront settlement_lifecycle.py and heartbeats.py, kit/alkahest codecs -->
+## Evidence
+
+- Plan envelopes and lifecycle-universal fields: `core/src/market_core/schemas.py` and `kit/alkahest/tests/unit/test_plans.py`.
+- Persisted restartable claims and idempotent submission: `core/storefront/tests/unit/test_settlement_lifecycle.py`.
+- Signed heartbeat authentication and persistence: `core/storefront/tests/unit/test_heartbeats.py`.
+- Alkahest mechanism dispatch and claim hooks: `kit/alkahest/tests/unit/test_claims.py` and `test_claim_hooks.py`.
+
+The code does not currently expose one generic `service(Plan) -> Receipt` contract or engine-driven materialization/reclaim for arbitrary plan shapes. Those are proposed lifecycle work and are not part of this baseline.

@@ -9,9 +9,9 @@ Define registry fan-in, domain plugins, policy-driven negotiation, aggregation, 
 ### Requirement: Plugin-composed buyer CLI
 The core `market` CLI MUST discover domain plugins through entry-point metadata and let each plugin register namespaced verbs without core importing the domain.
 
-#### Scenario: VM and API-credit plugins are installed
+#### Scenario: A domain plugin is installed
 - **WHEN** the buyer CLI starts
-- **THEN** both domains' verbs are available in one process without name collisions
+- **THEN** the plugin's verbs are registered without the core package importing that domain
 
 ### Requirement: Linear buy orchestration
 A buy run MUST compose discovery, candidate filtering/aggregation, negotiation, and settlement through injected hooks and persist stage results needed for inspection and recovery.
@@ -20,8 +20,8 @@ A buy run MUST compose discovery, candidate filtering/aggregation, negotiation, 
 - **WHEN** the run log contains accepted terms and a deal reference
 - **THEN** recovery can inspect or resume the deal without renegotiating a second agreement
 
-### Requirement: Policy-owned negotiation parameters
-Negotiation policies MUST own their compatibility checks, CLI parameter surfaces, opening messages, and per-round responses; the core MUST deliver policy parameters without interpreting schema-specific fields.
+### Requirement: Domain-owned negotiation surface
+Domain buyer adapters MUST own settlement compatibility checks and CLI parameters, negotiation policies MUST own opening and per-round decisions, and the core MUST deliver policy inputs without interpreting schema-specific fields.
 
 #### Scenario: Listing has no compatible settlement tuple
 - **WHEN** the selected buyer policy rejects every advertised tuple
@@ -41,4 +41,11 @@ Core aggregation control flow MUST order and select candidates through registere
 - **WHEN** a registered Alkahest aggregation policy is selected
 - **THEN** kit code interprets price fields while core applies the resulting ordering
 
-<!-- Provenance: ARCHITECTURE.md buyer CLI and policy sections; evidence: core_buyer orchestrator, plugin discovery, policy surface, escrow selection, run-log/recovery tests -->
+## Evidence
+
+- Core/domain import purity and entry-point composition: `core/buyer/tests/unit/test_carrier_purity.py`, `domains/vms/buyer/tests/test_plugin_export.py`, and `domains/apicredits/buyer/tests/test_plugin_export.py`.
+- Injected orchestration and aggregation-policy control: `core/buyer/tests/unit/test_orchestrator.py` and `kit/alkahest/tests/unit/test_aggregation.py`.
+- Persisted negotiation resume and agreed-run settlement continuation: `domains/vms/buyer/tests/test_buyer_client_resume.py` and `domains/vms/buyer/tests/test_buy_resume_cli.py`.
+- Policy-owned negotiation behavior: VM buyer policy and client tests.
+
+Simultaneous command registration for every installed domain plugin is not independently covered by the cited tests; the baseline claim is limited to the plugin boundary and each shipped plugin's export contract.

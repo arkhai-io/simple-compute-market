@@ -39,10 +39,18 @@ Core storefront publication orchestration MUST accept discovered publication-sou
 - **THEN** the core runner invokes it through the publication-source contract and publishes its opaque payloads
 
 ### Requirement: Domain runtime codecs
-A storefront domain runtime MUST provide the codecs for listing, message, terms, materialization, receipt, and result payloads used by shared storefront services.
+The shared storefront role MUST define a domain-runtime codec bundle for listing, message, terms, materialization, receipt, and result payloads. Current VM, bare-metal, and API-credit composition roots MUST provide their domain runtime explicitly.
 
-#### Scenario: Storefront hosts a domain
-- **WHEN** shared services cross a domain payload boundary
-- **THEN** they use the selected runtime codec rather than importing a concrete domain helper ad hoc
+#### Scenario: Storefront composition selects a domain
+- **WHEN** a current domain storefront is assembled
+- **THEN** its composition root supplies the domain-runtime bundle used at the shared boundary
 
-<!-- Provenance: ARCHITECTURE.md storefront component and package layout; evidence: core_storefront.publication_sources, publication_runner, publication_plugins, domain_runtime and storefront tests -->
+## Evidence
+
+- Generic publication source, runner, and plugin discovery: `core/storefront/tests/unit/test_publication_sources.py`, `test_publication_runner.py`, and `test_publication_plugins.py`.
+- Registry fan-out and publication persistence: `core/storefront/tests/unit/test_registry_publication.py` and `domains/vms/storefront/tests/unit/test_publications_wiring.py`.
+- Domain-runtime bundle and VM wiring: `core/storefront/tests/unit/test_domain_runtime.py` and `domains/vms/storefront/tests/unit/test_domain_runtime_wiring.py`.
+- Global pause state: `domains/vms/storefront/tests/unit/test_order_pause_state.py` and `tests/integration/test_admin_api.py`.
+- Resource-count diagnosis: `domains/vms/storefront/src/market_storefront/services/system_service.py` and `e2e-tests/tests/smoke/test_storefront_smoke.py`.
+
+Making every storefront service consume the domain-runtime bundle, and replacing the domain-owned storefront executables, remain proposed work rather than baseline behavior.

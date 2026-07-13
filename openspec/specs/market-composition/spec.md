@@ -28,10 +28,18 @@ Kit and domain concept modules MUST NOT depend on core composition packages; rol
 - **THEN** core has no domain imports and from-below modules have no upward composition imports
 
 ### Requirement: Role-owned executable composition
-The buyer executable MUST be core-owned and load domain plugins; registry behavior MUST be core-owned and schema-configured; storefront/provisioning composition MAY remain domain-owned while the generic executable boundary is migrated.
+The buyer executable MUST be core-owned and load domain plugins, and registry behavior MUST be core-owned and schema-configured. The current VM and API-credit storefront executables and the VM provisioning executable are domain-owned composition roots; making those executables generic is proposed work, not current baseline behavior.
 
-#### Scenario: Multiple buyer domains are installed
-- **WHEN** more than one buyer domain plugin is present
-- **THEN** their namespaced verbs compose in one `market` executable
+#### Scenario: A buyer domain plugin is installed
+- **WHEN** the core `market` executable starts
+- **THEN** that plugin registers its domain verbs through entry-point composition
 
-<!-- Provenance: ARCHITECTURE.md “Organizing Principle”, “Package layout”, “CLIs”; evidence: core/tests/unit/test_carrier_purity.py, domains/vms/storefront/tests/unit/test_architecture_imports.py, core/buyer/tests/unit/test_cli.py, domains/vms/buyer/tests/test_plugin_export.py -->
+#### Scenario: Seller starts a current storefront
+- **WHEN** a VM or API-credit storefront is launched
+- **THEN** the domain-owned composition root assembles the shared storefront role with that domain's runtime and infrastructure adapters
+
+## Evidence
+
+- Import boundaries: `core/tests/unit/test_carrier_purity.py` and `domains/vms/storefront/tests/unit/test_architecture_imports.py`.
+- Core CLI fallback and shipped plugin contracts: `core/buyer/tests/unit/test_cli.py`, `domains/vms/buyer/tests/test_plugin_export.py`, and `domains/apicredits/buyer/tests/test_plugin_export.py`.
+- Distribution entry points: `core/buyer/pyproject.toml`, `domains/vms/buyer/pyproject.toml`, and `domains/apicredits/buyer/pyproject.toml`.

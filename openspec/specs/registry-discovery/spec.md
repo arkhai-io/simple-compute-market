@@ -34,11 +34,11 @@ The registry MUST identify a filter-spec version with an ETag and MUST reject a 
 - **WHEN** a client queries listings with an ETag that does not match the active filter-spec
 - **THEN** the registry returns HTTP 412
 
-### Requirement: Compatibility-preserving schema rollout
-Non-additive registry API or persistence changes MUST preserve coexistence of old and new client/pod versions or wait for the Postgres rollout that enables gradual deployment.
 
-#### Scenario: Additive response rollout
-- **WHEN** a response field is introduced before all clients update
-- **THEN** old clients continue to parse the response and new clients tolerate its absence during the rollout window
+## Evidence
 
-<!-- Provenance: ARCHITECTURE.md “arkhai-core-registry”, “Registry client compatibility constraint”; evidence: core/registry/src/api/filter_spec.py, filter_eval.py, listing routes and registry client tests -->
+- Schema loading, validation, and ETag behavior: `core/registry/tests/unit/test_filter_spec.py`, `core/registry/tests/integration/test_filter_spec.py`, and `test_validate_publish.py`.
+- Declarative filtering and stale `If-Match`: `core/registry/tests/unit/test_filter_eval.py` and `core/registry/tests/integration/test_listings_filtering.py`.
+- Lazy publisher identity and owner-scoped mutation: `core/registry/tests/integration/test_eip191_publish.py`, `test_listings.py`, and `test_publishers.py`.
+
+Compatibility-preserving non-additive rollout is proposed policy tied to the Postgres migration, not established current registry behavior; it belongs in `migrate-registry-to-postgres`.

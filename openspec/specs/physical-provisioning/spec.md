@@ -2,26 +2,19 @@
 
 ## Purpose
 
-Define scheduling, fulfillment execution, durable settlement records, jobs, and lease release behavior.
+Define the implemented allocation-backed executor dispatch, asynchronous job, and lease release behavior in the VM provisioning service.
 
 ## Requirements
 
-### Requirement: Scheduler-owned resource binding
-A PhysicalSettlementScheduler MUST atomically bind an allocation/agreement to a Settlement Resource before a FulfillmentProvider executes create operations.
+### Requirement: Allocation-backed executor registration
+Market-managed VM and bare-metal leases MUST attach executor kind, target, and executor-specific reference data to an existing committed site allocation.
 
-#### Scenario: Provider cannot use selected resource
-- **WHEN** provider validation rejects the selected Settlement Resource
-- **THEN** the provider reports failure and does not silently substitute another resource outside the scheduler boundary
-
-### Requirement: Idempotent fulfillment
-Fulfillment creation MUST be idempotent by `allocation_id`, and durable settlement state MUST retain the selected resource, provider, lifecycle state, and opaque provider metadata.
-
-#### Scenario: Create request is retried
-- **WHEN** the same allocation is submitted after an uncertain response
-- **THEN** provisioning returns or resumes the existing settlement instead of double-provisioning
+#### Scenario: Bare-metal lease is registered
+- **WHEN** a caller registers a lease for a committed allocation and bare-metal machine
+- **THEN** the allocation records the `bare_metal` executor kind, machine target, and physical-host reference
 
 ### Requirement: Executor-dispatched lifecycle
-Market-managed create, status, and release MUST dispatch by executor kind; direct VM host administration endpoints MAY remain separate operator surfaces.
+Market-managed release MUST dispatch by executor kind; direct VM host administration endpoints MAY remain separate operator surfaces.
 
 #### Scenario: Bare-metal allocation is released
 - **WHEN** its lease lifecycle invokes release
@@ -41,4 +34,10 @@ Lease expiry MUST invoke the configured executor release delegate before capacit
 - **WHEN** the release delegate returns a failure
 - **THEN** capacity remains unavailable, the lease enters `release_failed`, and retry/force-release controls remain available
 
-<!-- Provenance: ARCHITECTURE.md provisioning and lease lifecycle sections; evidence: provisioning API, job queue, LeaseLifecycleService, executor dispatch and integration tests -->
+## Evidence
+
+- VM and bare-metal allocation executor metadata: `domains/vms/provisioning/service/tests/integration/test_leases_api.py` and `test_bare_metal_leases_api.py`.
+- Persisted asynchronous job lifecycle and polling: `domains/vms/provisioning/service/tests/integration/test_vms_api.py`.
+- Executor-specific release, failed-release capacity retention, retry, and force release: `domains/vms/provisioning/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `unit/services/test_ledger_lease_lifecycle.py`.
+
+`PhysicalSettlementScheduler`, `FulfillmentProvider`, and a durable mechanism-neutral settlement record are not implemented baseline contracts; the remaining ownership and package extraction is proposed in `migrate-compute-provisioning`.

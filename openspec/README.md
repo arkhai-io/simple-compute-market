@@ -23,11 +23,13 @@ Use `bunx @fission-ai/openspec@latest list` to inspect active changes, `show <na
 | [Buyer orchestration](specs/buyer-orchestration/spec.md) | Plugins, policy selection, aggregation, and recovery |
 | [Deployment and state](specs/deployment-state/spec.md) | Topology, persistence, migrations, and packaging |
 | [Testing and compatibility](specs/test-compatibility/spec.md) | Test levels, fixtures, e2e staging, and rollout contracts |
+| [Planning governance](specs/planning-governance/spec.md) | Specification ownership, evidence, and change readiness |
 
 ## Active changes
 
-### Ready for implementation
+### Imported change index — specification required
 
+The following proposals/designs are a normalized index of the former TODO and design documents, not implementation-ready plans. Their generated task lists were removed. Before implementation, audit the proposal against current code, rewrite its delta requirements and acceptance scenarios, make its design decisions explicit, and only then create a concrete task artifact.
 - `add-database-migration-commands`
 - `migrate-registry-to-postgres` — application work; Cloud SQL provisioning remains externally blocked
 - `add-settlement-plan-shapes`
@@ -49,7 +51,7 @@ Use `bunx @fission-ai/openspec@latest list` to inspect active changes, `show <na
 
 ### Deferred, conditional, or design-gated
 
-These intentionally have no implementation task list until their activation condition is satisfied:
+These also require the same specification audit, and their activation condition must be satisfied before tasks are created:
 
 - `index-registry-filters` — activate when measured `/listings` latency requires indexes
 - `extract-e2e-project` — activate when external operators need an independent runner
@@ -58,11 +60,11 @@ These intentionally have no implementation task list until their activation cond
 
 ## Contributor workflow
 
-1. Read the owning capability spec.
-2. Create or update one independently archivable change for the proposed delta.
-3. Keep deferred and conditional ideas explicitly non-ready.
-4. Implement from the change task list and mark tasks as they complete.
-5. Run focused behavioral checks and strict OpenSpec validation.
-6. Synchronize the delta and archive the completed change.
+1. Audit the owning capability spec against current code and focused evidence.
+2. Update one independently archivable change with concrete delta requirements and design decisions.
+3. Keep imported, deferred, conditional, and externally blocked changes taskless.
+4. Create implementation tasks only after the proposal, delta spec, and design are implementation-ready.
+5. Implement from that audited task list and run focused behavioral checks.
+6. Synchronize the verified delta and archive the completed change.
 
 `docs/development/ARCHITECTURE.md` is the non-normative orientation page. User-facing current behavior and troubleshooting belong in the relevant buyer, seller, or registry documentation; intended changes and their current behavioral context belong in OpenSpec.

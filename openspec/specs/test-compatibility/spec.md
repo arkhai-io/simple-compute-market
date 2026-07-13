@@ -21,11 +21,11 @@ Cross-language or cross-package implementations of the same protocol MUST consum
 - **THEN** each implementation reproduces the shared conformance session
 
 ### Requirement: Dependency-aware e2e stages
-End-to-end stages MUST fail at the stage that violates a required contract and MUST explicitly declare consumed prior state so missing setup does not silently become an unrelated skip.
+The end-to-end stage that violates an observable contract MUST fail; downstream stages MUST explicitly declare consumed prior state and skip with the exact missing state field rather than failing for an unrelated symptom.
 
 #### Scenario: Required deal state is absent
-- **WHEN** a downstream stage cannot obtain a prerequisite produced by an earlier stage
-- **THEN** the suite identifies the missing prerequisite and originating failure deterministically
+- **WHEN** a downstream stage lacks a prerequisite produced by an earlier stage
+- **THEN** the skip reason names the missing `DealState` field
 
 ### Requirement: Exact e2e state dependencies
 Every staged e2e state field MUST use one exact producer/consumer name, and every field introduced for downstream behavior MUST have at least one explicit `require_state` consumer.
@@ -34,11 +34,10 @@ Every staged e2e state field MUST use one exact producer/consumer name, and ever
 - **WHEN** a test adds a field to `DealState`
 - **THEN** a downstream stage consumes that exact attribute name and coverage verifies the transition
 
-### Requirement: Compatible client rollout
-Clients MUST tolerate additive response fields and, during a staged rollout, tolerate absence of newly introduced optional fields until all servers are upgraded.
+## Evidence
 
-#### Scenario: Old client reads new server response
-- **WHEN** the server adds an optional field
-- **THEN** the old client ignores it and continues processing known fields
+- Layer ownership: package unit/integration suites and role-level e2e scenarios.
+- Cross-language API-credit protocol behavior: `middleware/conformance/session.json` and the Python, TypeScript, and Rust conformance runners.
+- Explicit staged dependencies: `e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py`, scenario `require_state` calls, and `e2e-tests/tests/e2e/roles/README.md`.
 
-<!-- Provenance: ARCHITECTURE.md “Testing Strategy”, registry compatibility sections; evidence: package tests, e2e staged scenarios, middleware/conformance/session.json -->
+Additive/optional client coexistence during a staged rollout is not established as a general baseline contract; registry rollout work remains proposed in `migrate-registry-to-postgres`.

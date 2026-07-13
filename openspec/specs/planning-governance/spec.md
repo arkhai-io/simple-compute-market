@@ -61,3 +61,12 @@ Project configuration MUST require proposals to identify capabilities/non-goals,
 #### Scenario: New change instructions are generated
 - **WHEN** a contributor requests artifact instructions
 - **THEN** repository vocabulary, dependency constraints, and verification expectations are available without embedding the legacy architecture document
+
+## Evidence
+
+- Canonical contributor workflow and capability index: `openspec/README.md`.
+- Artifact-generation context and quality rules: `openspec/config.yaml`.
+- Lossless migration provenance: `openspec/changes/archive/2026-07-13-migrate-planning-to-openspec/migration-ledger.json` and its archived artifacts.
+- Non-normative legacy redirects and operational separation: `docs/development/ARCHITECTURE.md`, `TODO.md`, `design-remaining-work.md`, `provisioning-migration-plan.md`, and `KNOWN_ISSUES.md`.
+
+Strict OpenSpec validation checks artifact structure. Evidence strength, current-versus-proposed classification, coherent change boundaries, and stale inline-note disposition still require code-aware review.
