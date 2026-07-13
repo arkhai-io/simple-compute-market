@@ -17,6 +17,10 @@ None.
 
 - `physical-provisioning`: The capacity check accepts optional vCPU, RAM, and GPU requirements and returns eligible ranked hosts.
 
+## Related Changes
+
+- `market-platform-compute-30-extract-service` may provide the eventual placement-service composition point, but host ranking remains a separate conditional capability. It is not required for service extraction and MUST receive its own design and activation evidence before tasks are added.
+
 ## Non-Goals
 
 - This change requires design review before implementation tasks are expanded.

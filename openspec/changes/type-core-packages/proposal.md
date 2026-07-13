@@ -17,6 +17,10 @@ None.
 
 - `market-composition`: Core public APIs are marked typed and checked through a shared pragmatic type-check target.
 
+## Related Changes
+
+- `market-platform-domain-10-contract` defines the semantic core/domain protocols and their conformance behavior. This typing change remains independently archivable and MUST NOT substitute typing declarations for that behavioral contract.
+
 ## Non-Goals
 
 - Do not impose a repository-wide strictness cliff.
