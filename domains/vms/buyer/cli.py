@@ -1,23 +1,22 @@
-"""VM compute schema plugin for the core `market` buyer CLI.
-
-The `market` console script is core-owned (``core_buyer.cli:main``); this
-package contributes the VM compute schema's commands through the
-``market.buyer_plugins`` entry-point group. The plugin claims the
-``buy``/``negotiate``/``settle`` verbs and the ``listing`` group (named
-compute filter flags + rendered output), plus the buyer-operator groups
-(``config``, ``logs``, ``escrow``, ``network``, ``chain``).
-"""
+"""VM market-domain contribution for the core ``market`` buyer CLI."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import typer
 
+from arkhai_vms import make_vm_provision_terms
+from arkhai_vms.domain_runtime import market_domain
 from core_buyer.cli import build_app
-from core_buyer.plugins import BuyerSchemaPlugin
+from market_core import (
+    DomainCapability,
+    ImmutableBuyerCapability,
+    MarketDomainContract,
+)
 
 from . import buy_cli as buy_module
 from .chain_cli import chain_app
-from .common import VMS_SCHEMA_ID
 from .config_cli import config_app
 from .logs_cli import logs_app
 from .network_cli import network_app
@@ -47,18 +46,30 @@ def register(app: typer.Typer) -> None:
     service_module.register(app)
 
 
-#: Loaded by the core CLI via
-#: [project.entry-points."market.buyer_plugins"] vms = "domains.vms.buyer.cli:plugin"
-plugin = BuyerSchemaPlugin(
-    schema_id=VMS_SCHEMA_ID,
-    register=register,
-    distribution="arkhai-vms-buyer",
-)
+def _buyer_market_domain() -> MarketDomainContract:
+    base = market_domain()
+    from .policy_surface import configured_buyer_policy
 
-#: Pre-assembled app for the PyInstaller binary (main.py), which can't rely
-#: on entry-point metadata inside the frozen bundle. The installed `market`
-#: console script reaches the same assembly through plugin discovery.
-app = build_app(plugins=[plugin])
+    return replace(
+        base,
+        declared_capabilities=(
+            base.declared_capabilities | {DomainCapability.BUYER}
+        ),
+        buyer=ImmutableBuyerCapability(
+            register_commands=register,
+            build_provision_terms=make_vm_provision_terms,
+            select_policy=configured_buyer_policy,
+            decode_result=base.codecs.result,
+        ),
+    )
+
+
+#: Loaded by ``market.buyer_domains`` discovery.
+domain = _buyer_market_domain()
+
+#: Pre-assembled app for the PyInstaller binary, which cannot rely on installed
+#: entry-point metadata inside the frozen bundle.
+app = build_app(domains=[domain])
 
 
 if __name__ == "__main__":

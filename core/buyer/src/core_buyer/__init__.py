@@ -1,6 +1,6 @@
 """Core buyer role contracts and orchestration helpers."""
 
-from core_buyer.plugins import PLUGIN_GROUP, BuyerSchemaPlugin, discover_plugins
+from core_buyer.plugins import DOMAIN_GROUP, discover_domains
 from core_buyer.registry_config import (
     resolve_discovery_timeout,
     resolve_indexer_auth,
@@ -22,9 +22,8 @@ from core_buyer.orchestrator import (
 )
 
 __all__ = [
-    "PLUGIN_GROUP",
-    "BuyerSchemaPlugin",
-    "discover_plugins",
+    "DOMAIN_GROUP",
+    "discover_domains",
     "resolve_discovery_timeout",
     "resolve_indexer_auth",
     "resolve_indexer_urls",

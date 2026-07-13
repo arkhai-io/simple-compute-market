@@ -70,7 +70,7 @@ async def fulfill_credit_obligation(
     from core_storefront.stage_log import stage_event
 
     from apicredits_storefront.domain_runtime import (
-        get_storefront_domain_runtime,
+        get_market_domain_contract,
     )
     from apicredits_storefront.utils import config
 
@@ -83,7 +83,7 @@ async def fulfill_credit_obligation(
             held_allocation.setdefault("allocation_id", hold.get("allocation_id"))
             await db.delete_capacity_hold(negotiation_id=negotiation_id)
 
-    listing = get_storefront_domain_runtime().listing(order)
+    listing = get_market_domain_contract().codecs.listing(order)
     return await fulfill_api_credits_obligation(
         client=client,
         escrow_uid=escrow_uid,

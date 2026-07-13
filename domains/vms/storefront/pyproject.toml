@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-storefront"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Provider-side storefront server: hosts /orders, /negotiate, /settle, /alerts/resource endpoints. The provider-side counterpart to arkhai-vms-buyer."
 authors = [
@@ -9,15 +9,15 @@ authors = [
 requires-python = ">=3.12,<3.14"
 dependencies = [
 	"arkhai-core-registry-client>=0.7.0",
-    "arkhai-core-storefront-client>=0.15.0",
-    "arkhai-core-storefront",
-    "arkhai-core",
+    "arkhai-core-storefront-client>=0.16.0",
+    "arkhai-core-storefront>=0.2.0",
+    "arkhai-core>=0.2.0",
     "arkhai-kit-identity",
     "arkhai-kit-alkahest",
     "arkhai-kit-config",
     "arkhai-kit-policy",
-    "arkhai-bare-metal",
-    "arkhai-vms",
+    "arkhai-bare-metal>=0.2.0",
+    "arkhai-vms>=0.2.0",
     "arkhai-vms-provisioning-client>=0.1.1",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
     "google-cloud-logging>=3.12.0,<4.0.0",

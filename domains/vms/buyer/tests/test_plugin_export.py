@@ -1,33 +1,25 @@
-"""The VM buyer CLI is a schema plugin on the core `market` skeleton.
-
-Covers both halves of the flip: the entry-point metadata actually resolves
-to our plugin (what the installed core console script relies on), and the
-assembled app exposes the full VM verb surface.
-"""
+"""The VM buyer CLI contributes a validated market-domain contract."""
 
 from __future__ import annotations
 
 from typer.testing import CliRunner
 
-from core_buyer.plugins import BuyerSchemaPlugin, discover_plugins
-from domains.vms.buyer.cli import app, plugin
+from core_buyer.plugins import discover_domains
+from domains.vms.buyer.cli import app, domain
+from market_core import DomainCapability, MarketDomainContract
 
 runner = CliRunner()
 
 
-def test_entry_point_discovery_finds_vm_plugin():
-    discovered = {p.schema_id: p for p in discover_plugins()}
-    assert "vms.compute" in discovered, (
-        "market.buyer_plugins entry point for the VM schema is not "
-        "installed — `market` (core_buyer.cli:main) would fall back to "
-        "the generic no-plugin CLI"
-    )
-    assert discovered["vms.compute"].distribution == "arkhai-vms-buyer"
+def test_entry_point_discovery_finds_vm_domain():
+    discovered = {item.identity: item for item in discover_domains()}
+    assert "compute.v1" in discovered
 
 
-def test_plugin_is_well_formed():
-    assert isinstance(plugin, BuyerSchemaPlugin)
-    assert plugin.schema_id == "vms.compute"
+def test_domain_is_well_formed():
+    assert isinstance(domain, MarketDomainContract)
+    assert domain.identity == "compute.v1"
+    assert domain.has_capability(DomainCapability.BUYER)
 
 
 def test_assembled_app_exposes_vm_verbs():
@@ -50,8 +42,8 @@ def test_assembled_listing_is_vm_rendering_not_generic_fallback():
     assert "--filter" in result.output
 
 
-def test_version_reports_plugin():
+def test_version_reports_domain_contract():
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "vms.compute" in result.output
-    assert "arkhai-vms-buyer" in result.output
+    assert "compute.v1" in result.output
+    assert "contract 1.0" in result.output

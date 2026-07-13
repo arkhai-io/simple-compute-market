@@ -61,12 +61,12 @@ class FilterDecl(BaseModel):
 class SchemaIdentity(BaseModel):
     """Stable identity of the listing schema this registry serves.
 
-    ``id`` is the name a buyer schema plugin declares compatibility
-    with (``BuyerSchemaPlugin.schema_id``, e.g. ``"vms.compute"``) —
-    with several registries configured, the buyer offers each plugin
-    only the registries whose declared id matches. ``version`` is the
-    schema-contract version; plugins match on id alone today and the
-    version is advisory until a second schema version exists.
+    ``id`` is the stable listing-schema name that buyer-domain commands
+    declare compatibility with (for example, ``"vms.compute"``). With several
+    registries configured, a domain queries only registries whose declared id
+    matches. ``version`` is the schema-contract version; buyers match on id
+    alone today, and the version remains advisory until a second schema
+    version exists.
     """
 
     model_config = ConfigDict(extra="forbid")

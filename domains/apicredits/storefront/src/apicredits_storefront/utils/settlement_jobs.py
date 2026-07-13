@@ -165,12 +165,13 @@ async def _run_settlement_job_bg(
     claim_escrow_address: str | None = None,
 ) -> None:
     """Background coroutine: run issuance fulfillment, patch the job row."""
-    from apicredits_storefront.services.fulfillment_service import (
-        fulfill_credit_obligation,
-    )
+    from apicredits_storefront.domain_runtime import get_market_domain_contract
+
+    fulfillment = get_market_domain_contract().fulfillment
+    assert fulfillment is not None
 
     try:
-        result = await fulfill_credit_obligation(
+        result = await fulfillment.fulfill(
             client=alkahest_client,
             escrow_uid=escrow_uid,
             order=order_dict,

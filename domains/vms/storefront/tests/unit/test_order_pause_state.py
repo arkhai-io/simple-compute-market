@@ -257,7 +257,12 @@ class TestStartSyncNegotiationPauseGuard:
                 buyer_address="0xBuyer",
                 proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
                 provision_terms=ProvisionTerms(
-                    duration_seconds=1800, ssh_public_key="ssh-rsa AAAA",
+                    kind="compute.v1",
+                    version=1,
+                    payload={
+                        "duration_seconds": 1800,
+                        "ssh_public_key": "ssh-rsa AAAA",
+                    },
                 ),
                 our_base_url="http://seller:8001",
                 their_agent_url="0xBuyer",

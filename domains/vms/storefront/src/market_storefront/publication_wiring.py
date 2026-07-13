@@ -12,9 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from core_storefront.publication_composition import (
-    build_bare_metal_publication_selection,
-    build_multi_domain_publication_selection,
-    build_vm_publication_selection,
+    build_storefront_publication_selection as _build_core_publication_selection,
 )
 from core_storefront.publication_runner import PublicationSourceSelection
 
@@ -80,9 +78,12 @@ def build_bare_metal_publication_source_kwargs(
 def build_vm_storefront_publication_selection(
     callbacks: VmPublicationSourceCallbacks,
 ) -> PublicationSourceSelection:
-    """Build the VM-only publication selection used by the legacy CLI."""
-    return build_vm_publication_selection(
-        build_vm_publication_source_kwargs(callbacks),
+    """Build the VM-only publication selection."""
+    return _build_core_publication_selection(
+        ("vms",),
+        source_kwargs_by_name={
+            "vms": build_vm_publication_source_kwargs(callbacks),
+        },
     )
 
 
@@ -90,8 +91,11 @@ def build_bare_metal_storefront_publication_selection(
     callbacks: BareMetalPublicationSourceCallbacks,
 ) -> PublicationSourceSelection:
     """Build a bare-metal-only publication selection."""
-    return build_bare_metal_publication_selection(
-        build_bare_metal_publication_source_kwargs(callbacks),
+    return _build_core_publication_selection(
+        ("bare_metal",),
+        source_kwargs_by_name={
+            "bare_metal": build_bare_metal_publication_source_kwargs(callbacks),
+        },
     )
 
 
@@ -102,12 +106,12 @@ def build_storefront_publication_selection(
     bare_metal_callbacks: BareMetalPublicationSourceCallbacks,
 ) -> PublicationSourceSelection:
     """Build a selected VM/bare-metal publication-source composition."""
-    if source_names == ("vms",):
-        return build_vm_storefront_publication_selection(vm_callbacks)
-    return build_multi_domain_publication_selection(
-        vm_source_kwargs=build_vm_publication_source_kwargs(vm_callbacks),
-        bare_metal_source_kwargs=build_bare_metal_publication_source_kwargs(
-            bare_metal_callbacks,
-        ),
-        source_names=source_names,
+    return _build_core_publication_selection(
+        source_names,
+        source_kwargs_by_name={
+            "vms": build_vm_publication_source_kwargs(vm_callbacks),
+            "bare_metal": build_bare_metal_publication_source_kwargs(
+                bare_metal_callbacks,
+            ),
+        },
     )

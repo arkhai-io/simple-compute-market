@@ -9,6 +9,7 @@ FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
 .PHONY: build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-client dist-compute-provisioning dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-kit-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: dist-apicredits-domain
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -23,7 +24,7 @@ DIST_DIR := ${CURDIR}/.dist
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-kit-site dist-alkahest dist-config dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-client dist-compute-provisioning dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-buyer
+dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-kit-site dist-alkahest dist-config dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-client dist-compute-provisioning dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-buyer
 
 dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -65,13 +66,19 @@ dist-compute-provisioning: ## Build arkhai-compute-provisioning wheel into .dist
 	@ls $(DIST_DIR)/arkhai_compute_provisioning-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-compute-provisioning produced a platform-specific wheel — must build inside Docker" && exit 1)
 
+dist-apicredits-domain: ## Build arkhai-apicredits-domain wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd domains/apicredits && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_apicredits_domain-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-apicredits-domain produced a platform-specific wheel — must build inside Docker" && exit 1)
+
 dist-apicredits-service: ## Build arkhai-apicredits-service wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd domains/apicredits/service && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_apicredits_service-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-apicredits-service produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-apicredits-storefront: ## Build arkhai-apicredits-storefront wheel into .dist/
+dist-apicredits-storefront: dist-apicredits-domain ## Build arkhai-apicredits-storefront wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd domains/apicredits/storefront && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_apicredits_storefront-*-none-any.whl > /dev/null 2>&1 || \
@@ -89,7 +96,7 @@ dist-apicredits-sample-app: ## Build arkhai-apicredits-sample-app wheel into .di
 	@ls $(DIST_DIR)/arkhai_apicredits_sample_app-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-apicredits-sample-app produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-apicredits-buyer: ## Build arkhai-apicredits-buyer wheel into .dist/
+dist-apicredits-buyer: dist-apicredits-domain ## Build arkhai-apicredits-buyer wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd domains/apicredits/buyer && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_apicredits_buyer-*-none-any.whl > /dev/null 2>&1 || \

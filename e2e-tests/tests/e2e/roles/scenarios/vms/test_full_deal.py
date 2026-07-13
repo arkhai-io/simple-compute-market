@@ -678,7 +678,14 @@ class TestStage05b_NegotiationStartsAndVisible:
             listing_id=deal_state.seller_listing_id,
             buyer_address=buyer_config["wallet_address"],
             initial_amount=BUYER_INITIAL_PRICE,
-            duration_seconds=DURATION_HOURS * 3600,
+            provision_terms={
+                "kind": "compute.v1",
+                "version": 1,
+                "payload": {
+                    "duration_seconds": DURATION_HOURS * 3600,
+                    "ssh_public_key": "",
+                },
+            },
             token=DEMAND_RESOURCE["token"]["contract_address"],
         )
         neg_id = resp.get("negotiation_id") if isinstance(resp, dict) else None

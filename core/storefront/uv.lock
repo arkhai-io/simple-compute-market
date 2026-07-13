@@ -157,13 +157,13 @@ wheels = [
 
 [[package]]
 name = "arkhai-core"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -180,7 +180,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-core" },
@@ -200,7 +200,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-core" },
+    { name = "arkhai-core", specifier = ">=0.2.0" },
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity" },
@@ -218,14 +218,13 @@ dev = [
 [[package]]
 name = "arkhai-kit-alkahest"
 version = "0.1.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
     { name = "web3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a5/57/b879e921397c21aae46e5cbf2f81f6053289ef8206ae2eec629e44e5998d/arkhai_kit_alkahest-0.1.0.tar.gz", hash = "sha256:012a919f975286e25b55b5707013db396bf410c48c7b063798de0fc694af28ba", size = 154273, upload-time = "2026-06-16T05:02:10.311Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/0d/fd112ddc7fd2f21a8eeac1166047463736e8e87b8fc252bf25f8816951f1/arkhai_kit_alkahest-0.1.0-py3-none-any.whl", hash = "sha256:de54f52418ca13e96f164c4f02a3668586407f24fc92d04ebb95d1d10f78af10", size = 37937, upload-time = "2026-06-16T05:02:08.994Z" },
+    { path = "arkhai_kit_alkahest-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

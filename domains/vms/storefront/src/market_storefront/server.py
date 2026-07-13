@@ -28,6 +28,7 @@ from core_storefront.app_lifecycle import (
 )
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
+from market_storefront.domain_runtime import get_market_domain_contract
 from market_storefront.utils.config import settings, AGENT_ID
 from market_storefront.utils.sqlite_client import get_sqlite_client
 from market_storefront.utils.sync_negotiation import continue_sync_negotiation
@@ -145,6 +146,7 @@ from market_storefront.controllers.deals_controller import router as deals_route
 
 app = build_storefront_app(
     config=default_storefront_app_config(root_path=settings.gateway.root_path),
+    domain=get_market_domain_contract(),
     lifespan=lifespan,
     routers=(
         system_router,

@@ -12,6 +12,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from market_core import MarketDomainContract, validate_domain_contract
+
 from core_storefront.openapi import install_admin_key_openapi
 
 
@@ -51,6 +53,7 @@ def default_storefront_app_config(*, root_path: str = "") -> StorefrontAppConfig
 def build_storefront_app(
     *,
     config: StorefrontAppConfig,
+    domain: MarketDomainContract,
     lifespan: Any | None = None,
     routers: Iterable[Any] = (),
 ) -> Any:
@@ -72,6 +75,8 @@ def build_storefront_app(
         root_path=config.root_path,
         swagger_ui_parameters=config.swagger_ui_parameters,
     )
+
+    app.state.market_domain = validate_domain_contract(domain)
 
     for router in routers:
         app.include_router(router)

@@ -127,8 +127,11 @@ def _default_seller_round_hook(sqlite_client: Any) -> SellerRoundHook:
     # site-authority capacity client; embedded mode wraps the same
     # SQLite handle the rest of this flow uses.
     from market_storefront.services.capacity_client import build_capacity_client
+    from market_storefront.domain_runtime import get_market_domain_contract
 
-    return vm_storefront_round.default_seller_round_hook(
+    policy = get_market_domain_contract().storefront
+    assert policy is not None
+    return policy.run_negotiation_policy(
         build_capacity_client(lambda: sqlite_client),
         negotiation_config=_negotiation_settings(),
         chains=_chain_settings(),
@@ -147,7 +150,7 @@ def _chain_config_paths() -> dict[str, str | None]:
 
 
 def _normalize_vm_message_terms(provision_terms: Any) -> Any | None:
-    """Normalize provision terms through the injected VM domain runtime."""
+    """Validate the VM envelope before any negotiation policy runs."""
     if provision_terms is None:
         return None
     raw = (
@@ -155,21 +158,9 @@ def _normalize_vm_message_terms(provision_terms: Any) -> Any | None:
         if hasattr(provision_terms, "model_dump")
         else provision_terms
     )
-    try:
-        from market_storefront.domain_runtime import (
-            get_storefront_domain_runtime,
-        )
+    from market_storefront.domain_runtime import get_market_domain_contract
 
-        return get_storefront_domain_runtime().message(raw)
-    except Exception:
-        # Legacy behavior tolerated foreign/empty provision envelopes by
-        # treating them as absent VM delivery terms.
-        if (
-            provision_duration_seconds(provision_terms) is None
-            and provision_start_utc(provision_terms) is None
-        ):
-            return None
-        raise
+    return get_market_domain_contract().codecs.message(raw)
 
 
 def _accepted_escrow_artifacts(

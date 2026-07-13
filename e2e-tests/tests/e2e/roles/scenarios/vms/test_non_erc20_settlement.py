@@ -343,7 +343,14 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         listing_id=listing_id,
         buyer_address=buyer_config["wallet_address"],
         initial_amount=_BUYER_INITIAL_AMOUNT,
-        duration_seconds=_DURATION_SECONDS,
+        provision_terms={
+            "kind": "compute.v1",
+            "version": 1,
+            "payload": {
+                "duration_seconds": _DURATION_SECONDS,
+                "ssh_public_key": "",
+            },
+        },
         chain_name=_CHAIN_NAME,
         escrow_address=case.escrow_address,
         literal_fields=dict(case.literal_fields),

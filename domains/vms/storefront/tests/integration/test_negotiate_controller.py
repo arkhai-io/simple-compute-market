@@ -28,6 +28,17 @@ _BUYER = "0xBuyer00000000000000000000000000000000AB"  # 42 chars
 _TOKEN = "0x0000000000000000000000000000000000000001"
 
 
+def _vm_provision(duration_seconds: int = 3600) -> dict:
+    return {
+        "kind": "compute.v1",
+        "version": 1,
+        "payload": {
+            "duration_seconds": duration_seconds,
+            "ssh_public_key": "",
+        },
+    }
+
+
 @pytest_asyncio.fixture
 async def db(tmp_path):
     from market_storefront.utils.sqlite_client import SQLiteClient
@@ -140,10 +151,10 @@ class TestNegotiateNew:
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.negotiate_new(
-                listing_id="",  # empty string still passes model; real 422 from missing field
+                listing_id="",
                 buyer_address=_BUYER,
                 initial_amount=8000,
-                duration_seconds=3600,
+                provision_terms=_vm_provision(),
             )
         # missing listing_id can't be tested via client (required param);
         # test that a nonexistent listing returns 404 below.
@@ -155,7 +166,7 @@ class TestNegotiateNew:
                 listing_id="ghost-listing",
                 buyer_address=_BUYER,
                 initial_amount=8000,
-                duration_seconds=3600,
+                provision_terms=_vm_provision(),
             )
         assert "404" in str(exc_info.value)
 
@@ -166,7 +177,7 @@ class TestNegotiateNew:
             listing_id="neg-listing-1",
             buyer_address=_BUYER,
             initial_amount=5000,
-            duration_seconds=3600,
+            provision_terms=_vm_provision(),
             token=_TOKEN,
         )
         assert "negotiation_id" in result
@@ -184,7 +195,7 @@ class TestNegotiateNew:
             listing_id="neg-listing-unlimited",
             buyer_address=_BUYER,
             initial_amount=5000,
-            duration_seconds=3600,
+            provision_terms=_vm_provision(),
             token=_TOKEN,
         )
         assert "negotiation_id" in result
@@ -199,7 +210,7 @@ class TestNegotiateNew:
             listing_id="neg-listing-large",
             buyer_address=_BUYER,
             initial_amount=large_amount,
-            duration_seconds=3600,
+            provision_terms=_vm_provision(),
             token=_TOKEN,
         )
 
@@ -209,8 +220,8 @@ class TestNegotiateNew:
         assert messages[0]["their_price"] == large_amount
         assert messages[0]["proposed_price"] == large_amount
 
-    async def test_zero_duration_returns_policy_rejection(self, client, db):
-        """duration_seconds=0 is rejected by the opening-round policy guard."""
+    async def test_invalid_payload_rejected_before_policy(self, client, db):
+        """Domain payload validation runs before the opening-round policy."""
         c, db = client
         await _seed_listing(db, "neg-listing-zero-duration")
         with pytest.raises((StorefrontClientError, Exception)) as exc_info:
@@ -218,10 +229,10 @@ class TestNegotiateNew:
                 listing_id="neg-listing-zero-duration",
                 buyer_address=_BUYER,
                 initial_amount=8000,
-                duration_seconds=0,
+                provision_terms=_vm_provision(0),
             )
-        assert "409" in str(exc_info.value)
-        assert "compute_duration_invalid" in str(exc_info.value)
+        assert "400" in str(exc_info.value)
+        assert "incompatible_provision_terms" in str(exc_info.value)
 
     async def test_listing_not_open_returns_409(self, client, db):
         """Listing in a terminal state is refused with 409."""
@@ -237,7 +248,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-closed",
                 buyer_address=_BUYER,
                 initial_amount=5000,
-                duration_seconds=3600,
+                provision_terms=_vm_provision(),
             )
         msg = str(exc_info.value)
         assert "409" in msg
@@ -274,7 +285,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-empty",
                 buyer_address=_BUYER,
                 initial_amount=5000,
-                duration_seconds=3600,
+                provision_terms=_vm_provision(),
             )
         msg = str(exc_info.value)
         assert "409" in msg
@@ -321,7 +332,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-priceless",
                 buyer_address=_BUYER,
                 initial_amount=5000,
-                duration_seconds=3600,
+                provision_terms=_vm_provision(),
                 token=_TOKEN,
             )
         msg = str(exc_info.value)
@@ -378,11 +389,7 @@ class TestNegotiateNew:
             result = await c._post("/api/v1/negotiate/new", {
                 "listing_id": "neg-listing-attestation",
                 "buyer_address": _BUYER,
-                "provision_terms": {
-                    "duration_seconds": 3600,
-                    "ssh_public_key": "",
-                    "compute_resource": None,
-                },
+                "provision_terms": _vm_provision(),
                 "proposal": {
                     "chain_name": "anvil",
                     "escrow_address": escrow_address,
@@ -447,7 +454,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-rtx",
                 buyer_address=_BUYER,
                 initial_amount=5000,
-                duration_seconds=3600,
+                provision_terms=_vm_provision(),
             )
         assert "409" in str(exc_info.value)
         assert "no_matching_inventory" in str(exc_info.value)
@@ -484,7 +491,7 @@ class TestNegotiateContinue:
             listing_id="neg-listing-continue",
             buyer_address=_BUYER,
             initial_amount=5000,
-            duration_seconds=3600,
+            provision_terms=_vm_provision(),
             token=_TOKEN,
         )
         if "negotiation_id" not in result:
