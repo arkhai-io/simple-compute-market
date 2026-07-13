@@ -56,6 +56,6 @@ Validation and issue-discovery docs:
 
 ## Reference
 
-- [`docs/development/ARCHITECTURE.md`](./docs/development/ARCHITECTURE.md) — end-to-end design: components, request flow, on-chain schema, negotiation policy machinery
+- [`openspec/README.md`](./openspec/README.md) — canonical capability specifications, active changes, and planning workflow; [`ARCHITECTURE.md`](./docs/development/ARCHITECTURE.md) is the non-normative orientation page
 - [`docs/configuration.md`](./docs/configuration.md) — config reference: bundled negotiation + aggregation policies and how to write custom ones
 - [`docs/roles.md`](./docs/roles.md) — canonical role boundaries: registries, storefronts, seller resource services, and buyers

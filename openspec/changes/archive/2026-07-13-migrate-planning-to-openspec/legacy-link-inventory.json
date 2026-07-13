@@ -1,0 +1,2871 @@
+{
+  "sourceRevision": "7742aee25addae097b62951f6bdbd02629c58fd4",
+  "strategy": "Legacy documentation paths remain concise redirects/orientation pages; contributor entry points link directly to openspec/README.md; source comments resolve through the architecture legacy section map until edited with their owning code.",
+  "entries": [
+    {
+      "source": "README.md:59",
+      "reference": "- [`openspec/README.md`](./openspec/README.md) \u2014 canonical capability specifications, active changes, and planning workflow; [`ARCHITECTURE.md`](./docs/development/ARCHITECTURE.md) is the non-normative orientation page",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/README.md:68",
+      "reference": "`docs/development/ARCHITECTURE.md` is now a non-normative orientation page. Operational warnings remain in `docs/development/KNOWN_ISSUES.md`.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/configure-pypi-trusted-publishing/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/prune-storefront-database/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-compute-provisioning/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/prove-multi-domain-capacity/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/deduplicate-dynaconf-bootstrap/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:24",
+      "reference": "\"id\": \"ARCHITECTURE.md:1\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:26",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:31",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:35",
+      "reference": "\"id\": \"ARCHITECTURE.md:9\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:37",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:9\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:40",
+      "reference": "\"destination\": \"docs/development/ARCHITECTURE.md\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:42",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:9; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:46",
+      "reference": "\"id\": \"ARCHITECTURE.md:26\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:48",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:26\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:53",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:26; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:57",
+      "reference": "\"id\": \"ARCHITECTURE.md:34\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:59",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:34\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:64",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:34; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:68",
+      "reference": "\"id\": \"ARCHITECTURE.md:73\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:70",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:73\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:75",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:73; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:79",
+      "reference": "\"id\": \"ARCHITECTURE.md:100\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:81",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:100\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:86",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:100; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:90",
+      "reference": "\"id\": \"ARCHITECTURE.md:104\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:92",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:104\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:97",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:104; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:101",
+      "reference": "\"id\": \"ARCHITECTURE.md:205\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:103",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:205\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:108",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:205; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:112",
+      "reference": "\"id\": \"ARCHITECTURE.md:221\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:114",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:221\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:119",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:221; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:123",
+      "reference": "\"id\": \"ARCHITECTURE.md:257\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:125",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:257\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:130",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:257; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:134",
+      "reference": "\"id\": \"ARCHITECTURE.md:261\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:136",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:261\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:141",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:261; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:145",
+      "reference": "\"id\": \"ARCHITECTURE.md:277\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:147",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:277\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:152",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:277; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:156",
+      "reference": "\"id\": \"ARCHITECTURE.md:288\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:158",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:288\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:163",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:288; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:167",
+      "reference": "\"id\": \"ARCHITECTURE.md:331\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:169",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:331\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:174",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:331; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:178",
+      "reference": "\"id\": \"ARCHITECTURE.md:333\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:180",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:333\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:185",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:333; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:189",
+      "reference": "\"id\": \"ARCHITECTURE.md:348\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:191",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:348\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:196",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:348; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:200",
+      "reference": "\"id\": \"ARCHITECTURE.md:437\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:202",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:437\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:207",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:437; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:211",
+      "reference": "\"id\": \"ARCHITECTURE.md:984\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:213",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:984\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:218",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:984; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:222",
+      "reference": "\"id\": \"ARCHITECTURE.md:1146\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:224",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1146\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:229",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1146; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:233",
+      "reference": "\"id\": \"ARCHITECTURE.md:1160\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:235",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1160\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:240",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1160; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:244",
+      "reference": "\"id\": \"ARCHITECTURE.md:1188\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:246",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1188\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:251",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1188; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:255",
+      "reference": "\"id\": \"ARCHITECTURE.md:1216\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:257",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1216\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:262",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1216; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:266",
+      "reference": "\"id\": \"ARCHITECTURE.md:1321\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:268",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1321\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:273",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1321; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:277",
+      "reference": "\"id\": \"ARCHITECTURE.md:1350\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:279",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1350\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:284",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1350; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:288",
+      "reference": "\"id\": \"ARCHITECTURE.md:1370\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:290",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1370\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:295",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1370; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:299",
+      "reference": "\"id\": \"ARCHITECTURE.md:1415\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:301",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1415\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:306",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1415; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:310",
+      "reference": "\"id\": \"ARCHITECTURE.md:1453\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:312",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1453\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:317",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1453; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:321",
+      "reference": "\"id\": \"ARCHITECTURE.md:1477\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:323",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1477\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:328",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1477; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:332",
+      "reference": "\"id\": \"ARCHITECTURE.md:1587\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:334",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1587\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:339",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1587; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:343",
+      "reference": "\"id\": \"ARCHITECTURE.md:1604\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:345",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1604\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:350",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1604; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:354",
+      "reference": "\"id\": \"ARCHITECTURE.md:1615\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:356",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1615\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:361",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1615; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:365",
+      "reference": "\"id\": \"ARCHITECTURE.md:1627\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:367",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1627\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:372",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1627; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:376",
+      "reference": "\"id\": \"ARCHITECTURE.md:1635\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:378",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1635\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:383",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1635; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:387",
+      "reference": "\"id\": \"ARCHITECTURE.md:1688\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:389",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1688\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:394",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1688; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:398",
+      "reference": "\"id\": \"ARCHITECTURE.md:1728\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:400",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1728\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:405",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1728; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:409",
+      "reference": "\"id\": \"ARCHITECTURE.md:1777\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:411",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1777\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:416",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1777; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:420",
+      "reference": "\"id\": \"ARCHITECTURE.md:1850\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:422",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:1850\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:427",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:1850; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:431",
+      "reference": "\"id\": \"ARCHITECTURE.md:2194\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:433",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2194\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:438",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2194; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:442",
+      "reference": "\"id\": \"ARCHITECTURE.md:2210\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:444",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2210\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:449",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2210; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:453",
+      "reference": "\"id\": \"ARCHITECTURE.md:2313\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:455",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2313\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:460",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2313; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:464",
+      "reference": "\"id\": \"ARCHITECTURE.md:2327\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:466",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2327\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:471",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2327; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:475",
+      "reference": "\"id\": \"ARCHITECTURE.md:2367\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:477",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2367\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:482",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2367; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:486",
+      "reference": "\"id\": \"ARCHITECTURE.md:2375\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:488",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2375\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:493",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2375; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:497",
+      "reference": "\"id\": \"ARCHITECTURE.md:2390\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:499",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2390\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:504",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2390; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:508",
+      "reference": "\"id\": \"ARCHITECTURE.md:2413\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:510",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2413\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:515",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2413; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:519",
+      "reference": "\"id\": \"ARCHITECTURE.md:2428\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:521",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2428\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:526",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2428; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:530",
+      "reference": "\"id\": \"ARCHITECTURE.md:2448\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:532",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2448\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:537",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2448; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:541",
+      "reference": "\"id\": \"ARCHITECTURE.md:2457\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:543",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2457\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:548",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2457; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:552",
+      "reference": "\"id\": \"ARCHITECTURE.md:2471\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:554",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2471\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:559",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2471; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:563",
+      "reference": "\"id\": \"ARCHITECTURE.md:2486\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:565",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2486\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:570",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2486; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:574",
+      "reference": "\"id\": \"ARCHITECTURE.md:2498\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:576",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2498\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:581",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2498; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:585",
+      "reference": "\"id\": \"ARCHITECTURE.md:2511\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:587",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2511\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:592",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2511; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:596",
+      "reference": "\"id\": \"ARCHITECTURE.md:2529\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:598",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2529\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:603",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2529; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:607",
+      "reference": "\"id\": \"ARCHITECTURE.md:2577\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:609",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2577\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:614",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2577; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:618",
+      "reference": "\"id\": \"ARCHITECTURE.md:2608\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:620",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2608\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:625",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2608; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:629",
+      "reference": "\"id\": \"ARCHITECTURE.md:2630\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:631",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2630\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:636",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2630; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:640",
+      "reference": "\"id\": \"ARCHITECTURE.md:2651\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:642",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2651\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:647",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2651; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:651",
+      "reference": "\"id\": \"ARCHITECTURE.md:2668\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:653",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2668\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:658",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2668; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:662",
+      "reference": "\"id\": \"ARCHITECTURE.md:2694\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:664",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2694\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:669",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2694; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:673",
+      "reference": "\"id\": \"ARCHITECTURE.md:2731\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:675",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2731\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:680",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2731; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:684",
+      "reference": "\"id\": \"ARCHITECTURE.md:2777\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:686",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2777\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:691",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2777; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:695",
+      "reference": "\"id\": \"ARCHITECTURE.md:2779\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:697",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2779\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:702",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2779; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:706",
+      "reference": "\"id\": \"ARCHITECTURE.md:2819\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:708",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2819\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:713",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2819; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:717",
+      "reference": "\"id\": \"ARCHITECTURE.md:2999\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:719",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:2999\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:724",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:2999; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:728",
+      "reference": "\"id\": \"ARCHITECTURE.md:3036\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:730",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3036\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:735",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3036; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:739",
+      "reference": "\"id\": \"ARCHITECTURE.md:3139\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:741",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3139\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:746",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3139; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:750",
+      "reference": "\"id\": \"ARCHITECTURE.md:3145\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:752",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3145\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:757",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3145; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:761",
+      "reference": "\"id\": \"ARCHITECTURE.md:3202\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:763",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3202\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:768",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3202; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:772",
+      "reference": "\"id\": \"ARCHITECTURE.md:3228\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:774",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3228\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:779",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3228; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:783",
+      "reference": "\"id\": \"ARCHITECTURE.md:3230\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:785",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3230\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:790",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3230; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:794",
+      "reference": "\"id\": \"ARCHITECTURE.md:3242\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:796",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3242\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:801",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3242; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:805",
+      "reference": "\"id\": \"ARCHITECTURE.md:3269\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:807",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3269\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:812",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3269; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:816",
+      "reference": "\"id\": \"ARCHITECTURE.md:3290\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:818",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3290\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:823",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3290; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:827",
+      "reference": "\"id\": \"ARCHITECTURE.md:3302\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:829",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3302\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:834",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3302; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:838",
+      "reference": "\"id\": \"ARCHITECTURE.md:3310\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:840",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3310\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:845",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3310; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:849",
+      "reference": "\"id\": \"ARCHITECTURE.md:3316\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:851",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3316\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:856",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3316; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:860",
+      "reference": "\"id\": \"ARCHITECTURE.md:3350\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:862",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3350\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:867",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3350; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:871",
+      "reference": "\"id\": \"ARCHITECTURE.md:3352\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:873",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3352\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:878",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3352; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:882",
+      "reference": "\"id\": \"ARCHITECTURE.md:3366\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:884",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3366\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:889",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3366; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:893",
+      "reference": "\"id\": \"ARCHITECTURE.md:3407\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:895",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3407\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:900",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3407; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:904",
+      "reference": "\"id\": \"ARCHITECTURE.md:3412\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:906",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3412\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:911",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3412; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:915",
+      "reference": "\"id\": \"ARCHITECTURE.md:3420\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:917",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3420\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:922",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3420; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:926",
+      "reference": "\"id\": \"ARCHITECTURE.md:3428\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:928",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3428\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:933",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3428; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:937",
+      "reference": "\"id\": \"ARCHITECTURE.md:3568\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:939",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3568\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:944",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3568; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:948",
+      "reference": "\"id\": \"ARCHITECTURE.md:3583\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:950",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3583\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:955",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3583; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:959",
+      "reference": "\"id\": \"ARCHITECTURE.md:3676\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:961",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3676\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:966",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3676; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:970",
+      "reference": "\"id\": \"ARCHITECTURE.md:3679\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:972",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3679\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:977",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3679; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:981",
+      "reference": "\"id\": \"ARCHITECTURE.md:3707\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:983",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3707\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:988",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3707; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:992",
+      "reference": "\"id\": \"ARCHITECTURE.md:3753\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:994",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3753\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:999",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3753; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1003",
+      "reference": "\"id\": \"ARCHITECTURE.md:3768\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1005",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3768\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1010",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3768; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1014",
+      "reference": "\"id\": \"ARCHITECTURE.md:3784\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1016",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3784\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1021",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3784; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1025",
+      "reference": "\"id\": \"ARCHITECTURE.md:3788\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1027",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3788\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1032",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3788; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1036",
+      "reference": "\"id\": \"ARCHITECTURE.md:3801\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1038",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3801\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1043",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3801; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1047",
+      "reference": "\"id\": \"ARCHITECTURE.md:3842\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1049",
+      "reference": "\"source\": \"docs/development/ARCHITECTURE.md:3842\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1054",
+      "reference": "\"evidence\": \"docs/development/ARCHITECTURE.md:3842; implementation paths and focused tests cited by destination spec\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1058",
+      "reference": "\"id\": \"TODO.md:1\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1060",
+      "reference": "\"source\": \"docs/development/TODO.md:1\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1065",
+      "reference": "\"evidence\": \"docs/development/TODO.md:1; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1069",
+      "reference": "\"id\": \"TODO.md:7\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1071",
+      "reference": "\"source\": \"docs/development/TODO.md:7\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1076",
+      "reference": "\"evidence\": \"docs/development/TODO.md:7; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1080",
+      "reference": "\"id\": \"TODO.md:42\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1082",
+      "reference": "\"source\": \"docs/development/TODO.md:42\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1087",
+      "reference": "\"evidence\": \"docs/development/TODO.md:42; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1091",
+      "reference": "\"id\": \"TODO.md:44\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1093",
+      "reference": "\"source\": \"docs/development/TODO.md:44\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1098",
+      "reference": "\"evidence\": \"docs/development/TODO.md:44; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1102",
+      "reference": "\"id\": \"TODO.md:69\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1104",
+      "reference": "\"source\": \"docs/development/TODO.md:69\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1109",
+      "reference": "\"evidence\": \"docs/development/TODO.md:69; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1113",
+      "reference": "\"id\": \"TODO.md:89\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1115",
+      "reference": "\"source\": \"docs/development/TODO.md:89\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1120",
+      "reference": "\"evidence\": \"docs/development/TODO.md:89; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1124",
+      "reference": "\"id\": \"TODO.md:91\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1126",
+      "reference": "\"source\": \"docs/development/TODO.md:91\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1131",
+      "reference": "\"evidence\": \"docs/development/TODO.md:91; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1135",
+      "reference": "\"id\": \"TODO.md:155\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1137",
+      "reference": "\"source\": \"docs/development/TODO.md:155\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1142",
+      "reference": "\"evidence\": \"docs/development/TODO.md:155; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1146",
+      "reference": "\"id\": \"TODO.md:220\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1148",
+      "reference": "\"source\": \"docs/development/TODO.md:220\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1153",
+      "reference": "\"evidence\": \"docs/development/TODO.md:220; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1157",
+      "reference": "\"id\": \"TODO.md:253\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1159",
+      "reference": "\"source\": \"docs/development/TODO.md:253\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1164",
+      "reference": "\"evidence\": \"docs/development/TODO.md:253; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1168",
+      "reference": "\"id\": \"TODO.md:269\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1170",
+      "reference": "\"source\": \"docs/development/TODO.md:269\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1175",
+      "reference": "\"evidence\": \"docs/development/TODO.md:269; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1179",
+      "reference": "\"id\": \"TODO.md:284\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1181",
+      "reference": "\"source\": \"docs/development/TODO.md:284\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1186",
+      "reference": "\"evidence\": \"docs/development/TODO.md:284; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1190",
+      "reference": "\"id\": \"TODO.md:294\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1192",
+      "reference": "\"source\": \"docs/development/TODO.md:294\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1197",
+      "reference": "\"evidence\": \"docs/development/TODO.md:294; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1201",
+      "reference": "\"id\": \"TODO.md:304\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1203",
+      "reference": "\"source\": \"docs/development/TODO.md:304\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1208",
+      "reference": "\"evidence\": \"docs/development/TODO.md:304; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1212",
+      "reference": "\"id\": \"TODO.md:308\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1214",
+      "reference": "\"source\": \"docs/development/TODO.md:308\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1219",
+      "reference": "\"evidence\": \"docs/development/TODO.md:308; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1223",
+      "reference": "\"id\": \"TODO.md:324\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1225",
+      "reference": "\"source\": \"docs/development/TODO.md:324\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1230",
+      "reference": "\"evidence\": \"docs/development/TODO.md:324; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1234",
+      "reference": "\"id\": \"TODO.md:326\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1236",
+      "reference": "\"source\": \"docs/development/TODO.md:326\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1241",
+      "reference": "\"evidence\": \"docs/development/TODO.md:326; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1245",
+      "reference": "\"id\": \"TODO.md:336\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1247",
+      "reference": "\"source\": \"docs/development/TODO.md:336\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1252",
+      "reference": "\"evidence\": \"docs/development/TODO.md:336; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1256",
+      "reference": "\"id\": \"TODO.md:338\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1258",
+      "reference": "\"source\": \"docs/development/TODO.md:338\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1263",
+      "reference": "\"evidence\": \"docs/development/TODO.md:338; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1267",
+      "reference": "\"id\": \"TODO.md:356\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1269",
+      "reference": "\"source\": \"docs/development/TODO.md:356\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1274",
+      "reference": "\"evidence\": \"docs/development/TODO.md:356; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1278",
+      "reference": "\"id\": \"TODO.md:364\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1280",
+      "reference": "\"source\": \"docs/development/TODO.md:364\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1285",
+      "reference": "\"evidence\": \"docs/development/TODO.md:364; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1289",
+      "reference": "\"id\": \"TODO.md:390\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1291",
+      "reference": "\"source\": \"docs/development/TODO.md:390\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1296",
+      "reference": "\"evidence\": \"docs/development/TODO.md:390; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1300",
+      "reference": "\"id\": \"TODO.md:630\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1302",
+      "reference": "\"source\": \"docs/development/TODO.md:630\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1307",
+      "reference": "\"evidence\": \"docs/development/TODO.md:630; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1311",
+      "reference": "\"id\": \"TODO.md:673\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1313",
+      "reference": "\"source\": \"docs/development/TODO.md:673\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1318",
+      "reference": "\"evidence\": \"docs/development/TODO.md:673; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1322",
+      "reference": "\"id\": \"TODO.md:691\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1324",
+      "reference": "\"source\": \"docs/development/TODO.md:691\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1329",
+      "reference": "\"evidence\": \"docs/development/TODO.md:691; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1333",
+      "reference": "\"id\": \"TODO.md:735\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1335",
+      "reference": "\"source\": \"docs/development/TODO.md:735\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1340",
+      "reference": "\"evidence\": \"docs/development/TODO.md:735; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1344",
+      "reference": "\"id\": \"TODO.md:775\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1346",
+      "reference": "\"source\": \"docs/development/TODO.md:775\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1351",
+      "reference": "\"evidence\": \"docs/development/TODO.md:775; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1355",
+      "reference": "\"id\": \"TODO.md:814\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1357",
+      "reference": "\"source\": \"docs/development/TODO.md:814\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1362",
+      "reference": "\"evidence\": \"docs/development/TODO.md:814; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1366",
+      "reference": "\"id\": \"TODO.md:848\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1368",
+      "reference": "\"source\": \"docs/development/TODO.md:848\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1373",
+      "reference": "\"evidence\": \"docs/development/TODO.md:848; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1377",
+      "reference": "\"id\": \"TODO.md:876\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1379",
+      "reference": "\"source\": \"docs/development/TODO.md:876\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1384",
+      "reference": "\"evidence\": \"docs/development/TODO.md:876; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1388",
+      "reference": "\"id\": \"TODO.md:900\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1390",
+      "reference": "\"source\": \"docs/development/TODO.md:900\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1395",
+      "reference": "\"evidence\": \"docs/development/TODO.md:900; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1399",
+      "reference": "\"id\": \"TODO.md:910\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1401",
+      "reference": "\"source\": \"docs/development/TODO.md:910\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1406",
+      "reference": "\"evidence\": \"docs/development/TODO.md:910; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1410",
+      "reference": "\"id\": \"TODO.md:914\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1412",
+      "reference": "\"source\": \"docs/development/TODO.md:914\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1417",
+      "reference": "\"evidence\": \"docs/development/TODO.md:914; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1421",
+      "reference": "\"id\": \"TODO.md:920\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1423",
+      "reference": "\"source\": \"docs/development/TODO.md:920\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1428",
+      "reference": "\"evidence\": \"docs/development/TODO.md:920; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1432",
+      "reference": "\"id\": \"TODO.md:926\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1434",
+      "reference": "\"source\": \"docs/development/TODO.md:926\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1439",
+      "reference": "\"evidence\": \"docs/development/TODO.md:926; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1443",
+      "reference": "\"id\": \"TODO.md:932\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1445",
+      "reference": "\"source\": \"docs/development/TODO.md:932\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1450",
+      "reference": "\"evidence\": \"docs/development/TODO.md:932; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1454",
+      "reference": "\"id\": \"TODO.md:938\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1456",
+      "reference": "\"source\": \"docs/development/TODO.md:938\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1461",
+      "reference": "\"evidence\": \"docs/development/TODO.md:938; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1465",
+      "reference": "\"id\": \"TODO.md:944\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1467",
+      "reference": "\"source\": \"docs/development/TODO.md:944\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1472",
+      "reference": "\"evidence\": \"docs/development/TODO.md:944; legacy status and linked design context\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1476",
+      "reference": "\"id\": \"design-remaining-work.md:1\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1478",
+      "reference": "\"source\": \"docs/development/design-remaining-work.md:1\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1483",
+      "reference": "\"evidence\": \"docs/development/design-remaining-work.md:1; linked from TODO core follow-ons\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1487",
+      "reference": "\"id\": \"design-remaining-work.md:19\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1489",
+      "reference": "\"source\": \"docs/development/design-remaining-work.md:19\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1494",
+      "reference": "\"evidence\": \"docs/development/design-remaining-work.md:19; linked from TODO core follow-ons\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1498",
+      "reference": "\"id\": \"design-remaining-work.md:47\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1500",
+      "reference": "\"source\": \"docs/development/design-remaining-work.md:47\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1505",
+      "reference": "\"evidence\": \"docs/development/design-remaining-work.md:47; linked from TODO core follow-ons\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1509",
+      "reference": "\"id\": \"design-remaining-work.md:53\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1511",
+      "reference": "\"source\": \"docs/development/design-remaining-work.md:53\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1516",
+      "reference": "\"evidence\": \"docs/development/design-remaining-work.md:53; linked from TODO core follow-ons\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1520",
+      "reference": "\"id\": \"design-remaining-work.md:64\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1522",
+      "reference": "\"source\": \"docs/development/design-remaining-work.md:64\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1527",
+      "reference": "\"evidence\": \"docs/development/design-remaining-work.md:64; linked from TODO core follow-ons\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1531",
+      "reference": "\"id\": \"design-remaining-work.md:80\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1533",
+      "reference": "\"source\": \"docs/development/design-remaining-work.md:80\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1538",
+      "reference": "\"evidence\": \"docs/development/design-remaining-work.md:80; linked from TODO core follow-ons\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1542",
+      "reference": "\"id\": \"design-remaining-work.md:91\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1544",
+      "reference": "\"source\": \"docs/development/design-remaining-work.md:91\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1549",
+      "reference": "\"evidence\": \"docs/development/design-remaining-work.md:91; linked from TODO core follow-ons\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1553",
+      "reference": "\"id\": \"design-remaining-work.md:106\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1555",
+      "reference": "\"source\": \"docs/development/design-remaining-work.md:106\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1560",
+      "reference": "\"evidence\": \"docs/development/design-remaining-work.md:106; linked from TODO core follow-ons\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1564",
+      "reference": "\"id\": \"design-remaining-work.md:138\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1566",
+      "reference": "\"source\": \"docs/development/design-remaining-work.md:138\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1571",
+      "reference": "\"evidence\": \"docs/development/design-remaining-work.md:138; linked from TODO core follow-ons\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1575",
+      "reference": "\"id\": \"design-remaining-work.md:153\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1577",
+      "reference": "\"source\": \"docs/development/design-remaining-work.md:153\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1582",
+      "reference": "\"evidence\": \"docs/development/design-remaining-work.md:153; linked from TODO core follow-ons\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1586",
+      "reference": "\"id\": \"provisioning-migration-plan.md:1\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1588",
+      "reference": "\"source\": \"docs/development/provisioning-migration-plan.md:1\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1593",
+      "reference": "\"evidence\": \"docs/development/provisioning-migration-plan.md:1; ownership map and extraction sequence\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1597",
+      "reference": "\"id\": \"provisioning-migration-plan.md:14\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1599",
+      "reference": "\"source\": \"docs/development/provisioning-migration-plan.md:14\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1604",
+      "reference": "\"evidence\": \"docs/development/provisioning-migration-plan.md:14; ownership map and extraction sequence\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1608",
+      "reference": "\"id\": \"provisioning-migration-plan.md:40\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1610",
+      "reference": "\"source\": \"docs/development/provisioning-migration-plan.md:40\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1615",
+      "reference": "\"evidence\": \"docs/development/provisioning-migration-plan.md:40; ownership map and extraction sequence\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1619",
+      "reference": "\"id\": \"provisioning-migration-plan.md:42\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1621",
+      "reference": "\"source\": \"docs/development/provisioning-migration-plan.md:42\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1626",
+      "reference": "\"evidence\": \"docs/development/provisioning-migration-plan.md:42; ownership map and extraction sequence\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1630",
+      "reference": "\"id\": \"provisioning-migration-plan.md:55\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1632",
+      "reference": "\"source\": \"docs/development/provisioning-migration-plan.md:55\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1637",
+      "reference": "\"evidence\": \"docs/development/provisioning-migration-plan.md:55; ownership map and extraction sequence\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1641",
+      "reference": "\"id\": \"provisioning-migration-plan.md:71\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1643",
+      "reference": "\"source\": \"docs/development/provisioning-migration-plan.md:71\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1648",
+      "reference": "\"evidence\": \"docs/development/provisioning-migration-plan.md:71; ownership map and extraction sequence\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1652",
+      "reference": "\"id\": \"provisioning-migration-plan.md:84\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1654",
+      "reference": "\"source\": \"docs/development/provisioning-migration-plan.md:84\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1659",
+      "reference": "\"evidence\": \"docs/development/provisioning-migration-plan.md:84; ownership map and extraction sequence\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1663",
+      "reference": "\"id\": \"provisioning-migration-plan.md:104\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1665",
+      "reference": "\"source\": \"docs/development/provisioning-migration-plan.md:104\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1670",
+      "reference": "\"evidence\": \"docs/development/provisioning-migration-plan.md:104; ownership map and extraction sequence\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1674",
+      "reference": "\"id\": \"provisioning-migration-plan.md:106\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1676",
+      "reference": "\"source\": \"docs/development/provisioning-migration-plan.md:106\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1681",
+      "reference": "\"evidence\": \"docs/development/provisioning-migration-plan.md:106; ownership map and extraction sequence\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1685",
+      "reference": "\"id\": \"provisioning-migration-plan.md:124\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1687",
+      "reference": "\"source\": \"docs/development/provisioning-migration-plan.md:124\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1692",
+      "reference": "\"evidence\": \"docs/development/provisioning-migration-plan.md:124; ownership map and extraction sequence\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1696",
+      "reference": "\"id\": \"provisioning-migration-plan.md:138\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1698",
+      "reference": "\"source\": \"docs/development/provisioning-migration-plan.md:138\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1703",
+      "reference": "\"evidence\": \"docs/development/provisioning-migration-plan.md:138; ownership map and extraction sequence\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1707",
+      "reference": "\"id\": \"provisioning-migration-plan.md:148\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1709",
+      "reference": "\"source\": \"docs/development/provisioning-migration-plan.md:148\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1714",
+      "reference": "\"evidence\": \"docs/development/provisioning-migration-plan.md:148; ownership map and extraction sequence\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1718",
+      "reference": "\"id\": \"provisioning-migration-plan.md:160\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1720",
+      "reference": "\"source\": \"docs/development/provisioning-migration-plan.md:160\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1725",
+      "reference": "\"evidence\": \"docs/development/provisioning-migration-plan.md:160; ownership map and extraction sequence\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1729",
+      "reference": "\"id\": \"provisioning-migration-plan.md:213\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1731",
+      "reference": "\"source\": \"docs/development/provisioning-migration-plan.md:213\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1736",
+      "reference": "\"evidence\": \"docs/development/provisioning-migration-plan.md:213; ownership map and extraction sequence\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1740",
+      "reference": "\"id\": \"TODO.md:233\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1742",
+      "reference": "\"source\": \"docs/development/TODO.md:233\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/migration-ledger.json:1747",
+      "reference": "\"evidence\": \"docs/development/TODO.md:233-249\",",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/tasks.md:4",
+      "reference": "- [ ] 1.2 Inventory every heading and subheading in `ARCHITECTURE.md`, `TODO.md`, `design-remaining-work.md`, and `provisioning-migration-plan.md`",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/tasks.md:56",
+      "reference": "- [ ] 6.3 Remove or reduce `design-remaining-work.md` and `provisioning-migration-plan.md` after their decisions, deltas, and history are covered",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/design.md:5",
+      "reference": "- `ARCHITECTURE.md` mixes durable principles, current runtime facts, package inventories, known debt, and references to pending work.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/design.md:6",
+      "reference": "- `TODO.md` mixes planned changes, in-progress programs, implemented history, deferred/conditional ideas, operational gotchas, and documentation gaps. One heading is missing from its index and several large items contain both landed and pending work.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/design.md:7",
+      "reference": "- `design-remaining-work.md` and `provisioning-migration-plan.md` duplicate parts of the TODO while carrying decisions and sequencing that do not fit a flat backlog.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/design.md:36",
+      "reference": "Alternative: import `ARCHITECTURE.md` as a single spec and `TODO.md` as one change. Rejected because it reproduces the current coupling, prevents independent validation/archive, and makes scenarios too broad to be useful.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/proposal.md:8",
+      "reference": "- Convert stable, code-verified behavior from `docs/development/ARCHITECTURE.md` into capability specs organized by durable system responsibility rather than repository package.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/proposal.md:9",
+      "reference": "- Convert actionable work from `docs/development/TODO.md`, `design-remaining-work.md`, `provisioning-migration-plan.md`, and explicitly marked ad hoc TODO/FIXME notes into independently reviewable OpenSpec changes.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/proposal.md:14",
+      "reference": "- **BREAKING (contributor workflow):** after cutover, new planned work and normative architecture changes are recorded through OpenSpec rather than appended to `docs/development/TODO.md` or ad hoc planning files.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/proposal.md:28",
+      "reference": "- Legacy documentation: `docs/development/ARCHITECTURE.md`, `TODO.md`, `design-remaining-work.md`, and `provisioning-migration-plan.md`.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/type-core-packages/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/automate-seller-spot/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/fix-golden-image-config/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/extract-e2e-project/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/extract-storefront-callback-client/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/finish-buyer-cli-residue/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/genericize-storefront-client-wire/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/add-settlement-plan-shapes/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/separate-site-resource-lifecycle/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/add-host-capacity-filters/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/add-provisioning-cli/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/remove-relative-uv-sources/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/add-database-migration-commands/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/separate-marketplace-registry/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/complete-development-documentation/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/index-registry-filters/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-registry-to-postgres/proposal.md:26",
+      "reference": "Planning migration source: `docs/development/TODO.md` and its linked design notes. Runtime impact is limited to the capability above when this change is applied.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-registry-to-postgres/specs/deployment-state/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/index-registry-filters/specs/registry-discovery/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/complete-development-documentation/specs/test-compatibility/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/separate-marketplace-registry/specs/deployment-state/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/add-database-migration-commands/specs/deployment-state/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/remove-relative-uv-sources/specs/deployment-state/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/add-provisioning-cli/specs/physical-provisioning/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/add-host-capacity-filters/specs/physical-provisioning/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/separate-site-resource-lifecycle/specs/site-capacity/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/add-settlement-plan-shapes/specs/settlement-servicing/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/genericize-storefront-client-wire/specs/negotiation-protocol/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/finish-buyer-cli-residue/specs/buyer-orchestration/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/extract-storefront-callback-client/specs/physical-provisioning/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/extract-e2e-project/specs/test-compatibility/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/fix-golden-image-config/specs/physical-provisioning/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/automate-seller-spot/specs/storefront-publication/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/type-core-packages/specs/market-composition/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-planning-to-openspec/specs/planning-governance/spec.md:15",
+      "reference": "The migration MUST inventory every heading in `docs/development/ARCHITECTURE.md`, `TODO.md`, `design-remaining-work.md`, and `provisioning-migration-plan.md`, plus every in-scope repository-owned actionable TODO/FIXME marker. Each inventory entry MUST record its source, classification, destination or explicit removal rationale, and verification state.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/deduplicate-dynaconf-bootstrap/specs/deployment-state/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/prove-multi-domain-capacity/specs/site-capacity/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/migrate-compute-provisioning/specs/physical-provisioning/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/prune-storefront-database/specs/storefront-publication/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/changes/configure-pypi-trusted-publishing/specs/deployment-state/spec.md:10",
+      "reference": "<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/specs/negotiation-protocol/spec.md:37",
+      "reference": "<!-- Provenance: ARCHITECTURE.md \u201cWhat the core owns\u201d, storefront negotiation sections; evidence: core/storefront sync negotiation implementation and focused negotiation tests -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/specs/deployment-state/spec.md:37",
+      "reference": "<!-- Provenance: ARCHITECTURE.md deployment, build, artifact publishing, and state migration sections; evidence: Helm/compose manifests, service migration modules, package Makefiles -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/specs/site-capacity/spec.md:44",
+      "reference": "<!-- Provenance: ARCHITECTURE.md \u201cCapacity and the Site Authority\u201d, API-credits domain capacity notes; evidence: kit/site ledger and core_storefront capacity/aggregation tests -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/specs/market-composition/spec.md:37",
+      "reference": "<!-- Provenance: ARCHITECTURE.md \u201cOrganizing Principle\u201d, \u201cPackage layout\u201d, \u201cCLIs\u201d; evidence: core/tests/unit/test_carrier_purity.py, domains/vms/storefront/tests/unit/test_architecture_imports.py, core/buyer/tests/unit/test_cli.py, domains/vms/buyer/tests/test_plugin_export.py -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/specs/physical-provisioning/spec.md:44",
+      "reference": "<!-- Provenance: ARCHITECTURE.md provisioning and lease lifecycle sections; evidence: provisioning API, job queue, LeaseLifecycleService, executor dispatch and integration tests -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/specs/buyer-orchestration/spec.md:37",
+      "reference": "<!-- Provenance: ARCHITECTURE.md buyer CLI and policy sections; evidence: core_buyer orchestrator, plugin discovery, policy surface, escrow selection, run-log/recovery tests -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/specs/settlement-servicing/spec.md:44",
+      "reference": "<!-- Provenance: ARCHITECTURE.md \u201cSettlement Lifecycle\u201d; evidence: market_core settlement carriers, core_storefront settlement_lifecycle.py and heartbeats.py, kit/alkahest codecs -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/specs/storefront-publication/spec.md:37",
+      "reference": "<!-- Provenance: ARCHITECTURE.md storefront component and package layout; evidence: core_storefront.publication_sources, publication_runner, publication_plugins, domain_runtime and storefront tests -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/specs/test-compatibility/spec.md:37",
+      "reference": "<!-- Provenance: ARCHITECTURE.md \u201cTesting Strategy\u201d, registry compatibility sections; evidence: package tests, e2e staged scenarios, middleware/conformance/session.json -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "openspec/specs/registry-discovery/spec.md:44",
+      "reference": "<!-- Provenance: ARCHITECTURE.md \u201carkhai-core-registry\u201d, \u201cRegistry client compatibility constraint\u201d; evidence: core/registry/src/api/filter_spec.py, filter_eval.py, listing routes and registry client tests -->",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "e2e-tests/tests/e2e/roles/scenarios/apicredits/test_credits_deal_buyer_cli.py:3",
+      "reference": "The domain's end-to-end (ARCHITECTURE.md, \"API-credits market domain\"):",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "kit/policy/src/market_policy/scalar_policies.py:138",
+      "reference": "(ARCHITECTURE.md, \"Buyer negotiation policy surface\"): payment escrows carry",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "kit/policy/src/market_policy/scalar_policies.py:274",
+      "reference": "The buyer-side default decider (ARCHITECTURE.md, \"Buyer negotiation",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "kit/policy/src/market_policy/buyer_policy.py:6",
+      "reference": "(ARCHITECTURE.md, \"Buyer negotiation policy surface\"): it declares which escrow",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "kit/alkahest/src/market_alkahest/claims.py:5",
+      "reference": "(``docs/development/ARCHITECTURE.md``, \"Settlement Lifecycle\"):",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "kit/site/src/market_site/db.py:4",
+      "reference": "scaffold (docs/development/ARCHITECTURE.md, \"Capacity and the Site",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "kit/site/src/market_site/ledger.py:4",
+      "reference": "(docs/development/ARCHITECTURE.md, \"Capacity and the Site Authority\"):",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "kit/site/src/market_site/__init__.py:4",
+      "reference": "(docs/development/ARCHITECTURE.md, \"Capacity and the Site Authority\"):",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "kit/config/src/market_config/config_loader.py:181",
+      "reference": "buyer's. See ARCHITECTURE.md \"Storefront chart layout\".",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "provisioning/compute/README.md:31",
+      "reference": "See `docs/development/provisioning-migration-plan.md` for the migration map and",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "core/src/market_core/schemas.py:25",
+      "reference": "``docs/development/ARCHITECTURE.md, \"Settlement Lifecycle\"``).",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "core/buyer/src/core_buyer/negotiation_client.py:452",
+      "reference": "# round-0 opening (ARCHITECTURE.md, \"Buyer negotiation policy surface\") \u2014 run it",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "core/buyer/src/core_buyer/escrow_selection.py:81",
+      "reference": "(ARCHITECTURE.md, \"Buyer negotiation policy surface\"): entries the policy cannot",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "core/buyer/src/core_buyer/policy_surface.py:4",
+      "reference": "formats every Alkahest market domain trades in (ARCHITECTURE.md, \"Buyer",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "core/buyer/src/core_buyer/cli.py:114",
+      "reference": "verb (ARCHITECTURE.md, \"Buyer negotiation policy surface\") and",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "core/buyer/src/core_buyer/orchestrator.py:46",
+      "reference": "# context (ARCHITECTURE.md, \"Buyer negotiation policy surface\").",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "core/storefront/src/core_storefront/capacity.py:4",
+      "reference": "(docs/development/ARCHITECTURE.md, \"Capacity and the Site Authority\")",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "core/storefront/src/core_storefront/aggregation.py:5",
+      "reference": "(docs/development/ARCHITECTURE.md, \"Capacity and the Site Authority\"):",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "core/storefront/src/core_storefront/settlement_lifecycle.py:4",
+      "reference": "(``docs/development/ARCHITECTURE.md``, \"Settlement Lifecycle\"). A",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "core/storefront/src/core_storefront/heartbeats.py:4",
+      "reference": "(``docs/development/ARCHITECTURE.md``, \"Settlement Lifecycle\").",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "domains/apicredits/listings/models.py:4",
+      "reference": "schema-typed by the domain plugin (ARCHITECTURE.md, \"API-credits market",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "domains/apicredits/negotiation/buyer_policies.py:4",
+      "reference": "``key_possession_challenge`` middleware (ARCHITECTURE.md, \"API-credits",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "domains/apicredits/negotiation/policies.py:19",
+      "reference": "(ARCHITECTURE.md, \"API-credits market domain \u2014 Key ownership\"): for an existing-key",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "domains/apicredits/buyer/negotiate_cli.py:36",
+      "reference": "(ARCHITECTURE.md, \"Buyer negotiation policy surface\"), injected at",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "domains/apicredits/buyer/buy_cli.py:80",
+      "reference": "(ARCHITECTURE.md, \"Buyer negotiation policy surface\") \u2014 the scalar",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "domains/apicredits/service/src/db/models.py:3",
+      "reference": "The schema is the credit model from ARCHITECTURE.md, \"API-credits market",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "domains/apicredits/service/src/services/keys_service.py:4",
+      "reference": "(ARCHITECTURE.md, \"API-credits market domain \u2014 Market shape\"): it re-checks the",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "domains/apicredits/service/src/services/keys_service.py:45",
+      "reference": "#: (ARCHITECTURE.md, \"API-credits market domain \u2014 Key ownership\").",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "domains/apicredits/storefront/src/apicredits_storefront/services/listing_service.py:4",
+      "reference": "ledger (ARCHITECTURE.md, \"API-credits market domain \u2014 Market shape\"): ``publish_from_quota``",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "domains/vms/buyer/negotiate_cli.py:41",
+      "reference": "(ARCHITECTURE.md, \"Buyer negotiation policy surface\"), injected at app assembly \u2014",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "domains/vms/buyer/buy_cli.py:298",
+      "reference": "(ARCHITECTURE.md, \"Buyer negotiation policy surface\") \u2014 the scalar policies",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "domains/vms/storefront/src/market_storefront/services/capacity_client.py:5",
+      "reference": "docs/development/ARCHITECTURE.md, \"Capacity and the Site Authority\");",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "domains/vms/storefront/tests/unit/test_architecture_imports.py:3",
+      "reference": "The target graph (docs/development/ARCHITECTURE.md, \"Organizing Principle\"):",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    },
+    {
+      "source": "domains/vms/storefront/tests/integration/test_negotiate_controller.py:5",
+      "reference": "documented in ARCHITECTURE.md.",
+      "disposition": "redirected by concise legacy entry point or direct OpenSpec link"
+    }
+  ]
+}

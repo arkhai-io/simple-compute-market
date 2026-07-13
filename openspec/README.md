@@ -1,0 +1,68 @@
+# Arkhai OpenSpec Index
+
+OpenSpec is the canonical home for normative system behavior and planned changes.
+
+- `specs/` describes current, implemented capability contracts.
+- `changes/` describes proposed deltas and their implementation tasks.
+- `changes/archive/` records completed changes after their deltas are synchronized.
+- `config.yaml` supplies repository context and artifact-quality rules.
+
+Use `bunx @fission-ai/openspec@latest list` to inspect active changes, `show <name>` to read one, and `validate --all --strict` before review.
+
+## Current capability specifications
+
+| Capability | Contract |
+|---|---|
+| [Market composition](specs/market-composition/spec.md) | Core/kit/domain dependency direction, role ownership, and plugins |
+| [Registry discovery](specs/registry-discovery/spec.md) | Publication, filter-spec validation, identity, and compatibility |
+| [Negotiation protocol](specs/negotiation-protocol/spec.md) | Signed synchronous rounds, policy hooks, and deterministic Terms |
+| [Settlement servicing](specs/settlement-servicing/spec.md) | Plans, claims, mechanism codecs, and heartbeats |
+| [Storefront publication](specs/storefront-publication/spec.md) | Seller surfaces, listing reconciliation, and domain runtimes |
+| [Site capacity](specs/site-capacity/spec.md) | Capacity authority, reservations, aggregation, and events |
+| [Physical provisioning](specs/physical-provisioning/spec.md) | Scheduling, fulfillment, jobs, and lease release |
+| [Buyer orchestration](specs/buyer-orchestration/spec.md) | Plugins, policy selection, aggregation, and recovery |
+| [Deployment and state](specs/deployment-state/spec.md) | Topology, persistence, migrations, and packaging |
+| [Testing and compatibility](specs/test-compatibility/spec.md) | Test levels, fixtures, e2e staging, and rollout contracts |
+
+## Active changes
+
+### Ready for implementation
+
+- `add-database-migration-commands`
+- `migrate-registry-to-postgres` — application work; Cloud SQL provisioning remains externally blocked
+- `add-settlement-plan-shapes`
+- `prove-multi-domain-capacity`
+- `genericize-storefront-client-wire`
+- `finish-buyer-cli-residue`
+- `configure-pypi-trusted-publishing`
+- `type-core-packages`
+- `add-provisioning-cli`
+- `remove-relative-uv-sources`
+- `prune-storefront-database`
+- `deduplicate-dynaconf-bootstrap`
+- `separate-marketplace-registry`
+- `fix-golden-image-config`
+- `separate-site-resource-lifecycle`
+- `automate-seller-spot`
+- `migrate-compute-provisioning`
+- `complete-development-documentation`
+
+### Deferred, conditional, or design-gated
+
+These intentionally have no implementation task list until their activation condition is satisfied:
+
+- `index-registry-filters` — activate when measured `/listings` latency requires indexes
+- `extract-e2e-project` — activate when external operators need an independent runner
+- `extract-storefront-callback-client` — activate if the dependency becomes a demonstrated maintenance problem
+- `add-host-capacity-filters` — expand tasks after its API/ranking design review
+
+## Contributor workflow
+
+1. Read the owning capability spec.
+2. Create or update one independently archivable change for the proposed delta.
+3. Keep deferred and conditional ideas explicitly non-ready.
+4. Implement from the change task list and mark tasks as they complete.
+5. Run focused behavioral checks and strict OpenSpec validation.
+6. Synchronize the delta and archive the completed change.
+
+`docs/development/ARCHITECTURE.md` is now a non-normative orientation page. Operational warnings remain in `docs/development/KNOWN_ISSUES.md`.
