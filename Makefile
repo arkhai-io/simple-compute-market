@@ -56,7 +56,7 @@ dist-policy: ## Build arkhai-kit-policy wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_kit_policy-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-policy produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-provisioning-operator-client: ## Build arkhai-vms-provisioning-operator-client wheel into .dist/
+dist-provisioning-operator-client: dist-compute-provisioning ## Build arkhai-vms-provisioning-operator-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd domains/vms/provisioning/client && uv build --wheel --out-dir $(DIST_DIR)
 

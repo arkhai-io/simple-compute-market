@@ -33,7 +33,9 @@ class PoolConfigHandler(Protocol[UnitOfWorkT]):
         self, config: Mapping[str, Any]
     ) -> tuple[dict[str, Any] | None, tuple[PoolConfigValidationProblem, ...]]: ...
 
-    def read_config(self, unit_of_work: UnitOfWorkT, pool_id: str) -> dict[str, Any]: ...
+    def read_config(
+        self, unit_of_work: UnitOfWorkT, pool_id: str
+    ) -> dict[str, Any]: ...
 
     def replace_config(
         self,

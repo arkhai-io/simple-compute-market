@@ -43,6 +43,16 @@ from typing import Any, Optional
 
 import httpx
 
+from compute_provisioning import (
+    PoolCreate,
+    PoolImportRequest,
+    PoolImportResponse,
+    PoolListResponse,
+    PoolReplace,
+    PoolResponse,
+    PoolUpdate,
+    PoolValidateResponse,
+)
 from vm_provisioning_operator.models import (
     AnsibleReadinessResponse,
     CreateVmRequest,
@@ -57,14 +67,6 @@ from vm_provisioning_operator.models import (
     JobLogsResponse,
     JobStatusResponse,
     JobSubmitResponse,
-    PoolCreate,
-    PoolImportRequest,
-    PoolImportResponse,
-    PoolListResponse,
-    PoolResponse,
-    PoolReplace,
-    PoolUpdate,
-    PoolValidateResponse,
     VmActionRequest,
 )
 

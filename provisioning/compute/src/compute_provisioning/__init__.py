@@ -44,6 +44,19 @@ from .app import (
     build_compute_provisioning_app,
 )
 from .lifecycle import cancel_background_tasks, create_background_task
+from .pool_config_handler import PoolConfigHandler, PoolConfigValidationProblem
+from .pools import (
+    PoolCreate,
+    PoolImportDiff,
+    PoolImportRequest,
+    PoolImportResponse,
+    PoolListResponse,
+    PoolReplace,
+    PoolResponse,
+    PoolUpdate,
+    PoolValidateResponse,
+    PoolValidationProblem,
+)
 from .startup import (
     ComputeProvisioningBackgroundTask,
     ComputeProvisioningRuntime,
@@ -85,6 +98,18 @@ __all__ = [
     "LogsReference",
     "ProvisioningErrorEnvelope",
     "ProvisioningJob",
+    "PoolConfigHandler",
+    "PoolConfigValidationProblem",
+    "PoolCreate",
+    "PoolImportDiff",
+    "PoolImportRequest",
+    "PoolImportResponse",
+    "PoolListResponse",
+    "PoolReplace",
+    "PoolResponse",
+    "PoolUpdate",
+    "PoolValidateResponse",
+    "PoolValidationProblem",
     "ResultEnvelope",
     "UnsupportedExecutorActionError",
     "contract_major",
@@ -105,7 +130,3 @@ __all__ = [
     "start_compute_provisioning_runtime",
     "stop_compute_provisioning_runtime",
 ]
-
-from .pool_config_handler import PoolConfigHandler, PoolConfigValidationProblem
-
-__all__.append("PoolConfigHandler")

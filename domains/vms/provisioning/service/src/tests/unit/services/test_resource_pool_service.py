@@ -20,7 +20,7 @@ from sqlalchemy.pool import StaticPool
 
 from db.database import create_session_factory
 from db.models import Base
-from provisioning_client.models import PoolCreate, PoolReplace, PoolUpdate
+from compute_provisioning import PoolCreate, PoolReplace, PoolUpdate
 from services.resource_pool_service import (
     PoolAlreadyExistsError,
     PoolNotFoundError,
@@ -68,46 +68,70 @@ _ANSIBLE_CONFIG = {
 
 class TestCreatePool:
     def test_create_returns_pool_with_provider_config(self, svc):
-        pool = svc.create_pool(PoolCreate(
-            id="hetzner-eu", label="Hetzner EU", provider="ansible",
-            provider_config=_ANSIBLE_CONFIG,
-        ))
+        pool = svc.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
         assert pool.id == "hetzner-eu"
         assert pool.enabled is True
         assert pool.provider_config["playbook_path"] == _ANSIBLE_CONFIG["playbook_path"]
         assert pool.provider_config["extra_vars"] == {}
 
     def test_create_duplicate_id_raises(self, svc):
-        svc.create_pool(PoolCreate(
-            id="hetzner-eu", label="Hetzner EU", provider="ansible",
-            provider_config=_ANSIBLE_CONFIG,
-        ))
-        with pytest.raises(PoolAlreadyExistsError):
-            svc.create_pool(PoolCreate(
-                id="hetzner-eu", label="Hetzner EU (again)", provider="ansible",
+        svc.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
                 provider_config=_ANSIBLE_CONFIG,
-            ))
+            )
+        )
+        with pytest.raises(PoolAlreadyExistsError):
+            svc.create_pool(
+                PoolCreate(
+                    id="hetzner-eu",
+                    label="Hetzner EU (again)",
+                    provider="ansible",
+                    provider_config=_ANSIBLE_CONFIG,
+                )
+            )
 
     def test_create_unknown_provider_raises(self, svc):
         with pytest.raises(PoolValidationError):
-            svc.create_pool(PoolCreate(
-                id="k8s-1", label="K8s Cluster 1", provider="kubernetes",
-                provider_config={"namespace": "default"},
-            ))
+            svc.create_pool(
+                PoolCreate(
+                    id="k8s-1",
+                    label="K8s Cluster 1",
+                    provider="kubernetes",
+                    provider_config={"namespace": "default"},
+                )
+            )
 
     def test_create_ansible_missing_playbook_path_raises(self, svc):
         with pytest.raises(PoolValidationError):
-            svc.create_pool(PoolCreate(
-                id="hetzner-eu", label="Hetzner EU", provider="ansible",
-                provider_config={"inventory_group": "kvm_hosts"},
-            ))
+            svc.create_pool(
+                PoolCreate(
+                    id="hetzner-eu",
+                    label="Hetzner EU",
+                    provider="ansible",
+                    provider_config={"inventory_group": "kvm_hosts"},
+                )
+            )
 
     def test_create_ansible_missing_inventory_group_raises(self, svc):
         with pytest.raises(PoolValidationError):
-            svc.create_pool(PoolCreate(
-                id="hetzner-eu", label="Hetzner EU", provider="ansible",
-                provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
-            ))
+            svc.create_pool(
+                PoolCreate(
+                    id="hetzner-eu",
+                    label="Hetzner EU",
+                    provider="ansible",
+                    provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
+                )
+            )
 
 
 class TestGetAndListPools:
@@ -115,58 +139,96 @@ class TestGetAndListPools:
         assert svc.get_pool("does-not-exist") is None
 
     def test_get_returns_created_pool(self, svc):
-        svc.create_pool(PoolCreate(
-            id="hetzner-eu", label="Hetzner EU", provider="ansible",
-            provider_config=_ANSIBLE_CONFIG,
-        ))
+        svc.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
         pool = svc.get_pool("hetzner-eu")
         assert pool is not None
         assert pool.label == "Hetzner EU"
 
     def test_list_enabled_only_excludes_disabled(self, svc):
-        svc.create_pool(PoolCreate(
-            id="pool-a", label="A", provider="ansible", provider_config=_ANSIBLE_CONFIG,
-        ))
-        svc.create_pool(PoolCreate(
-            id="pool-b", label="B", provider="ansible", provider_config=_ANSIBLE_CONFIG,
-        ))
+        svc.create_pool(
+            PoolCreate(
+                id="pool-a",
+                label="A",
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        svc.create_pool(
+            PoolCreate(
+                id="pool-b",
+                label="B",
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
         svc.disable_pool("pool-b")
 
         enabled = svc.list_pools(enabled_only=True)
         assert {p.id for p in enabled} == {"pool-a"}
 
     def test_list_tag_filter(self, svc):
-        svc.create_pool(PoolCreate(
-            id="pool-eu", label="EU", provider="ansible",
-            policy_tags={"region": "eu"}, provider_config=_ANSIBLE_CONFIG,
-        ))
-        svc.create_pool(PoolCreate(
-            id="pool-us", label="US", provider="ansible",
-            policy_tags={"region": "us"}, provider_config=_ANSIBLE_CONFIG,
-        ))
+        svc.create_pool(
+            PoolCreate(
+                id="pool-eu",
+                label="EU",
+                provider="ansible",
+                policy_tags={"region": "eu"},
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        svc.create_pool(
+            PoolCreate(
+                id="pool-us",
+                label="US",
+                provider="ansible",
+                policy_tags={"region": "us"},
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
         result = svc.list_pools(tag_filter={"region": "eu"})
         assert {p.id for p in result} == {"pool-eu"}
 
 
 class TestUpdatePool:
     def test_patch_updates_label_only(self, svc):
-        svc.create_pool(PoolCreate(
-            id="hetzner-eu", label="Hetzner EU", provider="ansible",
-            provider_config=_ANSIBLE_CONFIG,
-        ))
+        svc.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
         updated = svc.update_pool("hetzner-eu", PoolUpdate(label="Hetzner EU Central"))
         assert updated.label == "Hetzner EU Central"
         assert updated.provider == "ansible"
 
     def test_replace_requires_full_desired_state(self, svc):
-        svc.create_pool(PoolCreate(
-            id="hetzner-eu", label="Hetzner EU", provider="ansible",
-            provider_config=_ANSIBLE_CONFIG,
-        ))
-        replaced = svc.replace_pool("hetzner-eu", PoolReplace(
-            label="Replacement", provider="ansible", enabled=False,
-            policy_tags={}, provider_config=_ANSIBLE_CONFIG,
-        ))
+        svc.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        replaced = svc.replace_pool(
+            "hetzner-eu",
+            PoolReplace(
+                label="Replacement",
+                provider="ansible",
+                enabled=False,
+                policy_tags={},
+                provider_config=_ANSIBLE_CONFIG,
+            ),
+        )
         assert replaced.enabled is False
 
     def test_update_missing_pool_raises(self, svc):
@@ -174,30 +236,50 @@ class TestUpdatePool:
             svc.update_pool("does-not-exist", PoolUpdate(label="X"))
 
     def test_update_provider_config_revalidates(self, svc):
-        svc.create_pool(PoolCreate(
-            id="hetzner-eu", label="Hetzner EU", provider="ansible",
-            provider_config=_ANSIBLE_CONFIG,
-        ))
+        svc.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
         with pytest.raises(PoolValidationError):
-            svc.update_pool("hetzner-eu", PoolUpdate(provider_config={"extra_vars": {}}))
+            svc.update_pool(
+                "hetzner-eu", PoolUpdate(provider_config={"extra_vars": {}})
+            )
 
     def test_update_provider_config_persists(self, svc):
-        svc.create_pool(PoolCreate(
-            id="hetzner-eu", label="Hetzner EU", provider="ansible",
-            provider_config=_ANSIBLE_CONFIG,
-        ))
-        updated = svc.update_pool("hetzner-eu", PoolUpdate(
-            provider_config={"playbook_path": "playbooks/new.yaml", "inventory_group": "kvm_hosts"},
-        ))
+        svc.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        updated = svc.update_pool(
+            "hetzner-eu",
+            PoolUpdate(
+                provider_config={
+                    "playbook_path": "playbooks/new.yaml",
+                    "inventory_group": "kvm_hosts",
+                },
+            ),
+        )
         assert updated.provider_config["playbook_path"] == "playbooks/new.yaml"
 
 
 class TestEnableDisablePool:
     def test_disable_then_enable(self, svc):
-        svc.create_pool(PoolCreate(
-            id="hetzner-eu", label="Hetzner EU", provider="ansible",
-            provider_config=_ANSIBLE_CONFIG,
-        ))
+        svc.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
         disabled = svc.disable_pool("hetzner-eu")
         assert disabled.enabled is False
         enabled = svc.enable_pool("hetzner-eu")
@@ -206,6 +288,19 @@ class TestEnableDisablePool:
     def test_disable_missing_pool_raises(self, svc):
         with pytest.raises(PoolNotFoundError):
             svc.disable_pool("does-not-exist")
+
+    def test_default_pool_cannot_be_disabled(self, svc):
+        svc.create_pool(
+            PoolCreate(
+                id="default",
+                label="Default Pool",
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+
+        with pytest.raises(PoolValidationError, match="cannot be disabled"):
+            svc.disable_pool("default")
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +349,11 @@ class TestImportPools:
         diff = svc.import_pools(_YAML)
         assert diff.created == []
         assert diff.updated == []
-        assert set(diff.unchanged) == {"default", "hetzner-eu-central", "equinix-us-west"}
+        assert set(diff.unchanged) == {
+            "default",
+            "hetzner-eu-central",
+            "equinix-us-west",
+        }
 
     def test_changed_field_reports_updated(self, svc):
         svc.import_pools(_YAML)
@@ -336,8 +435,23 @@ pools:
         assert response.valid is True
         assert response.problems == []
         assert response.diff is not None
-        assert set(response.diff.created) == {"default", "hetzner-eu-central", "equinix-us-west"}
+        assert set(response.diff.created) == {
+            "default",
+            "hetzner-eu-central",
+            "equinix-us-west",
+        }
         assert svc.list_pools() == []
+
+    def test_validate_rejects_disabled_default_pool(self, svc):
+        response = svc.validate_pools(
+            _YAML.replace("enabled: true", "enabled: false", 1)
+        )
+
+        assert response.valid is False
+        assert response.diff is None
+        assert "default_pool_disabled" in {
+            problem.code for problem in response.problems
+        }
 
     def test_validate_accumulates_all_detectable_problems(self, svc):
         response = svc.validate_pools("""
@@ -380,6 +494,7 @@ pools:
         with pytest.raises(PoolValidationError):
             svc.import_pools("other_key: []")
 
+
 class _StubPoolConfigHandler:
     def __init__(self, provider: str) -> None:
         self.provider = provider
@@ -412,15 +527,25 @@ def test_replace_provider_cleans_up_old_provider_config(session_factory):
         session_factory=session_factory,
         handlers={"old": old_handler, "new": new_handler},
     )
-    service.create_pool(PoolCreate(
-        id="switchable", label="Switchable", provider="old",
-        provider_config={"old_setting": True},
-    ))
+    service.create_pool(
+        PoolCreate(
+            id="switchable",
+            label="Switchable",
+            provider="old",
+            provider_config={"old_setting": True},
+        )
+    )
 
-    replaced = service.replace_pool("switchable", PoolReplace(
-        label="Switched", provider="new", enabled=True,
-        policy_tags={}, provider_config={"new_setting": True},
-    ))
+    replaced = service.replace_pool(
+        "switchable",
+        PoolReplace(
+            label="Switched",
+            provider="new",
+            enabled=True,
+            policy_tags={},
+            provider_config={"new_setting": True},
+        ),
+    )
 
     assert replaced.provider == "new"
     assert old_handler.deleted == ["switchable"]

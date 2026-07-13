@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi_utils.cbv import cbv
 
 import container as _container_module
-from provisioning_client.models import (
+from compute_provisioning import (
     PoolCreate,
     PoolImportRequest,
     PoolImportResponse,
@@ -73,7 +73,6 @@ class PoolController:
         pools = self._pools.list_pools(enabled_only=not include_disabled)
         pool_models = [PoolResponse.model_validate(p) for p in pools]
         return PoolListResponse(pools=pool_models, total=len(pool_models))
-
 
     @router.get(
         "/export",
@@ -159,6 +158,8 @@ class PoolController:
             pool = self._pools.disable_pool(pool_id)
         except PoolNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
+        except PoolValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         return PoolResponse.model_validate(pool)
 
     # ------------------------------------------------------------------

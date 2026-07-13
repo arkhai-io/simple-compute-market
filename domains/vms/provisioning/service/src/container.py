@@ -27,7 +27,6 @@ from services.release_executors import (
     VmReleaseExecutor,
 )
 from services.resource_pool_service import ResourcePoolService
-from services.site_resources_service import SiteResourcesService
 from services.system_service import SystemService
 from services.vm_operations_service import VmOperationsService
 

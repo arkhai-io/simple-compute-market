@@ -4,6 +4,18 @@ This package is intentionally separate from the shared, executor-neutral
 ``compute_provisioning`` contract used by storefront and domain callers.
 """
 
+from compute_provisioning import (
+    PoolCreate,
+    PoolImportDiff,
+    PoolImportRequest,
+    PoolImportResponse,
+    PoolListResponse,
+    PoolReplace,
+    PoolResponse,
+    PoolUpdate,
+    PoolValidateResponse,
+    PoolValidationProblem,
+)
 from vm_provisioning_operator.client import (
     ProvisioningClient,
     ProvisioningError,
@@ -36,16 +48,6 @@ from vm_provisioning_operator.models import (
     LeaseRetryReleaseRequest,
     LeaseTerminateRequest,
     LeaseUpdate,
-    PoolCreate,
-    PoolImportDiff,
-    PoolImportRequest,
-    PoolImportResponse,
-    PoolListResponse,
-    PoolResponse,
-    PoolReplace,
-    PoolUpdate,
-    PoolValidateResponse,
-    PoolValidationProblem,
     SshKeyInfo,
     VersionResponse,
     VmActionRequest,

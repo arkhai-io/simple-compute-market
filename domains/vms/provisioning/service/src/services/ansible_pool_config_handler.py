@@ -26,28 +26,40 @@ class AnsiblePoolConfigHandler:
     ) -> tuple[dict[str, Any] | None, tuple[PoolConfigValidationProblem, ...]]:
         problems: list[PoolConfigValidationProblem] = []
         for field in sorted(set(config) - self._FIELDS):
-            problems.append(PoolConfigValidationProblem(
-                path=field, code="unknown_field",
-                message=f"unknown ansible provider_config field '{field}'",
-            ))
+            problems.append(
+                PoolConfigValidationProblem(
+                    path=field,
+                    code="unknown_field",
+                    message=f"unknown ansible provider_config field '{field}'",
+                )
+            )
         playbook_path = config.get("playbook_path")
         inventory_group = config.get("inventory_group")
         extra_vars = config.get("extra_vars", {})
         if not isinstance(playbook_path, str) or not playbook_path.strip():
-            problems.append(PoolConfigValidationProblem(
-                path="playbook_path", code="required_field",
-                message="provider_config.playbook_path is required for provider='ansible'",
-            ))
+            problems.append(
+                PoolConfigValidationProblem(
+                    path="playbook_path",
+                    code="required_field",
+                    message="provider_config.playbook_path is required for provider='ansible'",
+                )
+            )
         if not isinstance(inventory_group, str) or not inventory_group.strip():
-            problems.append(PoolConfigValidationProblem(
-                path="inventory_group", code="required_field",
-                message="provider_config.inventory_group is required for provider='ansible'",
-            ))
+            problems.append(
+                PoolConfigValidationProblem(
+                    path="inventory_group",
+                    code="required_field",
+                    message="provider_config.inventory_group is required for provider='ansible'",
+                )
+            )
         if not isinstance(extra_vars, dict):
-            problems.append(PoolConfigValidationProblem(
-                path="extra_vars", code="invalid_type",
-                message="provider_config.extra_vars must be a mapping",
-            ))
+            problems.append(
+                PoolConfigValidationProblem(
+                    path="extra_vars",
+                    code="invalid_type",
+                    message="provider_config.extra_vars must be a mapping",
+                )
+            )
         if problems:
             return None, tuple(problems)
         return {
@@ -57,7 +69,11 @@ class AnsiblePoolConfigHandler:
         }, ()
 
     def read_config(self, db: Session, pool_id: str) -> dict[str, Any]:
-        row = db.query(AnsiblePoolConfig).filter(AnsiblePoolConfig.pool_id == pool_id).one_or_none()
+        row = (
+            db.query(AnsiblePoolConfig)
+            .filter(AnsiblePoolConfig.pool_id == pool_id)
+            .one_or_none()
+        )
         if row is None:
             return {}
         return {
@@ -66,9 +82,15 @@ class AnsiblePoolConfigHandler:
             "extra_vars": row.extra_vars or {},
         }
 
-    def replace_config(self, db: Session, pool_id: str, config: Mapping[str, Any]) -> None:
+    def replace_config(
+        self, db: Session, pool_id: str, config: Mapping[str, Any]
+    ) -> None:
         normalized = self.validate_config(config)
-        row = db.query(AnsiblePoolConfig).filter(AnsiblePoolConfig.pool_id == pool_id).one_or_none()
+        row = (
+            db.query(AnsiblePoolConfig)
+            .filter(AnsiblePoolConfig.pool_id == pool_id)
+            .one_or_none()
+        )
         if row is None:
             row = AnsiblePoolConfig(pool_id=pool_id)
             db.add(row)
@@ -77,6 +99,10 @@ class AnsiblePoolConfigHandler:
         row.extra_vars = normalized["extra_vars"]
 
     def delete_config(self, db: Session, pool_id: str) -> None:
-        row = db.query(AnsiblePoolConfig).filter(AnsiblePoolConfig.pool_id == pool_id).one_or_none()
+        row = (
+            db.query(AnsiblePoolConfig)
+            .filter(AnsiblePoolConfig.pool_id == pool_id)
+            .one_or_none()
+        )
         if row is not None:
             db.delete(row)

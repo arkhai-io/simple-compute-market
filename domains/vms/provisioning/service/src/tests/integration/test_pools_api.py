@@ -8,8 +8,8 @@ Coverage:
   - The "default" pool always exists (seeded by db_engine, mirroring the
     real migration's guarantee).
   - CRUD endpoints round-trip correctly through the client.
-  - PUT and PATCH share behavior (both are partial updates).
-  - DELETE disables, never hard-deletes — the pool remains gettable.
+  - PUT replaces complete mutable state; PATCH updates only supplied fields.
+  - DELETE disables non-default pools; the default pool remains enabled.
   - Import/validate round-trip through the client and produce the expected
     created/updated/disabled/unchanged diff.
   - Hosts can be created against a pool created through this API, and
@@ -24,8 +24,9 @@ from __future__ import annotations
 
 import pytest
 
-from provisioning_client import ProvisioningClient, ProvisioningError
-from provisioning_client.models import HostCreate, HostUpdate, PoolCreate, PoolReplace, PoolUpdate
+from compute_provisioning import PoolCreate, PoolReplace, PoolUpdate
+from vm_provisioning_operator import ProvisioningClient, ProvisioningError
+from vm_provisioning_operator.models import HostCreate, HostUpdate
 
 
 _ANSIBLE_CONFIG = {
@@ -34,13 +35,15 @@ _ANSIBLE_CONFIG = {
 }
 
 
-async def _create_pool(
-    client: ProvisioningClient, pool_id: str = "hetzner-eu"
-):
-    return await client.create_pool(PoolCreate(
-        id=pool_id, label="Hetzner EU", provider="ansible",
-        provider_config=_ANSIBLE_CONFIG,
-    ))
+async def _create_pool(client: ProvisioningClient, pool_id: str = "hetzner-eu"):
+    return await client.create_pool(
+        PoolCreate(
+            id=pool_id,
+            label="Hetzner EU",
+            provider="ansible",
+            provider_config=_ANSIBLE_CONFIG,
+        )
+    )
 
 
 class TestDefaultPool:
@@ -74,9 +77,14 @@ class TestCreatePool:
     async def test_create_unknown_provider_returns_400(self, client_and_queue):
         client, _ = client_and_queue
         with pytest.raises(ProvisioningError) as exc_info:
-            await client.create_pool(PoolCreate(
-                id="k8s-1", label="K8s", provider="kubernetes", provider_config={},
-            ))
+            await client.create_pool(
+                PoolCreate(
+                    id="k8s-1",
+                    label="K8s",
+                    provider="kubernetes",
+                    provider_config={},
+                )
+            )
         assert exc_info.value.status_code == 400
 
 
@@ -100,13 +108,21 @@ class TestUpdatePool:
         client, _ = client_and_queue
         await _create_pool(client)
 
-        patched = await client.patch_pool("hetzner-eu", PoolUpdate(label="Hetzner EU (patched)"))
+        patched = await client.patch_pool(
+            "hetzner-eu", PoolUpdate(label="Hetzner EU (patched)")
+        )
         assert patched.label == "Hetzner EU (patched)"
 
-        replaced = await client.replace_pool("hetzner-eu", PoolReplace(
-            label="Replacement", provider="ansible", enabled=False,
-            policy_tags={"region": "eu"}, provider_config=_ANSIBLE_CONFIG,
-        ))
+        replaced = await client.replace_pool(
+            "hetzner-eu",
+            PoolReplace(
+                label="Replacement",
+                provider="ansible",
+                enabled=False,
+                policy_tags={"region": "eu"},
+                provider_config=_ANSIBLE_CONFIG,
+            ),
+        )
         assert replaced.enabled is False
         assert replaced.label == "Replacement"
 
@@ -134,6 +150,14 @@ class TestDeletePool:
         with pytest.raises(ProvisioningError) as exc_info:
             await client.delete_pool("does-not-exist")
         assert exc_info.value.status_code == 404
+
+    async def test_delete_default_pool_returns_400(self, client_and_queue):
+        client, _ = client_and_queue
+
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.delete_pool("default")
+
+        assert exc_info.value.status_code == 400
 
 
 class TestImportAndValidatePools:
@@ -191,7 +215,8 @@ pools:
         assert result.valid is False
         assert result.diff is None
         assert {problem.code for problem in result.problems} >= {
-            "unknown_provider", "missing_default_pool",
+            "unknown_provider",
+            "missing_default_pool",
         }
 
     async def test_export_round_trips(self, client_and_queue):
@@ -208,35 +233,59 @@ class TestHostPoolIntegration:
         client, _ = client_and_queue
         await _create_pool(client)
 
-        host = await client.register_host(HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
-            ssh_key_type="path", ssh_key_value="/key", pool_id="hetzner-eu",
-        ))
+        host = await client.register_host(
+            HostCreate(
+                name="kvm1",
+                kvm_host="10.0.0.1",
+                ssh_user="ubuntu",
+                ssh_key_type="path",
+                ssh_key_value="/key",
+                pool_id="hetzner-eu",
+            )
+        )
         assert host.pool_id == "hetzner-eu"
 
     async def test_register_host_defaults_to_default_pool(self, client_and_queue):
         client, _ = client_and_queue
-        host = await client.register_host(HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
-            ssh_key_type="path", ssh_key_value="/key",
-        ))
+        host = await client.register_host(
+            HostCreate(
+                name="kvm1",
+                kvm_host="10.0.0.1",
+                ssh_user="ubuntu",
+                ssh_key_type="path",
+                ssh_key_value="/key",
+            )
+        )
         assert host.pool_id == "default"
 
-    async def test_register_host_with_nonexistent_pool_returns_400(self, client_and_queue):
+    async def test_register_host_with_nonexistent_pool_returns_400(
+        self, client_and_queue
+    ):
         client, _ = client_and_queue
         with pytest.raises(ProvisioningError) as exc_info:
-            await client.register_host(HostCreate(
-                name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
-                ssh_key_type="path", ssh_key_value="/key", pool_id="does-not-exist",
-            ))
+            await client.register_host(
+                HostCreate(
+                    name="kvm1",
+                    kvm_host="10.0.0.1",
+                    ssh_user="ubuntu",
+                    ssh_key_type="path",
+                    ssh_key_value="/key",
+                    pool_id="does-not-exist",
+                )
+            )
         assert exc_info.value.status_code == 400
 
     async def test_update_host_reassigns_pool(self, client_and_queue):
         client, _ = client_and_queue
         await _create_pool(client)
-        await client.register_host(HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
-            ssh_key_type="path", ssh_key_value="/key",
-        ))
+        await client.register_host(
+            HostCreate(
+                name="kvm1",
+                kvm_host="10.0.0.1",
+                ssh_user="ubuntu",
+                ssh_key_type="path",
+                ssh_key_value="/key",
+            )
+        )
         updated = await client.update_host("kvm1", HostUpdate(pool_id="hetzner-eu"))
         assert updated.pool_id == "hetzner-eu"
