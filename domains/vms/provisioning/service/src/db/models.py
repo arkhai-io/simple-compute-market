@@ -94,6 +94,70 @@ class Credential(Base):
     job = relationship("AnsibleJob", back_populates="credentials")
 
 
+DEFAULT_POOL_ID = "default"
+
+
+class ResourcePool(Base):
+    """Provisioning-owned grouping of physical resources eligible for
+    settlement (see ARCHITECTURE.md § Technical Terms — "Resource Pool").
+
+    This is infrastructure routing/scheduling metadata, distinct from any
+    storefront-side capacity pool concept — there is no FK between the two
+    layers, only explicit configuration/attribute mapping.
+
+    id:
+        Operator-chosen slug (e.g. "hetzner-eu-central"). Not a UUID — pool
+        ids appear in YAML definitions and are meant to be human-legible.
+    enabled:
+        False pools are excluded from scheduling eligibility once a
+        scheduler exists (no scheduler exists yet). Delete is soft —
+        disable — by default; pools are never hard-deleted by the admin
+        API so that hosts.pool_id and any future settlement records
+        referencing this id remain resolvable.
+    policy_tags:
+        Free-form tag map (e.g. {"region": "eu", "provider": "hetzner"})
+        used for tag-filtered pool lookup. Not consumed by a scheduler yet.
+    """
+
+    __tablename__ = "resource_pools"
+
+    id = Column(String, primary_key=True)
+    label = Column(String, nullable=False)
+    provider = Column(String, nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True)
+    policy_tags = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    ansible_config = relationship(
+        "AnsiblePoolConfig", back_populates="pool", uselist=False, cascade="all, delete-orphan"
+    )
+
+
+class AnsiblePoolConfig(Base):
+    """Ansible-provider-specific config for a resource pool.
+
+    Provider-specific data lives in its own side table rather than as
+    generic columns on ``resource_pools`` — see ARCHITECTURE.md § Physical
+    Settlement Scheduler and FulfillmentProvider Architecture, "Settlement
+    record metadata envelope" for the same principle applied to settlement
+    records. Only the "ansible" provider is implemented; other providers
+    (kubernetes, gcp, ...) would get their own side table, not new columns
+    here.
+    """
+
+    __tablename__ = "ansible_pool_configs"
+
+    pool_id = Column(String, ForeignKey("resource_pools.id"), primary_key=True)
+    playbook_path = Column(String, nullable=False)
+    inventory_group = Column(String, nullable=False)
+    extra_vars = Column(JSON, nullable=False, default=dict)
+
+    pool = relationship("ResourcePool", back_populates="ansible_config")
+
+
 class Host(Base):
     """Registered provisioning host.
 
@@ -114,6 +178,14 @@ class Host(Base):
         False hosts are excluded from list queries and inventory rendering.
         Hosts are never hard-deleted (append-only) so that job history FKs
         (vm_host name references) remain resolvable.
+
+    pool_id:
+        Resource pool this host belongs to. Every host has a pool — there is
+        no "unassigned" state. New rows default to the system-created
+        "default" pool (DEFAULT_POOL_ID) at both the ORM layer (for
+        freshly-created schemas) and the DB layer (for the migration that
+        backfills pre-existing rows) so the column can be NOT NULL from the
+        start rather than carrying a nullable transitional state.
     """
 
     __tablename__ = "hosts"
@@ -130,6 +202,13 @@ class Host(Base):
     ssh_key_value = Column(String, nullable=False)  # path string or encrypted PEM
     gpu_count = Column(Integer, nullable=False, default=0)
     enabled = Column(Boolean, nullable=False, default=True)
+    pool_id = Column(
+        String,
+        ForeignKey("resource_pools.id"),
+        nullable=False,
+        default=DEFAULT_POOL_ID,
+        server_default=DEFAULT_POOL_ID,
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

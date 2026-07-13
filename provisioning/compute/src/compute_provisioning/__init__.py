@@ -105,3 +105,7 @@ __all__ = [
     "start_compute_provisioning_runtime",
     "stop_compute_provisioning_runtime",
 ]
+
+from .pool_config_handler import PoolConfigHandler
+
+__all__.append("PoolConfigHandler")

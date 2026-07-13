@@ -26,6 +26,32 @@ spec:
       # the data volume's mount root is root-owned and SQLite can't write.
       securityContext:
         fsGroup: 1000
+      initContainers:
+        # Applies DB migrations before the main container starts — see
+        # ARCHITECTURE.md § Schema Migration Execution. Same image, only the
+        # command differs. `Init:Error` in pod status is an unambiguous
+        # migration-failure signal, distinct from an application crash.
+        # Idempotent: safe to re-run on every rollout/restart.
+        - name: provisioning-migrate
+          image: {{ include "provisioning.image" . }}
+          imagePullPolicy: {{ .Values.server.image.pullPolicy }}
+          command: ["python", "-m", "db.migrate"]
+          env:
+            - name: ACTIVE_PROFILES
+              value: {{ if .Values.mockMode }}"production,provisioning-secrets,mock"{{ else }}"production,provisioning-secrets"{{ end }}
+            - name: CONFIG_DIRECTORY
+              value: "/app/config"
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: config
+              mountPath: /app/config/config-production.yml
+              subPath: config-production.yml
+              readOnly: true
+            - name: provisioning-secrets
+              mountPath: /app/config/config-provisioning-secrets.yml
+              subPath: config-provisioning-secrets.yml
+              readOnly: true
       containers:
         - name: provisioning
           image: {{ include "provisioning.image" . }}

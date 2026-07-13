@@ -11,7 +11,7 @@ in the service wheel and are not part of this public surface.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -51,6 +51,10 @@ class HostCreate(BaseModel):
     )
     gpu_count: int = Field(default=0, ge=0, description="Number of GPU cards on the host.")
     enabled: bool = Field(default=True, description="Whether this host is available for jobs.")
+    pool_id: Optional[str] = Field(
+        default=None,
+        description="Resource pool this host belongs to. Defaults to the 'default' pool.",
+    )
 
 
 class HostUpdate(BaseModel):
@@ -63,6 +67,7 @@ class HostUpdate(BaseModel):
     ssh_key_value: Optional[str] = Field(default=None, description="Updated key path or material.")
     gpu_count: Optional[int] = Field(default=None, ge=0)
     enabled: Optional[bool] = Field(default=None)
+    pool_id: Optional[str] = Field(default=None, description="Reassign this host to a different pool.")
 
 
 class HostResponse(BaseModel):
@@ -79,6 +84,7 @@ class HostResponse(BaseModel):
     ssh_key_type: str
     gpu_count: int
     enabled: bool
+    pool_id: str
     created_at: datetime
     updated_at: datetime
 
@@ -618,3 +624,120 @@ class AnsibleReadinessResponse(BaseModel):
             "SSH key diagnostics per unique key reference across all enabled hosts."
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Resource pools
+# ---------------------------------------------------------------------------
+#
+# Provider config is intentionally a generic dict (`provider_config`), not a
+# typed per-provider field. Resource pools exist precisely so that future
+# settlement providers (Kubernetes, GCP, ...) don't have to be baked into
+# this wire contract — the service validates provider_config's shape against
+# the declared `provider` at the service layer, not here. See
+# ARCHITECTURE.md § Physical Settlement Scheduler and FulfillmentProvider
+# Architecture.
+
+
+class PoolCreate(BaseModel):
+    """Body accepted by ``POST /api/v1/pools``."""
+
+    id: str = Field(description="Operator-chosen pool slug, e.g. 'hetzner-eu-central'.")
+    label: str = Field(description="Human-readable pool name.")
+    provider: str = Field(description="Fulfillment provider kind, e.g. 'ansible'.")
+    enabled: bool = Field(default=True)
+    policy_tags: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Free-form tags for tag-filtered pool lookup (e.g. {'region': 'eu'}).",
+    )
+    provider_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Provider-specific config. For provider='ansible': "
+            "{'playbook_path': str, 'inventory_group': str, 'extra_vars': dict (optional)}."
+        ),
+    )
+
+
+class PoolReplace(BaseModel):
+    """Complete replacement body accepted by ``PUT /api/v1/pools/{pool_id}``."""
+
+    label: str
+    provider: str
+    enabled: bool
+    policy_tags: dict[str, Any] = Field(default_factory=dict)
+    provider_config: dict[str, Any] = Field(default_factory=dict)
+
+
+class PoolUpdate(BaseModel):
+    """Partial update body accepted by ``PATCH /api/v1/pools/{pool_id}``."""
+
+    label: Optional[str] = Field(default=None)
+    provider: Optional[str] = Field(default=None)
+    enabled: Optional[bool] = Field(default=None)
+    policy_tags: Optional[dict[str, Any]] = Field(default=None)
+    provider_config: Optional[dict[str, Any]] = Field(default=None)
+
+
+class PoolResponse(BaseModel):
+    """Serialised pool row returned by all pool endpoints."""
+
+    id: str
+    label: str
+    provider: str
+    enabled: bool
+    policy_tags: dict[str, Any]
+    provider_config: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PoolListResponse(BaseModel):
+    """Response body for ``GET /api/v1/pools``."""
+
+    pools: list[PoolResponse]
+    total: int
+
+
+class PoolImportRequest(BaseModel):
+    """Body accepted by ``POST /api/v1/pools/import`` and ``/validate``."""
+
+    yaml_text: str = Field(
+        description=(
+            "Pool definitions YAML: a top-level 'pools:' list where each entry "
+            "has 'id', 'label', 'provider', and optionally 'policy_tags' / "
+            "'provider_config'."
+        )
+    )
+
+
+class PoolImportDiff(BaseModel):
+    """Diff produced by import/validate: pool ids grouped by outcome."""
+
+    created: list[str] = Field(default_factory=list)
+    updated: list[str] = Field(default_factory=list)
+    disabled: list[str] = Field(
+        default_factory=list,
+        description="Pools present in the DB but absent from the YAML — disabled, not deleted.",
+    )
+    unchanged: list[str] = Field(default_factory=list)
+    rejected: list[dict[str, str]] = Field(
+        default_factory=list,
+        description="Entries that failed validation: [{'id': ..., 'reason': ...}].",
+    )
+
+
+class PoolImportResponse(BaseModel):
+    """Response body for ``POST /api/v1/pools/import``."""
+
+    diff: PoolImportDiff
+    applied: bool = Field(description="False when the request was validate-only.")
+
+
+class PoolValidateResponse(BaseModel):
+    """Response body for ``POST /api/v1/pools/validate``."""
+
+    diff: PoolImportDiff
+    valid: bool = Field(description="True if there are no rejected entries.")
