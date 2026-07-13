@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import BaseModel
 
 from apicredits_storefront.domain_runtime import get_storefront_domain_runtime
 from domains.apicredits.domain_runtime import storefront_runtime
@@ -52,6 +53,26 @@ def test_domain_runtime_normalizes_api_credits_schema_slots() -> None:
     assert materialization.quantity == 5
     assert receipt.status == "fulfilled"
     assert result.status == "success"
+
+
+def test_domain_runtime_normalizes_offer_resource_from_foreign_model() -> None:
+    """Accept models loaded through a second source/wheel import path."""
+
+    class ForeignApiCreditsResource(BaseModel):
+        kind: str
+        service_name: str
+        resource_id: str
+
+    listing = storefront_runtime().listing({
+        "offer_resource": ForeignApiCreditsResource(
+            kind="api_credits.v1",
+            service_name="Acme Inference",
+            resource_id="quota-a",
+        ),
+    })
+
+    assert listing.offer_resource.service_name == "Acme Inference"
+    assert listing.offer_resource.resource_id == "quota-a"
 
 
 def test_domain_runtime_surfaces_api_credits_validation_errors() -> None:
