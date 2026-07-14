@@ -29,6 +29,7 @@ async def _do_provision(
     *,
     vm_host: str,
     vm_target: str,
+    gpu_count: int | None = None,
     on_job_submitted: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict:
     """Submit a create VM job to the provisioning service and return the result.
@@ -42,6 +43,9 @@ async def _do_provision(
     poll_interval = float(settings.provisioning.poll_interval)
 
     params: dict[str, Any] = {"vm_target": vm_target, "ssh_pubkey": ssh_public_key}
+    if gpu_count is not None and gpu_count > 0:
+        params["gpu_provisioned"] = True
+        params["vm_gpu_count"] = gpu_count
     if settings.provisioning.frp_server_addr:
         params["frp_server_addr"] = settings.provisioning.frp_server_addr
     if settings.provisioning.frp_domain:

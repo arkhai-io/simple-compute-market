@@ -86,6 +86,27 @@ def _compute_listing(*, gpu_count: int = 1) -> dict:
 
 
 @pytest.mark.asyncio
+async def test_do_provision_forwards_reserved_gpu_count(monkeypatch):
+    create = AsyncMock(return_value={"status": "created"})
+    monkeypatch.setattr(
+        fulfillment_service,
+        "create_vm_and_wait_with_credentials",
+        create,
+    )
+
+    await fulfillment_service._do_provision(
+        "ssh-ed25519 AAAA",
+        vm_host="host-1",
+        vm_target="tenant-gpu",
+        gpu_count=2,
+    )
+
+    request = create.await_args.kwargs["request"]
+    assert request.gpu_provisioned is True
+    assert request.vm_gpu_count == 2
+
+
+@pytest.mark.asyncio
 async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment_fails(
     client,
     monkeypatch,
@@ -225,3 +246,5 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         3: "closed",
         4: "closed",
     }
+    fulfillment_service._do_provision.assert_awaited_once()
+    assert fulfillment_service._do_provision.await_args.kwargs["gpu_count"] == 2

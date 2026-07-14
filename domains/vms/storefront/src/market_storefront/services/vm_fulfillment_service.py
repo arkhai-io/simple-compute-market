@@ -237,6 +237,7 @@ async def fulfill_vm_obligation(
             ssh_public_key,
             vm_host=reserved_vm_host,
             vm_target=vm_target,
+            gpu_count=int(reserved.get("allocated_gpu_count") or 0),
             on_job_submitted=_record_job_id,
         )
         authentication: dict[str, Any] | None = None
