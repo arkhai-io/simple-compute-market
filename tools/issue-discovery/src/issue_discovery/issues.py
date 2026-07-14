@@ -292,6 +292,8 @@ class IssueRepository:
             "gh",
             "issue",
             "list",
+            "--state",
+            "open",
             "--search",
             f"{candidate['fingerprint']} in:title",
             "--json",

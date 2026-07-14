@@ -563,7 +563,7 @@ def test_issue_create_skips_duplicate_issue(tmp_path: Path, monkeypatch, capsys)
 
     assert code == 0
     assert len(calls) == 1
-    assert "--state" not in calls[0]
+    assert calls[0][calls[0].index("--state") + 1] == "open"
     assert "duplicate issue exists" in capsys.readouterr().out
 
 
