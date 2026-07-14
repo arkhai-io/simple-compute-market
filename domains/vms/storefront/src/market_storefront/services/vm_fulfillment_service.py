@@ -113,6 +113,13 @@ RegisterLeaseFn = Callable[..., Awaitable[Any]]
 ApplyFailurePolicyFn = Callable[..., Awaitable[None]]
 
 
+CAPACITY_EXHAUSTED_REASON = "capacity_exhausted"
+
+
+class CapacityExhaustedError(RuntimeError):
+    """The exact VM listing's site-authority claim has no free capacity."""
+
+
 async def fulfill_vm_obligation(
     *,
     client: Any | None,
@@ -179,7 +186,9 @@ async def fulfill_vm_obligation(
                 lease_duration_seconds=duration_seconds,
             )
         if not reserved:
-            raise RuntimeError("No available compute VM matched required attributes")
+            raise CapacityExhaustedError(
+                "No available compute VM matched required attributes"
+            )
         reserved_allocation_id = (
             str(reserved.get("allocation_id")) if reserved.get("allocation_id") else None
         )
@@ -247,6 +256,11 @@ async def fulfill_vm_obligation(
         else:
             connection_details = provision_result
     except Exception as error:
+        failure_reason = (
+            CAPACITY_EXHAUSTED_REASON
+            if isinstance(error, CapacityExhaustedError)
+            else "provisioning_failed"
+        )
         if apply_failure_policy is not None:
             try:
                 await apply_failure_policy(
@@ -254,7 +268,7 @@ async def fulfill_vm_obligation(
                     escrow_uid=escrow_uid,
                     listing_id=listing_id or order_id,
                     resource_id=reserved_resource_id,
-                    reason="provisioning_failed",
+                    reason=failure_reason,
                     message=str(error),
                     source="settlement_provisioning",
                 )
@@ -273,10 +287,12 @@ async def fulfill_vm_obligation(
             "provision", "failed",
             escrow_uid=escrow_uid,
             resource_id=reserved_resource_id,
+            reason=failure_reason,
             error=str(error),
         )
         return {
             "status": "error",
+            "reason": failure_reason,
             "message": f"Provisioning failed: {error}",
             "escrow_uid": escrow_uid,
             "connection_details": None,

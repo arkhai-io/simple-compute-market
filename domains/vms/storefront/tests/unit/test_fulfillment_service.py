@@ -173,6 +173,53 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
 
 
 @pytest.mark.asyncio
+async def test_fulfill_compute_obligation_types_authoritative_capacity_exhaustion(
+    client,
+    monkeypatch,
+):
+    await _seed_compute_pool(client)
+    fake = FakeSite()
+    fake.add_resource(
+        "pool-h200-1",
+        0,
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "host-1",
+        },
+    )
+    failure_policy = AsyncMock()
+    monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(
+        fulfillment_service,
+        "_apply_fulfillment_failure_policy_adapter",
+        failure_policy,
+    )
+    monkeypatch.setattr(
+        fulfillment_service,
+        "_do_provision",
+        AsyncMock(side_effect=AssertionError("no capacity must not provision")),
+    )
+
+    with site_capacity(fake, sqlite_client_factory=lambda: client):
+        result = await fulfillment_service.fulfill_compute_obligation(
+            client=None,
+            escrow_uid="escrow-exhausted",
+            ssh_public_key="ssh-ed25519 AAAA",
+            order=_compute_listing(),
+            duration_seconds=3600,
+            listing_id="listing-1x",
+        )
+
+    assert result["status"] == "error"
+    assert result["reason"] == "capacity_exhausted"
+    assert "No available compute VM" in result["message"]
+    fulfillment_service._do_provision.assert_not_awaited()
+    assert failure_policy.await_args.kwargs["reason"] == "capacity_exhausted"
+
+
+@pytest.mark.asyncio
 async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch):
     class FakeProvisioningClient:
         def __init__(self, *args, **kwargs):

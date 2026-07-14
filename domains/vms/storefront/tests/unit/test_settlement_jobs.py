@@ -463,6 +463,7 @@ async def test_background_task_writes_failed_on_non_fulfilled_status(client):
     await _seed_escrow_provisioning(client)
     mock_fulfill = AsyncMock(return_value={
         "status": "error",
+        "reason": "capacity_exhausted",
         "message": "Provisioning failed: No available compute VM",
     })
 
@@ -481,7 +482,7 @@ async def test_background_task_writes_failed_on_non_fulfilled_status(client):
 
     row = await client.load_escrow(escrow_uid="0xescrow")
     assert row["status"] == "failed"
-    assert "No available compute VM" in row["reason"]
+    assert row["reason"] == "capacity_exhausted"
 
 
 # ---------------------------------------------------------------------------

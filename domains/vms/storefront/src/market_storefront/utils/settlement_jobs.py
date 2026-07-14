@@ -315,7 +315,15 @@ async def _run_settlement_job_bg(
                     escrow_uid,
                 )
     else:
-        reason = (result or {}).get("message") or f"status={status!r}"
+        # ``reason`` is a stable machine-readable terminal when the
+        # fulfillment layer can classify the failure (notably
+        # ``capacity_exhausted``). Keep free-form detail in service/stage
+        # logs instead of forcing buyers to parse an error sentence.
+        reason = (
+            (result or {}).get("reason")
+            or (result or {}).get("message")
+            or f"status={status!r}"
+        )
         await sqlite_client.update_escrow(
             escrow_uid=escrow_uid,
             status="failed",

@@ -34,7 +34,6 @@ from market_alkahest.schemas import EscrowProposal
 from .buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
-    extract_seller_min_price,
     make_legacy_negotiate_hook,
     make_legacy_settle_hook,
     query_registry_for_matches_multi,
@@ -666,12 +665,44 @@ def register(app: typer.Typer) -> None:
             static_ip=static_ip,
         )
         active_filters.update(parse_filter_options(raw_filters))
+
+        def _start_buy_run_log() -> RunLog:
+            """Start the durable record for this already-validated attempt.
+
+            Discovery can terminate before the normal orchestration starts.
+            Keeping one constructor here ensures pinned discovery failures and
+            full buys use the same run-log schema and authority pins.
+            """
+            return RunLog.start(
+                command="market buy",
+                buyer_address=addr,
+                registry_urls=reg_urls,
+                policy=_policy.name,
+                policy_params=policy_params_all,
+                initial_price=initial_price,
+                max_price=max_price,
+                duration_seconds=duration_seconds,
+                start_utc=requested_start_utc,
+                max_matches=max_matches,
+                max_rounds=max_rounds,
+                filters=active_filters or None,
+                listing_id=listing_id,
+                seller_url=seller_url,
+            )
+
         try:
             matches = query_registry_for_matches_multi(
                 reg_urls, timeout=deadline,
                 filters=active_filters or None, auth=reg_auth,
             )
         except RuntimeError as exc:
+            run_log = _start_buy_run_log()
+            run_log.end(
+                "error",
+                reason="registry_query_failed",
+                reason_code="registry_query_failed",
+                error=str(exc),
+            )
             typer.secho(f"Registry query failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3)
 
@@ -682,6 +713,24 @@ def register(app: typer.Typer) -> None:
         )
 
         if not matches:
+            run_log = _start_buy_run_log()
+            exact_capacity_pin = listing_id is not None and seller_url is not None
+            if exact_capacity_pin:
+                run_log.end(
+                    "capacity_exhausted",
+                    reason="capacity_exhausted",
+                    reason_code="pinned_listing_not_discoverable",
+                    listing_id=listing_id,
+                    seller_url=seller_url,
+                )
+            else:
+                run_log.end(
+                    "no_matches",
+                    reason="registry_no_matches",
+                    reason_code="registry_no_matches",
+                    listing_id=listing_id,
+                    seller_url=seller_url,
+                )
             typer.secho(
                 "No listings matched. " + (
                     f"Filters applied: {active_filters}." if active_filters
@@ -709,6 +758,14 @@ def register(app: typer.Typer) -> None:
             )
             if initial_price is None or max_price is None:
                 # No advertised price, or the user declined the picks.
+                run_log = _start_buy_run_log()
+                run_log.end(
+                    "exited",
+                    reason="price_selection_unavailable_or_declined",
+                    reason_code="price_selection_unavailable_or_declined",
+                    listing_id=listing_id,
+                    seller_url=seller_url,
+                )
                 raise typer.Exit(2)
 
         # Resolve aggregation policy: --aggregate-by > [aggregation].policy > VM default.
@@ -766,20 +823,7 @@ def register(app: typer.Typer) -> None:
                 expiration_unix=int(time.time()) + int(expiration_seconds),
             )
 
-        run_log = RunLog.start(
-            command="market buy",
-            buyer_address=addr,
-            registry_urls=reg_urls,
-            policy=_policy.name,
-            policy_params=policy_params_all,
-            initial_price=initial_price,
-            max_price=max_price,
-            duration_seconds=duration_seconds,
-            start_utc=requested_start_utc,
-            max_matches=max_matches,
-            max_rounds=max_rounds,
-            filters=active_filters or None,
-        )
+        run_log = _start_buy_run_log()
 
         header = Table.grid(padding=(0, 2))
         header.add_column(style="bold")
@@ -896,6 +940,11 @@ def register(app: typer.Typer) -> None:
             typer.secho(f"Buy failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3)
 
+        terminal_reason_code = (
+            "seller_capacity_reservation_exhausted"
+            if result.status == "capacity_exhausted"
+            else None
+        )
         run_log.end(
             result.status,
             seller_url=result.seller_url,
@@ -904,6 +953,7 @@ def register(app: typer.Typer) -> None:
             escrow_uid=result.escrow_uid,
             fulfillment_uid=result.fulfillment_uid,
             reason=result.reason,
+            reason_code=terminal_reason_code,
         )
 
         # Quiet mode: one concise block instead of the full panel. The public
@@ -958,6 +1008,7 @@ def register(app: typer.Typer) -> None:
             "timeout": "red",
             "exited": "yellow",
             "no_matches": "yellow",
+            "capacity_exhausted": "yellow",
         }.get(result.status, "white")
         console.print(Panel(tbl, title="Buy complete", border_style=border))
 
