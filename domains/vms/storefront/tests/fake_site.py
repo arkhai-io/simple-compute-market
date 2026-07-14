@@ -13,7 +13,9 @@ from __future__ import annotations
 import contextlib
 import itertools
 import json
-from typing import Any, Iterator
+import re
+from collections.abc import Iterator
+from typing import Any
 from unittest.mock import patch
 
 import httpx
@@ -37,12 +39,82 @@ class FakeSite:
         *,
         attributes: dict | None = None,
     ) -> None:
+        attrs = dict(attributes or {})
+        if attrs.get("vm_host") and "gpu_devices" not in attrs:
+            # Test seeding convenience. HTTP registration remains strict, just
+            # like the real site authority.
+            attrs["gpu_devices"] = self._default_gpu_devices(total_units)
         self.resources[resource_id] = {
             "resource_id": resource_id,
             "total_units": int(total_units),
-            "attributes": dict(attributes or {}),
+            "attributes": attrs,
             "enabled": True,
         }
+
+    @staticmethod
+    def _default_gpu_devices(count: int) -> list[dict[str, str]]:
+        return [
+            {
+                "pci_bdf": f"0000:{3 + index:02x}:00.0",
+                "gpu_uuid": f"GPU-fake-{index:04d}",
+            }
+            for index in range(int(count))
+        ]
+
+    @staticmethod
+    def _normalize_gpu_devices(value: Any, total_units: int) -> list[dict]:
+        if not isinstance(value, list) or len(value) != int(total_units):
+            raise ValueError("gpu_devices must contain exactly total_units entries")
+        normalized: list[dict] = []
+        seen: set[str] = set()
+        seen_uuids: set[str] = set()
+        for device in value:
+            if not isinstance(device, dict):
+                raise ValueError("gpu_devices entries must be objects")
+            bdf = str(device.get("pci_bdf") or "").strip().lower()
+            if not re.fullmatch(
+                r"[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]", bdf,
+            ):
+                raise ValueError("gpu_devices entries require canonical pci_bdf")
+            if bdf in seen:
+                raise ValueError("gpu_devices contains duplicate pci_bdf")
+            seen.add(bdf)
+            if "gpu_uuid" in device:
+                gpu_uuid = str(device.get("gpu_uuid") or "").strip()
+                if not gpu_uuid or gpu_uuid.lower() in seen_uuids:
+                    raise ValueError("gpu_devices contains invalid or duplicate gpu_uuid")
+                seen_uuids.add(gpu_uuid.lower())
+            normalized.append({**device, "pci_bdf": bdf})
+        return normalized
+
+    def _scope(self, rid: str) -> str:
+        attrs = self.resources[rid]["attributes"]
+        return str(attrs.get("physical_host_id") or attrs.get("vm_host") or rid)
+
+    def _available_devices(self, rid: str) -> list[dict] | None:
+        row = self.resources[rid]
+        attrs = row["attributes"]
+        if not attrs.get("vm_host"):
+            return None
+        inventory = self._normalize_gpu_devices(
+            attrs.get("gpu_devices"), row["total_units"],
+        )
+        held: set[str] = set()
+        scope = self._scope(rid)
+        for allocation in self.allocations.values():
+            if allocation["state"] not in (
+                "reserved", "provisioning", "leased", "releasing",
+                "release_failed", "unmanaged",
+            ):
+                continue
+            if self._scope(allocation["resource_id"]) != scope:
+                continue
+            executor_ref = allocation.get("executor_ref") or {}
+            devices = executor_ref.get("gpu_devices")
+            if not isinstance(devices, list):
+                return []
+            held.update(str(device.get("pci_bdf")) for device in devices)
+        return [device for device in inventory if device["pci_bdf"] not in held]
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
@@ -56,6 +128,9 @@ class FakeSite:
         })
 
     def _available(self, rid: str) -> int:
+        exact = self._available_devices(rid)
+        if exact is not None:
+            return len(exact)
         held = sum(
             a["units"] for a in self.allocations.values()
             if a["resource_id"] == rid
@@ -70,10 +145,18 @@ class FakeSite:
 
         if request.method == "PUT" and path.startswith("/api/v1/capacity/resources/"):
             rid = path.rsplit("/", 1)[1]
+            attrs = body.get("attributes") or {}
+            if attrs.get("vm_host"):
+                try:
+                    attrs["gpu_devices"] = self._normalize_gpu_devices(
+                        attrs.get("gpu_devices"), body["total_units"],
+                    )
+                except ValueError as exc:
+                    return httpx.Response(422, json={"detail": str(exc)})
             self.resources[rid] = {
                 "resource_id": rid,
                 "total_units": body["total_units"],
-                "attributes": body.get("attributes") or {},
+                "attributes": attrs,
                 "enabled": body.get("enabled", True),
             }
             self._emit("released", rid)
@@ -104,18 +187,40 @@ class FakeSite:
             if match is None:
                 return httpx.Response(200, json={"allocation": None})
             allocation_id = f"alloc-{next(self._ids)}"
+            row = self.resources[match["resource_id"]]
+            available_devices = self._available_devices(match["resource_id"])
+            allocated_devices = (
+                [dict(device) for device in available_devices[
+                    :match["allocated_gpu_count"]
+                ]]
+                if available_devices is not None
+                else []
+            )
+            executor_ref = (
+                {
+                    "vm_host": row["attributes"].get("vm_host"),
+                    "gpu_devices": allocated_devices,
+                }
+                if row["attributes"].get("vm_host")
+                else {}
+            )
             self.allocations[allocation_id] = {
                 "allocation_id": allocation_id,
                 "resource_id": match["resource_id"],
                 "units": match["allocated_gpu_count"],
                 "state": "reserved",
                 "deal_ref": body.get("deal_ref") or {},
+                "vm_host": row["attributes"].get("vm_host"),
+                "executor_ref": executor_ref,
+                "gpu_devices": allocated_devices,
             }
             self._emit("reserved", match["resource_id"])
             return httpx.Response(200, json={"allocation": {
                 **match,
                 "allocation_id": allocation_id,
                 "hold_expires_at": None,
+                "executor_ref": executor_ref,
+                "gpu_devices": allocated_devices,
             }})
 
         if path.endswith("/commit"):

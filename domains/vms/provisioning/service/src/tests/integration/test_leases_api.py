@@ -43,7 +43,13 @@ def _reserve(escrow_uid: str, *, gpu_count: int = 1) -> dict:
         ledger.register_resource(
             resource_id="compute-kvm1-001",
             total_units=8,
-            attributes={"vm_host": "kvm1"},
+            attributes={
+                "vm_host": "kvm1",
+                "gpu_devices": [
+                    {"pci_bdf": f"0000:{3 + index:02x}:00.0"}
+                    for index in range(8)
+                ],
+            },
         )
     reserved = ledger.reserve(
         claim={"gpu_count": gpu_count, "vm_host": "kvm1"},
@@ -81,7 +87,10 @@ class TestCreateLease:
         assert allocation["vm_target"] == lease["vm_target"]
         assert allocation["executor_kind"] == "vm"
         assert allocation["executor_target"] == lease["vm_target"]
-        assert allocation["executor_ref"] == {"vm_host": "kvm1"}
+        assert allocation["executor_ref"] == {
+            "vm_host": "kvm1",
+            "gpu_devices": [{"pci_bdf": "0000:03:00.0"}],
+        }
 
     async def test_create_unknown_allocation_returns_404(self, client_and_queue):
         client, _ = client_and_queue

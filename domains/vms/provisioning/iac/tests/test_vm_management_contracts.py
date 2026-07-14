@@ -7,6 +7,7 @@ TASKS = ROOT / "ansible/roles/vm-management/tasks"
 MAIN = TASKS / "main.yml"
 PREREQUISITES = TASKS / "prerequisites.yml"
 VM_CREATE = TASKS / "vm-create.yml"
+GPU_MULTI = TASKS / "gpu-virt-install-multi.yml"
 VM_DESTROY = TASKS / "vm-destroy.yml"
 VM_UNDEFINE = TASKS / "vm-undefine.yml"
 JSON_OUTPUT = TASKS / "json-output.yml"
@@ -63,6 +64,38 @@ class VmManagementContractTests(unittest.TestCase):
         self.assertIn('proxy.get("status") == "online"', wait_block)
         self.assertNotIn("json.load(sys.stdin)", wait_block)
         self.assertNotIn("| python3 - <<'PY'", wait_block)
+
+    def test_exact_gpu_devices_fail_closed_without_auto_selection_or_retry(self) -> None:
+        text = _read(VM_CREATE)
+
+        self.assertIn("Validate and freeze exact GPU devices on the KVM host", text)
+        self.assertIn("Exact GPU $GPU_BDF is not in the host passthrough inventory", text)
+        self.assertIn("Exact GPU $GPU_BDF is already attached to a VM", text)
+        self.assertIn("Exact GPU $GPU_BDF is bound to", text)
+        self.assertIn("for required_command in jq virsh lspci", text)
+        self.assertIn("vm_gpu_passthrough_devices", text)
+        self.assertIn(
+            "Create VM with exact GPU devices (no retry or substitution)", text,
+        )
+        self.assertIn(
+            "Create VM from golden image with exact GPU devices "
+            "(no retry or substitution)",
+            text,
+        )
+        self.assertGreaterEqual(
+            text.count(
+                "vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0"
+            ),
+            16,
+        )
+        self.assertNotIn(
+            "vm_gpu_devices is not defined or (vm_gpu_devices | length) <= 1",
+            text,
+        )
+
+        multi = _read(GPU_MULTI)
+        self.assertIn("vm_gpu_passthrough_devices", multi)
+        self.assertIn("gpu.pci if gpu is mapping else gpu", multi)
 
     def test_vm_destroy_emits_force_destroy_json_contract(self) -> None:
         text = _read(VM_DESTROY)

@@ -48,6 +48,18 @@ def _hold(**overrides) -> dict:
         "allocation_id": "alloc-1",
         "resource_id": "res-1",
         "vm_host": "kvm1",
+        "allocated_gpu_count": 2,
+        "gpu_devices": [
+            {"pci_bdf": "0000:03:00.0"},
+            {"pci_bdf": "0000:04:00.0"},
+        ],
+        "executor_ref": {
+            "vm_host": "kvm1",
+            "gpu_devices": [
+                {"pci_bdf": "0000:03:00.0"},
+                {"pci_bdf": "0000:04:00.0"},
+            ],
+        },
         "hold_expires_at": _future(),
     }
     base.update(overrides)
@@ -192,6 +204,10 @@ async def test_acceptance_places_and_records_the_hold(tmp_path):
     hold = await db.load_capacity_hold(negotiation_id="neg-1")
     assert hold["allocation_id"] == "alloc-1"
     assert hold["payload"]["resource_id"] == "res-1"
+    assert hold["payload"]["executor_ref"]["gpu_devices"] == [
+        {"pci_bdf": "0000:03:00.0"},
+        {"pci_bdf": "0000:04:00.0"},
+    ]
 
 
 @pytest.mark.asyncio

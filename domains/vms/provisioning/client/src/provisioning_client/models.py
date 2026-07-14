@@ -11,10 +11,16 @@ in the service wheel and are not part of this public surface.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
+
+
+_PCI_BDF_RE = re.compile(
+    r"^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +302,10 @@ class CreateVmRequest(BaseModel):
     )
     vm_gpu_devices: Optional[list[str]] = Field(
         default=None,
-        description="Multiple GPU PCI addresses for multi-GPU passthrough",
+        description=(
+            "Exact canonical GPU PCI addresses selected by the capacity "
+            "authority; supports one or multiple whole GPUs"
+        ),
     )
     vm_gpu_partition_size: Optional[str] = Field(
         default=None, description="MIG or SR-IOV partition size (e.g. '1g.5gb')"
@@ -350,6 +359,48 @@ class CreateVmRequest(BaseModel):
             raise ValueError(
                 "frp_dashboard_password is required when frp_server_addr is set"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_gpu_selection(self) -> "CreateVmRequest":
+        exact_selectors = int(self.vm_gpu_device is not None) + int(
+            self.vm_gpu_devices is not None
+        )
+        if self.vm_gpu_count is not None and exact_selectors:
+            raise ValueError(
+                "vm_gpu_count auto-selection cannot be combined with exact GPU devices"
+            )
+        if exact_selectors > 1:
+            raise ValueError(
+                "use vm_gpu_device or vm_gpu_devices, not both"
+            )
+        if exact_selectors and self.gpu_provisioned is not True:
+            raise ValueError(
+                "gpu_provisioned=true is required when exact GPU devices are supplied"
+            )
+
+        if self.vm_gpu_device is not None:
+            bdf = self.vm_gpu_device.strip().lower()
+            if not _PCI_BDF_RE.fullmatch(bdf):
+                raise ValueError("vm_gpu_device must be a canonical PCI BDF")
+            self.vm_gpu_device = bdf
+
+        if self.vm_gpu_devices is not None:
+            if not self.vm_gpu_devices:
+                raise ValueError("vm_gpu_devices must not be empty")
+            normalized: list[str] = []
+            for bdf_raw in self.vm_gpu_devices:
+                bdf = bdf_raw.strip().lower()
+                if not _PCI_BDF_RE.fullmatch(bdf):
+                    raise ValueError(
+                        f"vm_gpu_devices contains invalid PCI BDF {bdf_raw!r}"
+                    )
+                if bdf in normalized:
+                    raise ValueError(
+                        f"vm_gpu_devices contains duplicate PCI BDF {bdf!r}"
+                    )
+                normalized.append(bdf)
+            self.vm_gpu_devices = normalized
         return self
 
 

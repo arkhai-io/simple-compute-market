@@ -78,6 +78,11 @@ async def test_remote_client_speaks_the_capacity_wire_contract(
     )
     assert reserved["allocation_id"]
     assert reserved["available_gpu_count"] == 8
+    assert reserved["executor_ref"]["gpu_devices"] == [
+        {"pci_bdf": "0000:03:00.0", "gpu_uuid": "GPU-fake-0000"},
+        {"pci_bdf": "0000:04:00.0", "gpu_uuid": "GPU-fake-0001"},
+        {"pci_bdf": "0000:05:00.0", "gpu_uuid": "GPU-fake-0002"},
+    ]
 
     await client.commit(
         resource_id=reserved["resource_id"],
@@ -149,6 +154,10 @@ async def test_sync_site_resources_preserves_shared_host_attributes(site: FakeSi
                 "vm_host": "kvm1",
                 "physical_host_id": "host-physical-1",
                 "allocation_mode": "shareable",
+                "gpu_devices": [
+                    {"pci_bdf": f"0000:{3 + index:02x}:00.0"}
+                    for index in range(8)
+                ],
                 "lease_end_utc": "2099-01-01 00:00",
             },
         },
@@ -195,6 +204,10 @@ async def test_sync_site_resources_preserves_shared_host_attributes(site: FakeSi
     assert attrs["vm_host"] == "kvm1"
     assert attrs["physical_host_id"] == "host-physical-1"
     assert attrs["allocation_mode"] == "shareable"
+    assert attrs["gpu_devices"] == [
+        {"pci_bdf": f"0000:{3 + index:02x}:00.0"}
+        for index in range(8)
+    ]
     assert "lease_end_utc" not in attrs
     bare_metal_attrs = site.resources["bare-metal-1"]["attributes"]
     assert bare_metal_attrs["machine_id"] == "bm-node-1"

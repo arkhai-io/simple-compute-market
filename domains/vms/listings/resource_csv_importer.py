@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,6 +47,13 @@ ALLOCATION_MODE_ATTR = "allocation_mode"
 PHYSICAL_HOST_ID_ATTR = "physical_host_id"
 SHAREABLE_ALLOCATION_MODE = "shareable"
 VM_HOST_ATTR = "vm_host"
+GPU_DEVICES_ATTR = "gpu_devices"
+GPU_PCI_BDF_KEY = "pci_bdf"
+GPU_UUID_KEY = "gpu_uuid"
+
+_PCI_BDF_RE = re.compile(
+    r"^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$"
+)
 
 
 def parse_accepted_escrows_cell(
@@ -267,12 +275,73 @@ def _normalize_compute_resource_attributes(
     *,
     resource_type: str,
     attributes: dict[str, Any],
+    value: int | float | None,
 ) -> None:
     if resource_type != COMPUTE_GPU_RESOURCE_TYPE:
         return
     vm_host = attributes.get(VM_HOST_ATTR)
     if not vm_host:
         return
+    try:
+        whole_units = int(value) if value is not None else -1
+    except (TypeError, ValueError, OverflowError):
+        whole_units = -1
+    if (
+        value is None
+        or isinstance(value, bool)
+        or whole_units != value
+        or whole_units < 0
+    ):
+        raise ValueError(
+            "VM compute resources require value to be a non-negative whole GPU count"
+        )
+    devices = attributes.get(GPU_DEVICES_ATTR)
+    if not isinstance(devices, list):
+        raise ValueError(
+            "VM compute resources require attribute.gpu_devices as a JSON list"
+        )
+    if len(devices) != whole_units:
+        raise ValueError(
+            "attribute.gpu_devices must contain exactly value entries "
+            f"({len(devices)} != {whole_units})"
+        )
+    normalized: list[dict[str, Any]] = []
+    seen_bdfs: set[str] = set()
+    seen_uuids: set[str] = set()
+    for index, raw in enumerate(devices):
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"attribute.gpu_devices[{index}] must be a JSON object"
+            )
+        bdf = str(raw.get(GPU_PCI_BDF_KEY) or "").strip().lower()
+        if not _PCI_BDF_RE.fullmatch(bdf):
+            raise ValueError(
+                f"attribute.gpu_devices[{index}].pci_bdf must be a canonical "
+                "PCI BDF such as '0000:03:00.0'"
+            )
+        if bdf in seen_bdfs:
+            raise ValueError(
+                f"attribute.gpu_devices contains duplicate pci_bdf {bdf!r}"
+            )
+        seen_bdfs.add(bdf)
+        device = dict(raw)
+        device[GPU_PCI_BDF_KEY] = bdf
+        if GPU_UUID_KEY in raw:
+            gpu_uuid = str(raw.get(GPU_UUID_KEY) or "").strip()
+            if not gpu_uuid:
+                raise ValueError(
+                    f"attribute.gpu_devices[{index}].gpu_uuid must be non-empty "
+                    "when supplied"
+                )
+            uuid_key = gpu_uuid.lower()
+            if uuid_key in seen_uuids:
+                raise ValueError(
+                    f"attribute.gpu_devices contains duplicate gpu_uuid {gpu_uuid!r}"
+                )
+            seen_uuids.add(uuid_key)
+            device[GPU_UUID_KEY] = gpu_uuid
+        normalized.append(device)
+    attributes[GPU_DEVICES_ATTR] = normalized
     attributes.setdefault(PHYSICAL_HOST_ID_ATTR, vm_host)
     attributes.setdefault(ALLOCATION_MODE_ATTR, SHAREABLE_ALLOCATION_MODE)
 
@@ -332,6 +401,7 @@ def _build_db_resource_from_csv_row(
     _normalize_compute_resource_attributes(
         resource_type=resource_type,
         attributes=attributes,
+        value=value,
     )
 
     accepted_escrows_raw = _clean_cell(row.get("accepted_escrows"))

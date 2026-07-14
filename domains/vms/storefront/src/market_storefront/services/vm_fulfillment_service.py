@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any
+
+from domains.vms.settlement import submit_compute_fulfillment
 
 from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
-from domains.vms.settlement import submit_compute_fulfillment
 
 logger = logging.getLogger(__name__)
 
@@ -115,9 +118,81 @@ ApplyFailurePolicyFn = Callable[..., Awaitable[None]]
 
 CAPACITY_EXHAUSTED_REASON = "capacity_exhausted"
 
+_PCI_BDF_RE = re.compile(
+    r"^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$"
+)
+
 
 class CapacityExhaustedError(RuntimeError):
     """The exact VM listing's site-authority claim has no free capacity."""
+
+
+def _allocated_gpu_bdfs(allocation: Mapping[str, Any]) -> list[str]:
+    """Read the authoritative exact device subset from a site allocation.
+
+    Never fall back to resource inventory or a count: those describe candidate
+    capacity, not the devices this deal owns.
+    """
+    raw_count = allocation.get("allocated_gpu_count")
+    try:
+        gpu_count = int(raw_count or 0)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            f"Reserved allocation has invalid allocated_gpu_count {raw_count!r}"
+        ) from exc
+    if gpu_count < 0:
+        raise RuntimeError("Reserved allocation has negative allocated_gpu_count")
+
+    executor_ref = allocation.get("executor_ref")
+    if not isinstance(executor_ref, Mapping):
+        if gpu_count:
+            raise RuntimeError(
+                "Reserved GPU allocation missing authoritative executor_ref"
+            )
+        return []
+    ref_host = executor_ref.get("vm_host")
+    allocation_host = allocation.get("vm_host")
+    if ref_host and allocation_host and str(ref_host) != str(allocation_host):
+        raise RuntimeError(
+            "Reserved GPU allocation executor_ref.vm_host does not match vm_host"
+        )
+    raw_devices = executor_ref.get("gpu_devices")
+    if gpu_count == 0:
+        if raw_devices not in (None, []):
+            raise RuntimeError(
+                "Reserved zero-GPU allocation unexpectedly contains gpu_devices"
+            )
+        return []
+    if not isinstance(raw_devices, list) or len(raw_devices) != gpu_count:
+        actual = len(raw_devices) if isinstance(raw_devices, list) else "missing"
+        raise RuntimeError(
+            "Reserved GPU allocation must carry exactly one exact device per "
+            f"allocated GPU ({actual} != {gpu_count})"
+        )
+
+    bdfs: list[str] = []
+    for index, device in enumerate(raw_devices):
+        if not isinstance(device, Mapping):
+            raise RuntimeError(
+                f"Reserved GPU device {index} is not an identity object"
+            )
+        bdf = str(device.get("pci_bdf") or "").strip().lower()
+        if not _PCI_BDF_RE.fullmatch(bdf):
+            raise RuntimeError(
+                f"Reserved GPU device {index} has invalid pci_bdf {bdf!r}"
+            )
+        if bdf in bdfs:
+            raise RuntimeError(
+                f"Reserved GPU allocation repeats pci_bdf {bdf!r}"
+            )
+        bdfs.append(bdf)
+
+    top_level = allocation.get("gpu_devices")
+    if top_level is not None and top_level != raw_devices:
+        raise RuntimeError(
+            "Reserved GPU allocation payload disagrees with executor_ref.gpu_devices"
+        )
+    return bdfs
 
 
 async def fulfill_vm_obligation(
@@ -196,6 +271,7 @@ async def fulfill_vm_obligation(
         reserved_vm_host = reserved.get("vm_host")
         if not reserved_vm_host:
             raise RuntimeError("Reserved resource missing vm_host")
+        allocated_gpu_devices = _allocated_gpu_bdfs(reserved)
         stage_event(
             "provision", "resource_reserved",
             listing_id=order_id,
@@ -207,6 +283,7 @@ async def fulfill_vm_obligation(
             required_attributes=required_attributes,
             allocation_id=reserved_allocation_id,
             allocated_gpu_count=reserved.get("allocated_gpu_count"),
+            gpu_devices=allocated_gpu_devices,
         )
         # Stale derived listings are closed by the storefront's
         # capacity-delta subscriber (reacting to the reserve above), not
@@ -247,6 +324,7 @@ async def fulfill_vm_obligation(
             vm_host=reserved_vm_host,
             vm_target=vm_target,
             gpu_count=int(reserved.get("allocated_gpu_count") or 0),
+            gpu_devices=allocated_gpu_devices,
             on_job_submitted=_record_job_id,
         )
         authentication: dict[str, Any] | None = None

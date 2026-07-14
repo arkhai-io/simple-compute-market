@@ -30,6 +30,16 @@ def _make_ledger(**kwargs) -> CapacityLedgerService:
     return CapacityLedgerService(sessionmaker(bind=engine), **kwargs)
 
 
+def _gpu_devices(count: int, *, start: int = 0) -> list[dict[str, str]]:
+    return [
+        {
+            "pci_bdf": f"0000:{3 + start + index:02x}:00.0",
+            "gpu_uuid": f"GPU-test-{start + index:04d}",
+        }
+        for index in range(count)
+    ]
+
+
 @pytest.fixture
 def ledger() -> CapacityLedgerService:
     return _make_ledger()
@@ -41,7 +51,12 @@ def seeded(ledger: CapacityLedgerService) -> CapacityLedgerService:
         resource_id="compute-kvm1-001",
         total_units=8,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm1", "gpu_model": "H200", "region": "us-west"},
+        attributes={
+            "vm_host": "kvm1",
+            "gpu_model": "H200",
+            "region": "us-west",
+            "gpu_devices": _gpu_devices(8),
+        },
     )
     return ledger
 
@@ -52,6 +67,43 @@ def test_snapshot_reports_availability(seeded: CapacityLedgerService):
     assert rows[0]["resource_id"] == "compute-kvm1-001"
     assert rows[0]["available_units"] == 8
     assert rows[0]["state"] == "available"
+    assert rows[0]["attributes"]["gpu_devices"] == _gpu_devices(8)
+
+
+@pytest.mark.parametrize(
+    ("devices", "message"),
+    [
+        (None, "gpu_devices to be a list"),
+        ([], "exactly total_units"),
+        (
+            [{"pci_bdf": "not-a-bdf"}],
+            "canonical PCI BDF",
+        ),
+        (
+            [{"pci_bdf": "0000:03:00.0"}, {"pci_bdf": "0000:03:00.0"}],
+            "duplicate pci_bdf",
+        ),
+        (
+            [
+                {"pci_bdf": "0000:03:00.0", "gpu_uuid": "GPU-same"},
+                {"pci_bdf": "0000:04:00.0", "gpu_uuid": "GPU-same"},
+            ],
+            "duplicate gpu_uuid",
+        ),
+    ],
+)
+def test_vm_resource_registration_requires_exact_device_inventory(
+    ledger: CapacityLedgerService,
+    devices,
+    message: str,
+):
+    total = 1 if devices is None or len(devices) == 1 else 2
+    with pytest.raises(ValueError, match=message):
+        ledger.register_resource(
+            resource_id="invalid-vm",
+            total_units=total,
+            attributes={"vm_host": "kvm1", "gpu_devices": devices},
+        )
 
 
 def test_probe_consumes_nothing(seeded: CapacityLedgerService):
@@ -87,6 +139,7 @@ def _register_dual_mode_host(ledger: CapacityLedgerService) -> None:
             "gpu_model": "H200",
             "physical_host_id": "physical-host-1",
             "allocation_mode": ALLOCATION_MODE_SHAREABLE,
+            "gpu_devices": _gpu_devices(8),
         },
     )
     ledger.register_resource(
@@ -256,6 +309,14 @@ def test_reserve_decrements_and_releases_restore(seeded: CapacityLedgerService):
     assert reserved is not None
     assert reserved["allocated_gpu_count"] == 3
     assert reserved["available_gpu_count"] == 5
+    assert reserved["gpu_devices"] == _gpu_devices(3)
+    assert reserved["executor_ref"] == {
+        "vm_host": "kvm1",
+        "gpu_devices": _gpu_devices(3),
+    }
+    persisted = seeded.get_allocation(reserved["allocation_id"])
+    assert persisted["gpu_devices"] == _gpu_devices(3)
+    assert persisted["executor_ref"] == reserved["executor_ref"]
     assert seeded.snapshot()[0]["available_units"] == 5
 
     # Second reservation cannot exceed the remainder.
@@ -276,7 +337,11 @@ def test_synchronized_buyers_cannot_double_allocate_one_gpu(
     ledger.register_resource(
         resource_id="compute-kvm1-gpu",
         total_units=1,
-        attributes={"vm_host": "kvm1", "gpu_model": "RTX 3090"},
+        attributes={
+            "vm_host": "kvm1",
+            "gpu_model": "RTX 3090",
+            "gpu_devices": _gpu_devices(1),
+        },
     )
     release = Barrier(2)
 
@@ -302,10 +367,206 @@ def test_synchronized_buyers_cannot_double_allocate_one_gpu(
 
     ledger.release(allocation_id=winners[0]["allocation_id"])
     assert ledger.snapshot()[0]["available_units"] == 1
-    assert ledger.reserve(
+    reused = ledger.reserve(
         claim={"vm_host": "kvm1", "gpu_count": 1},
         deal_ref={"escrow_uid": "0xbuyer-3"},
+    )
+    assert reused["gpu_devices"] == winners[0]["gpu_devices"]
+
+
+def test_concurrent_allocations_receive_distinct_exact_gpu_devices(
+    ledger: CapacityLedgerService,
+):
+    ledger.register_resource(
+        resource_id="compute-kvm1-two-gpus",
+        total_units=2,
+        attributes={
+            "vm_host": "kvm1",
+            "gpu_model": "H200",
+            "gpu_devices": _gpu_devices(2),
+        },
+    )
+    release = Barrier(2)
+
+    def reserve(escrow_uid: str):
+        release.wait(timeout=5)
+        return ledger.reserve(
+            claim={"vm_host": "kvm1", "gpu_count": 1},
+            deal_ref={"escrow_uid": escrow_uid},
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(reserve, ("0xbuyer-a", "0xbuyer-b")))
+
+    assert all(result is not None for result in results)
+    bdfs = [result["gpu_devices"][0]["pci_bdf"] for result in results]
+    assert len(set(bdfs)) == 2
+    assert set(bdfs) == {"0000:03:00.0", "0000:04:00.0"}
+
+
+def test_resource_update_cannot_remove_an_allocated_exact_device(
+    ledger: CapacityLedgerService,
+):
+    ledger.register_resource(
+        resource_id="compute-kvm1-two-gpus",
+        total_units=2,
+        attributes={"vm_host": "kvm1", "gpu_devices": _gpu_devices(2)},
+    )
+    reserved = ledger.reserve(
+        claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xheld"},
+    )
+    assert reserved["gpu_devices"] == _gpu_devices(1)
+
+    with pytest.raises(CapacityConflictError, match="cannot remove allocated GPU"):
+        ledger.register_resource(
+            resource_id="compute-kvm1-two-gpus",
+            total_units=1,
+            attributes={"vm_host": "kvm1", "gpu_devices": _gpu_devices(1, start=1)},
+        )
+
+    # The rejected upsert leaves the original authoritative inventory intact.
+    assert ledger.snapshot()[0]["attributes"]["gpu_devices"] == _gpu_devices(2)
+
+
+@pytest.mark.parametrize(
+    "executor_ref",
+    [
+        {"vm_host": "kvm1"},
+        {"vm_host": "kvm1", "gpu_devices": None},
+    ],
+)
+def test_legacy_held_vm_allocation_without_exact_devices_blocks_resource(
+    ledger: CapacityLedgerService,
+    executor_ref: dict,
+):
+    ledger.register_resource(
+        resource_id="compute-kvm1-two-gpus",
+        total_units=2,
+        attributes={"vm_host": "kvm1", "gpu_devices": _gpu_devices(2)},
+    )
+    reserved = ledger.reserve(claim={"gpu_count": 1}, deal_ref={})
+
+    from market_site.db import SiteAllocation
+    with ledger._session_factory() as db:
+        row = db.get(SiteAllocation, reserved["allocation_id"])
+        row.executor_ref = executor_ref
+        db.commit()
+
+    assert ledger.get_allocation(reserved["allocation_id"])["gpu_devices"] == []
+    assert ledger.probe(claim={"gpu_count": 1}) is None
+    assert ledger.snapshot()[0]["available_units"] == 0
+
+
+def test_lease_update_cannot_reassign_frozen_gpu_devices(
+    seeded: CapacityLedgerService,
+):
+    reserved = seeded.reserve(claim={"gpu_count": 1}, deal_ref={})
+
+    with pytest.raises(CapacityConflictError, match="GPU devices are frozen"):
+        seeded.attach_lease(
+            allocation_id=reserved["allocation_id"],
+            executor_ref={
+                "vm_host": "kvm1",
+                "gpu_devices": _gpu_devices(1, start=1),
+            },
+        )
+
+    assert seeded.get_allocation(reserved["allocation_id"])["executor_ref"] == (
+        reserved["executor_ref"]
+    )
+
+
+def test_lease_update_cannot_clear_frozen_gpu_devices(
+    seeded: CapacityLedgerService,
+):
+    reserved = seeded.reserve(claim={"gpu_count": 1}, deal_ref={})
+
+    with pytest.raises(CapacityConflictError, match="GPU devices are frozen"):
+        seeded.update_lease_fields(
+            reserved["allocation_id"],
+            executor_ref={"gpu_devices": None},
+        )
+
+    assert seeded.get_allocation(reserved["allocation_id"])["executor_ref"] == (
+        reserved["executor_ref"]
+    )
+
+
+def test_shareable_sibling_resources_cannot_reuse_a_physical_gpu(
+    ledger: CapacityLedgerService,
+):
+    shared = {
+        "vm_host": "kvm1",
+        "physical_host_id": "host-physical-1",
+        "allocation_mode": ALLOCATION_MODE_SHAREABLE,
+        "gpu_devices": _gpu_devices(2),
+    }
+    ledger.register_resource(
+        resource_id="h200-hourly",
+        total_units=2,
+        resource_subtype="h200",
+        attributes={**shared, "gpu_model": "H200"},
+    )
+    ledger.register_resource(
+        resource_id="h200-discount",
+        total_units=2,
+        resource_subtype="h200",
+        attributes={**shared, "gpu_model": "H200"},
+    )
+
+    first = ledger.reserve(
+        claim={"resource_id": "h200-hourly", "gpu_count": 1}, deal_ref={},
+    )
+    second = ledger.reserve(
+        claim={"resource_id": "h200-discount", "gpu_count": 1}, deal_ref={},
+    )
+
+    assert first["gpu_devices"] == _gpu_devices(1)
+    assert second["gpu_devices"] == _gpu_devices(1, start=1)
+    by_id = {row["resource_id"]: row for row in ledger.snapshot()}
+    assert by_id["h200-hourly"]["available_units"] == 0
+    assert by_id["h200-discount"]["available_units"] == 0
+
+
+def test_idle_sibling_cannot_split_scope_while_shared_gpu_is_allocated(
+    ledger: CapacityLedgerService,
+):
+    shared = {
+        "vm_host": "kvm1",
+        "physical_host_id": "host-physical-1",
+        "allocation_mode": ALLOCATION_MODE_SHAREABLE,
+        "gpu_devices": _gpu_devices(2),
+    }
+    ledger.register_resource(
+        resource_id="h200-hourly",
+        total_units=2,
+        attributes={**shared, "gpu_model": "H200"},
+    )
+    ledger.register_resource(
+        resource_id="h200-discount",
+        total_units=2,
+        attributes={**shared, "gpu_model": "H200"},
+    )
+    assert ledger.reserve(
+        claim={"resource_id": "h200-hourly", "gpu_count": 1}, deal_ref={},
     ) is not None
+
+    with pytest.raises(CapacityConflictError, match="physical GPU scope"):
+        ledger.register_resource(
+            resource_id="h200-discount",
+            total_units=2,
+            attributes={
+                **shared,
+                "physical_host_id": "forged-independent-host",
+                "gpu_model": "H200",
+            },
+        )
+
+    by_id = {row["resource_id"]: row for row in ledger.snapshot()}
+    assert (
+        by_id["h200-discount"]["attributes"]["physical_host_id"]
+        == "host-physical-1"
+    )
 
 
 def test_future_reservation_ignores_non_overlapping_current_lease(seeded: CapacityLedgerService):
@@ -332,6 +593,7 @@ def test_future_reservation_ignores_non_overlapping_current_lease(seeded: Capaci
     )
     assert later is not None
     assert later["allocated_gpu_count"] == 8
+    assert later["gpu_devices"] == first["gpu_devices"]
 
     # Future bookings do not consume the current snapshot.
     assert seeded.snapshot()[0]["available_units"] == 8
@@ -452,7 +714,11 @@ def test_attach_lease_records_tail_on_allocation(seeded: CapacityLedgerService):
     assert attached["vm_target"] == "tenant-abcd"
     assert attached["executor_kind"] == "vm"
     assert attached["executor_target"] == "tenant-abcd"
-    assert attached["executor_ref"] == {"vm_host": "kvm1"}
+    assert attached["executor_ref"] == {
+        "vm_host": "kvm1",
+        "gpu_devices": _gpu_devices(1),
+    }
+    assert attached["gpu_devices"] == _gpu_devices(1)
     assert attached["create_job_id"] == "job-1"
     # No availability change: attach emits no capacity event.
     events, _ = seeded.events_after(0)
@@ -522,6 +788,7 @@ def _shared_host_ledger() -> CapacityLedgerService:
             "allocation_mode": ALLOCATION_MODE_SHAREABLE,
             "vm_host": "kvm1",
             "gpu_model": "H200",
+            "gpu_devices": _gpu_devices(8),
         },
     )
     ledger.register_resource(

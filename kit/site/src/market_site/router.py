@@ -71,14 +71,19 @@ def make_capacity_router(
         Called by the storefront when inventory is registered (remote
         capacity mode) or by operators/seeding directly.
         """
-        resource = ledger.register_resource(
-            resource_id=resource_id,
-            total_units=body.total_units,
-            resource_type=body.resource_type,
-            resource_subtype=body.resource_subtype,
-            attributes=body.attributes,
-            enabled=body.enabled,
-        )
+        try:
+            resource = ledger.register_resource(
+                resource_id=resource_id,
+                total_units=body.total_units,
+                resource_type=body.resource_type,
+                resource_subtype=body.resource_subtype,
+                attributes=body.attributes,
+                enabled=body.enabled,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        except CapacityConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         logger.info(
             "[CAPACITY] Registered resource %s (units=%d enabled=%s)",
             resource_id, body.total_units, body.enabled,

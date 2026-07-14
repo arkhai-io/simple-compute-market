@@ -6,14 +6,16 @@
   set_fact:
     gpu_hostdev_args: >-
       {% set args = [] %}
-      {% if vm_gpu_devices is defined and vm_gpu_devices | length > 0 %}
-      {%   for gpu in vm_gpu_devices %}
-      {%     set gpu_arg = '--hostdev ' + gpu.pci %}
-      {%     if gpu.romfile is defined and gpu.romfile != '' %}
+      {% set execution_devices = vm_gpu_passthrough_devices | default(vm_gpu_devices | default([])) %}
+      {% if execution_devices | length > 0 %}
+      {%   for gpu in execution_devices %}
+      {%     set pci = gpu.pci if gpu is mapping else gpu %}
+      {%     set gpu_arg = '--hostdev ' + pci %}
+      {%     if gpu is mapping and gpu.romfile is defined and gpu.romfile != '' %}
       {%       set gpu_arg = gpu_arg + ',romfile=' + gpu.romfile %}
       {%     endif %}
       {%     set _ = args.append(gpu_arg) %}
-      {%     if gpu.audio is defined and gpu.audio != '' and gpu.audio != 'NO_AUDIO_DEVICE' %}
+      {%     if gpu is mapping and gpu.audio is defined and gpu.audio != '' and gpu.audio != 'NO_AUDIO_DEVICE' %}
       {%       set _ = args.append('--hostdev ' + gpu.audio) %}
       {%     endif %}
       {%   endfor %}
@@ -92,4 +94,4 @@
       - "=== VM Created Successfully ==="
       - "VM Name: {{ vm_name }}"
       - "GPUs Attached: {{ vm_gpu_devices | length if (vm_gpu_devices is defined) else 1 }}"
-      - "{% if vm_gpu_devices is defined %}GPU List: {{ vm_gpu_devices | map(attribute='pci') | join(', ') }}{% else %}GPU: {{ vm_gpu_device }}{% endif %}"
+      - "{% if vm_gpu_devices is defined %}GPU List: {{ vm_gpu_devices }}{% else %}GPU: {{ vm_gpu_device }}{% endif %}"

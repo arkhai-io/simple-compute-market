@@ -100,6 +100,39 @@ class TestCreateVmFieldConstraints:
         with pytest.raises(ValidationError):
             CreateVmRequest(vm_target="t", vm_gpu_count=0)
 
+    def test_exact_gpu_devices_are_canonicalized(self):
+        request = CreateVmRequest(
+            vm_target="t",
+            gpu_provisioned=True,
+            vm_gpu_devices=["0000:0A:00.0", "0000:0b:00.0"],
+        )
+        assert request.vm_gpu_devices == ["0000:0a:00.0", "0000:0b:00.0"]
+
+    @pytest.mark.parametrize(
+        "devices",
+        [[], ["not-a-bdf"], ["0000:03:00.0", "0000:03:00.0"]],
+    )
+    def test_invalid_exact_gpu_devices_raise(self, devices):
+        with pytest.raises(ValidationError, match="vm_gpu_devices"):
+            CreateVmRequest(
+                vm_target="t", gpu_provisioned=True, vm_gpu_devices=devices,
+            )
+
+    def test_exact_devices_cannot_be_combined_with_auto_selection(self):
+        with pytest.raises(ValidationError, match="auto-selection"):
+            CreateVmRequest(
+                vm_target="t",
+                vm_gpu_count=2,
+                vm_gpu_devices=["0000:03:00.0", "0000:04:00.0"],
+            )
+
+    def test_exact_devices_require_gpu_provisioning(self):
+        with pytest.raises(ValidationError, match="gpu_provisioned=true"):
+            CreateVmRequest(
+                vm_target="t",
+                vm_gpu_devices=["0000:03:00.0"],
+            )
+
 
 # ---------------------------------------------------------------------------
 # CreateVmRequest — defaults
@@ -159,13 +192,22 @@ class TestCreateVmToParams:
         req = CreateVmRequest(
             vm_target="t",
             gpu_provisioned=True,
-            vm_gpu_count=2,
             vm_gpu_devices=["0000:03:00.0", "0000:04:00.0"],
         )
         p = build_create_params("kvm1", req)
         assert p.gpu_provisioned is True
-        assert p.vm_gpu_count == 2
+        assert p.vm_gpu_count is None
         assert p.vm_gpu_devices == ["0000:03:00.0", "0000:04:00.0"]
+
+    def test_singular_exact_gpu_is_normalized_to_no_substitution_list(self):
+        req = CreateVmRequest(
+            vm_target="t",
+            gpu_provisioned=True,
+            vm_gpu_device="0000:03:00.0",
+        )
+        p = build_create_params("kvm1", req)
+        assert p.vm_gpu_device is None
+        assert p.vm_gpu_devices == ["0000:03:00.0"]
 
     def test_golden_image_fields_propagated(self):
         req = CreateVmRequest(

@@ -85,11 +85,11 @@ class TestSeedResourcesIfEmpty:
             "min_price,token,max_duration_seconds,"
             "attribute.gpu_model,attribute.sla,attribute.region,"
             "attribute.vm_host,attribute.vcpu_count,attribute.ram_gb,"
-            "attribute.disk_gb,attribute.virtualization_type\n"
+            "attribute.disk_gb,attribute.virtualization_type,attribute.gpu_devices\n"
             "compute-test-001,compute.gpu,rtx5080,count,1,available,"
             "150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,"
             'RTX 5080,90.0,"California, US",'
-            "kvm1,16,256,4000,bare_metal\n"
+            "kvm1,16,256,4000,bare_metal,\"[{\"\"pci_bdf\"\":\"\"0000:03:00.0\"\"}]\"\n"
         )
 
         svc = _make_service(db)
@@ -107,10 +107,11 @@ class TestSeedResourcesIfEmpty:
         csv_content = (
             "resource_id,resource_type,resource_subtype,unit,value,state,"
             "min_price,token,max_duration_seconds,"
-            "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
+            "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,"
+            "attribute.gpu_devices\n"
             'compute-inline-001,compute.gpu,rtx5080,count,1,available,'
             '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-            'RTX 5080,90.0,"California, US",kvm1\n'
+            'RTX 5080,90.0,"California, US",kvm1,"[{""pci_bdf"":""0000:03:00.0""}]"\n'
         )
         svc = _make_service(db)
         result = await svc.seed_resources_if_empty(csv_inline=csv_content)
@@ -131,10 +132,11 @@ class TestSeedResourcesIfEmpty:
         csv_content = (
             "resource_id,resource_type,resource_subtype,unit,value,state,"
             "min_price,token,max_duration_seconds,"
-            "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
+            "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,"
+            "attribute.gpu_devices\n"
             'compute-inline-001,compute.gpu,rtx5080,count,1,available,'
             '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-            'RTX 5080,90.0,"California, US",kvm1\n'
+            'RTX 5080,90.0,"California, US",kvm1,"[{""pci_bdf"":""0000:03:00.0""}]"\n'
         )
         svc = _make_service(db)
         result = await svc.seed_resources_if_empty(

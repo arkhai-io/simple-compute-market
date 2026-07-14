@@ -30,6 +30,9 @@ class ResourceRegisterRequest(BaseModel):
         default_factory=dict,
         description=(
             "Resource-domain attributes (vm_host, gpu_model, region, …). "
+            "A compute.gpu resource with vm_host must include gpu_devices: "
+            "one object per total unit with canonical pci_bdf and optional "
+            "gpu_uuid. "
             "Market schema (pricing, escrows) stays on the storefront."
         ),
     )

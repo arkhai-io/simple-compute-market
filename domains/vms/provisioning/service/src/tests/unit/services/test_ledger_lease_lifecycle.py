@@ -48,7 +48,13 @@ def ledger(session_factory) -> CapacityLedgerService:
     svc.register_resource(
         resource_id="compute-kvm1-001",
         total_units=8,
-        attributes={"vm_host": "kvm1"},
+        attributes={
+            "vm_host": "kvm1",
+            "gpu_devices": [
+                {"pci_bdf": f"0000:{3 + index:02x}:00.0"}
+                for index in range(8)
+            ],
+        },
     )
     return svc
 
@@ -397,6 +403,14 @@ async def test_bare_metal_executor_releases_locally_and_notifies(session_factory
     assert row["vm_remove_job_id"] is None
     assert row["executor_target"] == "node-1"
     assert row["executor_ref"] == {
+        # Updating release coordinates cannot erase the exact VM capacity
+        # identity frozen at reservation time, even in this synthetic test's
+        # executor-kind transition.
+        "vm_host": "kvm1",
+        "gpu_devices": [
+            {"pci_bdf": "0000:03:00.0"},
+            {"pci_bdf": "0000:04:00.0"},
+        ],
         "physical_host_id": "host-kvm1",
         "ssh_user": "tenant-x",
     }

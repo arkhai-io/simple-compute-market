@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
 import pytest
+from market_config.config_loader import EscrowTemplate, RateSlot
 
 from market_storefront.utils.sqlite_client import SQLiteClient
-from market_config.config_loader import EscrowTemplate, RateSlot
 
 
 def _write_csv(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
+
+
+def _gpu_devices_cell(*bdfs: str) -> str:
+    raw = json.dumps([{"pci_bdf": bdf} for bdf in bdfs], separators=(",", ":"))
+    return f'"{raw.replace(chr(34), chr(34) * 2)}"'
 
 
 @pytest.mark.asyncio
@@ -23,9 +29,9 @@ async def test_upsert_resources_from_csv_reports_matched_and_unrecognized(tmp_pa
         csv_path,
         "\n".join(
             [
-                "resource_id,resource_type,resource_subtype,unit,value,state,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.topic",
-                "compute-1,compute.gpu,h200,count,2,available,H200,99.0,\"California, US\",vm1,",
-                "info-1,information.note,,,,available,,,,,market-overview",
+                "resource_id,resource_type,resource_subtype,unit,value,state,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.topic,attribute.gpu_devices",
+                f"compute-1,compute.gpu,h200,count,2,available,H200,99.0,\"California, US\",vm1,,{_gpu_devices_cell('0000:03:00.0', '0000:04:00.0')}",
+                "info-1,information.note,,,,available,,,,,market-overview,",
             ]
         ),
     )
@@ -46,6 +52,10 @@ async def test_upsert_resources_from_csv_reports_matched_and_unrecognized(tmp_pa
     assert by_id["compute-1"]["attributes"]["vm_host"] == "vm1"
     assert by_id["compute-1"]["attributes"]["physical_host_id"] == "vm1"
     assert by_id["compute-1"]["attributes"]["allocation_mode"] == "shareable"
+    assert by_id["compute-1"]["attributes"]["gpu_devices"] == [
+        {"pci_bdf": "0000:03:00.0"},
+        {"pci_bdf": "0000:04:00.0"},
+    ]
     assert by_id["info-1"]["resource_type"] == "information.note"
     assert by_id["info-1"]["attributes"]["topic"] == "market-overview"
 
@@ -61,8 +71,8 @@ async def test_upsert_resources_from_csv_invalid_known_schema_row_fails(tmp_path
         csv_path,
         "\n".join(
             [
-                "resource_id,resource_type,resource_subtype,unit,value,state,attribute.gpu_model,attribute.region,attribute.vm_host",
-                "compute-bad-1,compute.gpu,h200,count,2,available,H200,\"California, US\",vm1",
+                "resource_id,resource_type,resource_subtype,unit,value,state,attribute.gpu_model,attribute.region,attribute.vm_host,attribute.gpu_devices",
+                f"compute-bad-1,compute.gpu,h200,count,2,available,H200,\"California, US\",vm1,{_gpu_devices_cell('0000:03:00.0', '0000:04:00.0')}",
             ]
         ),
     )
@@ -95,9 +105,9 @@ async def test_upsert_resources_from_csv_persists_per_row_pricing(tmp_path: Path
         csv_path,
         "\n".join(
             [
-                "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host",
-                f"compute-priced,compute.gpu,h200,count,1,available,150,{usdc},H200,99.0,\"California, US\",vm1",
-                "compute-default,compute.gpu,h200,count,1,available,,,H200,99.0,\"California, US\",vm2",
+                "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.gpu_devices",
+                f"compute-priced,compute.gpu,h200,count,1,available,150,{usdc},H200,99.0,\"California, US\",vm1,{_gpu_devices_cell('0000:03:00.0')}",
+                f"compute-default,compute.gpu,h200,count,1,available,,,H200,99.0,\"California, US\",vm2,{_gpu_devices_cell('0000:04:00.0')}",
             ]
         ),
     )
@@ -126,8 +136,8 @@ async def test_compute_resource_import_preserves_explicit_shared_host_metadata(
         csv_path,
         "\n".join(
             [
-                "resource_id,resource_type,resource_subtype,unit,value,state,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.physical_host_id,attribute.allocation_mode",
-                "compute-1,compute.gpu,h200,count,1,available,H200,99.0,\"California, US\",kvm-alias-1,host-physical-1,shareable",
+                "resource_id,resource_type,resource_subtype,unit,value,state,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.physical_host_id,attribute.allocation_mode,attribute.gpu_devices",
+                f"compute-1,compute.gpu,h200,count,1,available,H200,99.0,\"California, US\",kvm-alias-1,host-physical-1,shareable,{_gpu_devices_cell('0000:03:00.0')}",
             ]
         ),
     )
@@ -140,6 +150,45 @@ async def test_compute_resource_import_preserves_explicit_shared_host_metadata(
     assert attrs["vm_host"] == "kvm-alias-1"
     assert attrs["physical_host_id"] == "host-physical-1"
     assert attrs["allocation_mode"] == "shareable"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("value", "device_cell", "expected_error"),
+    [
+        (1, "", "require attribute.gpu_devices"),
+        (2, _gpu_devices_cell("0000:03:00.0"), "exactly value entries"),
+        (
+            2,
+            _gpu_devices_cell("0000:03:00.0", "0000:03:00.0"),
+            "duplicate pci_bdf",
+        ),
+        (1, _gpu_devices_cell("invalid"), "canonical PCI BDF"),
+    ],
+)
+async def test_vm_import_rejects_non_authoritative_device_inventory(
+    tmp_path: Path,
+    value: int,
+    device_cell: str,
+    expected_error: str,
+):
+    sqlite_client = SQLiteClient(db_path=str(tmp_path / "invalid-gpus.db"))
+    csv_path = tmp_path / "invalid-gpus.csv"
+    _write_csv(
+        csv_path,
+        "\n".join(
+            [
+                "resource_id,resource_type,resource_subtype,unit,value,state,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.gpu_devices",
+                f"compute-invalid,compute.gpu,h200,count,{value},available,H200,99.0,us-west,kvm1,{device_cell}",
+            ]
+        ),
+    )
+
+    report = await sqlite_client.upsert_resources_from_csv(csv_path=str(csv_path))
+
+    assert report["invalid_count"] == 1
+    assert expected_error in report["rows"][0]["errors"][0]
+    assert await sqlite_client.list_resources() == []
 
 
 @pytest.mark.asyncio

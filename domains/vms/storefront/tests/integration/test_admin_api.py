@@ -191,10 +191,11 @@ class TestAdminImportResources:
     _VALID_CSV = (
         "resource_id,resource_type,resource_subtype,unit,value,state,"
         "min_price,token,max_duration_seconds,"
-        "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
+        "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,"
+        "attribute.gpu_devices\n"
         'compute-import-001,compute.gpu,rtx5080,count,1,available,'
         '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-        'RTX 5080,90.0,"California, US",kvm1\n'
+        'RTX 5080,90.0,"California, US",kvm1,"[{""pci_bdf"":""0000:03:00.0""}]"\n'
     )
 
     async def test_requires_admin_key(self, client_no_key):
@@ -241,12 +242,13 @@ class TestAdminImportResources:
         mixed_csv = (
             "resource_id,resource_type,resource_subtype,unit,value,state,"
             "min_price,token,max_duration_seconds,"
-            "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
+            "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,"
+            "attribute.gpu_devices\n"
             'compute-good-001,compute.gpu,rtx5080,count,1,available,'
             '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-            'RTX 5080,90.0,"California, US",kvm1\n'
+            'RTX 5080,90.0,"California, US",kvm1,"[{""pci_bdf"":""0000:03:00.0""}]"\n'
             # Row with missing resource_id will fail.
-            ',compute.gpu,rtx5080,count,1,available,150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm1\n'
+            ',compute.gpu,rtx5080,count,1,available,150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm1,"[{""pci_bdf"":""0000:04:00.0""}]"\n'
         ).encode()
         result = await c.admin_import_resources(mixed_csv)
         assert result.total_rows == 2

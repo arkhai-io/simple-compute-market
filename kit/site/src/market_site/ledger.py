@@ -27,6 +27,7 @@ feed is always consistent with a snapshot.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -49,10 +50,80 @@ ALLOCATION_MODE_EXCLUSIVE = "exclusive"
 ALLOCATION_MODE_SHAREABLE = "shareable"
 PHYSICAL_HOST_ID_ATTR = "physical_host_id"
 VM_EXECUTOR_KIND = "vm"
+GPU_DEVICES_ATTR = "gpu_devices"
+GPU_PCI_BDF_KEY = "pci_bdf"
+GPU_UUID_KEY = "gpu_uuid"
+
+_PCI_BDF_RE = re.compile(
+    r"^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$"
+)
 
 
 class CapacityConflictError(Exception):
     """Raised when a mutation references a row in an incompatible state."""
+
+
+def normalize_gpu_device_inventory(
+    devices: Any,
+    *,
+    total_units: int,
+) -> list[dict[str, Any]]:
+    """Validate and canonicalize one VM resource's whole-GPU inventory.
+
+    A PCI BDF is the executor-facing identity.  ``gpu_uuid`` is retained when
+    the seller can discover it, providing a stable hardware identity across
+    inventory refreshes without making NVIDIA-specific discovery mandatory.
+    """
+    if not isinstance(devices, list):
+        raise ValueError(
+            "VM compute resources require attributes.gpu_devices to be a list"
+        )
+    if len(devices) != int(total_units):
+        raise ValueError(
+            "attributes.gpu_devices must contain exactly total_units entries "
+            f"({len(devices)} != {int(total_units)})"
+        )
+
+    normalized: list[dict[str, Any]] = []
+    seen_bdfs: set[str] = set()
+    seen_uuids: set[str] = set()
+    for index, raw in enumerate(devices):
+        if not isinstance(raw, Mapping):
+            raise ValueError(
+                f"attributes.gpu_devices[{index}] must be an object"
+            )
+        bdf_raw = raw.get(GPU_PCI_BDF_KEY)
+        bdf = str(bdf_raw or "").strip().lower()
+        if not _PCI_BDF_RE.fullmatch(bdf):
+            raise ValueError(
+                f"attributes.gpu_devices[{index}].pci_bdf must be a canonical "
+                "PCI BDF such as '0000:03:00.0'"
+            )
+        if bdf in seen_bdfs:
+            raise ValueError(
+                f"attributes.gpu_devices contains duplicate pci_bdf {bdf!r}"
+            )
+        seen_bdfs.add(bdf)
+
+        device = dict(raw)
+        device[GPU_PCI_BDF_KEY] = bdf
+        if GPU_UUID_KEY in raw:
+            gpu_uuid = str(raw.get(GPU_UUID_KEY) or "").strip()
+            if not gpu_uuid:
+                raise ValueError(
+                    f"attributes.gpu_devices[{index}].gpu_uuid must be non-empty "
+                    "when supplied"
+                )
+            uuid_key = gpu_uuid.lower()
+            if uuid_key in seen_uuids:
+                raise ValueError(
+                    "attributes.gpu_devices contains duplicate gpu_uuid "
+                    f"{gpu_uuid!r}"
+                )
+            seen_uuids.add(uuid_key)
+            device[GPU_UUID_KEY] = gpu_uuid
+        normalized.append(device)
+    return normalized
 
 
 def parse_utc(value: str | None) -> Optional[datetime]:
@@ -203,6 +274,16 @@ class CapacityLedgerService:
         "released" for grows/registrations and "reserved" for shrinks so
         subscribers reconcile in the right direction without a new kind.
         """
+        total_units = int(total_units)
+        if total_units < 0:
+            raise ValueError("total_units must be >= 0")
+        normalized_attributes = dict(attributes or {})
+        vm_host = normalized_attributes.get("vm_host")
+        if resource_type == "compute.gpu" and vm_host:
+            normalized_attributes[GPU_DEVICES_ATTR] = normalize_gpu_device_inventory(
+                normalized_attributes.get(GPU_DEVICES_ATTR),
+                total_units=total_units,
+            )
         with self._lock, self._session_factory() as db:
             row = db.get(SiteResource, resource_id)
             grew = True
@@ -211,17 +292,23 @@ class CapacityLedgerService:
                     resource_id=resource_id,
                     resource_type=resource_type,
                     resource_subtype=resource_subtype,
-                    total_units=int(total_units),
-                    attributes=dict(attributes or {}),
+                    total_units=total_units,
+                    attributes=normalized_attributes,
                     enabled=enabled,
                 )
                 db.add(row)
             else:
-                grew = (int(total_units), enabled) >= (int(row.total_units), bool(row.enabled))
+                self._validate_resource_inventory_update(
+                    db,
+                    row,
+                    resource_type=resource_type,
+                    attributes=normalized_attributes,
+                )
+                grew = (total_units, enabled) >= (int(row.total_units), bool(row.enabled))
                 row.resource_type = resource_type
                 row.resource_subtype = resource_subtype
-                row.total_units = int(total_units)
-                row.attributes = dict(attributes or {})
+                row.total_units = total_units
+                row.attributes = normalized_attributes
                 row.enabled = enabled
             db.add(CapacityEvent(
                 kind="released" if grew else "reserved",
@@ -266,7 +353,7 @@ class CapacityLedgerService:
             match = self._find_candidate(db, claim, requested, window_start, window_end)
             if match is None:
                 return None
-            resource, available = match
+            resource, available, _ = match
             return self._match_payload(resource, available, requested)
 
     def reserve(
@@ -290,7 +377,19 @@ class CapacityLedgerService:
             match = self._find_candidate(db, claim, requested, window_start, window_end)
             if match is None:
                 return None
-            resource, available = match
+            resource, available, available_devices = match
+            allocated_devices = (
+                [dict(device) for device in available_devices[:requested]]
+                if available_devices is not None
+                else []
+            )
+            executor_ref: dict[str, Any] = {}
+            vm_host = (resource.attributes or {}).get("vm_host")
+            if vm_host:
+                executor_ref = {
+                    "vm_host": vm_host,
+                    GPU_DEVICES_ATTR: allocated_devices,
+                }
             hold_expires_at = None
             if ttl_seconds is not None:
                 hold_expires_at = (
@@ -304,10 +403,11 @@ class CapacityLedgerService:
                 deal_ref=deal,
                 escrow_uid=deal.get("escrow_uid"),
                 hold_expires_at=hold_expires_at,
-                vm_host=(resource.attributes or {}).get("vm_host"),
+                executor_ref=executor_ref or None,
+                vm_host=vm_host,
                 executor_kind=(
                     VM_EXECUTOR_KIND
-                    if (resource.attributes or {}).get("vm_host")
+                    if vm_host
                     else None
                 ),
                 lease_start_utc=window_start.isoformat() if window_start else None,
@@ -319,6 +419,8 @@ class CapacityLedgerService:
             payload = self._match_payload(resource, available - requested, requested)
             payload["allocation_id"] = allocation.allocation_id
             payload["hold_expires_at"] = hold_expires_at
+            payload["executor_ref"] = dict(executor_ref)
+            payload[GPU_DEVICES_ATTR] = allocated_devices
             return payload
 
     def commit(
@@ -767,7 +869,7 @@ class CapacityLedgerService:
         requested: int,
         lease_start: datetime | None = None,
         lease_end: datetime | None = None,
-    ) -> tuple[SiteResource, int] | None:
+    ) -> tuple[SiteResource, int, list[dict[str, Any]] | None] | None:
         rows = (
             db.query(SiteResource)
             .filter(SiteResource.enabled.is_(True))
@@ -787,13 +889,184 @@ class CapacityLedgerService:
                 db, resource, lease_start, lease_end,
             ):
                 continue
-            available = int(resource.total_units or 0) - self._held_units(
-                db, resource.resource_id, lease_start, lease_end
+            available_devices = self._available_gpu_devices(
+                db, resource, lease_start, lease_end,
             )
+            if (resource.attributes or {}).get("vm_host"):
+                # ``None`` means an overlapping legacy/corrupt allocation has
+                # no trustworthy exact identity.  Do not guess which device it
+                # owns; this resource is unavailable until an operator repairs
+                # or drains that allocation.
+                if available_devices is None:
+                    continue
+                available = len(available_devices)
+            else:
+                available = int(resource.total_units or 0) - self._held_units(
+                    db, resource.resource_id, lease_start, lease_end
+                )
             if available < requested:
                 continue
-            return resource, available
+            return resource, available, available_devices
         return None
+
+    def _available_gpu_devices(
+        self,
+        db: Session,
+        resource: SiteResource,
+        lease_start: datetime | None = None,
+        lease_end: datetime | None = None,
+    ) -> list[dict[str, Any]] | None:
+        """Return the exact free subset, or ``None`` when safety is unknown."""
+        attrs = resource.attributes or {}
+        if not attrs.get("vm_host"):
+            return None
+        try:
+            inventory = normalize_gpu_device_inventory(
+                attrs.get(GPU_DEVICES_ATTR),
+                total_units=int(resource.total_units or 0),
+            )
+        except ValueError:
+            logger.error(
+                "[CAPACITY] Resource %s has invalid GPU device inventory; "
+                "failing closed",
+                resource.resource_id,
+            )
+            return None
+
+        held_bdfs: set[str] = set()
+        allocations = db.query(SiteAllocation).filter(
+            SiteAllocation.state.in_(HELD_ALLOCATION_STATES),
+        ).all()
+        scope = self._gpu_device_scope(resource)
+        for allocation in allocations:
+            held_resource = db.get(SiteResource, allocation.resource_id)
+            if held_resource is None or self._gpu_device_scope(held_resource) != scope:
+                continue
+            if not self._allocation_overlaps(allocation, lease_start, lease_end):
+                continue
+            executor_ref = allocation.executor_ref or {}
+            devices = (
+                executor_ref.get(GPU_DEVICES_ATTR)
+                if isinstance(executor_ref, Mapping)
+                else None
+            )
+            if not isinstance(devices, list) or len(devices) != int(
+                allocation.units or 0
+            ):
+                logger.error(
+                    "[CAPACITY] Allocation %s has no exact GPU device subset; "
+                    "resource %s is blocked",
+                    allocation.allocation_id,
+                    resource.resource_id,
+                )
+                return None
+            allocation_bdfs: set[str] = set()
+            for device in devices:
+                if not isinstance(device, Mapping):
+                    return None
+                bdf = str(device.get(GPU_PCI_BDF_KEY) or "").strip().lower()
+                if not _PCI_BDF_RE.fullmatch(bdf) or bdf in allocation_bdfs:
+                    return None
+                allocation_bdfs.add(bdf)
+            if held_bdfs.intersection(allocation_bdfs):
+                logger.error(
+                    "[CAPACITY] Existing allocations reuse a GPU BDF on %s; "
+                    "failing closed",
+                    resource.resource_id,
+                )
+                return None
+            held_bdfs.update(allocation_bdfs)
+        return [
+            dict(device)
+            for device in inventory
+            if str(device[GPU_PCI_BDF_KEY]) not in held_bdfs
+        ]
+
+    def _validate_resource_inventory_update(
+        self,
+        db: Session,
+        row: SiteResource,
+        *,
+        resource_type: str,
+        attributes: Mapping[str, Any],
+    ) -> None:
+        """Keep active exact allocations valid across inventory upserts."""
+        row_active = (
+            db.query(SiteAllocation)
+            .filter(
+                SiteAllocation.resource_id == row.resource_id,
+                SiteAllocation.state.in_(HELD_ALLOCATION_STATES),
+            )
+            .all()
+        )
+        old_scope = self._gpu_device_scope(row)
+        new_scope = str(
+            attributes.get(PHYSICAL_HOST_ID_ATTR)
+            or attributes.get("vm_host")
+            or row.resource_id
+        )
+        scope_has_active_allocation = False
+        if new_scope != old_scope:
+            for allocation in db.query(SiteAllocation).filter(
+                SiteAllocation.state.in_(HELD_ALLOCATION_STATES),
+            ):
+                held_resource = db.get(SiteResource, allocation.resource_id)
+                if (
+                    held_resource is not None
+                    and self._gpu_device_scope(held_resource) == old_scope
+                ):
+                    scope_has_active_allocation = True
+                    break
+        if scope_has_active_allocation:
+            raise CapacityConflictError(
+                f"resource {row.resource_id} cannot change physical GPU scope "
+                f"from {old_scope!r} while any allocation in that scope is active"
+            )
+        if not row_active:
+            return
+        if resource_type != "compute.gpu" or not attributes.get("vm_host"):
+            raise CapacityConflictError(
+                f"resource {row.resource_id} has active VM allocations; "
+                "its VM GPU identity cannot be removed"
+            )
+        new_devices = attributes.get(GPU_DEVICES_ATTR)
+        new_by_bdf = {
+            str(device[GPU_PCI_BDF_KEY]): device for device in new_devices
+        }
+        for allocation in row_active:
+            executor_ref = allocation.executor_ref or {}
+            allocated = (
+                executor_ref.get(GPU_DEVICES_ATTR)
+                if isinstance(executor_ref, Mapping)
+                else None
+            )
+            if not isinstance(allocated, list) or len(allocated) != int(
+                allocation.units or 0
+            ):
+                raise CapacityConflictError(
+                    f"resource {row.resource_id} has an active allocation "
+                    "without exact GPU identity; drain it before updating inventory"
+                )
+            for device in allocated:
+                if not isinstance(device, Mapping):
+                    raise CapacityConflictError(
+                        f"resource {row.resource_id} has an active allocation "
+                        "with malformed exact GPU identity; drain it before "
+                        "updating inventory"
+                    )
+                bdf = str(device.get(GPU_PCI_BDF_KEY) or "").strip().lower()
+                replacement = new_by_bdf.get(bdf)
+                if replacement is None:
+                    raise CapacityConflictError(
+                        f"resource {row.resource_id} cannot remove allocated GPU {bdf}"
+                    )
+                old_uuid = str(device.get(GPU_UUID_KEY) or "").strip()
+                new_uuid = str(replacement.get(GPU_UUID_KEY) or "").strip()
+                if old_uuid and old_uuid.lower() != new_uuid.lower():
+                    raise CapacityConflictError(
+                        f"resource {row.resource_id} cannot change gpu_uuid for "
+                        f"allocated GPU {bdf}"
+                    )
 
     def _find_allocation(
         self,
@@ -818,12 +1091,6 @@ class CapacityLedgerService:
 
     def _resource_payload(self, db: Session, row: SiteResource) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
-        held = self._held_units(
-            db,
-            row.resource_id,
-            now,
-            now + timedelta(microseconds=1),
-        )
         total = int(row.total_units or 0)
         blocked = self._has_physical_host_conflict(
             db, row, now, now + timedelta(microseconds=1),
@@ -831,7 +1098,19 @@ class CapacityLedgerService:
         if blocked:
             available = 0
             state = "leased"
+        elif (row.attributes or {}).get("vm_host"):
+            exact = self._available_gpu_devices(
+                db, row, now, now + timedelta(microseconds=1),
+            )
+            available = len(exact) if exact is not None else 0
+            state = "available" if available > 0 else "leased"
         else:
+            held = self._held_units(
+                db,
+                row.resource_id,
+                now,
+                now + timedelta(microseconds=1),
+            )
             available = max(total - held, 0)
             if available >= total or held <= 0:
                 state = "available"
@@ -908,6 +1187,16 @@ class CapacityLedgerService:
         value = (resource.attributes or {}).get(PHYSICAL_HOST_ID_ATTR)
         return str(value) if value else None
 
+    @classmethod
+    def _gpu_device_scope(cls, resource: SiteResource) -> str:
+        """Namespace PCI identities by physical host, with safe fallbacks."""
+        attrs = resource.attributes or {}
+        return str(
+            cls._physical_host_id(resource)
+            or attrs.get("vm_host")
+            or resource.resource_id
+        )
+
     @staticmethod
     def _allocation_mode(resource: SiteResource) -> str | None:
         value = str((resource.attributes or {}).get(ALLOCATION_MODE_ATTR) or "")
@@ -945,6 +1234,14 @@ class CapacityLedgerService:
 
     @staticmethod
     def _allocation_payload(allocation: SiteAllocation) -> dict[str, Any]:
+        executor_ref = dict(allocation.executor_ref or {})
+        raw_gpu_devices = executor_ref.get(GPU_DEVICES_ATTR)
+        gpu_devices = (
+            [dict(device) for device in raw_gpu_devices]
+            if isinstance(raw_gpu_devices, list)
+            and all(isinstance(device, Mapping) for device in raw_gpu_devices)
+            else []
+        )
         return {
             "allocation_id": allocation.allocation_id,
             "resource_id": allocation.resource_id,
@@ -958,7 +1255,8 @@ class CapacityLedgerService:
             "executor_kind": allocation.executor_kind,
             "executor_target": allocation.executor_target,
             "release_job_id": allocation.release_job_id,
-            "executor_ref": dict(allocation.executor_ref or {}),
+            "executor_ref": executor_ref,
+            GPU_DEVICES_ATTR: gpu_devices,
             "vm_host": allocation.vm_host,
             "vm_target": allocation.vm_target,
             "lease_start_utc": allocation.lease_start_utc,
@@ -988,7 +1286,22 @@ class CapacityLedgerService:
             allocation.executor_target = allocation.vm_target
 
         if executor_ref is not None:
-            allocation.executor_ref = dict(executor_ref)
+            # Lease-tail updates add executor coordinates.  They must not erase
+            # the exact device subset frozen when capacity was reserved.
+            merged = dict(allocation.executor_ref or {})
+            existing_devices = merged.get(GPU_DEVICES_ATTR)
+            incoming_ref = dict(executor_ref)
+            requested_devices = incoming_ref.get(GPU_DEVICES_ATTR)
+            if (
+                existing_devices is not None
+                and GPU_DEVICES_ATTR in incoming_ref
+                and requested_devices != existing_devices
+            ):
+                raise CapacityConflictError(
+                    f"allocation {allocation.allocation_id} GPU devices are frozen"
+                )
+            merged.update(incoming_ref)
+            allocation.executor_ref = merged
         elif allocation.vm_host and not allocation.executor_ref:
             allocation.executor_ref = {"vm_host": allocation.vm_host}
 

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 import provisioning_client
-from market_storefront.services import publication_service
-from market_storefront.services import fulfillment_service
+import pytest
 from domains.vms.listings.reconciler import record_derived_listing
+
+from market_storefront.services import fulfillment_service, publication_service
+from market_storefront.services.vm_fulfillment_service import _allocated_gpu_bdfs
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests.fake_site import FakeSite, pump_events, site_capacity
 
@@ -85,8 +85,27 @@ def _compute_listing(*, gpu_count: int = 1) -> dict:
     }
 
 
+def test_allocated_gpu_devices_are_read_only_from_authoritative_executor_ref():
+    allocation = {
+        "vm_host": "host-1",
+        "allocated_gpu_count": 1,
+        "attributes": {
+            "gpu_devices": [{"pci_bdf": "0000:09:00.0"}],
+        },
+        "executor_ref": {
+            "vm_host": "host-1",
+            "gpu_devices": [{"pci_bdf": "0000:03:00.0", "gpu_uuid": "GPU-1"}],
+        },
+    }
+    assert _allocated_gpu_bdfs(allocation) == ["0000:03:00.0"]
+
+    without_exact_subset = {**allocation, "executor_ref": {"vm_host": "host-1"}}
+    with pytest.raises(RuntimeError, match="exactly one exact device"):
+        _allocated_gpu_bdfs(without_exact_subset)
+
+
 @pytest.mark.asyncio
-async def test_do_provision_forwards_reserved_gpu_count(monkeypatch):
+async def test_do_provision_forwards_exact_reserved_gpu_devices(monkeypatch):
     create = AsyncMock(return_value={"status": "created"})
     monkeypatch.setattr(
         fulfillment_service,
@@ -99,11 +118,33 @@ async def test_do_provision_forwards_reserved_gpu_count(monkeypatch):
         vm_host="host-1",
         vm_target="tenant-gpu",
         gpu_count=2,
+        gpu_devices=["0000:03:00.0", "0000:04:00.0"],
     )
 
     request = create.await_args.kwargs["request"]
     assert request.gpu_provisioned is True
-    assert request.vm_gpu_count == 2
+    assert request.vm_gpu_count is None
+    assert request.vm_gpu_devices == ["0000:03:00.0", "0000:04:00.0"]
+
+
+@pytest.mark.asyncio
+async def test_do_provision_rejects_count_only_gpu_request(monkeypatch):
+    create = AsyncMock()
+    monkeypatch.setattr(
+        fulfillment_service,
+        "create_vm_and_wait_with_credentials",
+        create,
+    )
+
+    with pytest.raises(ValueError, match="Exact gpu_devices"):
+        await fulfillment_service._do_provision(
+            "ssh-ed25519 AAAA",
+            vm_host="host-1",
+            vm_target="tenant-gpu",
+            gpu_count=1,
+        )
+
+    create.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -295,3 +336,7 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
     }
     fulfillment_service._do_provision.assert_awaited_once()
     assert fulfillment_service._do_provision.await_args.kwargs["gpu_count"] == 2
+    assert fulfillment_service._do_provision.await_args.kwargs["gpu_devices"] == [
+        "0000:03:00.0",
+        "0000:04:00.0",
+    ]

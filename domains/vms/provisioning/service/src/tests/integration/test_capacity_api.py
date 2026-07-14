@@ -15,6 +15,16 @@ from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE, ALLOCATION_MODE_SHAREA
 from main import app
 
 
+def _gpu_devices(count: int) -> list[dict[str, str]]:
+    return [
+        {
+            "pci_bdf": f"0000:{3 + index:02x}:00.0",
+            "gpu_uuid": f"GPU-api-{index:04d}",
+        }
+        for index in range(count)
+    ]
+
+
 class CapacityApi:
     """Typed helper over the capacity endpoints (no raw HTTP in tests)."""
 
@@ -105,7 +115,11 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
         "compute-kvm1-001",
         total_units=8,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+        attributes={
+            "vm_host": "kvm1",
+            "gpu_model": "H200",
+            "gpu_devices": _gpu_devices(8),
+        },
     )
 
     assert (await capacity.snapshot())[0]["available_units"] == 8
@@ -118,6 +132,11 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
     )
     assert reserved["vm_host"] == "kvm1"
     assert reserved["available_gpu_count"] == 5
+    assert reserved["gpu_devices"] == _gpu_devices(3)
+    assert reserved["executor_ref"] == {
+        "vm_host": "kvm1",
+        "gpu_devices": _gpu_devices(3),
+    }
     assert (await capacity.snapshot())[0]["available_units"] == 5
 
     committed = await capacity.commit(
@@ -127,6 +146,7 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
         lease_end_utc="2099-01-01T01:00:00Z",
     )
     assert committed["state"] == "leased"
+    assert committed["executor_ref"] == reserved["executor_ref"]
 
     truncated = await capacity.truncate(reserved["allocation_id"], "2026-06-01 00:00")
     assert truncated["lease_end_utc"] == "2026-06-01 00:00"
@@ -149,6 +169,21 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
 async def test_no_capacity_is_a_null_answer_not_an_error(capacity: CapacityApi):
     assert await capacity.reserve({"gpu_count": 1}, {}) is None
     assert await capacity.release(allocation_id="missing") is None
+
+
+@pytest.mark.asyncio
+async def test_vm_registration_without_exact_inventory_is_rejected(
+    client_and_queue,
+):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        response = await http.put(
+            "/api/v1/capacity/resources/invalid-vm",
+            json={"total_units": 1, "attributes": {"vm_host": "kvm1"}},
+        )
+
+    assert response.status_code == 422
+    assert "gpu_devices" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -187,6 +222,7 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
             "gpu_model": "H200",
             "physical_host_id": "host-physical-1",
             "allocation_mode": ALLOCATION_MODE_SHAREABLE,
+            "gpu_devices": _gpu_devices(8),
         },
     )
     await capacity.register(
@@ -233,7 +269,9 @@ async def test_register_lease_attaches_to_ledger_allocation(capacity: CapacityAp
     import container as _container_module
 
     await capacity.register(
-        "compute-kvm1-001", total_units=8, attributes={"vm_host": "kvm1"},
+        "compute-kvm1-001",
+        total_units=8,
+        attributes={"vm_host": "kvm1", "gpu_devices": _gpu_devices(8)},
     )
     reserved = await capacity.reserve(
         {"gpu_count": 1, "vm_host": "kvm1"},
@@ -264,6 +302,7 @@ async def test_register_lease_attaches_to_ledger_allocation(capacity: CapacityAp
     assert row["vm_target"] == "tenant-led1"
     assert row["state"] == "leased"
     assert row["lease_end_utc"] == "2099-01-01T00:00:00+00:00"
+    assert row["executor_ref"] == reserved["executor_ref"]
 
 
 @pytest.mark.asyncio

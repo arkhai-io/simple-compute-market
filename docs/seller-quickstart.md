@@ -109,8 +109,8 @@ What you offer for sale. One row per slice. The compose mounts
 `/app/resources.csv`; the storefront auto-seeds from it on first start.
 
 ```csv
-resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.physical_host_id,attribute.allocation_mode
-slice-001,compute.gpu,H200,count,1,available,2,0x036CbD53842c5426634e7929541eC2318f3dCF7e,86400,H200,99.0,"California, US",<vm_host_alias>,<physical_host_id>,shareable
+resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.physical_host_id,attribute.allocation_mode,attribute.gpu_devices
+slice-001,compute.gpu,H200,count,1,available,2,0x036CbD53842c5426634e7929541eC2318f3dCF7e,86400,H200,99.0,"California, US",<vm_host_alias>,<physical_host_id>,shareable,"[{""pci_bdf"":""0000:03:00.0"",""gpu_uuid"":""GPU-<uuid-from-nvidia-smi>""}]"
 ```
 
 - `min_price` — human / whole-token units, scaled by token decimals on
@@ -126,6 +126,18 @@ slice-001,compute.gpu,H200,count,1,available,2,0x036CbD53842c5426634e7929541eC23
   `attribute.vm_host` is used as the default.
 - `attribute.allocation_mode` — `shareable` for VM-slice listings. If omitted
   for a VM resource with `attribute.vm_host`, it defaults to `shareable`.
+- `attribute.gpu_devices` — required for VM resources. Supply a JSON array with
+  exactly `value` whole-GPU identity objects. Each object requires the full
+  canonical PCI BDF (`dddd:bb:ss.f`) and should include the stable GPU UUID
+  when the host exposes one. BDFs and supplied UUIDs must be unique. Discover
+  them from the actual KVM host immediately before freezing inventory; never
+  copy the sanitized addresses above into a live seller configuration.
+
+The site authority selects and persists an exact subset from this inventory for
+each allocation. VM fulfillment passes those BDFs to Ansible verbatim and will
+fail closed if the allocation lacks them; it never falls back to count-based
+host selection. Do not edit or remove an allocated device until its VM has been
+torn down and the allocation released.
 
 A larger sample is at
 [`domains/vms/storefront/src/market_storefront/data/resources.sample.csv`](../domains/vms/storefront/src/market_storefront/data/resources.sample.csv).

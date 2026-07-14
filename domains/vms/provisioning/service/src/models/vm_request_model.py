@@ -26,6 +26,9 @@ def build_create_params(host: str, body: CreateVmRequest) -> AnsibleJobParams:
     HTTP request model to server-internal DTO lives here, not on the model,
     because ``AnsibleJobParams`` is a server-private type.
     """
+    exact_gpu_devices = body.vm_gpu_devices
+    if exact_gpu_devices is None and body.vm_gpu_device is not None:
+        exact_gpu_devices = [body.vm_gpu_device]
     return AnsibleJobParams(
         vm_host=host,
         vm_action="create",
@@ -38,8 +41,10 @@ def build_create_params(host: str, body: CreateVmRequest) -> AnsibleJobParams:
         ssh_pubkey=body.ssh_pubkey,
         gpu_provisioned=body.gpu_provisioned,
         vm_gpu_count=body.vm_gpu_count,
-        vm_gpu_device=body.vm_gpu_device,
-        vm_gpu_devices=body.vm_gpu_devices,
+        # Normalize the legacy singular exact field onto the same
+        # no-substitution Ansible path as the authoritative list field.
+        vm_gpu_device=None if exact_gpu_devices else body.vm_gpu_device,
+        vm_gpu_devices=exact_gpu_devices,
         vm_gpu_partition_size=body.vm_gpu_partition_size,
         frp_server_addr=body.frp_server_addr,
         frp_domain=body.frp_domain,

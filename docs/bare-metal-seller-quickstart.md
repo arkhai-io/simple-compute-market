@@ -106,6 +106,11 @@ Important fields:
   It must match `[bare_metal_nodes]` in the provisioning inventory. If omitted,
   `resource_id` is used.
 - `attribute.vm_host` is for VM slices; leave it empty in bare-metal rows.
+- VM slice rows for this physical host additionally require
+  `attribute.gpu_devices`: the exact per-GPU PCI BDF inventory (plus GPU UUID
+  when available). Keep those private runtime values in the VM seller's
+  inventory; bare-metal rows remain whole-host/exclusive and do not duplicate
+  the device list.
 - `value` is the total units on the physical host. For GPU hosts, this is
   normally the total GPU count.
 

@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable
-
-from core_storefront.stage_log import stage_event
+from typing import Any
 
 from alkahest_py import AlkahestClient
-
+from core_storefront.stage_log import stage_event
 from provisioning_client import CreateVmRequest, ProvisioningClient
+
+from market_storefront.services.capacity_client import build_capacity_client
 from market_storefront.services.provisioning_orchestration_service import (
     create_vm_and_wait_with_credentials,
 )
@@ -17,11 +18,8 @@ from market_storefront.services.vm_fulfillment_service import fulfill_vm_obligat
 from market_storefront.services.vm_job_spec_service import (
     build_provisioning_job_spec as _vm_build_provisioning_job_spec,
 )
-
-from market_storefront.utils.config import CHAINS, settings, BASE_URL_OVERRIDE
-from market_storefront.services.capacity_client import build_capacity_client
+from market_storefront.utils.config import BASE_URL_OVERRIDE, CHAINS, settings
 from market_storefront.utils.sqlite_client import get_sqlite_client
-
 
 
 async def _do_provision(
@@ -30,6 +28,7 @@ async def _do_provision(
     vm_host: str,
     vm_target: str,
     gpu_count: int | None = None,
+    gpu_devices: list[str] | None = None,
     on_job_submitted: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict:
     """Submit a create VM job to the provisioning service and return the result.
@@ -44,8 +43,18 @@ async def _do_provision(
 
     params: dict[str, Any] = {"vm_target": vm_target, "ssh_pubkey": ssh_public_key}
     if gpu_count is not None and gpu_count > 0:
+        if not isinstance(gpu_devices, list) or len(gpu_devices) != gpu_count:
+            actual = len(gpu_devices) if isinstance(gpu_devices, list) else "missing"
+            raise ValueError(
+                "Exact gpu_devices must match the reserved GPU count "
+                f"({actual} != {gpu_count})"
+            )
         params["gpu_provisioned"] = True
-        params["vm_gpu_count"] = gpu_count
+        # The site allocation, not Ansible host inspection, chose these
+        # devices.  Omitting vm_gpu_count disables the legacy auto-selector.
+        params["vm_gpu_devices"] = list(gpu_devices)
+    elif gpu_devices:
+        raise ValueError("gpu_devices were supplied for a zero-GPU allocation")
     if settings.provisioning.frp_server_addr:
         params["frp_server_addr"] = settings.provisioning.frp_server_addr
     if settings.provisioning.frp_domain:

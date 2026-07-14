@@ -103,7 +103,13 @@ class TestCapacityClientEndpointCoverage:
         ledger.register_resource(
             resource_id="compute-kvm1-001",
             total_units=8,
-            attributes={"vm_host": HOST},
+            attributes={
+                "vm_host": HOST,
+                "gpu_devices": [
+                    {"pci_bdf": f"0000:{3 + index:02x}:00.0"}
+                    for index in range(8)
+                ],
+            },
         )
         reserved = ledger.reserve(
             claim={"gpu_count": 1, "vm_host": HOST},
@@ -141,7 +147,13 @@ class TestLeaseClientEndpointCoverage:
             ledger.register_resource(
                 resource_id="compute-kvm1-001",
                 total_units=8,
-                attributes={"vm_host": HOST},
+                attributes={
+                    "vm_host": HOST,
+                    "gpu_devices": [
+                        {"pci_bdf": f"0000:{3 + index:02x}:00.0"}
+                        for index in range(8)
+                    ],
+                },
             )
         reserved = ledger.reserve(
             claim={"gpu_count": 1, "vm_host": HOST},

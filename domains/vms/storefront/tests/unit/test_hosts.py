@@ -535,9 +535,9 @@ class TestCapacityEnforcement:
         resources.write_text(
             "resource_id,resource_type,unit,value,state,attribute.gpu_model,attribute.sla,"
             "attribute.region,attribute.vm_host,attribute.vcpu_count,attribute.ram_gb,"
-            "attribute.disk_gb\n"
-            "ok,compute.gpu,count,2,available,H200,99.0,\"California, US\",h,16,128,2000\n"
-            "bad,compute.gpu,count,2,available,H200,99.0,\"California, US\",h,16,128,2000\n"
+            "attribute.disk_gb,attribute.gpu_devices\n"
+            "ok,compute.gpu,count,2,available,H200,99.0,\"California, US\",h,16,128,2000,\"[{\"\"pci_bdf\"\":\"\"0000:03:00.0\"\"},{\"\"pci_bdf\"\":\"\"0000:04:00.0\"\"}]\"\n"
+            "bad,compute.gpu,count,2,available,H200,99.0,\"California, US\",h,16,128,2000,\"[{\"\"pci_bdf\"\":\"\"0000:03:00.0\"\"},{\"\"pci_bdf\"\":\"\"0000:04:00.0\"\"}]\"\n"
         )
 
         async def _run():
