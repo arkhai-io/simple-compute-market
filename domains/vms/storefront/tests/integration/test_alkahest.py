@@ -65,9 +65,10 @@ async def full_arbitration_flow(
     inner_demand_data = f"test arbitration data {secret_code}".encode("utf-8")
 
     demand_data = TrustedOracleArbiterDemandData(oracle_address, inner_demand_data)
+    encoded_demand_data = demand_data.encode_self()
     arbiter = {
         "arbiter": arbiter_address,
-        "demand": demand_data.encode_self(),
+        "demand": encoded_demand_data,
     }
 
     escrow_receipt = await create_escrow(
@@ -83,7 +84,7 @@ async def full_arbitration_flow(
     )
 
     await seller_client.oracle.request_arbitration(
-        fulfillment_uid, oracle_address, inner_demand_data
+        fulfillment_uid, oracle_address, encoded_demand_data
     )
 
     def decision_function(attestation, demand):
