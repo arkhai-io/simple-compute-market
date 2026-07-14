@@ -43,6 +43,16 @@ from typing import Any, Optional
 
 import httpx
 
+from compute_provisioning import (
+    PoolCreate,
+    PoolImportRequest,
+    PoolImportResponse,
+    PoolListResponse,
+    PoolReplace,
+    PoolResponse,
+    PoolUpdate,
+    PoolValidateResponse,
+)
 from vm_provisioning_operator.models import (
     AnsibleReadinessResponse,
     CreateVmRequest,
@@ -206,6 +216,12 @@ class ProvisioningClient(_ProvisioningClientBase):
         self._raise_for_status("PATCH", url, resp.status_code, resp.text)
         return resp.json()
 
+    async def _delete(self, path: str) -> dict:
+        url = self._url(path)
+        resp = await self._client.delete(path, headers=self._headers())
+        self._raise_for_status("DELETE", url, resp.status_code, resp.text)
+        return resp.json()
+
     async def _post_multipart(self, path: str, files: dict, data: dict) -> dict:
         url = self._url(path)
         resp = await self._client.post(
@@ -319,6 +335,53 @@ class ProvisioningClient(_ProvisioningClientBase):
             "/api/v1/hosts/import",
             files={"file": (filename, ini_text.encode("utf-8"), "text/plain")},
             data={"ssh_key_type": ssh_key_type},
+        )))
+
+    # ------------------------------------------------------------------
+    # Resource pools (admin)
+    # ------------------------------------------------------------------
+
+    async def list_pools(self) -> PoolListResponse:
+        """GET /api/v1/pools"""
+        return PoolListResponse(**(await self._get("/api/v1/pools/")))
+
+    async def get_pool(self, pool_id: str) -> PoolResponse:
+        """GET /api/v1/pools/{pool_id}"""
+        return PoolResponse(**(await self._get(f"/api/v1/pools/{pool_id}")))
+
+    async def export_pools_yaml(self) -> str:
+        """GET /api/v1/pools/export — canonical authoritative YAML."""
+        path = "/api/v1/pools/export"
+        resp = await self._client.get(path, headers=self._headers())
+        self._raise_for_status("GET", self._url(path), resp.status_code, resp.text)
+        return resp.text
+
+    async def create_pool(self, body: PoolCreate) -> PoolResponse:
+        """POST /api/v1/pools"""
+        return PoolResponse(**(await self._post("/api/v1/pools/", body)))
+
+    async def replace_pool(self, pool_id: str, body: PoolReplace) -> PoolResponse:
+        """PUT /api/v1/pools/{pool_id}"""
+        return PoolResponse(**(await self._put(f"/api/v1/pools/{pool_id}", body)))
+
+    async def patch_pool(self, pool_id: str, body: PoolUpdate) -> PoolResponse:
+        """PATCH /api/v1/pools/{pool_id}"""
+        return PoolResponse(**(await self._patch(f"/api/v1/pools/{pool_id}", body)))
+
+    async def delete_pool(self, pool_id: str) -> PoolResponse:
+        """DELETE /api/v1/pools/{pool_id} — disables, does not hard-delete."""
+        return PoolResponse(**(await self._delete(f"/api/v1/pools/{pool_id}")))
+
+    async def import_pools(self, yaml_text: str) -> PoolImportResponse:
+        """POST /api/v1/pools/import"""
+        return PoolImportResponse(**(await self._post(
+            "/api/v1/pools/import", PoolImportRequest(yaml_text=yaml_text)
+        )))
+
+    async def validate_pools(self, yaml_text: str) -> PoolValidateResponse:
+        """POST /api/v1/pools/validate"""
+        return PoolValidateResponse(**(await self._post(
+            "/api/v1/pools/validate", PoolImportRequest(yaml_text=yaml_text)
         )))
 
     # ------------------------------------------------------------------
@@ -647,6 +710,12 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         self._raise_for_status("PATCH", url, resp.status_code, resp.text)
         return resp.json()
 
+    def _delete(self, path: str) -> dict:
+        url = self._url(path)
+        resp = self._client.delete(path, headers=self._headers())
+        self._raise_for_status("DELETE", url, resp.status_code, resp.text)
+        return resp.json()
+
     def _post_multipart(self, path: str, files: dict, data: dict) -> dict:
         url = self._url(path)
         resp = self._client.post(path, files=files, data=data, headers=self._headers())
@@ -729,6 +798,41 @@ class SyncProvisioningClient(_ProvisioningClientBase):
             "/api/v1/hosts/import",
             files={"file": (path.name, content, "text/plain")},
             data={"ssh_key_type": ssh_key_type},
+        )))
+
+    # Resource pools (admin, sync mirrors)
+    def list_pools(self) -> PoolListResponse:
+        return PoolListResponse(**(self._get("/api/v1/pools/")))
+
+    def get_pool(self, pool_id: str) -> PoolResponse:
+        return PoolResponse(**(self._get(f"/api/v1/pools/{pool_id}")))
+
+    def export_pools_yaml(self) -> str:
+        path = "/api/v1/pools/export"
+        resp = self._client.get(path, headers=self._headers())
+        self._raise_for_status("GET", self._url(path), resp.status_code, resp.text)
+        return resp.text
+
+    def create_pool(self, body: PoolCreate) -> PoolResponse:
+        return PoolResponse(**(self._post("/api/v1/pools/", body)))
+
+    def replace_pool(self, pool_id: str, body: PoolReplace) -> PoolResponse:
+        return PoolResponse(**(self._put(f"/api/v1/pools/{pool_id}", body)))
+
+    def patch_pool(self, pool_id: str, body: PoolUpdate) -> PoolResponse:
+        return PoolResponse(**(self._patch(f"/api/v1/pools/{pool_id}", body)))
+
+    def delete_pool(self, pool_id: str) -> PoolResponse:
+        return PoolResponse(**(self._delete(f"/api/v1/pools/{pool_id}")))
+
+    def import_pools(self, yaml_text: str) -> PoolImportResponse:
+        return PoolImportResponse(**(self._post(
+            "/api/v1/pools/import", PoolImportRequest(yaml_text=yaml_text)
+        )))
+
+    def validate_pools(self, yaml_text: str) -> PoolValidateResponse:
+        return PoolValidateResponse(**(self._post(
+            "/api/v1/pools/validate", PoolImportRequest(yaml_text=yaml_text)
         )))
 
     # System / readiness (sync mirrors)

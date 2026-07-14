@@ -27,7 +27,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from db.models import Host
+from db.models import DEFAULT_POOL_ID, Host, ResourcePool
 from vm_provisioning_operator.models import HostCreate, HostUpdate
 
 logger = logging.getLogger(__name__)
@@ -88,6 +88,13 @@ class HostService:
             raise HostNotFoundError(f"Host '{name}' not found")
         return host
 
+    def _require_pool_exists(self, db: Session, pool_id: str) -> None:
+        # Deliberately a raw query here rather than a dependency on
+        # ResourcePoolService — this is a single existence check, not
+        # worth a service-to-service coupling.
+        if db.query(ResourcePool).filter(ResourcePool.id == pool_id).one_or_none() is None:
+            raise ValueError(f"Pool '{pool_id}' does not exist")
+
     # ------------------------------------------------------------------
     # Mutations
     # ------------------------------------------------------------------
@@ -108,6 +115,8 @@ class HostService:
             from crypto import encrypt_key
             key_value = encrypt_key(key_value, self._settings.ssh_decryption_key)
 
+        pool_id = data.pool_id or DEFAULT_POOL_ID
+
         host = Host(
             name=data.name,
             kvm_host=data.kvm_host,
@@ -117,8 +126,10 @@ class HostService:
             ssh_key_value=key_value,
             gpu_count=data.gpu_count,
             enabled=data.enabled,
+            pool_id=pool_id,
         )
         with self._session_factory() as db:
+            self._require_pool_exists(db, pool_id)
             db.add(host)
             db.commit()
             db.refresh(host)
@@ -144,6 +155,9 @@ class HostService:
                 host.ssh_user = data.ssh_user
             if data.gpu_count is not None:
                 host.gpu_count = data.gpu_count
+            if data.pool_id is not None:
+                self._require_pool_exists(db, data.pool_id)
+                host.pool_id = data.pool_id
 
             # Resolve the effective key type after any update
             effective_type = data.ssh_key_type or host.ssh_key_type

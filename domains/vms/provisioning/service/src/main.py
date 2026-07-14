@@ -40,6 +40,7 @@ from controllers.vms_controller import VmController          # noqa: E402
 from controllers.leases_controller import AdminLeasesController, LeasesController   # noqa: E402
 from controllers.bare_metal_leases_controller import BareMetalLeasesController  # noqa: E402
 from controllers.compute_contract_controller import ComputeContractController  # noqa: E402
+from controllers.pools_controller import PoolController  # noqa: E402
 from market_site.router import make_capacity_router  # noqa: E402
 
 
@@ -125,6 +126,13 @@ PROVISIONING_OPENAPI_TAGS = [
         "description": "Admin-only repair operations for exceptional lifecycle states.",
     },
     {
+        "name": "pools",
+        "description": (
+            "Resource pool registry — infrastructure routing/scheduling metadata. "
+            "CRUD plus YAML import/validate."
+        ),
+    },
+    {
         "name": "capacity",
         "description": (
             "Site-authority capacity ledger — snapshot, probe, "
@@ -146,6 +154,7 @@ PROVISIONING_OPENAPI_TAGS = [
 #   /api/v1/hosts/{host}/vms/*       <- direct VM admin/operator lifecycle
 #   /api/v1/leases/*                 <- market-managed lease lifecycle
 #   /api/v1/bare-metal/leases/*      <- bare-metal domain lease adapter
+#   /api/v1/pools/*                  <- resource pool registry (CRUD, import, validate)
 # ---------------------------------------------------------------------------
 app = build_compute_provisioning_app(
     config=ComputeProvisioningAppConfig(
@@ -188,6 +197,7 @@ app = build_compute_provisioning_app(
         ComputeProvisioningRouterMount(LeasesController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(BareMetalLeasesController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(AdminLeasesController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(PoolController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(
             make_capacity_router(
                 lambda: _container_module.resolved_capacity_ledger_service

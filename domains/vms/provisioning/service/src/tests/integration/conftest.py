@@ -34,7 +34,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import container as _container_module
@@ -225,6 +225,17 @@ def db_engine():
     # Site-ledger tables ride market_site's own metadata.
     from market_site.db import Base as SiteBase
     SiteBase.metadata.create_all(bind=engine)
+    # HostService requires pool_id to reference an existing pool. The real
+    # migration always seeds "default" before hosts.pool_id can be NOT
+    # NULL (see db/migrations.py); mirror that guarantee here since this
+    # fixture builds schema directly rather than through the migration.
+    from db.models import DEFAULT_POOL_ID, ResourcePool
+    with Session(engine) as session:
+        session.add(ResourcePool(
+            id=DEFAULT_POOL_ID, label="Default Pool", provider="ansible",
+            enabled=True, policy_tags={},
+        ))
+        session.commit()
     return engine
 
 
@@ -346,6 +357,9 @@ async def client_and_queue(
         settings=mock_settings,
     )
 
+    from services.resource_pool_service import ResourcePoolService
+    resource_pool_service = ResourcePoolService(session_factory=session_factory)
+
     job_service = AnsibleJobService(
         settings=mock_settings,
         session_factory=session_factory,
@@ -424,6 +438,7 @@ async def client_and_queue(
     app.container.bare_metal_operations_service.override(bare_metal_operations_service)
     app.container.lease_lifecycle_service.override(lease_lifecycle_service)
     app.container.capacity_ledger_service.override(capacity_ledger_service)
+    app.container.resource_pool_service.override(resource_pool_service)
 
     # Wire resolved module-level variables
     _container_module.resolved_job_service = job_service
@@ -435,6 +450,7 @@ async def client_and_queue(
     _container_module.resolved_bare_metal_operations_service = bare_metal_operations_service
     _container_module.resolved_lease_lifecycle_service = lease_lifecycle_service
     _container_module.resolved_capacity_ledger_service = capacity_ledger_service
+    _container_module.resolved_resource_pool_service = resource_pool_service
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()

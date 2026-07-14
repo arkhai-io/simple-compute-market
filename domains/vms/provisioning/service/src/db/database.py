@@ -34,11 +34,30 @@ def create_session_factory(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def init_db(engine: Engine) -> None:
-    """Create all tables. Called once during application startup."""
+def run_migrations(
+    engine: Engine,
+    *,
+    default_playbook_path: str = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml",
+    default_inventory_group: str = "kvm_hosts",
+) -> None:
+    """Create all tables and apply versioned migrations.
+
+    This is the full migration entrypoint: ``python -m db.migrate`` (CLI,
+    for local dev and the Helm init container) and ``make migrate`` both
+    call this. It is idempotent — safe to run on every deploy/restart.
+
+    The main service container does **not** call this at startup; it calls
+    :func:`db.migrations.check_schema_version` instead and fails fast if
+    migrations haven't been applied. See ARCHITECTURE.md § Schema Migration
+    Execution.
+    """
     Base.metadata.create_all(bind=engine)
     # Site-authority ledger tables ride the shared market_site
     # metadata (db.models re-exports the classes).
     from market_site.db import Base as SiteBase
     SiteBase.metadata.create_all(bind=engine)
-    apply_schema_migrations(engine)
+    apply_schema_migrations(
+        engine,
+        default_playbook_path=default_playbook_path,
+        default_inventory_group=default_inventory_group,
+    )

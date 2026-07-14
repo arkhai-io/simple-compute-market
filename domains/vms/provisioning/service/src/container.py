@@ -10,6 +10,7 @@ from market_site.ledger import CapacityLedgerService
 from config import settings
 from db.database import create_db_engine, create_session_factory
 from services.ansible_service import AnsibleService
+from services.ansible_pool_config_handler import AnsiblePoolConfigHandler
 from services.async_job_queue import AsyncJobQueue
 from services.bare_metal_lease_service import BareMetalLeaseService
 from services.compute_contract_service import build_compute_contract_service
@@ -25,6 +26,7 @@ from services.release_executors import (
     VM_EXECUTOR_KIND,
     VmReleaseExecutor,
 )
+from services.resource_pool_service import ResourcePoolService
 from services.system_service import SystemService
 from services.vm_operations_service import VmOperationsService
 
@@ -122,6 +124,14 @@ class Container(containers.DeclarativeContainer):
         HostService,
         session_factory=session_factory,
         settings=config,
+    )
+
+    ansible_pool_config_handler = providers.Singleton(AnsiblePoolConfigHandler)
+
+    resource_pool_service = providers.Singleton(
+        ResourcePoolService,
+        session_factory=session_factory,
+        handlers=providers.Dict(ansible=ansible_pool_config_handler),
     )
 
     job_service = providers.Singleton(
@@ -246,3 +256,4 @@ resolved_bare_metal_lease_service: "BareMetalLeaseService | None" = None
 resolved_bare_metal_operations_service: "BareMetalOperationsService | None" = None
 resolved_executor_lease_service: "ExecutorLeaseService | None" = None
 resolved_compute_contract_service = None
+resolved_resource_pool_service: "ResourcePoolService | None" = None
