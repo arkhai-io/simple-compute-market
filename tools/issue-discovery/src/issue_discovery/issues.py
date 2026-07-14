@@ -791,15 +791,11 @@ def _render_body(
 
 
 def _capacity_fingerprint(finding: dict[str, Any]) -> str:
-    return _slug(
-        "-".join(
-            (
-                finding["fingerprint"],
-                finding["observed"]["working_branch"],
-                finding["scenario_fingerprint"],
-            )
-        )
-    )
+    # The producer-supplied value identifies the defect. Repository, branch,
+    # and scenario are occurrence context: issue lookup scopes the GitHub query
+    # to the authorized destination repository and checks the exact context
+    # marker in the issue body instead of mutating the defect identity.
+    return str(finding["fingerprint"])
 
 
 def _context_marker(

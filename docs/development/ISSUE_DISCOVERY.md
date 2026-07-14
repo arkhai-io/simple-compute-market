@@ -181,6 +181,14 @@ work, and later verification. Issue bodies state that fixes must target the
 recorded working branch and cannot promote the campaign branch to `dev` or
 `main`.
 
+The defect fingerprint itself remains the stable, sanitized value supplied by
+the private orchestrator; SCM does not append branch or scenario context to it.
+For duplicate detection, the selected destination checkout scopes the GitHub
+search to that repository, and the issue body must contain the exact working
+branch and scenario marker. Reproducing the same defect fingerprint in another
+repository, working branch, or scenario therefore creates a distinct issue
+context instead of updating the wrong one.
+
 Publication is branch-scoped and redaction-gated. Teardown and evidence freeze
 must happen before live issue mutation; publication is never allowed to extend
 a VM lease.

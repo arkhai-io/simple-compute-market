@@ -75,10 +75,14 @@ Publication verifies both the authorized working branch and the destination
 checkout's `origin` slug. A correct branch name in the wrong repository fails
 closed.
 
-Capacity fingerprints include the working branch and scenario fingerprint.
-Live publication fails unless the repository is on that working branch. An
-exact open issue receives a new occurrence; an exact closed issue is reopened;
-another branch or scenario does not deduplicate the finding.
+The capacity defect fingerprint is stable: the harness preserves the sanitized
+producer-supplied value instead of adding a branch or scenario suffix. Duplicate
+matching is still occurrence-scoped. The harness searches only the authorized
+destination repository, then requires the issue body to contain the exact
+working-branch and scenario marker. Live publication fails unless the checkout
+is on that working branch. An exact open issue receives a new occurrence; an
+exact closed issue is reopened; another repository, branch, or scenario does
+not deduplicate the finding.
 
 Fix automation is proposal-only until a validated fix exists. The proposal
 must use an issue-specific child head and the authorized working branch as base:

@@ -106,15 +106,22 @@ def test_all_tracked_capacity_scenarios_are_valid_and_cover_seller_scaling() -> 
         assert sum(scenario["listing"]["seller_distribution"]) == scenario["listing"]["count"]
 
 
-def test_capacity_finding_ingest_is_branch_scoped_and_immutable(tmp_path: Path) -> None:
+def test_capacity_finding_ingest_preserves_defect_identity_and_branch_authority(
+    tmp_path: Path,
+) -> None:
     run_dir, candidate = ingest(tmp_path)
 
+    assert candidate["fingerprint"] == "double-allocation"
     assert candidate["working_branch"] == "feat/issue-discovery-harness"
     assert candidate["labels"] == ["bug"]
     assert candidate["observed_ref"] == "a" * 40
     assert candidate["scenario_fingerprint"] == "scenario-sha256-example"
-    assert "feat-issue-discovery-harness" in candidate["fingerprint"]
     body = (run_dir / candidate["body_file"]).read_text(encoding="utf-8")
+    assert (
+        "<!-- scm-issue-discovery fingerprint=double-allocation "
+        "branch=feat/issue-discovery-harness "
+        "scenario=scenario-sha256-example -->"
+    ) in body
     assert "Working branch: `feat/issue-discovery-harness`" in body
     assert "Observed ref: `" + "a" * 40 + "`" in body
     assert "does not authorize promotion to `dev` or `main`" in body
@@ -123,6 +130,40 @@ def test_capacity_finding_ingest_is_branch_scoped_and_immutable(tmp_path: Path) 
         for line in (run_dir / "issue-lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert [event["state"] for event in lifecycle] == ["detected"]
+
+
+def test_capacity_defect_fingerprint_is_independent_of_occurrence_context(
+    tmp_path: Path,
+) -> None:
+    public_root = tmp_path / "public"
+    public_root.mkdir()
+    public_run, public_candidate = ingest(public_root)
+
+    private = valid_finding()
+    private.update(
+        {
+            "finding_id": "finding-private-identity",
+            "classification": "private-infra",
+            "destination_repo": "compute-market-internal-infra",
+            "scenario_fingerprint": "different-scenario-fingerprint",
+        }
+    )
+    private["observed"].update(
+        {
+            "run_id": "qualification-private",
+            "working_branch": "tools/agent-orchestration-scratch",
+            "observed_ref": "b" * 40,
+        }
+    )
+    private_path = tmp_path / "private-finding.json"
+    private_path.write_text(json.dumps(private), encoding="utf-8")
+    private_run = tmp_path / "private-run"
+    ingest_finding(private_run, private_path, repo_root())
+    private_candidate = IssueRepository(private_run, repo_root=repo_root()).list()[0]
+
+    assert public_run != private_run
+    assert public_candidate["fingerprint"] == private_candidate["fingerprint"]
+    assert private_candidate["fingerprint"] == "double-allocation"
 
 
 def test_capacity_duplicate_updates_exact_open_issue(tmp_path: Path, monkeypatch) -> None:
@@ -161,6 +202,83 @@ def test_capacity_duplicate_updates_exact_open_issue(tmp_path: Path, monkeypatch
         for line in (run_dir / "issue-lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert [event["state"] for event in lifecycle] == ["detected", "updated"]
+
+
+def test_capacity_duplicate_requires_exact_branch_and_scenario_marker(
+    tmp_path: Path, monkeypatch
+) -> None:
+    run_dir, candidate = ingest(tmp_path)
+    body = (run_dir / candidate["body_file"]).read_text(encoding="utf-8")
+    other_branch_body = body.replace(
+        "branch=feat/issue-discovery-harness",
+        "branch=tools/agent-orchestration-scratch",
+    )
+    other_scenario_body = body.replace(
+        "scenario=scenario-sha256-example",
+        "scenario=other-scenario",
+    )
+    calls: list[tuple[list[str], Path]] = []
+
+    def fake_run(
+        command: list[str],
+        *,
+        check: bool,
+        text: bool,
+        cwd: Path,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append((command, cwd))
+        if command[:4] == ["git", "remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(
+                command, 0, stdout="https://github.com/arkhai-io/simple-compute-market.git\n"
+            )
+        if command[:3] == ["git", "branch", "--show-current"]:
+            return subprocess.CompletedProcess(
+                command, 0, stdout="feat/issue-discovery-harness\n"
+            )
+        if command[:3] == ["gh", "issue", "list"]:
+            payload = [
+                {
+                    "number": 51,
+                    "title": candidate["title"],
+                    "state": "OPEN",
+                    "url": "https://example.test/51",
+                    "body": other_branch_body,
+                },
+                {
+                    "number": 52,
+                    "title": candidate["title"],
+                    "state": "OPEN",
+                    "url": "https://example.test/52",
+                    "body": other_scenario_body,
+                },
+            ]
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload))
+        if command[:3] == ["gh", "issue", "create"]:
+            return subprocess.CompletedProcess(
+                command, 0, stdout="https://example.test/53\n"
+            )
+        raise AssertionError(command)
+
+    monkeypatch.setattr("issue_discovery.issues.subprocess.run", fake_run)
+
+    assert (
+        IssueRepository(run_dir, repo_root=repo_root()).create(
+            candidate["fingerprint"], dry_run=False
+        )
+        == 0
+    )
+    issue_list_call = next(
+        (command, cwd)
+        for command, cwd in calls
+        if command[:3] == ["gh", "issue", "list"]
+    )
+    assert issue_list_call[1] == repo_root()
+    assert issue_list_call[0][issue_list_call[0].index("--search") + 1] == (
+        "double-allocation in:title"
+    )
+    assert any(command[:3] == ["gh", "issue", "create"] for command, _ in calls)
+    assert not any(command[:3] == ["gh", "issue", "comment"] for command, _ in calls)
 
 
 def test_capacity_issue_creation_records_filed_lifecycle(tmp_path: Path, monkeypatch) -> None:
