@@ -23,7 +23,12 @@ def valid_scenario() -> dict[str, object]:
         "deal_type": "vm",
         "provisioning": "real-kvm-ansible",
         "gpu_assignment": "whole-device-passthrough",
-        "listing": {"fingerprint": "one-vm-listing", "count": 1, "gpus_per_vm": 1},
+        "listing": {
+            "fingerprint": "one-vm-listing",
+            "count": 1,
+            "gpus_per_vm": 1,
+            "seller_distribution": [1],
+        },
         "wave": {
             "buyers": 2,
             "sellers": 1,
@@ -85,6 +90,20 @@ def test_capacity_scenario_is_vm_only_and_balances_terminal_outcomes() -> None:
         assert "vm" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("a non-VM capacity scenario passed")
+
+
+def test_all_tracked_capacity_scenarios_are_valid_and_cover_seller_scaling() -> None:
+    scenario_dir = repo_root() / "tools" / "issue-discovery" / "config" / "capacity"
+    scenarios = []
+    for path in sorted(scenario_dir.glob("*.json")):
+        scenario = json.loads(path.read_text(encoding="utf-8"))
+        validate_scenario(scenario, repo_root())
+        scenarios.append(scenario)
+    ids = {item["scenario_id"] for item in scenarios}
+    assert {"b2-s2-g1-contention", "b2-s2-g2-fulfillment"}.issubset(ids)
+    for scenario in scenarios:
+        assert len(scenario["listing"]["seller_distribution"]) == scenario["wave"]["sellers"]
+        assert sum(scenario["listing"]["seller_distribution"]) == scenario["listing"]["count"]
 
 
 def test_capacity_finding_ingest_is_branch_scoped_and_immutable(tmp_path: Path) -> None:

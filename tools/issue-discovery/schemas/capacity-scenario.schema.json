@@ -14,11 +14,16 @@
     "listing": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["fingerprint", "count", "gpus_per_vm"],
+      "required": ["fingerprint", "count", "gpus_per_vm", "seller_distribution"],
       "properties": {
         "fingerprint": { "type": "string", "minLength": 1 },
         "count": { "type": "integer", "minimum": 0 },
-        "gpus_per_vm": { "const": 1 }
+        "gpus_per_vm": { "const": 1 },
+        "seller_distribution": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 1 }
+        }
       }
     },
     "wave": {

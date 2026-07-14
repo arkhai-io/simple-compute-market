@@ -7,7 +7,8 @@
   "listing": {
     "fingerprint": "replace-with-frozen-vm-listing-fingerprint",
     "count": 1,
-    "gpus_per_vm": 1
+    "gpus_per_vm": 1,
+    "seller_distribution": [1]
   },
   "wave": {
     "buyers": 2,

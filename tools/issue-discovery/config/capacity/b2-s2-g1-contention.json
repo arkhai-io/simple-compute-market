@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
-  "scenario_id": "b2-g2-fulfillment",
+  "scenario_id": "b2-s2-g1-contention",
   "deal_type": "vm",
   "provisioning": "real-kvm-ansible",
   "gpu_assignment": "whole-device-passthrough",
   "listing": {
-    "fingerprint": "replace-with-frozen-vm-listing-fingerprint",
+    "fingerprint": "replace-with-frozen-two-seller-vm-listing-fingerprint",
     "count": 2,
     "gpus_per_vm": 1,
-    "seller_distribution": [2]
+    "seller_distribution": [1, 1]
   },
   "wave": {
     "buyers": 2,
-    "sellers": 1,
+    "sellers": 2,
     "requests": 2,
-    "expected_successes": 2,
-    "expected_scarcity": 0,
+    "expected_successes": 1,
+    "expected_scarcity": 1,
     "retry_count": 0
   }
 }

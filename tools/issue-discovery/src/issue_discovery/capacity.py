@@ -42,6 +42,7 @@ def validate_scenario(scenario: dict[str, Any], repo_root: Path) -> None:
     if not errors:
         wave = scenario["wave"]
         listing = scenario["listing"]
+        distribution = listing["seller_distribution"]
         if wave["requests"] != wave["expected_successes"] + wave["expected_scarcity"]:
             errors.append("wave.requests must equal expected_successes plus expected_scarcity")
         if wave["requests"] > wave["buyers"]:
@@ -50,6 +51,10 @@ def validate_scenario(scenario: dict[str, Any], repo_root: Path) -> None:
             errors.append("expected successes cannot exceed the frozen listing count")
         if wave["requests"] and wave["sellers"] < 1:
             errors.append("a request wave requires at least one seller")
+        if len(distribution) != wave["sellers"]:
+            errors.append("listing.seller_distribution must have one entry per seller")
+        if sum(distribution) != listing["count"]:
+            errors.append("listing.seller_distribution must sum to listing.count")
     if errors:
         raise CapacityValidationError("scenario validation failed:\n- " + "\n- ".join(errors))
 

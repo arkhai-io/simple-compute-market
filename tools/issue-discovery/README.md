@@ -44,7 +44,10 @@ against `schemas/capacity-scenario.schema.json`:
 
 The scenarios are VM-only, require real KVM/Ansible and whole-device GPU
 passthrough, disable request retries, and distinguish one-GPU contention from
-two-GPU simultaneous fulfillment. Replace the listing fingerprint only after
+two-GPU simultaneous fulfillment. Buyer scaling remains first; the two
+`b2-s2-*` scenarios then repeat contention and fulfillment with two independent
+seller roles and one listing per seller. `seller_distribution` freezes the
+listing count owned by each seller. Replace a listing fingerprint only after
 the private topology is frozen.
 
 The private orchestrator emits sanitized findings conforming to
