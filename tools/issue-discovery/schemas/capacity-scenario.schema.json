@@ -14,9 +14,8 @@
     "listing": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["fingerprint", "count", "gpus_per_vm", "seller_distribution"],
+      "required": ["count", "gpus_per_vm", "seller_distribution"],
       "properties": {
-        "fingerprint": { "type": "string", "minLength": 1 },
         "count": { "type": "integer", "minimum": 0 },
         "gpus_per_vm": { "const": 1 },
         "seller_distribution": {

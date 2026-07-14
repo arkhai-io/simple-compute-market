@@ -120,6 +120,13 @@ def build_parser() -> argparse.ArgumentParser:
     scenario_validate.add_argument("scenario", type=Path)
     scenario_validate.set_defaults(handler=_capacity_scenario_validate)
 
+    scenario_hash = capacity_subparsers.add_parser(
+        "scenario-sha256",
+        help="Validate a public capacity scenario and print its canonical SHA-256.",
+    )
+    scenario_hash.add_argument("scenario", type=Path)
+    scenario_hash.set_defaults(handler=_capacity_scenario_sha256)
+
     finding_ingest = capacity_subparsers.add_parser(
         "finding-ingest",
         help="Validate and ingest a sanitized capacity finding occurrence.",
@@ -214,6 +221,12 @@ def _issue_transition(args: argparse.Namespace) -> int:
 
 def _capacity_scenario_validate(args: argparse.Namespace) -> int:
     return DiscoveryRunner(repo_root=args.repo_root).capacity_scenario_validate(
+        _repo_path(args, args.scenario)
+    )
+
+
+def _capacity_scenario_sha256(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_scenario_sha256(
         _repo_path(args, args.scenario)
     )
 

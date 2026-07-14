@@ -7,6 +7,7 @@ import subprocess
 from issue_discovery.capacity import (
     CapacityValidationError,
     ingest_finding,
+    scenario_sha256,
     validate_scenario,
 )
 from issue_discovery.issues import IssueRepository
@@ -24,7 +25,6 @@ def valid_scenario() -> dict[str, object]:
         "provisioning": "real-kvm-ansible",
         "gpu_assignment": "whole-device-passthrough",
         "listing": {
-            "fingerprint": "one-vm-listing",
             "count": 1,
             "gpus_per_vm": 1,
             "seller_distribution": [1],
@@ -92,6 +92,33 @@ def test_capacity_scenario_is_vm_only_and_balances_terminal_outcomes() -> None:
         raise AssertionError("a non-VM capacity scenario passed")
 
 
+def test_capacity_scenario_rejects_private_runtime_listing_identity() -> None:
+    scenario = valid_scenario()
+    scenario["listing"]["fingerprint"] = "runtime-listing-fingerprint"
+
+    try:
+        validate_scenario(scenario, repo_root())
+    except CapacityValidationError as exc:
+        assert "listing" in str(exc)
+        assert "fingerprint" in str(exc)
+        assert "was unexpected" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("a runtime listing fingerprint passed the public schema")
+
+
+def test_capacity_scenario_sha256_is_canonical() -> None:
+    scenario = valid_scenario()
+    reordered = json.loads(json.dumps(scenario, sort_keys=True, indent=4))
+
+    digest = scenario_sha256(scenario)
+    assert digest == (
+        "dff78da34b800f24423bd3e04c4439eb3f86ab2890a0be7bdb81e5f1e57c17e2"
+    )
+    assert digest == scenario_sha256(reordered)
+    assert len(digest) == 64
+    assert set(digest) <= set("0123456789abcdef")
+
+
 def test_all_tracked_capacity_scenarios_are_valid_and_cover_seller_scaling() -> None:
     scenario_dir = repo_root() / "tools" / "issue-discovery" / "config" / "capacity"
     scenarios = []
@@ -99,9 +126,22 @@ def test_all_tracked_capacity_scenarios_are_valid_and_cover_seller_scaling() -> 
         scenario = json.loads(path.read_text(encoding="utf-8"))
         validate_scenario(scenario, repo_root())
         scenarios.append(scenario)
-    ids = {item["scenario_id"] for item in scenarios}
+    ordered_ids = [item["scenario_id"] for item in scenarios]
+    ids = set(ordered_ids)
     assert {"b2-s2-g1-contention", "b2-s2-g2-fulfillment"}.issubset(ids)
+    assert ordered_ids[0] == "b1-g1-qualification"
+    assert ordered_ids.index("b2-g1-contention") < ordered_ids.index(
+        "b2-s2-g1-contention"
+    )
+    assert ordered_ids.index("b2-g2-fulfillment") < ordered_ids.index(
+        "b2-s2-g2-fulfillment"
+    )
     for scenario in scenarios:
+        assert set(scenario["listing"]) == {
+            "count",
+            "gpus_per_vm",
+            "seller_distribution",
+        }
         assert len(scenario["listing"]["seller_distribution"]) == scenario["wave"]["sellers"]
         assert sum(scenario["listing"]["seller_distribution"]) == scenario["listing"]["count"]
 

@@ -17,6 +17,7 @@ from issue_discovery.clean_room import (
 from issue_discovery.capacity import (
     CapacityValidationError,
     ingest_finding,
+    scenario_sha256,
     validate_scenario_file,
 )
 from issue_discovery.collectors import CollectorRunner, load_collectors
@@ -156,6 +157,15 @@ class DiscoveryRunner:
             print(f"capacity scenario invalid: {exc}")
             return 1
         print(f"capacity scenario valid: {scenario.resolve()}")
+        return 0
+
+    def capacity_scenario_sha256(self, scenario: Path) -> int:
+        try:
+            validated = validate_scenario_file(scenario.resolve(), self.repo_root)
+        except (CapacityValidationError, json.JSONDecodeError, OSError) as exc:
+            print(f"capacity scenario invalid: {exc}")
+            return 1
+        print(scenario_sha256(validated))
         return 0
 
     def capacity_finding_ingest(self, run_dir: Path, finding: Path) -> int:

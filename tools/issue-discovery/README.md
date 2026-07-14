@@ -40,6 +40,8 @@ against `schemas/capacity-scenario.schema.json`:
 ```bash
 ./scripts/issue-discovery capacity scenario-validate \
   tools/issue-discovery/config/capacity/b2-g1-contention.json
+./scripts/issue-discovery capacity scenario-sha256 \
+  tools/issue-discovery/config/capacity/b2-g1-contention.json
 ```
 
 The scenarios are VM-only, require real KVM/Ansible and whole-device GPU
@@ -47,8 +49,18 @@ passthrough, disable request retries, and distinguish one-GPU contention from
 two-GPU simultaneous fulfillment. Buyer scaling remains first; the two
 `b2-s2-*` scenarios then repeat contention and fulfillment with two independent
 seller roles and one listing per seller. `seller_distribution` freezes the
-listing count owned by each seller. Replace a listing fingerprint only after
-the private topology is frozen.
+listing count owned by each seller.
+
+These public files own only the portable test contract: VM/provisioning/GPU
+mode, buyer and seller role counts, request load, seller distribution, and the
+success/scarcity oracle. They intentionally do not contain a runtime listing
+fingerprint or listing IDs. The private controller owns those deployment facts,
+binds them to the selected public shape, and records the public file's pinned SCM
+ref, path, and canonical scenario SHA-256. `scenario-sha256` validates the file
+first and writes only the lowercase 64-character digest to stdout. The digest is
+SHA-256 over UTF-8 canonical JSON with recursively sorted object keys and compact
+separators plus one trailing newline, so formatting and object-key order do not
+change scenario identity.
 
 The private orchestrator emits sanitized findings conforming to
 `schemas/capacity-finding.schema.json`. Ingesting one creates or refreshes the

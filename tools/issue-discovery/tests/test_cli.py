@@ -86,6 +86,27 @@ def test_profile_dry_run_prints_profile_env(capsys) -> None:
     assert "  - redis_no_host_port_override" in captured.out
 
 
+def test_capacity_scenario_sha256_prints_machine_readable_digest(capsys) -> None:
+    root = repo_root()
+    scenario = root / "tools" / "issue-discovery" / "config" / "capacity" / "b1-g1-qualification.json"
+
+    code = main(
+        [
+            "--repo-root",
+            str(root),
+            "capacity",
+            "scenario-sha256",
+            str(scenario),
+        ]
+    )
+
+    digest = capsys.readouterr().out.strip()
+    assert code == 0
+    assert digest == (
+        "e3d5b48c2314890b1ff5c191a18face5ff151bbfb8baffa67c8899a2a389a5d9"
+    )
+
+
 def test_issue_create_has_independent_dry_run(tmp_path: Path, capsys) -> None:
     run_dir = tmp_path / "run"
     issue_dir = run_dir / "issue-candidates"

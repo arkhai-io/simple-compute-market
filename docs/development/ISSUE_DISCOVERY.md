@@ -168,6 +168,31 @@ SCM_MULTIPASS_TRANSFER_DIR=scm-clean-room-transfer \
 
 Use `./scripts/clean-room/multipass-run.sh --dry-run` before launching the VM. It prints the VM settings and the exact clean-room sequence that will run, without requiring Multipass to be installed.
 
+## Public Capacity Scenario Authority
+
+Tracked files under `tools/issue-discovery/config/capacity/` define the public,
+portable test contract: VM-only deals, real KVM/Ansible provisioning,
+whole-device GPU passthrough, buyer and seller role counts, request load,
+per-seller listing distribution, and expected success/scarcity outcomes. The
+buyer-scaling scenarios run before the two-seller scenarios. These files do not
+own runtime listing fingerprints or listing IDs; the private controller binds
+those deployment-specific values to the validated public shape.
+
+The controller should pin the SCM ref and scenario path, validate that exact
+file, and record its canonical digest:
+
+```bash
+./scripts/issue-discovery capacity scenario-validate \
+  tools/issue-discovery/config/capacity/b2-g1-contention.json
+./scripts/issue-discovery capacity scenario-sha256 \
+  tools/issue-discovery/config/capacity/b2-g1-contention.json
+```
+
+`scenario-sha256` validates before hashing and prints only a lowercase
+64-character digest. It hashes UTF-8 canonical JSON with recursively sorted
+object keys, compact separators, and one trailing newline, so whitespace and
+object-key ordering do not change the scenario identity.
+
 ## Capacity Finding Lifecycle
 
 The same harness accepts sanitized VM-capacity findings from the private

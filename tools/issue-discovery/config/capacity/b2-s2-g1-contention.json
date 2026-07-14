@@ -5,7 +5,6 @@
   "provisioning": "real-kvm-ansible",
   "gpu_assignment": "whole-device-passthrough",
   "listing": {
-    "fingerprint": "replace-with-frozen-two-seller-vm-listing-fingerprint",
     "count": 2,
     "gpus_per_vm": 1,
     "seller_distribution": [1, 1]

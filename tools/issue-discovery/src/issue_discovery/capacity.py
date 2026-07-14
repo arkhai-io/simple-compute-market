@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -83,6 +84,14 @@ def validate_scenario_file(path: Path, repo_root: Path) -> dict[str, Any]:
     scenario = _read_object(path)
     validate_scenario(scenario, repo_root)
     return scenario
+
+
+def scenario_sha256(scenario: dict[str, Any]) -> str:
+    """Return the SHA-256 of the scenario's canonical JSON representation."""
+    canonical = (
+        json.dumps(scenario, separators=(",", ":"), sort_keys=True) + "\n"
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def validate_finding_file(path: Path, repo_root: Path) -> dict[str, Any]:
