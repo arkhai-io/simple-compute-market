@@ -199,8 +199,8 @@ The same harness accepts sanitized VM-capacity findings from the private
 orchestrator. The public schemas and example scenarios intentionally contain no
 project, wallet, host, GPU UUID, private URL, or credential material.
 
-Each occurrence records its run, stage, scenario fingerprint, working branch,
-and observed commit. Its lifecycle is appended to `issue-lifecycle.jsonl` as it
+Each occurrence records its exact destination repository, run, stage, scenario
+id/fingerprint, working branch, and observed commit. Its lifecycle is appended to `issue-lifecycle.jsonl` as it
 moves through detection, filing or exact-issue update/reopen, proposal-only fix
 work, and later verification. Issue bodies state that fixes must target the
 recorded working branch and cannot promote the campaign branch to `dev` or
@@ -208,12 +208,16 @@ recorded working branch and cannot promote the campaign branch to `dev` or
 
 The defect fingerprint itself remains the stable, sanitized value supplied by
 the private orchestrator; SCM does not append branch or scenario context to it.
-For duplicate detection, the selected destination checkout scopes the GitHub
-search to that repository, and the issue body must contain the exact working
-branch and scenario marker. Reproducing the same defect fingerprint in another
+For duplicate detection, an explicit
+`--repo github.com/arkhai-io/<repository>` scopes the
+GitHub search and the issue body must contain the exact repository/working-
+branch/scenario scope marker. A second marker records the occurrence's full
+SHA/run/stage metadata. Reproducing the same defect fingerprint in another
 repository, working branch, or scenario therefore creates a distinct issue
-context instead of updating the wrong one.
+context instead of updating the wrong one; a later run in the same scope still
+updates or reopens the existing issue.
 
 Publication is branch-scoped and redaction-gated. Teardown and evidence freeze
-must happen before live issue mutation; publication is never allowed to extend
-a VM lease.
+must happen before live issue mutation. The destination checkout must have the
+exact official GitHub origin, authorized non-default branch, observed HEAD, and
+clean worktree; publication is never allowed to extend a VM lease.

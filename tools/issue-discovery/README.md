@@ -83,18 +83,21 @@ private checkout used for branch and GitHub authority:
   --dry-run
 ```
 
-Publication verifies both the authorized working branch and the destination
-checkout's `origin` slug. A correct branch name in the wrong repository fails
-closed.
+Publication verifies the exact `github.com/arkhai-io/<repository>` origin, authorized
+working branch, observed commit SHA, and clean worktree. Every `gh issue`
+create/list/comment/reopen command also receives an explicit `--repo`; a fork,
+`GH_REPO` override, default branch (`dev`/`main`), detached/wrong branch,
+advanced commit, or dirty worktree fails closed before GitHub mutation.
 
 The capacity defect fingerprint is stable: the harness preserves the sanitized
 producer-supplied value instead of adding a branch or scenario suffix. Duplicate
-matching is still occurrence-scoped. The harness searches only the authorized
-destination repository, then requires the issue body to contain the exact
-working-branch and scenario marker. Live publication fails unless the checkout
-is on that working branch. An exact open issue receives a new occurrence; an
-exact closed issue is reopened; another repository, branch, or scenario does
-not deduplicate the finding.
+matching is still occurrence-scoped. Candidate and lifecycle records carry the
+exact repository, working branch, observed SHA, scenario id/fingerprint, run,
+and stage. Issue bodies carry a stable machine-readable repository/branch/
+scenario scope marker plus an exact per-occurrence SHA/run/stage marker. The
+harness uses only the stable scope marker for duplicate matching, so a new run
+of the same defect updates the exact open issue or reopens the exact closed
+issue; another repository, branch, or scenario does not deduplicate it.
 
 Fix automation is proposal-only until a validated fix exists. The proposal
 must use an issue-specific child head and the authorized working branch as base:
@@ -108,7 +111,9 @@ must use an issue-specific child head and the authorized working branch as base:
   --state verified --detail "Passed in a new qualification series"
 ```
 
-The packet never authorizes a PR to `dev` or `main` and never auto-merges.
+The packet repeats the exact destination repository, observed SHA, scenario,
+and run. Its base is derived only from the authorized working branch; neither
+head nor base may be `dev` or `main`. The packet never auto-merges.
 The lifecycle refuses to move from `fixed_unverified` directly to `closed`;
 verification in a new series is required first.
 

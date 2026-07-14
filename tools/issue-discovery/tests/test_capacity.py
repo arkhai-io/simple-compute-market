@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import subprocess
 
+import pytest
+
 from issue_discovery.capacity import (
     CapacityValidationError,
     ingest_finding,
@@ -76,6 +78,34 @@ def ingest(tmp_path: Path) -> tuple[Path, dict[str, object]]:
     ingest_finding(run_dir, finding_path, repo_root())
     candidate = IssueRepository(run_dir, repo_root=repo_root()).list()[0]
     return run_dir, candidate
+
+
+def marker_payload(body: str, kind: str) -> dict[str, str]:
+    prefix = f"<!-- scm-issue-discovery-{kind} "
+    line = next(item for item in body.splitlines() if item.startswith(prefix))
+    return json.loads(line.removeprefix(prefix).removesuffix(" -->"))
+
+
+def authorized_git_result(
+    command: list[str],
+    *,
+    repository: str = "simple-compute-market",
+    branch: str = "feat/issue-discovery-harness",
+    observed_ref: str = "a" * 40,
+) -> subprocess.CompletedProcess[str] | None:
+    if command[:4] == ["git", "remote", "get-url", "origin"]:
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=f"git@github.com:arkhai-io/{repository}.git\n",
+        )
+    if command[:3] == ["git", "branch", "--show-current"]:
+        return subprocess.CompletedProcess(command, 0, stdout=f"{branch}\n")
+    if command[:3] == ["git", "rev-parse", "HEAD"]:
+        return subprocess.CompletedProcess(command, 0, stdout=f"{observed_ref}\n")
+    if command[:2] == ["git", "status"]:
+        return subprocess.CompletedProcess(command, 0, stdout="")
+    return None
 
 
 def test_capacity_scenario_is_vm_only_and_balances_terminal_outcomes() -> None:
@@ -155,13 +185,27 @@ def test_capacity_finding_ingest_preserves_defect_identity_and_branch_authority(
     assert candidate["working_branch"] == "feat/issue-discovery-harness"
     assert candidate["labels"] == ["bug"]
     assert candidate["observed_ref"] == "a" * 40
+    assert candidate["destination_repo"] == "simple-compute-market"
+    assert candidate["scenario_id"] == "b2-g1-contention"
     assert candidate["scenario_fingerprint"] == "scenario-sha256-example"
+    assert candidate["run_id"] == "qualification-001"
     body = (run_dir / candidate["body_file"]).read_text(encoding="utf-8")
-    assert (
-        "<!-- scm-issue-discovery fingerprint=double-allocation "
-        "branch=feat/issue-discovery-harness "
-        "scenario=scenario-sha256-example -->"
-    ) in body
+    assert marker_payload(body, "scope") == {
+        "fingerprint": "double-allocation",
+        "repository": "github.com/arkhai-io/simple-compute-market",
+        "scenario_fingerprint": "scenario-sha256-example",
+        "scenario_id": "b2-g1-contention",
+        "working_branch": "feat/issue-discovery-harness",
+    }
+    assert marker_payload(body, "occurrence") == {
+        "observed_ref": "a" * 40,
+        "repository": "github.com/arkhai-io/simple-compute-market",
+        "run_id": "qualification-001",
+        "scenario_fingerprint": "scenario-sha256-example",
+        "scenario_id": "b2-g1-contention",
+        "stage": "b2-g1-contention",
+        "working_branch": "feat/issue-discovery-harness",
+    }
     assert "Working branch: `feat/issue-discovery-harness`" in body
     assert "Observed ref: `" + "a" * 40 + "`" in body
     assert "does not authorize promotion to `dev` or `main`" in body
@@ -170,6 +214,26 @@ def test_capacity_finding_ingest_preserves_defect_identity_and_branch_authority(
         for line in (run_dir / "issue-lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert [event["state"] for event in lifecycle] == ["detected"]
+    assert {
+        key: lifecycle[0][key]
+        for key in (
+            "destination_repo",
+            "working_branch",
+            "observed_ref",
+            "scenario_id",
+            "scenario_fingerprint",
+            "run_id",
+            "stage",
+        )
+    } == {
+        "destination_repo": "simple-compute-market",
+        "working_branch": "feat/issue-discovery-harness",
+        "observed_ref": "a" * 40,
+        "scenario_id": "b2-g1-contention",
+        "scenario_fingerprint": "scenario-sha256-example",
+        "run_id": "qualification-001",
+        "stage": "b2-g1-contention",
+    }
 
 
 def test_capacity_defect_fingerprint_is_independent_of_occurrence_context(
@@ -220,12 +284,9 @@ def test_capacity_duplicate_updates_exact_open_issue(tmp_path: Path, monkeypatch
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         calls.append(command)
-        if command[:4] == ["git", "remote", "get-url", "origin"]:
-            return subprocess.CompletedProcess(
-                command, 0, stdout="https://github.com/arkhai-io/simple-compute-market.git\n"
-            )
-        if command[:3] == ["git", "branch", "--show-current"]:
-            return subprocess.CompletedProcess(command, 0, stdout="feat/issue-discovery-harness\n")
+        authority = authorized_git_result(command)
+        if authority is not None:
+            return authority
         if command[:3] == ["gh", "issue", "list"]:
             payload = [{"number": 41, "title": candidate["title"], "state": "OPEN", "url": "https://example.test/41", "body": body}]
             return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload))
@@ -237,6 +298,12 @@ def test_capacity_duplicate_updates_exact_open_issue(tmp_path: Path, monkeypatch
 
     assert IssueRepository(run_dir, repo_root=repo_root()).create(candidate["fingerprint"], dry_run=False) == 0
     assert not any(command[:3] == ["gh", "issue", "create"] for command in calls)
+    assert all(
+        command[command.index("--repo") + 1]
+        == "github.com/arkhai-io/simple-compute-market"
+        for command in calls
+        if command[:3] in (["gh", "issue", "list"], ["gh", "issue", "comment"])
+    )
     lifecycle = [
         json.loads(line)
         for line in (run_dir / "issue-lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
@@ -250,12 +317,12 @@ def test_capacity_duplicate_requires_exact_branch_and_scenario_marker(
     run_dir, candidate = ingest(tmp_path)
     body = (run_dir / candidate["body_file"]).read_text(encoding="utf-8")
     other_branch_body = body.replace(
-        "branch=feat/issue-discovery-harness",
-        "branch=tools/agent-orchestration-scratch",
+        '"working_branch":"feat/issue-discovery-harness"',
+        '"working_branch":"tools/agent-orchestration-scratch"',
     )
     other_scenario_body = body.replace(
-        "scenario=scenario-sha256-example",
-        "scenario=other-scenario",
+        '"scenario_fingerprint":"scenario-sha256-example"',
+        '"scenario_fingerprint":"other-scenario"',
     )
     calls: list[tuple[list[str], Path]] = []
 
@@ -268,14 +335,9 @@ def test_capacity_duplicate_requires_exact_branch_and_scenario_marker(
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         calls.append((command, cwd))
-        if command[:4] == ["git", "remote", "get-url", "origin"]:
-            return subprocess.CompletedProcess(
-                command, 0, stdout="https://github.com/arkhai-io/simple-compute-market.git\n"
-            )
-        if command[:3] == ["git", "branch", "--show-current"]:
-            return subprocess.CompletedProcess(
-                command, 0, stdout="feat/issue-discovery-harness\n"
-            )
+        authority = authorized_git_result(command)
+        if authority is not None:
+            return authority
         if command[:3] == ["gh", "issue", "list"]:
             payload = [
                 {
@@ -317,6 +379,9 @@ def test_capacity_duplicate_requires_exact_branch_and_scenario_marker(
     assert issue_list_call[0][issue_list_call[0].index("--search") + 1] == (
         "double-allocation in:title"
     )
+    assert issue_list_call[0][issue_list_call[0].index("--repo") + 1] == (
+        "github.com/arkhai-io/simple-compute-market"
+    )
     assert any(command[:3] == ["gh", "issue", "create"] for command, _ in calls)
     assert not any(command[:3] == ["gh", "issue", "comment"] for command, _ in calls)
 
@@ -334,12 +399,9 @@ def test_capacity_issue_creation_records_filed_lifecycle(tmp_path: Path, monkeyp
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         calls.append(command)
-        if command[:4] == ["git", "remote", "get-url", "origin"]:
-            return subprocess.CompletedProcess(
-                command, 0, stdout="https://github.com/arkhai-io/simple-compute-market.git\n"
-            )
-        if command[:3] == ["git", "branch", "--show-current"]:
-            return subprocess.CompletedProcess(command, 0, stdout="feat/issue-discovery-harness\n")
+        authority = authorized_git_result(command)
+        if authority is not None:
+            return authority
         if command[:3] == ["gh", "issue", "list"]:
             return subprocess.CompletedProcess(command, 0, stdout="[]")
         if command[:3] == ["gh", "issue", "create"]:
@@ -351,6 +413,9 @@ def test_capacity_issue_creation_records_filed_lifecycle(tmp_path: Path, monkeyp
     assert IssueRepository(run_dir, repo_root=repo_root()).create(candidate["fingerprint"], dry_run=False) == 0
     create = next(command for command in calls if command[:3] == ["gh", "issue", "create"])
     assert create[create.index("--label") + 1] == "bug"
+    assert create[create.index("--repo") + 1] == (
+        "github.com/arkhai-io/simple-compute-market"
+    )
     lifecycle = [
         json.loads(line)
         for line in (run_dir / "issue-lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
@@ -373,12 +438,9 @@ def test_capacity_duplicate_reopens_exact_closed_issue(tmp_path: Path, monkeypat
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         calls.append(command)
-        if command[:4] == ["git", "remote", "get-url", "origin"]:
-            return subprocess.CompletedProcess(
-                command, 0, stdout="https://github.com/arkhai-io/simple-compute-market.git\n"
-            )
-        if command[:3] == ["git", "branch", "--show-current"]:
-            return subprocess.CompletedProcess(command, 0, stdout="feat/issue-discovery-harness\n")
+        authority = authorized_git_result(command)
+        if authority is not None:
+            return authority
         if command[:3] == ["gh", "issue", "list"]:
             payload = [{"number": 42, "title": candidate["title"], "state": "CLOSED", "url": "https://example.test/42", "body": body}]
             return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload))
@@ -390,6 +452,13 @@ def test_capacity_duplicate_reopens_exact_closed_issue(tmp_path: Path, monkeypat
 
     assert IssueRepository(run_dir, repo_root=repo_root()).create(candidate["fingerprint"], dry_run=False) == 0
     assert any(command[:3] == ["gh", "issue", "reopen"] for command in calls)
+    assert all(
+        command[command.index("--repo") + 1]
+        == "github.com/arkhai-io/simple-compute-market"
+        for command in calls
+        if command[:3]
+        in (["gh", "issue", "list"], ["gh", "issue", "reopen"], ["gh", "issue", "comment"])
+    )
     lifecycle = [
         json.loads(line)
         for line in (run_dir / "issue-lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
@@ -405,14 +474,21 @@ def test_fix_pr_proposal_targets_working_branch_only(tmp_path: Path) -> None:
     proposal_path = repository.propose_fix(candidate["fingerprint"], head)
     proposal = json.loads(proposal_path.read_text(encoding="utf-8"))
     assert proposal["status"] == "proposal-only"
+    assert proposal["destination_repository"] == (
+        "github.com/arkhai-io/simple-compute-market"
+    )
     assert proposal["head_branch"] == head
     assert proposal["base_branch"] == "feat/issue-discovery-harness"
+    assert proposal["observed_ref"] == "a" * 40
+    assert proposal["scenario_id"] == "b2-g1-contention"
+    assert proposal["scenario_fingerprint"] == "scenario-sha256-example"
+    assert proposal["run_id"] == "qualification-001"
     assert proposal["auto_merge"] is False
 
     try:
         repository.propose_fix(candidate["fingerprint"], "main")
     except ValueError as exc:
-        assert "must begin" in str(exc) or "authority" in str(exc)
+        assert "dev or main" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("a main-targeted fix proposal passed")
 
@@ -450,29 +526,6 @@ def test_capacity_lifecycle_requires_verification_before_close(tmp_path: Path) -
 def test_private_infra_finding_uses_public_policy_and_private_git_authority(
     tmp_path: Path, capsys
 ) -> None:
-    finding = valid_finding()
-    finding.update(
-        {
-            "finding_id": "finding-private-001",
-            "classification": "private-infra",
-            "destination_repo": "compute-market-internal-infra",
-            "actual": "X-Admin-Key: should-not-survive",
-        }
-    )
-    finding["observed"].update(
-        {
-            "working_branch": "tools/agent-orchestration-scratch",
-            "observed_ref": "b" * 40,
-        }
-    )
-    finding_path = tmp_path / "private-finding.json"
-    finding_path.write_text(json.dumps(finding), encoding="utf-8")
-    run_dir = tmp_path / "run-private"
-    ingest_finding(run_dir, finding_path, repo_root())
-    candidate = IssueRepository(run_dir, repo_root=repo_root()).list()[0]
-    body = (run_dir / candidate["body_file"]).read_text(encoding="utf-8")
-    assert "should-not-survive" not in body
-
     infra = tmp_path / "compute-market-internal-infra"
     infra.mkdir()
     subprocess.run(
@@ -491,11 +544,59 @@ def test_private_infra_finding_uses_public_policy_and_private_git_authority(
         cwd=infra,
         check=True,
     )
+    (infra / "authority.txt").write_text("exact issue authority\n", encoding="utf-8")
+    subprocess.run(["git", "add", "authority.txt"], cwd=infra, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Issue Test",
+            "-c",
+            "user.email=issue-test@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "record exact authority",
+        ],
+        cwd=infra,
+        check=True,
+    )
+    observed_ref = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=infra,
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
+    finding = valid_finding()
+    finding.update(
+        {
+            "finding_id": "finding-private-001",
+            "classification": "private-infra",
+            "destination_repo": "compute-market-internal-infra",
+            "actual": "X-Admin-Key: should-not-survive",
+        }
+    )
+    finding["observed"].update(
+        {
+            "working_branch": "tools/agent-orchestration-scratch",
+            "observed_ref": observed_ref,
+        }
+    )
+    finding_path = tmp_path / "private-finding.json"
+    finding_path.write_text(json.dumps(finding), encoding="utf-8")
+    run_dir = tmp_path / "run-private"
+    ingest_finding(run_dir, finding_path, repo_root())
+    candidate = IssueRepository(run_dir, repo_root=repo_root()).list()[0]
+    body = (run_dir / candidate["body_file"]).read_text(encoding="utf-8")
+    assert "should-not-survive" not in body
+
     repository = IssueRepository(run_dir, repo_root=infra, policy_root=repo_root())
     assert repository.create(candidate["fingerprint"], dry_run=True) == 0
     output = capsys.readouterr().out
     assert f"cd {infra}" in output
     assert "gh issue create" in output
+    assert "--repo github.com/arkhai-io/compute-market-internal-infra" in output
 
     subprocess.run(
         ["git", "remote", "set-url", "origin", "https://github.com/arkhai-io/wrong-repo.git"],
@@ -504,3 +605,82 @@ def test_private_infra_finding_uses_public_policy_and_private_git_authority(
     )
     assert repository.create(candidate["fingerprint"], dry_run=True) == 2
     assert "issue repository mismatch" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("remote", "branch", "observed_ref", "status", "message"),
+    [
+        (
+            "https://github.com/a-fork/simple-compute-market.git\n",
+            "feat/issue-discovery-harness",
+            "a" * 40,
+            "",
+            "issue repository mismatch",
+        ),
+        (
+            "https://github.com/arkhai-io/simple-compute-market.git\n",
+            "dev",
+            "a" * 40,
+            "",
+            "default branch is forbidden",
+        ),
+        (
+            "https://github.com/arkhai-io/simple-compute-market.git\n",
+            "feat/issue-discovery-harness",
+            "b" * 40,
+            "",
+            "issue ref mismatch",
+        ),
+        (
+            "https://github.com/arkhai-io/simple-compute-market.git\n",
+            "feat/issue-discovery-harness",
+            "a" * 40,
+            " M tracked-file\n",
+            "exact clean observed worktree",
+        ),
+    ],
+)
+def test_capacity_publish_fails_closed_outside_exact_repository_branch_and_ref(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+    remote: str,
+    branch: str,
+    observed_ref: str,
+    status: str,
+    message: str,
+) -> None:
+    run_dir, candidate = ingest(tmp_path)
+
+    def fake_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        if command[:4] == ["git", "remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(command, 0, stdout=remote)
+        if command[:3] == ["git", "branch", "--show-current"]:
+            return subprocess.CompletedProcess(command, 0, stdout=f"{branch}\n")
+        if command[:3] == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(command, 0, stdout=f"{observed_ref}\n")
+        if command[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(command, 0, stdout=status)
+        raise AssertionError(f"publication must fail before GitHub mutation: {command}")
+
+    monkeypatch.setattr("issue_discovery.issues.subprocess.run", fake_run)
+
+    assert (
+        IssueRepository(run_dir, repo_root=repo_root()).create(
+            candidate["fingerprint"], dry_run=False
+        )
+        == 2
+    )
+    assert message in capsys.readouterr().out
+
+
+def test_fix_proposal_rejects_tampered_default_base(tmp_path: Path) -> None:
+    run_dir, candidate = ingest(tmp_path)
+    candidates_path = run_dir / "issue-candidates" / "candidates.jsonl"
+    candidate["working_branch"] = "main"
+    candidates_path.write_text(json.dumps(candidate) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="working branch is forbidden"):
+        IssueRepository(run_dir, repo_root=repo_root()).propose_fix(
+            candidate["fingerprint"], f"fix/{candidate['fingerprint']}"
+        )

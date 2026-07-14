@@ -5,6 +5,7 @@ import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from issue_discovery.redaction import Redactor
 
@@ -55,6 +56,18 @@ _CLASSIFIER_PATTERNS = {
     ),
 }
 
+_CAPACITY_REPOSITORIES = {
+    "simple-compute-market": (
+        "github.com/arkhai-io/simple-compute-market",
+        "feat/issue-discovery-harness",
+    ),
+    "compute-market-internal-infra": (
+        "github.com/arkhai-io/compute-market-internal-infra",
+        "tools/agent-orchestration-scratch",
+    ),
+}
+_FORBIDDEN_BASE_BRANCHES = {"dev", "main"}
+
 
 @dataclass(frozen=True)
 class CandidateReadiness:
@@ -77,7 +90,9 @@ class IssueCandidate:
     state_reason: str
     working_branch: str | None = None
     observed_ref: str | None = None
+    scenario_id: str | None = None
     scenario_fingerprint: str | None = None
+    run_id: str | None = None
     destination_repo: str | None = None
     lifecycle_state: str | None = None
 
@@ -95,7 +110,9 @@ class IssueCandidate:
             "state_reason": self.state_reason,
             "working_branch": self.working_branch,
             "observed_ref": self.observed_ref,
+            "scenario_id": self.scenario_id,
             "scenario_fingerprint": self.scenario_fingerprint,
+            "run_id": self.run_id,
             "destination_repo": self.destination_repo,
             "lifecycle_state": self.lifecycle_state,
         }
@@ -174,7 +191,9 @@ class IssuePacketGenerator:
                     state_reason=readiness.reason,
                     working_branch=finding["observed"]["working_branch"],
                     observed_ref=finding["observed"]["observed_ref"],
+                    scenario_id=finding["scenario_id"],
                     scenario_fingerprint=finding["scenario_fingerprint"],
+                    run_id=finding["observed"]["run_id"],
                     destination_repo=finding["destination_repo"],
                     lifecycle_state="detected",
                 )
@@ -238,6 +257,7 @@ class IssuePacketGenerator:
                         state_reason=readiness.reason,
                         working_branch=str(manifest.get("working_branch")) if manifest.get("working_branch") else None,
                         observed_ref=str(manifest.get("observed_ref")) if manifest.get("observed_ref") else None,
+                        run_id=str(manifest.get("run_id")) if manifest.get("run_id") else None,
                         destination_repo="simple-compute-market",
                         lifecycle_state="detected",
                     )
@@ -296,6 +316,7 @@ class IssuePacketGenerator:
             state_reason=readiness.reason,
             working_branch=str(manifest.get("working_branch")) if manifest.get("working_branch") else None,
             observed_ref=str(manifest.get("observed_ref")) if manifest.get("observed_ref") else None,
+            run_id=str(manifest.get("run_id")) if manifest.get("run_id") else None,
             destination_repo="simple-compute-market",
             lifecycle_state="detected",
         )
@@ -350,6 +371,9 @@ class IssueRepository:
             "--body-file",
             str(body_path),
         ]
+        destination = _candidate_repository(candidate)
+        if destination is not None:
+            command.extend(["--repo", destination])
         for label in candidate.get("labels", []):
             command.extend(["--label", str(label)])
         if not self._branch_is_authorized(candidate):
@@ -396,23 +420,34 @@ class IssueRepository:
 
     def propose_fix(self, fingerprint: str, head_branch: str) -> Path:
         candidate = self.get(fingerprint)
-        base_branch = candidate.get("working_branch")
-        if candidate.get("lifecycle_state") != "detected" or not base_branch:
+        if (
+            candidate.get("lifecycle_state") != "detected"
+            or not candidate.get("scenario_id")
+            or not candidate.get("scenario_fingerprint")
+            or not candidate.get("run_id")
+        ):
             raise ValueError("fix proposals require a capacity finding with branch authority")
-        if base_branch not in {"feat/issue-discovery-harness", "tools/agent-orchestration-scratch"}:
+        destination, base_branch, observed_ref = _capacity_target(candidate)
+        if base_branch in _FORBIDDEN_BASE_BRANCHES:
             raise ValueError(f"unauthorized fix PR base: {base_branch}")
         allowed_prefix = f"fix/{fingerprint}"
+        if head_branch in _FORBIDDEN_BASE_BRANCHES:
+            raise ValueError("fix PR head cannot be dev or main")
         if head_branch != allowed_prefix and not head_branch.startswith(f"{allowed_prefix}-"):
             raise ValueError(f"fix PR head must begin with {allowed_prefix}")
-        if head_branch in {base_branch, "dev", "main"}:
+        if head_branch == base_branch:
             raise ValueError("fix PR head and base must preserve inbound-only branch authority")
         proposal = {
             "schema_version": 1,
             "status": "proposal-only",
             "destination_repo": candidate["destination_repo"],
+            "destination_repository": destination,
             "head_branch": head_branch,
             "base_branch": base_branch,
-            "observed_ref": candidate["observed_ref"],
+            "observed_ref": observed_ref,
+            "scenario_id": candidate["scenario_id"],
+            "scenario_fingerprint": candidate["scenario_fingerprint"],
+            "run_id": candidate["run_id"],
             "fingerprint": fingerprint,
             "auto_merge": False,
         }
@@ -482,6 +517,9 @@ class IssueRepository:
             "--limit",
             "10",
         ]
+        destination = _candidate_repository(candidate)
+        if destination is not None:
+            command.extend(["--repo", destination])
         completed = subprocess.run(
             command,
             check=False,
@@ -509,6 +547,8 @@ class IssueRepository:
 
     def _duplicate_matches(self, candidate: dict[str, Any], issue: dict[str, Any]) -> bool:
         working_branch = candidate.get("working_branch")
+        destination_repo = candidate.get("destination_repo")
+        scenario_id = candidate.get("scenario_id")
         scenario = candidate.get("scenario_fingerprint")
         if not working_branch:
             return True
@@ -516,21 +556,33 @@ class IssueRepository:
             return False
         marker = _context_marker(
             fingerprint=str(candidate["fingerprint"]),
+            destination_repo=str(destination_repo) if destination_repo else None,
+            working_branch=str(working_branch),
+            scenario_id=str(scenario_id) if scenario_id else None,
+            scenario_fingerprint=str(scenario) if scenario else None,
+        )
+        body = str(issue.get("body", ""))
+        if marker in body:
+            return True
+        # Issues filed before the exact repository/scenario-id marker remain
+        # eligible for one scoped update. The explicit --repo query supplies
+        # repository authority; the new occurrence comment carries both new
+        # machine-readable markers.
+        legacy_marker = _legacy_context_marker(
+            fingerprint=str(candidate["fingerprint"]),
             working_branch=str(working_branch),
             scenario_fingerprint=str(scenario) if scenario else None,
         )
-        return marker in str(issue.get("body", ""))
+        return legacy_marker in body
 
     def _branch_is_authorized(self, candidate: dict[str, Any]) -> bool:
         expected = candidate.get("working_branch")
         if not expected:
             return True
-        if expected not in {"feat/issue-discovery-harness", "tools/agent-orchestration-scratch"}:
-            print(f"candidate working branch is not authorized: {expected}")
-            return False
-        destination = candidate.get("destination_repo")
-        if destination not in {"simple-compute-market", "compute-market-internal-infra"}:
-            print(f"candidate destination repository is not authorized: {destination}")
+        try:
+            destination, expected, observed_ref = _capacity_target(candidate)
+        except ValueError as exc:
+            print(str(exc))
             return False
         remote = subprocess.run(
             ["git", "remote", "get-url", "origin"],
@@ -539,15 +591,13 @@ class IssueRepository:
             cwd=self.repo_root,
             capture_output=True,
         )
-        remote_slug = (
-            remote.stdout.strip().rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1]
+        remote_identity = (
+            _github_repository(remote.stdout) if remote.returncode == 0 else None
         )
-        if remote_slug.endswith(".git"):
-            remote_slug = remote_slug[:-4]
-        if remote.returncode != 0 or remote_slug != destination:
+        if remote_identity != destination:
             print(
                 f"issue repository mismatch: expected {destination}, "
-                f"found {remote_slug or 'unknown'}"
+                f"found {remote_identity or 'unknown'}"
             )
             return False
         completed = subprocess.run(
@@ -558,8 +608,35 @@ class IssueRepository:
             capture_output=True,
         )
         actual = completed.stdout.strip() if completed.returncode == 0 else ""
+        if actual in _FORBIDDEN_BASE_BRANCHES:
+            print(f"issue publication from default branch is forbidden: {actual}")
+            return False
         if actual != expected:
             print(f"issue branch mismatch: expected {expected}, found {actual or 'unknown'}")
+            return False
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=False,
+            text=True,
+            cwd=self.repo_root,
+            capture_output=True,
+        )
+        actual_ref = head.stdout.strip() if head.returncode == 0 else ""
+        if actual_ref != observed_ref:
+            print(
+                f"issue ref mismatch: expected {observed_ref}, "
+                f"found {actual_ref or 'unknown'}"
+            )
+            return False
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            check=False,
+            text=True,
+            cwd=self.repo_root,
+            capture_output=True,
+        )
+        if status.returncode != 0 or status.stdout.strip():
+            print("issue publication requires the exact clean observed worktree")
             return False
         return True
 
@@ -576,7 +653,14 @@ class IssueRepository:
         state = str(issue.get("state", "")).upper()
         if state == "CLOSED":
             reopened = subprocess.run(
-                ["gh", "issue", "reopen", str(number)],
+                [
+                    "gh",
+                    "issue",
+                    "reopen",
+                    str(number),
+                    "--repo",
+                    _candidate_repository(candidate, required=True),
+                ],
                 check=False,
                 text=True,
                 cwd=self.repo_root,
@@ -591,7 +675,16 @@ class IssueRepository:
             lifecycle_state = "updated"
             detail = "Attached a new occurrence to an exact open branch-and-scenario issue."
         commented = subprocess.run(
-            ["gh", "issue", "comment", str(number), "--body-file", str(body_path)],
+            [
+                "gh",
+                "issue",
+                "comment",
+                str(number),
+                "--body-file",
+                str(body_path),
+                "--repo",
+                _candidate_repository(candidate, required=True),
+            ],
             check=False,
             text=True,
             cwd=self.repo_root,
@@ -657,13 +750,25 @@ def _render_capacity_body(*, finding: dict[str, Any], fingerprint: str) -> str:
     readiness = finding["filing_readiness"]
     marker = _context_marker(
         fingerprint=fingerprint,
+        destination_repo=finding["destination_repo"],
         working_branch=observed["working_branch"],
+        scenario_id=finding["scenario_id"],
         scenario_fingerprint=finding["scenario_fingerprint"],
+    )
+    occurrence_marker = _occurrence_marker(
+        destination_repo=finding["destination_repo"],
+        working_branch=observed["working_branch"],
+        observed_ref=observed["observed_ref"],
+        scenario_id=finding["scenario_id"],
+        scenario_fingerprint=finding["scenario_fingerprint"],
+        run_id=observed["run_id"],
+        stage=observed["stage"],
     )
     lines = [
         f"# {finding['summary']}",
         "",
         marker,
+        occurrence_marker,
         "",
         "## Filing Readiness",
         f"- State: `{readiness['state']}`",
@@ -719,8 +824,19 @@ def _render_body(
         "",
         _context_marker(
             fingerprint=fingerprint,
+            destination_repo="simple-compute-market",
             working_branch=str(working_branch) if working_branch else None,
+            scenario_id=None,
             scenario_fingerprint=None,
+        ),
+        _occurrence_marker(
+            destination_repo="simple-compute-market",
+            working_branch=str(working_branch) if working_branch else None,
+            observed_ref=str(observed_ref) if observed_ref else None,
+            scenario_id=None,
+            scenario_fingerprint=None,
+            run_id=str(manifest.get("run_id")) if manifest.get("run_id") else None,
+            stage=str(phase.get("id")) if phase.get("id") else None,
         ),
         "",
         "## Filing Readiness",
@@ -801,15 +917,128 @@ def _capacity_fingerprint(finding: dict[str, Any]) -> str:
 def _context_marker(
     *,
     fingerprint: str,
+    destination_repo: str | None,
     working_branch: str | None,
+    scenario_id: str | None,
     scenario_fingerprint: str | None,
 ) -> str:
-    branch = working_branch or "unknown"
+    return _machine_marker(
+        "scope",
+        {
+            "fingerprint": fingerprint,
+            "repository": _repository_name(destination_repo),
+            "working_branch": working_branch or "unknown",
+            "scenario_id": scenario_id or "none",
+            "scenario_fingerprint": scenario_fingerprint or "none",
+        },
+    )
+
+
+def _occurrence_marker(
+    *,
+    destination_repo: str | None,
+    working_branch: str | None,
+    observed_ref: str | None,
+    scenario_id: str | None,
+    scenario_fingerprint: str | None,
+    run_id: str | None,
+    stage: str | None,
+) -> str:
+    return _machine_marker(
+        "occurrence",
+        {
+            "repository": _repository_name(destination_repo),
+            "working_branch": working_branch or "unknown",
+            "observed_ref": observed_ref or "unknown",
+            "scenario_id": scenario_id or "none",
+            "scenario_fingerprint": scenario_fingerprint or "none",
+            "run_id": run_id or "unknown",
+            "stage": stage or "unknown",
+        },
+    )
+
+
+def _machine_marker(kind: str, payload: dict[str, str]) -> str:
+    serialized = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    # Keep even adversarial free-text metadata inside one HTML comment while
+    # preserving its exact JSON value when decoded.
+    serialized = serialized.replace("--", "\\u002d\\u002d")
+    return f"<!-- scm-issue-discovery-{kind} {serialized} -->"
+
+
+def _legacy_context_marker(
+    *,
+    fingerprint: str,
+    working_branch: str,
+    scenario_fingerprint: str | None,
+) -> str:
     scenario = scenario_fingerprint or "none"
     return (
         "<!-- scm-issue-discovery "
-        f"fingerprint={fingerprint} branch={branch} scenario={scenario} -->"
+        f"fingerprint={fingerprint} branch={working_branch} scenario={scenario} -->"
     )
+
+
+def _repository_name(destination_repo: str | None) -> str:
+    target = _CAPACITY_REPOSITORIES.get(str(destination_repo))
+    return target[0] if target is not None else "unknown"
+
+
+def _capacity_target(candidate: dict[str, Any]) -> tuple[str, str, str]:
+    destination_repo = str(candidate.get("destination_repo") or "")
+    target = _CAPACITY_REPOSITORIES.get(destination_repo)
+    if target is None:
+        raise ValueError(
+            f"candidate destination repository is not authorized: "
+            f"{destination_repo or 'unknown'}"
+        )
+    destination, required_branch = target
+    working_branch = str(candidate.get("working_branch") or "")
+    if working_branch in _FORBIDDEN_BASE_BRANCHES:
+        raise ValueError(f"candidate working branch is forbidden: {working_branch}")
+    if working_branch != required_branch:
+        raise ValueError(
+            f"candidate working branch is not authorized for {destination}: "
+            f"{working_branch or 'unknown'}"
+        )
+    observed_ref = str(candidate.get("observed_ref") or "")
+    if len(observed_ref) != 40 or any(
+        character not in "0123456789abcdef" for character in observed_ref
+    ):
+        raise ValueError("candidate observed ref must be an exact lowercase commit SHA")
+    return destination, working_branch, observed_ref
+
+
+def _candidate_repository(
+    candidate: dict[str, Any], *, required: bool = False
+) -> str | None:
+    if not candidate.get("working_branch") and not required:
+        return None
+    try:
+        destination, _, _ = _capacity_target(candidate)
+    except ValueError:
+        if required:
+            raise
+        return None
+    return destination
+
+
+def _github_repository(remote: str) -> str | None:
+    value = remote.strip()
+    if value.startswith("git@github.com:"):
+        path = value.removeprefix("git@github.com:")
+    else:
+        parsed = urlparse(value)
+        if parsed.hostname != "github.com":
+            return None
+        path = parsed.path.lstrip("/")
+    path = path.rstrip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    parts = path.split("/")
+    if len(parts) != 2 or not all(parts):
+        return None
+    return f"github.com/{parts[0]}/{parts[1]}".lower()
 
 
 def _workarounds_for_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
