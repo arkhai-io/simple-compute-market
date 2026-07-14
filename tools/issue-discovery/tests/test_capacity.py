@@ -120,6 +120,10 @@ def test_capacity_duplicate_updates_exact_open_issue(tmp_path: Path, monkeypatch
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         calls.append(command)
+        if command[:4] == ["git", "remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(
+                command, 0, stdout="https://github.com/arkhai-io/simple-compute-market.git\n"
+            )
         if command[:3] == ["git", "branch", "--show-current"]:
             return subprocess.CompletedProcess(command, 0, stdout="feat/issue-discovery-harness\n")
         if command[:3] == ["gh", "issue", "list"]:
@@ -153,6 +157,10 @@ def test_capacity_issue_creation_records_filed_lifecycle(tmp_path: Path, monkeyp
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         calls.append(command)
+        if command[:4] == ["git", "remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(
+                command, 0, stdout="https://github.com/arkhai-io/simple-compute-market.git\n"
+            )
         if command[:3] == ["git", "branch", "--show-current"]:
             return subprocess.CompletedProcess(command, 0, stdout="feat/issue-discovery-harness\n")
         if command[:3] == ["gh", "issue", "list"]:
@@ -188,6 +196,10 @@ def test_capacity_duplicate_reopens_exact_closed_issue(tmp_path: Path, monkeypat
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         calls.append(command)
+        if command[:4] == ["git", "remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(
+                command, 0, stdout="https://github.com/arkhai-io/simple-compute-market.git\n"
+            )
         if command[:3] == ["git", "branch", "--show-current"]:
             return subprocess.CompletedProcess(command, 0, stdout="feat/issue-discovery-harness\n")
         if command[:3] == ["gh", "issue", "list"]:
@@ -256,3 +268,62 @@ def test_capacity_lifecycle_requires_verification_before_close(tmp_path: Path) -
         "verified",
         "closed",
     ]
+
+
+def test_private_infra_finding_uses_public_policy_and_private_git_authority(
+    tmp_path: Path, capsys
+) -> None:
+    finding = valid_finding()
+    finding.update(
+        {
+            "finding_id": "finding-private-001",
+            "classification": "private-infra",
+            "destination_repo": "compute-market-internal-infra",
+            "actual": "X-Admin-Key: should-not-survive",
+        }
+    )
+    finding["observed"].update(
+        {
+            "working_branch": "tools/agent-orchestration-scratch",
+            "observed_ref": "b" * 40,
+        }
+    )
+    finding_path = tmp_path / "private-finding.json"
+    finding_path.write_text(json.dumps(finding), encoding="utf-8")
+    run_dir = tmp_path / "run-private"
+    ingest_finding(run_dir, finding_path, repo_root())
+    candidate = IssueRepository(run_dir, repo_root=repo_root()).list()[0]
+    body = (run_dir / candidate["body_file"]).read_text(encoding="utf-8")
+    assert "should-not-survive" not in body
+
+    infra = tmp_path / "compute-market-internal-infra"
+    infra.mkdir()
+    subprocess.run(
+        ["git", "init", "-q", "-b", "tools/agent-orchestration-scratch"],
+        cwd=infra,
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/arkhai-io/compute-market-internal-infra.git",
+        ],
+        cwd=infra,
+        check=True,
+    )
+    repository = IssueRepository(run_dir, repo_root=infra, policy_root=repo_root())
+    assert repository.create(candidate["fingerprint"], dry_run=True) == 0
+    output = capsys.readouterr().out
+    assert f"cd {infra}" in output
+    assert "gh issue create" in output
+
+    subprocess.run(
+        ["git", "remote", "set-url", "origin", "https://github.com/arkhai-io/wrong-repo.git"],
+        cwd=infra,
+        check=True,
+    )
+    assert repository.create(candidate["fingerprint"], dry_run=True) == 2
+    assert "issue repository mismatch" in capsys.readouterr().out

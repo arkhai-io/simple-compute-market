@@ -58,6 +58,20 @@ normal issue candidate packet and appends an immutable lifecycle event:
 ./scripts/issue-discovery issue create <run-dir> <fingerprint> --dry-run
 ```
 
+For a sanitized `private-infra` finding, keep `--repo-root` pointed at SCM so
+schema and redaction policy remain public and auditable, but name the exact
+private checkout used for branch and GitHub authority:
+
+```bash
+./scripts/issue-discovery issue create <run-dir> <fingerprint> \
+  --destination-repo-root /absolute/path/to/compute-market-internal-infra \
+  --dry-run
+```
+
+Publication verifies both the authorized working branch and the destination
+checkout's `origin` slug. A correct branch name in the wrong repository fails
+closed.
+
 Capacity fingerprints include the working branch and scenario fingerprint.
 Live publication fails unless the repository is on that working branch. An
 exact open issue receives a new occurrence; an exact closed issue is reopened;

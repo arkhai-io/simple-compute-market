@@ -153,9 +153,12 @@ class IssuePacketGenerator:
             )
             fingerprint = _capacity_fingerprint(finding)
             body_file = self.issue_dir / f"{fingerprint}.md"
+            body = _render_capacity_body(finding=finding, fingerprint=fingerprint)
+            redactions_path = repo_root / "tools" / "issue-discovery" / "config" / "redactions.yaml"
+            if not redactions_path.is_file():
+                raise ValueError("capacity issue generation requires the SCM redaction policy")
             body_file.write_text(
-                _render_capacity_body(finding=finding, fingerprint=fingerprint),
-                encoding="utf-8",
+                Redactor.from_file(redactions_path).redact(body), encoding="utf-8"
             )
             candidates.append(
                 IssueCandidate(
@@ -299,9 +302,17 @@ class IssuePacketGenerator:
 
 
 class IssueRepository:
-    def __init__(self, run_dir: Path, repo_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        run_dir: Path,
+        repo_root: Path | None = None,
+        policy_root: Path | None = None,
+    ) -> None:
         self.run_dir = run_dir
         self.repo_root = repo_root.resolve() if repo_root is not None else Path.cwd().resolve()
+        self.policy_root = (
+            policy_root.resolve() if policy_root is not None else self.repo_root
+        )
         self.candidates_path = run_dir / "issue-candidates" / "candidates.jsonl"
 
     def list(self) -> list[dict[str, Any]]:
@@ -517,6 +528,28 @@ class IssueRepository:
         if expected not in {"feat/issue-discovery-harness", "tools/agent-orchestration-scratch"}:
             print(f"candidate working branch is not authorized: {expected}")
             return False
+        destination = candidate.get("destination_repo")
+        if destination not in {"simple-compute-market", "compute-market-internal-infra"}:
+            print(f"candidate destination repository is not authorized: {destination}")
+            return False
+        remote = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            check=False,
+            text=True,
+            cwd=self.repo_root,
+            capture_output=True,
+        )
+        remote_slug = (
+            remote.stdout.strip().rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1]
+        )
+        if remote_slug.endswith(".git"):
+            remote_slug = remote_slug[:-4]
+        if remote.returncode != 0 or remote_slug != destination:
+            print(
+                f"issue repository mismatch: expected {destination}, "
+                f"found {remote_slug or 'unknown'}"
+            )
+            return False
         completed = subprocess.run(
             ["git", "branch", "--show-current"],
             check=False,
@@ -608,9 +641,10 @@ class IssueRepository:
         )
 
     def _body_is_redacted(self, body_path: Path) -> bool:
-        redactions_path = self.repo_root / "tools" / "issue-discovery" / "config" / "redactions.yaml"
-        if not redactions_path.exists():
-            return True
+        redactions_path = self.policy_root / "tools" / "issue-discovery" / "config" / "redactions.yaml"
+        if not redactions_path.is_file():
+            print("SCM redaction policy is unavailable; refusing to create issue")
+            return False
         body = body_path.read_text(encoding="utf-8")
         if Redactor.from_file(redactions_path).redact(body) == body:
             return True

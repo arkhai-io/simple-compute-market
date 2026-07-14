@@ -7,6 +7,9 @@ from pathlib import Path
 from issue_discovery.issues import IssuePacketGenerator, IssueRepository
 
 
+POLICY_ROOT = Path(__file__).resolve().parents[3]
+
+
 def write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
     path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
 
@@ -484,7 +487,9 @@ def test_issue_create_runs_gh_from_repo_root(tmp_path: Path, monkeypatch) -> Non
 
     monkeypatch.setattr("issue_discovery.issues.subprocess.run", fake_run)
 
-    code = IssueRepository(run_dir, repo_root=repo_root).create("fingerprint", dry_run=False)
+    code = IssueRepository(
+        run_dir, repo_root=repo_root, policy_root=POLICY_ROOT
+    ).create("fingerprint", dry_run=False)
 
     assert code == 0
     assert calls[0]["command"][:3] == ["gh", "issue", "list"]
@@ -559,7 +564,9 @@ def test_issue_create_skips_duplicate_issue(tmp_path: Path, monkeypatch, capsys)
 
     monkeypatch.setattr("issue_discovery.issues.subprocess.run", fake_run)
 
-    code = IssueRepository(run_dir, repo_root=repo_root).create("fingerprint", dry_run=False)
+    code = IssueRepository(
+        run_dir, repo_root=repo_root, policy_root=POLICY_ROOT
+    ).create("fingerprint", dry_run=False)
 
     assert code == 0
     assert len(calls) == 1

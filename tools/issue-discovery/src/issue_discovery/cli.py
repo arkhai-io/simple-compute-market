@@ -65,6 +65,15 @@ def build_parser() -> argparse.ArgumentParser:
     issue_create.add_argument("run_dir", type=Path)
     issue_create.add_argument("fingerprint")
     issue_create.add_argument(
+        "--destination-repo-root",
+        type=Path,
+        default=None,
+        help=(
+            "Exact checkout in which gh should file the issue. Required when a "
+            "private-infra finding is ingested by the public SCM harness."
+        ),
+    )
+    issue_create.add_argument(
         "--dry-run",
         action="store_true",
         default=False,
@@ -178,6 +187,11 @@ def _issue_create(args: argparse.Namespace) -> int:
         args.fingerprint,
         dry_run=args.dry_run,
         force=args.force,
+        destination_repo_root=(
+            _repo_path(args, args.destination_repo_root)
+            if args.destination_repo_root is not None
+            else None
+        ),
     )
 
 
