@@ -1,50 +1,67 @@
+# Physical provisioning delta
+
 ## ADDED Requirements
 
-### Requirement: Idempotent physical settlement resource selection
+### Requirement: Capacity Settlement Assignment lifecycle
 
-The provisioning service MUST expose a `PhysicalSettlementScheduler` that
-binds a `PhysicalSettlementRequest` to exactly one `SettlementResource`,
-keyed durably by `allocation_id`, and MUST return the existing binding
-rather than selecting a different resource on repeated calls for the same
-`allocation_id`.
+The provisioning domain SHALL distinguish Capacity Reservation, Capacity Settlement Assignment, Physical Settlement, and Provisioned Resource / Active Workload. A Capacity Settlement Assignment SHALL identify one concrete Settlement Resource but SHALL NOT by itself indicate that provisioning succeeded or that a workload is active.
 
-#### Scenario: Selection is retried for the same allocation
+#### Scenario: Assignment precedes physical settlement
 
-- **WHEN** `select_resource` is called twice with the same `allocation_id`
-- **THEN** the second call returns the same `settlement_resource_id` as the first without creating a second binding
+- **GIVEN** an active Capacity Reservation
+- **WHEN** scheduling succeeds
+- **THEN** the service records a Capacity Settlement Assignment
+- **AND** provider-specific physical settlement remains a separate downstream operation.
 
-#### Scenario: Concurrent selection races for the same allocation
+### Requirement: Idempotent assignment
 
-- **WHEN** two concurrent `select_resource` calls race for the same `allocation_id`
-- **THEN** exactly one settlement resource binding is created and both callers observe it
+The provisioning domain SHALL create at most one Capacity Settlement Assignment for an unchanged Capacity Reservation. Retrying the same allocation SHALL return the existing assignment without rerunning scheduling policy or advancing policy cursors.
 
-### Requirement: Bottleneck-normalized pool selection
+#### Scenario: Retry returns the same resource
 
-When a `PhysicalSettlementRequest` carries fungible pool/capacity
-attributes rather than an explicit `resource_id`, the scheduler MUST select
-among enabled, eligible pools by the lowest bottleneck resource-dimension
-utilization — the maximum of per-dimension utilization ratios across
-CPU/RAM/GPU/disk — rather than a static priority ordering.
+- **GIVEN** a reservation already assigned to a Settlement Resource
+- **WHEN** the same unchanged reservation is scheduled again
+- **THEN** the existing assignment is returned
+- **AND** no new policy choice is made.
 
-#### Scenario: One eligible pool is GPU-saturated
+#### Scenario: Conflicting explicit retry
 
-- **WHEN** an eligible pool is at high GPU utilization but low utilization on every other dimension
-- **THEN** the scheduler prefers another eligible pool whose bottleneck dimension is lower, even if its average utilization is higher
+- **GIVEN** a reservation already assigned to one Settlement Resource
+- **WHEN** a retry requests a different explicit resource
+- **THEN** scheduling fails with a request-mismatch error.
 
-#### Scenario: No eligible pool exists
+### Requirement: Explicit selection preserves eligibility
 
-- **WHEN** every pool matching the request is disabled or exhausted
-- **THEN** selection fails with an actionable pool-unavailable error instead of binding a disabled or exhausted pool
+An explicit resource identifier SHALL bypass policy choice but SHALL NOT bypass allocation, agreement, expiry, pool, resource, shape, attribute, or capacity eligibility checks. Explicit selection SHALL NOT advance automatic round-robin cursors.
 
-### Requirement: Specific-resource request path
+#### Scenario: Explicit resource in disabled pool
 
-A `PhysicalSettlementRequest` MAY carry an explicit `resource_id` instead
-of pool/capacity attributes. When it does, the scheduler MUST bind exactly
-that resource and MUST NOT substitute a different one. Operator-facing
-configuration for opting a listing into this path is not defined by this
-requirement.
+- **GIVEN** an enabled resource in a disabled pool
+- **WHEN** that exact resource is requested
+- **THEN** scheduling rejects the request as ineligible.
 
-#### Scenario: Explicit resource_id is honored
+### Requirement: Replaceable executor-neutral policy
 
-- **WHEN** a request supplies `resource_id` instead of pool/capacity attributes
-- **THEN** the scheduler binds that `resource_id` or fails outright, without silently substituting a different resource
+Generic scheduling orchestration SHALL depend on a replaceable scheduling-policy protocol. Policy implementations SHALL receive eligible executor-neutral candidates and SHALL NOT depend on market-specific executor persistence models.
+
+#### Scenario: VM host model is not required
+
+- **GIVEN** generic candidates containing resource kind, units, pool identity, provider, and opaque attributes
+- **WHEN** the policy selects a candidate
+- **THEN** no VM Host ORM lookup is required.
+
+### Requirement: Deterministic MVP policy
+
+The initial automatic policy SHALL choose deterministically by round-robin across sorted eligible pool IDs and then sorted eligible resource IDs in the chosen pool.
+
+#### Scenario: Pool fairness
+
+- **GIVEN** two eligible pools with eligible resources
+- **WHEN** three independent reservations are automatically assigned
+- **THEN** the selected pools follow a stable alternating sequence.
+
+#### Scenario: Ineligible pool is skipped
+
+- **GIVEN** a previously selected pool that becomes disabled or has no eligible resource
+- **WHEN** the next assignment is selected
+- **THEN** the policy selects from the remaining eligible pools deterministically.

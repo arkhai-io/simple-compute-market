@@ -67,12 +67,9 @@ class ResourcePoolService:
     default to any concrete provider implementation (e.g. Ansible), keeping
     it free of any domain-specific import.
 
-    ``active_binding_check``, if supplied, is called with a pool id whenever
-    an operation would disable that pool; it should return ``True`` if the
-    pool has at least one active settlement-resource binding, in which case
-    the disable is rejected. Late-bound (settable after construction) so a
-    composition root can wire this service and its scheduler in either
-    order without a circular dependency.
+    Disabling a pool is a draining operation: it excludes the pool from new
+    scheduling decisions without invalidating existing reservations,
+    assignments, or active workloads.
     """
 
     _ROOT_FIELDS = frozenset({"pools"})
@@ -84,11 +81,9 @@ class ResourcePoolService:
         self,
         session_factory: sessionmaker[Session],
         handlers: Mapping[str, PoolConfigHandler[Session]],
-        active_binding_check: Callable[[str], bool] | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._handlers = dict(handlers)
-        self.active_binding_check = active_binding_check
 
     def _handler(self, provider: str) -> PoolConfigHandler[Session]:
         handler = self._handlers.get(provider)
@@ -107,14 +102,6 @@ class ResourcePoolService:
             return self._handler(provider).validate_config(config)
         except ValueError as exc:
             raise PoolValidationError(str(exc)) from exc
-
-    def _ensure_no_active_binding(self, pool_id: str, enabled: bool | None) -> None:
-        if enabled is False and self.active_binding_check is not None:
-            if self.active_binding_check(pool_id):
-                raise PoolValidationError(
-                    f"pool '{pool_id}' has an active settlement-resource "
-                    "binding and cannot be disabled"
-                )
 
     def _attach_provider_config(self, db: Session, pool: ResourcePool) -> None:
         pool.provider_config = self._handler(pool.provider).read_config(db, pool.id)
@@ -157,7 +144,6 @@ class ResourcePoolService:
         return pool
 
     def create_pool(self, data: PoolCreate) -> ResourcePool:
-        self._ensure_no_active_binding(data.id, data.enabled)
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             if db.query(ResourcePool).filter(ResourcePool.id == data.id).one_or_none():
@@ -175,7 +161,6 @@ class ResourcePoolService:
         return self.get_pool(data.id)  # type: ignore[return-value]
 
     def replace_pool(self, pool_id: str, data: PoolReplace) -> ResourcePool:
-        self._ensure_no_active_binding(pool_id, data.enabled)
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
@@ -190,7 +175,6 @@ class ResourcePoolService:
         return self.get_pool(pool_id)  # type: ignore[return-value]
 
     def update_pool(self, pool_id: str, data: PoolUpdate) -> ResourcePool:
-        self._ensure_no_active_binding(pool_id, data.enabled)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
             provider = data.provider or pool.provider
@@ -502,13 +486,6 @@ class ResourcePoolService:
         for definition in (*plan.created, *plan.updated):
             self._apply_definition(db, definition)
         if plan.disabled:
-            if self.active_binding_check is not None:
-                bound = [pid for pid in plan.disabled if self.active_binding_check(pid)]
-                if bound:
-                    raise PoolValidationError(
-                        "cannot disable pool(s) with an active settlement-resource "
-                        f"binding: {', '.join(bound)}"
-                    )
             db.query(ResourcePool).filter(ResourcePool.id.in_(plan.disabled)).update(
                 {ResourcePool.enabled: False}, synchronize_session=False
             )

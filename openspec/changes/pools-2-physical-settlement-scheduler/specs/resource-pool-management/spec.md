@@ -1,26 +1,36 @@
-## MODIFIED Requirements
+# Resource pool management delta
 
-### Requirement: Non-destructive pool lifecycle
+## ADDED Requirements
 
-Pool removal MUST disable the pool rather than delete it. The system-owned
-`default` pool MUST always remain present under its configured ID and MUST
-remain the fallback for hosts and create requests that omit a pool ID
-regardless of its own enabled state; disabling it is otherwise ordinary and
-only excludes it from new scheduler selection. The service MUST reject
-disabling any pool — including `default` — that has at least one active
-settlement-resource binding.
+### Requirement: Exactly one scheduling pool
 
-#### Scenario: Operator deletes a non-default pool
+Every resource eligible for physical settlement SHALL belong to exactly one Resource Pool.
 
-- **WHEN** an operator sends DELETE for an existing non-default pool
-- **THEN** the service sets `enabled=false` and the pool remains retrievable by ID
+#### Scenario: Resource has no pool
 
-#### Scenario: Operator disables the default pool
+- **GIVEN** an otherwise enabled resource with no pool membership
+- **WHEN** settlement candidates are evaluated
+- **THEN** the resource is excluded as unschedulable.
 
-- **WHEN** an operator sends DELETE, PUT, or PATCH that disables `default` and it has no active settlement-resource binding
-- **THEN** the service sets `enabled=false`, `default` remains retrievable by ID, and hosts or create requests that omit a pool ID still resolve to it
+#### Scenario: Resource appears in multiple pools
 
-#### Scenario: Operator disables a pool with an active settlement-resource binding
+- **GIVEN** one physical resource represented as capacity in more than one pool
+- **WHEN** configuration is validated
+- **THEN** the configuration is rejected because it overstates true capacity.
 
-- **WHEN** an operator sends DELETE, PUT, or PATCH that would disable a pool — including `default` — with at least one active settlement-resource binding
-- **THEN** the service rejects the operation and the pool remains enabled
+### Requirement: Pool disablement drains new assignments
+
+Disabling a Resource Pool SHALL exclude it from new Capacity Settlement Assignments. Existing reservations, assignments, physical settlements, and active workloads SHALL NOT prevent disablement and SHALL NOT be invalidated solely by the disable action.
+
+#### Scenario: Disable pool with existing assignment
+
+- **GIVEN** a pool with an existing Capacity Settlement Assignment
+- **WHEN** an operator disables the pool
+- **THEN** disablement succeeds
+- **AND** the existing assignment remains readable.
+
+#### Scenario: New scheduling after disablement
+
+- **GIVEN** a disabled pool
+- **WHEN** a new automatic or explicit scheduling request is evaluated
+- **THEN** resources in that pool are ineligible.

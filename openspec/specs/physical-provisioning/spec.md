@@ -91,3 +91,9 @@ Shared storefront/provisioner DTOs, executor-neutral resource-pool models, and g
 - Executor-specific release, failed-release capacity retention, retry, and force release: `domains/vms/provisioning/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `unit/services/test_ledger_lease_lifecycle.py`.
 
 `PhysicalSettlementScheduler`, `FulfillmentProvider`, and a durable mechanism-neutral settlement record are not implemented baseline contracts. Deployment relocation remains proposed in `market-platform-compute-30-extract-service`.
+
+## Capacity settlement lifecycle
+
+Physical provisioning distinguishes **Capacity Reservation → Capacity Settlement Assignment → Physical Settlement → Provisioned Resource / Active Workload**. Generic scheduling chooses an eligible Settlement Resource. Physical Settlement is provider-specific execution on that assigned resource. Provider-specific reachability, credentials, topology, and execution failures remain downstream of generic scheduling eligibility.
+
+The current scheduling policy is deterministic round-robin through a replaceable policy interface. Generic policy and orchestration code use resource kind, units, pool identity, and opaque attributes and do not import market-specific executor persistence models.

@@ -398,40 +398,16 @@ class TestEnableDisablePool:
         assert still_there is not None
         assert still_there.enabled is False
 
-    def test_disable_rejected_when_active_binding_exists(self, session_factory):
-        service = ResourcePoolService(
-            session_factory=session_factory,
-            handlers={"ansible": _AnsibleLikePoolConfigHandler()},
-            active_binding_check=lambda pool_id: pool_id == "bound-pool",
-        )
-        service.create_pool(
+    def test_disabling_pool_is_a_draining_operation(self, svc):
+        svc.create_pool(
             PoolCreate(
-                id="bound-pool",
-                label="Bound",
+                id="draining-pool",
+                label="Draining",
                 provider="ansible",
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
-        with pytest.raises(PoolValidationError, match="active settlement-resource"):
-            service.disable_pool("bound-pool")
-        assert service.get_pool("bound-pool").enabled is True
-
-    def test_disable_allowed_when_no_active_binding(self, session_factory):
-        service = ResourcePoolService(
-            session_factory=session_factory,
-            handlers={"ansible": _AnsibleLikePoolConfigHandler()},
-            active_binding_check=lambda pool_id: False,
-        )
-        service.create_pool(
-            PoolCreate(
-                id="free-pool",
-                label="Free",
-                provider="ansible",
-                provider_config=_ANSIBLE_CONFIG,
-            )
-        )
-        disabled = service.disable_pool("free-pool")
-        assert disabled.enabled is False
+        assert svc.disable_pool("draining-pool").enabled is False
 
 
 # ---------------------------------------------------------------------------
@@ -517,15 +493,8 @@ pools:
         assert pool is not None
         assert pool.enabled is False
 
-    def test_import_disabling_a_pool_with_active_binding_rejects_entire_import(
-        self, session_factory
-    ):
-        service = ResourcePoolService(
-            session_factory=session_factory,
-            handlers={"ansible": _AnsibleLikePoolConfigHandler()},
-            active_binding_check=lambda pool_id: pool_id == "equinix-us-west",
-        )
-        service.import_pools(_YAML)
+    def test_import_can_disable_pool_as_draining_operation(self, svc):
+        svc.import_pools(_YAML)
         one_pool_yaml = """
 pools:
   - id: default
@@ -534,17 +503,10 @@ pools:
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
       inventory_group: kvm_hosts
-  - id: hetzner-eu-central
-    label: Hetzner EU Central
-    provider: ansible
-    provider_config:
-      playbook_path: playbooks/vm-operations-frp.yaml
-      inventory_group: kvm_hosts_eu
 """
-        with pytest.raises(PoolValidationError, match="active settlement-resource"):
-            service.import_pools(one_pool_yaml)
-        # Rejected atomically — equinix-us-west remains enabled.
-        assert service.get_pool("equinix-us-west").enabled is True
+        diff = svc.import_pools(one_pool_yaml)
+        assert "equinix-us-west" in diff.disabled
+
 
     def test_invalid_entry_rejects_entire_document(self, svc):
         mixed_yaml = """

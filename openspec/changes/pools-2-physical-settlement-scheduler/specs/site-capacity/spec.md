@@ -1,19 +1,39 @@
-## MODIFIED Requirements
+# Site capacity delta
 
-### Requirement: Reservation lifecycle
+## ADDED Requirements
 
-Capacity reservation MUST use a hold/commit/release lifecycle keyed by
-durable allocation identity, MUST support lease-shaped `start`/`end`
-windows and expiry of uncommitted holds through both a lazy check on
-subsequent ledger access and a periodic watchdog sweep, and MUST be
-idempotent for retries.
+### Requirement: Reservation exposes settlement-validation data
 
-#### Scenario: Two buyers reserve the same final unit
+A Capacity Reservation SHALL expose sufficient identity, state, expiry, requested units or shape, resource kind, and deal relationship data for settlement validation.
 
-- **WHEN** concurrent requests race at one site
-- **THEN** the authoritative ledger commits at most one reservation
+#### Scenario: Unknown reservation
 
-#### Scenario: Uncommitted hold outlives its TTL without another ledger access
+- **WHEN** scheduling references an allocation identifier that does not exist
+- **THEN** scheduling fails with an entity-not-found error.
 
-- **WHEN** no subsequent `reserve`/`commit`/`release` call touches an expired uncommitted hold
-- **THEN** a periodic reservation-expiry watchdog still releases it without requiring storefront-side polling
+#### Scenario: Expired reservation
+
+- **GIVEN** a reservation whose hold expiry has passed
+- **WHEN** scheduling is requested
+- **THEN** scheduling fails with a reservation-expired error.
+
+#### Scenario: Agreement or represented terms mismatch
+
+- **GIVEN** a reservation whose recorded agreement, market, or terms differ from the request
+- **WHEN** scheduling is requested
+- **THEN** scheduling fails with a request-mismatch error.
+
+### Requirement: Concrete capacity claim and assignment are atomic
+
+The durable architecture SHALL claim concrete-resource capacity and persist the Capacity Settlement Assignment atomically with assignment idempotency and cursor advancement.
+
+#### Scenario: Concurrent assignments compete for one resource
+
+- **GIVEN** two concurrent reservations and capacity sufficient for only one
+- **WHEN** both assignments are attempted
+- **THEN** at most one transaction claims the capacity
+- **AND** the other request receives no eligible resource or retries against updated state.
+
+### Requirement: Intermediate reservation constraint is documented
+
+Until the durable assignment transaction is implemented, the concrete site-ledger reservation and process-local assignment/cursor storage SHALL remain documented as intermediate constraints rather than distributed-idempotency guarantees.

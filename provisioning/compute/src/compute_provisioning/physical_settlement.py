@@ -1,53 +1,81 @@
-"""Executor-neutral physical-settlement scheduling shapes.
-
-See openspec/changes/pools-2-physical-settlement-scheduler/design.md for
-the design behind PhysicalSettlementScheduler.select_resource(...), which
-consumes and returns these models.
-"""
+"""Executor-neutral contracts for capacity settlement scheduling."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
+
+
+class PhysicalSettlementError(Exception):
+    """Base error for settlement scheduling failures."""
+
+
+class SettlementEntityNotFoundError(PhysicalSettlementError):
+    """A referenced allocation, agreement, pool, or resource does not exist."""
+
+
+class SettlementRequestMismatchError(PhysicalSettlementError):
+    """Existing entities do not correspond to the supplied request."""
+
+
+class CapacityReservationExpiredError(PhysicalSettlementError):
+    """The referenced capacity reservation has expired."""
+
+
+class NoEligibleSettlementResourceError(PhysicalSettlementError):
+    """No enabled resource can satisfy the validated reservation."""
 
 
 class PhysicalSettlementRequest(BaseModel):
-    """What the scheduler needs to bind an allocation to a settlement resource.
+    """Request to create or retrieve one Capacity Settlement Assignment."""
 
-    Carries either fungible pool/capacity attributes (``pool_id``, or
-    neither field for "any eligible pool") or an explicit ``resource_id``
-    for a specific-resource opt-in listing — never both.
-    """
-
-    allocation_id: str = Field(description="Durable idempotency key for this binding.")
-    agreement_id: str = Field(description="The market agreement/deal this settlement serves.")
-    market: str = Field(description="Market domain identity, e.g. 'vms'.")
+    allocation_id: str = Field(description="Capacity Reservation identifier and idempotency key.")
+    agreement_id: str = Field(description="Agreement served by this settlement.")
+    market: str = Field(description="Market domain identity, for example 'vms'.")
     terms: dict[str, Any] = Field(default_factory=dict)
-    pool_id: str | None = Field(
-        default=None,
-        description="Restrict fungible selection to this pool. None means any eligible pool.",
-    )
     resource_id: str | None = Field(
         default=None,
-        description="Bind exactly this resource (specific-resource opt-in path).",
+        description=(
+            "Optional exact resource constraint. Explicit selection bypasses policy "
+            "choice, never eligibility validation."
+        ),
     )
 
-    @model_validator(mode="after")
-    def _pool_and_resource_are_mutually_exclusive(self) -> "PhysicalSettlementRequest":
-        if self.pool_id is not None and self.resource_id is not None:
-            raise ValueError(
-                "pool_id and resource_id are mutually exclusive on a "
-                "PhysicalSettlementRequest"
-            )
-        return self
+
+class SettlementRequirement(BaseModel):
+    """Generic capacity shape used to evaluate concrete candidates."""
+
+    resource_kind: str
+    units: int = Field(gt=0)
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class SettlementCandidate(BaseModel):
+    """One concrete resource eligible for physical settlement evaluation."""
+
+    resource_id: str
+    pool_id: str
+    resource_kind: str
+    available_units: int
+    enabled: bool = True
+    provider: str
+    attributes: dict[str, Any] = Field(default_factory=dict)
 
 
 class SettlementResource(BaseModel):
-    """The durable selected physical resource for one allocation's settlement."""
+    """The selected physical resource in a Capacity Settlement Assignment."""
 
     settlement_resource_id: str
     pool_id: str
     resource_kind: str
     provider: str
     attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class CapacitySettlementAssignment(BaseModel):
+    """Idempotent allocation-to-resource scheduling decision."""
+
+    allocation_id: str
+    agreement_id: str
+    resource: SettlementResource

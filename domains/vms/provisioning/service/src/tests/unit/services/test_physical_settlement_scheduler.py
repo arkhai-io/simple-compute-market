@@ -1,238 +1,176 @@
-"""Unit tests for PhysicalSettlementScheduler.
-
-Covers: idempotency by allocation_id, disabled/exhausted pool exclusion,
-explicit resource_id binding without substitution, no-match errors, and
-dimension-agnostic bottleneck-normalized pool selection.
-"""
+"""Unit tests for deterministic Capacity Settlement Assignment scheduling."""
 
 from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from compute_provisioning import PhysicalSettlementRequest
-from db.models import Base, Host
+from compute_provisioning import (
+    CapacityReservationExpiredError,
+    NoEligibleSettlementResourceError,
+    PhysicalSettlementRequest,
+    SettlementEntityNotFoundError,
+    SettlementRequestMismatchError,
+)
 from market_resource_pools import PoolCreate, ResourcePoolService
 from market_resource_pools.db import Base as PoolsBase
 from market_site.db import Base as SiteBase
 from market_site.ledger import CapacityLedgerService
-from services.physical_settlement_scheduler import (
-    NoEligiblePoolError,
-    PhysicalSettlementScheduler,
-    ResourceNotFoundError,
-)
+from services.physical_settlement_scheduler import PhysicalSettlementScheduler
 
 
-class _StubPoolConfigHandler:
+class _Handler:
     provider = "ansible"
-
-    def validate_config(self, config):
-        return dict(config)
-
-    def validate_config_problems(self, config):
-        return dict(config), ()
-
-    def read_config(self, db, pool_id):
-        return {}
-
-    def replace_config(self, db, pool_id, config):
-        pass
-
-    def delete_config(self, db, pool_id):
-        pass
+    def validate_config(self, config): return dict(config)
+    def validate_config_problems(self, config): return dict(config), ()
+    def read_config(self, db, pool_id): return {}
+    def replace_config(self, db, pool_id, config): pass
+    def delete_config(self, db, pool_id): pass
 
 
 @pytest.fixture
-def session_factory():
+def services():
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    # resource_pools must exist before Base's Host.pool_id FK resolves.
     PoolsBase.metadata.create_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
     SiteBase.metadata.create_all(bind=engine)
-    return sessionmaker(bind=engine)
+    factory = sessionmaker(bind=engine)
+    pools = ResourcePoolService(factory, {"ansible": _Handler()})
+    ledger = CapacityLedgerService(factory)
+    scheduler = PhysicalSettlementScheduler(pools, ledger)
+    return pools, ledger, scheduler
 
 
-@pytest.fixture
-def pool_service(session_factory):
-    return ResourcePoolService(
-        session_factory=session_factory,
-        handlers={"ansible": _StubPoolConfigHandler()},
+def _pool(pools, pool_id: str, enabled: bool = True):
+    pools.create_pool(PoolCreate(
+        id=pool_id, label=pool_id, provider="ansible", enabled=enabled,
+        provider_config={},
+    ))
+
+
+def _resource(ledger, resource_id: str, pool_id: str, *, units: int = 4, enabled=True):
+    ledger.register_resource(
+        resource_id=resource_id,
+        resource_type="compute.gpu",
+        total_units=units,
+        enabled=enabled,
+        attributes={"pool_id": pool_id},
     )
 
 
-@pytest.fixture
-def capacity_ledger(session_factory):
-    return CapacityLedgerService(session_factory=session_factory)
+def _reserve(ledger, agreement="agreement-1", **deal):
+    ref = {"agreement_id": agreement, "market": "vms", **deal}
+    result = ledger.reserve(claim={"gpu_count": 1}, deal_ref=ref)
+    assert result is not None
+    return result["allocation_id"]
 
 
-@pytest.fixture
-def scheduler(pool_service, capacity_ledger, session_factory):
-    return PhysicalSettlementScheduler(
-        pool_service=pool_service,
-        capacity_ledger=capacity_ledger,
-        session_factory=session_factory,
-    )
-
-
-def _add_host(session_factory, name: str, pool_id: str) -> None:
-    with session_factory() as db:
-        db.add(Host(
-            name=name, kvm_host="10.0.0.1", ssh_user="ubuntu",
-            ssh_key_type="path", ssh_key_value="/key", pool_id=pool_id,
-        ))
-        db.commit()
-
-
-def _request(allocation_id="alloc-1", **kwargs) -> PhysicalSettlementRequest:
+def _request(allocation_id: str, **kwargs):
     return PhysicalSettlementRequest(
-        allocation_id=allocation_id, agreement_id="agree-1", market="vms", **kwargs
+        allocation_id=allocation_id,
+        agreement_id=kwargs.pop("agreement_id", "agreement-1"),
+        market="vms",
+        **kwargs,
     )
 
 
-class TestIdempotency:
-    def test_repeated_calls_return_the_same_binding(
-        self, scheduler, pool_service, capacity_ledger, session_factory
-    ):
-        pool_service.create_pool(
-            PoolCreate(id="pool-a", label="A", provider="ansible", provider_config={})
-        )
-        _add_host(session_factory, "kvm1", "pool-a")
-        capacity_ledger.register_resource(
-            resource_id="kvm1", total_units=4, attributes={"vm_host": "kvm1"},
-        )
-
-        first = scheduler.select_resource(_request())
-        second = scheduler.select_resource(_request())
-        assert first == second
-        assert first.settlement_resource_id == "kvm1"
-        assert first.pool_id == "pool-a"
+def test_unknown_allocation_is_rejected(services):
+    _, _, scheduler = services
+    with pytest.raises(SettlementEntityNotFoundError):
+        scheduler.select_resource(_request("missing"))
 
 
-class TestPoolExclusion:
-    def test_disabled_pool_is_excluded(
-        self, scheduler, pool_service, capacity_ledger, session_factory
-    ):
-        pool_service.create_pool(
-            PoolCreate(id="pool-a", label="A", provider="ansible", provider_config={})
-        )
-        pool_service.disable_pool("pool-a")
-        _add_host(session_factory, "kvm1", "pool-a")
-        capacity_ledger.register_resource(
-            resource_id="kvm1", total_units=4, attributes={"vm_host": "kvm1"},
-        )
-
-        with pytest.raises(NoEligiblePoolError):
-            scheduler.select_resource(_request())
-
-    def test_exhausted_pool_is_excluded(
-        self, scheduler, pool_service, capacity_ledger, session_factory
-    ):
-        pool_service.create_pool(
-            PoolCreate(id="pool-a", label="A", provider="ansible", provider_config={})
-        )
-        _add_host(session_factory, "kvm1", "pool-a")
-        capacity_ledger.register_resource(
-            resource_id="kvm1", total_units=1, attributes={"vm_host": "kvm1"},
-        )
-        capacity_ledger.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0x1"})
-
-        with pytest.raises(NoEligiblePoolError):
-            scheduler.select_resource(_request())
-
-    def test_explicit_pool_id_restricts_selection(
-        self, scheduler, pool_service, capacity_ledger, session_factory
-    ):
-        pool_service.create_pool(
-            PoolCreate(id="pool-a", label="A", provider="ansible", provider_config={})
-        )
-        pool_service.create_pool(
-            PoolCreate(id="pool-b", label="B", provider="ansible", provider_config={})
-        )
-        _add_host(session_factory, "kvm1", "pool-a")
-        _add_host(session_factory, "kvm2", "pool-b")
-        capacity_ledger.register_resource(
-            resource_id="kvm1", total_units=4, attributes={"vm_host": "kvm1"},
-        )
-        capacity_ledger.register_resource(
-            resource_id="kvm2", total_units=4, attributes={"vm_host": "kvm2"},
-        )
-
-        bound = scheduler.select_resource(_request(pool_id="pool-b"))
-        assert bound.pool_id == "pool-b"
-        assert bound.settlement_resource_id == "kvm2"
+def test_agreement_mismatch_is_rejected(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a")
+    allocation_id = _reserve(ledger)
+    with pytest.raises(SettlementRequestMismatchError):
+        scheduler.select_resource(_request(allocation_id, agreement_id="other"))
 
 
-class TestExplicitResourceId:
-    def test_binds_exactly_the_requested_resource(
-        self, scheduler, pool_service, capacity_ledger, session_factory
-    ):
-        pool_service.create_pool(
-            PoolCreate(id="pool-a", label="A", provider="ansible", provider_config={})
-        )
-        _add_host(session_factory, "kvm1", "pool-a")
-        capacity_ledger.register_resource(
-            resource_id="kvm1", total_units=4, attributes={"vm_host": "kvm1"},
-        )
-
-        bound = scheduler.select_resource(_request(resource_id="kvm1"))
-        assert bound.settlement_resource_id == "kvm1"
-        assert bound.pool_id == "pool-a"
-
-    def test_unknown_resource_id_raises(self, scheduler):
-        with pytest.raises(ResourceNotFoundError):
-            scheduler.select_resource(_request(resource_id="does-not-exist"))
-
-    def test_disabled_resource_raises(
-        self, scheduler, pool_service, capacity_ledger, session_factory
-    ):
-        pool_service.create_pool(
-            PoolCreate(id="pool-a", label="A", provider="ansible", provider_config={})
-        )
-        _add_host(session_factory, "kvm1", "pool-a")
-        capacity_ledger.register_resource(
-            resource_id="kvm1", total_units=4, attributes={"vm_host": "kvm1"},
-            enabled=False,
-        )
-
-        with pytest.raises(ResourceNotFoundError):
-            scheduler.select_resource(_request(resource_id="kvm1"))
+def test_expired_reservation_is_rejected(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a")
+    result = ledger.reserve(
+        claim={"gpu_count": 1},
+        deal_ref={"agreement_id": "agreement-1", "market": "vms"},
+        ttl_seconds=-1,
+    )
+    with pytest.raises((CapacityReservationExpiredError, SettlementRequestMismatchError)):
+        scheduler.select_resource(_request(result["allocation_id"]))
 
 
-class TestBottleneckNormalizedSelection:
-    def test_prefers_pool_with_lower_bottleneck_dimension(
-        self, scheduler, pool_service, capacity_ledger, session_factory
-    ):
-        """pool-a is 90% utilized on one resource_type; pool-b is 50%
-        utilized. Even though both pools have only one resource each,
-        this exercises the utilization comparison rather than a
-        first-match/round-robin fallback."""
-        pool_service.create_pool(
-            PoolCreate(id="pool-a", label="A", provider="ansible", provider_config={})
-        )
-        pool_service.create_pool(
-            PoolCreate(id="pool-b", label="B", provider="ansible", provider_config={})
-        )
-        _add_host(session_factory, "kvm1", "pool-a")
-        _add_host(session_factory, "kvm2", "pool-b")
-        capacity_ledger.register_resource(
-            resource_id="kvm1", total_units=10, attributes={"vm_host": "kvm1"},
-        )
-        capacity_ledger.register_resource(
-            resource_id="kvm2", total_units=10, attributes={"vm_host": "kvm2"},
-        )
-        # Reserve 9/10 on kvm1 (pool-a) — 90% utilized. Pinned by
-        # resource_id so the test doesn't depend on the ledger's own
-        # candidate-selection order between two equally-sized resources.
-        capacity_ledger.reserve(
-            claim={"gpu_count": 9, "resource_id": "kvm1"},
-            deal_ref={"escrow_uid": "0xa"},
-        )
+def test_retry_is_idempotent_and_does_not_rerun_policy(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _resource(ledger, "a1", "pool-a")
+    _resource(ledger, "b1", "pool-b")
+    allocation_id = _reserve(ledger)
+    first = scheduler.select_resource(_request(allocation_id))
+    second = scheduler.select_resource(_request(allocation_id))
+    assert first == second
 
-        bound = scheduler.select_resource(_request())
-        assert bound.pool_id == "pool-b"
+
+def test_round_robin_is_deterministic_across_pools(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _resource(ledger, "a1", "pool-a", units=10)
+    _resource(ledger, "b1", "pool-b", units=10)
+    ids = [_reserve(ledger, agreement=f"agreement-{i}") for i in range(1, 4)]
+    selected = [
+        scheduler.select_resource(_request(aid, agreement_id=f"agreement-{i}" )).pool_id
+        for i, aid in enumerate(ids, 1)
+    ]
+    assert selected == ["pool-a", "pool-b", "pool-a"]
+
+
+def test_round_robin_is_deterministic_within_pool(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a", units=10)
+    _resource(ledger, "r2", "pool-a", units=10)
+    ids = [_reserve(ledger, agreement=f"agreement-{i}") for i in range(1, 3)]
+    selected = [
+        scheduler.select_resource(_request(aid, agreement_id=f"agreement-{i}")).settlement_resource_id
+        for i, aid in enumerate(ids, 1)
+    ]
+    assert selected == ["r1", "r2"]
+
+
+def test_explicit_resource_bypasses_policy_not_eligibility(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a", enabled=False)
+    _resource(ledger, "r1", "pool-a")
+    allocation_id = _reserve(ledger)
+    with pytest.raises(NoEligibleSettlementResourceError):
+        scheduler.select_resource(_request(allocation_id, resource_id="r1"))
+
+
+def test_resource_without_pool_is_not_schedulable(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    ledger.register_resource(resource_id="orphan", total_units=4, attributes={})
+    allocation_id = _reserve(ledger)
+    with pytest.raises(NoEligibleSettlementResourceError):
+        scheduler.select_resource(_request(allocation_id))
+
+
+def test_disabling_pool_does_not_depend_on_existing_assignment(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a")
+    allocation_id = _reserve(ledger)
+    scheduler.select_resource(_request(allocation_id))
+    disabled = pools.disable_pool("pool-a")
+    assert disabled.enabled is False

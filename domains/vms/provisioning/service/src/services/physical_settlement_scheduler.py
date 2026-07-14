@@ -1,231 +1,194 @@
-"""Physical settlement resource selection.
-
-Binds an already-reserved capacity allocation to exactly one durable,
-idempotent settlement resource. See
-openspec/changes/pools-2-physical-settlement-scheduler/design.md for the
-full design rationale (scheduler/provider split, naming, algorithm).
-
-Persistence is intentionally process-local this round (see that design's
-"No persistence this change" decision) — bindings live in an in-memory
-dict keyed by allocation_id. pools-3 replaces this with a durable
-SettlementRecord extending the same key.
-"""
+"""Deterministic, executor-neutral capacity settlement scheduling."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import threading
 from typing import Any
 
-from compute_provisioning.physical_settlement import (
+from compute_provisioning import (
+    CapacityReservationExpiredError,
+    NoEligibleSettlementResourceError,
     PhysicalSettlementRequest,
+    SettlementCandidate,
+    SettlementEntityNotFoundError,
+    SettlementRequestMismatchError,
+    SettlementRequirement,
     SettlementResource,
+    SettlementSchedulingPolicy,
 )
 from market_resource_pools import ResourcePoolService
 from market_site.ledger import CapacityLedgerService
-
-from db.models import Host
-
-
-class NoEligiblePoolError(Exception):
-    """No enabled, non-exhausted pool can satisfy the request."""
-
-
-class ResourceNotFoundError(Exception):
-    """An explicitly-requested resource_id does not exist or isn't eligible."""
+from services.deterministic_round_robin_policy import DeterministicRoundRobinPolicy
 
 
 class PhysicalSettlementScheduler:
-    """Selects and durably (for this process's lifetime) binds settlement resources.
+    """Creates one Capacity Settlement Assignment per unchanged reservation.
 
-    Dimension-agnostic bottleneck-normalized selection: for each eligible
-    pool, utilization is the maximum of (used_units / total_units) across
-    whatever ``resource_type`` values that pool's resources actually have —
-    not a fixed CPU/RAM/GPU/disk set, since the site ledger's resource model
-    doesn't have fixed dimensions (see design.md's "Discovery" note carried
-    into this session's plan). The pool with the lowest bottleneck
-    utilization is selected.
+    The in-memory assignment and cursor repositories are an intermediate
+    implementation boundary. They are deliberately named for the domain
+    concepts they approximate so durable repositories can replace them
+    without changing scheduler policy or public contracts.
     """
+
+    _ACTIVE_STATES = {"reserved", "committed", "leased", "unmanaged"}
 
     def __init__(
         self,
         pool_service: ResourcePoolService,
         capacity_ledger: CapacityLedgerService,
-        session_factory: Any,
+        session_factory: Any | None = None,
+        policy: SettlementSchedulingPolicy | None = None,
     ) -> None:
+        del session_factory
         self._pool_service = pool_service
         self._capacity_ledger = capacity_ledger
-        self._session_factory = session_factory
+        self._policy = policy or DeterministicRoundRobinPolicy()
         self._lock = threading.Lock()
-        self._bindings: dict[str, SettlementResource] = {}
+        self._capacity_settlement_assignments: dict[str, SettlementResource] = {}
 
-    def has_active_binding(self, pool_id: str) -> bool:
-        """Used by ResourcePoolService's disable_pool guardrail."""
+    def get_settlement_assignment(self, allocation_id: str) -> SettlementResource | None:
         with self._lock:
-            return any(
-                resource.pool_id == pool_id for resource in self._bindings.values()
-            )
+            return self._capacity_settlement_assignments.get(allocation_id)
 
-    def select_resource(
-        self, request: PhysicalSettlementRequest
+    def record_settlement_assignment(
+        self, allocation_id: str, resource: SettlementResource
     ) -> SettlementResource:
-        """Atomically bind request.allocation_id to a settlement resource.
+        self._capacity_settlement_assignments[allocation_id] = resource
+        return resource
 
-        Repeated calls for the same allocation_id return the existing
-        binding rather than selecting another resource.
-        """
+    def select_resource(self, request: PhysicalSettlementRequest) -> SettlementResource:
         with self._lock:
-            existing = self._bindings.get(request.allocation_id)
+            allocation = self._require_valid_allocation(request)
+            existing = self._capacity_settlement_assignments.get(request.allocation_id)
             if existing is not None:
+                if request.resource_id and request.resource_id != existing.settlement_resource_id:
+                    raise SettlementRequestMismatchError(
+                        "explicit resource does not match the existing Capacity Settlement Assignment"
+                    )
                 return existing
 
+            requirement = self._requirement(allocation, request)
+            candidates = self._eligible_candidates(requirement, allocation)
             if request.resource_id is not None:
-                resource = self._bind_explicit_resource(request)
+                selected = next(
+                    (item for item in candidates if item.resource_id == request.resource_id),
+                    None,
+                )
+                if selected is None:
+                    raise NoEligibleSettlementResourceError(
+                        f"resource '{request.resource_id}' is not eligible for settlement"
+                    )
             else:
-                resource = self._bind_pool_selected_resource(request)
-
-            self._bindings[request.allocation_id] = resource
-            return resource
-
-    # ------------------------------------------------------------------
-    # Explicit resource_id path
-    # ------------------------------------------------------------------
-
-    def _bind_explicit_resource(
-        self, request: PhysicalSettlementRequest
-    ) -> SettlementResource:
-        for payload in self._capacity_ledger.list_resources():
-            if payload["resource_id"] != request.resource_id:
-                continue
-            if not payload.get("enabled"):
-                raise ResourceNotFoundError(
-                    f"resource '{request.resource_id}' is disabled"
-                )
-            pool_id = self._pool_id_for(payload)
-            return SettlementResource(
-                settlement_resource_id=payload["resource_id"],
-                pool_id=pool_id or "",
-                resource_kind=payload["resource_type"],
-                provider=self._provider_for_pool(pool_id),
-                attributes=payload.get("attributes") or {},
-            )
-        raise ResourceNotFoundError(
-            f"resource '{request.resource_id}' does not exist"
-        )
-
-    # ------------------------------------------------------------------
-    # Fungible pool-selection path
-    # ------------------------------------------------------------------
-
-    def _bind_pool_selected_resource(
-        self, request: PhysicalSettlementRequest
-    ) -> SettlementResource:
-        eligible_pool_ids = {
-            pool.id
-            for pool in self._pool_service.list_pools(enabled_only=True)
-            if request.pool_id is None or pool.id == request.pool_id
-        }
-        if not eligible_pool_ids:
-            raise NoEligiblePoolError(
-                "no enabled pool matches this request"
-                if request.pool_id is None
-                else f"pool '{request.pool_id}' does not exist or is disabled"
-            )
-
-        by_pool = self._group_resources_by_pool(eligible_pool_ids)
-        best_pool_id: str | None = None
-        best_utilization: float | None = None
-        best_resource: dict[str, Any] | None = None
-
-        for pool_id in eligible_pool_ids:
-            resources = by_pool.get(pool_id, [])
-            candidate = next(
-                (r for r in resources if r.get("enabled") and r["available_units"] > 0),
-                None,
-            )
-            if candidate is None:
-                continue
-            utilization = self._pool_bottleneck_utilization(resources)
-            if best_utilization is None or utilization < best_utilization:
-                best_pool_id, best_utilization, best_resource = (
-                    pool_id,
-                    utilization,
-                    candidate,
+                selected = self._policy.select(
+                    requirement=requirement,
+                    candidates=candidates,
                 )
 
-        if best_pool_id is None or best_resource is None:
-            raise NoEligiblePoolError(
-                "every eligible pool is disabled or exhausted"
+            resource = SettlementResource(
+                settlement_resource_id=selected.resource_id,
+                pool_id=selected.pool_id,
+                resource_kind=selected.resource_kind,
+                provider=selected.provider,
+                attributes=selected.attributes,
             )
+            return self.record_settlement_assignment(request.allocation_id, resource)
 
-        return SettlementResource(
-            settlement_resource_id=best_resource["resource_id"],
-            pool_id=best_pool_id,
-            resource_kind=best_resource["resource_type"],
-            provider=self._provider_for_pool(best_pool_id),
-            attributes=best_resource.get("attributes") or {},
-        )
+    def _require_valid_allocation(self, request: PhysicalSettlementRequest) -> dict[str, Any]:
+        allocation = self._capacity_ledger.get_allocation(request.allocation_id)
+        if allocation is None:
+            raise SettlementEntityNotFoundError(
+                f"capacity allocation '{request.allocation_id}' does not exist"
+            )
+        if allocation.get("state") not in self._ACTIVE_STATES:
+            raise SettlementRequestMismatchError(
+                f"capacity allocation '{request.allocation_id}' is not active"
+            )
+        expires = allocation.get("hold_expires_at")
+        if expires:
+            expiry = datetime.fromisoformat(str(expires).replace("Z", "+00:00"))
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            if expiry <= datetime.now(timezone.utc):
+                raise CapacityReservationExpiredError(
+                    f"capacity allocation '{request.allocation_id}' has expired"
+                )
+        deal_ref = allocation.get("deal_ref") or {}
+        known_agreement = deal_ref.get("agreement_id") or deal_ref.get("deal_id")
+        if known_agreement is not None and known_agreement != request.agreement_id:
+            raise SettlementRequestMismatchError(
+                "agreement_id does not match the capacity reservation"
+            )
+        known_market = deal_ref.get("market")
+        if known_market is not None and known_market != request.market:
+            raise SettlementRequestMismatchError("market does not match the capacity reservation")
+        known_terms = deal_ref.get("terms")
+        if known_terms is not None and dict(known_terms) != request.terms:
+            raise SettlementRequestMismatchError("terms do not match the capacity reservation")
+        return allocation
 
     @staticmethod
-    def _pool_bottleneck_utilization(resources: list[dict[str, Any]]) -> float:
-        totals: dict[str, int] = {}
-        useds: dict[str, int] = {}
-        for r in resources:
-            if not r.get("enabled"):
-                continue
-            rtype = r["resource_type"]
-            total = int(r["value"])
-            available = int(r["available_units"])
-            totals[rtype] = totals.get(rtype, 0) + total
-            useds[rtype] = useds.get(rtype, 0) + max(total - available, 0)
-        if not totals:
-            return 1.0
-        return max(
-            (useds[rtype] / totals[rtype]) if totals[rtype] else 1.0
-            for rtype in totals
+    def _requirement(
+        allocation: dict[str, Any], request: PhysicalSettlementRequest
+    ) -> SettlementRequirement:
+        deal_ref = allocation.get("deal_ref") or {}
+        resource_kind = (
+            deal_ref.get("resource_kind")
+            or request.terms.get("resource_kind")
+            or "compute.gpu"
+        )
+        attributes = dict(request.terms.get("attributes") or {})
+        return SettlementRequirement(
+            resource_kind=resource_kind,
+            units=max(int(allocation.get("units") or 1), 1),
+            attributes=attributes,
         )
 
-    def _group_resources_by_pool(
-        self, eligible_pool_ids: set[str]
-    ) -> dict[str, list[dict[str, Any]]]:
-        resources = self._capacity_ledger.list_resources()
-        # attributes["vm_host"] identifies the physical host a resource rides
-        # on (legacy naming; conceptually "the host name" for any executor
-        # kind sharing this Host table). Hostless resources (e.g. an
-        # api-credits market's quota rows) never join to a pool and are
-        # correctly excluded from pool-based scheduling.
-        host_names = {
-            r["attributes"].get("vm_host")
-            for r in resources
-            if r.get("attributes")
-        }
-        host_names.discard(None)
-        with self._session_factory() as db:
-            hosts = (
-                db.query(Host).filter(Host.name.in_(host_names)).all()
-                if host_names
-                else []
-            )
-        pool_by_host = {h.name: h.pool_id for h in hosts}
-
-        grouped: dict[str, list[dict[str, Any]]] = {}
-        for r in resources:
-            host_name = (r.get("attributes") or {}).get("vm_host")
-            pool_id = pool_by_host.get(host_name)
-            if pool_id is None or pool_id not in eligible_pool_ids:
+    def _eligible_candidates(
+        self,
+        requirement: SettlementRequirement,
+        allocation: dict[str, Any],
+    ) -> list[SettlementCandidate]:
+        pools = {pool.id: pool for pool in self._pool_service.list_pools(enabled_only=True)}
+        candidates: list[SettlementCandidate] = []
+        for payload in self._capacity_ledger.list_resources():
+            attributes = dict(payload.get("attributes") or {})
+            pool_id = attributes.get("pool_id")
+            if not isinstance(pool_id, str) or pool_id not in pools:
                 continue
-            grouped.setdefault(pool_id, []).append(r)
-        return grouped
+            if not payload.get("enabled"):
+                continue
+            if payload.get("resource_type") != requirement.resource_kind:
+                continue
+            available_units = int(payload.get("available_units") or 0)
+            # The current ledger reserves against a concrete line item before
+            # POOLS-2 scheduling. Credit this allocation's own held units back
+            # during eligibility evaluation; POOLS-3 persistence will move the
+            # concrete claim into the assignment transaction.
+            if payload.get("resource_id") == allocation.get("resource_id"):
+                available_units += requirement.units
+            if available_units < requirement.units:
+                continue
+            if any(attributes.get(key) != value for key, value in requirement.attributes.items()):
+                continue
+            pool = pools[pool_id]
+            candidates.append(
+                SettlementCandidate(
+                    resource_id=payload["resource_id"],
+                    pool_id=pool_id,
+                    resource_kind=payload["resource_type"],
+                    available_units=available_units,
+                    provider=pool.provider,
+                    attributes=attributes,
+                )
+            )
+        if not candidates:
+            raise NoEligibleSettlementResourceError(
+                "no enabled pooled resource can satisfy the capacity reservation"
+            )
+        return candidates
 
-    def _pool_id_for(self, resource_payload: dict[str, Any]) -> str | None:
-        host_name = (resource_payload.get("attributes") or {}).get("vm_host")
-        if host_name is None:
-            return None
-        with self._session_factory() as db:
-            host = db.query(Host).filter(Host.name == host_name).one_or_none()
-        return host.pool_id if host else None
 
-    def _provider_for_pool(self, pool_id: str | None) -> str:
-        if pool_id is None:
-            return ""
-        pool = self._pool_service.get_pool(pool_id)
-        return pool.provider if pool else ""
+# Compatibility aliases for callers transitioning from the POOLS-2 draft.
+NoEligiblePoolError = NoEligibleSettlementResourceError
+ResourceNotFoundError = SettlementEntityNotFoundError

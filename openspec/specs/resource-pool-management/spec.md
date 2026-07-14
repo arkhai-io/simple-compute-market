@@ -100,3 +100,9 @@ Pool YAML import MUST treat the supplied definitions as authoritative, validate 
 - Pool persistence, provider validation, strict import, dry-run, idempotency, lifecycle, and provider replacement: `domains/vms/provisioning/service/src/tests/unit/services/test_resource_pool_service.py`.
 - Typed administrative API, default-pool invariant, canonical round trip, and host assignment: `domains/vms/provisioning/service/src/tests/integration/test_pools_api.py`.
 - Migration ordering, legacy host backfill, and schema-drift rejection: `domains/vms/provisioning/service/src/tests/unit/test_database.py`.
+
+## Scheduling membership and draining
+
+Every resource eligible for physical settlement belongs to exactly one Resource Pool. Zero memberships makes the resource unschedulable; multiple memberships misrepresent system capacity and are invalid configuration.
+
+Disabling a Resource Pool is a draining action. It blocks new Capacity Settlement Assignments to that pool but does not invalidate existing reservations, assignments, physical settlements, or active workloads, and those existing records do not prevent disablement.

@@ -39,20 +39,6 @@ def _resolved_job_queue():
     return resolved_job_queue
 
 
-def _pool_has_active_binding(pool_id: str) -> bool:
-    """Late-bound lookup for ResourcePoolService's disable_pool guardrail.
-
-    resource_pool_service and physical_settlement_scheduler each depend on
-    being constructible without the other (the scheduler reads pools; the
-    pool service's guardrail reads bindings), so this indirection — rather
-    than a constructor dependency in either direction — avoids a circular
-    DI graph, mirroring _resolved_job_queue's pattern above.
-    """
-    if resolved_physical_settlement_scheduler is None:
-        return False
-    return resolved_physical_settlement_scheduler.has_active_binding(pool_id)
-
-
 def _make_ansible_service(cfg):
     """Return ProgrammableMockAnsibleService when ACTIVE_PROFILES includes 'mock'."""
     import os
@@ -148,7 +134,6 @@ class Container(containers.DeclarativeContainer):
         ResourcePoolService,
         session_factory=session_factory,
         handlers=providers.Dict(ansible=ansible_pool_config_handler),
-        active_binding_check=_pool_has_active_binding,
     )
 
     job_service = providers.Singleton(
