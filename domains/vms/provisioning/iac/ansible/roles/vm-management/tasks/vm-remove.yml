@@ -1,0 +1,89 @@
+---
+# VM Management - Full VM Removal
+#
+# Forcibly destroys the VM and runs the per-VM cleanup script that was written
+# to the host at create time.  The cleanup script removes the FRP proxy entry,
+# iptables/UFW port-forward rules, static DHCP lease, GPU passthrough
+# configuration, SSH keys, cloud-init artefacts, libvirt definition, and all
+# associated disk images.
+#
+# This action is the authoritative teardown path.  It is invoked by:
+#   - The provisioning service LeaseWatchdog when a lease expires.
+#   - The POST /api/v1/hosts/{host}/vms/{vm_name}/remove endpoint for
+#     operator-initiated immediate removal.
+#
+# The host machine has no knowledge of leases.  "Remove" simply means
+# "destroy and clean up this VM completely."
+
+- name: Verify cleanup script exists on target host
+  stat:
+    path: "/usr/local/bin/cleanup_vm_{{ vm_name }}.sh"
+  register: cleanup_script_stat
+  delegate_to: "{{ target_host }}"
+  when: vm_action == "vm_remove"
+
+- name: Fail loudly when cleanup script is missing
+  fail:
+    msg: >
+      Cleanup script not found at /usr/local/bin/cleanup_vm_{{ vm_name }}.sh
+      on host {{ target_host }}.
+      This script is written during VM creation.  Its absence indicates the
+      VM was not provisioned through this system, or the create job failed
+      before the script was written.
+      Manual intervention is required: verify the VM exists on the host
+      (virsh list --all), destroy it manually if present, and confirm no
+      FRP proxy entries, iptables rules, or disk images remain.
+  when:
+    - vm_action == "vm_remove"
+    - not cleanup_script_stat.stat.exists
+
+- name: Force-destroy VM (in case it is still running)
+  shell: |
+    if virsh domstate {{ vm_name }} 2>/dev/null | grep -q "running"; then
+      virsh destroy {{ vm_name }} 2>&1
+      echo "VM {{ vm_name }} force-destroyed"
+    else
+      echo "VM {{ vm_name }} is not running (state: $(virsh domstate {{ vm_name }} 2>/dev/null || echo 'not found'))"
+    fi
+  register: vm_destroy_result
+  delegate_to: "{{ target_host }}"
+  when: vm_action == "vm_remove"
+
+- name: Run cleanup script
+  shell: |
+    LOG_DIR="/var/log/vm-cleanup"
+    mkdir -p "$LOG_DIR"
+    LOG_FILE="$LOG_DIR/{{ vm_name }}_remove_$(date +%Y%m%d_%H%M%S).log"
+    /usr/local/bin/cleanup_vm_{{ vm_name }}.sh "$LOG_FILE" 2>&1
+    EXIT_CODE=$?
+    echo "Cleanup log: $LOG_FILE"
+    exit $EXIT_CODE
+  register: vm_cleanup_result
+  delegate_to: "{{ target_host }}"
+  when: vm_action == "vm_remove"
+
+- name: Get current timestamp for vm_remove
+  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  register: vm_remove_timestamp
+  when:
+    - vm_action == "vm_remove"
+  delegate_to: localhost
+
+- name: Create JSON data structure for vm_remove action
+  set_fact:
+    vm_remove_data:
+      action: "vm_remove"
+      vm_name: "{{ vm_name }}"
+      timestamp: "{{ vm_remove_timestamp.stdout }}"
+      host: "{{ target_host }}"
+      status: >-
+        {{ 'success' if (vm_cleanup_result is defined and vm_cleanup_result.rc == 0) else 'failed' }}
+      destroy_output: "{{ vm_destroy_result.stdout | default('') }}"
+      cleanup_output: "{{ vm_cleanup_result.stdout_lines | default([]) }}"
+      error: >-
+        {{ vm_cleanup_result.stderr | default('')
+           if (vm_cleanup_result is defined and vm_cleanup_result.rc != 0)
+           else '' }}
+  when:
+    - vm_action == "vm_remove"
+    - vm_cleanup_result is defined

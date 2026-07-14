@@ -12,3 +12,6 @@ patterns:
   - id: home_path
     regex: '/home/[^/\s]+'
     replacement: '/home/<user>'
+  - id: macos_home_path
+    regex: '/Users/[^/\s]+'
+    replacement: '/Users/<user>'

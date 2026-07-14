@@ -1,0 +1,294 @@
+# Sell access to a vLLM server with API credits
+
+This cookbook shows how to sell prepaid access to an OpenAI-compatible
+vLLM server with the `api_credits` domain. The seller runs a storefront,
+an API-credit ledger service, a gateway protected by API-credit
+middleware, and the vLLM model server. A registry remains an independent
+discovery role: the seller publishes listings to it, and buyers decide
+whether to discover from it.
+
+The flow is:
+
+```text
+Seller storefront -> Registry: publish an api_credits listing
+Buyer             -> Registry: discover the listing
+Buyer             -> Storefront: negotiate and settle escrow
+Storefront        -> Credits service: issue a bearer credential
+Buyer             -> vLLM gateway: call OpenAI-compatible endpoints
+Gateway           -> Credits service: verify and consume credits
+Gateway           -> vLLM: proxy authorized requests
+```
+
+## When to use this pattern
+
+Use this pattern when the resource being sold is request quota rather
+than a machine. The listing describes credits for a named service, such
+as `vllm-chat`. Settlement issues a credential with a prepaid balance.
+The gateway consumes one or more credits per protected request.
+
+This is different from the VM domain: there is no VM provisioning step.
+The seller's resource service is the credits service and the protected
+vLLM gateway.
+
+## Prerequisites
+
+- Docker with the Compose v2 plugin.
+- Built or published images for:
+  - `arkhai:dev-env`
+  - `arkhai:registry`
+  - `arkhai:apicredits-service`
+  - `arkhai:apicredits-storefront`
+- A vLLM image. For CPU-only demos, the public CPU image can run a small
+  model such as `HuggingFaceTB/SmolLM2-135M-Instruct`; for production,
+  use a GPU host and the CUDA vLLM image.
+- An EVM chain and Alkahest address config. Local demos commonly use an
+  Anvil dev image with contracts already deployed.
+
+## Services
+
+Run these services as separate roles even if they share one Compose
+project:
+
+- `registry`: a federated listing registry filtered for the
+  `api_credits` schema.
+- `credits-storefront`: the seller negotiation and settlement surface.
+- `credits-service`: the seller-operated key, credit, quota, and
+  fulfillment service used by the storefront and gateway.
+- `vllm-gateway`: an OpenAI-compatible reverse proxy protected by
+  `arkhai-apicredits-middleware`.
+- `vllm`: the upstream model server.
+- `buyer`: an optional tool container for validating the purchase and
+  API-call path from the buyer role.
+
+The storefront, credits service, gateway, and vLLM server are the seller
+side. The registry is not part of the seller's settlement authority.
+
+## Storefront config
+
+The API-credits storefront needs the seller wallet, chain, registry,
+credits service, and seed listing. A local demo config looks like this:
+
+```toml
+agent_id = "vllm_seller"
+port = 8000
+base_url = "http://credits-storefront:8000/"
+db_path = "/tmp/credits-storefront.db"
+admin_api_key = "test-api-key"
+
+[wallet]
+address = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+private_key = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6"
+
+[chains.anvil]
+rpc_url = "ws://anvil:8545"
+chain_id = 31337
+alkahest_address_config_path = "/app/alkahest_anvil_addresses.json"
+
+[registry]
+urls = ["http://api-credits-registry:8080"]
+discovery_timeout = 5.0
+
+[credits]
+service_url = "http://credits-service:8082"
+admin_key = "test-api-key"
+preflight_timeout = 60
+fail_on_unreachable = true
+
+[capacity]
+poll_interval = 1
+hold_ttl_seconds = 900
+
+[negotiation]
+policies = []
+
+[pricing]
+default_min_price = "1"
+
+[seed]
+resource_id = "vllm-chat-quota"
+total_units = 100
+service_name = "vllm-chat"
+price_per_token = "1"
+token = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+chain = "anvil"
+base_url = "http://vllm-gateway:8080"
+openapi_url = "http://vllm-gateway:8080/openapi.json"
+description = "Prepaid OpenAI-compatible vLLM chat credits"
+```
+
+For non-local deployments:
+
+- Replace the dev private key with the seller wallet.
+- Replace `chains.anvil` with the target chain, RPC URL, chain ID, and
+  Alkahest address config.
+- Set `token` to the ERC-20 accepted for payment on that chain.
+- Set `base_url` and `openapi_url` to buyer-reachable gateway URLs.
+- Use a real `admin_api_key` shared only by seller infrastructure.
+
+## Compose shape
+
+The registry is a discovery service:
+
+```yaml
+api-credits-registry:
+  image: ${ARKHAI_REGISTRY_IMAGE:-arkhai:registry}
+  environment:
+    REGISTRY_FILTER_SPEC_PATH: /app/filter-spec-apicredits.yaml
+    REGISTRY_DATABASE_URL: sqlite:////tmp/registry.db
+    REGISTRY_RPC_URL: http://anvil:8545
+    REGISTRY_CHAIN_ID: "31337"
+  volumes:
+    - ./config/filter-spec.apicredits.yaml:/app/filter-spec-apicredits.yaml:ro
+```
+
+The seller infrastructure contains the storefront, credit ledger,
+gateway, and model server:
+
+```yaml
+credits-service:
+  image: ${ARKHAI_APICREDITS_SERVICE_IMAGE:-arkhai:apicredits-service}
+  environment:
+    APICREDITS_DATABASE_URL: sqlite:////tmp/apicredits.db
+    APICREDITS_STOREFRONT_ADMIN_KEY: ${APICREDITS_ADMIN_KEY}
+
+credits-storefront:
+  image: ${ARKHAI_APICREDITS_STOREFRONT_IMAGE:-arkhai:apicredits-storefront}
+  environment:
+    XDG_CONFIG_HOME: /etc
+    PYTHONPATH: /app
+  volumes:
+    - ./config/storefront.credits.toml:/etc/arkhai/storefront.toml:ro
+    - ./config/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
+
+vllm:
+  image: ${VLLM_CPU_IMAGE:-public.ecr.aws/q9t5s3a7/vllm-cpu-release-repo:v0.10.2}
+  environment:
+    VLLM_TARGET_DEVICE: cpu
+    VLLM_CPU_KVCACHE_SPACE: "4"
+  command:
+    - --host
+    - 0.0.0.0
+    - --port
+    - "8000"
+    - --model
+    - ${VLLM_MODEL:-HuggingFaceTB/SmolLM2-135M-Instruct}
+    - --max-model-len
+    - ${VLLM_MAX_MODEL_LEN:-1024}
+
+vllm-gateway:
+  build:
+    context: ./gateway
+  environment:
+    VLLM_GATE_UPSTREAM_URL: http://vllm:8000
+    APICREDITS_MIDDLEWARE_SERVICE_URL: http://credits-service:8082
+    APICREDITS_MIDDLEWARE_ADMIN_KEY: ${APICREDITS_ADMIN_KEY}
+    APICREDITS_MIDDLEWARE_AMOUNT_PER_REQUEST: "1"
+    APICREDITS_MIDDLEWARE_PURCHASE_SERVICE_NAME: vllm-chat
+    APICREDITS_MIDDLEWARE_PURCHASE_STOREFRONT_URL: http://credits-storefront:8000
+    APICREDITS_MIDDLEWARE_PURCHASE_REGISTRY_URL: http://api-credits-registry:8080
+```
+
+For a GPU host, replace the `vllm` service with the CUDA image and an
+NVIDIA device reservation:
+
+```yaml
+vllm:
+  image: ${VLLM_GPU_IMAGE:-vllm/vllm-openai:latest}
+  environment:
+    VLLM_TARGET_DEVICE: cuda
+  command:
+    - --host
+    - 0.0.0.0
+    - --port
+    - "8000"
+    - --model
+    - ${VLLM_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
+    - --device
+    - cuda
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+```
+
+## Gateway
+
+The gateway should expose health and model-list endpoints without a
+credential, and protect generation endpoints with API credits. The
+common protected endpoints are:
+
+- `/v1/chat/completions`
+- `/v1/completions`
+
+The middleware verifies the bearer credential against `credits-service`
+and consumes `APICREDITS_MIDDLEWARE_AMOUNT_PER_REQUEST` credits before
+proxying to vLLM. Keep the middleware admin key inside the seller
+network; buyers should only receive issued bearer credentials.
+
+## Buyer validation
+
+A buyer config points at the buyer wallet, chain, and chosen registry:
+
+```toml
+[wallet]
+address = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+private_key = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+
+[chains.anvil]
+rpc_url = "ws://anvil:8545"
+alkahest_address_config_path = "/config/alkahest_anvil_addresses.json"
+
+[registry]
+urls = ["http://api-credits-registry:8080"]
+```
+
+Run the purchase from a buyer environment:
+
+```bash
+market credits buy \
+  --quantity 3 \
+  --new-key \
+  --service-name vllm-chat \
+  --chain anvil \
+  --max-matches 5 \
+  --max-rounds 10 \
+  --poll-interval 1.0 \
+  --settlement-timeout 300 \
+  --expiration 3600 \
+  --yes
+```
+
+The successful settlement output includes the issued bearer secret. Use
+it from the buyer environment when calling the gated vLLM endpoint:
+
+```bash
+curl -s http://vllm-gateway:8080/v1/chat/completions \
+  -H "Authorization: Bearer $ARKHAI_API_TOKEN_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "HuggingFaceTB/SmolLM2-135M-Instruct",
+    "messages": [
+      {"role": "user", "content": "Say hello from behind an Arkhai API-credit gate."}
+    ]
+  }'
+```
+
+After the purchased balance is spent, protected endpoints should return
+`402 insufficient_credits`.
+
+## Operational notes
+
+- The registry can be public, private, or co-located with the seller for
+  convenience. Co-location does not make it part of the seller role.
+- The storefront's `admin_api_key` and credits service admin key are
+  seller-internal secrets.
+- The gateway should only expose the OpenAI-compatible API surface and
+  public metadata endpoints to buyers.
+- In production, persist the storefront and credits-service databases.
+  Demo stacks often use `/tmp` databases so runs are repeatable.
+- CPU vLLM is useful for compatibility demos but can be slow,
+  especially under emulation. Use a GPU host for realistic throughput.
+

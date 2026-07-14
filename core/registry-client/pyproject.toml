@@ -1,0 +1,33 @@
+[project]
+name = "arkhai-core-registry-client"
+version = "0.10.0"
+license = "MIT"
+description = "Async and sync HTTP clients for the Arkhai registry REST API."
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "eth-account>=0.12",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/registry_client"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/registry_client/py.typed" = "registry_client/py.typed"
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+show_error_codes = true
+warn_return_any = true
+warn_unused_ignores = true
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0,<2.0.0",
+    "pytest>=8.0",
+]

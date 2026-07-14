@@ -1,0 +1,83 @@
+[project]
+name = "arkhai-kit-policy"
+version = "0.1.1"
+description = "Domain-agnostic policy engine for the market — negotiation thread store, action builders, callable registry, and policy evaluation. Ships with the `market-policy` CLI for the train/eval/export lifecycle."
+license = "MIT"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "pydantic>=2",
+    "typer>=0.12.0",
+]
+
+[project.scripts]
+market-policy = "market_policy.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/market_policy"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "../..", "../alkahest/src"]
+asyncio_mode = "auto"
+
+[tool.uv]
+# pufferlib 3.0 ships only as a source tarball whose ``setup.py`` runs
+# its own Cython + numpy import path; uv's PEP 517 build isolation
+# strips those out and the build fails.
+no-build-isolation-package = ["pufferlib"]
+
+[tool.uv.extra-build-dependencies]
+# pufferlib 3.0 ``setup.py`` imports numpy + Cython at build time.
+# Pinned to numpy<2 because its C env was compiled against the 1.x ABI.
+pufferlib = ["setuptools", "Cython", "numpy<2"]
+
+[tool.uv.sources]
+# Pin torch to the CPU index so installs don't hit the multi-GB CUDA
+# wheels on hosts that don't have an NVIDIA GPU. Trainers with a GPU
+# can override this in their own venv.
+torch = [
+    { index = "pytorch-cpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4,<9.0.0",
+    "pytest-asyncio>=0.23.8,<1.0.0",
+]
+
+# Retrain Arkhai negotiation models from scratch via ``market-policy
+# train`` / ``market-policy eval``. This is a dev dependency group, not a
+# published extra: PyPI rejects the ``pufferlib @ git+...`` direct
+# reference in wheel metadata, so it lives here and is installed locally
+# with ``uv sync --group training`` (or ``pip install --group training``).
+# Pulls in pufferlib's C-backed bilateral env + trainer plus torch.
+# Inference at the storefront / buyer needs only ``torch>=2.7.0`` (see
+# their ``[rl]`` extras) — the trained ``.pt`` files load into a small
+# inline ``ArkhaiInferencePolicy`` without pufferlib at runtime.
+#
+# Caveats for whoever installs this:
+#   * pufferlib 3.0's C env compiles against the numpy<2 ABI, so the
+#     resolved Python must be 3.12 (it won't build on 3.13). Use a
+#     dedicated training venv with ``uv python pin 3.12``.
+#   * The build wants Cython + numpy<2 as build-time deps and disables
+#     build isolation for pufferlib — see ``[tool.uv]`` above.
+#   * On macOS with a uv-managed Python, ``setup.py``'s leaked
+#     ``-isysroot`` / ``-LModules/_hacl`` flags can break the linker.
+#     Workaround: override the sysroot at install time, e.g.::
+#
+#         LDCXXSHARED="clang++ -bundle -undefined dynamic_lookup \
+#             -arch arm64 -mmacosx-version-min=11.0 \
+#             -isysroot $(xcrun --sdk macosx --show-sdk-path)" \
+#         uv sync --group training
+training = [
+    "torch>=2.7.0",
+    "pufferlib @ git+https://github.com/arkhai-io/ArkhaiPufferEnv@f18e3b42c0ae22e8aec5e8d26a26f424e6b18a30",
+]

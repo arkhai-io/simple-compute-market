@@ -6,11 +6,28 @@
 
 ---
 
+## Document Map
+
+| Section | Purpose |
+|---|---|
+| [Repository Overview](#repository-overview) | High-level system purpose and production shape. |
+| [Organizing Principle](#organizing-principle-composition-from-above-and-below) | Core/kit/domain package boundary rules. |
+| [Service Map](#service-map) | Runtime services and cross-service relationships. |
+| [Technical Terms and Cross-Service IDs](#technical-terms-and-cross-service-ids) | Official vocabulary and identifiers used across service boundaries. |
+| [Component Summaries](#component-summaries) | Current responsibilities, APIs, and storage by component. |
+| [Settlement Lifecycle](#settlement-lifecycle--plans-claims-engine-heartbeats) | Market settlement, servicing, and claim lifecycle model. |
+| [Capacity and the Site Authority](#capacity-and-the-site-authority) | Current capacity reservation machinery and pending naming cleanup. |
+| [Deployment Topology](#deployment-topology) | Local/dev and deployed runtime topology. |
+| [Build & Init Flow](#build--init-flow) | Packaging, artifact publishing, Make targets, and runtime support conventions. |
+| [Testing Strategy](#testing-strategy) | Test levels, e2e structure, and coverage contracts. |
+
+---
+
 ## Repository Overview
 
 **Simple Compute Market** is a reference implementation of an agent-driven compute marketplace. Autonomous buyer and seller agents discover each other, negotiate prices, and settle agreements on-chain using Alkahest smart contracts. Physical compute (VMs) is provisioned post-settlement via Ansible.
 
-The stack is designed so that in production, multiple independent seller nodes each run their own agent + provisioning stack, while buyers can be ephemeral (a CLI invocation or a long-running agent). The `test-env` component exists only for local development.
+The stack is designed so that in production, multiple independent seller nodes each run their own agent + provisioning stack, while buyers can be ephemeral (a CLI invocation or a long-running agent). The `dev-env` component exists only for local development.
 
 ---
 
@@ -20,23 +37,34 @@ The README frames this as a market for "anything"; the structural test that make
 
 > **A behavior belongs in the market core (composed "from above") if and only if it is invariant across every possible listing schema. If it varies by schema, it is a utility composed "from below" that the core invokes through an injected hook** — and "requiring the hook" is the from-above part; "implementing it" is from-below.
 
-- **From above** — the role contracts (buyer, seller, indexer) and the three market processes (discovery, negotiation/aggregation, settlement), expressed purely in terms of injected dependencies and schema-opaque primitives. `buy_orchestrator.run_buy(...)` is already this shape: a linear discover→negotiate→settle flow with every domain decision injected (`build_escrow_proposal`, `build_escrow_terms`, `create_escrow`, …).
-- **From below** — concrete, mutually-independent utilities: negotiation middlewares (`market-policy`), identity schemes (`service.identity`), generic schemas (`EscrowTerms`/`EscrowProposal`/`RateValue`), infra clients (alkahest, chain, registry-client). The defining property is "depended on, never depending up into the skeleton" — not "packaged as one wheel."
+- **From above** — the role contracts (buyer, seller, indexer) and the four market processes (discovery, negotiation/aggregation, settlement, servicing), expressed purely in terms of injected dependencies and schema-opaque primitives. `core_buyer.run_buy(...)` is already this shape: a linear discover→negotiate→settle flow with high-level `negotiate` and `settle` hooks (servicing runs as separate long-lived engines — see "Settlement Lifecycle"). The current compute instantiation still adapts legacy finer-grained hooks (`build_escrow_proposal`, `build_escrow_terms`, `create_escrow`, …) into that surface.
+- **From below** — concrete, mutually-independent utilities: negotiation middlewares (`arkhai-kit-policy`), identity schemes (`arkhai-kit-identity`), generic schemas (`arkhai-core`), settlement kits (`arkhai-kit-alkahest`), shared config (`arkhai-kit-config`), infra clients (chain, registry-client). The defining property is "depended on, never depending up into the skeleton" — not "packaged as one wheel."
 - **A market instantiation** for a given asset class / listing schema wires from-below implementations into the from-above hooks, and *uses* the from-below utilities inside those implementations.
 
 Negotiation is an exchange of **messages** — opaque, schema-defined units passed between participants. The invariant the core rests on is that settlement composes with negotiation:
 
 ```
 terms   = negotiate(messages…)
-receipt = settle(terms)
+plan    = settle(terms)          # materialize the settlement plan (escrows/bonds)
+receipt = service(plan)          # drive obligations + claims to completion
 ```
 
-Negotiation reduces a message history to a `Terms` value; settlement consumes that `Terms` to produce a `Receipt`. That is the whole of what the core knows about the exchange:
+Negotiation reduces a message history to a `Terms` value; settlement materializes that `Terms` into an active **settlement plan**; servicing drives the plan's obligations and claims to a `Receipt`. That is the whole of what the core knows about the exchange:
 
 1. messages flow between participants (opaque content);
 2. a negotiation terminates by reducing its history to `Terms`;
-3. `settle(Terms) → Receipt`;
-4. settlement runs and reports success or failure.
+3. `settle(Terms) → Plan` materializes the agreed obligations;
+4. `service(Plan) → Receipt` is the long-running part: conditions are
+   checked, claims collected, defaults reacted to — possibly long after
+   fulfillment, possibly repeatedly (per interval).
+
+Servicing is a separate phase, not a fattening of `settle`, by the
+merge-vs-separate test below: core machinery (persistence, scheduling,
+chain watching) sits in the gap between "escrows materialized" and
+"funds collected". The degenerate case is current single-escrow
+behavior — a plan with one escrow whose condition is immediately true
+collapses servicing to a single collect, so the simple flow is the
+trivial instance of the engine, not a parallel code path.
 
 Everything else is schema-defined: message content (offer, counter, bid, acceptance are schema vocabulary), how a participant chooses its next message, and how `Terms` are validated. Seller-advertised fields (`accepted_escrows`, `min_price`, `max_duration_seconds`, …) are listing data; a policy decides whether to read them as a whitelist, a floor, a ceiling, or a soft predicate, and whether a mismatched message draws a rejection, a counter, a correction, or an acceptance. Every dimension of a message — price, escrow shape, duration — is handled the same way: by the negotiation chain, against the advertised data.
 
@@ -46,10 +74,24 @@ Settlement verification requires both sides to derive the same `Terms`. That hol
 
 The core owns the *structure* of the exchange: the round loop, the signed request/response transport, history persistence, the middleware-chain execution semantics (a middleware that returns a value terminates the chain; returning none passes context to the next), and the determinism contract above. Schemas supply a small number of hooks within that structure.
 
-The composition wants two behavior hooks; `run_buy` injects six today:
+The composition wants two behavior hooks. `run_buy` now exposes only that
+surface. The previous fine-grained compute hooks are kept as adapter
+factories outside the core orchestration call:
 
 - **`negotiate`** — a per-turn message policy, `respond(history) → message | terms`, run by the core's negotiation engine. Today's `chain`, `derive_prices`, opening-message construction (`build_escrow_proposal`), and the buyer's commit (`confirm_settlement`) all belong here: each is a decision a participant makes during its turn.
 - **`settle`** — `Terms → Receipt`. Today's `build_escrow_terms` + `create_escrow` are one hook — "materialize the on-chain shape, then submit it" is internal factoring.
+
+On the seller side, `start_sync_negotiation` and
+`continue_sync_negotiation` own the signed HTTP protocol, thread
+persistence, and stage events. They delegate each policy decision to an
+injectable seller round hook. The hook contract carries only protocol-visible
+inputs (`listing`, message `history`, requested duration, and optional
+strategy label); the implementation decides what extra side inputs or private
+state it needs. The default compute hook captures the storefront DB adapter
+behind the callable, takes an available-inventory snapshot for the compute
+inventory guard, then runs the configured middleware chain to produce a
+`NegotiationDecision`. The generic negotiation tables store only the protocol
+transcript, terminal state, and agreed terms.
 
 Two hooks merge when the core does nothing between them: `build_escrow_terms → create_escrow` is a pure sequence. They stay separate when a core-enforced boundary sits in the gap — the determinism contract between `negotiate` and `settle` is such a boundary, so those remain two phases with `Terms` as the typed handoff. Hooks need not be interchangeable across schemas to warrant separation; a schema's `negotiate` and `settle` are co-designed and don't cross-compose. The core's leverage is the structure it provides around the hooks, not the count of hooks.
 
@@ -57,27 +99,119 @@ The structure baked into the core is the structure shared by every market shape 
 
 ### The registry is the schema-centralizing point
 
-The indexer registry plays the platform role of existing compute markets: it is where a listing schema is *declared* (on the wire via `filter-spec.yaml`) and centralized. A registry typically serves a single schema, and the realistic first driver of the core/instantiation split is not a different asset class but **heterogeneous listing schemas within "compute"** that don't make sense on the same registry. Under this model a per-schema instantiation is the *registry operator's* deliverable: the core ships the from-above skeleton + the from-below kit; an operator stands up a registry and publishes a schema (its `filter-spec.yaml` plus the typed client counterpart, versioned together) and the storefront/buyer plugins that wire kit implementations into core hooks. The registry is already the most complete instance of this — it stores `offer_resource` as an opaque blob and drives discovery off a swappable filter-spec, with zero schema-specific code.
+The listing registry plays the platform role of existing compute markets: it is where a listing schema is *declared* (on the wire via `filter-spec.yaml`) and centralized. A registry typically serves a single schema, and the realistic first driver of the core/instantiation split is not a different asset class but **heterogeneous listing schemas within "compute"** that don't make sense on the same registry. Under this model a per-schema instantiation is the *registry operator's* deliverable: the core ships the from-above skeleton + the from-below kit; an operator stands up a registry and publishes a schema (its `filter-spec.yaml` plus the typed client counterpart, versioned together) and the storefront/buyer plugins that wire kit implementations into core hooks. The registry is already the most complete instance of this — it stores `offer_resource` as an opaque blob and drives discovery off a swappable filter-spec, with zero schema-specific code.
 
-### Where the current code deviates from the principle
+### Package layout (the principle, implemented)
 
-Parts of the code predate the principle and diverge from it. These seams are tracked in [`TODO.md`](TODO.md) / [`design-market-core-extraction.md`](design-market-core-extraction.md):
+The core/kit/domain extraction is complete; the package graph expresses
+the principle, and distribution names mirror it
+(`arkhai-{core,kit,vms}-*`). The `arkhai-` prefix is kept as the project
+namespace: PyPI organizations group projects at the account level but do
+not namespace distribution names, so the prefix is the only real
+namespace (and several bare names like `core` are already taken on PyPI).
+Import names and console scripts (`market`, `market-storefront`,
+`market-policy`) are unchanged.
 
-- **Escrow-shape validation runs as a pre-chain hard gate.** `sync_negotiation._validate_escrow_proposal` raises `OfferUnfulfillableError` *before* `_compute_round_zero_decision`, baking "proposal out of `accepted_escrows` ⇒ reject" into the infrastructure. It belongs in the negotiation chain as a middleware — a guard that may reject or counter with a corrected shape (a `counter` already carries a `proposal`) — handled like any other message dimension. Field-equality is already a swappable policy callable; the `(chain, escrow_address)` membership check is the same kind of check, currently sitting at the protocol layer instead.
-- **`derive_prices` is an orchestrator-level injection.** It exists only because `bisection` needs `(initial, max)` bounds; a different negotiation policy has different inputs. It belongs folded into negotiation-policy setup (from below), not as a peer of the escrow hooks in `run_buy`'s signature.
-- **`ProvisionTerms` is compute-flavored.** It carries `ssh_public_key` / `duration_seconds` / `compute_resource`; the core should treat delivery terms as an opaque, schema-defined blob — exactly as the registry already treats `offer_resource`.
-- **The market skeleton is packaged inside `buyer/` + `storefront/`** alongside compute-specific code, so the package graph does not yet express the from-above/from-below joint that the function signatures already imply.
+| Layer | Distribution (path) | Role |
+|---|---|---|
+| core | `arkhai-core` (`core/`) | protocol-carrier wheel: negotiation/settlement wire shapes both roles must derive identically. Stdlib + pydantic only; zero domain vocabulary and zero settlement-mechanism vocabulary (lifecycle universals + `{mechanism, params}` envelope — see "Settlement Lifecycle"). |
+| core | `arkhai-core-buyer` (`core/buyer/`) | buyer role shell: `market` console script, verb skeleton, `market.buyer_plugins` entry-point discovery, registry fan-in, the sync negotiation client (per-unit→absolute scaling by an explicit `unit_count`), buyer-policy and aggregation registries/discovery, buy orchestration stages, settle/escrow clients, schema-opaque aggregation helpers, run-log, deal-recovery helpers |
+| core | `arkhai-core-storefront` (`core/storefront/`) | storefront role shell (library, framework-free): sync-negotiation protocol, registry publication + multi-registry fan-out client, market-state SQLite persistence + versioned migrations (domain tables via subclass hooks), settle-time escrow verification, refund/ERC-20 transfer, stage log, auth, HTTP models, capacity-client contract + remote site client/event poller, claims engine |
+| core | `arkhai-core-registry` (`core/registry/`) | registry service; schema injected as `filter-spec.yaml` config |
+| core | `arkhai-core-registry-client`, `arkhai-core-storefront-client` | protocol clients |
+| kit | `arkhai-kit-site` (`kit/site/`) | site-authority scaffold: capacity ledger, ledger tables, `/api/v1/capacity/*` router — mounted by a hosting service per site |
+| kit | `arkhai-kit-provisioning` *(planned — POOLS-5)* | shared provisioning machinery extracted from `arkhai-vms-provisioning`: `FulfillmentProvider`, `ProviderRegistry`, `PhysicalSettlementScheduler` contract, `SettlementResource` / settlement record shapes, `AsyncJobQueue`, `LeaseLifecycleService`, and `LeaseWatchdog`; capacity-reservation/projection services should be renamed before extraction rather than carrying `SiteResourcesService` forward unchanged |
+| kit | `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-alkahest`, `arkhai-kit-config` | from-below capabilities; alkahest is the first *settlement-mechanism codec* |
+| domain | `arkhai-vms` (`domains/vms/domain/`) | shared VM-domain models/helpers consumed by both buyer and storefront; currently owns the `compute.v1` provision-term interpretation (`arkhai_vms.provision_terms`) |
+| domain | `arkhai-bare-metal` (`domains/bare_metal/`) | shared bare-metal domain models/helpers consumed by storefront/provisioning implementations; owns the `bare_metal.v1` schema, pure listing derivation, and lightweight role adapters behind optional extras |
+| domain | `arkhai-vms-buyer` (`domains/vms/buyer/`) | no console script — publishes the `vms.compute` plugin the core `market` CLI discovers |
+| domain | `arkhai-apicredits-buyer` (`domains/apicredits/buyer/`) | no console script — publishes the `api_credits` plugin; verbs namespaced under `market credits …` so both plugins compose in one binary |
+| domain | `arkhai-vms-storefront` (`domains/vms/storefront/`) | transitional VM storefront executable/composition root; target is a core storefront executable loading the VM domain adapter |
+| domain | `arkhai-vms-provisioning` (`domains/vms/provisioning/service/`) | the VM fulfillment executor service |
+| domain | `arkhai-apicredits-service` (`domains/apicredits/service/`) | the credits service: API keys/credit grants/consumption + the quota ledger (mounts `market_site`) |
+| domain | `arkhai-apicredits-storefront` (`domains/apicredits/storefront/`) | transitional API-credits storefront executable/composition root; target is a core storefront executable loading the API-credits domain adapter |
+| domain | `arkhai-apicredits-middleware` (`domains/apicredits/middleware/python/`) | seller-side ASGI gate that meters a downstream app on prepaid credits (verify cache + synchronous/batched consume + 402-with-purchase-pointer); the reference implementation |
+| domain | `@arkhai/apicredits-middleware` (`domains/apicredits/middleware/typescript/`) | TypeScript port of the gate (Connect/Express + Web-fetch adapters); reproduces `middleware/conformance/session.json` |
+| domain | `arkhai-apicredits-middleware` crate (`domains/apicredits/middleware/rust/`) | Rust port of the gate (tower/axum layer); reproduces `middleware/conformance/session.json` |
+| domain | `arkhai-apicredits-sample-app` (`domains/apicredits/sample-app/`) | a one-endpoint gated service for the e2e — the metered API the deal consumes to 402 and back |
+
+The *concept* modules (`domains/vms/{listings,negotiation,settlement}`,
+`domains/apicredits/{listings,negotiation,settlement}`) are not general-purpose
+service packages. Most ship inside the buyer/storefront wheels and implement
+core hook shapes by injection, without importing core.
+
+Domain packages specify concrete markets; role and implementation packages
+execute them. A light domain package should contain only the schema and
+deterministic interpretation needed for independent implementations to agree:
+listing payloads, negotiation messages, agreed terms, settlement
+materialization/receipt vocabulary, provisioning/executor result vocabulary,
+pure validators/codecs, and schema-implied default/reference behavior. For
+example, a domain package may include an exact-match seller policy, an exact
+buyer proposal builder, registry filter vocabulary helpers, and canonical
+fixtures because those clarify what the schema means. It should not carry
+operator-specific seller or buyer policies, RL models, provisioning daemons,
+provider SDK integrations, Ansible assets, FastAPI apps, or SQLAlchemy service
+state. Those implementations depend on the domain package plus the relevant
+core role package. Operators install one implementation for each
+role/capability they need, or write their own. Bundled implementation packages
+are fine; they need not be one wheel per policy.
+
+VM-domain code is split by ownership boundary. `arkhai-vms`
+(`domains/vms/domain/`) carries shared VM-domain model code such as
+`compute.v1` provision-term interpretation (`arkhai_vms.provision_terms`).
+The VM storefront composition root owns seller-side provisioning orchestration:
+resource capacity validation in
+`market_storefront.services.resource_capacity_validator`, settlement-time VM
+fulfillment in `market_storefront.services.vm_fulfillment_service`, fulfillment
+planning in `market_storefront.services.vm_fulfillment_planner`, job-spec
+construction in `market_storefront.services.vm_job_spec_service`, and admin API
+payload models in `market_storefront.models.capacity_admin_models`. The
+provisioning package root exposes only the provisioning-service client facade
+(`client.py`, `__init__.py`); the executable provisioning API lives under
+`domains/vms/provisioning/service/`. The alkahest-scalar negotiation vocabulary
+both domains share (bisection, listed_price, the escrow shape guards, the
+per-kind dispatch, `SellerRoundResult`) lives in the kits
+(`market_policy.scalar_policies` / `.seller_round`,
+`market_alkahest.proposals`); each domain module keeps only what interprets its
+own market content.
+
+Executable ownership splits by role: the buyer binary is core-owned
+with domain schema plugins (one binary, many registry schemas; without
+plugins it degrades to generic `--filter` browsing, never a concrete
+market); storefront executables are domain-owned, one process per
+market schema domain (multi-domain operators run parallel processes
+sharing the capacity layer underneath); the registry is core + schema
+config.
+
+Three rules are mechanically enforced, not just documented:
+kit and concept modules import no core/composition packages
+(`domains/vms/storefront/tests/unit/test_architecture_imports.py`);
+`market_core` imports nothing beyond stdlib + pydantic
+(`core/tests/unit/test_carrier_purity.py`); core never imports
+`domains.*` (plugin inversion on the buyer, injected hooks on the
+storefront — `core/buyer/tests/unit/test_cli.py` asserts the no-plugin
+core CLI has no concrete market behavior, and
+`domains/vms/buyer/tests/test_plugin_export.py` asserts the VM plugin
+is discovered through real entry-point metadata).
+
+Remaining divergences are aggregated in [`TODO.md`](TODO.md) → "Core
+Stack"; the architectural items still open (plan shapes, mechanism
+vocabulary, multi-domain capacity dispatch) are planned with their
+design context in
+[`design-remaining-work.md`](design-remaining-work.md). The
+extraction and settlement/capacity design docs that preceded this
+state are retired — their decisions are folded into this file.
 
 ### Technology Anchors
 
 | Concern | Technology |
 |---|---|
 | On-chain settlement / escrow | [Alkahest](https://github.com/arkhai-io/alkahest) contracts |
-| Seller identity | Pluggable scheme registry (EIP-191 wallet by default; see `service.identity`) |
+| Seller identity | Pluggable scheme registry (EIP-191 wallet by default; see `arkhai-kit-identity`) |
 | Buyer ↔ seller protocol | Plain HTTP request/response, EIP-191-signed bodies |
 | Seller server framework | FastAPI / Starlette + uvicorn |
 | Buyer | Pure HTTP client — `market` CLI, no server |
-| VM automation | Ansible (via `compute-provisioning-iac` submodule) |
+| VM automation | Ansible (via `domains/vms/provisioning/iac`) |
 | Job queue | In-process `asyncio.Queue` (no external queue dependency) |
 | Overlay networking (optional) | ZeroTier |
 | Local dev chain | Anvil (Foundry) |
@@ -93,14 +227,14 @@ Parts of the code predate the principle and diverge from it. These seams are tra
 └──────────────────┬──────────────────────┬───────────────────────────┘
                    │ events / txns         │ events / txns
          ┌─────────▼──────────┐   ┌───────▼─────────────────┐
-         │  registry-service  │   │  storefront             │
+         │  arkhai-core-registry  │   │  storefront             │
          │  :8080             │   │  :8001 (seller only)    │
          │  FastAPI indexer   │◄──┤  FastAPI                │
          │  SQLite/Postgres   │   │  market-storefront serve│
          └─────────▲──────────┘   └────────────┬────────────┘
                    │  GET /listings            │ HTTP (provisioning API)
                    │  signed reqs    ┌─────────▼───────────────┐
-                   │                 │ provisioning-service    │
+                   │                 │ arkhai-vms-provisioning    │
          ┌─────────┴──────────┐      │   API  :8081  (FastAPI) │
          │  buyer (`market`)  ├─────▶│   Job loop (in-process) │
          │  pure HTTP client  │ HTTP └────────┬────────────────┘
@@ -108,19 +242,83 @@ Parts of the code predate the principle and diverge from it. These seams are tra
          │  signed bodies     │      ┌────────▼────────────────┐
          └────────────────────┘      │  Ansible playbooks      │
                                      │  (compute-provisioning- │
-                                     │   iac submodule)        │
+                                     │   iac tree)        │
                                      └─────────────────────────┘
 
  ┌──────────────┐   ┌────────────────────────────────────────┐
- │  test-env    │   │  Participant CLIs                       │
+ │  dev-env    │   │  Participant CLIs                       │
  │  Anvil node  │   │   market           — buyer runtime     │
  │  (dev only)  │   │   market-storefront — seller runtime   │
- └──────────────┘   │   market-policy    — train/eval/export │
+ └──────────────┘   │   market-policy    — train/eval/export    │
                     └────────────────────────────────────────┘
 ```
 
+
+## Technical Terms and Cross-Service IDs
+
+The terms below are the official vocabulary for capacity and settlement work. Prefer these names in new code, APIs, tests, and documentation. Older VM-shaped names remain in existing code until their planned cleanup lands.
+
+### Technical terms
+
+| Term | Definition | Primary owner | Notes |
+|---|---|---|---|
+| Market Agreement | The commercial agreement/order/deal accepted by buyer and seller after negotiation. | Core / schema implementation | The agreement is the business input to settlement; it is not the physical resource itself. |
+| Capacity Offering | Storefront-facing representation of sellable capacity. | Storefront | Listings and listing derivation operate on offerings, not physical inventory. |
+| Capacity Projection | Storefront-side view/cache of capacity that provisioning can physically satisfy. | Storefront, sourced from provisioning | A projection may be stale; it is not the physical source of truth. |
+| Capacity Reservation | A hold against sellable capacity so concurrent buyers cannot rent the same committed capacity. | Storefront capacity layer / capacity authority | Reservation expiry and recovery semantics are still a POOLS design-review topic. |
+| Physical Resource | A real resource that can satisfy a marketplace agreement, such as a host, pod allocation, storage allocation, power circuit, or bandwidth allocation. | Provisioning | Physical resources are not owned by storefront tables. |
+| Resource Pool | Provisioning-owned grouping of physical resources eligible for settlement. | Provisioning | Resource pools are infrastructure routing and scheduling inputs. They are distinct from storefront capacity pools. |
+| Physical Settlement | The process of binding a market agreement to physical resources and making the agreed resource available. | Provisioning | Physical settlement may create, configure, enable, reserve, or tear down resources depending on market type. |
+| Settlement Resource | The selected physical resource or resource-specific binding context used to satisfy a capacity reservation. | Provisioning | Avoid `SettlementTarget`; use `SettlementResource` or, in method names, `select_resource` / `select_target_resource`. |
+| PhysicalSettlementScheduler | The component that atomically selects a settlement resource for a capacity reservation or accepted agreement. | Provisioning | The scheduler decides placement. Fulfillment providers do not independently schedule. |
+| FulfillmentProvider | Provider implementation that performs create/status/teardown operations for a selected settlement resource. | Provisioning | The provider fulfills a marketplace order; it executes operations but does not decide which resource should be selected. |
+| Settlement Record | Durable record of the reservation, selected settlement resource, provider, state, and provider metadata required for status and teardown. | Provisioning / shared provisioning core | This replaces ad hoc VM-specific linkage as the generic lifecycle shape emerges. |
+
+### Cross-service identifiers
+
+| Identifier | Meaning | Stable across services? | Notes |
+|---|---|---|---|
+| `agreement_id` / deal reference | Identifier for the accepted market agreement or deal context. | Yes | Exact field name varies in current VM paths; new generic code should carry an explicit deal/agreement reference. |
+| `allocation_id` | Durable capacity/settlement allocation identity used for idempotency. | Yes | Fulfillment `create` must be idempotent by `allocation_id`; retries must not double-provision. |
+| `pool_id` | Identifier of an eligible resource pool or capacity pool, depending on layer. | Boundary-sensitive | Do not assume storefront capacity pools and provisioning resource pools are the same table or FK target. Mapping is explicit configuration/attributes. |
+| `resource_id` | Identifier for a specific physical resource when the agreement intentionally names one. | Boundary-sensitive | Specific-resource listings are valid minority use cases: the buyer may choose the resource because the seller opted into exposing that choice. |
+| `settlement_resource_id` | Identifier of the resource selected by `PhysicalSettlementScheduler`. | Yes after scheduling | Used by status/teardown and persisted in the settlement record. |
+| provider metadata | Provider-specific operational data learned during fulfillment. | Yes, opaque outside provider/core lifecycle | Store under a provider-specific envelope; do not require generic services to understand VM/Ansible fields. |
+
+### Physical settlement flow
+
+```text
+Marketplace agreement
+        ↓
+Storefront capacity / availability representation
+        ↓
+Capacity reservation against sellable capacity
+        ↓
+Physical settlement request
+        ↓
+Provisioning-side scheduling / resource binding
+        ↓
+Fulfillment provider executes create / status / teardown
+        ↓
+Settlement state and release lifecycle
+```
+
+The important separation is:
+
+```text
+PhysicalSettlementScheduler.select_resource(...)
+    → atomically binds allocation_id/agreement_id to a settlement resource
+
+FulfillmentProvider.create(...)
+    → performs provider operations against that selected settlement resource
+```
+
+A fulfillment provider may validate that the selected settlement resource is usable, but it must not independently substitute a different physical resource without returning to the scheduler boundary.
+
+---
+
 Negotiation flow: the buyer's `market buy`/`market negotiate`
-discovers seller orders from `registry-service`, then issues
+discovers seller orders from `arkhai-core-registry`, then issues
 synchronous signed POSTs against the seller's storefront
 (`/negotiate`, `/listings/...`, `/settle/{escrow_uid}`). The seller's
 storefront runs the request through a per-round middleware chain
@@ -132,22 +330,22 @@ symmetric agent-to-agent protocol — the buyer drives every round.
 
 ## Component Summaries
 
-### `test-env`
+### `dev-env`
 
 **Role:** Local development chain fixture.
 
-An Anvil (Foundry) instance with Alkahest contracts pre-deployed and chain state saved to `test-env/state/state.json`. The Dockerfile loads this snapshot at startup, giving a deterministic chain for every dev session. Restarting the container resets chain state.
+An Anvil (Foundry) instance with Alkahest contracts pre-deployed and chain state saved to `dev-env/state/state.json`. The Dockerfile loads this snapshot at startup, giving a deterministic chain for every dev session. Restarting the container resets chain state.
 
 In production this component is absent — the agent and registry configs point to a live RPC endpoint (e.g., Base Sepolia or mainnet).
 
 **Key facts:**
 - Default port: `8545`
-- State is generated by the root `build-anvil-state` Makefile target, which runs `test-env/generate_state.py` — it spins up alkahest's `EnvTestManager`, funds the test wallets, and writes the `anvil_dumpState` snapshot to `test-env/state/state.json`
-- The same script writes the deployed Alkahest contract addresses to `storefront/.../data/alkahest_anvil_addresses.json`, which the seller container ships and the buyer reads
+- State is generated by the root `build-anvil-state` Makefile target, which runs `dev-env/generate_state.py` — it spins up alkahest's `EnvTestManager`, funds the test wallets, and writes the `anvil_dumpState` snapshot to `dev-env/state/state.json`
+- The same script writes the deployed Alkahest contract addresses to `domains/vms/storefront/.../data/alkahest_anvil_addresses.json`, which the seller container ships and the buyer reads
 
 ---
 
-### `registry-service`
+### `arkhai-core-registry`
 
 **Role:** Listings registry — discovery surface for the marketplace.
 
@@ -190,14 +388,14 @@ What the spec carries:
   the registry is the single enforcement point so sellers can list any
   hardware string but discovery is gated centrally.
 
-Filter evaluation lives in `registry-service/src/api/filter_eval.py`:
+Filter evaluation lives in `core/registry/src/api/filter_eval.py`:
 `build_criteria(spec, params)` compiles the spec + request params into
 parsed JSONPath criteria; `evaluate_all(criteria, listing)` returns the
 matching listings. Array-projection paths (`accepted_escrows[*]...`) are
 supported via jsonpath-ng. The storefront's `GET /api/v1/listings` is a
 slim local-enumeration view (`status`, `paused`, `limit`, `offset`) —
 discovery goes through the registry; the storefront is the seller's local
-state surface. `arkhai-registry-client.list_listings()` and the
+state surface. `arkhai-core-registry-client.list_listings()` and the
 storefront-client equivalent take a filter param dict that the caller
 composes from the active spec.
 
@@ -209,7 +407,7 @@ Failed** rather than silently honouring a query built against a stale spec.
 `If-Match` is optional — clients that don't care about spec drift can omit
 it.
 
-**Where the YAML lives and how it ships:** `registry-service/filter-spec.yaml`
+**Where the YAML lives and how it ships:** `core/registry/filter-spec.yaml`
 in source, copied into both build stages of the registry Docker image.
 Loaded once at import via `lru_cache`; path overridable via
 `REGISTRY_FILTER_SPEC_PATH` env var. To rotate the spec without rebuilding
@@ -222,11 +420,11 @@ the lowercase 0x hex wallet address. A publisher may hold more than one
 identity (the seam for cross-chain/cross-scheme linking); today it holds
 one. Listings are published via signed `POST /listings` and the registry
 creates the publisher + identity rows lazily on first publication. Custom
-schemes register via `service.identity.register_identity_scheme(verifier)`.
+schemes register via `market_identity.register_identity_scheme(verifier)`.
 
 **Source layout:**
 ```
-registry-service/src/
+core/registry/src/
 ├── api/             # FastAPI routes (publisher_routes, listing_routes, system_routes)
 ├── db/              # SQLAlchemy models (publishers, identities, listings, api_keys) + Alembic migrations
 ├── types/
@@ -259,13 +457,105 @@ on-chain registration step and nothing to register ahead of time. The
 storefront becomes known to a registry the first time it publishes a
 listing (the registry creates its publisher row lazily).
 
+**Storefront capacity boundary:**
+
+The storefront owns market-facing capacity negotiation and listing
+derivation. Provisioning owns physical inventory, resource pools, resource
+scheduling, and physical settlement. Storefront capacity data is therefore a
+**capacity projection**: a view of capacity that can be sold, not the source
+of truth for the physical resources that will satisfy a deal.
+
+- Physical resource records — hosts, pod capacity, storage allocations,
+  power circuits, bandwidth slots, pool configurations, and physical
+  allocation history — live in provisioning-owned services.
+- The storefront may advertise capacity offerings derived from those
+  resources, but it must not require host/VM-specific attributes in the
+  normal fungible-capacity reservation path.
+- A buyer-selected concrete `resource_id` is a valid minority use case when
+  the seller intentionally exposes specific resources as individually
+  selectable. In that case the buyer is effectively making the scheduling
+  decision with seller permission. The generic path remains pool/capacity
+  based: the buyer reserves capacity, and provisioning selects the
+  settlement resource.
+- The physical settlement request sent to provisioning should carry either
+  a pool/capacity commitment or an explicitly negotiated specific resource.
+  Provisioning then records the durable settlement state and calls
+  `PhysicalSettlementScheduler.select_resource(...)` or
+  `select_target_resource(...)` before invoking a `FulfillmentProvider`.
+- The storefront's `compute_capacity_pools` table (planned rename from
+  `compute_inventory_pools` — POOLS-4) groups market-facing resources into
+  fungibility buckets for listing derivation. These are market-level
+  grouping decisions, not physical-machine inventory. Mapping between a
+  storefront capacity pool and a provisioning `resource_pool` is explicit
+  configuration/attributes, not a cross-service foreign key.
+
+**Known technical debt:** `required_attributes=("vm_host",)` in the
+`CapacityLedgerService` constructor currently forces physical host selection
+into the storefront at reservation time for the normal capacity path. The
+`AggregateCapacityClient` placement policies (`fill_first`,
+`most_available`) are a consequence of the same layering problem — host
+selection happens before the provisioning scheduler boundary. POOLS-4 removes
+the host-specific requirement from the ordinary capacity reservation path and
+keeps explicit `resource_id` reservations only for intentionally specific
+resource listings.
+
+**Compute capacity pools and dynamic listings:**
+
+For compute resources, the storefront owns the market-facing capacity
+projection; the authoritative capacity ledger lives in the **site
+authority** (hosted by the provisioning service — see "Capacity and the
+Site Authority"). The storefront is strictly a capacity *client*: every
+hold, commit, release, and lease truncation goes through the
+`CapacityClient` boundary, and its SQLite holds market state only.
+
+The storefront stores concrete imported resources in `resources`. Those
+rows are grouped into `compute_capacity_pools` (currently named
+`compute_inventory_pools` — rename in POOLS-4), with `compute_pool_members`
+linking each member — keyed by `(site, resource_id)`, NULL site = the
+home site — to a pool. Existing resources are backfilled into one-member
+pools. Multiple rows can opt into fungible capacity by sharing
+`attribute.pool_id` in the CSV or import payload; listings can then
+represent capacity across equivalent machines without exposing which
+machine will satisfy the lease.
+
+`derived_compute_listings` records generated listing identity for each
+advertised GPU slice. Single-resource pools keep the legacy
+`resource_id:gpus:N` listing key for compatibility; fungible pools use
+`pool:{pool_id}:gpus:{N}`. Reconciliation closes and reopens derived
+listings from pool/member feasibility, not just aggregate capacity: a
+slice is advertised only when at least one remaining member can satisfy
+that slice after current holds are subtracted — with consumption taken
+from the capacity client's aggregated snapshots while totals and market
+attributes stay local. When no site authority answers, the reconciler
+**skips** rather than closing or reopening listings: ignorance is not
+evidence of capacity change.
+
+Allocation records (the market correlation `listing_id` / `order_id` /
+`negotiation_id` / `escrow_uid`, selected `pool_id`/member, GPU count)
+live on the site authority's ledger rows; a negotiated offer may pin
+either a concrete `resource_id` or a fungible `pool_id`, and
+reservation resolves pool terms to a concrete member at allocation
+time. The local `compute_allocations` table is retained schema-only
+(pre-flip legacy, like provisioning's `vm_leases`); `capacity_holds`
+keeps per-negotiation hold metadata between accept and settlement.
+
+Execution lifecycle facts arrive as events, not callbacks: the site
+authority posts deal-scoped events to the owning storefront and
+publishes anonymous versioned capacity deltas that each storefront's
+event-feed poller consumes; the reconciler runs as a delta subscriber.
+The `/api/v1/admin/fulfillment/events/*` endpoints remain as the
+admin-boundary reporting surface for *external* fulfillment flows —
+progress events are stage-log-only (a held allocation is held in every
+progress state), and `capacity-released`/`failed` release capacity
+through the client, idempotent on unknown allocations.
+
 **Key source layout:**
 ```
-storefront/src/market_storefront/
+domains/vms/storefront/src/market_storefront/
 ├── cli.py                  # `market-storefront` console-script entry
 ├── server.py               # FastAPI app, lifespan, run_serve()
 ├── container.py            # Resolved service singletons (populated in lifespan)
-├── agent.py                # Startup-task helpers:
+├── startup.py              # Startup-task helpers:
 │                           #   _startup_tasks, _preflight_provisioning,
 │                           #   _probe_chain_addresses, _maybe_join_zerotier_network
 ├── controllers/
@@ -291,12 +581,14 @@ storefront/src/market_storefront/
 │   ├── listing_service.py         # ListingService: create/close/refund/claim/reclaim/…
 │   ├── alkahest_service.py        # build_client(): AlkahestClient factory
 │   ├── negotiation_service.py     # NegotiationService: advance/force-accept/list/get
+│   ├── publication_service.py     # Registry publication/close orchestration
+│   ├── fulfillment_service.py     # VM fulfillment orchestration for settled escrows
 │   └── system_service.py          # SystemService: health/seed/evaluate + registry checks
 ├── groups/                 # CLI groups: config, escrow, network
 ├── cli_publish.py, cli_portfolio.py, cli_logs.py, cli_common.py
 ├── negotiation_watchdog.py
 ├── utils/
-│   ├── config.py, sqlite_client.py, action_executor.py
+│   ├── config.py, sqlite_client.py
 │   ├── sync_negotiation.py, settlement_jobs.py, serializer.py
 │   └── …
 └── data/                   # Alkahest address registry + sample resource CSVs
@@ -312,13 +604,16 @@ storefront/src/market_storefront/
 │  HTTP (FastAPI / controllers/)                                      │
 │  ┌─────────────┐ ┌──────────────┐ ┌──────────────┐ ┌────────────┐ │
 │  │  listings   │ │ negotiations │ │    system    │ │   admin    │ │
-│  │ controller  │ │  controller  │ │  controller  │ │  (agent.py)│ │
+│  │ controller  │ │  controller  │ │  controller  │ │ controller │ │
 │  └──────┬──────┘ └──────┬───────┘ └──────┬───────┘ └─────┬──────┘ │
 │         │               │                │               │        │
 │  ┌──────▼───────────────▼────────────────▼───────────────▼──────┐ │
 │  │                   SQLiteClient                                │ │
 │  │  listings · negotiation_threads · negotiation_messages        │ │
-│  │  stage_events · policy_config · resource_portfolio            │ │
+│  │  stage_events · policy_config · resources                     │ │
+│  │  compute_capacity_pools [née compute_inventory_pools, POOLS-4] · compute_pool_members │ │
+│  │  derived_compute_listings · capacity_holds                    │ │
+│  │  settlement_claims · deal_heartbeats · escrows                │ │
 │  └──────────────────────────────────────────────────────────────┘ │
 │                                                                     │
 │  ┌───────────────────────────────────────────────────────────────┐ │
@@ -335,7 +630,7 @@ storefront/src/market_storefront/
 │  │    │   ◦ has_matching_inventory_guard   │                    │ │
 │  │    │   ◦ escrow_shape_guard             │                    │ │
 │  │    │   ◦ max_rounds_guard               │                    │ │
-│  │    │   ◦ bisection (or rl) ← terminal   │                    │ │
+│  │    │   ◦ bisection (or rl) ← decides    │                    │ │
 │  │    └─────────┬──────────────────────────┘                    │ │
 │  │              ▼                                                 │ │
 │  │    NegotiationDecision {action, price, reason}                │ │
@@ -345,19 +640,21 @@ storefront/src/market_storefront/
 │  └───────────────────────────────────────────────────────────────┘ │
 │                                                                     │
 │  Background tasks                                                   │
-│  ┌─────────────────────┐                                           │
-│  │ negotiation_watchdog│                                           │
-│  └─────────────────────┘                                           │
+│  ┌─────────────────────┐ ┌──────────────────┐ ┌──────────────────┐ │
+│  │ negotiation_watchdog│ │ claims_engine    │ │ capacity event   │ │
+│  │                     │ │ loop (claims)    │ │ pollers (per site│ │
+│  └─────────────────────┘ └──────────────────┘ └──────────────────┘ │
 │                                                                     │
-│  Resource lifecycle owned by provisioning service LeaseWatchdog,    │
-│  which calls PATCH /api/v1/admin/portfolio/resources/{id} on expiry │
+│  Capacity is reached only through the CapacityClient boundary       │
+│  (aggregator over per-site ledgers); listing reconcile reacts to    │
+│  capacity deltas, never to local allocation state                   │
 │                                                                     │
 │  Outbound                                                           │
-│  ┌─────────────────────┐  ┌──────────────────┐                     │
-│  │   RegistryClient    │  │ProvisioningClient│                     │
-│  │ (arkhai-registry-   │  │(provisioning-    │                     │
-│  │  client wheel)      │  │ service wheel)   │                     │
-│  └─────────────────────┘  └──────────────────┘                     │
+│  ┌─────────────────────┐  ┌──────────────────┐ ┌────────────────┐  │
+│  │   RegistryClient    │  │ProvisioningClient│ │RemoteCapacity- │  │
+│  │ (arkhai-registry-   │  │(provisioning-    │ │Client(s) → site│  │
+│  │  client wheel)      │  │ service wheel)   │ │authorities     │  │
+│  └─────────────────────┘  └──────────────────┘ └────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -392,18 +689,20 @@ rate and duration. Empty `rates` = hidden reserve (the seller publishes
 no advertised rate; negotiation establishes one via the strategy's
 `default_min_price`).
 
-Readers use the `primary_rate_value` / `accepted_token_address` helpers
-in `service.schemas` rather than touching the dict keys directly; both
-helpers work against either a `AcceptedEscrow` model or a raw JSON dict
-(the shape coming off SQLite or the wire).
+Readers use `primary_rate_value` for the generic headline rate.
+Token-shaped flows may additionally use `accepted_token_address`, but
+that helper is not universal: native-token, attestation, and some bundle
+escrows have no top-level `literal_fields.token`.
 
 **Round-0 wire shape:** `POST /api/v1/negotiate/new` carries two structured
 fields:
 
-- `provision_terms: ProvisionTerms` — `{duration_seconds, ssh_public_key,
-  compute_resource}`. What the seller will deliver off-chain. Read by the
-  seller's settlement/provisioning pipeline as the single source of truth for
-  what to provision.
+- `provision_terms: ProvisionTerms` — `{kind, payload}`. What the seller
+  will deliver off-chain. The core treats `payload` as opaque; the current
+  compute adapter interprets `kind="compute.v1"` as
+  `{duration_seconds, ssh_public_key, compute_resource?}` and the seller's
+  settlement/provisioning pipeline reads those compute fields as the single
+  source of truth for what to provision.
 - `escrow_proposal: EscrowProposal` — `{chain_name, escrow_address, fields,
   literal_fields, rates, expiration_unix}`. The buyer picks one of the
   listing's `accepted_escrows` by `(chain_name, escrow_address)` and supplies
@@ -414,30 +713,39 @@ fields:
   intentionally **not** on the listing-side advertisement: it's derived at
   settlement from `primary_rate × duration / 3600`.
 
-The seller validates the proposal in `_validate_escrow_proposal`: match the
-`(chain_name, escrow_address)` against an entry in the listing's
-`accepted_escrows`, then field-equality-check every seller-advertised
-literal on the matched entry's `literal_fields`. On non-rejection paths,
-`NegotiateNewResponse` echoes both as `accepted_provision_terms` and
-`accepted_escrow_proposal` — settlement code on both sides reconstructs the
-same on-chain `obligation_data` from those echoed values.
+The default seller policy validates escrow shape inside the negotiation
+chain. `escrow_shape_guard` matches the buyer's
+`(chain_name, escrow_address)` against the listing's `accepted_escrows` and
+rejects both out-of-set proposals and literal-field mismatches. The protocol
+layer's `_validate_escrow_proposal` only canonicalizes non-rejected
+proposals by merging matched listing `literal_fields` and `rates`; it does
+not decide whether an out-of-set proposal is rejected, corrected, or
+allowed. On non-rejection paths, `NegotiateNewResponse` echoes both as
+`accepted_provision_terms` and `accepted_escrow_proposal`, and accept paths
+additionally echo `accepted_escrow_terms`: concrete `EscrowTerms`
+materialized from the final proposal, agreed amount, duration, and arbiter
+demands. Split settlement flows consume those concrete terms directly and
+fall back to proposal materialization only for older run logs.
 
 **Settlement is a byte-compare, not a dispatch:** `EscrowTerms`
-(`service.schemas.EscrowTerms`) is the negotiated artifact — a flat mirror of
-the alkahest `ObligationData` struct: `{maker, escrow_contract,
-obligation_data, expiration_unix}`. The settlement verifier reads the
-on-chain obligation by UID and byte-compares against the negotiated
-`EscrowTerms.obligation_data`. Adding a new escrow kind (ERC721, native,
-bundle, attestation) is a codec-registration change: the buyer-side
-builder and seller-side verifier resolve `(chain, escrow_address)` to a
-codec via `service.clients.alkahest.get_escrow_codec_for`, then refuse
-unsupported kinds with `NotImplementedError` carrying the kind + address.
-Today only `erc20_escrow_obligation_nontierable` is registered; wiring
-another kind is a builder + verifier addition with no schema change.
+(`market_core.schemas.EscrowTerms`) is the settlement artifact — a flat mirror
+of the alkahest `ObligationData` struct:
+`{maker, chain_name, escrow_contract, obligation_data, expiration_unix}`.
+The settlement verifier reads the on-chain obligation by UID and
+byte-compares against materialized `EscrowTerms.obligation_data`. Adding a
+new escrow kind is primarily a codec-registration change: all default
+and unconditional Alkahest escrow obligation variants under
+`contracts/src/obligations/escrow` are registered, and the buyer submit
+hook resolves each term's `(chain_name, escrow_contract)` to a codec via
+`market_alkahest.alkahest.get_escrow_kind_codec_by_address`. The
+proposal-to-terms materializer owns the final obligation data shape.
+Codec-boundary tests cover every registered kind; compose-backed
+settlement e2e coverage currently exercises native-token and ERC1155
+escrows through buyer, storefront, and provisioning.
 
-A negotiation produces `list[EscrowTerms]` so multi-escrow designs (payment
-+ seller penalty deposit, block-by-block schedules) are expressible without
-a wrapper type. Today every list is length-1 (single buyer-made ERC20
+A negotiation accept produces `list[EscrowTerms]` so multi-escrow designs
+(payment + seller penalty deposit, block-by-block schedules) are expressible
+without a wrapper type. Today every list is length-1 (single buyer-made
 escrow); the rest is forward shape.
 
 `CreateListingRequest` requires `accepted_escrows: list[dict]`.
@@ -445,10 +753,10 @@ escrow); the rest is forward shape.
 row via `sqlite_client.upsert_listing`, then (unless `paused=True`)
 publishes to the configured registries. Close is the symmetric
 procedural path: SQLite update → registry unpublish. No policy step
-gates either operation. `_extract_initial_price_from_order` reads the
-primary rate via `primary_rate_value(accepted_escrows[0])`; its
-hidden-reserve fallback (empty `rates`) is
-`[seller.pricing].default_min_price`.
+gates either operation. `domains.vms.listings.pricing.extract_initial_price_from_order`
+reads the primary rate via `primary_rate_value(accepted_escrows[0])`; its
+storefront binding supplies `[seller.pricing].default_min_price` as the
+hidden-reserve fallback for empty `rates`.
 
 **Escrow templates (CSV → `accepted_escrows`):** sellers populate
 `accepted_escrows` per-resource via the templates DSL in the resource CSV:
@@ -458,88 +766,133 @@ references templates by name with per-slot rate values
 (`"usdc_anvil:amount=150; eth_pool:eth=0.001"`, or the single-slot sugar
 `"usdc_anvil=150"`). The importer materializes one `accepted_escrows`
 entry per template at import time; `cli_publish._publish_round` scales
-rate values by the token's decimals before publishing. The legacy
+token-backed rate values by the token's decimals before publishing.
+Non-token templates use their declared base units directly. The legacy
 "broadcast min_price across every CHAINS entry" path remains as the
 fallback for rows without a templates cell.
 
 ---
 
-**Procedural request path + two pluggable policy hooks:**
+**Procedural request path + three pluggable policy hooks:**
 
-The storefront is a request/response service over its inventory and
-negotiation state. Listing create/close, lease start/end, and resource
-state transitions are direct procedural calls — `ListingService` mutates
-SQLite and (un)publishes to the registry; no policy layer gates them.
-The two places where policy plugs in are:
+The storefront is a request/response service over negotiation state,
+market-facing inventory, and the allocation ledger. Listing
+create/close/refund/claim/reclaim calls are procedural
+`ListingService` operations. Compute lease execution is not stored as a
+listing state; settlement reserves a `compute_allocations` row, the
+provisioning service reports lifecycle facts through fulfillment
+callbacks, and the dynamic listing reconciler opens/closes registry
+listings from the resulting pool availability. The three places where
+policy plugs in are:
 
-- **Buyer-side aggregation** (buyer-only) — `aggregate(negotiate, listings)`
-  in `buyer/market_buyer/aggregation.py` owns the iteration shape across
-  listing candidates. Built-ins: `best_price`, `cheapest_first`,
-  `registry_order`. Custom strategies plug in via entry-point or file
-  discovery.
+- **Buyer-side aggregation** (buyer-only) — `core_buyer.aggregation` owns the
+  registry/discovery interface and schema-opaque control-flow helpers across
+  listing candidates. Settlement- or domain-shaped comparison policies live with
+  the package whose vocabulary they inspect; for example Alkahest scalar
+  policies such as `best_price`, `cheapest_first`, and `priceless_last` are
+  implemented in `market_alkahest.aggregation` and exposed through
+  `market.buyer_aggregation_policies` entry points. Custom strategies plug in
+  via entry-point or file discovery.
 - **Seller-side per-round negotiation policies** (seller-only) — an
   ordered list of middlewares with signature
   `(history, context) -> (Maybe<Response>, Context)`. Guards short-
-  circuit with `reject`/`exit` when their preconditions fail; the
-  terminal policy (`bisection` or `rl`) always returns
+  circuit with `reject`/`exit` when their preconditions fail; the last
+  middleware (`bisection`, `listed_price`, or `rl`) always returns
   `counter`/`accept`/`exit`. Configured per-storefront in
   `[negotiation] policies = [...]` in `storefront.toml`.
+- **Storefront fulfillment failure policy** (seller-only) — a configured
+  ordered action list behind provisioning failure and
+  `/api/v1/admin/fulfillment/events/failed`. Built-ins are
+  `release_capacity`, `emit_event`, `webhook`, and `refund`; the default
+  repairs capacity/listings and emits a stage event. The `refund` action
+  is the seller-side "send already-claimed assets back" path; token escrows
+  dispatch through the selected escrow codec. Rows without a stored escrow
+  proposal are skipped rather than deriving refund details from listing
+  defaults. Buyer-side `reclaim_expired` is a separate post-expiry escape hatch
+  and is not a seller refund.
 
-Both hooks live in `market-policy` (package: `policy/`, import:
+The negotiation hooks live in `arkhai-kit-policy` (package: `kit/policy/`, import:
 `market_policy`); the buyer and seller import from the same wheel. The
-data model is symmetric — `NegotiationRound`, `NegotiationContext`,
-`NegotiationDecision` are shared. Each side instantiates its own chain.
+negotiation data model is symmetric — `NegotiationRound`,
+`NegotiationContext`, `NegotiationDecision` are shared. Each side
+instantiates its own chain. The fulfillment failure policy lives in the
+storefront because it operates on seller inventory, settlement records,
+refunds, and operator alerting.
 
 **Built-in negotiation middlewares:**
 
-- `has_matching_inventory_guard` — round 0 only; the seller's portfolio
-  must contain a compute resource matching the listing's `offer_resource`
-  attributes. Rejects with `no_matching_inventory` if not.
-- `escrow_shape_guard` — every key on the matched
-  `accepted_escrows[i].literal_fields` must equal the buyer's value in
-  `escrow_proposal.literal_fields`. Rejects with `escrow_field_mismatch`
-  otherwise.
+- `has_matching_inventory_guard` — round 0 only; the seller's storefront
+  projection must contain matching compute capacity for the listing's
+  `offer_resource` attributes. The offer may pin a concrete
+  `resource_id` or a fungible `pool_id`; otherwise the guard checks the
+  imported portfolio. Rejects with `no_matching_inventory` if not.
+- `escrow_shape_guard` — the buyer's real `(chain_name, escrow_address)`
+  must select one listing `accepted_escrows` entry, and every key on that
+  entry's `literal_fields` must equal the buyer's value in
+  `escrow_proposal.literal_fields`. Rejects with
+  `escrow_not_in_accepted_set` or `escrow_field_mismatch` otherwise.
 - `max_rounds_guard` — exits with `max_rounds_reached` once
   `len(history) >= [negotiation].max_rounds` (default 5).
-- `bisection_middleware` — terminal. Bisects between `our_price` (the
+- `listed_price_middleware` — the buyer-side default. Accepts the
+  peer's proposal when its amount is within the bound
+  (`our_reference_amount`; ≤ in `minimize`, ≥ in `maximize`), exits
+  with `price_above_bound` otherwise; never counters beyond the
+  opening (when nothing has come from the peer it counters once at the
+  opening proposal). Amountless escrow shapes are accepted as
+  proposed. Rationale: haggling rounds carry no information today —
+  neither side exchanges *reasons* for a new number, so bisection
+  against a published floor is wasted network traffic; richer policies
+  return when proposals carry justification.
+- `bisection_middleware` — bisects between `our_price` (the
   listing's primary rate) and `their_price` (the peer's latest offer);
   accepts within ~1% convergence, counters at midpoint when feasible,
   exits with `price_unreasonable` when `their_price < our_price / 1.5`
   (maximize) or symmetrically (minimize).
-- `rl_middleware` — terminal (optional). Lazy-imports torch + the
+- `rl_middleware` — optional. Lazy-imports torch + the
   pufferlib checkpoint at
-  `domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt`
+  `domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt`
   (or `_buyer.pt`). Exits with `torch_unavailable` if torch isn't
   installed.
 
 **Chain runner:** `run_negotiation_chain(chain, history, context)` in
-`policy/.../negotiation_middleware.py`. Loops middlewares in order;
-returns the first `Some<Response>`; raises if the chain exhausts (the
-terminal middleware must always return `Some`).
+`kit/policy/src/market_policy/negotiation_middleware.py`. Loops middlewares in order;
+returns the first `Some<Response>`. There is no separate "terminal"
+middleware type — every middleware has the same shape, and whether one
+decides is not externally knowable, so nothing is ever appended to a
+chain *because* it passed (that would just run a different chain than
+the one configured). A chain whose every middleware passes raises
+`NegotiationChainExhausted`; the last middleware in a configured chain
+must therefore always decide. On the buyer side a mid-negotiation
+exhaustion releases the seller's live thread with a protocol-level exit
+(`buyer_chain_no_decision`) before the error propagates.
 
 **Negotiation direction:** determined by
-`determine_strategy_from_resources()` in `utils/validation.py`. Listings
-carry an `offer_resource`; the payment side lives in `accepted_escrows`.
-Seller offering `ComputeResource` → direction `"maximize"` (highest
-price the buyer will pay). The buyer's CLI runs in `"minimize"` from the
-other side.
+`domains.vms.listings.strategy.determine_strategy_from_resources()`.
+Listings carry an `offer_resource`; the payment side lives in
+`accepted_escrows`. Seller offering `ComputeResource` → direction
+`"maximize"` (highest price the buyer will pay). The buyer's CLI runs in
+`"minimize"` from the other side.
 
 **Policy loader:** `_load_storefront_chain()` in `sync_negotiation.py`
-reads `[negotiation] policies` from `storefront.toml` and resolves the
-names via `load_negotiation_chain()`. Back-compat: if `policies` is
-absent and the legacy `policy_mode` is set, synthesize
-`["has_matching_inventory_guard", "escrow_shape_guard", policy_mode]`.
-Custom middlewares are picked up by file discovery via
+reads `[negotiation] policies` from `storefront.toml`. If it is a list,
+the names are resolved via `load_negotiation_chain()`. If it is a
+`[negotiation.policies]` table, the storefront keeps the default seller
+guards and adds an escrow-kind dispatcher that maps the selected
+proposal's Alkahest escrow kind to a configured terminal/chain. Back-
+compat: if `policies` is absent and the legacy `policy_mode` is set,
+synthesize `["has_matching_inventory_guard", "escrow_shape_guard",
+policy_mode]`. Custom middlewares are picked up by file discovery via
 `[negotiation] extra_policy_paths = [...]`. See
 [docs/configuration.md](../configuration.md) for the full reference
 including built-in policies, the buyer's aggregation policy, and how
 to write a custom one.
 
 **`our_price` source:** the terminal middleware reads it via
-`_extract_initial_price_from_order()` in `action_executor.py`, which
-calls `primary_rate_value(accepted_escrows[0])`. This is the seller's
-price floor — the buyer's opening offer must be at or above this value
-for the seller to counter rather than exit immediately.
+`domains.vms.listings.pricing.extract_initial_price_from_order()`, with
+the storefront passing its configured default minimum price for hidden
+reserve listings. This calls `primary_rate_value(accepted_escrows[0])`.
+It is the seller's price floor — the buyer's opening offer must be at or
+above this value for the seller to counter rather than exit immediately.
 
 **`checks.negotiation_strategy` in system status:** `GET /api/v1/system/status`
 includes a `negotiation_strategy` check that instantiates the configured
@@ -562,13 +915,13 @@ to `get_status()` whose success value is not `"ok"`, either: (a) return
 `"ok"` on success and put the diagnostic name in a separate top-level
 fact field, or (b) add a key-specific rule to `_check_is_healthy`.
 
-**`domain/` tree — not installed, on sys.path:** holds the RL training
+**`domains/` tree — not installed, on sys.path:** holds the RL training
 + inference code that's outside the procedural runtime — specifically
-`domain/compute/agent/app/policy/torch_arkhai_strategy.py` (loads the
+`domains/vms/negotiation/rl/torch_arkhai_strategy.py` (loads the
 pufferlib checkpoint at inference time, called by `rl_middleware`) and
-`domain/compute/training/` (the standalone train + eval CLIs). The tree
+`domains/vms/training/` (the standalone train + eval CLIs). The tree
 is not a pip-installable package — it's copied into the Docker image at
-`/app/domain/` and requires `/app` on `sys.path` (Dockerfile sets
+`/app/domains/` and requires `/app` on `sys.path` (Dockerfile sets
 `ENV PYTHONPATH="/app"`). `arkhai_common` requires `gymnasium`;
 importing it without the ML extra installed fails — that's expected and
 the `rl_middleware` exit-on-probe path surfaces it cleanly.
@@ -687,7 +1040,8 @@ Buyer                    Storefront (/negotiate/new)         SQLite
   │                              │                              │
   │── POST /negotiate/new ───────►│                              │
   │   {listing_id, buyer_address, │                              │
-  │    initial_price, duration,   │                              │
+  │    initial_amount, duration,  │                              │
+  │    proposal,                  │                              │
   │    signature, timestamp}      │                              │
   │                              │── verify EIP-191 sig ────────►│
   │                              │◄─ ok ────────────────────────│
@@ -735,7 +1089,7 @@ All negotiation events are written to `stage_events` with `stage="negotiation"` 
 
 | Event | Trigger | Key data fields |
 |---|---|---|
-| `negotiation_started` | `/negotiate/new` accepted (sig valid, not paused) | `listing_id`, `buyer_address`, `initial_price` |
+| `negotiation_started` | `/negotiate/new` accepted (sig valid, not paused) | `listing_id`, `buyer_address`, opening amount/proposal |
 | `round_decided` | Seller strategy returns a decision (every round) | `round`, `our_price`, `their_price`, `decision` (`accept`/`counter`/`exit`), `decision_price`, `decision_reason` |
 | `negotiation_accepted` | Decision is `accept` or admin `force-accept` | `agreed_price`, `neg_id` |
 | `negotiation_exited` | Decision is `exit` | `decision_reason` (e.g. `price_unreasonable`, `torch_unavailable`) |
@@ -761,17 +1115,32 @@ All negotiation events are written to `stage_events` with `stage="negotiation"` 
 POST  /api/v1/admin/pause    Set globally paused = True — admin key required
 POST  /api/v1/admin/resume   Set globally paused = False — admin key required
 GET   /api/v1/admin/status   Live counts: active_negotiations, open_orders, paused_orders
+POST  /api/v1/admin/portfolio/resources/import
+      Runtime inventory CSV import/upsert — admin key required.
+      Resources that share attribute.pool_id join the same fungible
+      compute_capacity_pools row (currently named compute_inventory_pools — rename in POOLS-4); otherwise they remain one-member pools.
 PATCH /api/v1/admin/portfolio/resources/{resource_id}
       Partial update of a resource row — admin key required.
       Body: { state?, attributes? } — only non-None fields written.
-      Primary use: lease expiry release by the provisioning LeaseWatchdog:
-        { "state": "available", "attributes": { "lease_end_utc": null } }
-      Also used for operator recovery and test state manipulation.
+      Used for operator recovery, compatibility, and test state manipulation.
       Returns: full updated row + updated=true/false (idempotent flag).
       404 if resource_id does not exist.
+POST  /api/v1/admin/portfolio/reservations
+      Force-reserve compute capacity without buyer negotiation — admin key
+      required. Writes compute_allocations and returns the selected
+      pool_id/member_id/resource_id.
 POST  /api/v1/admin/portfolio/release-reservations
       Bulk-release all held (reserved or leased) resources — admin key required.
-      Sledgehammer; prefer PATCH above for targeted single-row release.
+      Sledgehammer for local/e2e recovery; normal lifecycle release should use
+      fulfillment callbacks.
+POST  /api/v1/admin/fulfillment/events/started
+POST  /api/v1/admin/fulfillment/events/usage-started
+POST  /api/v1/admin/fulfillment/events/release-started
+POST  /api/v1/admin/fulfillment/events/capacity-released
+POST  /api/v1/admin/fulfillment/events/failed
+      Provisioning-service callbacks for execution lifecycle facts. These
+      update compute_allocations and let the derived-listing reconciler
+      republish or close listings from the new market-side capacity state.
 ```
 
 #### Admin API Key
@@ -802,11 +1171,11 @@ when set for a specific listing, `POST /negotiate/new` against that listing retu
 
 Listings can be **created already-paused** by passing `"paused": true` in the
 `POST /orders/create` body. This threads through the policy pipeline:
-`agent.py` reads the flag from the request body → adds it to `OrderCreateEvent.data["paused"]`
-→ `oc_action_make_offer_from_order_create` in `domain/compute/agent/app/policy/store.py`
+`listings_controller.py` reads the flag from the request body → adds it to `OrderCreateEvent.data["paused"]`
+→ `oc_action_make_offer_from_order_create` in `domains/vms/negotiation/policies.py`
 propagates it into `action.parameters["paused"]`
-→ `action_executor.py` MAKE_OFFER handler writes the listing to SQLite with `paused=1`
-and **skips** `publish_order_to_registry`.
+→ `listing_service.py` writes the listing to SQLite with `paused=1` and
+**skips** `publication_service.publish_order_to_registry`.
 The listing is invisible to buyers until `POST /api/v1/listings/{id}/resume` is called,
 which clears `paused=0` and calls `publish_order_to_registry`. This is the mechanism
 used in the e2e test to assert registry non-visibility (stage 03) before controlled
@@ -844,37 +1213,91 @@ No new DB state — reads `negotiation_threads`, `negotiation_messages`, and
 
 ---
 
-### `buyer` (Pure HTTP client)
+### VM Buyer CLI (Pure HTTP client)
 
 **Role:** The buyer side of the market. There is no buyer server, no
 agent runtime, no SQLite database — only the `market` console script
-(package: `buyer/`, import: `market_buyer`).
+(packaged and implemented under `domains/vms/buyer`).
 
 `market buy` is a one-shot orchestrator: it queries
-`registry-service` for matching seller orders, runs synchronous
+`arkhai-core-registry` for matching seller orders, runs synchronous
 negotiations against each candidate seller's storefront (POST
 `/negotiate`, signed bodies), and on agreement creates the on-chain
 escrow via `alkahest_py` directly from the CLI process before POSTing
 `/settle/{escrow_uid}` and polling for fulfillment. `market negotiate`
 is the same loop bound to a single known seller; both share
-`buy_orchestrator`.
+`domains.vms.buyer.buy_orchestrator`.
 
 The negotiation chain the buyer runs is built from the same
-`market-policy` middlewares the seller uses — both sides instantiate
-the chain via `load_negotiation_chain([...])`, with `bisection` as the
-default terminal (or `rl` behind the optional torch extra). Round-by-
-round events land in a per-run JSONL log under
+`arkhai-kit-policy` middlewares the seller uses — both sides instantiate
+the chain via `load_negotiation_chain([...])`. Round-by-round events
+land in a per-run JSONL log under
 `$XDG_STATE_HOME/arkhai/buy-runs/<run_id>.jsonl` rather than a database.
+
+**Buyer negotiation policy surface.** The configured negotiation policy
+— not the schema plugin's CLI, not the round loop — is the interface to
+a deal's concrete escrow parameters. `market_policy.buyer_policy`
+defines `BuyerPolicy`: a named object declaring (a) which escrow formats
+it can negotiate (`compatible`, judged per `accepted_escrows` entry —
+tuple selection offers the policy only formats it claims, refusing with
+"no compatible escrow format" rather than taking `accepted_escrows[0]`
+and hoping), (b) its CLI parameter surface (`cli_params`, materialized
+as typer options on `buy`/`negotiate` at app-assembly time via
+`inject_policy_cli_params`, plus a `--policy-param key=value` escape
+hatch whose values reach the chain's context verbatim), (c) the
+middleware chain that runs the rounds, and (d) `derive_prices` — how raw
+parameter values plus the candidate listings become the chain's numeric
+inputs. The scalar policies `listed_price` (default) and `bisection` are
+registered once in `core_buyer.policy_surface` — they are escrow
+vocabulary shared by every scalar domain, and two plugins re-registering
+the same names would silently shadow each other; `[negotiation] policy`
+in `buyer.toml` names the configured one. Their prices are **per unit**;
+the schema plugin's verb supplies the unit count that scales them to the
+absolute amounts a negotiation runs on (lease hours for `vms.compute`,
+token quantity for `api_credits`). This gives a three-way CLI split:
+core owns the verb skeleton, run-log chaining, and identity; the schema
+plugin owns *what* is bought (`--gpu-model` and `--quantity` are plugin
+vocabulary); the policy owns *how it is paid for* (`--max-price` is policy vocabulary —
+the scalar trio `--initial-price`/`--max-price`/`--price-markup` belongs
+to the scalar policies and is hardcoded nowhere else). Core owns the
+inject-then-register pairing so this surface is identical across plugins:
+a plugin hands its verb function and the configured policy to
+`core_buyer.cli.register_policy_verb`, which applies
+`inject_policy_cli_params` and binds the command — the plugin never
+spells the injection out itself, and the shared `--yes/-y` flag comes
+from `core_buyer.cli.assume_yes_option` for the same reason.
+
+Conventions the surface enforces: a policy hook receives its own
+collected values as one `params` mapping, structurally separate from the
+canonical caller kwargs (`matches`, `console`, `interactive`) — no
+collisions, no reserved prefixes. `interactive` is computed once by
+core (`core_buyer.cli.interactive_disposition`: not `--yes` and stdin is
+a TTY); a policy never re-derives it. `buy` passes it (the user is
+confirming the listing the *aggregation* policy picked, since `buy`
+bundles discovery they never saw); `negotiate` passes False (the user
+chose the listing explicitly). Resolution is strict where it matters: a
+typo'd `[negotiation] policy` name errors instead of silently becoming
+the default. The round-0 opening is chain-driven (the chain runs on an
+empty history; an exit/reject opening means the seller is never
+contacted), and the run-log records the policy name + params at
+`run_started` so `--from` resumes rebuild the chain under the policy
+that opened the run, not whatever the config says today. When Part I's
+settlement-plan carrier lands, an interval-plan or bonded policy
+contributes its vocabulary (`--interval`, bond sizes) through this same
+seam — `listed_price` and the scalar flags are the degenerate
+single-scalar case.
 
 **Key source layout:**
 ```
-buyer/market_buyer/
+domains/vms/buyer/
 ├── cli.py                  # `market` console-script entry
-├── groups/                 # buy, negotiate, settle, listing, escrow, chain,
-│                           # network, config, logs (+ _deal/_cli_helpers shared)
+├── *_cli.py                # buy, negotiate, settle, listing, escrow, chain,
+│                           # network, config, logs
 ├── buy_orchestrator.py     # the one-shot buy flow
 ├── buyer_client.py         # signed HTTP client for /negotiate, /api/v1/settle
-├── escrow_client.py        # alkahest-py escrow create/reclaim
+├── policy_surface.py       # BuyerPolicy registry compatibility surface
+├── deal_helpers.py         # run-log recovery + chain settings helpers
+├── aggregation.py          # aggregation registry + schema-opaque helpers
 ├── run_log.py              # JSONL run logs under XDG_STATE_HOME
 └── common.py               # config-resolution + REPO_ROOT helpers
 ```
@@ -883,27 +1306,38 @@ buyer/market_buyer/
 reads the agreed terms from the run-log JSONL, creates the on-chain escrow
 under the buyer's wallet via `make_create_escrow_fn`, then POSTs
 `/api/v1/settle/{uid}` and polls for fulfillment. Both buyer and seller
-configure the negotiation chain via `[negotiation].policies` (ordered
-list) in their respective TOMLs; the buyer's default
-(`["buyer_escrow_shape_guard", "bisection"]`) and the seller's
-(`["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]`)
-differ in the appropriate guards. Both honour the legacy
-`policy_mode = "bisection"|"rl"` key for back-compat.
+can configure the negotiation chain explicitly via
+`[negotiation] policies` (ordered list, or per-kind table) in their
+respective TOMLs; absent that, the buyer's chain is
+`["buyer_escrow_shape_guard", *policy.middlewares]` from the configured
+`[negotiation] policy` (default `listed_price`), and the seller's
+default is
+`["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]`.
+Both honour the legacy `policy_mode = "bisection"|"rl"` key for
+back-compat.
 
 ---
 
-### `policy` (`market-policy`)
+### `policy` (`arkhai-kit-policy`)
 
 Shared negotiation machinery + the RL training/eval tool. Two surfaces:
 
 - **Library**: `market_policy.{negotiation_middleware,
-  negotiation_thread, identity, ports}` — imported by both buyer and
-  seller. The middleware shape (`NegotiationContext`,
+  negotiation_thread, buyer_policy, identity, ports}` — imported by
+  both buyer and seller. The middleware shape (`NegotiationContext`,
   `NegotiationDecision`, `register_negotiation_middleware`,
   `load_negotiation_chain`, `run_negotiation_chain`) is the public
-  surface; built-in middlewares (`bisection_middleware`,
-  `has_matching_inventory_guard`, `escrow_shape_guard`,
-  `max_rounds_guard`, `buyer_escrow_shape_guard`) ship registered.
+  surface; built-in middlewares (`listed_price_middleware`,
+  `bisection_middleware`, `has_matching_inventory_guard`,
+  `escrow_shape_guard`, `max_rounds_guard`, `buyer_escrow_shape_guard`,
+  `accept_exact_listing`, and amount-policy aliases for ERC20,
+  native-token, and ERC1155) ship registered. The shared
+  escrow-kind dispatcher is constructed from config rather than
+  registered as a plain global middleware. `buyer_policy` owns the
+  `BuyerPolicy`/`PolicyParam` protocol + registry and
+  `inject_policy_cli_params` (see "Buyer negotiation policy surface"
+  above); concrete policy objects are registered by domain packages,
+  exactly like middlewares.
 - **CLI**: `market-policy train / eval / export` — invoked by policy
   authors to produce RL checkpoints that the `rl` terminal middleware
   loads at inference time.
@@ -913,7 +1347,7 @@ a tooling concern separate from the buyer or seller process.
 
 ---
 
-### `provisioning-service`
+### `arkhai-vms-provisioning`
 
 **Role:** Physical settlement layer. Converts completed on-chain agreements into running VMs.
 
@@ -938,14 +1372,22 @@ Long-running Ansible playbooks (up to `ANSIBLE_TIMEOUT_SECONDS=1800`) are launch
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Controllers (FastAPI layer)                                │
-│  VmController, HostController, JobController (read-only)    │
-│  Accepts typed per-operation requests                       │
-│  Returns job_id; OpenAPI docs describe polling pattern      │
+│  VmController, HostController, JobController, SystemController │
+│  Parse HTTP requests, expose OpenAPI docs, map domain         │
+│  exceptions to HTTP responses                                │
+└─────────────────────────┬───────────────────────────────────┘
+                          │ typed request models
+┌─────────────────────────▼───────────────────────────────────┐
+│  Service layer                                               │
+│  - VmOperationsService: direct admin/operator VM actions     │
+│  - HostOperationsService: host capacity/connectivity checks  │
+│  - SystemService: health/status/readiness + watchdog admin   │
+│  Build internal DTOs, perform diagnostics, and choose queues │
 └─────────────────────────┬───────────────────────────────────┘
                           │ AnsibleJobParams (internal DTO)
 ┌─────────────────────────▼───────────────────────────────────┐
 │  AnsibleJobService                                          │
-│  - submit(AnsibleJobParams, agent_id, job_queue) → job_id   │
+│  - submit(AnsibleJobParams, job_queue) → job_id             │
 │  - list/get/cancel/credentials/logs (read ops)              │
 │  - _process_job(job_id) — handler passed to AsyncJobQueue   │
 └──────────────┬──────────────────┬──────────────────────────┘
@@ -954,14 +1396,19 @@ Long-running Ansible playbooks (up to `ANSIBLE_TIMEOUT_SECONDS=1800`) are launch
 │  AsyncJobQueue      │  │  AnsibleService                  │
 │  (queue mgmt only)  │  │  - start_playbook()              │
 │  - enqueue(job_id)  │  │  - wait_for_playbook()           │
-│  - start(handler)   │  │  - build_vars_file()  ← absorbed │
-│  - is_alive()       │  │  - parse_playbook_result() ←     │
-│  No Ansible/DB      │  │  - _inject_golden_image_creds()  │
-│  knowledge          │  │  - parse_inventory()             │
-└─────────────────────┘  │  - lookup_host_ip()              │
-                         │  - check_connectivity()          │
+│  - start(handler)   │  │  - build_vars_file()             │
+│  - is_alive()       │  │  - parse_playbook_result()       │
+│  No Ansible/DB      │  │  - parse_inventory()             │
+│  knowledge          │  │  - lookup_host_ip()              │
+└─────────────────────┘  │  - check_connectivity()          │
                          └──────────────────────────────────┘
 ```
+
+Controllers stay thin: they own HTTP routing, request/response schemas,
+OpenAPI descriptions, and translation of service exceptions into HTTP status
+codes. Business rules, Ansible job construction, temporary inventory handling,
+job queue selection, health diagnostics, and lease-watchdog admin operations
+live in services.
 
 ---
 
@@ -1005,6 +1452,8 @@ caller and decides which credentials to surface to which tenant.
 
 #### VM Actions (all routed through a single playbook: `vm-operations.yaml`)
 
+Direct VM controller routes are admin/operator APIs protected by the provisioning service admin key when authentication is configured. Tenant self-service VM actions require lease-owner authorization and are not exposed by this controller.
+
 All actions are submitted as `ProvisionRequest` jobs with a `vm_action` field. The single Ansible playbook dispatches to action-specific task files based on the `vm_action` variable.
 
 | `vm_action` | What it does | Notable behavior |
@@ -1018,95 +1467,120 @@ All actions are submitted as `ProvisionRequest` jobs with a `vm_action` field. T
 | `undefine` | Remove VM definition from libvirt | Typically paired with storage cleanup |
 | `monitor` | Collect CPU/memory/disk/network stats | See details below |
 | `reset_password` | Reset the tenant user password | |
-| `lease_end` | Schedule VM destruction at a future UTC datetime | Uses the host's `at` daemon — **the timer runs on the KVM host, not in the provisioning service** |
-| `lease_remove` | Cancel a previously scheduled `lease_end` | Finds and removes `at` jobs tagged `LEASE:<vm_name>` |
+| `vm_remove` | Full VM teardown | Runs `virsh destroy` then `/usr/local/bin/cleanup_vm_<name>.sh`; fails loudly if the script is missing — operator must intervene manually. Used by the provisioning-service watchdog for lease-driven teardown. |
 | `check` | Report host capacity (total/allocated/available vCPUs, RAM, GPUs) | No `vm_target` required |
 
-**`VmActionRequest` — shared optional body:** Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, `monitor`, `reset-password`, `cancel_expiry`) share one optional body model `VmActionRequest(buyer_agent_id, max_retries)`. The `build_simple_params(action, host, body, vm_name)` helper in `vm_request_model.py` produces `AnsibleJobParams` from path parameters + this body. `CreateVmRequest` and `ScheduleVmExpiryRequest` remain distinct classes with their own fields.
+**`VmActionRequest` — shared optional body:** Direct admin/operator VM actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, `monitor`, `reset-password`) share one optional body model `VmActionRequest(max_retries)`. The `build_simple_params(action, host, body, vm_name)` helper in `vm_request_model.py` produces `AnsibleJobParams` from path parameters + this body. `CreateVmRequest` remains a distinct class with its own fields. `vm_remove` is an internal teardown action submitted by the lease lifecycle watchdog, not a normal VM controller endpoint.
 
 ---
 
-#### Lease Lifecycle — DB-driven watchdog
+#### Lease Lifecycle — allocation-backed watchdog
 
-The provisioning service owns lease lifecycle via the `vm_leases` table and the `LeaseWatchdog` background task. When the storefront provisions a VM, it registers a lease with the provisioning service via `POST /api/v1/leases` after the create-VM job succeeds. The host-side `lease_end` `at` job is best-effort and must not block settlement readiness; the `LeaseWatchdog` is the authoritative release path and calls back to the storefront's `PATCH /api/v1/admin/portfolio/resources/{resource_id}` when leases expire.
+A lease is a time-bounded interpretation of a site allocation. The lower
+site resource layer persists resource inventory, allocation state, and
+capacity events; it does not own watchdog policy or VM teardown semantics.
+The provisioning service's `LeaseLifecycleService` interprets allocation
+fields such as `lease_end_utc`, `vm_host`, `vm_target`, and
+`vm_remove_job_id` as the VM lease lifecycle.
 
-**`vm_leases` table:**
+The KVM host has no knowledge of leases. The host-side teardown unit is the
+`vm_remove` Ansible action: it runs `virsh destroy` and then the per-VM
+cleanup script written at create time (`/usr/local/bin/cleanup_vm_<name>.sh`).
+That script removes the FRP proxy entry, firewall rules, static DHCP lease,
+GPU passthrough config, SSH keys, libvirt definition, and disk images. If
+the script is missing or cleanup fails, the job fails loudly so an operator
+can intervene; capacity remains held.
 
-| Column | Type | Description |
-|---|---|---|
-| `id` | UUID PK | Internal lease ID |
-| `resource_id` | TEXT | Storefront-assigned resource identifier (e.g. `compute-kvm1-001`). Application-level FK — unvalidated by the provisioning service. |
-| `escrow_uid` | TEXT UNIQUE | On-chain escrow UID. One deal = one lease. |
-| `vm_host` | TEXT | KVM host alias (Ansible inventory name) |
-| `vm_target` | TEXT | Libvirt domain name of the provisioned VM |
-| `lease_start_utc` | DATETIME nullable | Null = lease active immediately on creation |
-| `lease_end_utc` | DATETIME | When the lease expires |
-| `status` | TEXT | See `LeaseStatus` enum below |
-| `create_job_id` | TEXT nullable | Provisioning job_id of the VM creation job. Allows tracing from lease back to the original create job. |
-| `check_job_id` | TEXT nullable | Provisioning job_id for the most recent watchdog check job (set during `releasing` phase) |
-
-**`LeaseStatus` values:**
-
-| Status | Meaning |
-|---|---|
-| `pending` | `lease_start_utc` is in the future; VM may not yet be running |
-| `active` | Lease is running; `lease_end_utc` is in the future |
-| `releasing` | `lease_end_utc` passed; watchdog submitted a check job to confirm VM cleanup |
-| `released` | Storefront `PATCH /resources/{id}` called successfully; resource is available again |
-| `forced` | Grace period elapsed; storefront patched without VM confirmation |
-| `cancelled` | Lease cancelled before expiry |
-
-**Lease flow:**
+`LeaseLifecycleService` uses a release delegate for the concrete teardown
+operation. The VM provisioning service supplies a delegate that submits
+`vm_remove`. This keeps the lifecycle state machine close to a future shared
+lease layer that can support pod, bare-metal, or other time-bounded rentals
+by supplying a different release delegate.
 
 ```
-Storefront (after provisioning succeeds)
-  │
-  └── POST /api/v1/leases  →  vm_leases row created (status=active or pending)
-
 LeaseWatchdog (every 60s, or on-demand via POST /api/v1/system/check-leases)
   │
-  ├── list_pending_to_activate(now)  →  advance pending leases whose start has passed
-  ├── list_due(now)  →  active leases with lease_end_utc < now
+  ├── due leased allocations — lease_end_utc < now:
+  │   └── run release delegate (VM service submits vm_remove)
+  │       → state = releasing, vm_remove_job_id = <job id>
   │
-  ├── For each due lease:
-  │   ├── Submit check Ansible job (vm_action=check, vm_host, vm_target)
-  │   └── begin_releasing(check_job_id) → status=releasing
-  │
-  ├── list_releasing()  →  leases with check jobs in flight
-  │   ├── Poll check job status
-  │   ├── On succeeded / failed+past-grace:
-  │   │   ├── PATCH {settings.storefront_url}/api/v1/admin/portfolio/resources/{resource_id}
-  │   │   │     body: { state: "available", attributes: { lease_end_utc: null } }
-  │   │   │     headers: X-Admin-Key: {settings.storefront_admin_key}
-  │   │   ├── On 200/404: mark_released()
-  │   │   └── On patch failure within grace: skip (retry next cycle)
-  │   │       On patch failure past grace: mark_forced()
-  │   └── On still-running + within grace: skip (wait next cycle)
+  ├── releasing allocations:
+  │   ├── vm_remove succeeded:
+  │   │   ├── release the allocation in a local site-resource transaction
+  │   │   │   (publishes an anonymous capacity delta to subscribers)
+  │   │   └── post a deal-scoped capacity-released event to the
+  │   │       owning storefront (X-Admin-Key)
+  │   ├── vm_remove failed/cancelled:
+  │   │   └── state = release_failed; capacity remains held
+  │   ├── still-running within grace: wait next cycle
+  │   └── still-running past grace:
+  │       └── state = release_failed; capacity remains held
 ```
+
+Lease states surfaced by the API are `pending`, `active`, `releasing`,
+`released`, `release_failed`, `unmanaged`, `provisioning_failed`, and
+`force_released`. `unmanaged` is terminal for automated lifecycle oversight:
+an operator has released provisioning-service oversight without deleting the
+VM or releasing capacity. Admin cleanup and force-release are required before
+that capacity can be resold. `retry-release` is available for `release_failed`
+leases when the operator wants the provisioning service to submit the release
+delegate again; `force-release` is the explicit repair action after manual
+verification that capacity is safe to resell.
+
+Everything downstream is event-driven. The storefront's reconciler reacts to
+the anonymous capacity delta, and the deal-scoped capacity-released event feeds
+stage logs and deal-specific policy. No storefront capacity-released event is
+sent for `release_failed` because capacity has not become available.
 
 **Watchdog configuration** (`settings.toml` → dynaconf):
 ```toml
 lease_watchdog_enabled = true
 lease_watchdog_poll_interval_seconds = 60
 lease_watchdog_grace_period_seconds = 300
-storefront_url = ""          # base URL of the storefront (global, not per-lease)
-storefront_admin_key = ""    # X-Admin-Key for storefront admin endpoints
+storefront_url = ""          # owning storefront for deal-scoped events
+storefront_admin_key = ""    # X-Admin-Key for the event POST
                              # inject via provisioning-secrets profile in production
 ```
 
-`storefront_url` and `storefront_admin_key` are global settings on the provisioning service — one provisioning service instance serves one storefront. They are not stored per-lease.
+`storefront_url` and `storefront_admin_key` are global service settings — one
+provisioning service instance currently serves one storefront. Routing deal
+events by the `deal_ref` recorded at reserve time remains planned work.
 
-**On-demand trigger:** `POST /api/v1/system/check-leases` runs one watchdog cycle immediately. Used by operators and tests to avoid waiting for the 60-second timer. Returns `{ activated, checked, released, forced, skipped }`.
+**On-demand trigger:** `POST /api/v1/system/check-leases` runs one watchdog
+cycle immediately. Used by operators and tests to avoid waiting for the
+60-second timer.
 
-**Leases API:**
+**Leases API (view over allocation-backed leases):**
 ```
-POST   /api/v1/leases                  Register a new lease (called by storefront)
-GET    /api/v1/leases                  List leases (filter: status, vm_host, escrow_uid)
-GET    /api/v1/leases/{lease_id}       Get one lease by internal ID
-PATCH  /api/v1/leases/{lease_id}       Partial update (status, check_job_id, lease_end_utc)
-GET    /api/v1/leases/by-escrow/{uid}  Lookup by escrow_uid (storefront recovery path)
-DELETE /api/v1/leases/{lease_id}/cancel  Cancel a lease before expiry
+POST   /api/v1/leases                              Attach lease tail to the deal's live allocation
+GET    /api/v1/leases                              List leases (filter: status, vm_host, escrow_uid)
+GET    /api/v1/leases/{lease_id}                   Get one lease by ID
+PATCH  /api/v1/leases/{lease_id}                   Partial update (vm_host, vm_target, lease_end_utc, …)
+GET    /api/v1/leases/by-escrow/{uid}              Lookup by escrow_uid
+POST   /api/v1/leases/{lease_id}/terminate         Submit release delegate; capacity releases only on success
+POST   /api/v1/leases/{lease_id}/release-oversight Mark unmanaged; no teardown and no capacity release
+POST   /api/v1/admin/leases/{lease_id}/retry-release    Admin repair: retry release_failed teardown
+POST   /api/v1/admin/leases/{lease_id}/force-release    Admin repair: release capacity without teardown proof
 ```
+
+**Provisioning contract ownership:** domain packages own the
+storefront-facing provisioning contract for their market semantics. A VM
+domain contract can speak in VM image/spec, `vm_host`, `vm_target`, and
+SSH-to-VM connection results; a bare-metal domain contract can speak in
+machine access grants, SSH/user/key policy, exclusive host semantics, and
+node reclaim. A provisioning service implements the domain contracts it
+chooses to serve through thin adapters at its edge, while sharing local
+internals such as inventory, credentials, site authority, allocation
+lifecycle, job queues, and event delivery.
+
+This means the VM provisioning API is not the generic provisioning API. It is
+currently both a VM domain contract and a home for reusable site-authority
+substrate. Over time, reusable pieces should move into shared kit
+(`site_authority`, allocation lifecycle, capacity clients), while VM,
+bare-metal, pod, or other provisioner adapters implement named domain
+contracts. Compatible domains may intentionally share a contract, such as a
+future leased-access contract, but that should be explicit shared kit rather
+than accidental coupling through another domain's API.
 
 ---
 
@@ -1164,7 +1638,7 @@ Only mounted when `mock` is in `ACTIVE_PROFILES`. Never present in production or
 
 Provides an HTTP API for configuring `ProgrammableMockAnsibleService` rules and waiting for job lifecycle events without polling loops.
 
-In provisioning-service integration tests, `/test/*` callers use a fresh
+In arkhai-vms-provisioning integration tests, `/test/*` callers use a fresh
 `ProgrammableMockAnsibleService` wired through `container.resolved_ansible_service`
 for the lifetime of the test client. The regular provisioning API integration
 fixtures may still use a `MagicMock` at the Ansible subprocess boundary when a
@@ -1222,17 +1696,16 @@ Rules are evaluated in insertion order. The first rule whose `match` dict is a s
 | What VMs exist on the host? | Submit a `list` job, check `result` when succeeded |
 | What resources are available on the host? | Submit a `check` job |
 | What are the resource usage stats for a running VM? | Submit a `monitor` job |
-| Did the lease-end cleanup actually run? | SSH to KVM host: `cat /var/log/vm-lease-end/<vm_name>/lease_end_*.log` — no API visibility |
-| What `at` jobs are pending on the host? | SSH to KVM host: `atq` — no API visibility |
+| Did VM teardown run? | `GET /jobs/{id}` + `GET /jobs/{id}/logs` for the `vm_remove` job |
 | Is a VM stuck in `running` state in Ansible mid-job? | `GET /api/v1/jobs/{id}` — `process_id` field gives the Ansible PID (same container as the API) |
 
 ---
 
 **Key source layout:**
 ```
-provisioning-service/src/
-├── controllers/                # Handles Http Routing concerns.
-├── services/                   # For internal business logic
+domains/vms/provisioning/service/src/
+├── controllers/                # HTTP routing, OpenAPI docs, response mapping
+├── services/                   # Business logic, Ansible job construction, queue use
 ├── models/                     # Request and Response objects for controllers
 ├── middleware/
 │   ├── auth.py                 # StorefrontAuthMiddleware (shared X-Admin-Key gate)
@@ -1244,7 +1717,7 @@ provisioning-service/src/
 │   ├── config.yml              # Environment schema (mostly empty — structure documentation)
 │   ├── config-docker.yml       # IaC paths + ansible_cfg for standalone container runs
 │   └── config-local.yml.example  # Developer override template (copy to config-local.yml)
-├── container.py                # dependency-injector DeclarativeContainer
+├── container.py                # dependency-injector DeclarativeContainer; controllers receive resolved services via Depends
 ├── config.py                   # Profile-aware dynaconf loader
 ├── settings.toml               # Committed base defaults
 └── main.py                     # FastAPI app + lifespan (starts job processing loop)
@@ -1374,9 +1847,353 @@ GET    /api/v1/hosts/{host}/connectivity   Run ansible -m ping
 
 ---
 
-### `compute-provisioning-iac` (submodule)
+#### Physical Settlement Scheduler and FulfillmentProvider Architecture *(design finalized; implementation in POOLS-1 through POOLS-5)*
 
-**Role:** Infrastructure-as-code for the physical layer. A git submodule.
+The provisioning service separates **scheduling** from **fulfillment**:
+
+```text
+PhysicalSettlementScheduler.select_resource(...)
+    -> atomically binds the agreement/allocation to a settlement resource
+
+FulfillmentProvider.create(...)
+    -> performs provider-specific operations against the selected resource
+```
+
+This boundary prepares the system for multiple physical settlement markets —
+bare metal, Kubernetes pods, power, storage, bandwidth, and VM-like compute —
+without turning any one provider into the generic lifecycle model. The VM
+service keeps its Ansible implementation, but the generic machinery should be
+usable by future domain provisioning services without inheriting VM or Ansible
+vocabulary.
+
+**`PhysicalSettlementScheduler`:**
+
+The scheduler owns placement. It receives a physical settlement request and
+selects the settlement resource that will satisfy it. It must be durable and
+idempotent by `allocation_id` so retries, process crashes, and duplicate job
+delivery do not create multiple physical bindings.
+
+```python
+from dataclasses import dataclass
+from typing import Any
+
+@dataclass(frozen=True)
+class PhysicalSettlementRequest:
+    allocation_id: str
+    agreement_id: str
+    market: str
+    terms: dict[str, Any]
+    pool_id: str | None = None
+    resource_id: str | None = None
+
+@dataclass(frozen=True)
+class SettlementResource:
+    settlement_resource_id: str
+    pool_id: str
+    resource_kind: str
+    provider: str
+    attributes: dict[str, Any]
+
+class PhysicalSettlementScheduler:
+    async def select_resource(
+        self,
+        request: PhysicalSettlementRequest,
+    ) -> SettlementResource:
+        """Atomically bind request.allocation_id to a settlement resource.
+
+        Repeated calls for the same allocation_id return the existing binding.
+        """
+        ...
+```
+
+`select_target_resource(...)` is also acceptable as an implementation name
+where call-site readability benefits from emphasizing that the selected
+resource is the fulfillment target. Avoid the noun `SettlementTarget`; the
+preferred domain noun is **Settlement Resource**.
+
+Specific-resource agreements are valid: if the seller lists concrete resources
+and allows the buyer to choose one, the request can carry `resource_id`. That
+means the buyer made the scheduling decision with seller permission. The normal
+fungible-capacity path carries pool/capacity attributes, and the scheduler
+selects the settlement resource after the capacity reservation is accepted.
+
+**`FulfillmentProvider` ABC:**
+
+The provider owns operations, not placement. It receives a selected settlement
+resource and performs create/status/teardown for that resource. A provider may
+validate that the selected resource is usable, but it must not independently
+select or substitute a different resource without returning to the scheduler
+boundary.
+
+```python
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Any
+
+@dataclass
+class FulfillmentResult:
+    """Provider result persisted on the settlement record."""
+    provider_metadata: dict[str, Any]
+    credentials: dict[str, Any]
+
+@dataclass
+class ProviderStatus:
+    state: str           # "running" | "stopped" | "gone" | "unknown"
+    detail: str | None = None
+
+class FulfillmentProvider(ABC):
+    """Minimum contract for any physical settlement provider.
+
+    The identity key is allocation_id. Infra-specific identifiers are
+    provider metadata, not generic lifecycle identity.
+
+    create() is idempotent on allocation_id: re-delivery must detect-or-create,
+    not double-provision. teardown() is idempotent: no-op if already gone.
+    status() and teardown() operate from the persisted settlement record.
+    """
+
+    @abstractmethod
+    async def create(
+        self,
+        request: PhysicalSettlementRequest,
+        resource: SettlementResource,
+    ) -> FulfillmentResult: ...
+
+    @abstractmethod
+    async def teardown(
+        self,
+        allocation_id: str,
+        resource: SettlementResource,
+        provider_metadata: dict[str, Any],
+    ) -> None: ...
+
+    @abstractmethod
+    async def get_status(
+        self,
+        allocation_id: str,
+        resource: SettlementResource,
+        provider_metadata: dict[str, Any],
+    ) -> ProviderStatus: ...
+```
+
+The `release_delegate` injected into `LeaseLifecycleService` becomes a thin
+adapter around the selected provider's `teardown(...)`. The lifecycle state
+machine never learns whether the provider is Ansible, Kubernetes, storage,
+power, bandwidth, or another mechanism.
+
+**`ProviderRegistry`:**
+
+Maps pool/provider strings to `FulfillmentProvider` instances, constructed in
+the DI container at startup. The VM service starts as a degenerate singleton
+(`"ansible" -> AnsibleFulfillmentProvider`). New provider implementations extend
+the registry without adding provider branches to lifecycle code.
+
+```python
+class ProviderRegistry:
+    def __init__(self, providers: dict[str, FulfillmentProvider]) -> None:
+        self._providers = providers
+
+    def require(self, provider: str) -> FulfillmentProvider:
+        if provider not in self._providers:
+            raise KeyError(f"No provider registered for '{provider}'")
+        return self._providers[provider]
+```
+
+**Ansible fulfillment provider and `AnsiblePoolConfig`:**
+
+The Ansible implementation owns Ansible variable construction, job queue
+dispatch, playbook result normalization, and SSH credential extraction. It does
+not own scheduling. It receives a `SettlementResource` that identifies the host
+or host-like resource selected by the scheduler, then runs the configured
+playbook against that resource.
+
+Pool-level variation in data center infrastructure (different FRP servers,
+network bridges, firewall topologies, available utilities) is expressed via
+`AnsiblePoolConfig`, resolved from the `ansible_pool_configs` table at execution
+time. Different pools get different playbooks and extra_vars without requiring a
+new provider type:
+
+```python
+@dataclass
+class AnsiblePoolConfig:
+    playbook_path: str
+    inventory_group: str
+    extra_vars: dict[str, Any]
+```
+
+The mock seam for tests stays at the Ansible layer: `ProgrammableMockAnsibleService`
+is selected by the `mockMode` profile flag inside the Ansible provider, not
+promoted to the `FulfillmentProvider` level. The `/test/*` test controller and
+the e2e gate pattern are unchanged.
+
+**Physical settlement job shape:**
+
+The job submitted at settlement time carries a `PhysicalSettlementRequest` with
+either `pool_id` (fungible) or `resource_id` (specific-resource agreement). The
+scheduler resolves that request to a `SettlementResource`; the provider executes
+against the selected resource.
+
+```python
+@dataclass
+class PhysicalSettlementJobSpec:
+    request: PhysicalSettlementRequest
+```
+
+**Settlement record metadata envelope:**
+
+Provider-specific data should not leak into generic lifecycle columns. Persist a
+small stable envelope and put operational details under provider metadata:
+
+```python
+@dataclass
+class SettlementRecord:
+    allocation_id: str
+    agreement_id: str
+    market: str
+    pool_id: str
+    provider: str
+    resource: SettlementResource
+    provider_metadata: dict[str, Any]
+    credentials_ref: str | None
+    state: str
+```
+
+`resource` records what was selected for settlement. `provider_metadata` records
+what the provider learned or created while executing settlement. Sensitive access
+material should be referenced where possible rather than stored inline.
+
+**Error surface for settlement:**
+
+The planned failure taxonomy is intentionally broader than the initial VM path
+so future markets can reuse it. Names may be refined during implementation, but
+each failure must classify as retryable, terminal, or operator-action-required.
+
+- `pool_not_found`
+- `pool_disabled`
+- `pool_exhausted`
+- `resource_unavailable`
+- `target_resource_missing` / `settlement_resource_missing`
+- `provider_not_found`
+- `provider_unavailable`
+- `provider_config_invalid`
+- `settlement_already_bound`
+- `fulfillment_create_failed`
+- `fulfillment_status_failed`
+- `fulfillment_teardown_failed`
+- `credentials_publish_failed`
+- `capacity_projection_stale`
+
+**Resource pools data model:**
+
+```sql
+-- Infrastructure routing metadata; lives in provisioning-owned storage only.
+-- Not in the storefront, which owns capacity projection rather than physical
+-- resource inventory.
+
+CREATE TABLE resource_pools (
+    id          TEXT PRIMARY KEY,
+    label       TEXT NOT NULL,
+    provider    TEXT NOT NULL,
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+    policy_tags JSON NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE ansible_pool_configs (
+    pool_id         TEXT PRIMARY KEY REFERENCES resource_pools(id),
+    playbook_path   TEXT NOT NULL,
+    inventory_group TEXT NOT NULL,
+    extra_vars      JSON NOT NULL DEFAULT '{}'
+);
+
+-- hosts.pool_id FK; nullable during migration. Existing hosts backfill
+-- to a system-created default pool ("default") in POOLS-1 migration.
+ALTER TABLE hosts ADD COLUMN pool_id TEXT REFERENCES resource_pools(id);
+```
+
+The provisioning service's `resource_pools` and the storefront's
+`compute_capacity_pools` are different tables at different layers. A storefront
+capacity pool member maps to a provisioning pool via explicit configuration or
+resource attributes, not a foreign key between services.
+
+**Pool listing authority — unresolved design point:**
+
+Something in system configuration must determine how resources are listed:
+resource-by-resource, resource-pool-level, provisioning-service-level, or
+storefront-level. Specific-resource listings are allowed, but should be treated
+as an explicit seller opt-in because they grant buyers placement choice. This is
+left as a POOLS design-review topic rather than prematurely encoding the answer
+in the architecture.
+
+**Pool seeding and admin surfaces:**
+
+Pool definitions are YAML because pool configs have nested structure that flat
+formats cannot express. The admin API should include normal CRUD plus import and
+validate paths:
+
+```text
+GET    /api/v1/admin/pools
+POST   /api/v1/admin/pools
+GET    /api/v1/admin/pools/{pool_id}
+PUT    /api/v1/admin/pools/{pool_id}
+PATCH  /api/v1/admin/pools/{pool_id}
+DELETE /api/v1/admin/pools/{pool_id}   # disable/soft-delete by default
+POST   /api/v1/admin/pools/import
+POST   /api/v1/admin/pools/validate
+```
+
+Import guardrails:
+
+- Validate-only mode before apply.
+- Import returns a diff: created, updated, disabled, unchanged, rejected.
+- Reset must not remove or mutate pools with active reservations or settlements
+  unless an explicit force path is designed with operator-action semantics.
+- Reset should prefer disabling/deprecating removed pools over hard deletion.
+- Import is idempotent.
+
+YAML format example:
+
+```yaml
+pools:
+  - id: hetzner-eu-central
+    label: Hetzner EU Central
+    provider: ansible
+    policy_tags:
+      region: eu
+      provider: hetzner
+    ansible_config:
+      playbook_path: playbooks/vm-operations-frp.yaml
+      inventory_group: kvm_hosts_eu
+      extra_vars:
+        frp_server_addr: frp.eu.example.com
+        network_bridge: virbr0
+  - id: equinix-us-west
+    label: Equinix US West
+    provider: ansible
+    policy_tags:
+      region: us-west
+      provider: equinix
+    ansible_config:
+      playbook_path: playbooks/vm-operations-direct.yaml
+      inventory_group: kvm_hosts_usw
+      extra_vars:
+        network_bridge: br0
+```
+
+**Capacity reservation expiry — unresolved design point:**
+
+POOLS must define how capacity reservations expire and recover across crashes.
+Open questions include whether reservation expiry is driven by a storefront
+watchdog, provisioning-side capacity authority, database TTL/reaper, explicit
+release calls, or a combination; what happens if the storefront crashes after
+reservation but before settlement submission; and whether reservations can be
+future-facing like leases. These questions are intentionally left for design
+review before implementing the reservation/scheduler boundary.
+
+---
+
+### `domains/vms/provisioning/iac`
+
+**Role:** Infrastructure-as-code for the physical layer.
 
 Contains Ansible roles and Terraform modules used by both the provisioning worker (at runtime) and operators (to set up seller hardware).
 
@@ -1386,7 +2203,7 @@ Contains Ansible roles and Terraform modules used by both the provisioning worke
 - `frp-setup` — sets up FRP server (fast reverse proxy) for buyer network access to VMs
 - `docker-app` — deploys Docker-based apps to a host
 
-**Terraform modules:** GCP-focused (Cloud Run, artifact registry, service accounts, Redis, ZeroTier controller). Used for the production/staging/sandbox cloud deployment of the non-hardware services.
+**Terraform modules:** legacy cloud-focused modules for non-hardware service deployment support. These are separate from the resource-pool / physical settlement architecture and are not a driver for POOLS work.
 
 ---
 
@@ -1475,7 +2292,7 @@ The provisioning client (`service/clients/provisioning.py`) normalizes the resul
 
 **VM teardown and FRP cleanup:**
 
-The cleanup script written to `/usr/local/bin/cleanup_vm_<name>.sh` on the KVM host at create time includes removal of the FRP proxy block (sed delete on the `ANSIBLE MANAGED BLOCK FOR VM <name>` markers in `frpc.toml`) and a `frpc` restart. This runs as part of the `at`-scheduled lease expiry. The FRP server retains no persistent state — the proxy entry disappears as soon as `frpc` reconnects without it.
+The cleanup script written to `/usr/local/bin/cleanup_vm_<name>.sh` on the KVM host at create time includes removal of the FRP proxy block (sed delete on the `ANSIBLE MANAGED BLOCK FOR VM <name>` markers in `frpc.toml`) and a `frpc` restart. This runs as part of the `vm_remove` Ansible action when the provisioning-service watchdog tears down an expired lease. The FRP server retains no persistent state — the proxy entry disappears as soon as `frpc` reconnects without it.
 
 **Fallback mode (no FRP):**
 
@@ -1518,9 +2335,9 @@ storefront server (override either with `--config <path>`).
 
 | CLI | Package | Role | Top-level groups |
 |---|---|---|---|
-| `market` | `buyer/` | Buyer runtime (pure HTTP client) | `buy`, `negotiate`, `order`, `escrow reclaim`, `network join/get-peers`, `config`, `logs` |
-| `market-storefront` | `storefront/` | Seller runtime | `register`, `serve`, `provide`, `escrow claim/refund`, `portfolio import-csv`, `network join/get-peers`, `config`, `logs` |
-| `market-policy` | `policy/` | Policy authoring tool | `train`, `eval`, `export` |
+| `market` | `domains/vms/buyer/` | Buyer runtime (pure HTTP client) | `buy`, `negotiate`, `order`, `escrow reclaim`, `network join/get-peers`, `config`, `logs` |
+| `market-storefront` | `domains/vms/storefront/` | Seller runtime | `register`, `serve`, `provide`, `escrow claim/refund`, `portfolio import-csv`, `network join/get-peers`, `config`, `logs` |
+| `market-policy` | `kit/policy/` | Policy authoring tool | `train`, `eval`, `export` |
 
 The two runtimes (`market`, `market-storefront`) share `network join`
 and `get-peers` because each participant manages their own ZeroTier
@@ -1547,24 +2364,457 @@ See `docs/cli-redesign-plan.md` for the rationale behind the current
 
 ---
 
+## Settlement Lifecycle — plans, claims engine, heartbeats
+
+Settlement is a lifecycle, not an event. A `Receipt` is not terminal:
+collection can depend on conditions that flip long after fulfillment,
+possibly repeatedly. The machinery below is the current state of that
+model; future plan shapes (interval escrows, penalty bonds, true
+heartbeat-gating, fiat) are planned in `design-remaining-work.md`.
+
+### Arbiters are microconditions
+
+Alkahest escrow demands are arbiter trees:
+
+- `attestation-properties/RecipientArbiter.sol` — synchronous: checks a
+  property of the fulfillment attestation; collection can succeed in
+  the same flow that created the fulfillment. This was the only arbiter
+  the original flow knew, which is why it assumed immediate settlement.
+- `TrustedOracleArbiter.sol` — asynchronous: `checkObligation` returns
+  whatever the named oracle last `arbitrate()`d for the
+  `(obligation, demand)` key; collection is impossible until an
+  off-chain actor acts.
+- `logical/AllArbiter.sol` — conjunction: the obligation passes only
+  when every microcondition passes.
+
+### The plan carrier (mechanism-neutral)
+
+`market_core.schemas.SettlementObligation`/`SettlementPlan` carry the
+lifecycle universals as typed fields — payer/claimant, amount/asset,
+expiration, condition set — plus a `{mechanism, params}` envelope
+whose deterministic interpretation lives in kit codecs, the same
+pattern as the `ProvisionTerms` `{kind, payload}` envelope. Alkahest is
+the first mechanism, not a structural assumption: a fiat escrow follows
+the same lifecycle with a different identifier scheme (provider +
+payment refs instead of chain + contract) and different verification
+semantics (provider-API check instead of byte-compare), so the carrier
+must not bake in the alkahest call shapes. The flat `EscrowTerms`
+shapes survive as marked legacy coercions into the envelope and leave
+with the client-wheel wire bump.
+
+The determinism contract extends unchanged in kind: both sides derive
+the same *plan* from the shared message history. The `/negotiate/*`
+responses, seller artifacts, buyer outcome, deal context, and run-log
+all carry `settlement_plan` (the flat terms list remains as a legacy
+wire mirror). `kit/alkahest/plans.py` is the first mechanism codec:
+structural carrier mirror, envelope↔terms converters, deterministic
+plan materialization.
+
+### kit/alkahest claims machinery
+
+`market_alkahest.claims` extends the arbiter registry with
+TrustedOracleArbiter and AllArbiter codecs (explicit demand data, both
+directions), oracle wrappers (`request_arbitration`, oracle-side
+`arbitrate`, a timeout-bounded `arbitration_status` probe), and
+`collect_escrow_with_codec` — the collection mirror of the reclaim
+dispatcher. `market_alkahest.txlock.chain_tx_lock(chain)` serializes
+all of a process's same-wallet submissions per `(event loop, chain)`:
+alkahest_py fetches the account's transaction count per submission with
+no cross-call coordination, so concurrent submitters (settlement
+fulfillment, the claims sweep, arbitration requests, admin reclaims,
+oracle arbitration) hold the lock across each submission to avoid
+`nonce too low` races.
+
+### Seller engine: the claims engine
+
+`core_storefront.settlement_lifecycle.ClaimsEngine` is the persisted
+claim state machine (`awaiting_conditions → collectable → collected /
+abandoned`) with backoff scheduling, expiration-grace abandonment,
+hook-owned `mechanism_state` scratch, and stage-event hook points. It
+drives injected per-mechanism `check_conditions`/`collect` hooks and
+never learns which mechanism it is driving — same altitude as
+`negotiation_sync`/`stage_log`: mechanics, no vocabulary. The alkahest
+hooks live in `domains/vms/settlement/claims.py` (recipient → ready;
+trusted-oracle → request-once + `ArbitrationMade` poll; all_arbiter
+recurses). The storefront embeds the engine as a watchdog-style startup
+task (`claims_engine_loop`) over the `settlement_claims` table;
+settlement jobs submit a claim on fulfillment, with the obligation
+re-materialized from the pinned proposal. Arbitration is engine-owned:
+`submit_compute_fulfillment` submits the fulfillment and nothing else —
+the engine requests arbitration once per fulfillment (recorded in
+`mechanism_state`), with the oracle taken from the escrow's decoded
+demand tree.
+
+### Buyer engine: `market service`
+
+`market service --from <run-id>`
+(`domains/vms/buyer/service_cli.py`) is the buyer-side servicing loop
+over the deal run-log: it emits signed heartbeats at the plan's agreed
+cadence (`service_terms.heartbeat`) until the obligation's expiration,
+then attempts post-expiry reclaim when the seller never collected
+(`--once` for single-shot, `--no-reclaim` to opt out).
+
+### Heartbeat channel
+
+`core_storefront.heartbeats` owns the mechanics: per-deal strict
+monotonicity on the signed timestamp (replay protection covering
+exactly what the request signature covers), skew bounds, the store
+protocol, and the `heartbeat_gap_seconds` primitive lifecycle policies
+read. `POST /api/v1/deals/{escrow_uid}/heartbeat` rides the standard
+signed-request verification plus a binding check against the deal's
+recorded buyer, persists to `deal_heartbeats`, and emits
+`service`-stage events. `domains/vms/settlement/heartbeats.py` defines
+the first payload vocabulary (`vms.heartbeat.v1`: bare liveness +
+status). What a heartbeat attests and how evidence bundles are built is
+domain policy; the endpoint shell is core mechanics.
+
+### First lifecycle policy: oracle-gated single escrow
+
+A seller opts in via `oracle_gated_listings` +
+`trusted_oracle_address`; listings then advertise a
+`TrustedOracleArbiter(oracle)` demand, which flows through the codec
+registry into materialized escrows, and the claims engine requests
+arbitration once and polls. The publish path rejects a missing oracle
+and rejects the seller's own wallet: **the oracle must be a party that
+does not benefit from the decision** — a seller-operated oracle gates
+nothing (the collector would authorize its own collection), a
+buyer-operated one is a unilateral payment hold-up. The oracle is
+assumed to `arbitrate()` true at end of lease unless a dispute was
+raised — manual for now via the kit's `alkahest-oracle` CLI
+(arbitrate/status); the oracle *service* is future work.
+
+### Filing and the capacity coupling
+
+Core owns the lifecycle engine mechanics and the heartbeat shell; kit
+owns one codec package per settlement mechanism; the domain owns which
+conditions a deal uses, the heartbeat schema, and oracle/mechanism
+selection. The lifecycle is also what ends a deal early: on
+`claim_abandoned` the storefront truncates the deal's lease to now
+through the capacity client, handing teardown to the ledger's expiry
+machinery (next section).
+
+---
+
+## Capacity and the Site Authority
+
+One hardware pool can sell through multiple market domains, and one
+storefront can aggregate multiple sites. Both require the authoritative
+capacity ledger to live outside any storefront. "Domain" splits into
+two deliberately decoupled axes: the **market schema domain** (VM
+listings vs inference listings — vocabulary of listings, negotiation,
+plans; chosen per storefront) and the **resource domain** (compute
+hosts: GPUs/RAM/disk/region — what the ledger counts; chosen per site).
+Market-domain coupling appears at exactly two pluggable joints:
+offer → claim conversion (a domain hook on the storefront side) and
+job-kind → executor (a plugin at the site).
+
+### Components and authority
+
+| Component        | Owns (authoritative) | Domain axis | Deployment |
+| ---------------- | -------------------- | ----------- | ---------- |
+| Site authority   | per-site resource ledger: resources, allocations (incl. lease timing), job queue, watchdog/scheduler; emits all events | resource domain only; no market schema | hosted by the provisioning service process; one per datacenter / failure domain |
+| Executor         | nothing durable — pulls jobs, drives infra, reports status to the ledger | one per fulfillment kind | in-process plugin of the site authority |
+| Aggregator       | nothing authoritative — fungible pool view over N sites, placement/routing, listing derivation | follows its storefront's market domain | library module inside the storefront process |
+| Storefront       | market state: listings, pricing/terms, negotiation threads, deals, settlement lifecycle | one market schema domain per process | core-owned executable with domain adapter |
+
+The ledger is its own service boundary because it is the serialization
+point for reserves across processes and allocations outlive any deal
+flow; the aggregator is deliberately *not* one (soft state + per-seller
+policy — an HTTP hop to your own cache buys nothing). The storefront
+has no embedded ledger fallback: it cannot fulfill without the
+provisioning service anyway, so a local ledger would be duplicated
+responsibility (the transitional embedded mode was deleted once the
+service stood; the storefront's SQLite holds market state only).
+
+### Current implementation
+
+The site-authority scaffold is the shared `arkhai-kit-site` package
+(`kit/site/`, import `market_site`): the ledger
+(`CapacityLedgerService`), its tables — `site_resources` /
+`site_allocations` (the storefront's hold and the lease's temporal
+tail as one row, TTL soft holds supported at the ledger) plus the
+`capacity_events` pull feed — and the `/api/v1/capacity/*` router
+(resources PUT/GET, `snapshot`, `probe`, `reservations`,
+`allocations/{id}/commit`, `releases`,
+`allocations/{id}/truncate-lease`, `allocations`, `events`). A hosting
+service mounts the tables on its engine and the router on its app; the
+VM provisioning service is the first host (the API-credits service is
+the second). The ledger is domain-neutral: claims request a unit count
+via the generic `units` key (`gpu_count` is the VM alias), and
+domain-specific eligibility is expressed in claims (`vm_host` for VM
+slices, `physical_host_id`/`allocation_mode` for bare-metal host
+claims). `required_attributes` remains only as an optional coarse guard
+for single-domain hosts. `commit` without a `lease_end_utc` produces an
+open-ended lease the watchdog never sees (prepaid credits don't expire).
+The surface mirrors the `CapacityClient` contract defined in
+`core_storefront.capacity`
+(snapshot/probe/reserve(+TTL)/commit/release/truncate-lease/subscribe,
+plus the anonymous versioned `CapacityDelta` carrier and in-process
+event bus). The storefront reaches it through
+`market_storefront.services.capacity_client.RemoteCapacityClient` with
+a per-site event-feed poller; storefront inventory mirrors into the
+ledger at startup and after admin imports/patches, and operator
+reservations land in the ledger like every other hold.
+
+`core_storefront.aggregation.AggregateCapacityClient` is the soft-state
+view over N hard-state site ledgers, implementing the same
+`CapacityClient` protocol it consumes: site-tagged union reads;
+reserves walk sites in placement-policy order (`fill_first`,
+`most_available`) and fall back on refusal — `None` only when every
+member refuses; writes route to the owning site. `[capacity.sites]` in
+storefront.toml names the authorities (the default/first site comes
+from `provisioning.service_url` and is the home site, where local
+inventory mirrors); one site is the degenerate aggregation.
+
+**Fungibility rule:** resources may share a pool exactly when no
+attribute advertised or negotiable in the listing schema distinguishes
+them (if `region` is in the listing, two regions cannot pool). Pooling
+is therefore a market-domain decision — which is why the aggregator
+belongs to the storefront, not to a site (a site cannot know it is
+interchangeable with another) and not to a neutral shared service
+(interchangeability is a commercial judgment per seller).
+
+### Event model
+
+Two kinds of notification with different delivery semantics:
+
+- **Deal-scoped events** (provisioning failed / capacity released *for
+  allocation X*): point-to-point to the storefront that owns the deal.
+  They carry deal context and feed the stage log, failure policy, and
+  the claims engine. Never broadcast — noise at best, a cross-seller
+  leak at worst.
+- **Capacity-scoped events** (availability for a host/pool changed, for
+  *any* reason): fanned to all subscribed storefronts via a versioned
+  pull feed, **anonymous** — new availability plus a version number,
+  never whose deal caused it. (Poll-based subscription, not a message
+  broker — storefronts tail `GET /api/v1/capacity/events?after=N` and
+  resync from a full snapshot on version gap.) Aggregators refresh a
+  view (versioned deltas, pull-snapshot resync on version gap); they do
+  not reconstruct a ledger.
+
+```
+executor ──job status──▶ site authority (ledger txn)
+                              ├─ deal event ────────▶ owning storefront
+                              └─ capacity delta ────▶ all subscribed storefronts
+                                                       └ aggregator refresh →
+                                                         derived-listing reconcile →
+                                                         publish/close to registries
+```
+
+Stale-listing closure is each storefront's *reaction to capacity
+deltas*, not an inline step after its own reservation — necessarily so,
+because another storefront's sale also invalidates your listings.
+
+### Reservation protocol
+
+Negotiation-time availability is advisory; reservation is
+authoritative (the inventory guard works off a round-start snapshot and
+tolerates staleness):
+
+1. **Round start:** the seller round hook feeds the inventory guard
+   from `capacity.snapshot()`.
+2. **Terms accepted:** a TTL'd soft hold (`capacity.reserve` with
+   `ttl_seconds`; `hold_ttl_seconds` defaults to 900, 0 disables)
+   closes the window where escrow settles but capacity is gone.
+   Unsettled deals lapse at the ledger.
+3. **Settlement:** commits the held allocation into a lease *before*
+   provisioning — securing capacity up front removes the
+   lapse-mid-provision race; the post-provision commit refreshes the
+   window. Lapsed/refused holds fall back to a plain atomic reserve.
+   Cross-storefront contention resolves here, in one site's local
+   transaction.
+4. **Fulfillment:** the job runs against the allocation; the lease tail
+   attaches to the ledger row; teardown at expiry or early termination
+   (lease truncation from the settlement lifecycle).
+
+### Topology
+
+```
+VM storefront ────┐                 ┌── site authority, DC-A
+  [aggregator:VM] ├──── claims ─────┤   [ledger+jobs | vm-exec, …]
+inference sf ─────┤    (neutral)    ├── site authority, DC-B
+  [aggregator:inf]┘                 └   [ledger+jobs | vm-exec, …]
+```
+
+M storefronts × N sites; each aggregator subscribes to its seller's
+sites; each site serves whichever storefronts sell from it; neither
+count constrains the other. The second executor kind and the second
+market-domain storefront are the remaining proof of this topology
+(`design-remaining-work.md` § 3), along with its open edges: job
+submission still uses the VM-specific `/hosts/{host}/vms` API rather
+than a job-kind queue keyed by `allocation_id`, and deal-scoped events
+route to the storefront named in service settings rather than the
+`deal_ref` recorded at reserve time.
+
+---
+
+## API-credits market domain
+
+The second market schema: **prepaid API credits** sold against a
+token-gated service. A listing advertises a service at a unit price per
+token; the buyer picks a quantity and whether the credits land on a new
+API key or top up an existing one; settlement is the standard escrow
+flow; the deliverable is a credit grant in a seller-side credits service,
+enforced by drop-in middlewares (Python / TypeScript / Rust) in the
+gated service. It is the second instance that made the "wait for a
+second schema" seams concrete: schema identity for registries
+(`filter-spec.yaml`'s `schema: {id, version}` header), the second
+storefront composition root, non-per-hour price scaling, and the
+site-authority ledger extraction (`market_site`). Concept modules live in
+`domains/apicredits/{listings,negotiation,settlement}`; the packages are
+in the layout table above (`arkhai-apicredits-{buyer,storefront,service,
+middleware,sample-app}`).
+
+### Decisions
+
+- **A token is a prepaid credit.** A key carries a balance; the gated
+  service's middleware decrements it per request (or per request-cost).
+  Quantity is the unit of purchase; price is per token.
+- **Vocabulary.** The sold asset is an "API token" in listings and
+  prose; the consumable count in code/DB/middleware is **credits /
+  balance** — "token" unqualified is already ERC-20 vocabulary, and the
+  payment side of an API-credit deal *is* an ERC-20/native escrow, so the
+  split keeps "token" from meaning two things in one wire message.
+- **Quota is sellable inventory**, capacity-managed through the existing
+  `/api/v1/capacity/*` contract: the seller configures sellable credit
+  inventory, terms acceptance places a TTL hold for the quantity,
+  settlement commits it, fulfillment issues the grant. v1 quota is a
+  finite supply that selling decrements — not an outstanding-liability
+  cap that consumption replenishes (a later seller-policy upgrade over
+  the same ledger).
+- **Middlewares consume online** against the credits service, with a
+  short-TTL verify cache and batched decrements (batching bounds a small
+  overdraft window; the flush threshold is the bound). One source of
+  truth; revocation is immediate; the gate is thin in all three
+  languages and pinned by `middleware/conformance/session.json`.
+- **Usage identity and market identity are separate** (see Key
+  ownership): a gated-service request authenticates by the bearer API
+  key alone, while top-up rights bind to the purchasing wallet.
+
+### Market shape
+
+**Listing.** `offer_resource` is opaque to the registry, schema-typed by
+the plugin: `{kind: "api_credits.v1", service_name, description,
+openapi_url, base_url}`. `accepted_escrows` carries the unit price as a
+rate with a `per: "token"` unit. The buyer renders `openapi_url` in
+listing detail so it can inspect what the credits gate.
+
+**Negotiation.** Same round/chain model. The plugin owns *what* is
+bought — `--quantity N` and the key disposition (`--new-key` |
+`--key-id <id>`), fixed at round 0 in
+`ProvisionTerms{kind: "api_credits.v1", payload: {quantity, key}}`. The
+policy owns *how it is paid*: the negotiated scalar is `quantity × unit
+rate`, and the per-unit→absolute translation lives in the buyer's
+negotiation client (`negotiate_with_seller` scales by an explicit
+`unit_count`), not the CLI bodies — the non-per-hour trigger that also
+moved the VM plugin's per-hour scaling to the same seam. `listed_price`
+is the default (bound = quantity × advertised rate). Seller guards:
+`credit_quota_guard` (requested quantity ≤ available units in the
+captured capacity snapshot) and `key_owned_by_buyer_wallet` for
+existing-key claims (see Key ownership).
+
+**Settlement.** Standard scalar escrow for the absolute amount,
+RecipientArbiter immediate settlement by default. Fulfillment is an
+issuance job against the credits service: commit the quota hold, create
+the key (new) or locate it (existing), write the credit grant
+(`escrow_uid` UNIQUE → idempotent under retry), and return
+`{key_id, secret?}` once through the settle-status / run-log channel
+(the bearer secret only for new keys, delivered once). The storefront's
+quota-backed listings derive from a quota resource the way VM slices
+derive from pool members, closing on exhaustion and reopening on release
+via the capacity event feed. **No lease tail:** credits don't expire in
+v1, so committed allocations carry no `lease_end_utc` and the ledger's
+expiry/watchdog machinery is dormant for this domain (credit expiry, if
+wanted later, maps onto lease truncation — which is why the shared
+ledger is reused rather than a bespoke quota table).
+
+### Key ownership
+
+Two operations, only one of which touches the marketplace: **usage**
+(every request to the gated service) authenticates by the API key alone;
+**top-up** (assigning credits to an existing key) is a marketplace
+negotiation, which is already wallet-signed. So binding top-up rights to
+the purchasing wallet adds zero new key-management burden in the
+purchase path.
+
+The decision: **bearer usage keys**, with a **scheme-tagged ownership
+claim** on the key record (`owner: (scheme, identifier)`, the same shape
+as the registry's publisher identity), and **enforcement as negotiation
+middleware** — key ownership is validated by the chain against captured
+side inputs, exactly like price, escrow shape, and duration.
+
+- `key_owned_by_buyer_wallet` *(seller default, shipped)* — a round-0
+  guard structurally identical to the inventory guard: it consults a
+  captured key→owner lookup (the credits-service `GET /keys/{id}`) and
+  rejects with `key_not_owned` unless the key's `wallet` owner equals
+  the negotiation's signing wallet. **Free** — the wallet-signed
+  negotiation *is* the possession proof; no extra round, no buyer
+  config. New keys auto-bind `owner = purchasing wallet`.
+- `key_possession_challenge` / `answer_key_challenge` *(ed25519,
+  planned)* — for asymmetric owners the seller *counters* with a nonce
+  (`key_challenge` in the message — message content is schema
+  vocabulary), then verifies the buyer's signature over
+  `(nonce, negotiation_id, terms hash)` (so it cannot replay across
+  negotiations) before deferring to pricing; `key_proof_invalid`
+  rejects. The buyer mirror ships now as an inert pass-through — `None`
+  unless challenged, and a clean `key_challenge_unanswerable` exit (not
+  chain exhaustion) when challenged with no owner key configured.
+- **Open top-up is the absence of an ownership guard** in the seller's
+  chain, not a mode flag — a seller wanting gifting/team pooling omits
+  the guard per listing or per escrow kind.
+
+**The guard is the interface, not the enforcement.** Negotiation-time
+checks are advisory (they work off a snapshot, and force-accept bypasses
+the chain); the issuance job re-checks the ownership claim
+authoritatively at grant time. The reject vocabulary
+(`key_not_found` / `key_not_owned` / `key_revoked` /
+`key_proof_invalid`) is shared between the negotiation guards and the
+service. `arkhai-kit-identity` owns the per-scheme signature primitives;
+core chain mechanics are untouched.
+
+---
+
 ## Deployment Topology
 
 ### Local Dev (compose)
 
+Compose is organized by domain — each market domain owns its runtime
+topology next to its code, and the chain is a separate, dev-only layer.
+The pieces assemble with Compose `include:`:
+
 ```
-compose/external.yml     — Anvil node + one-shot contract deployer (the "external"
-                           chain layer; in prod this is a live RPC, not run here)
-compose/registry.dev.yml — registry-service against the dev chain
-                           (compose/registry.yml is the operator-facing variant)
-compose/seller.yml       — storefront server + provisioning service (unified)
+compose.dev.yml                  — the shared dev chain: an Anvil node with the
+                                   Alkahest contracts pre-baked. Dev-only; a real
+                                   deployment points at a live RPC (and uses Helm,
+                                   not compose). The one thing every domain shares.
+domains/vms/compose.yml          — the VM compute market: two registry instances,
+                                   Bob's + Alice's storefronts, Redis, provisioning.
+domains/apicredits/compose.yml    — the API-credits market: the api_credits registry
+                                   instance, credits service, sample gated app,
+                                   credits storefront.
+docker-compose.yml               — full multi-domain stack (includes compose.dev.yml
+                                   + every domains/<d>/compose.yml). Bare
+                                   `docker compose up` — what the e2e expects.
+compose.vms.yml / compose.apicredits.yml
+                                 — single-domain wrappers (compose.dev.yml + one
+                                   domain), so a domain runs without the others:
+                                   `docker compose -f compose.vms.yml up`.
 ```
 
-There is no `compose/buyer.yml` — the buyer is the `market`
-CLI invoked from the host or another container, not a long-running
-service. The seller container reads its config from a TOML file
-mounted at `/etc/arkhai/storefront.toml` (set via `XDG_CONFIG_HOME=/etc`);
-the `.env` flow used by the previous symmetric topology has been
-retired.
+Domains are independent at runtime, mirroring the package split — you can
+sell VMs without the token-gated-API market and vice versa; each domain
+ships its own registry instance (its filter-spec *is* its published
+schema), storefront, and services. A domain's compose file is
+chain-agnostic except that its chain-touching services gate on a service
+named `anvil`, which the dev layer supplies; the per-file relative paths
+resolve against each file's own directory (Compose `include:` semantics).
+
+There is no buyer compose service — the buyer is the `market` CLI invoked
+from the host or another container, not a long-running service. The
+seller container reads its config from a TOML mounted at
+`/etc/arkhai/storefront.toml` (set via `XDG_CONFIG_HOME=/etc`); override
+`$VMS_BOB_STOREFRONT_CONFIG` / `$APICREDITS_STOREFRONT_CONFIG` to point a
+storefront at a different chain's config without editing the compose file.
 
 ### Production / Staging — Helm (`helm/`)
 
@@ -1580,8 +2830,8 @@ helm/
 ├── templates/
 │   └── tests/test-config.yaml  # Shared ConfigMap for helm test pods
 └── charts/
-    ├── test-env/           # Anvil node (condition: test-env.enabled)
-    ├── registry/           # registry-service (condition: registry.enabled)
+    ├── dev-env/           # Anvil node (condition: dev-env.enabled)
+    ├── registry/           # arkhai-core-registry (condition: registry.enabled)
     ├── storefront/         # storefront-service (condition: agents>0)
     ├── provisioning/       # Unified provisioning service (condition: provisioning.enabled)
     └── validate-contracts/ # Helm test: chain connectivity check
@@ -1591,7 +2841,7 @@ helm/
 
 | Subchart | Deployments | Services |
 |---|---|---|
-| `test-env` | 1 (Anvil) | 1 NodePort :8545 |
+| `dev-env` | 1 (Anvil) | 1 NodePort :8545 |
 | `registry` | 1 | 1 NodePort :8080 |
 | `storefront` | 1 | 1 NodePort :8001 |
 | `provisioning` | 1 (unified API + job loop) | 1 ClusterIP (:8081) |
@@ -1599,7 +2849,7 @@ helm/
 **Startup ordering** is enforced by init containers:
 - The storefront waits on RPC (`eth_blockNumber` poll) and registry (`/health` poll) before starting
 - The provisioning container has no init containers or startup dependencies
-- The test-env container has no init containers or startup dependencies
+- The dev-env container has no init containers or startup dependencies
 
 **Secrets:**
 - Storefront private key + wallet address → `Secret` per storefront, sourced from `values.yaml` `secret.privKey` / `secret.walletAddress`, or an externally pre-created secret
@@ -1625,7 +2875,7 @@ make unforward         # kill all port-forwards
 
 **Port-forward map** (local dev against a deployed cluster):
 ```
-localhost:8545  → test-env (Anvil RPC)
+localhost:8545  → dev-env (Anvil RPC)
 localhost:8080  → registry
 localhost:8001  → seller storefront
 localhost:8081  → provisioning API (also handles ansible inventory + connectivity endpoints)
@@ -1653,9 +2903,9 @@ emits two artifacts per agent:
   top-level `resources_csv_inline`) rendered as `storefront.secrets.toml`
 
 The runtime config tree is assembled by `dynaconf` in
-`storefront/src/market_storefront/utils/config.py`, which layers (highest
+`domains/vms/storefront/src/market_storefront/utils/config.py`, which layers (highest
 priority last): the committed defaults in
-`storefront/src/market_storefront/settings.toml`, the ConfigMap
+`domains/vms/storefront/src/market_storefront/settings.toml`, the ConfigMap
 `/etc/arkhai/storefront.toml`, the Secret
 `/etc/arkhai/storefront.secrets.toml`, and `STOREFRONT_*` environment
 variables. `settings.toml` documents every supported key and its default;
@@ -1689,7 +2939,7 @@ Wallet key, admin key, and inline resources CSV are in the Secret object;
 they rotate independently of non-sensitive config.
 
 **Notable gaps / fitness questions to investigate:**
-- `test-env.enabled: true` in the default values — in production this needs to be `false` and `global.rpc.*` overridden to point at a live chain
+- `dev-env.enabled: true` in the default values — in production this needs to be `false` and `global.rpc.*` overridden to point at a live chain
 - `replicaCount` exists for the storefront and provisioning API but running multiple replicas of either without shared persistent storage would be incorrect (RWO PVC permits one attached pod)
 
 **GKE Autopilot constraints:**
@@ -1719,14 +2969,14 @@ must be disabled for all GKE-hosted deployments:
 
 *Three delivery mechanisms, in priority order:*
 1. **`seller.resources_csv_inline`** (Helm) — raw CSV content injected via the per-agent Secret. Set via `make deploy RESOURCES_CSV_FILE=/path/to/resources.csv`, which passes `--set-file storefront.agents[0].secret.resourcesCsvInline=<path>` to `helm upgrade`. The CSV is stored in the Kubernetes Secret alongside the wallet key and rendered into the dynaconf profile that the storefront reads at startup. This is the production path — no CSV file ever touches the container image.
-2. **`seller.resources_csv_path`** (compose / local dev) — path to a CSV file on disk, bind-mounted into the container by `make deploy-storefront` via `RESOURCES_CSV_FILE` (defaults to `storefront/src/market_storefront/data/kvm1-machine.csv`). Used by the docker-run compose flow.
+2. **`seller.resources_csv_path`** (compose / local dev) — path to a CSV file on disk, bind-mounted into the container by `make deploy-storefront` via `RESOURCES_CSV_FILE` (defaults to `domains/vms/storefront/src/market_storefront/data/kvm1-machine.csv`). Used by the docker-run compose flow.
 3. **`POST /api/v1/admin/portfolio/resources/import`** — admin endpoint for runtime clobber. Accepts a CSV file upload and upserts regardless of current table state. Used for inventory updates without restarting the pod.
 
 *Startup seeding is idempotent*: if the resources table already has rows (e.g. from a previous startup or a prior import call), seeding is skipped. Pod restarts do not overwrite operator changes. To force a full re-seed, use the import endpoint.
 
 The full-deal e2e scenario uses the admin import path: it carries an inline CSV fixture and imports the exact compute row it needs through `SyncStorefrontClient.admin_import_resources()` during readiness. This keeps the test self-contained and prevents it from depending on `kvm1-machine.csv` being mounted into the storefront container.
 
-The CSV files in `storefront/src/market_storefront/data/*.csv` are excluded from the container image via `.dockerignore`. They exist in the source tree as reference/default inventory for local dev (used by the compose bind-mount path) but are not baked into the image.
+The CSV files in `domains/vms/storefront/src/market_storefront/data/*.csv` are excluded from the container image via `.dockerignore`. They exist in the source tree as reference/default inventory for local dev (used by the compose bind-mount path) but are not baked into the image.
 
 **Helm test pods:**
 - `validate-contracts` — verifies RPC connectivity and contract deployment (`-m contracts`)
@@ -1751,16 +3001,16 @@ The subchart is self-contained: it owns all its own credentials and mounts nothi
 ```
 make build                       # production artifacts
   ├── dist                       # internal wheels → .dist/
-  ├── build-buyer                # PyInstaller → buyer/dist/market
+  ├── build-buyer                # PyInstaller → domains/vms/buyer/dist/market
   ├── build-registry             # arkhai:registry / arkhai:registry-<sha>
   ├── build-storefront           # arkhai:storefront / arkhai:storefront-<sha>
   └── build-provisioning         # arkhai:provisioning / arkhai:provisioning-<sha>
 
 make build-dev                   # build + the local e2e stack
   ├── build                      # (above)
-  ├── build-test-env             # arkhai:test-env (Anvil + baked state)
-  │     └── build-anvil-state   # generate_state.py → test-env/state/state.json
-  └── build-test-image           # arkhai:integration-tests
+  ├── build-dev-env             # arkhai:dev-env (Anvil + baked state)
+  │     └── build-anvil-state   # generate_state.py → dev-env/state/state.json
+  └── build-test-image           # arkhai:e2e-tests
 ```
 
 Wheel builds happen separately via `make dist` (called automatically by
@@ -1769,35 +3019,37 @@ Wheel builds happen separately via `make dist` (called automatically by
 ```
 make dist
   ├── dist-storefront-client  → .dist/arkhai_storefront_client-*.whl
-  ├── dist-registry           → .dist/arkhai_registry_client-*.whl
-  ├── dist-provisioning       → .dist/provisioning_service-*.whl
+  ├── dist-registry-client    → .dist/arkhai_core_registry_client-*.whl
+  ├── dist-arkhai-core-buyer         → .dist/core_buyer-*.whl
+  ├── dist-arkhai-core-storefront    → .dist/core_storefront-*.whl
+  ├── dist-provisioning-client → .dist/arkhai_vms_provisioning_client-*.whl
   ├── dist-storefront         → .dist/market_storefront-*.whl      (Docker builds only)
   ├── dist-policy             → .dist/market_policy-*.whl          (Docker builds only)
-  └── dist-service            → .dist/market_service-*.whl         (Docker builds only)
+  ├── dist-identity           → .dist/market_identity-*.whl        (Docker builds only)
+  ├── dist-core               → .dist/market_core-*.whl            (Docker builds only)
+  ├── dist-alkahest           → .dist/market_alkahest-*.whl        (Docker builds only)
+  └── dist-config             → .dist/market_config-*.whl          (Docker builds only)
 ```
 
 ---
 
 ## Artifact Registry Publishing
 
-Built runtime artifacts are published to GCP Artifact Registry in the `compute-market-internal-infra` 
-repo. The registries and their IAM are managed there; this repo only pushes.
+Built runtime artifacts are published to the internal artifact registries managed by the `compute-market-internal-infra` repo. Registry infrastructure and IAM are managed there; this repo only pushes.
 
 **Artifact inventory:**
 
 | Artifact | AR format | Repo key | Tag at push |
 |---|---|---|---|
 | Docker images (registry, storefront, provisioning) | DOCKER | `docker` | git short SHA |
-| Docker dev images (test-env, integration-tests) | DOCKER | `docker` | git short SHA |
+| Docker dev images (dev-env, e2e-tests) | DOCKER | `docker` | git short SHA |
 | Helm chart (`arkhai-node-operator`) | DOCKER (OCI) | `helm` | git short SHA |
-| `arkhai-storefront-client` wheel | PYTHON | `python` | wheel version |
-| `arkhai-registry-client` wheel | PYTHON | `python` | wheel version |
-| `provisioning-service` wheel | PYTHON | `python` | wheel version |
+| `arkhai-core-storefront-client` wheel | PYTHON | `python` | wheel version |
+| `arkhai-core-registry-client` wheel | PYTHON | `python` | wheel version |
+| `arkhai-vms-provisioning-client` wheel | PYTHON | `python` | wheel version |
 | `market` CLI binary | GENERIC | `cli` | git short SHA |
 
-The three internal-only wheels (`market-storefront`, `market-policy`,
-`market-service`) are consumed only via `--find-links` inside
-Docker builds and are never pushed to AR.
+The internal-only wheels (`arkhai-vms-storefront`, `arkhai-kit-policy`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-core-storefront`) are consumed only via `--find-links` inside Docker builds and local development; they are never pushed to AR. Only the three client wheels above (`arkhai-core-storefront-client`, `arkhai-core-registry-client`, `arkhai-vms-provisioning-client`) are published externally.
 
 **Push flow:**
 
@@ -1811,8 +3063,8 @@ make push-runtime-artifacts [AR_PROJECT=compute-market-1-dev]
 
 make build-dev
 make push-dev-images [AR_PROJECT=compute-market-1-dev]
-  ├── arkhai:test-env
-  └── arkhai:integration-tests
+  ├── arkhai:dev-env
+  └── arkhai:e2e-tests
 ```
 
 **Image naming convention:** All service images share the image name `arkhai`
@@ -1845,8 +3097,8 @@ package/version/filename. Semver tags (`<version>-rc.N` for preprod,
 
 **Dev wheel overwrite path:** during dev-cluster iteration, use
 `make clobber-wheels` to delete the current published versions of
-`arkhai-storefront-client`, `arkhai-registry-client`, and
-`provisioning-service`, then immediately re-upload the local `.dist/` wheels.
+`arkhai-core-storefront-client`, `arkhai-core-registry-client`, and
+`arkhai-vms-provisioning-client`, then immediately re-upload the local `.dist/` wheels.
 This is intentionally separate from `push-wheels` because it mutates the Python
 repository by deleting package versions. Use it only for development
 repositories; preprod/prod wheel changes should bump package versions instead.
@@ -1859,7 +3111,7 @@ gcloud artifacts versions list \
   --project=compute-market-1-dev \
   --location=us-central1 \
   --repository=compute-market-1-dev-python \
-  --package=provisioning-service
+  --package=arkhai-vms-provisioning
 ```
 
 Use the target `AR_PROJECT` and package name as needed.
@@ -1917,7 +3169,13 @@ def stage_05a_evaluate_negotiate():
 
 def stage_05b_negotiate_new():
     # advance: actually start the negotiation
-    resp = await client.negotiate_new(listing_id=..., initial_price=..., ...)
+    resp = await client.negotiate_new(
+        listing_id=...,
+        initial_amount=...,
+        proposal_fields=...,
+        literal_fields=...,
+        ...
+    )
     assert resp.action in ("counter", "accept")
     # audit: confirm the round_decided event appears in stage_event stream
     event = wait_for_stage_event(stage="negotiation", event="round_decided")
@@ -1933,7 +3191,7 @@ their `evaluate-create` / `evaluate-close` admin endpoints were dropped
 in the procedural-policy refactor. The e2e stage-Na pattern survives
 via the remaining dry-run endpoints + the `stage_events` audit stream.
 
-**The event stream as the observable:** `GET /api/v1/system/events` (`SyncStorefrontClient.wait_for_stage_event()`) provides a cursor-based poll over the `stage_events` SQLite audit log. This is the mechanism for validating "what did you do?" without polling the resource directly or using `asyncio.sleep`. See `wait_for_stage_event` in `integration-tests/tests/e2e/roles/scenarios/conftest.py`.
+**The event stream as the observable:** `GET /api/v1/system/events` (`SyncStorefrontClient.wait_for_stage_event()`) provides a cursor-based poll over the `stage_events` SQLite audit log. This is the mechanism for validating "what did you do?" without polling the resource directly or using `asyncio.sleep`. See `wait_for_stage_event` in `e2e-tests/tests/e2e/roles/scenarios/conftest.py`.
 
 **The pause/advance pattern for multi-step pipelines:** Create resources with `paused=True` to prevent them from propagating to the next pipeline stage before the test has validated the current stage. Use admin endpoints (`resume`, `advance`, `force-accept`) to advance one step at a time. This is how the e2e test controls pacing through the negotiation → settlement → provisioning pipeline without race conditions.
 
@@ -1967,11 +3225,127 @@ parts of the Swagger flow and should remain in sync.
 
 **Buyer-facing EIP-191 auth:** Buyer endpoints (`/api/v1/negotiate/*`, `/api/v1/settle/*`) use EIP-191 signatures in `X-Signature` + `X-Timestamp` headers. This is not a standard OpenAPI security scheme; it is documented in each endpoint's OpenAPI `description`. Auth is verified by calling `buyer_auth._verify(request, operation, resource_id, claimed_address)` directly inside the handler — not via `Depends()` — to avoid `fastapi_utils @cbv` + method-level `Depends` interaction issues. Tests bypass auth via `unittest.mock.patch.object(buyer_auth, "_verify", return_value=None)`.
 
+## State Management and Schema Migration Strategy
+
+### Database topology
+
+Each service owns exactly one database. Cross-service database sharing does not occur; the per-service SQLite file-per-service design structurally prevents it. The registry is the exception: it runs SQLite in development but is architecturally designed for Postgres in production.
+
+| Service | Migration framework | Storage | Startup behaviour |
+|---|---|---|---|
+| Registry | Alembic (`alembic_version` table, 14 migrations) | SQLite (dev), Postgres-ready | `create_all` bootstraps missing tables, then startup stamps or upgrades Alembic state depending on whether `alembic_version` exists. |
+| Storefront | Custom `schema_migrations` table, per-migration tracking | SQLite | Applied in lifespan hook via `SQLiteClient` constructor |
+| Provisioning | Custom `schema_migrations` table, per-migration tracking | SQLite | Applied in lifespan hook via `init_db()` |
+
+---
+
+### Migration placement — current state and target
+
+**Current state:** All three services apply schema migrations inside the main service container's startup sequence. This conflates migration concerns with service startup and makes migration failures indistinguishable from application crashes in Kubernetes pod status.
+
+**Target for SQLite services (storefront, provisioning):**
+
+A Kubernetes init container in the pod executes migrations before the main container starts. Both containers use the same image but different entrypoints — the init container runs a migration CLI command, the main container runs the service. A `Init:Error` pod status is unambiguously a migration failure; it cannot be confused with an application crash.
+
+The main container adds a **schema version guard** in its startup code: before serving any traffic it reads the current schema version from the tracking table, compares it against the version the running code expects, and if there is drift it exits with a message like:
+
+```
+Database schema is at version 3, service expects version 4.
+Run the migration before starting the service:
+  docker run <image> python -m db.migrate       (docker / local)
+  kubectl apply -f migrate-job.yaml              (Kubernetes, if init container not configured)
+```
+
+This guard matters equally for non-Kubernetes deployments — local dev, docker-compose — where init containers do not apply. The service must never silently boot against a mismatched schema and return errors only when a query hits a missing column.
+
+**Target for the registry (Postgres, future):**
+
+A Helm pre-upgrade hook Job connects directly to Postgres and runs `alembic upgrade head` before the Deployment rollout begins. If the Job fails, `helm upgrade` returns an error and the running Deployment is untouched. No pod lifecycle is involved in the migration path. This pattern is enabled by Postgres not being bound to a ReadWriteOnce volume.
+
+Implementation of the init container pattern and the Helm pre-upgrade Job are tracked in `TODO.md`. Until implemented, startup-time migration remains in place; under the `strategy: Recreate` deployment model, the PVC detaches from the old pod before the new pod can attach it, so the migration and service startup are already serialized.
+
+---
+
+### Schema change policy
+
+**Additive-only by default.** The policy for all schema changes:
+
+- New columns must be nullable or carry a default value
+- New tables and new indexes may be added freely
+- Column renames, type changes, and column drops are not permitted in a single release
+
+**Non-additive changes use expand-contract across releases:**
+
+When a change cannot be expressed as purely additive, it is decomposed into two separately-deployable phases:
+
+- *Expand phase (Release N):* Add new columns or tables alongside old. Application code writes to both old and new. Old columns remain present and readable by already-deployed service versions.
+- *Contract phase (Release N+1):* Drop deprecated columns or tables. Application code reads only from the new schema. Old columns are no longer written.
+
+The deprecation window is **k=1**: deprecated schema is removed in the release after the one that introduced the deprecation. Operators on a version behind the expand phase will receive the schema change without disruption; operators more than one release behind must upgrade sequentially through the expand-phase release before applying the contract-phase release. For specific changes requiring longer lead time, k > 1 may be applied and communicated directly to ecosystem partners.
+
+**Large-table guard.** Migrations that backfill or transform existing rows should check the row count before executing. If the count exceeds a threshold (starting value TBD, the migration should fail fast with instructions on how to proceed.
+
+---
+
+### Registry client compatibility constraint
+
+The registry is shared infrastructure. A schema or API change that breaks compatibility with running storefront or provisioning service versions affects the entire ecosystem of operators simultaneously — not just those who have upgraded. This is categorically different from a brief pod restart outage on a per-operator service.
+
+**Non-additive registry schema or API changes are blocked until the registry runs on Postgres with a gradual rollout pattern.**
+
+Postgres enables running old and new registry versions concurrently against the same database, giving operators a defined compatibility window to upgrade their storefront and provisioning service versions before the old API is retired. SQLite on a ReadWriteOnce PVC fundamentally cannot support concurrent pod versions.
+
+Until this infrastructure is in place, all registry schema and API changes must be backward-compatible with at least the immediately preceding release of `arkhai-core-registry-client`. The expand-contract policy makes individual releases additive, satisfying this requirement.
+
+---
+
+### State persistence
+
+All three service Helm subcharts default to `persistence.enabled: true`, creating a ReadWriteOnce PVC backed by the cluster's default StorageClass. Each Deployment uses `strategy: Recreate` to enforce single-writer access (RWO volumes cannot attach to multiple pods simultaneously), and `helm.sh/resource-policy: keep` ensures `helm uninstall` does not delete the PVC.
+
+The Helm subcharts expose a `persistence.existingClaim` parameter: when set, the chart mounts the named PVC without creating one; when empty, existing behaviour is unchanged.
+
+---
+
 ## Testing Strategy
 
 > **Test execution context:** The e2e / system integration test suite runs from a **Helm test pod** inside the cluster. It cannot import or instantiate service code in-process. All assertions are made over HTTP against live services using typed client libraries. This affects every layer of the test design: there is no `ASGITransport`, no monkeypatching of service internals, and no direct DB reads from the test pod. Visibility into service state is provided exclusively through HTTP endpoints — which is why the storefront and provisioning service expose rich read APIs rather than relying on direct DB inspection.
 
 This section defines the testing conventions for the Arkhai Market Stack. It exists to give every contributor a consistent mental model of what each test level is responsible for, what it is explicitly not responsible for, and how the levels relate to each other. New tests should be placed at the lowest level that can meaningfully exercise the behaviour in question.
+
+### Contract Fixtures
+
+A **contract fixture** is a pair of functions — `build_*()` and `validate_*()` — that define the canonical shape of a message at a package boundary. They are shared between the producer-side tests (which call `validate_*` to assert real code emits the agreed shape) and the consumer-side tests (which call `build_*` to produce mock inputs of exactly that shape). When the boundary changes, both sides break at once.
+
+**When to use them:** A boundary earns a contract fixture when *both* its producer and consumer have unit tests. Consumer-only mocks that have no corresponding producer test remain as local inline dicts — moving them prematurely documents a contract that has no enforcement on the production side.
+
+**`build_*()`** constructs a minimal but complete canonical instance. Use keyword arguments with sensible defaults so tests can override only the fields relevant to them. Non-deterministic fields (timestamps, generated IDs) use fixed sentinel values in `build_*` and range/type assertions in `validate_*` — *not* equality checks. This avoids the classic brittle test failure where `created_at` shifts by a millisecond.
+
+**`validate_*()`** asserts structural and semantic constraints on a value produced by real code. It checks field presence, type, and any invariants the consumer depends on. It does not check incidental fields the consumer ignores. When `validate_*` is called in a producer test, a failure means the producer broke the contract; when `build_*` is used in a consumer test, a silent mismatch is exposed the moment the producer test also calls `validate_*` on a real output that no longer matches.
+
+**Where they live — import direction always flows producer → consumer:**
+
+- **Same-package boundary** (producer and consumer are in the same package): `tests/fixtures/<module>.py` within that package. Importable as `tests.fixtures.<module>` by any test in the package because pytest adds the package root to `sys.path`.
+
+- **Cross-package boundary** (consumer is in a higher-level package): `src/{package_name}/fixtures/<module>.py` inside the producer's source package. Because the producer is already installed as a wheel in consumer packages, no `pythonpath` changes are needed. The import mirrors the existing client import pattern:
+
+  ```python
+  # existing pattern
+  from storefront_client import SyncStorefrontClient
+  from storefront_client.models import ClaimResponse
+  # contract fixture — same namespace, no new configuration
+  from storefront_client.fixtures.escrow import build_claim_response
+  ```
+
+  This means two producer packages are naturally unambiguous:
+
+  ```python
+  from storefront_client.fixtures.escrow import build_claim_response
+  from provisioning_client.fixtures.host import build_host_response
+  ```
+
+  If the producer has no unit tests yet, create the `fixtures/` subpackage anyway and leave `validate_*` functions dormant. They document the contract and give future producer tests an immediate hook. Mark dormant validators with a module docstring explaining which test file will call them once the producer gains test coverage.
+
 
 ### Four-Level Hierarchy
 
@@ -1984,7 +3358,7 @@ This section defines the testing conventions for the Arkhai Market Stack. It exi
 **What to focus on in this codebase:**
 - `AnsibleService`: `_build_vm_vars` (YAML serialisation of every field combination), `_extract_ssh_port` / `_extract_tenant_user` / `_extract_ansible_json` (output parsers against representative playbook output strings).
 - `AnsibleJobService`: `_build_params` (dict → `AnsibleJobParams` mapping), `_redact_logs` (regex redaction), `_calculate_retry_delay` (backoff arithmetic), `_should_retry_error` (error string matching), `_build_result_payload` (structured result assembly from `AnsibleRunResult`).
-- `models/vm_request_model.py`: `CreateVmRequest` Pydantic validation (FRP cross-field rule, field constraints), `ScheduleVmExpiryRequest` required field, `build_simple_params` action routing.
+- `models/vm_request_model.py`: `CreateVmRequest` Pydantic validation (FRP cross-field rule, field constraints), `VmActionRequest` optional-body behavior, and `build_simple_params` action routing.
 - `HostService`: `seed_from_ini` (INI parsing, upsert idempotency), `register_host` with `embedded` key (Fernet encryption round-trip), `render_inventory_ini` (correct `[kvm_hosts]` group + variable output), `list_hosts(enabled_only=True)` filter.
 
 **Mocking convention:** Use `unittest.mock.MagicMock` / `AsyncMock` for injected collaborators. Do not patch module-level imports; instead, pass mocks in via the constructor (the DI design makes this natural).
@@ -1997,11 +3371,14 @@ This section defines the testing conventions for the Arkhai Market Stack. It exi
 
 **External boundary definition:** Any I/O that crosses a process boundary. In this codebase that means:
 - Ansible subprocess invocations — mocked at `AnsibleService` (replace `start_playbook` / `wait_for_playbook` / `check_connectivity`)
+- Alkahest SDK `EnvTestManager` checks — integration tests only; it spawns a local chain process and requires host Node/Foundry runtime availability
 - The `StorefrontAuthMiddleware` X-Admin-Key gate — open in tests because the test settings leave `storefront_admin_key` empty
 
 **Test setup pattern:** Use `httpx.AsyncClient` with `ASGITransport` against the real `app` instance, injected via the canonical `FooClient(transport=...)` constructor. Override container providers for `AnsibleService` before the test and restore them after. See `src/tests/integration/conftest.py` for the full fixture implementation.
 
-**Client contract verification:** Integration tests call `ProvisioningClient` methods directly against the in-process app. Route strings, request body shapes, and response parsing are owned by the client — no raw HTTP calls appear in test code. If the API renames a field or changes a route, the client method raises `ProvisioningError` and the test fails immediately.
+**Typed client contract verification:** Service integration tests call the service's canonical typed client methods directly against the in-process app (`ProvisioningClient` for provisioning, `StorefrontClient` for storefront, `RegistryClient` for registry). Route strings, request body shapes, and response parsing are owned by the client — happy-path tests should not make raw HTTP calls. If an API renames a field or changes a route, the typed client should raise its client error and the test should fail immediately. These service integration suites are the complete behavioral contract test surface for their client wheels: each public client endpoint is exercised against FastAPI controllers with lower service layers mocked where appropriate. Client packages themselves intentionally remain lightweight and do not need separate test dependencies or Makefile machinery when the owning service can validate the contract through integration tests.
+
+**Sync/async client parity guardrails:** When a client package exposes both async and sync clients, the owning service's unit suite owns a small contract test that compares public method names and signatures. New client methods must be added to both clients in the same change. This guardrail belongs with the service tests because the service owns the contract validation boundary; it is not a substitute for integration tests that call the client methods through the real controller routes.
 
 **The "no raw calls" rule — two legitimate exceptions:**
 
@@ -2013,7 +3390,7 @@ The rule is absolute for happy-path tests. Two narrow exceptions are permitted:
 
 Any other use of `_request`, `_client.get/post`, or raw `httpx` in an integration test is a gap that requires either adding a method to the canonical client or restructuring the test. The comment `"not yet a client method"` is a deferred debt marker, not a permanent exemption — it must reference a tracking item and be resolved before the gap accumulates.
 
-**State setup convention:** Test precondition state (e.g., a job row that must already exist before the endpoint under test is called) should be created through the HTTP API where feasible. Use direct DB factory functions only for state that is not expressible through any API endpoint — this keeps integration tests honest about the API contract.
+**State setup convention:** Test precondition state (e.g., a job row that must already exist before the endpoint under test is called) should be created through the HTTP API where feasible. Use direct DB factory functions or injected service-layer helpers only for state that is not expressible through any API endpoint, or where the test is explicitly setting up ledger/job state below the controller layer so the client method under test remains the only HTTP operation. This keeps integration tests honest about the API contract while avoiding costly end-to-end setup for lower-layer state machines.
 
 **Async test discipline — no sleeps:** Tests that exercise the background job processing loop must never use `asyncio.sleep` or `await asyncio.wait_for(..., timeout=...)` to wait for side effects. These approaches always produce intermittent failures. The correct pattern uses the `on_job_started` seam on `AsyncJobQueue`:
 
@@ -2046,7 +3423,7 @@ await asyncio.wait_for(job_dispatched.wait(), timeout=5.0)
 
 **What they do not cover:** Anything already covered by the three levels above. System integration tests are expensive to run and brittle to maintain; they should be minimal in count and cover only the cross-service contract, not any service's internal logic.
 
-**Current location:** `integration-tests/tests/e2e/` — the `roles/` subtree organises tests by deployment layer (external chain, market registry, seller node) and negotiation stage (discovery, negotiation, settlement).
+**Current location:** `e2e-tests/tests/e2e/` — the `roles/` subtree organises tests by deployment layer (external chain, market registry, seller node) and negotiation stage (discovery, negotiation, settlement).
 
 #### Full-Deal E2E Test — two scenarios
 
@@ -2088,15 +3465,15 @@ autouse `reap_buyer_settle_subprocess` teardown is a no-op when
 | 08a / 08c | Settle + provisioning-job dry-runs | `evaluate-settle` (captures `vm_host`/`vm_target`); `POST /test/evaluate-job` (matches gate rule) |
 | 08b | Submit settle + job queued | `POST /api/v1/settle/{uid}`; `wait_for_stage_event(resource_reserved)`; `provisioning_job_id` surfaced |
 | 09a | Gate release + ansible succeeds | `resume_rule`; `wait_for_job` (long-poll) → succeeded |
-| 09b | Ready + credentials + listing closed | `wait_for_settlement` → ready; `GET /api/v1/settle/{uid}/status` → tenant credentials; listing accepted/closed |
+| 09b | Ready + credentials + capacity held | `wait_for_settlement` → ready; `GET /api/v1/settle/{uid}/status` → tenant credentials; 1x listing closes while capacity is held |
 | 09c | Lease registered | `GET /api/v1/leases/by-escrow/{uid}` → active/pending |
-| 10a / 10b | Lease expiry setup + watchdog advances | pause watchdog, patch `lease_end_utc` past, arm check-gate mock; watchdog transitions lease to `releasing` |
-| 11a / 11b | Releasing state stable + resource released | check-gate released; resource patched `available` via `PATCH /api/v1/admin/portfolio/resources/{id}` |
+| 10a / 10b | Lease teardown setup + watchdog advances | pause watchdog, patch `lease_end_utc` past, arm `vm_remove` gate mock; watchdog transitions lease to `releasing` |
+| 11a / 11b | Releasing state stable + capacity released | `vm_remove` gate released; provisioning reports `/api/v1/admin/fulfillment/events/capacity-released` and the storefront releases the matching allocation |
 
 **Buyer-CLI variant divergence (`test_full_deal_buyer_cli.py`):**
 
 - **05b** — `market negotiate --listing-id … --max-price 12000 --duration-hours 1 --yes` runs synchronously to terminal. Bisection on both sides converges in ~1 round (buyer ceiling above seller's first counter). Test asserts subprocess `rc=0`, run-log `run_ended.status=agreed`, and seller-side `round_decided` stage_event.
-- **06b deleted** — `force_accept` coverage stays in `storefront/tests/integration/test_negotiations_api.py`.
+- **06b deleted** — `force_accept` coverage stays in `domains/vms/storefront/tests/integration/test_negotiations_api.py`.
 - **07** — only arms the provisioning gate; escrow creation moves out.
 - **08i** — `market settle --from <run_id>` started as a **background subprocess**. It creates the real on-chain escrow under the buyer's wallet, POSTs `/api/v1/settle/{uid}`, then blocks on its status-poll loop at the armed provisioning gate. Test waits for `escrow_created` event in the run-log, captures uid, then proceeds through 07b/08b/09a as normal.
 - **09b** — observes ready from the buyer side: `wait_for_event(settle_terminal, status="ready")` from the buyer run-log, asserts `tenant_credentials` in the event body, waits for the background `market settle` subprocess to exit cleanly (`Popen.wait(timeout=10)`, `rc=0`).
@@ -2125,7 +3502,27 @@ selection.
 
 `POST /test/evaluate-job` on the provisioning service's test controller. Accepts `{host, vm_target, ssh_pubkey, vm_action}`, returns `{params_valid, host_exists, rule_matched, would_pause, errors}`. Checks host existence in inventory and which mock rule (if any) would match the job params. No job is created. Used by e2e stage 9a.
 
-**`/api/v1/negotiate/new` signing and escrow terms:** `StorefrontClient.negotiate_new()` and `SyncStorefrontClient.negotiate_new()` add EIP-191 `X-Signature` and `X-Timestamp` headers automatically. They accept `listing_id`, `buyer_address`, `initial_price`, `duration_seconds`, `buyer_agent_url`, `ssh_public_key`, `token`, and `escrow_expiration_unix`, then build the structured `provision_terms` and `escrow_terms_proposal` body required by the server. The buyer proposal's `literal_fields["token"]` must match one of the listing's `accepted_escrows[i].literal_fields.token` advertisements; omitting it makes the helper send the zero address, which is only valid for listings without a typed payment token. If an e2e test raises `TypeError: SyncStorefrontClient.negotiate_new() got an unexpected keyword argument 'token'`, the runtime is importing a stale `arkhai-storefront-client` install. Rebuild the wheel and reinstall consumers with `make reinit` so `uv.lock` is re-resolved against the current `.dist/` wheel.
+**`/api/v1/negotiate/new` signing and escrow terms:**
+`StorefrontClient.negotiate_new()` and
+`SyncStorefrontClient.negotiate_new()` add EIP-191 `X-Signature` and
+`X-Timestamp` headers automatically. They accept `listing_id`,
+`buyer_address`, `initial_amount`, `duration_seconds`, `buyer_agent_url`,
+`ssh_public_key`, `chain_name`, `escrow_address`,
+`escrow_expiration_unix`, `proposal_fields`, `literal_fields`, `rates`,
+and `demands`, plus `token` as a convenience for token-shaped scalar
+flows. The helper builds the structured `provision_terms` and
+`escrow_proposal` body required by the server. If `literal_fields` is
+omitted, the legacy helper default injects `literal_fields.token =
+0x000...000`; if callers pass an explicit empty dict, it remains empty,
+which is required for native-token escrows. For token-shaped flows, the
+buyer proposal's token literal must match the selected listing
+`accepted_escrows[i].literal_fields.token`; non-token escrows are matched
+by their own `(chain_name, escrow_address, literal_fields, rates)` shape
+and by the configured negotiation policy. If an e2e test raises
+`TypeError: SyncStorefrontClient.negotiate_new() got an unexpected keyword
+argument`, the runtime is importing a stale `arkhai-core-storefront-client`
+install. Rebuild the wheel and reinstall consumers with `make reinit` so
+`uv.lock` is re-resolved against the current `.dist/` wheel.
 
 **Current full-deal details:** publishing is lazy — the publisher row is
 created on the first signed publish (stage 03b), so there is no
@@ -2138,9 +3535,9 @@ reserve the e2e-seeded row rather than any matching inventory row from a
 mounted startup file. Stage 08b waits for `provision/job_submitted` and
 asserts the reserved resource is the inline e2e-seeded row. Stage 09c
 asserts provisioning registered an active/pending lease for the escrow via
-`GET /api/v1/leases/by-escrow/{uid}`. Admin pause/resume and forced
-resource release are intentionally outside the full-deal happy path; they
-belong in separate smoke or e2e tests for operator interventions.
+`GET /api/v1/leases/by-escrow/{uid}`. Admin pause/resume, retry-release, and
+force-release are intentionally outside the full-deal happy path; they belong
+in separate smoke or e2e tests for operator interventions.
 
 **Pre-negotiation inventory guard:** `/api/v1/negotiate/new` enforces immediate-deal inventory availability via the `has_matching_inventory_guard` middleware in the configured negotiation chain (round 0 only — `len(history) == 0`). If no available resource matches the listing's `offer_resource`, the middleware short-circuits with `action="reject", reason="no_matching_inventory"`, which the controller maps to HTTP 409. The default chain in `storefront.toml` puts this middleware first, so the check happens before any rate negotiation.
 
@@ -2166,7 +3563,7 @@ belong in separate smoke or e2e tests for operator interventions.
 - Buyer wallet: `settings.BUYER.PRIVATE_KEY`, `settings.BUYER.WALLET_ADDRESS`
 - `settings.SELLER.WALLET_ADDRESS` (for EIP-191 signing of `POST /orders/create`)
 
-**`ProvisioningTestClient`** (`integration-tests/src/provisioning_test_client.py`) — sync HTTP client for the `/test/*` endpoints. Not part of `SyncProvisioningClient`; test infra only. Methods: `add_mock_rule`, `list_mock_rules`, `delete_mock_rule`, `resume_rule`, `job_summary`, `wait_for_job` (long-poll), `drain` (long-poll).
+**`ProvisioningTestClient`** (`e2e-tests/src/provisioning_test_client.py`) — sync HTTP client for the `/test/*` endpoints. Not part of `SyncProvisioningClient`; test infra only. Methods: `add_mock_rule`, `list_mock_rules`, `delete_mock_rule`, `resume_rule`, `job_summary`, `wait_for_job` (long-poll), `drain` (long-poll).
 
 ### Coverage Contract Between Levels
 
@@ -2185,9 +3582,9 @@ Each level has a defined jurisdiction. Duplicating coverage across levels create
 
 ### Test File Layout
 
-**provisioning-service** (reference layout):
+**arkhai-vms-provisioning** (reference layout):
 ```
-provisioning-service/src/tests/
+domains/vms/provisioning/service/src/tests/
 ├── unit/
 │   ├── conftest.py              # mock_settings fixture
 │   └── services/
@@ -2196,9 +3593,9 @@ provisioning-service/src/tests/
     └── test_{controller}.py
 ```
 
-**registry-service**:
+**arkhai-core-registry**:
 ```
-registry-service/tests/
+core/registry/tests/
 ├── conftest.py                  # db_session fixture (in-memory SQLite), sign_order_auth helper
 ├── unit/
 │   ├── test_order_auth_utils.py # EIP-191 signature verification helpers (exhaustive)
@@ -2220,45 +3617,15 @@ registry-service/tests/
     └── test_system.py           # GET /health (including 503 on DB failure), GET /api/v1/system/stats
 ```
 
-**Client contract enforcement in registry-service integration tests:**
+**Client contract enforcement in arkhai-core-registry integration tests:**
 
-All integration tests import `RegistryClient` from the `arkhai-registry-client` wheel and exercise the API exclusively through it.  The transport is `httpx.ASGITransport(app=app)` — real HTTP through the full FastAPI stack, no network socket.  If the API renames a field or changes a response shape, the client's `from_dict` parser will either raise or silently drop the field, and the assertion will fail immediately.  The `get_db` dependency is overridden per-test to yield the fixture's isolated in-memory SQLite session.
+All integration tests import `RegistryClient` from the `arkhai-core-registry-client` wheel and exercise the API exclusively through it.  The transport is `httpx.ASGITransport(app=app)` — real HTTP through the full FastAPI stack, no network socket.  If the API renames a field or changes a response shape, the client's `from_dict` parser will either raise or silently drop the field, and the assertion will fail immediately.  The `get_db` dependency is overridden per-test to yield the fixture's isolated in-memory SQLite session.
 
-The two legitimate raw-call exceptions (rejection-path tests and `db_session` state setup) apply here exactly as documented in the provisioning-service section above. `RegistryClient` and `SyncRegistryClient` expose typed methods covering `/api/v1/system/stats`, `GET /publishers{,/{id}}`, `POST /listings`, `PUT`/`DELETE /listings/{id}`, and `validate_publish_listing()` (`POST /api/v1/listings/validate-publish`) with `ValidatePublishRequest`/`ValidatePublishResponse` models. `ListingRequest` and `ValidatePublishRequest` carry a `storefront_url` field (`""` default) to satisfy the filter-spec's required-publish-candidate constraint; the storefront populates it from `BASE_URL_OVERRIDE`/its storefront URL.
+The two legitimate raw-call exceptions (rejection-path tests and `db_session` state setup) apply here exactly as documented in the arkhai-vms-provisioning section above. `RegistryClient` and `SyncRegistryClient` expose typed methods covering `/api/v1/system/stats`, `GET /publishers{,/{id}}`, `POST /listings`, `PUT`/`DELETE /listings/{id}`, and `validate_publish_listing()` (`POST /api/v1/listings/validate-publish`) with `ValidatePublishRequest`/`ValidatePublishResponse` models. `ListingRequest` and `ValidatePublishRequest` carry a `storefront_url` field (`""` default) to satisfy the filter-spec's required-publish-candidate constraint; the storefront populates it from `BASE_URL_OVERRIDE`/its storefront URL.
 
-**service package (`market-service`)**:
+**e2e-tests**:
 ```
-service/tests/
-├── unit/
-│   ├── test_signing.py
-│   ├── test_heartbeat.py
-│   ├── test_role.py
-│   ├── test_alkahest.py
-│   ├── test_config_loader.py
-│   ├── test_token.py
-│   └── test_erc8004_blockchain.py   # pure-function tests (rpc_url conversion, canonical ID)
-└── integration/
-    └── test_abi_alignment.py        # ABI codec alignment — see pattern below
-```
-
-**ABI alignment test pattern (`service/tests/integration/test_abi_alignment.py`):**
-
-The `service.clients.erc8004.registration` module constructs Python dicts that are passed to web3's ABI codec as `MetadataEntry` struct arguments. If the dict field names do not match the ABI component names, web3 raises `KeyError` during `encode_abi()` before any transaction is broadcast — a silent registration crash whenever the vendored ABI drifts from the constructor.
-
-The integration tests guard this invariant by calling `contract.encode_abi()` against the real vendored ABI using a provider-less `Web3()` instance — no Anvil, no deployment, no network:
-
-```python
-def test_register_with_metadata_encodes_without_error(contract):
-    metadata = _build_metadata_entries("agent", {"name": "agent"})
-    encoded = contract.encode_abi("register", args=["http://example/reg", metadata])
-    assert encoded
-```
-
-The `_build_metadata_entries()` helper in `registration.py` is the single authoritative source for struct field names — all metadata construction goes through it. When the ABI is updated, `test_metadata_entry_field_names_match_abi_struct` fails with an explicit message pointing at `_build_metadata_entries`.
-
-**integration-tests**:
-```
-integration-tests/
+e2e-tests/
 ├── conftest.py                  # CLI options (--profile, --config-dir); sets env vars pre-import
 ├── src/                         # Shared clients and settings (not test files)
 │   ├── agent_client.py          # SyncStorefrontClient adapter shim (see Re-export shims)
@@ -2289,9 +3656,25 @@ integration-tests/
                 └── discovery/test_buyer.py
 ```
 
+**CLI unit test conventions:**
+
+CLI tests should use `typer.testing.CliRunner` and `monkeypatch`. No real network, chain, subprocess, Make, or SQLite I/O — the `logs` tests use `FakeLogConnection` (defined in `cli/conftest.py`) rather than a real SQLite database.
+
+Three mocking layers, applied in order of specificity:
+
+- **`settings_overrides(**{...})`** — the canonical way to inject dynaconf `settings` values. Always use this for `settings.*` reads (e.g. `wallet.private_key`, `zerotier_network`). Import from `tests._settings_overrides`. Use dotted keys for nested paths: `settings_overrides(**{"wallet.private_key": "0x..."})`.
+
+- **`monkeypatch.setattr("market_storefront.utils.config.CHAINS", {...})`** — for the module-level `CHAINS` dict, which CLI command bodies import lazily (`from ..utils.config import CHAINS`). Always patch the *source* module (`market_storefront.utils.config`), not a consumer, because the lazy `from ... import` re-reads the source at call time.
+
+- **`monkeypatch.setattr(importing_module, "name", fake)`** — for everything else: patch on the *importing* module, not the defining one. For example, `monkeypatch.setattr(config_group, "storefront_config_file", ...)` (not `market_config.config_loader.storefront_config_file`), `monkeypatch.setattr(escrow_group, "_submit_claim", ...)`, `monkeypatch.setattr(network_group, "run_step", ...)`. This keeps each test's patch target colocated with the module it is testing and avoids action-at-a-distance through unrelated namespaces.
+
+For lazy imports inside a function body (e.g. `from market_alkahest.alkahest import get_escrow_obligation_with_codec`), patch on the *defining* module (`market_alkahest.alkahest.<fn>`), since the `from … import` re-reads the module's namespace at each call.
+
+**`FakeLogConnection`** (in `cli/conftest.py`) is the logs test seam. It implements the minimal sqlite3 connection interface (`cursor`, `execute`, `close`) and pattern-matches SQL query substrings to return shaped `FakeRow` objects seeded at construction time (`stage_events=`, `threads=`, `listings=`, `escrows=`). The `fake_log_db` fixture installs it by monkeypatching both `_resolve_db_path` and `sqlite3.connect` on `market_storefront.cli_logs`. This approach makes the test boundary explicit — CLI tests own wiring and rendering, not SQL correctness — and avoids DDL management. The tradeoff is that `FakeLogConnection.execute` pattern-matches on query substrings; if query text changes materially, a filter test may silently stop exercising the intended branch rather than failing. The `test_logs_show_filters_negotiation_and_stage` test mitigates this by asserting on the captured `params` tuple in addition to the exit code.
+
 
 ### Problem
-Python packages in this monorepo need to consume each other (e.g. the storefront imports the provisioning service client). Relative path imports across project directories are fragile — they encode layout assumptions and break when projects move. Native extension wheels (those with platform/ABI tags like `cp312-cp312-linux_x86_64`) must be compiled inside the target Docker environment; this is why `alkahest-py` ships pre-built wheels for each platform in `storefront/packages/`. Pure Python wheels (`py3-none-any`) have no such constraint and can be built safely on the host.
+Python packages in this monorepo need to consume each other (e.g. the storefront imports the provisioning service client). Relative path imports across project directories are fragile — they encode layout assumptions and break when projects move. Native extension wheels (those with platform/ABI tags like `cp312-cp312-linux_x86_64`) must be compiled inside the target Docker environment; this is why `alkahest-py` ships pre-built wheels for each platform in `domains/vms/storefront/packages/`. Pure Python wheels (`py3-none-any`) have no such constraint and can be built safely on the host.
 
 ### Current Approach: `--find-links` flat wheel directory
 
@@ -2306,7 +3689,7 @@ make build         →  docker build (COPY .dist/ /dist/, uv sync --find-links /
 
 `make dist` runs automatically as a prerequisite of `make build`.
 
-**Guard:** `make dist-provisioning` asserts the output wheel filename ends in `-none-any.whl`. If a C extension or Rust crate is ever added to a package, the build fails loudly with an error directing the developer to move compilation inside the Docker build context.
+**Guard:** wheel-build targets assert their output filenames end in `-none-any.whl` for packages expected to remain pure Python. If a C extension or Rust crate is ever added to one of those packages, the build fails loudly with an error directing the developer to move compilation inside the Docker build context.
 
 **Why `--find-links` is passed on the CLI, not in `pyproject.toml`:**
 
@@ -2317,36 +3700,47 @@ make build         →  docker build (COPY .dist/ /dist/, uv sync --find-links /
 
 Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockfile and breaks the other context. Setting it via `UV_FIND_LINKS` on the command line means the path stays out of version-controlled files entirely.
 
-**Rule:** `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for `market-service`, `provisioning-service`, `arkhai-storefront-client`, or `arkhai-registry-client`. These packages are resolved exclusively from wheels in `.dist/`.
+**Rule:** No `pyproject.toml` in this repo may declare a `[tool.uv.sources]` `path` entry traverses above the declaring package's own directory. Such paths encode the monorepo's filesystem topology into `uv.lock`, break Docker builds where the referenced path does not exist, and prevent customers from using the package outside the monorepo checkout. All cross-package internal dependencies are resolved exclusively from wheels in `.dist/` via `--find-links`.
 
-**Why not `uv.sources` editable installs:** Editable path references (`{ path = "../service", editable = true }`) are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker that relative path does not exist, causing resolution failures. The wheel approach makes both the path and the mechanism context-specific (CLI flag, not lockfile entry).
+**Why not `uv.sources` editable installs:** Editable path references are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker builds where the monorepo layout is not present that path does not exist, causing resolution failures. The same flaw prevents customers installing the wheel outside the monorepo from resolving its dependencies. The wheel approach makes both the path and the mechanism context-specific (CLI flag, not lockfile entry).
 
 ### Internal wheel packages
 
-Three pure-Python internal packages are distributed as wheels:
-
 | Package | Wheel name | Source | Primary consumers |
 |---------|-----------|--------|-------------------|
-| `market-service` | `market_service-*.whl` | `service/` | `core`, `integration-tests` |
-| `provisioning-service` | `provisioning_service-*.whl` | `provisioning-service/` | `integration-tests`, `service` |
-| `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `storefront-client/` | `storefront`, `integration-tests`, `provisioning-service` |
-| `arkhai-registry-client` | `arkhai_registry_client-*.whl` | `registry-client/` | `integration-tests` |
+| `arkhai-kit-identity` | `market_identity-*.whl` | `kit/identity/` | `arkhai-core`, `arkhai-core-registry`, `storefront` |
+| `arkhai-core` | `market_core-*.whl` | `core/` | `arkhai-kit-alkahest`, `storefront` |
+| `arkhai-core-buyer` | `core_buyer-*.whl` | `core/buyer/` | `buyer` |
+| `arkhai-core-storefront` | `core_storefront-*.whl` | `core/storefront/` | `storefront` |
+| `arkhai-kit-alkahest` | `market_alkahest-*.whl` | `kit/alkahest/` | `buyer`, `storefront`, `e2e-tests` |
+| `arkhai-kit-config` | `market_config-*.whl` | `kit/config/` | `buyer`, `storefront` |
+| `arkhai-kit-policy` | `market_policy-*.whl` | `kit/policy/` | `buyer`, `storefront` |
+| `arkhai-vms` | `arkhai_vms-*.whl` | `domains/vms/domain/` | `buyer`, `storefront` |
+| `arkhai-vms-provisioning-client` | `arkhai_vms_provisioning_client-*.whl` | `domains/vms/provisioning/client/` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
+| `arkhai-core-storefront-client` | `arkhai_storefront_client-*.whl` | `core/storefront-client/` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
+| `arkhai-core-registry-client` | `arkhai_core_registry_client-*.whl` | `core/registry-client/` | `e2e-tests` |
 
-`arkhai-storefront-client` exists as a separate lightweight package to avoid pulling `market-storefront`'s heavyweight dependencies (`pufferlib`, `torch`, native RL wheels under the `[rl]` extra) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `storefront-client/src/storefront_client/client.py` and exposes `StorefrontClient` (async) and `SyncStorefrontClient` (sync).
+Typed client wheels are the **authoritative inter-service contracts** for their services' public HTTP DTOs and primitive operations. This applies repo-wide to `arkhai-vms-provisioning-client`, `arkhai-core-storefront-client`, and `arkhai-core-registry-client`. Do not duplicate public DTOs inside a server just to avoid importing from its client wheel; controllers and service unit tests may import client-owned public models when those models are the natural method boundary. Server-only types remain in the service package and are not exported through the client surface. When a client package exposes both async and sync clients, they must expose the same public operation names and signatures; the owning service's unit suite should carry the parity guardrail, while the owning service's integration suite remains the behavioral contract test surface for every public client endpoint.
 
-**Dependency direction note — provisioning-service → arkhai-storefront-client:**
+`arkhai-vms-provisioning-client` (`domains/vms/provisioning/client/`) is the provisioning service's HTTP client wheel — `httpx` + `pydantic` only, mirroring the `arkhai-core-registry-client` and `arkhai-core-storefront-client` pattern. It exposes `ProvisioningClient` (async) and `SyncProvisioningClient` (sync), plus all public request/response Pydantic models (`CreateVmRequest`, `HostCreate`, `JobStatusResponse`, `LeaseResponse`, etc.). The provisioning service depends on it for the shared Pydantic models its FastAPI route handlers use. Internal server-only types (`AnsibleJobParams`, `AnsibleRunResult`) remain in the service wheel and are never part of the client surface. Consumers import from a collision-free namespace: `from provisioning_client import ProvisioningClient, CreateVmRequest`. Storefront and e2e depend on `arkhai-vms-provisioning-client` for HTTP calls and public DTOs; they should not depend on the full `arkhai-vms-provisioning` service package unless they are intentionally operating the service itself. The provisioning service package is built into its container image from source; because no other project consumes a provisioning service wheel, the root Makefile does not build or publish `arkhai-vms-provisioning` as a wheel.
 
-The provisioning service depends on `arkhai-storefront-client` for two call sites:
-1. `lease_lifecycle_service._patch_storefront_resource()` — PATCH storefront resource on lease expiry
+`arkhai-core-storefront-client` exists as a separate lightweight package to avoid pulling `arkhai-vms-storefront`'s heavyweight dependencies (`pufferlib`, `torch`, native RL wheels under the `[rl]` extra) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `core/storefront-client/src/storefront_client/client.py` and exposes `StorefrontClient` (async) and `SyncStorefrontClient` (sync). The storefront service is the owner of storefront-client behavioral contract coverage.
+
+`arkhai-core-registry-client` is the registry service's lightweight HTTP client wheel. Registry DTOs and primitive operations that cross process boundaries belong in the client wheel; registry service integration tests own route/DTO/client compatibility coverage.
+
+**Dependency direction note — arkhai-vms-provisioning → arkhai-core-storefront-client:**
+
+The provisioning service depends on `arkhai-core-storefront-client` for two call sites:
+1. `lease_lifecycle_service` — post deal-scoped capacity release events to the owning storefront
 2. `system_service.get_status()` — probe storefront reachability for the diagnostic status endpoint
 
-This inverts the conceptual layer (provisioning is infrastructure; storefront is a consumer). It does not create a circular import — `storefront-client` has no dependency on `provisioning-service`. The `make dist` ordering already builds `arkhai-storefront-client` before `provisioning-service`, so wheel resolution is correct.
+This inverts the conceptual layer (provisioning is infrastructure; storefront is a consumer). It does not create a circular import — `storefront-client` has no dependency on `arkhai-vms-provisioning`. The provisioning image build resolves `arkhai-core-storefront-client` from `.dist/` before syncing the service environment, so wheel resolution is correct.
 
-**`arkhai-storefront-client` versioning policy:**
+**`arkhai-core-storefront-client` versioning policy:**
 
-`arkhai-storefront-client` encodes two contracts with the agent server (`storefront/src/market_storefront/agent.py`) that are not enforced at import time — mismatches produce silent 403s or wrong response shapes at runtime:
+`arkhai-core-storefront-client` encodes two contracts with the storefront server that are not enforced at import time — mismatches produce silent 403s or wrong response shapes at runtime:
 
-1. **Auth message format** — `_build_auth_headers` must match `_check_agent_request_auth` in `agent.py`:
+1. **Auth message format** — `_build_auth_headers` must match `domains/vms/storefront/src/market_storefront/middleware/seller_auth.py`:
    - `create_listing` → `"create_listing:<agent_wallet_address>:<timestamp>"`
    - `close_listing` → `"close_listing:<listing_id>:<timestamp>"`
 
@@ -2354,17 +3748,18 @@ This inverts the conceptual layer (provisioning is infrastructure; storefront is
    `/api/v1/listings/{listing_id}/close`, and `/alerts/resource`
    request/response shapes.
 
-When either contract changes: bump `version` in `storefront-client/pyproject.toml`, update the minimum version constraint in all consuming `pyproject.toml` files, rebuild the wheel with `make dist-storefront-client`, and run `make init` in each consumer. Keep all changes in one commit so the version boundary is auditable in git history. See `storefront-client/README.md` for the full checklist.
+When either contract changes: bump `version` in `core/storefront-client/pyproject.toml`, update the minimum version constraint in all consuming `pyproject.toml` files, rebuild the wheel with `make dist-storefront-client`, and run `make init` in each consumer. Keep all changes in one commit so the version boundary is auditable in git history. See `core/storefront-client/README.md` for the full checklist.
 
 ### Distribution path
 
 **Internal builds (Docker images):** `.dist/` wheels are consumed via
 `--find-links` inside Docker `RUN` instructions. This path is unchanged.
 
-**External distribution:** The three client packages (`arkhai-storefront-client`,
-`arkhai-registry-client`, `provisioning-service`) are published to GCP Artifact
-Registry via `make push-wheels`. See the `## Artifact Registry Publishing`
-section for the full push flow.
+**External distribution:** The client packages (`arkhai-core-storefront-client`,
+`arkhai-core-registry-client`, `arkhai-vms-provisioning-client`) are published
+to the internal artifact registry via `make push-wheels`. Service workloads are
+distributed as Docker images, not service wheels. See the `## Artifact
+Registry Publishing` section for the full push flow.
 
 **PEP 503 local index (optional):** `scripts/gen_simple_index.py .dist/` generates
 a local `simple/` index. Useful if a consumer needs `--index` rather than
@@ -2411,7 +3806,7 @@ finally:
     client.close()
 ```
 
-**No module-level wrapper functions:** Functions like `provision_machine_async()` or `schedule_vm_expiry_async()` that wrap client methods are removed. Callers instantiate the client and call methods directly.
+**No module-level wrapper functions in client packages:** Functions like `provision_machine_async()` or `schedule_vm_expiry_async()` that wrap client methods are removed from client packages. Callers instantiate the client and call methods directly. Service-specific orchestration may still live in the consuming service when it combines multiple primitive client calls into that service's workflow; for example, storefront owns a local helper that submits a VM create job, records the job id callback, polls for completion, and merges credentials into the storefront fulfillment payload.
 
 **Transport injection for integration tests:** Service integration tests use `FooClient` (async) with `httpx.ASGITransport(app=app)`. The fixture wires `get_db` override and yields the client — tests call methods, never route strings:
 
@@ -2438,21 +3833,21 @@ health = client.get_health()
 **Iteration workflow for wheel consumers:** When iterating on a client package during development, use `make reinit` (not `make init`) to force reinstallation and re-resolution to the latest version in `.dist/`:
 
 ```
-make dist-registry          # rebuild wheel
-cd registry-service && make reinit && make test-integration
+make dist-registry-client   # rebuild wheel
+cd core/registry && make reinit && make test-integration
 ```
 
-`reinit` runs `uv sync --upgrade-package <pkg> --reinstall-package <pkg>`. The `--upgrade-package` flag is essential: without it, `uv` re-installs whatever version is **pinned in the local `uv.lock`** rather than resolving the latest available wheel from `.dist/`. If `uv.lock` was generated when an older wheel was the only option, subsequent `make dist` runs that produce a higher version are silently ignored by `--reinstall-package` alone. `--upgrade-package` forces uv to re-resolve the constraint against the current contents of `.dist/` and update `uv.lock` to the new version.
+`reinit` runs `uv sync --upgrade-package <pkg> --reinstall-package <pkg>`. The `--upgrade-package` flag is essential: without it, `uv` re-installs whatever version is **pinned in the local `uv.lock`** rather than resolving the latest available wheel from `.dist/`. If `uv.lock` was generated when an older wheel was the only option, subsequent `make dist` runs that produce a higher version are silently ignored by `--reinstall-package` alone. `--upgrade-package` also implies uv's package refresh behavior, so a separate `--refresh-package` flag is redundant. `--reinstall-package` remains useful because local wheel rebuilds often keep the same version while changing the wheel contents.
 
 ### Client package inventory
 
 | Package | Wheel | Async client | Sync client | Consumers |
 |---|---|---|---|---|
-| `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `StorefrontClient` | `SyncStorefrontClient` | `storefront`, `integration-tests` |
-| `registry-client/` | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `integration-tests`, `registry-service` tests |
-| `provisioning-service/src/client/` | `provisioning_service-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `integration-tests`, `service` shim |
+| `arkhai-core-storefront-client` | `arkhai_storefront_client-*.whl` | `StorefrontClient` | `SyncStorefrontClient` | `storefront`, `e2e-tests` |
+| `arkhai-core-registry-client` (`core/registry-client/`) | `arkhai_core_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `e2e-tests`, `arkhai-core-registry` tests |
+| `arkhai-vms-provisioning-client` (`domains/vms/provisioning/client/`) | `arkhai_vms_provisioning_client-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `e2e-tests`, `arkhai-vms-provisioning` |
 
-`arkhai-storefront-client` exposes EIP-191-signed methods on both
+`arkhai-core-storefront-client` exposes EIP-191-signed methods on both
 `StorefrontClient` (async) and `SyncStorefrontClient` (sync):
 
 - `negotiate_new()` / `negotiate_counter()` — take `token` and populate
@@ -2466,15 +3861,6 @@ cd registry-service && make reinit && make test-integration
 The wheel ships `EvaluateNegotiateResponse`, `SettleResponse`, and
 `SettleStatusResponse` typed models alongside these methods.
 
-`provisioning-service` bundles its client inside the service wheel (under `src/client/`) because the request/response models (`CreateVmRequest`, `JobStatusResponse`, etc.) are shared between the server and client. Consumers import as `from client.provisioning_client import ProvisioningClient`.
-
-### Re-export shims
-
-**`integration-tests/src/agent_client.py`:** a compatibility adapter wrapping `SyncStorefrontClient` from the wheel. Preserves the `AgentClient` interface expected by the smoke tests (constructor-level `agent_wallet_address`, `get_registration_file()`, single-arg `create_order()`). The docstring in that file lists the steps to remove it once the smoke tests are updated to call `SyncStorefrontClient` directly.
-
-**`integration-tests/src/registry_client.py`:** re-exports `SyncRegistryClient as RegistryClient` from the canonical wheel. Preserved for the smoke test import path `from src.registry_client import RegistryClient`.
-
----
 
 | Term | Meaning |
 |---|---|

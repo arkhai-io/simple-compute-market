@@ -11,7 +11,7 @@
 integrationTests:
   repository: ""    # falls back to global.imageRepository
   name: arkhai
-  tag: integration-tests
+  tag: e2e-tests
   pullPolicy: IfNotPresent
 
 # ---------------------------------------------------------------------------

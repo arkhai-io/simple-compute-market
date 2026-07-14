@@ -1,2 +1,0 @@
-"""Compute domain app package."""
-

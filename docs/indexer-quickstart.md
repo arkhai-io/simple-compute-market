@@ -1,16 +1,19 @@
-# Indexer quickstart
+# Listing registry quickstart
 
-How to stand up your own indexer registry. Reasons to run one:
+How to stand up your own listing registry. Reasons to run one:
 
 - **Curate which sellers can publish and which buyers can query**
   (bearer-token auth, §6).
 - **No third-party rate limits.**
 - **Custom `filter-spec.yaml`** — the vocabulary for `gpu_model`,
-  `region`, etc. is per-indexer.
+  `region`, etc. is per registry.
 - **Solo testing** — no fanout.
 
-`compose/seller.yml` is registry-agnostic, so an indexer can run on
-the same host as a seller or anywhere else.
+`compose/seller.yml` is registry-agnostic, so a listing registry can run on
+the same host as a seller or anywhere else. Co-location is only deployment
+convenience: the registry remains a discovery role, while the storefront
+remains the seller's negotiation, settlement, and fulfillment role. See
+[`roles.md`](./roles.md) for the role model.
 
 ## 1. Build the image
 
@@ -37,10 +40,10 @@ Fill in:
 
 The example file gates reads and writes independently and ships with
 both on (`REGISTRY_REQUIRE_READ_API_KEY=true`,
-`REGISTRY_REQUIRE_WRITE_API_KEY=true`) — a private indexer where buyers
+`REGISTRY_REQUIRE_WRITE_API_KEY=true`) — a private listing registry where buyers
 hold read keys and sellers hold write keys.
 
-For a fully public indexer (anyone can publish and query) set both to
+For a fully public listing registry (anyone can publish and query) set both to
 `false` and drop the two key vars. For an open market — public
 discovery, publishing limited to vetted sellers — set only
 `REGISTRY_REQUIRE_WRITE_API_KEY=true` and hand write keys to sellers.
@@ -63,30 +66,30 @@ In each storefront / buyer TOML:
 
 ```toml
 [registry]
-urls = ["http://<INDEXER_HOST>:8080"]
+urls = ["http://<REGISTRY_HOST>:8080"]
 ```
 
-When the indexer and seller share a docker network, use the service
+When the listing registry and seller share a docker network, use the service
 name: `urls = ["http://registry:8080"]`.
 
 ## 5. Checks
 
 ```bash
-curl -sf http://<INDEXER_HOST>:8080/health
+curl -sf http://<REGISTRY_HOST>:8080/health
 
 docker compose logs registry | grep -i "JIT.*Indexed agent"
 
-curl -s http://<INDEXER_HOST>:8080/filter-spec | jq
+curl -s http://<REGISTRY_HOST>:8080/filter-spec | jq
 
 # Listings — note the full canonical agent ID, URL-encoded:
-curl -s "http://<INDEXER_HOST>:8080/agents/eip155%3A84532%3A0x8004A818BFB912233c491871b3d84c89A494BD9e%3A<N>/listings" \
+curl -s "http://<REGISTRY_HOST>:8080/agents/eip155%3A84532%3A0x8004A818BFB912233c491871b3d84c89A494BD9e%3A<N>/listings" \
   | jq
 ```
 
 ## 6. Bearer-token auth
 
 `config.registry.env.example` ships with both gates on. To disable auth
-(fully public indexer) set `REGISTRY_REQUIRE_READ_API_KEY` and
+(fully public listing registry) set `REGISTRY_REQUIRE_READ_API_KEY` and
 `REGISTRY_REQUIRE_WRITE_API_KEY` to `false` and drop the two key vars.
 
 Flow:
@@ -104,5 +107,5 @@ In the seller / buyer TOML:
 
 ```toml
 [registry.auth]
-"http://<INDEXER_HOST>:8080" = "<api_key>"
+"http://<REGISTRY_HOST>:8080" = "<api_key>"
 ```

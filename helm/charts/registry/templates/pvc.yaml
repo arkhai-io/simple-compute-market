@@ -7,7 +7,7 @@ helm.sh/resource-policy: keep so `helm uninstall` does not destroy
 indexed state. Reinstalls rebind the existing PVC and pick up where
 they left off.
 */}}
-{{- if .Values.persistence.enabled }}
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

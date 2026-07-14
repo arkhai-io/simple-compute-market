@@ -9,7 +9,7 @@
   {{- $itRepo = .Values.global.imageRepository | default "" -}}
 {{- end -}}
 {{- $itName := $rootIt.name | default ($itValues.name | default "arkhai") -}}
-{{- $itTag  := $rootIt.tag  | default ($itValues.tag  | default "integration-tests") -}}
+{{- $itTag  := $rootIt.tag  | default ($itValues.tag  | default "e2e-tests") -}}
 {{- $itPull := $rootIt.pullPolicy | default ($itValues.pullPolicy | default "IfNotPresent") -}}
 {{- $itImage := "" -}}
 {{- if $itRepo -}}

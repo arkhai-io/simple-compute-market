@@ -8,10 +8,10 @@ then run a CLI-first GCP proof for real Ansible/KVM provisioning.
 
 - All commands assume the repo root unless a step explicitly changes
   directories.
-- `make test-module MODULE=<marker>` in `integration-tests/` runs
+- `make test-module MODULE=<marker>` in `e2e-tests/` runs
   `pytest -m <marker>`.
 - High `deselected` counts are expected for marker-specific runs. Pytest
-  discovers the whole `integration-tests/tests/` tree, then runs only tests
+  discovers the whole `e2e-tests/tests/` tree, then runs only tests
   matching the requested marker.
 - Keep `docker compose -f docker-compose.yml -f /tmp/scm-no-redis-port.yml`
   together for every compose command if the Redis port override is in use.
@@ -69,15 +69,15 @@ Defaults:
 - Code-level tests are enabled.
 - Compose smoke/e2e tests are enabled.
 - Redis host-port publishing is disabled through `/tmp/scm-no-redis-port.yml`.
-- `compute-provisioning-iac` contract tests run by default because they do not
+- `domains/vms/provisioning/iac` contract tests run by default because they do not
   require a live KVM host or Ansible inventory.
 - Bob/Alice storefront named volumes are pre-chowned to UID/GID `1000:1000`
   before stack startup to avoid the known SQLite volume ownership failure.
 - A quiet `anvil_dumpState` check runs after Anvil is reachable.
 - Helm render validation runs automatically when `helm` is available.
 - Compute-provisioning IAC validation runs automatically when Ansible tooling
-  and `compute-provisioning-iac/ansible/inventory/hosts` are available.
-- The single-pass `integration-tests make test` sweep is off by default because
+  and `domains/vms/provisioning/iac/ansible/inventory/hosts` are available.
+- The single-pass `e2e-tests make test` sweep is off by default because
   it reruns stack-mutating e2e tests after the marker-specific runs.
 
 ## 1. Prerequisites
@@ -139,7 +139,7 @@ make build-dev
 ```
 
 Expected build products include `.dist/`, `shared-env/.env`,
-`test-env/state/state.json`, runtime Docker images, and dev/test Docker images
+`dev-env/state/state.json`, runtime Docker images, and dev/test Docker images
 for the local stack.
 
 ## 4. Code-Level Tests
@@ -155,23 +155,14 @@ make test
 
 This runs unit + integration tests for:
 
-- `provisioning-service`
-- `registry-service`
+- `domains/vms/provisioning/service`
+- `core/registry`
 - `storefront`
-
-Shared service package:
-
-```bash
-cd service
-make reinit
-make test
-cd ..
-```
 
 Policy package:
 
 ```bash
-cd policy
+cd kit/policy
 uv sync --dev
 uv run pytest tests/unit/ -v
 cd ..
@@ -180,26 +171,26 @@ cd ..
 Buyer package:
 
 ```bash
-cd buyer
+cd domains/vms/buyer
 uv sync --python 3.12 --extra test
 uv run pytest tests/ -v
 make smoke-test
-cd ..
+cd ../../..
 ```
 
 Storefront client package:
 
 ```bash
-cd storefront-client
+cd core/storefront-client
 uv sync --dev
 uv run pytest tests/ -v
-cd ..
+cd ../..
 ```
 
 Compute provisioning IAC contract tests:
 
 ```bash
-cd compute-provisioning-iac
+cd domains/vms/provisioning/iac
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 cd ..
 ```
@@ -207,7 +198,7 @@ cd ..
 Integration-test harness unit tests:
 
 ```bash
-cd integration-tests
+cd e2e-tests
 make reinit
 .venv/bin/pytest tests/unit/ -v
 cd ..
@@ -215,7 +206,7 @@ cd ..
 
 Current note:
 
-- `registry-client/` currently has a `tests/` package but no `test_*.py`
+- `core/registry-client/` currently has a `tests/` package but no `test_*.py`
   files, so there is no runnable registry-client test command at the moment.
 - `infra/` currently has pytest dev dependencies but no `test_*.py` files, so
   there is no runnable infra package test command at the moment.
@@ -223,10 +214,10 @@ Current note:
 ## 5. Optional Environment-Dependent Local Tests
 
 Compute provisioning IAC inventory/playbook validation requires Ansible tooling
-and `compute-provisioning-iac/ansible/inventory/hosts`:
+and `domains/vms/provisioning/iac/ansible/inventory/hosts`:
 
 ```bash
-cd compute-provisioning-iac
+cd domains/vms/provisioning/iac
 make validate
 cd ..
 ```
@@ -234,7 +225,7 @@ cd ..
 Do not run acceptance validation unless a real KVM host is configured:
 
 ```bash
-cd compute-provisioning-iac
+cd domains/vms/provisioning/iac
 make validate-acceptance KVM_HOST=<inventory-host>
 cd ..
 ```
@@ -248,7 +239,7 @@ cd ..
 ```
 
 Policy training/RL dependencies are not part of the standard local validation.
-The old `domain/compute/tests` integration suite was removed in the latest pull;
+The old `domains/vms/tests` integration suite was removed in the latest pull;
 future training or RL validation should be documented separately when runnable
 tests are added back.
 
@@ -256,7 +247,7 @@ tests are added back.
 
 These are not covered by the standard local run above:
 
-- `registry-client`: has a `tests/` package but currently no `test_*.py`
+- `core/registry-client`: has a `tests/` package but currently no `test_*.py`
   files, so there is no runnable test suite to execute.
 - `infra`: has pytest dev dependencies but currently no `test_*.py` files, so
   there is no runnable test suite to execute.
@@ -268,7 +259,7 @@ These are not covered by the standard local run above:
   were retired with the buyer-storefront drop.
 - Helm/Kubernetes test pods: `helm test` coverage requires a deployed Helm
   release and is separate from the local compose stack.
-- `compute-provisioning-iac make validate-acceptance`: requires a real KVM host
+- `domains/vms/provisioning/iac make validate-acceptance`: requires a real KVM host
   and `KVM_HOST` set to an inventory alias.
 - Policy training/RL behavior: no current standard local test command covers
   the training stack or trained model inference.
@@ -359,7 +350,7 @@ Registry agents:
 curl -sf http://localhost:8080/agents | jq
 ```
 
-Test-env state smoke, as a quieter equivalent of `cd test-env && make smoke`:
+Dev-env state smoke, as a quieter equivalent of `cd dev-env && make smoke`:
 
 ```bash
 curl -sf http://localhost:8545 -H 'Content-Type: application/json' \
@@ -404,7 +395,7 @@ docker run --rm -v simple-compute-market_alice-storefront-data:/data alpine:3.20
 ## 11. Deployment Smoke Tests
 
 ```bash
-cd integration-tests
+cd e2e-tests
 
 make test-module MODULE=contracts ACTIVE_PROFILES=local
 make test-module MODULE=wallets ACTIVE_PROFILES=local
@@ -434,7 +425,7 @@ make test-module MODULE=multi_registry ACTIVE_PROFILES=local
 ## 13. Optional Single-Pass Integration-Test Sweep
 
 After running the marker-specific commands above, this can catch any unmarked
-test in `integration-tests/tests/`. Run it before teardown and expect it to
+test in `e2e-tests/tests/`. Run it before teardown and expect it to
 rerun tests that mutate stack state:
 
 ```bash
@@ -526,7 +517,7 @@ tar \
   --exclude='dist' \
   --exclude='build' \
   --exclude='node_modules' \
-  --exclude='test-env/state' \
+  --exclude='dev-env/state' \
   --exclude='.scm-local/issue-discovery' \
   --exclude='.scm-local/clean-room-runs' \
   --exclude='scm-clean-room-transfer' \
@@ -818,7 +809,7 @@ Deploy the current dev overlay as-is first. This proves images, Helm values,
 secret mounts, and service wiring before real provisioning is enabled.
 On a reused dev cluster, restart the application deployments in dependency
 order so mutable image tags and startup-read config are actually reloaded. Do
-not restart `test-env` here unless you intentionally want to reset the dev
+not restart `dev-env` here unless you intentionally want to reset the dev
 Anvil chain state.
 
 ```bash
@@ -1000,7 +991,7 @@ for attempt in $(seq 1 30); do
 done
 test "$ssh_ready" -eq 1
 
-cd compute-provisioning-iac
+cd domains/vms/provisioning/iac
 
 ANSIBLE_CONFIG=ansible/ansible.cfg \
   ansible-galaxy collection install -r ansible/requirements.yml

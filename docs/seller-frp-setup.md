@@ -49,7 +49,7 @@ Minimum requirements on the VM:
 
 ## 2. Add the host to your Ansible inventory
 
-Edit `compute-provisioning-iac/ansible/inventory/hosts` (copy from
+Edit `domains/vms/provisioning/iac/ansible/inventory/hosts` (copy from
 `hosts.example` if you haven't):
 
 ```ini
@@ -62,7 +62,7 @@ playbook targets the group, not the name.
 
 ## 3. Run the setup playbook
 
-From `compute-provisioning-iac/`:
+From `domains/vms/provisioning/iac/`:
 
 ```bash
 ansible-playbook -i ansible/inventory/hosts \
@@ -77,11 +77,11 @@ dashboard, sets up UFW + fail2ban, and reboots the host. Run time:
 ~5 minutes.
 
 When it finishes, **save the credentials file it writes locally** to
-`compute-provisioning-iac/credentials/frp-server-credentials-<host>-<timestamp>.json`.
+`domains/vms/provisioning/iac/credentials/frp-server-credentials-<host>-<timestamp>.json`.
 It contains the `auth_token` and `dashboard_password` you'll need next.
 
 For full parameter details and re-run / SSL recovery flags, see
-[`compute-provisioning-iac/README.md`](../compute-provisioning-iac/README.md#1-setup-frp-server-optional-for-secure-remote-access-to-leased-vms).
+[`domains/vms/provisioning/iac/README.md`](../domains/vms/provisioning/iac/README.md#1-setup-frp-server-optional-for-secure-remote-access-to-leased-vms).
 
 ## 4. DNS records
 

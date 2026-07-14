@@ -1,0 +1,74 @@
+[project]
+name = "arkhai-apicredits-buyer"
+version = "0.1.0"
+license = "MIT"
+description = "API-credits buyer schema plugin for the core `market` CLI: discover credit listings, negotiate quantity x rate, settle into issued keys."
+requires-python = ">=3.12"
+dependencies = [
+  "typer>=0.12.0",
+  "rich>=13.7.0",
+  "eth-account>=0.13.0",
+  # Needed by the buy/settle path for in-process on-chain escrow
+  # creation. Imported lazily from core_buyer.escrow_client so loading
+  # the CLI does not pay the native-binary cost unless a deal settles.
+  "alkahest-py==1.1.0",
+  "arkhai-core-buyer",
+  "arkhai-core",
+  "arkhai-kit-alkahest",
+  "arkhai-kit-config",
+  "arkhai-kit-policy",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0.0",
+]
+
+# The `market` console script ships from arkhai-core-buyer; this package only
+# contributes the API-credits schema plugin the core CLI discovers.
+[project.entry-points."market.buyer_plugins"]
+apicredits = "domains.apicredits.buyer.cli:plugin"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+only-include = ["__init__.py"]
+dev-mode-dirs = ["../../.."]
+
+# Ships the buyer modules plus the concept modules they compose
+# (listings, negotiation). `domains/__init__.py` is deliberately NOT
+# included: arkhai-vms-buyer ships it, and installing both wheels in
+# one venv must not collide on the file. Installed alone, `domains`
+# resolves as an implicit namespace package.
+[tool.hatch.build.targets.wheel.force-include]
+"../__init__.py" = "domains/apicredits/__init__.py"
+"__init__.py" = "domains/apicredits/buyer/__init__.py"
+"buy_cli.py" = "domains/apicredits/buyer/buy_cli.py"
+"cli.py" = "domains/apicredits/buyer/cli.py"
+"cli_helpers.py" = "domains/apicredits/buyer/cli_helpers.py"
+"common.py" = "domains/apicredits/buyer/common.py"
+"listing_cli.py" = "domains/apicredits/buyer/listing_cli.py"
+"negotiate_cli.py" = "domains/apicredits/buyer/negotiate_cli.py"
+"settle_cli.py" = "domains/apicredits/buyer/settle_cli.py"
+"../listings/__init__.py" = "domains/apicredits/listings/__init__.py"
+"../listings/models.py" = "domains/apicredits/listings/models.py"
+"../listings/pricing.py" = "domains/apicredits/listings/pricing.py"
+"../listings/reconciler.py" = "domains/apicredits/listings/reconciler.py"
+"../negotiation/__init__.py" = "domains/apicredits/negotiation/__init__.py"
+"../negotiation/buyer_policies.py" = "domains/apicredits/negotiation/buyer_policies.py"
+"../negotiation/policies.py" = "domains/apicredits/negotiation/policies.py"
+"../negotiation/storefront_round.py" = "domains/apicredits/negotiation/storefront_round.py"
+"../negotiation/terms.py" = "domains/apicredits/negotiation/terms.py"
+
+[tool.pytest.ini_options]
+pythonpath = ["../../..", "."]

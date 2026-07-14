@@ -1,0 +1,7 @@
+# API-credits market on the local dev chain — standalone bring-up.
+#   docker compose -f compose.apicredits.yml up
+# Just the shared Anvil chain + the API-credits domain stack, with no VM
+# services. See domains/apicredits/compose.yml.
+include:
+  - compose.dev.yml
+  - domains/apicredits/compose.yml

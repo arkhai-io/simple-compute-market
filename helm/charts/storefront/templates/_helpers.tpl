@@ -54,7 +54,8 @@ Compose the HTTP RPC URL from global.rpc.host and global.rpc.port.
 Mirrors the definition in the root chart's _helpers.tpl.
 */}}
 {{- define "rpc.url" -}}
-{{- printf "http://%s:%d" .Values.global.rpc.host (int .Values.global.rpc.port) -}}
+{{- $scheme := .Values.global.rpc.scheme | default "http" -}}
+{{- printf "%s://%s:%d" $scheme .Values.global.rpc.host (int .Values.global.rpc.port) -}}
 {{- end }}
 
 {{/*
@@ -62,7 +63,8 @@ Compose the WebSocket RPC URL from global.rpc.host and global.rpc.port.
 Agents connect to Anvil over WebSocket for event subscriptions.
 */}}
 {{- define "rpc.wsUrl" -}}
-{{- printf "ws://%s:%d" .Values.global.rpc.host (int .Values.global.rpc.port) -}}
+{{- $scheme := ternary "wss" "ws" (eq (.Values.global.rpc.scheme | default "http") "https") -}}
+{{- printf "%s://%s:%d" $scheme .Values.global.rpc.host (int .Values.global.rpc.port) -}}
 {{- end }}
 
 {{/*
@@ -81,8 +83,8 @@ Compose the provisioning service URL from global.provisioning.{host,port}.
 
 {{/*
 Compose the agent's externally-advertised base URL from the agent's
-Service DNS + port. This is what the agent writes to its on-chain
-ERC-8004 registration file (and what other agents dial to reach it).
+Service DNS + port. This is what the storefront advertises on its
+registry listings (and what buyers dial to reach it).
 Argument: dict with `root` and `agent`.
 */}}
 {{- define "storefront.agentBaseUrl" -}}
@@ -144,7 +146,7 @@ string the ConfigMap template embeds under `storefront.toml`.
 Argument: dict with `root` (chart root) and `agent`.
 
 Pairs with `storefront.agentSecretsToml` — together they form the
-complete config the runtime loader (`service.config_loader`) merges
+complete config the storefront runtime loader merges
 at startup. Sensitive values (wallet.address, wallet.private_key,
 admin_api_key, resources_csv_inline, integrations.gemini_api_key)
 live in the Secret-rendered overlay and are not duplicated here.
@@ -185,7 +187,6 @@ ssh_public_key = {{ $seller.sshPublicKey | default "" | quote }}
 [chains.{{ $chain.name | default "ethereum_sepolia" }}]
 rpc_url = {{ default (include "rpc.wsUrl" $root) $chain.rpcUrl | quote }}
 chain_id = {{ $root.Values.global.rpc.chainId | int }}
-identity_registry_address = {{ $root.Values.global.registry.identity_address | quote }}
 {{- if $chain.alkahestAddressConfigPath }}
 alkahest_address_config_path = {{ $chain.alkahestAddressConfigPath | quote }}
 {{- end }}
@@ -254,6 +255,13 @@ admin_api_key = {{ $adminKey | quote }}
 resources_csv_inline = """
 {{ $agent.secret.resourcesCsvInline }}
 """
+{{- end }}
+
+{{- if $agent.secret.registryAuthToken }}
+
+[registry.auth]
+# Key must match the rendered [registry] urls entry exactly.
+{{ default (include "registry.url" $root) ($cfg.registryUrl) | quote }} = {{ $agent.secret.registryAuthToken | quote }}
 {{- end }}
 
 [wallet]

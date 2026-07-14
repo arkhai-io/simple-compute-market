@@ -24,7 +24,7 @@ workarounds:
     removal_condition: Top-level make build no longer runs sudo ZeroTier installation as part of local image/artifact builds.
     start_phase: build
     env:
-      ISSUE_DISCOVERY_BUILD_COMMAND: make build-runtime-images build-market-contract-deployer build-test-env build-test-image
+      ISSUE_DISCOVERY_BUILD_COMMAND: make build-runtime-images build-market-contract-deployer build-dev-env build-test-image
 
   - id: storefront_volume_chown
     status: active

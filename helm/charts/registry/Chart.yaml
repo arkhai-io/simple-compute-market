@@ -1,6 +1,6 @@
 apiVersion: v2
 name: registry
-description: ERC-8004 registry and indexer service for the Arkhai stack
+description: Listing discovery/index service (registry role) for the Arkhai stack
 type: application
 version: 0.1.0
 appVersion: "0.1.0"

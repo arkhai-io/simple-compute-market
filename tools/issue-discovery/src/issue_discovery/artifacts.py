@@ -42,6 +42,10 @@ class ArtifactStore:
     def use_exact_dir(cls, run_dir: Path, run_id: str | None = None) -> ArtifactStore:
         actual_run_id = run_id or run_dir.name
         store = cls(run_dir=run_dir, run_id=actual_run_id)
+        if store.run_dir.exists() and any(store.run_dir.iterdir()):
+            raise FileExistsError(
+                f"output directory already exists and is not empty: {store.run_dir}"
+            )
         store.run_dir.mkdir(parents=True, exist_ok=True)
         store.commands_dir.mkdir(parents=True, exist_ok=True)
         (store.run_dir / "context").mkdir(parents=True, exist_ok=True)

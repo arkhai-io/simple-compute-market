@@ -6,7 +6,7 @@
 #
 # For local development and testing, we provide a test chain (Anvil) with
 # the Alkahest contracts pre-baked into the image's state snapshot
-# (test-env/state/state.json). Real users can ignore this file.
+# (dev-env/state/state.json). Real users can ignore this file.
 #
 # Usage:
 #   docker compose -f compose/external.yml up       # start the test chain
@@ -14,7 +14,7 @@
 
 services:
   anvil:
-    image: arkhai:test-env
+    image: arkhai:dev-env
     container_name: anvil
     ports:
       - "8545:8545"

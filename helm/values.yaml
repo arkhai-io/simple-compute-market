@@ -11,21 +11,17 @@ global:
   # ---------------------------------------------------------------------------
   rpc:
     chainId: 31337
-    host: "arkhai-node-operator-test-env"
+    host: "arkhai-node-operator-dev-env"
     port: 8545
 
   # ---------------------------------------------------------------------------
-  # Registry service coordinates and contract addresses shared across all subcharts.
+  # Registry service coordinates shared across all subcharts.
   # Defaults to the service name produced by the registry subchart under a
   # release named "arkhai-node-operator".
   # ---------------------------------------------------------------------------
   registry:
     host: "arkhai-node-operator-registry"
     port: 8080
-    identity_address:   "0x8004A818BFB912233c491871b3d84c89A494BD9e"
-    reputation_address: "0x8004B663056A597Dffe9eCcC1965A193B7388713"
-    validation_address: "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
-    owner_address:      "0x547289319C3e6aedB179C0b8e8aF0B5ACd062603"
 
   # Provisioning service coordinates. Surfaced in globals so the
   # storefront subchart can compose seller.provisioning.service_url
@@ -83,15 +79,15 @@ global:
         profileRefs: {}
 
 # ---------------------------------------------------------------------------
-# test-env subchart
+# dev-env subchart
 # ---------------------------------------------------------------------------
-test-env:
+dev-env:
   enabled: true
 
   image:
     repository: ""
     name: arkhai
-    tag: test-env
+    tag: dev-env
     pullPolicy: IfNotPresent
 
   service:
@@ -146,7 +142,7 @@ storefront:
     - name: bob
       port: 8001
       component: seller
-      agentId: ""        # pin after first registration; see storefront/values.yaml
+      agentId: ""        # pin after first registration; see charts/storefront/values.yaml
       autoRegister: true # set false once registered to prevent accidental re-registration
       secret:
         createSecret: true
@@ -224,20 +220,20 @@ provisioning:
 # ---------------------------------------------------------------------------
 # validate-contracts subchart
 # Runs the contract validation helm test.
-# When test-env is enabled, tests run against that deployment via global.rpc.
-# When test-env is disabled, set rpcUrl to point at your target endpoint.
+# When dev-env is enabled, tests run against that deployment via global.rpc.
+# When dev-env is disabled, set rpcUrl to point at your target endpoint.
 # ---------------------------------------------------------------------------
 validate-contracts:
   enabled: true
   # Override the RPC endpoint. Leave empty to use global.rpc.host:port
-  # (i.e. the test-env service when that subchart is enabled).
+  # (i.e. the dev-env service when that subchart is enabled).
   rpcUrl: ""
 
 integrationTests:
   image:
     repository: ""
     name: arkhai
-    tag: integration-tests
+    tag: e2e-tests
     pullPolicy: IfNotPresent
 
 # ---------------------------------------------------------------------------
@@ -253,7 +249,7 @@ e2e-tests:
   integrationTests:
     repository: ""
     name: arkhai
-    tag: integration-tests
+    tag: e2e-tests
     pullPolicy: IfNotPresent
 
   # Seller credentials for the agent this e2e run targets.
