@@ -51,6 +51,27 @@ from .settle_cli import run_settle_from_log
 from .run_log import RunLog
 
 
+def _pin_discovered_matches(
+    matches: list[dict[str, Any]],
+    *,
+    listing_id: str | None,
+    seller_url: str | None,
+) -> list[dict[str, Any]]:
+    """Apply exact post-discovery authority pins used by reproducible buys."""
+    pinned = matches
+    if listing_id is not None:
+        pinned = [item for item in pinned if item.get("listing_id") == listing_id]
+    if seller_url is not None:
+        expected = seller_url.rstrip("/")
+        pinned = [
+            item
+            for item in pinned
+            if isinstance(item.get("seller"), str)
+            and str(item["seller"]).rstrip("/") == expected
+        ]
+    return pinned
+
+
 def _normalize_start_utc(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
@@ -369,6 +390,22 @@ def register(app: typer.Typer) -> None:
                  "appended to so `market logs show <id>` captures the "
                  "full lifecycle.",
         ),
+        listing_id: Optional[str] = typer.Option(
+            None,
+            "--listing-id",
+            help=(
+                "Require the exact discovered listing id. Applied after registry "
+                "discovery so an automated run cannot buy another match."
+            ),
+        ),
+        seller_url: Optional[str] = typer.Option(
+            None,
+            "--seller",
+            help=(
+                "Require the exact seller base URL for a fresh buy. Combine with "
+                "--listing-id to pin multi-seller waves."
+            ),
+        ),
         registry_urls: Optional[str] = typer.Option(
             None, "--registry-urls",
             help="Comma-separated registry base URLs (default: "
@@ -637,6 +674,12 @@ def register(app: typer.Typer) -> None:
         except RuntimeError as exc:
             typer.secho(f"Registry query failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3)
+
+        matches = _pin_discovered_matches(
+            matches,
+            listing_id=listing_id,
+            seller_url=seller_url,
+        )
 
         if not matches:
             typer.secho(

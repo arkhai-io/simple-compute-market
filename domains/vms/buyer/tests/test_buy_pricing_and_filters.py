@@ -23,6 +23,25 @@ from domains.vms.buyer.buy_orchestrator import (
     run_buy,
 )
 from domains.vms.buyer.cli_helpers import parse_filter_options
+from domains.vms.buyer.buy_cli import _pin_discovered_matches
+
+
+def test_exact_listing_and_seller_pins_are_applied_after_discovery() -> None:
+    matches = [
+        {"listing_id": "L1", "seller": "https://seller-one.example/"},
+        {"listing_id": "L2", "seller": "https://seller-two.example"},
+    ]
+
+    assert _pin_discovered_matches(
+        matches,
+        listing_id="L2",
+        seller_url="https://seller-two.example/",
+    ) == [matches[1]]
+    assert _pin_discovered_matches(
+        matches,
+        listing_id="missing",
+        seller_url=None,
+    ) == []
 
 
 def _escrow_proposal() -> EscrowProposal:
