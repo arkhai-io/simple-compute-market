@@ -1,13 +1,21 @@
 # async-provisioning-service
 
-Async VM provisioning service. Exposes a REST API that queues provisioning jobs (create, destroy, start, stop, etc.) onto a Redis-backed worker that executes Ansible playbooks from `domains/vms/provisioning/iac`.
+Async VM provisioning service. Exposes a REST API that queues provisioning
+jobs (create, destroy, start, stop, etc.) onto an in-process bounded worker
+loop that executes Ansible playbooks from `domains/vms/provisioning/iac`.
 
 ## Architecture
 
 ```
-Client ──▶ FastAPI (port 8081) ──▶ Redis queue ──▶ Worker ──▶ Ansible playbooks
-                                                              (domains/vms/provisioning/iac)
+Client ──▶ FastAPI (port 8081) ──▶ asyncio.Queue ──▶ Worker ──▶ Ansible playbooks
+                                                                 (domains/vms/provisioning/iac)
 ```
+
+The queue can run jobs for different physical hosts concurrently. Complete
+executor operations for the same physical host are serialized in-process so
+GPU selection and `virt-install` cannot race. Deploy exactly one provisioning
+service replica until a distributed whole-GPU reservation is implemented and
+qualified.
 
 ## Local Development
 
@@ -77,7 +85,7 @@ docker run --rm --env-file .env.local -p 8081:8081 \
 | `PORT` | `8081` | API port |
 | `LOG_LEVEL` | `info` | Logging level |
 | `DATABASE_URL` | `postgresql+psycopg2://...` | Database connection string |
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection for job queue |
+| `PROVISIONING_MAX_CONCURRENT_JOBS` | `5` | Maximum jobs dispatched across all hosts; each physical host remains single-writer |
 | `ANSIBLE_TIMEOUT_SECONDS` | `1800` | Max seconds per Ansible run |
 | `DEFAULT_VM_HOST` | `kvm1` | Default KVM host target |
 | `PROVISIONING_REPO_ROOT` | *(auto-detected)* | Override project root path |

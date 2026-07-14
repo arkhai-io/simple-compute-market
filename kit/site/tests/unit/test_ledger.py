@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from threading import Barrier
 
 import pytest
 from sqlalchemy import create_engine
@@ -265,6 +267,45 @@ def test_reserve_decrements_and_releases_restore(seeded: CapacityLedgerService):
 
     # Idempotent: a second release finds nothing held.
     assert seeded.release(deal_ref={"escrow_uid": "0xesc"}) is None
+
+
+def test_synchronized_buyers_cannot_double_allocate_one_gpu(
+    ledger: CapacityLedgerService,
+):
+    """The site authority is the atomic admission point for buyer waves."""
+    ledger.register_resource(
+        resource_id="compute-kvm1-gpu",
+        total_units=1,
+        attributes={"vm_host": "kvm1", "gpu_model": "RTX 3090"},
+    )
+    release = Barrier(2)
+
+    def reserve(escrow_uid: str):
+        release.wait(timeout=5)
+        return ledger.reserve(
+            claim={"vm_host": "kvm1", "gpu_count": 1},
+            deal_ref={"escrow_uid": escrow_uid},
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(reserve, ("0xbuyer-1", "0xbuyer-2"))
+        )
+
+    winners = [result for result in results if result is not None]
+    assert len(winners) == 1
+    assert ledger.snapshot()[0]["available_units"] == 0
+    assert ledger.reserve(
+        claim={"vm_host": "kvm1", "gpu_count": 1},
+        deal_ref={"escrow_uid": "0xbuyer-3"},
+    ) is None
+
+    ledger.release(allocation_id=winners[0]["allocation_id"])
+    assert ledger.snapshot()[0]["available_units"] == 1
+    assert ledger.reserve(
+        claim={"vm_host": "kvm1", "gpu_count": 1},
+        deal_ref={"escrow_uid": "0xbuyer-3"},
+    ) is not None
 
 
 def test_future_reservation_ignores_non_overlapping_current_lease(seeded: CapacityLedgerService):

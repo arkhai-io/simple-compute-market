@@ -28,7 +28,7 @@ from sqlalchemy.pool import StaticPool
 import container as _container_module
 from provisioning_client import ProvisioningClient, ProvisioningError
 from db.database import create_session_factory
-from db.models import Base
+from db.models import Base, JobStatus
 from main import app
 from provisioning_client.models import CreateVmRequest
 from services.ansible_service import AnsibleService
@@ -238,6 +238,130 @@ class TestJobSummary:
         body = await test_client.job_summary()
         assert body["total"] >= 1
         assert body["counts"].get("succeeded", 0) >= 1
+
+    async def test_same_host_jobs_are_serialized_before_ansible_starts(
+        self, client_and_queue
+    ):
+        prov_client, job_queue, mock, _ = client_and_queue
+        mock.add_rule(MockRule(
+            rule_id="hold-host",
+            match={"vm_action": "create"},
+            pause_before_result=True,
+        ))
+        both_dispatched = asyncio.Event()
+        dispatched_ids: list[str] = []
+
+        def on_job_started(job_id: str) -> None:
+            dispatched_ids.append(job_id)
+            if len(dispatched_ids) == 2:
+                both_dispatched.set()
+
+        job_queue._on_job_started = on_job_started
+        first = await prov_client.create_vm(HOST, CreateVmRequest(
+            vm_target="serialized-vm-1", vm_ram=2048, vm_vcpus=2,
+            vm_disk_size="20G", ssh_pubkey="ssh-ed25519 AAAA test",
+        ))
+        second = await prov_client.create_vm(HOST, CreateVmRequest(
+            vm_target="serialized-vm-2", vm_ram=2048, vm_vcpus=2,
+            vm_disk_size="20G", ssh_pubkey="ssh-ed25519 AAAA test",
+        ))
+
+        try:
+            await asyncio.wait_for(both_dispatched.wait(), timeout=5.0)
+            deadline = asyncio.get_running_loop().time() + 5.0
+            while True:
+                statuses = {
+                    (await prov_client.get_job(first.job_id)).status,
+                    (await prov_client.get_job(second.job_id)).status,
+                }
+                if JobStatus.running.value in statuses:
+                    break
+                if asyncio.get_running_loop().time() >= deadline:
+                    pytest.fail(f"neither job started: {statuses}")
+                await asyncio.sleep(0.01)
+
+            assert statuses == {
+                JobStatus.queued.value,
+                JobStatus.running.value,
+            }
+        finally:
+            mock.resume_rule("hold-host")
+
+        await prov_client.poll_until_complete(first.job_id, timeout=10.0)
+        await prov_client.poll_until_complete(second.job_id, timeout=10.0)
+
+    async def test_cancelled_same_host_waiter_never_starts(self, client_and_queue):
+        prov_client, job_queue, mock, _ = client_and_queue
+        mock.add_rule(MockRule(
+            rule_id="hold-first",
+            match={"vm_action": "create"},
+            pause_before_result=True,
+        ))
+        both_dispatched = asyncio.Event()
+        dispatched_ids: list[str] = []
+
+        def on_job_started(job_id: str) -> None:
+            dispatched_ids.append(job_id)
+            if len(dispatched_ids) == 2:
+                both_dispatched.set()
+
+        job_queue._on_job_started = on_job_started
+        first = await prov_client.create_vm(HOST, CreateVmRequest(
+            vm_target="blocking-vm", vm_ram=2048, vm_vcpus=2,
+            vm_disk_size="20G", ssh_pubkey="ssh-ed25519 AAAA test",
+        ))
+        second = await prov_client.create_vm(HOST, CreateVmRequest(
+            vm_target="cancelled-vm", vm_ram=2048, vm_vcpus=2,
+            vm_disk_size="20G", ssh_pubkey="ssh-ed25519 AAAA test",
+        ))
+
+        await asyncio.wait_for(both_dispatched.wait(), timeout=5.0)
+        deadline = asyncio.get_running_loop().time() + 5.0
+        while (await prov_client.get_job(first.job_id)).status != JobStatus.running.value:
+            if asyncio.get_running_loop().time() >= deadline:
+                pytest.fail("first same-host job never reached running")
+            await asyncio.sleep(0.01)
+
+        cancelled = await prov_client.cancel_job(second.job_id)
+        assert cancelled["status"] == JobStatus.cancelled.value
+        mock.resume_rule("hold-first")
+        await prov_client.poll_until_complete(first.job_id, timeout=10.0)
+
+        deadline = asyncio.get_running_loop().time() + 5.0
+        while any(not task.done() for task in job_queue._running_tasks):
+            if asyncio.get_running_loop().time() >= deadline:
+                pytest.fail("cancelled host waiter did not drain")
+            await asyncio.sleep(0.01)
+        assert (await prov_client.get_job(second.job_id)).status == JobStatus.cancelled.value
+
+    async def test_running_cancellation_is_not_overwritten_by_late_success(
+        self, client_and_queue
+    ):
+        prov_client, job_queue, mock, _ = client_and_queue
+        mock.add_rule(MockRule(
+            rule_id="hold-running",
+            match={"vm_action": "create"},
+            pause_before_result=True,
+        ))
+        dispatched = _make_event_seam(job_queue)
+        submit = await prov_client.create_vm(HOST, CreateVmRequest(
+            vm_target="cancel-running-vm", vm_ram=2048, vm_vcpus=2,
+            vm_disk_size="20G", ssh_pubkey="ssh-ed25519 AAAA test",
+        ))
+        await asyncio.wait_for(dispatched.wait(), timeout=5.0)
+        deadline = asyncio.get_running_loop().time() + 5.0
+        while (await prov_client.get_job(submit.job_id)).status != JobStatus.running.value:
+            if asyncio.get_running_loop().time() >= deadline:
+                pytest.fail("job never reached running before cancellation")
+            await asyncio.sleep(0.01)
+
+        done = mock.get_or_create_job_event(submit.job_id)
+        cancelled = await prov_client.cancel_job(submit.job_id)
+        assert cancelled["status"] == JobStatus.cancelled.value
+        mock.resume_rule("hold-running")
+        await asyncio.wait_for(done.wait(), timeout=5.0)
+
+        assert (await prov_client.get_job(submit.job_id)).status == JobStatus.cancelled.value
 
 
 # ---------------------------------------------------------------------------

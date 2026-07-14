@@ -1365,7 +1365,13 @@ Agent ──HTTP──▶ Provisioning API :8081
                          ansible-playbook──▶ KVM host
 ```
 
-Long-running Ansible playbooks (up to `ANSIBLE_TIMEOUT_SECONDS=1800`) are launched as non-blocking subprocesses via `asyncio.create_task`. The event loop stays responsive to new requests while playbooks run. Up to `max_concurrent_jobs` (default 5) jobs run in parallel, controlled by an `asyncio.Semaphore`. The in-process `asyncio.Queue` replaces the former Redis queue; the service has no external queue dependency.
+Long-running Ansible playbooks (up to `ANSIBLE_TIMEOUT_SECONDS=1800`) are launched as non-blocking subprocesses via `asyncio.create_task`. The event loop stays responsive to new requests while playbooks run. Up to `max_concurrent_jobs` (default 5) jobs are dispatched across hosts, controlled by an `asyncio.Semaphore`. A keyed `asyncio.Lock` serializes the complete Ansible operation for each physical host. This closes the interval in which two workers could otherwise observe the same unattached whole GPU before either `virt-install` made its domain visible. Jobs for different physical hosts can still run concurrently. The in-process `asyncio.Queue` replaces the former Redis queue; the service has no external queue dependency.
+
+The physical-host lock is in-process. Deploy exactly one provisioning-service
+replica until whole-GPU ownership has a distributed reservation boundary.
+Queued jobs canceled while waiting for a host lock are fenced before Ansible
+starts, and late success or failure cannot overwrite a running job's
+`cancelled` state.
 
 #### Service layer architecture
 

@@ -229,6 +229,23 @@ class TestPlaybookSelection:
 
         assert svc._playbook_path_for_params(params) == Path("/playbooks/node-access.yaml")
 
+
+class TestTargetLockKey:
+    def test_vm_jobs_share_their_inventory_host_key(self):
+        params = AnsibleJobParams(vm_host="kvm1", vm_action="create")
+
+        assert AnsibleJobService._target_lock_key(params) == "kvm1"
+
+    def test_physical_host_identity_overrides_executor_local_target(self):
+        params = AnsibleJobParams(
+            vm_host="inventory-alias",
+            vm_action=NODE_GRANT_ACCESS_ACTION,
+            executor_kind="bare_metal",
+            executor_ref={"physical_host_id": "host-physical-1"},
+        )
+
+        assert AnsibleJobService._target_lock_key(params) == "host-physical-1"
+
     def test_bare_metal_executor_kind_uses_bare_metal_playbook(self):
         svc = _make_service()
         params = AnsibleJobParams(

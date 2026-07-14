@@ -76,6 +76,12 @@ class AnsibleJobService:
         self._session_factory = session_factory
         self._ansible = ansible_service
         self._host_service = host_service
+        # GPU selection currently derives availability from libvirt domain
+        # state on the target host.  Keep the selection-to-domain-creation
+        # interval single-writer per physical host so two queue workers cannot
+        # choose the same whole GPU before either domain becomes visible.
+        # Different hosts retain the queue's configured parallelism.
+        self._target_locks: dict[str, asyncio.Lock] = {}
 
     # ------------------------------------------------------------------
     # HTTP-layer operations
@@ -282,8 +288,18 @@ class AnsibleJobService:
             if job.status == JobStatus.running.value and job.process_id:
                 try:
                     pid = int(job.process_id)
-                    os.kill(pid, signal.SIGTERM)
-                    logger.info("Sent SIGTERM to process %d for job %s", pid, job_id)
+                    # Mock/no-subprocess executors use PID 0.  POSIX interprets
+                    # kill(0, ...) as the caller's entire process group, so it
+                    # must never cross the cancellation boundary.
+                    if pid > 0:
+                        os.kill(pid, signal.SIGTERM)
+                        logger.info(
+                            "Sent SIGTERM to process %d for job %s", pid, job_id
+                        )
+                    else:
+                        logger.info(
+                            "Job %s has no signalable executor process", job_id
+                        )
                 except ProcessLookupError:
                     logger.warning(
                         "Process %d for job %s not found (already terminated)",
@@ -311,6 +327,34 @@ class AnsibleJobService:
     # ------------------------------------------------------------------
 
     async def _process_job(self, job_id: str) -> None:
+        """Serialize a complete executor operation per physical host.
+
+        ``AsyncJobQueue`` bounds process-wide concurrency.  This second layer
+        protects host-local discovery and mutation (notably GPU selection and
+        ``virt-install``) while still allowing jobs for different hosts to run
+        concurrently.  Waiting jobs remain queued until they own the host.
+        """
+        with self._session_factory() as db:
+            job = (
+                db.query(AnsibleJob)
+                .filter(AnsibleJob.id == job_id)
+                .one_or_none()
+            )
+            if not job:
+                logger.warning("Job %s not found", job_id)
+                return
+            if job.next_retry_at and datetime.utcnow() < job.next_retry_at:
+                return
+            params = self._build_params(job.params)
+
+        target_key = self._target_lock_key(params)
+        target_lock = self._target_locks.setdefault(target_key, asyncio.Lock())
+        logger.debug("Job %s waiting for executor target %s", job_id, target_key)
+        async with target_lock:
+            logger.debug("Job %s acquired executor target %s", job_id, target_key)
+            await self._process_job_for_target(job_id)
+
+    async def _process_job_for_target(self, job_id: str) -> None:
         """Execute a single Ansible job end-to-end.
 
         This is the ``handler`` argument to ``AsyncJobQueue.start()``.
@@ -328,6 +372,18 @@ class AnsibleJobService:
             )
             if not job:
                 logger.warning("Job %s not found", job_id)
+                return
+
+            # A queued job can be cancelled while it waits for another job's
+            # host lock.  The queue entry is intentionally transient and is
+            # not removed on cancellation, so terminal rows must fence stale
+            # dispatch here before any Ansible or host mutation starts.
+            if job.status != JobStatus.queued.value:
+                logger.info(
+                    "Skipping job %s in terminal/non-queued state %s",
+                    job_id,
+                    job.status,
+                )
                 return
 
             # Respect scheduled retry delay: if the job's next_retry_at is in
@@ -409,6 +465,13 @@ class AnsibleJobService:
                     timeout_seconds=self._settings.ansible_timeout_seconds,
                     log_callback=log_callback,
                 )
+                db.refresh(job)
+                if job.status == JobStatus.cancelled.value:
+                    logger.info(
+                        "Job %s completed after cancellation; preserving fence",
+                        job_id,
+                    )
+                    return
                 run_result: AnsibleRunResult = self._ansible.parse_playbook_result(
                     ansible_result, params, public_host=host_public_host
                 )
@@ -431,6 +494,13 @@ class AnsibleJobService:
                 logger.info("Job %s succeeded", job_id)
 
             except AnsibleError as exc:
+                db.refresh(job)
+                if job.status == JobStatus.cancelled.value:
+                    logger.info(
+                        "Job %s failed after cancellation; preserving fence",
+                        job_id,
+                    )
+                    return
                 logs = exc.stdout + (
                     "\n\nSTDERR:\n" + exc.stderr if exc.stderr else ""
                 )
@@ -494,7 +564,7 @@ class AnsibleJobService:
                     .filter(AnsibleJob.id == job_id)
                     .one_or_none()
                 )
-                if job:
+                if job and job.status != JobStatus.cancelled.value:
                     self._update_job(
                         db,
                         job,
@@ -526,6 +596,18 @@ class AnsibleJobService:
     # ------------------------------------------------------------------
 
     _UNSET = object()
+
+    @staticmethod
+    def _target_lock_key(params: AnsibleJobParams) -> str:
+        """Return the stable physical-host key used for mutation fencing."""
+        executor_ref = params.executor_ref or {}
+        physical_host_id = (
+            executor_ref.get("physical_host_id")
+            if isinstance(executor_ref, dict)
+            else None
+        )
+        key = physical_host_id or params.physical_host_id or params.vm_host
+        return str(key or "__unscoped_executor__")
 
     def _update_job(
         self,
