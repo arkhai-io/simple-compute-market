@@ -94,46 +94,12 @@ class Credential(Base):
     job = relationship("AnsibleJob", back_populates="credentials")
 
 
-DEFAULT_POOL_ID = "default"
-
-
-class ResourcePool(Base):
-    """Provisioning-owned grouping of physical resources eligible for
-    settlement (see ARCHITECTURE.md § Technical Terms — "Resource Pool").
-
-    This is infrastructure routing/scheduling metadata, distinct from any
-    storefront-side capacity pool concept — there is no FK between the two
-    layers, only explicit configuration/attribute mapping.
-
-    id:
-        Operator-chosen slug (e.g. "hetzner-eu-central"). Not a UUID — pool
-        ids appear in YAML definitions and are meant to be human-legible.
-    enabled:
-        False pools are excluded from scheduling eligibility once a
-        scheduler exists (no scheduler exists yet). Delete is soft —
-        disable — by default; pools are never hard-deleted by the admin
-        API so that hosts.pool_id and any future settlement records
-        referencing this id remain resolvable.
-    policy_tags:
-        Free-form tag map (e.g. {"region": "eu", "provider": "hetzner"})
-        used for tag-filtered pool lookup. Not consumed by a scheduler yet.
-    """
-
-    __tablename__ = "resource_pools"
-
-    id = Column(String, primary_key=True)
-    label = Column(String, nullable=False)
-    provider = Column(String, nullable=False)
-    enabled = Column(Boolean, nullable=False, default=True)
-    policy_tags = Column(JSON, nullable=False, default=dict)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
-    )
-
-    ansible_config = relationship(
-        "AnsiblePoolConfig", back_populates="pool", uselist=False, cascade="all, delete-orphan"
-    )
+# Provider-neutral resource-pool identity now lives in the shared
+# market_resource_pools package (kit); re-exported here because the
+# service's modules and tests reach all persistence models through
+# db.models. The table rides market_resource_pools' own metadata —
+# init_db creates it alongside this service's own Base and market_site's.
+from market_resource_pools import DEFAULT_POOL_ID, ResourcePool  # noqa: F401
 
 
 class AnsiblePoolConfig(Base):
@@ -146,16 +112,19 @@ class AnsiblePoolConfig(Base):
     records. Only the "ansible" provider is implemented; other providers
     (kubernetes, gcp, ...) would get their own side table, not new columns
     here.
+
+    No ORM ``relationship()`` back to ``ResourcePool``: that model now lives
+    in a different declarative registry (``market_resource_pools``), so
+    navigation is by explicit ``pool_id`` lookup — which is how
+    ``PoolConfigHandler`` implementations already read/write this table.
     """
 
     __tablename__ = "ansible_pool_configs"
 
-    pool_id = Column(String, ForeignKey("resource_pools.id"), primary_key=True)
+    pool_id = Column(String, ForeignKey(ResourcePool.__table__.c.id), primary_key=True)
     playbook_path = Column(String, nullable=False)
     inventory_group = Column(String, nullable=False)
     extra_vars = Column(JSON, nullable=False, default=dict)
-
-    pool = relationship("ResourcePool", back_populates="ansible_config")
 
 
 class Host(Base):
@@ -204,7 +173,7 @@ class Host(Base):
     enabled = Column(Boolean, nullable=False, default=True)
     pool_id = Column(
         String,
-        ForeignKey("resource_pools.id"),
+        ForeignKey(ResourcePool.__table__.c.id),
         nullable=False,
         default=DEFAULT_POOL_ID,
         server_default=DEFAULT_POOL_ID,

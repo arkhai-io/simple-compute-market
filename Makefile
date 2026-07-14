@@ -8,7 +8,7 @@ GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-kit-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-kit-resource-pools dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-kit-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
 .PHONY: dist-apicredits-domain
 
 # ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@ DIST_DIR := ${CURDIR}/.dist
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-kit-site dist-alkahest dist-config dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-buyer
+dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-kit-site dist-kit-resource-pools dist-alkahest dist-config dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-buyer
 
 dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -139,6 +139,12 @@ dist-kit-site: ## Build arkhai-kit-site wheel into .dist/
 	cd kit/site && $(MAKE) build DIST_DIR=$(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_kit_site-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-site produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+dist-kit-resource-pools: ## Build arkhai-kit-resource-pools wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd kit/resource-pools && $(MAKE) build DIST_DIR=$(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_kit_resource_pools-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-resource-pools produced a platform-specific wheel — must build inside Docker" && exit 1)
 
 dist-alkahest: ## Build arkhai-kit-alkahest wheel into .dist/
 	-mkdir -p $(DIST_DIR)

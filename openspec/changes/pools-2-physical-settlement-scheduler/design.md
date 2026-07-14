@@ -263,13 +263,58 @@ lands.
   instead of its code means some duplication until a shared thin-timer
   utility is justified; not worth extracting for one additional caller.
 
+### 10. `ResourcePoolService` relocates to a new kit package, `kit/resource-pools`
+
+Decided this session, prompted by evaluating where `PhysicalSettlementScheduler`
+should live (decision in "Carried-forward note," below — now superseded by
+this one). Audited `resource_pool_service.py` line by line for VM-specific
+coupling: the only VM/Ansible-specific code is a three-line default-import
+fallback for `AnsiblePoolConfigHandler` in `__init__`, trivially droppable.
+Everything else — CRUD, YAML validate/import/reconcile, provider-config
+normalization — already goes through the generic `PoolConfigHandler`
+protocol and the already-`compute_provisioning`-owned wire models.
+
+The remaining coupling is persistence-location, not domain logic:
+`ResourcePoolService` does direct SQLAlchemy against `ResourcePool`, an ORM
+class currently riding the VM service's own `Base`. This has an exact
+precedent already in the codebase: `CapacityLedgerService` is a concrete
+SQLAlchemy-touching class living in `kit/site` (`market_site`) alongside its
+own ORM models (`SiteResource`, `SiteAllocation`, `CapacityEvent`), and the
+VM service re-exports those classes into its own `db.models` so they "ride"
+its `Base.metadata` for migration purposes
+(`domains/vms/provisioning/service/src/db/models.py`, comment: "The tables
+ride market_site's own metadata — init_db creates both"). `compute_provisioning`
+was considered and rejected: its existing service classes
+(`LeaseLifecycleService`, `ExecutorLeaseService`) are protocol-mediated and
+never touch SQLAlchemy directly — a different shape than `ResourcePoolService`.
+
+A new kit package rather than folding into `kit/site` itself: `resource
+-pool-management` is already its own top-level openspec capability, distinct
+from `site-capacity`. Conflating them into one kit package and one
+`Base.metadata` would blur a capability boundary the spec structure already
+respects. `kit/resource-pools` (`arkhai-kit-resource-pools`, import
+`market_resource_pools`) follows the same one-capability-per-kit-package
+shape as `kit/site`, `kit/policy`, `kit/identity`, `kit/config`.
+
+`ResourcePool` (generic) moves; `AnsiblePoolConfig` (the Ansible provider's
+own side-table) and `AnsiblePoolConfigHandler` stay VM-domain-local — they
+were already correctly separated by the `PoolConfigHandler` protocol
+boundary POOLS-1 established, so this relocation only moves the
+provider-neutral half.
+
+This is additive scope beyond the original POOLS-2 design, prompted by
+avoiding a Protocol+adapter pair for `PhysicalSettlementScheduler`'s pool
+-catalog dependency (see the now-superseded "Carried-forward note" below) —
+once `ResourcePoolService` is neutral, the scheduler can depend on it
+directly, same as it already will on the also-neutral `CapacityLedgerService`.
+
 ## Migration Plan
 
 None. No schema or wire change in this change; nothing to roll back beyond
 reverting the added scheduler module, request/response shapes, watchdog
 wiring, and `disable_pool` guardrail.
 
-## Carried-forward note for the plan step
+## Carried-forward note (superseded by decision 10)
 
 Drafting `pools-5-shared-provisioning-package` surfaced a placement
 question worth deciding during `pools-2`'s own plan step rather than
@@ -280,3 +325,8 @@ to. Building `PhysicalSettlementScheduler` directly there — rather than in
 `domains/vms/provisioning/service` and extracting afterward — may avoid
 `pools-5`'s residual-extraction step outright. Worth an explicit
 file-placement decision when we move to planning.
+
+This note is preserved for provenance; decision 10 resolves it differently
+than either option it originally posed — the scheduler stays VM-service
+-local (still true), but its pool-catalog dependency is now the relocated,
+already-neutral `ResourcePoolService` rather than a same-service concern.

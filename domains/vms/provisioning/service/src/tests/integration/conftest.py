@@ -221,6 +221,9 @@ def db_engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    # resource_pools must exist before Base's ansible_pool_configs FK resolves.
+    from market_resource_pools.db import Base as PoolsBase
+    PoolsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     # Site-ledger tables ride market_site's own metadata.
     from market_site.db import Base as SiteBase
@@ -357,8 +360,12 @@ async def client_and_queue(
         settings=mock_settings,
     )
 
-    from services.resource_pool_service import ResourcePoolService
-    resource_pool_service = ResourcePoolService(session_factory=session_factory)
+    from market_resource_pools import ResourcePoolService
+    from services.ansible_pool_config_handler import AnsiblePoolConfigHandler
+    resource_pool_service = ResourcePoolService(
+        session_factory=session_factory,
+        handlers={"ansible": AnsiblePoolConfigHandler()},
+    )
 
     job_service = AnsibleJobService(
         settings=mock_settings,
@@ -369,6 +376,24 @@ async def client_and_queue(
 
     from market_site.ledger import CapacityLedgerService
     capacity_ledger_service = CapacityLedgerService(session_factory=session_factory)
+
+    from services.physical_settlement_scheduler import PhysicalSettlementScheduler
+    physical_settlement_scheduler = PhysicalSettlementScheduler(
+        pool_service=resource_pool_service,
+        capacity_ledger=capacity_ledger_service,
+        session_factory=session_factory,
+    )
+    # Late-bound, same as container.py's _pool_has_active_binding: the
+    # guardrail needs the scheduler, the scheduler needs the pool service.
+    resource_pool_service.active_binding_check = (
+        physical_settlement_scheduler.has_active_binding
+    )
+
+    from services.capacity_reservation_watchdog import CapacityReservationWatchdog
+    capacity_reservation_watchdog = CapacityReservationWatchdog(
+        capacity_ledger_service=capacity_ledger_service,
+        settings=mock_settings,
+    )
 
     from market_site.authority import LedgerSiteAuthority
     site_authority = LedgerSiteAuthority(capacity_ledger_service)
@@ -439,6 +464,8 @@ async def client_and_queue(
     app.container.lease_lifecycle_service.override(lease_lifecycle_service)
     app.container.capacity_ledger_service.override(capacity_ledger_service)
     app.container.resource_pool_service.override(resource_pool_service)
+    app.container.physical_settlement_scheduler.override(physical_settlement_scheduler)
+    app.container.capacity_reservation_watchdog.override(capacity_reservation_watchdog)
 
     # Wire resolved module-level variables
     _container_module.resolved_job_service = job_service
@@ -451,6 +478,12 @@ async def client_and_queue(
     _container_module.resolved_lease_lifecycle_service = lease_lifecycle_service
     _container_module.resolved_capacity_ledger_service = capacity_ledger_service
     _container_module.resolved_resource_pool_service = resource_pool_service
+    _container_module.resolved_physical_settlement_scheduler = (
+        physical_settlement_scheduler
+    )
+    _container_module.resolved_capacity_reservation_watchdog = (
+        capacity_reservation_watchdog
+    )
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()

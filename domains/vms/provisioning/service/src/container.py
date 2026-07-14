@@ -4,6 +4,7 @@ from dependency_injector import containers, providers
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.executor_leases import ExecutorLeaseService
 from compute_provisioning.release import ExecutorReleaseDispatcher
+from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
 
@@ -19,14 +20,15 @@ from services.deal_event_sink import StorefrontLifecycleEventSink, notify_storef
 from services.host_operations_service import HostOperationsService
 from services.host_service import HostService
 from services.job_service import AnsibleJobService
+from services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from services.lease_watchdog import LeaseWatchdog
+from services.physical_settlement_scheduler import PhysicalSettlementScheduler
 from services.release_executors import (
     BARE_METAL_EXECUTOR_KIND,
     BareMetalReleaseExecutor,
     VM_EXECUTOR_KIND,
     VmReleaseExecutor,
 )
-from services.resource_pool_service import ResourcePoolService
 from services.system_service import SystemService
 from services.vm_operations_service import VmOperationsService
 
@@ -35,6 +37,20 @@ def _resolved_job_queue():
     if resolved_job_queue is None:
         raise RuntimeError("Job queue is not initialised")
     return resolved_job_queue
+
+
+def _pool_has_active_binding(pool_id: str) -> bool:
+    """Late-bound lookup for ResourcePoolService's disable_pool guardrail.
+
+    resource_pool_service and physical_settlement_scheduler each depend on
+    being constructible without the other (the scheduler reads pools; the
+    pool service's guardrail reads bindings), so this indirection — rather
+    than a constructor dependency in either direction — avoids a circular
+    DI graph, mirroring _resolved_job_queue's pattern above.
+    """
+    if resolved_physical_settlement_scheduler is None:
+        return False
+    return resolved_physical_settlement_scheduler.has_active_binding(pool_id)
 
 
 def _make_ansible_service(cfg):
@@ -132,6 +148,7 @@ class Container(containers.DeclarativeContainer):
         ResourcePoolService,
         session_factory=session_factory,
         handlers=providers.Dict(ansible=ansible_pool_config_handler),
+        active_binding_check=_pool_has_active_binding,
     )
 
     job_service = providers.Singleton(
@@ -159,6 +176,19 @@ class Container(containers.DeclarativeContainer):
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
         session_factory=session_factory,
+    )
+
+    physical_settlement_scheduler = providers.Singleton(
+        PhysicalSettlementScheduler,
+        pool_service=resource_pool_service,
+        capacity_ledger=capacity_ledger_service,
+        session_factory=session_factory,
+    )
+
+    capacity_reservation_watchdog = providers.Singleton(
+        CapacityReservationWatchdog,
+        capacity_ledger_service=capacity_ledger_service,
+        settings=config,
     )
 
     site_authority = providers.Singleton(
@@ -257,3 +287,5 @@ resolved_bare_metal_operations_service: "BareMetalOperationsService | None" = No
 resolved_executor_lease_service: "ExecutorLeaseService | None" = None
 resolved_compute_contract_service = None
 resolved_resource_pool_service: "ResourcePoolService | None" = None
+resolved_physical_settlement_scheduler: "PhysicalSettlementScheduler | None" = None
+resolved_capacity_reservation_watchdog: "CapacityReservationWatchdog | None" = None

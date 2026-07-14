@@ -151,13 +151,48 @@ class TestDeletePool:
             await client.delete_pool("does-not-exist")
         assert exc_info.value.status_code == 404
 
-    async def test_delete_default_pool_returns_400(self, client_and_queue):
+    async def test_delete_default_pool_disables_but_keeps_it_resolvable(
+        self, client_and_queue
+    ):
+        """`default` can be disabled like any other pool it just can never
+        be hard-deleted or stop being the fallback for hosts that omit pool_id.
+        See openspec/changes/pools-2-physical-settlement-scheduler/design.md,
+        decision 8."""
         client, _ = client_and_queue
 
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.delete_pool("default")
+        # The test fixture seeds "default" as a bare ResourcePool row with
+        # no matching Ansible side-table config (unlike the real migration
+        # seed). Give it one first — otherwise any update, not just
+        # disable, would 400 on missing provider_config.
+        await client.replace_pool(
+            "default",
+            PoolReplace(
+                label="Default Pool",
+                provider="ansible",
+                enabled=True,
+                policy_tags={},
+                provider_config=_ANSIBLE_CONFIG,
+            ),
+        )
 
-        assert exc_info.value.status_code == 400
+        deleted = await client.delete_pool("default")
+        assert deleted.enabled is False
+
+        # Still resolvable via GET — not gone.
+        pool = await client.get_pool("default")
+        assert pool.enabled is False
+
+        # Still the fallback for hosts that omit pool_id.
+        host = await client.register_host(
+            HostCreate(
+                name="kvm1",
+                kvm_host="10.0.0.1",
+                ssh_user="ubuntu",
+                ssh_key_type="path",
+                ssh_key_value="/key",
+            )
+        )
+        assert host.pool_id == "default"
 
 
 class TestImportAndValidatePools:

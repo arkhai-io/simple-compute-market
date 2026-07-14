@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 import yaml
 from sqlalchemy.orm import Session, sessionmaker
 
-from compute_provisioning import (
-    PoolConfigHandler,
+from .pool_config_handler import PoolConfigHandler
+from .pools import (
     PoolCreate,
     PoolImportDiff,
     PoolReplace,
@@ -17,7 +17,7 @@ from compute_provisioning import (
     PoolValidateResponse,
     PoolValidationProblem,
 )
-from db.models import DEFAULT_POOL_ID, ResourcePool
+from .db import DEFAULT_POOL_ID, ResourcePool
 
 
 class PoolNotFoundError(Exception):
@@ -61,6 +61,20 @@ class ReconciliationPlan:
 
 
 class ResourcePoolService:
+    """Provider-neutral resource-pool administration.
+
+    ``handlers`` must be supplied by the caller — this service does not
+    default to any concrete provider implementation (e.g. Ansible), keeping
+    it free of any domain-specific import.
+
+    ``active_binding_check``, if supplied, is called with a pool id whenever
+    an operation would disable that pool; it should return ``True`` if the
+    pool has at least one active settlement-resource binding, in which case
+    the disable is rejected. Late-bound (settable after construction) so a
+    composition root can wire this service and its scheduler in either
+    order without a circular dependency.
+    """
+
     _ROOT_FIELDS = frozenset({"pools"})
     _POOL_FIELDS = frozenset(
         {"id", "label", "provider", "enabled", "policy_tags", "provider_config"}
@@ -69,14 +83,12 @@ class ResourcePoolService:
     def __init__(
         self,
         session_factory: sessionmaker[Session],
-        handlers: Mapping[str, PoolConfigHandler[Session]] | None = None,
+        handlers: Mapping[str, PoolConfigHandler[Session]],
+        active_binding_check: Callable[[str], bool] | None = None,
     ) -> None:
         self._session_factory = session_factory
-        if handlers is None:
-            from services.ansible_pool_config_handler import AnsiblePoolConfigHandler
-
-            handlers = {"ansible": AnsiblePoolConfigHandler()}
         self._handlers = dict(handlers)
+        self.active_binding_check = active_binding_check
 
     def _handler(self, provider: str) -> PoolConfigHandler[Session]:
         handler = self._handlers.get(provider)
@@ -96,10 +108,13 @@ class ResourcePoolService:
         except ValueError as exc:
             raise PoolValidationError(str(exc)) from exc
 
-    @staticmethod
-    def _ensure_default_pool_enabled(pool_id: str, enabled: bool | None) -> None:
-        if pool_id == DEFAULT_POOL_ID and enabled is False:
-            raise PoolValidationError("the default pool cannot be disabled")
+    def _ensure_no_active_binding(self, pool_id: str, enabled: bool | None) -> None:
+        if enabled is False and self.active_binding_check is not None:
+            if self.active_binding_check(pool_id):
+                raise PoolValidationError(
+                    f"pool '{pool_id}' has an active settlement-resource "
+                    "binding and cannot be disabled"
+                )
 
     def _attach_provider_config(self, db: Session, pool: ResourcePool) -> None:
         pool.provider_config = self._handler(pool.provider).read_config(db, pool.id)
@@ -142,7 +157,7 @@ class ResourcePoolService:
         return pool
 
     def create_pool(self, data: PoolCreate) -> ResourcePool:
-        self._ensure_default_pool_enabled(data.id, data.enabled)
+        self._ensure_no_active_binding(data.id, data.enabled)
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             if db.query(ResourcePool).filter(ResourcePool.id == data.id).one_or_none():
@@ -160,7 +175,7 @@ class ResourcePoolService:
         return self.get_pool(data.id)  # type: ignore[return-value]
 
     def replace_pool(self, pool_id: str, data: PoolReplace) -> ResourcePool:
-        self._ensure_default_pool_enabled(pool_id, data.enabled)
+        self._ensure_no_active_binding(pool_id, data.enabled)
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
@@ -175,7 +190,7 @@ class ResourcePoolService:
         return self.get_pool(pool_id)  # type: ignore[return-value]
 
     def update_pool(self, pool_id: str, data: PoolUpdate) -> ResourcePool:
-        self._ensure_default_pool_enabled(pool_id, data.enabled)
+        self._ensure_no_active_binding(pool_id, data.enabled)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
             provider = data.provider or pool.provider
@@ -213,8 +228,6 @@ class ResourcePoolService:
         internal caller cannot accidentally introduce hard deletion without
         revisiting the pool lifecycle and referential-integrity rules.
         """
-        if pool_id == DEFAULT_POOL_ID:
-            raise PoolValidationError("the default pool cannot be deleted")
         raise PoolValidationError(
             "resource pools use disable semantics and cannot be hard-deleted"
         )
@@ -342,15 +355,6 @@ class ResourcePoolService:
                         path=f"{base}.enabled",
                         code="invalid_type",
                         message="enabled must be boolean",
-                    )
-                )
-                entry_valid = False
-            elif pool_id == DEFAULT_POOL_ID and enabled is False:
-                problems.append(
-                    PoolValidationProblem(
-                        path=f"{base}.enabled",
-                        code="default_pool_disabled",
-                        message="the default pool must remain enabled",
                     )
                 )
                 entry_valid = False
@@ -498,6 +502,13 @@ class ResourcePoolService:
         for definition in (*plan.created, *plan.updated):
             self._apply_definition(db, definition)
         if plan.disabled:
+            if self.active_binding_check is not None:
+                bound = [pid for pid in plan.disabled if self.active_binding_check(pid)]
+                if bound:
+                    raise PoolValidationError(
+                        "cannot disable pool(s) with an active settlement-resource "
+                        f"binding: {', '.join(bound)}"
+                    )
             db.query(ResourcePool).filter(ResourcePool.id.in_(plan.disabled)).update(
                 {ResourcePool.enabled: False}, synchronize_session=False
             )

@@ -36,6 +36,17 @@ before any provider executes against it.
   pattern, so uncommitted holds expire without depending on storefront-side
   polling. The storefront continues to hold only a cached capacity
   projection; the site authority remains the sole source of truth per site.
+- **Relocate `ResourcePoolService`.** Move `ResourcePoolService`, `ResourcePool`
+  (ORM model), `DEFAULT_POOL_ID`, and the `PoolNotFoundError`/
+  `PoolAlreadyExistsError`/`PoolValidationError` exceptions out of
+  `domains/vms/provisioning/service` into a new kit package,
+  `kit/resource-pools` (`arkhai-kit-resource-pools`, import
+  `market_resource_pools`), following the same shape `kit/site` already
+  uses for `CapacityLedgerService`. `AnsiblePoolConfig` and
+  `AnsiblePoolConfigHandler` stay VM-domain-local — only the
+  provider-neutral half moves. This makes `ResourcePoolService` a direct,
+  same-shape dependency for `PhysicalSettlementScheduler` rather than
+  requiring a new Protocol+adapter pair.
 - Add a guardrail to `ResourcePoolService.disable_pool`: a pool with an
   active settlement-resource binding cannot be disabled. (Previously a
   documented no-op — "the check will be added once the scheduler creates
@@ -101,16 +112,24 @@ fulfillment; it has simply not implemented the scheduler half yet.
 
 ## Impact
 
-- **Packages:** `provisioning/compute` (scheduler, selection algorithm,
-  request/response shapes), `kit/site` (lease-shaped reservation windows),
-  and the VM provisioning composition root (reservation-expiry watchdog,
-  `disable_pool` guardrail wiring).
-- **Database:** none. No migration in this change.
+- **Packages:** new `kit/resource-pools` (`ResourcePoolService` + `ResourcePool`
+  relocated from `domains/vms/provisioning/service`); `provisioning/compute`
+  (scheduler request/response shapes); `domains/vms/provisioning/service`
+  (scheduler itself, reservation-expiry watchdog composition, `disable_pool`
+  guardrail, updated imports/re-exports for the relocated pool model).
+- **Database:** no new tables. `resource_pools`/`ansible_pool_configs`
+  schema is unchanged; only which package defines the `ResourcePool` model
+  and which migration module creates its table move, mirroring how
+  `market_site`'s tables are already created from the VM service's own
+  `db/database.py` today.
 - **API:** none new. The scheduler is not yet wired to a caller-facing route;
   wiring it into a real settlement path is `pools-3` work.
-- **Compatibility:** no wire or persistence break. Existing pool and
-  reservation behavior is unchanged for callers that do not use the
-  scheduler, with one deliberate exception: `PoolReplace`/`PoolUpdate`/
-  import calls that set `default`'s `enabled=false` currently fail with
-  `default_pool_disabled` and will start succeeding. Any caller or test
-  relying on that rejection needs updating.
+- **Compatibility:** no wire or persistence break for pool CRUD/YAML
+  behavior. Internal-only: `from db.models import ResourcePool` call sites
+  and `from services.resource_pool_service import ...` imports move to
+  `from market_resource_pools import ...`; `arkhai-kit-resource-pools`
+  becomes a new dependency of `domains/vms/provisioning/service`. One
+  deliberate exception unrelated to the relocation: `PoolReplace`/
+  `PoolUpdate`/import calls that set `default`'s `enabled=false` currently
+  fail with `default_pool_disabled` and will start succeeding. Any caller
+  or test relying on that rejection needs updating.

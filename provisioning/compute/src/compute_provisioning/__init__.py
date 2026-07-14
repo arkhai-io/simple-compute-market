@@ -44,8 +44,10 @@ from .app import (
     build_compute_provisioning_app,
 )
 from .lifecycle import cancel_background_tasks, create_background_task
-from .pool_config_handler import PoolConfigHandler, PoolConfigValidationProblem
-from .pools import (
+from .physical_settlement import PhysicalSettlementRequest, SettlementResource
+from market_resource_pools import (
+    PoolConfigHandler,
+    PoolConfigValidationProblem,
     PoolCreate,
     PoolImportDiff,
     PoolImportRequest,
@@ -110,6 +112,8 @@ __all__ = [
     "PoolUpdate",
     "PoolValidateResponse",
     "PoolValidationProblem",
+    "PhysicalSettlementRequest",
+    "SettlementResource",
     "ResultEnvelope",
     "UnsupportedExecutorActionError",
     "contract_major",

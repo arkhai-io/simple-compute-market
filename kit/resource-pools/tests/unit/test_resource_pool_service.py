@@ -4,29 +4,42 @@ Unit tests for ResourcePoolService.
 Scope (per ARCHITECTURE.md — Unit Tests jurisdiction):
   - CRUD: create/get/list/replace/patch/enable/disable
   - Tag-filtered lookup
-  - Provider config validation (ansible required fields; unknown providers rejected)
+  - Provider config validation (required fields; unknown providers rejected)
   - YAML import: created/updated/disabled/unchanged diff, idempotency,
     validate_only (no writes)
+  - Active-binding guardrail on disable
 
-External boundary: SQLAlchemy with an in-memory SQLite DB (not mocked) —
-consistent with test_host_service.py's rationale.
+External boundary: SQLAlchemy with an in-memory SQLite DB (not mocked).
+
+This package is provider-neutral kit code, so tests use a local
+ansible-shaped stub handler rather than the real VM-domain
+AnsiblePoolConfigHandler — the "ansible" provider string is just test data
+here, not a dependency on the VM service.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
-from db.database import create_session_factory
-from db.models import Base
-from compute_provisioning import PoolCreate, PoolReplace, PoolUpdate
-from services.resource_pool_service import (
+from market_resource_pools import (
     PoolAlreadyExistsError,
+    PoolCreate,
     PoolNotFoundError,
+    PoolReplace,
+    PoolUpdate,
     PoolValidationError,
     ResourcePoolService,
 )
+from market_resource_pools.db import Base
+from sqlalchemy.orm import sessionmaker
+
+
+def create_session_factory(engine):
+    return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 # ---------------------------------------------------------------------------
@@ -50,9 +63,86 @@ def session_factory(db_engine):
     return create_session_factory(db_engine)
 
 
+class _AnsibleLikePoolConfigHandler:
+    """Test stand-in shaped like the real (VM-domain) Ansible handler.
+
+    Requires playbook_path/inventory_group, same as the real handler — the
+    CRUD/validation tests below exercise that shape without importing
+    VM-domain code into this kit package's own test suite.
+    """
+
+    provider = "ansible"
+    _FIELDS = frozenset({"playbook_path", "inventory_group", "extra_vars"})
+
+    def validate_config(self, config):
+        normalized, problems = self.validate_config_problems(config)
+        if problems:
+            raise ValueError(problems[0].message)
+        return normalized
+
+    def validate_config_problems(self, config):
+        from market_resource_pools import PoolConfigValidationProblem
+
+        problems: list[PoolConfigValidationProblem] = []
+        for field in sorted(set(config) - self._FIELDS):
+            problems.append(
+                PoolConfigValidationProblem(
+                    path=field, code="unknown_field",
+                    message=f"unknown ansible provider_config field '{field}'",
+                )
+            )
+        playbook_path = config.get("playbook_path")
+        inventory_group = config.get("inventory_group")
+        extra_vars = config.get("extra_vars", {})
+        if not isinstance(playbook_path, str) or not playbook_path.strip():
+            problems.append(
+                PoolConfigValidationProblem(
+                    path="playbook_path", code="required_field",
+                    message="provider_config.playbook_path is required for provider='ansible'",
+                )
+            )
+        if not isinstance(inventory_group, str) or not inventory_group.strip():
+            problems.append(
+                PoolConfigValidationProblem(
+                    path="inventory_group", code="required_field",
+                    message="provider_config.inventory_group is required for provider='ansible'",
+                )
+            )
+        if not isinstance(extra_vars, dict):
+            problems.append(
+                PoolConfigValidationProblem(
+                    path="extra_vars", code="invalid_type",
+                    message="provider_config.extra_vars must be a mapping",
+                )
+            )
+        if problems:
+            return None, tuple(problems)
+        return {
+            "playbook_path": playbook_path,
+            "inventory_group": inventory_group,
+            "extra_vars": dict(extra_vars),
+        }, ()
+
+    def read_config(self, db, pool_id: str) -> dict[str, Any]:
+        row = self._configs.get(pool_id) if hasattr(self, "_configs") else None
+        return dict(row) if row else {}
+
+    def replace_config(self, db, pool_id: str, config) -> None:
+        if not hasattr(self, "_configs"):
+            self._configs: dict[str, dict] = {}
+        self._configs[pool_id] = dict(config)
+
+    def delete_config(self, db, pool_id: str) -> None:
+        if hasattr(self, "_configs"):
+            self._configs.pop(pool_id, None)
+
+
 @pytest.fixture
 def svc(session_factory):
-    return ResourcePoolService(session_factory=session_factory)
+    return ResourcePoolService(
+        session_factory=session_factory,
+        handlers={"ansible": _AnsibleLikePoolConfigHandler()},
+    )
 
 
 _ANSIBLE_CONFIG = {
@@ -289,7 +379,11 @@ class TestEnableDisablePool:
         with pytest.raises(PoolNotFoundError):
             svc.disable_pool("does-not-exist")
 
-    def test_default_pool_cannot_be_disabled(self, svc):
+    def test_default_pool_can_be_disabled(self, svc):
+        """Corrected POOLS-1 behavior: disabling `default` only excludes it
+        from scheduling — it never stops being the system-owned pool that
+        exists. (Host fallback-to-default-on-omission is a VM-service
+        concern, covered in the integration suite, not here.)"""
         svc.create_pool(
             PoolCreate(
                 id="default",
@@ -298,9 +392,46 @@ class TestEnableDisablePool:
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
+        disabled = svc.disable_pool("default")
+        assert disabled.enabled is False
+        still_there = svc.get_pool("default")
+        assert still_there is not None
+        assert still_there.enabled is False
 
-        with pytest.raises(PoolValidationError, match="cannot be disabled"):
-            svc.disable_pool("default")
+    def test_disable_rejected_when_active_binding_exists(self, session_factory):
+        service = ResourcePoolService(
+            session_factory=session_factory,
+            handlers={"ansible": _AnsibleLikePoolConfigHandler()},
+            active_binding_check=lambda pool_id: pool_id == "bound-pool",
+        )
+        service.create_pool(
+            PoolCreate(
+                id="bound-pool",
+                label="Bound",
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        with pytest.raises(PoolValidationError, match="active settlement-resource"):
+            service.disable_pool("bound-pool")
+        assert service.get_pool("bound-pool").enabled is True
+
+    def test_disable_allowed_when_no_active_binding(self, session_factory):
+        service = ResourcePoolService(
+            session_factory=session_factory,
+            handlers={"ansible": _AnsibleLikePoolConfigHandler()},
+            active_binding_check=lambda pool_id: False,
+        )
+        service.create_pool(
+            PoolCreate(
+                id="free-pool",
+                label="Free",
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        disabled = service.disable_pool("free-pool")
+        assert disabled.enabled is False
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +517,35 @@ pools:
         assert pool is not None
         assert pool.enabled is False
 
+    def test_import_disabling_a_pool_with_active_binding_rejects_entire_import(
+        self, session_factory
+    ):
+        service = ResourcePoolService(
+            session_factory=session_factory,
+            handlers={"ansible": _AnsibleLikePoolConfigHandler()},
+            active_binding_check=lambda pool_id: pool_id == "equinix-us-west",
+        )
+        service.import_pools(_YAML)
+        one_pool_yaml = """
+pools:
+  - id: default
+    label: Default Pool
+    provider: ansible
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+      inventory_group: kvm_hosts
+  - id: hetzner-eu-central
+    label: Hetzner EU Central
+    provider: ansible
+    provider_config:
+      playbook_path: playbooks/vm-operations-frp.yaml
+      inventory_group: kvm_hosts_eu
+"""
+        with pytest.raises(PoolValidationError, match="active settlement-resource"):
+            service.import_pools(one_pool_yaml)
+        # Rejected atomically — equinix-us-west remains enabled.
+        assert service.get_pool("equinix-us-west").enabled is True
+
     def test_invalid_entry_rejects_entire_document(self, svc):
         mixed_yaml = """
 pools:
@@ -442,16 +602,29 @@ pools:
         }
         assert svc.list_pools() == []
 
-    def test_validate_rejects_disabled_default_pool(self, svc):
+    def test_validate_accepts_disabled_default_pool(self, svc):
+        """Corrected POOLS-1 behavior: a disabled `default` in an
+        authoritative document is valid — only omitting `default` entirely
+        is rejected (test_missing_default_pool_rejected, below)."""
         response = svc.validate_pools(
             _YAML.replace("enabled: true", "enabled: false", 1)
         )
+        assert response.valid is True
+        assert response.diff is not None
 
+    def test_missing_default_pool_rejected(self, svc):
+        no_default_yaml = """
+pools:
+  - id: hetzner-eu-central
+    label: Hetzner EU Central
+    provider: ansible
+    provider_config:
+      playbook_path: playbooks/vm-operations-frp.yaml
+      inventory_group: kvm_hosts_eu
+"""
+        response = svc.validate_pools(no_default_yaml)
         assert response.valid is False
-        assert response.diff is None
-        assert "default_pool_disabled" in {
-            problem.code for problem in response.problems
-        }
+        assert "missing_default_pool" in {p.code for p in response.problems}
 
     def test_validate_accumulates_all_detectable_problems(self, svc):
         response = svc.validate_pools("""

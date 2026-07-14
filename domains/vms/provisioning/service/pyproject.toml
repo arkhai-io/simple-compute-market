@@ -10,7 +10,8 @@ description = "Async VM provisioning service"
 requires-python = ">=3.12"
 dependencies = [
     "arkhai-kit-site>=0.2.0",
-    "arkhai-compute-provisioning>=0.4.0",
+    "arkhai-kit-resource-pools>=0.1.0",
+    "arkhai-compute-provisioning>=0.5.0",
     "arkhai-core-storefront-client>=0.11.0",
     "arkhai-bare-metal>=0.1.0",
     "arkhai-vms-provisioning-operator-client>=0.3.0",

@@ -125,6 +125,8 @@ default_pool_inventory_group = "kvm_hosts"
 lease_watchdog_enabled = true
 lease_watchdog_poll_interval_seconds = 60
 lease_watchdog_grace_period_seconds = 300
+capacity_reservation_watchdog_enabled = true
+capacity_reservation_watchdog_poll_interval_seconds = 60
 storefront_url = ""
 # Shared secret with the storefront. Dual purpose: signs the outbound
 # lease-watchdog callback to the storefront, and gates every inbound request

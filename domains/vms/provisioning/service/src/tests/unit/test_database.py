@@ -5,7 +5,7 @@ from sqlalchemy.pool import StaticPool
 
 from db.database import run_migrations
 from db.migrations import SchemaDriftError, check_schema_version
-from db.models import AnsibleJob, DEFAULT_POOL_ID, Host, ResourcePool
+from db.models import AnsibleJob, AnsiblePoolConfig, DEFAULT_POOL_ID, Host, ResourcePool
 
 
 def _sqlite_memory_engine():
@@ -132,9 +132,18 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         assert default_pool.label == "Default Pool"
         assert default_pool.provider == "ansible"
         assert default_pool.enabled is True
-        assert default_pool.ansible_config.playbook_path == "/configured/playbook.yaml"
-        assert default_pool.ansible_config.inventory_group == "legacy_hosts"
-        assert default_pool.ansible_config.extra_vars == {}
+
+        # No ORM relationship crosses the resource_pools/ansible_pool_configs
+        # boundary — ResourcePool and AnsiblePoolConfig now live in separate
+        # declarative registries (market_resource_pools vs. this service's
+        # own Base), so navigation is by explicit pool_id lookup, matching
+        # how PoolConfigHandler implementations already read this table.
+        ansible_config = session.query(AnsiblePoolConfig).filter(
+            AnsiblePoolConfig.pool_id == DEFAULT_POOL_ID
+        ).one()
+        assert ansible_config.playbook_path == "/configured/playbook.yaml"
+        assert ansible_config.inventory_group == "legacy_hosts"
+        assert ansible_config.extra_vars == {}
 
     with engine.begin() as connection:
         migration_ids = {
