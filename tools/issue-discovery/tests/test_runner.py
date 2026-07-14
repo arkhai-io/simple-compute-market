@@ -123,6 +123,8 @@ phases:
     assert code == 1
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "failed"
+    assert manifest["working_branch"] == "feat/issue-discovery-harness"
+    assert len(manifest["observed_ref"]) == 40
     records = read_jsonl(run_dir / "phases.jsonl")
     assert [(item["id"], item["status"]) for item in records] == [
         ("setup", "passed"),

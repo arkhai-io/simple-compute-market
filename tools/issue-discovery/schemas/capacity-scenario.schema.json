@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simple-compute-market.dev/schemas/capacity-scenario-v1.json",
+  "title": "SCM public VM capacity scenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scenario_id", "deal_type", "provisioning", "gpu_assignment", "listing", "wave"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "scenario_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+    "deal_type": { "const": "vm" },
+    "provisioning": { "const": "real-kvm-ansible" },
+    "gpu_assignment": { "const": "whole-device-passthrough" },
+    "listing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fingerprint", "count", "gpus_per_vm"],
+      "properties": {
+        "fingerprint": { "type": "string", "minLength": 1 },
+        "count": { "type": "integer", "minimum": 0 },
+        "gpus_per_vm": { "const": 1 }
+      }
+    },
+    "wave": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["buyers", "sellers", "requests", "expected_successes", "expected_scarcity", "retry_count"],
+      "properties": {
+        "buyers": { "type": "integer", "minimum": 0 },
+        "sellers": { "type": "integer", "minimum": 0 },
+        "requests": { "type": "integer", "minimum": 0 },
+        "expected_successes": { "type": "integer", "minimum": 0 },
+        "expected_scarcity": { "type": "integer", "minimum": 0 },
+        "retry_count": { "const": 0 }
+      }
+    }
+  }
+}

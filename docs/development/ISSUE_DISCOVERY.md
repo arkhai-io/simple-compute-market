@@ -167,3 +167,20 @@ SCM_MULTIPASS_TRANSFER_DIR=scm-clean-room-transfer \
 ```
 
 Use `./scripts/clean-room/multipass-run.sh --dry-run` before launching the VM. It prints the VM settings and the exact clean-room sequence that will run, without requiring Multipass to be installed.
+
+## Capacity Finding Lifecycle
+
+The same harness accepts sanitized VM-capacity findings from the private
+orchestrator. The public schemas and example scenarios intentionally contain no
+project, wallet, host, GPU UUID, private URL, or credential material.
+
+Each occurrence records its run, stage, scenario fingerprint, working branch,
+and observed commit. Its lifecycle is appended to `issue-lifecycle.jsonl` as it
+moves through detection, filing or exact-issue update/reopen, proposal-only fix
+work, and later verification. Issue bodies state that fixes must target the
+recorded working branch and cannot promote the campaign branch to `dev` or
+`main`.
+
+Publication is branch-scoped and redaction-gated. Teardown and evidence freeze
+must happen before live issue mutation; publication is never allowed to extend
+a VM lease.

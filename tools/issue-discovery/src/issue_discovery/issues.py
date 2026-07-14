@@ -75,6 +75,11 @@ class IssueCandidate:
     state: str
     confidence: str
     state_reason: str
+    working_branch: str | None = None
+    observed_ref: str | None = None
+    scenario_fingerprint: str | None = None
+    destination_repo: str | None = None
+    lifecycle_state: str | None = None
 
     def to_json(self, run_dir: Path) -> dict[str, Any]:
         return {
@@ -88,12 +93,18 @@ class IssueCandidate:
             "state": self.state,
             "confidence": self.confidence,
             "state_reason": self.state_reason,
+            "working_branch": self.working_branch,
+            "observed_ref": self.observed_ref,
+            "scenario_fingerprint": self.scenario_fingerprint,
+            "destination_repo": self.destination_repo,
+            "lifecycle_state": self.lifecycle_state,
         }
 
 
 class IssuePacketGenerator:
-    def __init__(self, run_dir: Path) -> None:
+    def __init__(self, run_dir: Path, repo_root: Path | None = None) -> None:
         self.run_dir = run_dir
+        self.repo_root = repo_root.resolve() if repo_root is not None else None
         self.issue_dir = run_dir / "issue-candidates"
 
     def generate(self) -> list[IssueCandidate]:
@@ -102,6 +113,12 @@ class IssuePacketGenerator:
         phases = _read_jsonl(self.run_dir / "phases.jsonl")
         collectors = _read_jsonl(self.run_dir / "collectors.jsonl")
         candidates = self._from_failed_phases(manifest, phases, collectors)
+        candidates.extend(
+            self._from_capacity_findings(
+                manifest,
+                _read_jsonl(self.run_dir / "capacity-findings.jsonl"),
+            )
+        )
         blocking_failure = manifest.get("blocking_failure") or ""
         if not candidates and str(blocking_failure).startswith("workaround:"):
             candidates = [self._from_workaround_failure(manifest)]
@@ -110,6 +127,55 @@ class IssuePacketGenerator:
         with jsonl_path.open("w", encoding="utf-8") as handle:
             for candidate in candidates:
                 handle.write(json.dumps(candidate.to_json(self.run_dir), sort_keys=True) + "\n")
+        return candidates
+
+    def _from_capacity_findings(
+        self,
+        manifest: dict[str, Any],
+        findings: list[dict[str, Any]],
+    ) -> list[IssueCandidate]:
+        if not findings:
+            return []
+        repo_root = self.repo_root
+        if repo_root is None:
+            configured = manifest.get("repo_root")
+            repo_root = Path(str(configured)).resolve() if configured else Path.cwd().resolve()
+        from issue_discovery.capacity import validate_finding
+
+        candidates = []
+        for finding in findings:
+            validate_finding(finding, repo_root)
+            readiness_data = finding["filing_readiness"]
+            readiness = CandidateReadiness(
+                state=readiness_data["state"],
+                confidence=readiness_data["confidence"],
+                reason=readiness_data["reason"],
+            )
+            fingerprint = _capacity_fingerprint(finding)
+            body_file = self.issue_dir / f"{fingerprint}.md"
+            body_file.write_text(
+                _render_capacity_body(finding=finding, fingerprint=fingerprint),
+                encoding="utf-8",
+            )
+            candidates.append(
+                IssueCandidate(
+                    fingerprint=fingerprint,
+                    title=f"{finding['summary']} ({fingerprint})",
+                    labels=("bug",),
+                    classification=finding["classification"],
+                    phase=finding["observed"]["stage"],
+                    body_file=body_file,
+                    evidence=tuple(finding["evidence"]),
+                    state=readiness.state,
+                    confidence=readiness.confidence,
+                    state_reason=readiness.reason,
+                    working_branch=finding["observed"]["working_branch"],
+                    observed_ref=finding["observed"]["observed_ref"],
+                    scenario_fingerprint=finding["scenario_fingerprint"],
+                    destination_repo=finding["destination_repo"],
+                    lifecycle_state="detected",
+                )
+            )
         return candidates
 
     def _from_failed_phases(
@@ -167,6 +233,10 @@ class IssuePacketGenerator:
                         state=readiness.state,
                         confidence=readiness.confidence,
                         state_reason=readiness.reason,
+                        working_branch=str(manifest.get("working_branch")) if manifest.get("working_branch") else None,
+                        observed_ref=str(manifest.get("observed_ref")) if manifest.get("observed_ref") else None,
+                        destination_repo="simple-compute-market",
+                        lifecycle_state="detected",
                     )
                 )
                 candidate_indexes[fingerprint] = len(candidates) - 1
@@ -213,7 +283,7 @@ class IssuePacketGenerator:
         return IssueCandidate(
             fingerprint=fingerprint,
             title=f"Explicit issue-discovery workaround failed: {raw}",
-            labels=("bug", "local-dev", "issue-discovery"),
+            labels=("bug",),
             classification="workaround",
             phase=raw,
             body_file=body_file,
@@ -221,6 +291,10 @@ class IssuePacketGenerator:
             state=readiness.state,
             confidence=readiness.confidence,
             state_reason=readiness.reason,
+            working_branch=str(manifest.get("working_branch")) if manifest.get("working_branch") else None,
+            observed_ref=str(manifest.get("observed_ref")) if manifest.get("observed_ref") else None,
+            destination_repo="simple-compute-market",
+            lifecycle_state="detected",
         )
 
 
@@ -267,6 +341,8 @@ class IssueRepository:
         ]
         for label in candidate.get("labels", []):
             command.extend(["--label", str(label)])
+        if not self._branch_is_authorized(candidate):
+            return 2
         if dry_run:
             print(
                 f"cd {_shell_quote(str(self.repo_root))} && "
@@ -281,23 +357,117 @@ class IssueRepository:
         if duplicate is None:
             return 2
         if duplicate:
+            if candidate.get("lifecycle_state") == "detected":
+                return self._record_capacity_occurrence(candidate, duplicate, body_path)
             print(f"duplicate issue exists: {duplicate.get('url') or duplicate.get('title')}")
             return 0
 
-        completed = subprocess.run(command, check=False, text=True, cwd=self.repo_root)
+        completed = subprocess.run(
+            command,
+            check=False,
+            text=True,
+            cwd=self.repo_root,
+            capture_output=True,
+        )
+        if completed.stdout:
+            print(completed.stdout.strip())
+        if completed.stderr:
+            print(completed.stderr.strip())
+        if completed.returncode == 0 and candidate.get("lifecycle_state") == "detected":
+            issue_url = completed.stdout.strip().splitlines()[-1] if completed.stdout.strip() else None
+            self._append_capacity_lifecycle(
+                candidate,
+                state="filed",
+                detail="Created a branch-scoped GitHub issue.",
+                issue_url=issue_url,
+            )
         return completed.returncode
 
+    def propose_fix(self, fingerprint: str, head_branch: str) -> Path:
+        candidate = self.get(fingerprint)
+        base_branch = candidate.get("working_branch")
+        if candidate.get("lifecycle_state") != "detected" or not base_branch:
+            raise ValueError("fix proposals require a capacity finding with branch authority")
+        if base_branch not in {"feat/issue-discovery-harness", "tools/agent-orchestration-scratch"}:
+            raise ValueError(f"unauthorized fix PR base: {base_branch}")
+        allowed_prefix = f"fix/{fingerprint}"
+        if head_branch != allowed_prefix and not head_branch.startswith(f"{allowed_prefix}-"):
+            raise ValueError(f"fix PR head must begin with {allowed_prefix}")
+        if head_branch in {base_branch, "dev", "main"}:
+            raise ValueError("fix PR head and base must preserve inbound-only branch authority")
+        proposal = {
+            "schema_version": 1,
+            "status": "proposal-only",
+            "destination_repo": candidate["destination_repo"],
+            "head_branch": head_branch,
+            "base_branch": base_branch,
+            "observed_ref": candidate["observed_ref"],
+            "fingerprint": fingerprint,
+            "auto_merge": False,
+        }
+        path = self.run_dir / "issue-candidates" / f"{fingerprint}.fix-pr.json"
+        path.write_text(json.dumps(proposal, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        self._append_capacity_lifecycle(
+            candidate,
+            state="fix_in_progress",
+            detail=f"Prepared a proposal-only child fix PR targeting {base_branch}.",
+        )
+        return path
+
+    def transition(self, fingerprint: str, state: str, detail: str) -> None:
+        candidate = self.get(fingerprint)
+        if candidate.get("lifecycle_state") != "detected":
+            raise ValueError("lifecycle transitions require a capacity or branch-scoped finding")
+        finding = next(
+            (
+                item
+                for item in _read_jsonl(self.run_dir / "capacity-findings.jsonl")
+                if _capacity_fingerprint(item) == candidate["fingerprint"]
+            ),
+            None,
+        )
+        if finding is None:
+            raise ValueError("capacity finding occurrence is missing")
+        events = [
+            item
+            for item in _read_jsonl(self.run_dir / "issue-lifecycle.jsonl")
+            if item.get("finding_id") == finding["finding_id"]
+        ]
+        current = str(events[-1]["state"]) if events else "detected"
+        allowed = {
+            "detected": {"triaged", "filed", "fix_in_progress"},
+            "triaged": {"filed", "fix_in_progress"},
+            "filed": {"updated", "reopened", "fix_in_progress"},
+            "updated": {"updated", "fix_in_progress"},
+            "reopened": {"updated", "fix_in_progress"},
+            "fix_in_progress": {"fixed_unverified"},
+            "fixed_unverified": {"verified"},
+            "verified": {"closed"},
+            "closed": {"reopened"},
+        }
+        if state not in allowed.get(current, set()):
+            raise ValueError(f"invalid lifecycle transition: {current} -> {state}")
+        from issue_discovery.capacity import append_lifecycle
+
+        append_lifecycle(
+            self.run_dir,
+            finding=finding,
+            state=state,
+            detail=detail,
+        )
+
     def _find_duplicate(self, candidate: dict[str, Any]) -> dict[str, Any] | bool | None:
+        capacity_candidate = candidate.get("lifecycle_state") == "detected"
         command = [
             "gh",
             "issue",
             "list",
             "--state",
-            "open",
+            "all" if capacity_candidate else "open",
             "--search",
             f"{candidate['fingerprint']} in:title",
             "--json",
-            "number,title,state,url",
+            "number,title,state,url,body",
             "--limit",
             "10",
         ]
@@ -319,7 +489,123 @@ class IssueRepository:
         if not isinstance(issues, list):
             print("duplicate issue check returned unexpected JSON")
             return None
-        return issues[0] if issues else False
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+            if self._duplicate_matches(candidate, issue):
+                return issue
+        return False
+
+    def _duplicate_matches(self, candidate: dict[str, Any], issue: dict[str, Any]) -> bool:
+        working_branch = candidate.get("working_branch")
+        scenario = candidate.get("scenario_fingerprint")
+        if not working_branch:
+            return True
+        if str(candidate["fingerprint"]) not in str(issue.get("title", "")):
+            return False
+        marker = _context_marker(
+            fingerprint=str(candidate["fingerprint"]),
+            working_branch=str(working_branch),
+            scenario_fingerprint=str(scenario) if scenario else None,
+        )
+        return marker in str(issue.get("body", ""))
+
+    def _branch_is_authorized(self, candidate: dict[str, Any]) -> bool:
+        expected = candidate.get("working_branch")
+        if not expected:
+            return True
+        if expected not in {"feat/issue-discovery-harness", "tools/agent-orchestration-scratch"}:
+            print(f"candidate working branch is not authorized: {expected}")
+            return False
+        completed = subprocess.run(
+            ["git", "branch", "--show-current"],
+            check=False,
+            text=True,
+            cwd=self.repo_root,
+            capture_output=True,
+        )
+        actual = completed.stdout.strip() if completed.returncode == 0 else ""
+        if actual != expected:
+            print(f"issue branch mismatch: expected {expected}, found {actual or 'unknown'}")
+            return False
+        return True
+
+    def _record_capacity_occurrence(
+        self,
+        candidate: dict[str, Any],
+        issue: dict[str, Any],
+        body_path: Path,
+    ) -> int:
+        number = issue.get("number")
+        if not isinstance(number, int):
+            print("duplicate capacity issue is missing its number")
+            return 2
+        state = str(issue.get("state", "")).upper()
+        if state == "CLOSED":
+            reopened = subprocess.run(
+                ["gh", "issue", "reopen", str(number)],
+                check=False,
+                text=True,
+                cwd=self.repo_root,
+                capture_output=True,
+            )
+            if reopened.returncode != 0:
+                print("failed to reopen matching capacity issue")
+                return reopened.returncode
+            lifecycle_state = "reopened"
+            detail = "Reopened an exact branch-and-scenario capacity finding."
+        else:
+            lifecycle_state = "updated"
+            detail = "Attached a new occurrence to an exact open branch-and-scenario issue."
+        commented = subprocess.run(
+            ["gh", "issue", "comment", str(number), "--body-file", str(body_path)],
+            check=False,
+            text=True,
+            cwd=self.repo_root,
+            capture_output=True,
+        )
+        if commented.returncode != 0:
+            print("failed to attach the capacity occurrence")
+            return commented.returncode
+        self._append_capacity_lifecycle(
+            candidate,
+            state=lifecycle_state,
+            detail=detail,
+            issue_number=number,
+            issue_url=str(issue.get("url")) if issue.get("url") else None,
+        )
+        print(f"capacity issue {lifecycle_state}: {issue.get('url') or number}")
+        return 0
+
+    def _append_capacity_lifecycle(
+        self,
+        candidate: dict[str, Any],
+        *,
+        state: str,
+        detail: str,
+        issue_number: int | None = None,
+        issue_url: str | None = None,
+    ) -> None:
+        finding = next(
+            (
+                item
+                for item in _read_jsonl(self.run_dir / "capacity-findings.jsonl")
+                if _capacity_fingerprint(item) == candidate["fingerprint"]
+            ),
+            None,
+        )
+        if finding is None:
+            return
+        from issue_discovery.capacity import append_lifecycle
+
+        append_lifecycle(
+            self.run_dir,
+            finding=finding,
+            state=state,
+            detail=detail,
+            issue_number=issue_number,
+            issue_url=issue_url,
+        )
 
     def _body_is_redacted(self, body_path: Path) -> bool:
         redactions_path = self.repo_root / "tools" / "issue-discovery" / "config" / "redactions.yaml"
@@ -330,6 +616,55 @@ class IssueRepository:
             return True
         print("issue body still contains unredacted data; refusing to create issue")
         return False
+
+
+def _render_capacity_body(*, finding: dict[str, Any], fingerprint: str) -> str:
+    observed = finding["observed"]
+    readiness = finding["filing_readiness"]
+    marker = _context_marker(
+        fingerprint=fingerprint,
+        working_branch=observed["working_branch"],
+        scenario_fingerprint=finding["scenario_fingerprint"],
+    )
+    lines = [
+        f"# {finding['summary']}",
+        "",
+        marker,
+        "",
+        "## Filing Readiness",
+        f"- State: `{readiness['state']}`",
+        f"- Confidence: `{readiness['confidence']}`",
+        f"- Reason: {readiness['reason']}",
+        "",
+        "## Capacity Context",
+        f"- Frontier: `{finding['frontier']}`",
+        f"- Scenario: `{finding['scenario_id']}`",
+        f"- Scenario fingerprint: `{finding['scenario_fingerprint']}`",
+        f"- Run id: `{observed['run_id']}`",
+        f"- Stage: `{observed['stage']}`",
+        "",
+        "## Expected",
+        finding["expected"],
+        "",
+        "## Actual",
+        finding["actual"],
+        "",
+        "## Evidence",
+    ]
+    lines.extend(f"- `{item}`" for item in finding["evidence"])
+    lines.extend(
+        [
+            "",
+            "## Branch Authority",
+            f"- Working branch: `{observed['working_branch']}`",
+            f"- Observed ref: `{observed['observed_ref']}`",
+            f"- Destination repository: `{finding['destination_repo']}`",
+            "- Any fix PR must use an issue-specific child branch and target the working branch above.",
+            "- This finding does not authorize promotion to `dev` or `main`.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _render_body(
@@ -343,8 +678,16 @@ def _render_body(
     failed_commands = _failed_commands_for_phase(phase)
     primary_failed_command = failed_commands[0] if failed_commands else None
     command_records = phase.get("commands") or []
+    working_branch = manifest.get("working_branch")
+    observed_ref = manifest.get("observed_ref")
     lines = [
         f"# {_title_for_phase(phase, fingerprint)}",
+        "",
+        _context_marker(
+            fingerprint=fingerprint,
+            working_branch=str(working_branch) if working_branch else None,
+            scenario_fingerprint=None,
+        ),
         "",
         "## Filing Readiness",
         f"- State: `{readiness.state}`",
@@ -405,10 +748,38 @@ def _render_body(
             f"- Artifact directory: `{manifest.get('output_dir')}`",
             f"- Started: `{manifest.get('started_at')}`",
             f"- Completed: `{manifest.get('completed_at')}`",
+            f"- Working branch: `{working_branch}`",
+            f"- Observed ref: `{observed_ref}`",
             "",
         ]
     )
     return "\n".join(lines)
+
+
+def _capacity_fingerprint(finding: dict[str, Any]) -> str:
+    return _slug(
+        "-".join(
+            (
+                finding["fingerprint"],
+                finding["observed"]["working_branch"],
+                finding["scenario_fingerprint"],
+            )
+        )
+    )
+
+
+def _context_marker(
+    *,
+    fingerprint: str,
+    working_branch: str | None,
+    scenario_fingerprint: str | None,
+) -> str:
+    branch = working_branch or "unknown"
+    scenario = scenario_fingerprint or "none"
+    return (
+        "<!-- scm-issue-discovery "
+        f"fingerprint={fingerprint} branch={branch} scenario={scenario} -->"
+    )
 
 
 def _workarounds_for_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
@@ -577,11 +948,10 @@ def _title_for_phase(phase: dict[str, Any], fingerprint: str) -> str:
 
 
 def _labels_for_phase(phase: dict[str, Any]) -> tuple[str, ...]:
-    labels = ["bug", "local-dev", "issue-discovery"]
-    category = phase.get("category")
-    if category:
-        labels.append(str(category).replace("_", "-"))
-    return tuple(labels)
+    # Both campaign repositories currently have only the default GitHub labels.
+    # Classification and capacity-frontier details remain structured in the
+    # candidate/body instead of making live filing depend on undeclared labels.
+    return ("bug",)
 
 
 def _reproduction_command(manifest: dict[str, Any]) -> str:

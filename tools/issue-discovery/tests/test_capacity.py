@@ -1,0 +1,258 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import subprocess
+
+from issue_discovery.capacity import (
+    CapacityValidationError,
+    ingest_finding,
+    validate_scenario,
+)
+from issue_discovery.issues import IssueRepository
+
+
+def repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def valid_scenario() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "scenario_id": "b2-g1-contention",
+        "deal_type": "vm",
+        "provisioning": "real-kvm-ansible",
+        "gpu_assignment": "whole-device-passthrough",
+        "listing": {"fingerprint": "one-vm-listing", "count": 1, "gpus_per_vm": 1},
+        "wave": {
+            "buyers": 2,
+            "sellers": 1,
+            "requests": 2,
+            "expected_successes": 1,
+            "expected_scarcity": 1,
+            "retry_count": 0,
+        },
+    }
+
+
+def valid_finding() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "finding_id": "finding-001",
+        "fingerprint": "double-allocation",
+        "scenario_id": "b2-g1-contention",
+        "scenario_fingerprint": "scenario-sha256-example",
+        "frontier": "correctness",
+        "classification": "public-product",
+        "destination_repo": "simple-compute-market",
+        "summary": "One-GPU contention allocated two buyers",
+        "expected": "Exactly one request succeeds and one reaches scarcity.",
+        "actual": "Both requests reached a successful allocation.",
+        "evidence": ["sanitized/wave-result.json", "sanitized/allocation-trace.jsonl"],
+        "observed": {
+            "run_id": "qualification-001",
+            "stage": "b2-g1-contention",
+            "working_branch": "feat/issue-discovery-harness",
+            "observed_ref": "a" * 40,
+        },
+        "filing_readiness": {
+            "state": "ready_to_file",
+            "confidence": "high",
+            "reason": "The synchronized wave has complete allocation evidence.",
+        },
+    }
+
+
+def ingest(tmp_path: Path) -> tuple[Path, dict[str, object]]:
+    finding = valid_finding()
+    finding_path = tmp_path / "finding.json"
+    finding_path.write_text(json.dumps(finding), encoding="utf-8")
+    run_dir = tmp_path / "run"
+    ingest_finding(run_dir, finding_path, repo_root())
+    candidate = IssueRepository(run_dir, repo_root=repo_root()).list()[0]
+    return run_dir, candidate
+
+
+def test_capacity_scenario_is_vm_only_and_balances_terminal_outcomes() -> None:
+    scenario = valid_scenario()
+    validate_scenario(scenario, repo_root())
+
+    scenario["deal_type"] = "container"
+    try:
+        validate_scenario(scenario, repo_root())
+    except CapacityValidationError as exc:
+        assert "deal_type" in str(exc)
+        assert "vm" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("a non-VM capacity scenario passed")
+
+
+def test_capacity_finding_ingest_is_branch_scoped_and_immutable(tmp_path: Path) -> None:
+    run_dir, candidate = ingest(tmp_path)
+
+    assert candidate["working_branch"] == "feat/issue-discovery-harness"
+    assert candidate["labels"] == ["bug"]
+    assert candidate["observed_ref"] == "a" * 40
+    assert candidate["scenario_fingerprint"] == "scenario-sha256-example"
+    assert "feat-issue-discovery-harness" in candidate["fingerprint"]
+    body = (run_dir / candidate["body_file"]).read_text(encoding="utf-8")
+    assert "Working branch: `feat/issue-discovery-harness`" in body
+    assert "Observed ref: `" + "a" * 40 + "`" in body
+    assert "does not authorize promotion to `dev` or `main`" in body
+    lifecycle = [
+        json.loads(line)
+        for line in (run_dir / "issue-lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["state"] for event in lifecycle] == ["detected"]
+
+
+def test_capacity_duplicate_updates_exact_open_issue(tmp_path: Path, monkeypatch) -> None:
+    run_dir, candidate = ingest(tmp_path)
+    body = (run_dir / candidate["body_file"]).read_text(encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def fake_run(
+        command: list[str],
+        *,
+        check: bool,
+        text: bool,
+        cwd: Path,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        if command[:3] == ["git", "branch", "--show-current"]:
+            return subprocess.CompletedProcess(command, 0, stdout="feat/issue-discovery-harness\n")
+        if command[:3] == ["gh", "issue", "list"]:
+            payload = [{"number": 41, "title": candidate["title"], "state": "OPEN", "url": "https://example.test/41", "body": body}]
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload))
+        if command[:3] == ["gh", "issue", "comment"]:
+            return subprocess.CompletedProcess(command, 0, stdout="https://example.test/41#comment")
+        raise AssertionError(command)
+
+    monkeypatch.setattr("issue_discovery.issues.subprocess.run", fake_run)
+
+    assert IssueRepository(run_dir, repo_root=repo_root()).create(candidate["fingerprint"], dry_run=False) == 0
+    assert not any(command[:3] == ["gh", "issue", "create"] for command in calls)
+    lifecycle = [
+        json.loads(line)
+        for line in (run_dir / "issue-lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["state"] for event in lifecycle] == ["detected", "updated"]
+
+
+def test_capacity_issue_creation_records_filed_lifecycle(tmp_path: Path, monkeypatch) -> None:
+    run_dir, candidate = ingest(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run(
+        command: list[str],
+        *,
+        check: bool,
+        text: bool,
+        cwd: Path,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        if command[:3] == ["git", "branch", "--show-current"]:
+            return subprocess.CompletedProcess(command, 0, stdout="feat/issue-discovery-harness\n")
+        if command[:3] == ["gh", "issue", "list"]:
+            return subprocess.CompletedProcess(command, 0, stdout="[]")
+        if command[:3] == ["gh", "issue", "create"]:
+            return subprocess.CompletedProcess(command, 0, stdout="https://example.test/43\n")
+        raise AssertionError(command)
+
+    monkeypatch.setattr("issue_discovery.issues.subprocess.run", fake_run)
+
+    assert IssueRepository(run_dir, repo_root=repo_root()).create(candidate["fingerprint"], dry_run=False) == 0
+    create = next(command for command in calls if command[:3] == ["gh", "issue", "create"])
+    assert create[create.index("--label") + 1] == "bug"
+    lifecycle = [
+        json.loads(line)
+        for line in (run_dir / "issue-lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["state"] for event in lifecycle] == ["detected", "filed"]
+    assert lifecycle[-1]["issue_url"] == "https://example.test/43"
+
+
+def test_capacity_duplicate_reopens_exact_closed_issue(tmp_path: Path, monkeypatch) -> None:
+    run_dir, candidate = ingest(tmp_path)
+    body = (run_dir / candidate["body_file"]).read_text(encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def fake_run(
+        command: list[str],
+        *,
+        check: bool,
+        text: bool,
+        cwd: Path,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        if command[:3] == ["git", "branch", "--show-current"]:
+            return subprocess.CompletedProcess(command, 0, stdout="feat/issue-discovery-harness\n")
+        if command[:3] == ["gh", "issue", "list"]:
+            payload = [{"number": 42, "title": candidate["title"], "state": "CLOSED", "url": "https://example.test/42", "body": body}]
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload))
+        if command[:3] in (["gh", "issue", "reopen"], ["gh", "issue", "comment"]):
+            return subprocess.CompletedProcess(command, 0, stdout="ok")
+        raise AssertionError(command)
+
+    monkeypatch.setattr("issue_discovery.issues.subprocess.run", fake_run)
+
+    assert IssueRepository(run_dir, repo_root=repo_root()).create(candidate["fingerprint"], dry_run=False) == 0
+    assert any(command[:3] == ["gh", "issue", "reopen"] for command in calls)
+    lifecycle = [
+        json.loads(line)
+        for line in (run_dir / "issue-lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["state"] for event in lifecycle] == ["detected", "reopened"]
+
+
+def test_fix_pr_proposal_targets_working_branch_only(tmp_path: Path) -> None:
+    run_dir, candidate = ingest(tmp_path)
+    repository = IssueRepository(run_dir, repo_root=repo_root())
+    head = f"fix/{candidate['fingerprint']}"
+
+    proposal_path = repository.propose_fix(candidate["fingerprint"], head)
+    proposal = json.loads(proposal_path.read_text(encoding="utf-8"))
+    assert proposal["status"] == "proposal-only"
+    assert proposal["head_branch"] == head
+    assert proposal["base_branch"] == "feat/issue-discovery-harness"
+    assert proposal["auto_merge"] is False
+
+    try:
+        repository.propose_fix(candidate["fingerprint"], "main")
+    except ValueError as exc:
+        assert "must begin" in str(exc) or "authority" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("a main-targeted fix proposal passed")
+
+
+def test_capacity_lifecycle_requires_verification_before_close(tmp_path: Path) -> None:
+    run_dir, candidate = ingest(tmp_path)
+    repository = IssueRepository(run_dir, repo_root=repo_root())
+
+    repository.transition(candidate["fingerprint"], "triaged", "Confirmed product invariant.")
+    repository.transition(candidate["fingerprint"], "fix_in_progress", "Prepared branch-scoped fix.")
+    repository.transition(candidate["fingerprint"], "fixed_unverified", "Fix merged to working branch.")
+    try:
+        repository.transition(candidate["fingerprint"], "closed", "Too early.")
+    except ValueError as exc:
+        assert "fixed_unverified -> closed" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("unverified finding closed")
+    repository.transition(candidate["fingerprint"], "verified", "Passed in a new qualification series.")
+    repository.transition(candidate["fingerprint"], "closed", "Verified lifecycle is complete.")
+
+    lifecycle = [
+        json.loads(line)
+        for line in (run_dir / "issue-lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["state"] for event in lifecycle] == [
+        "detected",
+        "triaged",
+        "fix_in_progress",
+        "fixed_unverified",
+        "verified",
+        "closed",
+    ]

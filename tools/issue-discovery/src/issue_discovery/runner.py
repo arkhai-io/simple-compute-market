@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import shlex
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,11 @@ from issue_discovery.clean_room import (
     load_clean_room_sequence,
     render_clean_room_script,
     render_step_command,
+)
+from issue_discovery.capacity import (
+    CapacityValidationError,
+    ingest_finding,
+    validate_scenario_file,
 )
 from issue_discovery.collectors import CollectorRunner, load_collectors
 from issue_discovery.commands import CommandResult, run_shell_command
@@ -111,6 +118,48 @@ class DiscoveryRunner:
         repository = IssueRepository(run_dir.resolve(), repo_root=self.repo_root)
         return repository.create(fingerprint, dry_run=dry_run, force=force)
 
+    def issue_propose_fix(self, run_dir: Path, fingerprint: str, head_branch: str) -> int:
+        repository = IssueRepository(run_dir.resolve(), repo_root=self.repo_root)
+        try:
+            path = repository.propose_fix(fingerprint, head_branch)
+        except (KeyError, ValueError) as exc:
+            print(str(exc))
+            return 2
+        print(path)
+        return 0
+
+    def issue_transition(self, run_dir: Path, fingerprint: str, state: str, detail: str) -> int:
+        repository = IssueRepository(run_dir.resolve(), repo_root=self.repo_root)
+        try:
+            repository.transition(fingerprint, state, detail)
+        except (KeyError, ValueError) as exc:
+            print(str(exc))
+            return 2
+        print(f"capacity finding lifecycle: {fingerprint} -> {state}")
+        return 0
+
+    def capacity_scenario_validate(self, scenario: Path) -> int:
+        try:
+            validate_scenario_file(scenario.resolve(), self.repo_root)
+        except (CapacityValidationError, json.JSONDecodeError, OSError) as exc:
+            print(f"capacity scenario invalid: {exc}")
+            return 1
+        print(f"capacity scenario valid: {scenario.resolve()}")
+        return 0
+
+    def capacity_finding_ingest(self, run_dir: Path, finding: Path) -> int:
+        try:
+            ingested = ingest_finding(
+                run_dir.resolve(),
+                finding.resolve(),
+                self.repo_root,
+            )
+        except (CapacityValidationError, json.JSONDecodeError, OSError) as exc:
+            print(f"capacity finding invalid: {exc}")
+            return 1
+        print(f"capacity finding ingested: {ingested['finding_id']}")
+        return 0
+
     def clean_room_plan(self, sequence_name: str) -> int:
         sequence = self._load_clean_room_sequence(sequence_name)
         if sequence is None:
@@ -162,6 +211,7 @@ class DiscoveryRunner:
             return 0
 
         store = self._create_store()
+        git_identity = _git_identity(self.repo_root)
         redactor = Redactor.from_file(self.paths.config_dir / "redactions.yaml")
         collectors = CollectorRunner(
             repo_root=self.repo_root,
@@ -176,6 +226,8 @@ class DiscoveryRunner:
             "mode": mode,
             "status": "running",
             "repo_root": str(self.repo_root),
+            "working_branch": git_identity["branch"],
+            "observed_ref": git_identity["ref"],
             "phase_file": self._display_path(phase_path),
             "selected_phases": [phase.id for phase in phases],
             "phase_scope_start": phase_scope_start,
@@ -594,6 +646,24 @@ def _normalize_workarounds(
     if isinstance(workaround, tuple):
         return workaround
     return (workaround,)
+
+
+def _git_identity(repo_root: Path) -> dict[str, str]:
+    def git(*args: str) -> str:
+        completed = subprocess.run(
+            ["git", "-C", str(repo_root), *args],
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        if completed.returncode != 0:
+            return "unknown"
+        return completed.stdout.strip() or "unknown"
+
+    return {
+        "branch": git("branch", "--show-current"),
+        "ref": git("rev-parse", "HEAD"),
+    }
 
 
 def _merged_workaround_env(workarounds: tuple[WorkaroundSpec, ...]) -> dict[str, str]:

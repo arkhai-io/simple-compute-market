@@ -31,6 +31,54 @@ issue candidates when the workflow fails.
   generation, issue filing guards, bootstrap integration, and clean-room
   rendering.
 
+## VM Capacity Preparation
+
+Capacity preparation reuses this harness rather than creating another issue
+tracker. Public scenario semantics live under `config/capacity/` and validate
+against `schemas/capacity-scenario.schema.json`:
+
+```bash
+./scripts/issue-discovery capacity scenario-validate \
+  tools/issue-discovery/config/capacity/b2-g1-contention.json
+```
+
+The scenarios are VM-only, require real KVM/Ansible and whole-device GPU
+passthrough, disable request retries, and distinguish one-GPU contention from
+two-GPU simultaneous fulfillment. Replace the listing fingerprint only after
+the private topology is frozen.
+
+The private orchestrator emits sanitized findings conforming to
+`schemas/capacity-finding.schema.json`. Ingesting one creates or refreshes the
+normal issue candidate packet and appends an immutable lifecycle event:
+
+```bash
+./scripts/issue-discovery capacity finding-ingest <run-dir> <finding.json>
+./scripts/issue-discovery issue list <run-dir>
+./scripts/issue-discovery issue show <run-dir> <fingerprint>
+./scripts/issue-discovery issue create <run-dir> <fingerprint> --dry-run
+```
+
+Capacity fingerprints include the working branch and scenario fingerprint.
+Live publication fails unless the repository is on that working branch. An
+exact open issue receives a new occurrence; an exact closed issue is reopened;
+another branch or scenario does not deduplicate the finding.
+
+Fix automation is proposal-only until a validated fix exists. The proposal
+must use an issue-specific child head and the authorized working branch as base:
+
+```bash
+./scripts/issue-discovery issue propose-fix <run-dir> <fingerprint> \
+  --head-branch fix/<fingerprint>
+./scripts/issue-discovery issue transition <run-dir> <fingerprint> \
+  --state fixed_unverified --detail "Fix merged to the working branch"
+./scripts/issue-discovery issue transition <run-dir> <fingerprint> \
+  --state verified --detail "Passed in a new qualification series"
+```
+
+The packet never authorizes a PR to `dev` or `main` and never auto-merges.
+The lifecycle refuses to move from `fixed_unverified` directly to `closed`;
+verification in a new series is required first.
+
 ## Docs
 
 - `../README.md` explains the repo tooling namespace and the available

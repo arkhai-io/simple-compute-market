@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "finding_id": "replace-finding-id",
+  "fingerprint": "replace-fingerprint",
+  "scenario_id": "b2-g1-contention",
+  "scenario_fingerprint": "replace-with-frozen-scenario-fingerprint",
+  "frontier": "correctness",
+  "classification": "public-product",
+  "destination_repo": "simple-compute-market",
+  "summary": "Replace with a sanitized capacity finding summary",
+  "expected": "Replace with the predeclared invariant.",
+  "actual": "Replace with the sanitized observed outcome.",
+  "evidence": [
+    "sanitized/replace-evidence.json"
+  ],
+  "observed": {
+    "run_id": "replace-run-id",
+    "stage": "b2-g1-contention",
+    "working_branch": "feat/issue-discovery-harness",
+    "observed_ref": "0000000000000000000000000000000000000000"
+  },
+  "filing_readiness": {
+    "state": "needs_targeted_repro",
+    "confidence": "low",
+    "reason": "Replace with the evidence-based filing decision."
+  }
+}

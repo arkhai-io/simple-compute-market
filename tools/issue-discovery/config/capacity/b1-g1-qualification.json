@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "scenario_id": "b1-g1-qualification",
+  "deal_type": "vm",
+  "provisioning": "real-kvm-ansible",
+  "gpu_assignment": "whole-device-passthrough",
+  "listing": {
+    "fingerprint": "replace-with-frozen-vm-listing-fingerprint",
+    "count": 1,
+    "gpus_per_vm": 1
+  },
+  "wave": {
+    "buyers": 1,
+    "sellers": 1,
+    "requests": 1,
+    "expected_successes": 1,
+    "expected_scarcity": 0,
+    "retry_count": 0
+  }
+}

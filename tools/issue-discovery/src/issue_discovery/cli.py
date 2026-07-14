@@ -78,6 +78,47 @@ def build_parser() -> argparse.ArgumentParser:
     )
     issue_create.set_defaults(handler=_issue_create)
 
+    issue_propose = issue_subparsers.add_parser(
+        "propose-fix",
+        help="Write a proposal-only child fix PR packet for a capacity finding.",
+    )
+    issue_propose.add_argument("run_dir", type=Path)
+    issue_propose.add_argument("fingerprint")
+    issue_propose.add_argument("--head-branch", required=True)
+    issue_propose.set_defaults(handler=_issue_propose_fix)
+
+    issue_transition = issue_subparsers.add_parser(
+        "transition",
+        help="Append a validated capacity-finding lifecycle transition.",
+    )
+    issue_transition.add_argument("run_dir", type=Path)
+    issue_transition.add_argument("fingerprint")
+    issue_transition.add_argument(
+        "--state",
+        required=True,
+        choices=["triaged", "filed", "fix_in_progress", "fixed_unverified", "verified", "closed", "reopened"],
+    )
+    issue_transition.add_argument("--detail", required=True)
+    issue_transition.set_defaults(handler=_issue_transition)
+
+    capacity = subparsers.add_parser("capacity", help="Validate VM capacity scenarios and findings.")
+    capacity_subparsers = capacity.add_subparsers(dest="capacity_command", required=True)
+
+    scenario_validate = capacity_subparsers.add_parser(
+        "scenario-validate",
+        help="Validate a public VM-only capacity scenario.",
+    )
+    scenario_validate.add_argument("scenario", type=Path)
+    scenario_validate.set_defaults(handler=_capacity_scenario_validate)
+
+    finding_ingest = capacity_subparsers.add_parser(
+        "finding-ingest",
+        help="Validate and ingest a sanitized capacity finding occurrence.",
+    )
+    finding_ingest.add_argument("run_dir", type=Path)
+    finding_ingest.add_argument("finding", type=Path)
+    finding_ingest.set_defaults(handler=_capacity_finding_ingest)
+
     clean_room = subparsers.add_parser("clean-room", help="Plan clean-room discovery runs.")
     clean_room_subparsers = clean_room.add_subparsers(dest="clean_room_command", required=True)
 
@@ -117,6 +158,12 @@ def _run_dir(args: argparse.Namespace) -> Path:
     return args.repo_root / args.run_dir
 
 
+def _repo_path(args: argparse.Namespace, path: Path) -> Path:
+    if path.is_absolute():
+        return path
+    return args.repo_root / path
+
+
 def _issue_list(args: argparse.Namespace) -> int:
     return DiscoveryRunner(repo_root=args.repo_root).issue_list(_run_dir(args))
 
@@ -131,6 +178,36 @@ def _issue_create(args: argparse.Namespace) -> int:
         args.fingerprint,
         dry_run=args.dry_run,
         force=args.force,
+    )
+
+
+def _issue_propose_fix(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).issue_propose_fix(
+        _run_dir(args),
+        args.fingerprint,
+        args.head_branch,
+    )
+
+
+def _issue_transition(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).issue_transition(
+        _run_dir(args),
+        args.fingerprint,
+        args.state,
+        args.detail,
+    )
+
+
+def _capacity_scenario_validate(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_scenario_validate(
+        _repo_path(args, args.scenario)
+    )
+
+
+def _capacity_finding_ingest(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_finding_ingest(
+        _run_dir(args),
+        _repo_path(args, args.finding),
     )
 
 
