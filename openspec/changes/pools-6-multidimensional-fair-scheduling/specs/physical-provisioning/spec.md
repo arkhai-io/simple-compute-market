@@ -1,10 +1,15 @@
 # Physical provisioning future delta
 
-## PROPOSED Requirements — not yet approved or implemented
+## ADDED Requirements
+
+> These requirements are provisional — see proposal.md's "Status of the
+> requirement delta" note. POOLS-6 must resolve the documented Non-Work
+> decisions in a dedicated design session before implementation or
+> archival.
 
 ### Requirement: Pluggable multidimensional policy
 
-A future physical-provisioning scheduler MAY support multidimensional scheduling policies behind the existing `SettlementSchedulingPolicy` boundary without changing Capacity Settlement Assignment identity or provider-facing settlement contracts.
+The `SettlementSchedulingPolicy` boundary SHALL remain capable of supporting a multidimensional scheduling policy without changing Capacity Settlement Assignment identity or provider-facing settlement contracts.
 
 #### Scenario: Second policy proves interface generality
 
@@ -27,4 +32,14 @@ A future multidimensional policy SHALL select only a concrete resource or explic
 
 A future fair policy SHALL define deterministic tie-breaking and produce an operator-safe explanation of eligibility, score inputs, fairness scope, and the selected candidate.
 
-> These requirements remain proposed. POOLS-6 must resolve the documented Non-Work decisions before approval or implementation.
+#### Scenario: Tie-break is deterministic
+
+- **GIVEN** two or more candidates with identical fairness scores
+- **WHEN** the policy selects among them
+- **THEN** the same input state always yields the same selected candidate.
+
+#### Scenario: Selection is explainable
+
+- **GIVEN** a completed policy selection or a policy failure to find a candidate
+- **WHEN** an operator inspects the decision
+- **THEN** the recorded explanation identifies which candidates were eligible, the score inputs considered, the fairness scope applied, and the resulting choice or reason for no choice.

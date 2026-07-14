@@ -383,11 +383,6 @@ async def client_and_queue(
         capacity_ledger=capacity_ledger_service,
         session_factory=session_factory,
     )
-    # Late-bound, same as container.py's _pool_has_active_binding: the
-    # guardrail needs the scheduler, the scheduler needs the pool service.
-    resource_pool_service.active_binding_check = (
-        physical_settlement_scheduler.has_active_binding
-    )
 
     from services.capacity_reservation_watchdog import CapacityReservationWatchdog
     capacity_reservation_watchdog = CapacityReservationWatchdog(

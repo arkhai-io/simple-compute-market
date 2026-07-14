@@ -33,6 +33,10 @@ A richer scheduler must still preserve the durable properties established by POO
 - Treating abstract aggregate capacity as proof that one concrete resource can fit a request.
 - Changing Capacity Settlement Assignment or physical-settlement caller contracts solely to accommodate one algorithm.
 
+## Status of the requirement delta
+
+The `## ADDED Requirements` in this change's `specs/physical-provisioning/spec.md` use the standard openspec delta header — openspec's delta model has no separate "proposed but not yet decided" state, every change is a proposal until archived. That header does **not** mean this is implementation-ready: the "Non-Work / Deferred Decisions" list below and the open questions in `design.md` must be resolved in a dedicated design session before any of these requirements are implemented or this change is archived. Treat this change directory as a placeholder for problem framing, not a ready-to-build spec.
+
 ## Candidate directions
 
 Potential designs include:

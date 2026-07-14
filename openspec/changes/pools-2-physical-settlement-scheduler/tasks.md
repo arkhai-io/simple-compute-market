@@ -22,4 +22,4 @@
 - [ ] Enforce exactly-one-pool membership at the database layer after migration/backfill.
 - [ ] Wire the scheduler into caller-facing settlement endpoints.
 - [ ] Add multi-process concurrency and restart integration tests for durable idempotency.
-- [ ] Run the complete repository integration suite and strict OpenSpec validation in the canonical development environment.
+- [x] Run the complete repository integration suite and strict OpenSpec validation in the canonical development environment.
