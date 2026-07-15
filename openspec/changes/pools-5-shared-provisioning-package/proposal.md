@@ -60,6 +60,13 @@ this change's residual scope needs reconciling against the resulting
 package shape. Whichever comes first should drive a fresh design-review
 pass, not a straight implementation of this document.
 
+Related: `pools-7-storefront-fulfillment-cutover` (the storefront's
+eventual move to the scheduler/provider path) is itself gated in part on
+this activation condition, since a cross-service caller is a real argument
+for resolving the package boundary rather than staying VM-service-local.
+Whichever of the two changes activates first should re-check the other's
+Activation Condition/Open Questions before proceeding.
+
 ## Capabilities
 
 ### Modified Capabilities

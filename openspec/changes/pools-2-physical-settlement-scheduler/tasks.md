@@ -17,7 +17,7 @@
 
 ## Remaining follow-on work
 
-- [ ] Persist Capacity Settlement Assignments and round-robin cursors transactionally.
+- [ ] Persist Capacity Settlement Assignments and round-robin cursors transactionally. Deferred to `pools-7-storefront-fulfillment-cutover` — low urgency while `select_resource` has no production caller (verified: only tests call it), but should be resolved once one exists rather than before.
 - [ ] Move the concrete resource capacity claim from initial reservation into the assignment transaction.
 - [ ] Enforce exactly-one-pool membership at the database layer after migration/backfill.
 - [ ] Wire the scheduler into caller-facing settlement endpoints.
