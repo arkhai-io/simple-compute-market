@@ -65,6 +65,12 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_executor_lease_service = container.executor_lease_service()
     _container_module.resolved_compute_contract_service = container.compute_contract_service()
     _container_module.resolved_resource_pool_service = container.resource_pool_service()
+    _container_module.resolved_physical_settlement_scheduler = (
+        container.physical_settlement_scheduler()
+    )
+    _container_module.resolved_capacity_reservation_watchdog = (
+        container.capacity_reservation_watchdog()
+    )
 
 
 def seed_inventory_if_empty() -> None:
@@ -229,6 +235,33 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
         )
     else:
         logger.info("Lease watchdog disabled (lease_watchdog_enabled=false)")
+
+    # Capacity reservation watchdog — only started when enabled in config
+    # (default: true). Every reserve/commit/release call already lazily
+    # sweeps expired holds; this only catches an otherwise-idle site.
+    reservation_watchdog_enabled = bool(
+        getattr(settings, "capacity_reservation_watchdog_enabled", True)
+    )
+    if reservation_watchdog_enabled:
+        tasks.append(
+            ComputeProvisioningBackgroundTask(
+                "capacity-reservation-watchdog",
+                lambda: _container_module.resolved_capacity_reservation_watchdog.run(),
+                "Capacity reservation watchdog started (interval=%ds)",
+                (
+                    getattr(
+                        settings,
+                        "capacity_reservation_watchdog_poll_interval_seconds",
+                        60,
+                    ),
+                ),
+            )
+        )
+    else:
+        logger.info(
+            "Capacity reservation watchdog disabled "
+            "(capacity_reservation_watchdog_enabled=false)"
+        )
 
     return tuple(tasks)
 

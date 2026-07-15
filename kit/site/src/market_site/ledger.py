@@ -696,6 +696,19 @@ class CapacityLedgerService:
     # Internals
     # ------------------------------------------------------------------
 
+    def expire_due_holds(self) -> None:
+        """Public entry point for a periodic watchdog to sweep expired holds.
+
+        Every ``reserve``/``commit``/``release``/``probe`` call already runs
+        :meth:`_expire_stale_holds` lazily against its own open session, so
+        an uncommitted hold is self-healing the moment anything touches the
+        ledger again. This method exists for the case where nothing does —
+        an idle site with no incoming requests — so a hold doesn't sit
+        expired-but-unreleased indefinitely.
+        """
+        with self._lock, self._session_factory() as db:
+            self._expire_stale_holds(db)
+
     def _expire_stale_holds(self, db: Session) -> None:
         """Lapse TTL'd reservations whose hold expired without a commit.
 

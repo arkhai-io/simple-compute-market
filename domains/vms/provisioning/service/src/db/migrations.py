@@ -246,7 +246,9 @@ def _migrate_resource_pools_and_hosts_pool_id(
     open-ended business-logic seeding (that stays in app_runtime's YAML
     pool-definitions import).
     """
-    Base.metadata.tables["resource_pools"].create(bind=engine, checkfirst=True)
+    from market_resource_pools.db import Base as PoolsBase
+
+    PoolsBase.metadata.tables["resource_pools"].create(bind=engine, checkfirst=True)
     Base.metadata.tables["ansible_pool_configs"].create(bind=engine, checkfirst=True)
 
     with Session(engine) as session:

@@ -35,7 +35,7 @@ from compute_provisioning import (
     PoolUpdate,
     PoolValidateResponse,
 )
-from services.resource_pool_service import (
+from market_resource_pools import (
     PoolAlreadyExistsError,
     PoolNotFoundError,
     PoolValidationError,

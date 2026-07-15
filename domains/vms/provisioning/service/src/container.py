@@ -4,6 +4,7 @@ from dependency_injector import containers, providers
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.executor_leases import ExecutorLeaseService
 from compute_provisioning.release import ExecutorReleaseDispatcher
+from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
 
@@ -19,14 +20,15 @@ from services.deal_event_sink import StorefrontLifecycleEventSink, notify_storef
 from services.host_operations_service import HostOperationsService
 from services.host_service import HostService
 from services.job_service import AnsibleJobService
+from services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from services.lease_watchdog import LeaseWatchdog
+from services.physical_settlement_scheduler import PhysicalSettlementScheduler
 from services.release_executors import (
     BARE_METAL_EXECUTOR_KIND,
     BareMetalReleaseExecutor,
     VM_EXECUTOR_KIND,
     VmReleaseExecutor,
 )
-from services.resource_pool_service import ResourcePoolService
 from services.system_service import SystemService
 from services.vm_operations_service import VmOperationsService
 
@@ -161,6 +163,19 @@ class Container(containers.DeclarativeContainer):
         session_factory=session_factory,
     )
 
+    physical_settlement_scheduler = providers.Singleton(
+        PhysicalSettlementScheduler,
+        pool_service=resource_pool_service,
+        capacity_ledger=capacity_ledger_service,
+        session_factory=session_factory,
+    )
+
+    capacity_reservation_watchdog = providers.Singleton(
+        CapacityReservationWatchdog,
+        capacity_ledger_service=capacity_ledger_service,
+        settings=config,
+    )
+
     site_authority = providers.Singleton(
         LedgerSiteAuthority,
         ledger=capacity_ledger_service,
@@ -257,3 +272,5 @@ resolved_bare_metal_operations_service: "BareMetalOperationsService | None" = No
 resolved_executor_lease_service: "ExecutorLeaseService | None" = None
 resolved_compute_contract_service = None
 resolved_resource_pool_service: "ResourcePoolService | None" = None
+resolved_physical_settlement_scheduler: "PhysicalSettlementScheduler | None" = None
+resolved_capacity_reservation_watchdog: "CapacityReservationWatchdog | None" = None

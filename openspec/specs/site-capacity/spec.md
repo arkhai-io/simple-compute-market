@@ -78,3 +78,9 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 - “Do not close on ignorance” reconciliation: `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py`.
 
 Job-kind dispatch and deal-event routing across multiple storefront domains are not established by this capacity baseline; they remain proposed in `prove-multi-domain-capacity`.
+
+## Capacity settlement lifecycle
+
+A **Capacity Reservation** records accepted capacity, the agreement/deal relationship, requested shape or units, lifecycle state, and any hold expiry. A reservation is not itself a concrete provisioning decision.
+
+A **Capacity Settlement Assignment** is the idempotent scheduling decision that maps one unchanged Capacity Reservation to one concrete pooled Settlement Resource. Retrying assignment for the same unchanged reservation returns the existing decision rather than rerunning scheduling policy. An assignment alone does not imply that physical settlement succeeded or that a workload is active.

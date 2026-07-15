@@ -44,8 +44,22 @@ from .app import (
     build_compute_provisioning_app,
 )
 from .lifecycle import cancel_background_tasks, create_background_task
-from .pool_config_handler import PoolConfigHandler, PoolConfigValidationProblem
-from .pools import (
+from .physical_settlement import (
+    CapacityReservationExpiredError,
+    CapacitySettlementAssignment,
+    NoEligibleSettlementResourceError,
+    PhysicalSettlementError,
+    PhysicalSettlementRequest,
+    SettlementCandidate,
+    SettlementEntityNotFoundError,
+    SettlementRequestMismatchError,
+    SettlementRequirement,
+    SettlementResource,
+)
+from .scheduling import SettlementSchedulingPolicy
+from market_resource_pools import (
+    PoolConfigHandler,
+    PoolConfigValidationProblem,
     PoolCreate,
     PoolImportDiff,
     PoolImportRequest,
@@ -110,6 +124,17 @@ __all__ = [
     "PoolUpdate",
     "PoolValidateResponse",
     "PoolValidationProblem",
+    "PhysicalSettlementError",
+    "SettlementEntityNotFoundError",
+    "SettlementRequestMismatchError",
+    "CapacityReservationExpiredError",
+    "NoEligibleSettlementResourceError",
+    "PhysicalSettlementRequest",
+    "SettlementRequirement",
+    "SettlementCandidate",
+    "SettlementResource",
+    "CapacitySettlementAssignment",
+    "SettlementSchedulingPolicy",
     "ResultEnvelope",
     "UnsupportedExecutorActionError",
     "contract_major",

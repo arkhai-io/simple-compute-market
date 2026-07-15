@@ -40,6 +40,9 @@ def db_engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    # resource_pools must exist before Base's ansible_pool_configs FK resolves.
+    from market_resource_pools.db import Base as PoolsBase
+    PoolsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     # HostService requires pool_id to reference an existing pool. The real
     # migration always seeds "default" before hosts.pool_id can be NOT

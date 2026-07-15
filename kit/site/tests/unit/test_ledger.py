@@ -346,6 +346,33 @@ def test_ttl_hold_expires_without_commit(seeded: CapacityLedgerService):
     assert lapsed["failure_reason"] == "hold_expired"
 
 
+def test_expire_due_holds_reclaims_without_another_ledger_call(
+    seeded: CapacityLedgerService,
+):
+    """The watchdog's public entry point, exercised directly rather than
+    via the lazy sweep every reserve/commit/release already runs."""
+    reserved = seeded.reserve(
+        claim={"gpu_count": 8}, deal_ref={"escrow_uid": "0xwatchdog"}, ttl_seconds=60,
+    )
+    assert reserved["hold_expires_at"] is not None
+
+    from market_site.db import SiteAllocation
+    with seeded._session_factory() as db:
+        row = db.get(SiteAllocation, reserved["allocation_id"])
+        row.hold_expires_at = (
+            datetime.now(timezone.utc) - timedelta(seconds=1)
+        ).isoformat()
+        db.commit()
+
+    # No reserve/commit/release/probe call in between — only the public
+    # sweep entry point a periodic watchdog would call.
+    seeded.expire_due_holds()
+
+    lapsed = seeded.get_allocation(reserved["allocation_id"])
+    assert lapsed["state"] == "released"
+    assert lapsed["failure_reason"] == "hold_expired"
+
+
 def test_committed_hold_survives_ttl(seeded: CapacityLedgerService):
     reserved = seeded.reserve(
         claim={"gpu_count": 2}, deal_ref={"escrow_uid": "0xkeep"}, ttl_seconds=60,

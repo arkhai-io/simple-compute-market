@@ -46,6 +46,43 @@ The change artifacts own requirements, design, readiness, and task state. This s
 
 The two tracks can start independently. Compute changes are ordered by their numeric prefix; the final proof also depends on the domain contract. A newly discovered prerequisite stays in the current task list when required for that change's acceptance criteria, otherwise it receives the same initiative prefix and is cross-linked as an independently archivable change.
 
+### Resource pool physical settlement
+
+**Goal:** Move from operator-managed pool administration to pool-aware
+physical settlement resource selection, provider execution, and a cleaned
+-up storefront capacity boundary.
+
+1. `pools-1-resource-pool-foundation` — archived
+   ([`changes/archive/2026-07-13-pools-1-resource-pool-foundation/`](changes/archive/2026-07-13-pools-1-resource-pool-foundation/)).
+   Resource pools, provider configuration, host membership, and the
+   administrative API.
+2. [`pools-2-physical-settlement-scheduler`](changes/pools-2-physical-settlement-scheduler/) —
+   bind a capacity reservation to a specific settlement resource through
+   `PhysicalSettlementScheduler`, without yet persisting the binding or
+   executing fulfillment against it. Design-reviewed; entering planning.
+3. [`pools-3-fulfillment-provider`](changes/pools-3-fulfillment-provider/) —
+   `FulfillmentProvider` ABC, `ProviderRegistry`, the Ansible provider, and
+   durable `SettlementRecord` persistence. Proposal/design recovered from
+   pre-migration planning and verified against current code; still carries
+   one unresolved design-review topic (`SettlementRecord` vs. the
+   storefront's `settlement_claims`/`ClaimsEngine` ownership boundary) and
+   has not had its own design-review session yet.
+4. [`pools-4-storefront-capacity-boundary`](changes/pools-4-storefront-capacity-boundary/) —
+   remove host-specific placement from the ordinary storefront reservation
+   path and apply `pools-2`'s reservation-expiry model storefront-side.
+   Recovered and corrected against current code (the `SiteLedger`/
+   `SiteResourcesService` rename it originally called for is already done).
+5. [`pools-5-shared-provisioning-package`](changes/pools-5-shared-provisioning-package/) —
+   **largely superseded.** The originally-planned `core/provisioning`
+   package already exists in a different shape
+   (`provisioning/compute`/`compute_provisioning`), and its remaining
+   extraction goal is already covered by the active
+   `market-platform-compute-30-extract-service` change. Taskless and
+   activation-gated; see its proposal.md.
+
+Final e2e verification (originally POOLS-6) is not yet drafted as a change
+directory.
+
 ### Imported change index — specification required
 
 The following proposals/designs are a normalized index of the former TODO and design documents, not implementation-ready plans. Their generated task lists were removed. Before implementation, audit the proposal against current code, rewrite its delta requirements and acceptance scenarios, make its design decisions explicit, and only then create a concrete task artifact. The audited market-platform changes above are no longer part of this imported set.

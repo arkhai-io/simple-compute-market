@@ -33,6 +33,7 @@ The normative dependency and plugin contracts are in the [market composition spe
 | Plans, claims, heartbeats, and mechanism codecs | [Settlement servicing](../../openspec/specs/settlement-servicing/spec.md) |
 | Seller surfaces and listing publication | [Storefront publication](../../openspec/specs/storefront-publication/spec.md) |
 | Capacity authority, reservations, aggregation, and events | [Site capacity](../../openspec/specs/site-capacity/spec.md) |
+| Resource pool administration, provider configuration, and host membership | [Resource pool management](../../openspec/specs/resource-pool-management/spec.md) |
 | Scheduling, fulfillment, jobs, and lease release | [Physical provisioning](../../openspec/specs/physical-provisioning/spec.md) |
 | Buyer plugins, policies, aggregation, and recovery | [Buyer orchestration](../../openspec/specs/buyer-orchestration/spec.md) |
 | Deployment, persistence, migrations, and packaging | [Deployment and state](../../openspec/specs/deployment-state/spec.md) |

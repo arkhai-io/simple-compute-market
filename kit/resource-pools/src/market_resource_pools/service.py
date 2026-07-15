@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 import yaml
 from sqlalchemy.orm import Session, sessionmaker
 
-from compute_provisioning import (
-    PoolConfigHandler,
+from .pool_config_handler import PoolConfigHandler
+from .pools import (
     PoolCreate,
     PoolImportDiff,
     PoolReplace,
@@ -17,7 +17,7 @@ from compute_provisioning import (
     PoolValidateResponse,
     PoolValidationProblem,
 )
-from db.models import DEFAULT_POOL_ID, ResourcePool
+from .db import DEFAULT_POOL_ID, ResourcePool
 
 
 class PoolNotFoundError(Exception):
@@ -61,6 +61,17 @@ class ReconciliationPlan:
 
 
 class ResourcePoolService:
+    """Provider-neutral resource-pool administration.
+
+    ``handlers`` must be supplied by the caller — this service does not
+    default to any concrete provider implementation (e.g. Ansible), keeping
+    it free of any domain-specific import.
+
+    Disabling a pool is a draining operation: it excludes the pool from new
+    scheduling decisions without invalidating existing reservations,
+    assignments, or active workloads.
+    """
+
     _ROOT_FIELDS = frozenset({"pools"})
     _POOL_FIELDS = frozenset(
         {"id", "label", "provider", "enabled", "policy_tags", "provider_config"}
@@ -69,13 +80,9 @@ class ResourcePoolService:
     def __init__(
         self,
         session_factory: sessionmaker[Session],
-        handlers: Mapping[str, PoolConfigHandler[Session]] | None = None,
+        handlers: Mapping[str, PoolConfigHandler[Session]],
     ) -> None:
         self._session_factory = session_factory
-        if handlers is None:
-            from services.ansible_pool_config_handler import AnsiblePoolConfigHandler
-
-            handlers = {"ansible": AnsiblePoolConfigHandler()}
         self._handlers = dict(handlers)
 
     def _handler(self, provider: str) -> PoolConfigHandler[Session]:
@@ -95,11 +102,6 @@ class ResourcePoolService:
             return self._handler(provider).validate_config(config)
         except ValueError as exc:
             raise PoolValidationError(str(exc)) from exc
-
-    @staticmethod
-    def _ensure_default_pool_enabled(pool_id: str, enabled: bool | None) -> None:
-        if pool_id == DEFAULT_POOL_ID and enabled is False:
-            raise PoolValidationError("the default pool cannot be disabled")
 
     def _attach_provider_config(self, db: Session, pool: ResourcePool) -> None:
         pool.provider_config = self._handler(pool.provider).read_config(db, pool.id)
@@ -142,7 +144,6 @@ class ResourcePoolService:
         return pool
 
     def create_pool(self, data: PoolCreate) -> ResourcePool:
-        self._ensure_default_pool_enabled(data.id, data.enabled)
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             if db.query(ResourcePool).filter(ResourcePool.id == data.id).one_or_none():
@@ -160,7 +161,6 @@ class ResourcePoolService:
         return self.get_pool(data.id)  # type: ignore[return-value]
 
     def replace_pool(self, pool_id: str, data: PoolReplace) -> ResourcePool:
-        self._ensure_default_pool_enabled(pool_id, data.enabled)
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
@@ -175,7 +175,6 @@ class ResourcePoolService:
         return self.get_pool(pool_id)  # type: ignore[return-value]
 
     def update_pool(self, pool_id: str, data: PoolUpdate) -> ResourcePool:
-        self._ensure_default_pool_enabled(pool_id, data.enabled)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
             provider = data.provider or pool.provider
@@ -213,8 +212,6 @@ class ResourcePoolService:
         internal caller cannot accidentally introduce hard deletion without
         revisiting the pool lifecycle and referential-integrity rules.
         """
-        if pool_id == DEFAULT_POOL_ID:
-            raise PoolValidationError("the default pool cannot be deleted")
         raise PoolValidationError(
             "resource pools use disable semantics and cannot be hard-deleted"
         )
@@ -342,15 +339,6 @@ class ResourcePoolService:
                         path=f"{base}.enabled",
                         code="invalid_type",
                         message="enabled must be boolean",
-                    )
-                )
-                entry_valid = False
-            elif pool_id == DEFAULT_POOL_ID and enabled is False:
-                problems.append(
-                    PoolValidationProblem(
-                        path=f"{base}.enabled",
-                        code="default_pool_disabled",
-                        message="the default pool must remain enabled",
                     )
                 )
                 entry_valid = False

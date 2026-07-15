@@ -51,6 +51,12 @@ def run_migrations(
     migrations haven't been applied. See ARCHITECTURE.md § Schema Migration
     Execution.
     """
+    # Resource-pool tables must be created before this service's own Base:
+    # ansible_pool_configs (on Base) has a ForeignKey("resource_pools.id"),
+    # and SQLAlchemy's cross-metadata FK resolution during create_all needs
+    # the referenced table to already exist.
+    from market_resource_pools.db import Base as PoolsBase
+    PoolsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     # Site-authority ledger tables ride the shared market_site
     # metadata (db.models re-exports the classes).

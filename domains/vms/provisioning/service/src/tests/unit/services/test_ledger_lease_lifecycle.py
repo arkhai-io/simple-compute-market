@@ -40,6 +40,9 @@ def session_factory():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    # resource_pools must exist before Base's ansible_pool_configs FK resolves.
+    from market_resource_pools.db import Base as PoolsBase
+    PoolsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     # Site-ledger tables ride market_site's own metadata.
     from market_site.db import Base as SiteBase
