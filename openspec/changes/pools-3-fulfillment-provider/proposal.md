@@ -1,150 +1,98 @@
 ## Why
 
-The provisioning service has no formal abstraction separating physical
-settlement *operations* from lifecycle and job-management machinery.
-`pools-2-physical-settlement-scheduler` selects a `SettlementResource` but
-nothing yet executes against it, and `pools-2` explicitly defers durable
-storage of that binding. Without a provider boundary, future domain
-provisioning services would have to duplicate VM-domain execution code or
-depend on it directly.
+`pools-2-physical-settlement-scheduler` selects a concrete
+`SettlementResource`, but the provisioning service still needs a formal layer
+that executes create, status, and teardown operations against that selected
+resource without allowing executor mechanisms to perform placement.
 
-`pools-2` is implemented (verified against
-`services/physical_settlement_scheduler.py` and its
-`_capacity_settlement_assignments` map) except for the follow-on items its
-own `tasks.md` lists as remaining work. This change adds durable
-`SettlementRecord` persistence for the *fulfillment* side (provider
-execution state) but deliberately does not touch
-`PhysicalSettlementScheduler`'s own non-durable assignment map — see
-"Explicitly Deferred This Round." Caller wiring (something actually
-invoking `select_resource` + `create`) also remains unscoped — see
-`pools-7-storefront-fulfillment-cutover`.
+The storefront will eventually own the end-to-end business workflow: obtain a
+Capacity Reservation, negotiate a Market Agreement, begin physical fulfillment,
+observe completion, and let the lease lifecycle request teardown. The
+provisioning service must nevertheless remain authoritative for physical
+fulfillment consistency, duplicate detection, provider resolution, and
+execution against the selected resource.
 
 ## What Changes
 
-- Define `FulfillmentProvider` (ABC), `FulfillmentResult`, and
-  `ProviderStatus` in the VM provisioning service. A provider receives an
-  already-selected `SettlementResource` and performs `create`/
-  `get_status`/`teardown` against it; it MUST NOT independently select or
-  substitute a different resource.
-- `create()` is **dispatch-only, not blocking-to-completion**. Ansible
-  execution runs through the existing `AsyncJobQueue`/`AnsibleJobService`
-  background worker (can take minutes); `create()` submits the job and
-  returns a `FulfillmentResult` carrying a job reference and a `pending`
-  provider-metadata state. `get_status(...)` polls the underlying job and
-  is how a `pending` record is observed to move toward `active` (or
-  `failed`). Whatever eventually calls `create()` is responsible for
-  polling — same shape as the existing `LeaseRegistration.create_job_id`
-  pattern already used elsewhere in this service.
-- Add durable `SettlementRecord` persistence, extending the same binding
-  identity `pools-2` establishes (`allocation_id`) rather than creating a
-  second, competing record — `pools-2` is deliberately non-durable and this
-  is where that persistence lands. `SettlementRecord.state` tracks
-  `pending` / `active` / `failed` (teardown moves a record out of the live
-  set entirely rather than adding further states here).
-- Implement `AnsibleFulfillmentProvider` around the existing
-  `AnsibleJobService`/`AnsibleService`. Per-pool Ansible configuration is
-  **not new storage** — `AnsiblePoolConfig` (`playbook_path`,
-  `inventory_group`, `extra_vars`) already persists per pool and is already
-  resolvable via `ResourcePoolService.get_pool(pool_id).provider_config`
-  (see `AnsiblePoolConfigHandler`, wired in `container.py` today). The
-  provider reads that, builds Ansible variables, dispatches through the
-  existing job queue, normalizes results, and extracts credentials for the
-  selected resource. It owns execution, not placement.
-- Keep `ProgrammableMockAnsibleService`'s `mockMode`-flag test seam inside
-  the Ansible provider (selected in `_make_ansible_service`); do not
-  promote it to the `FulfillmentProvider` level.
-- Implement `ProviderRegistry.require(provider)`, constructed in the DI
-  container at startup, mapping provider strings to `FulfillmentProvider`
-  instances. Lifecycle code stays free of provider-specific branches.
+- Add a provisioning-side `FulfillmentService` above provider execution. It is
+  the future storefront-facing physical-fulfillment boundary and owns request
+  validation, allocation-to-fulfillment identity, equivalent-retry behavior,
+  conflict detection, provider resolution, and provider-state normalization.
+- Define `FulfillmentProvider`, `FulfillmentResult`, and `ProviderStatus`.
+  Providers execute against an already-selected `SettlementResource` and MUST
+  NOT select or substitute another resource.
+- Make both create and teardown dispatch-only. They return after asynchronous
+  work is accepted; callers observe progress through `get_status(...)`.
+- Define normalized provider operation states: `pending`, `succeeded`,
+  `failed`, and `unknown`.
+- Guarantee idempotency at the `FulfillmentService` boundary: an equivalent
+  retry for the same `allocation_id` returns the existing fulfillment; a
+  conflicting reuse fails before another provider operation is submitted.
+- Add `ProviderRegistry.require(provider)` and register the initial Ansible
+  implementation in the provisioning composition root.
+- Wire the resource pool's generic provider-configuration metadata into
+  `AnsibleFulfillmentProvider`. Configuration is resolved and snapshotted into
+  executor inputs at dispatch time.
+- Remove `inventory_group` from `AnsiblePoolConfig`; it is not operationally
+  used and concrete placement already belongs to `PhysicalSettlementScheduler`.
+- Keep existing credential behavior. POOLS-3 introduces no new
+  secret-distribution or credential-publication system.
+- Preserve enough fulfillment metadata for later status checks and asynchronous
+  teardown. The durable ORM and final teardown lifecycle are completed in
+  `pools-7-storefront-fulfillment-cutover`.
 
 ## Explicitly Deferred This Round
 
-- **No rewiring of `LeaseLifecycleService`'s release path.** The
-  lifecycle's actual injection point is `executor_release:
-  ExecutorReleasePort`, dispatched by `ExecutorReleaseDispatcher` on
-  `allocation["executor_kind"]` (`vm` / `bare_metal`) to
-  `VmReleaseExecutor` / `BareMetalReleaseExecutor` — not a
-  `release_delegate` parameter as earlier drafts of this document said.
-  `VmReleaseExecutor` is today a narrow, VM-specific Ansible caller
-  (`vm_action="vm_remove"`) with no notion of `SettlementResource`,
-  `pool_id`, or `provider`; `ProviderRegistry` dispatches on `provider`
-  (mechanism), an orthogonal axis to `executor_kind` (domain allocation
-  semantics — VM-shareable vs. bare-metal-exclusive; see
-  `market-platform-compute-40-multi-domain-proof`). Because nothing calls
-  `select_resource` + `create` yet, no `SettlementRecord` rows will exist
-  by the end of this change, so there is nothing live for
-  `VmReleaseExecutor` to release through the registry. Wiring that
-  connection now would be dead code. It's deferred to whichever change
-  first gives `SettlementRecord` a real caller (see
-  `pools-7-storefront-fulfillment-cutover`), where it can be designed
-  against an actual call shape instead of guessed at.
-- **No change to `PhysicalSettlementScheduler`.** `select_resource()` has
-  no production caller today (only tests call it), so `pools-2`'s
-  "persist Capacity Settlement Assignments... transactionally" follow-on
-  item is deliberately left alone rather than folded into this change's
-  `SettlementRecord` work — that would mean reaching into the scheduler's
-  internals for a durability need nothing is exercising yet. Deferred to
-  `pools-7-storefront-fulfillment-cutover`.
+- Storefront workflow cutover and API/client wiring.
+- Database-backed settlement persistence, uniqueness, and transaction handling.
+  POOLS-7 MUST use the database as the correctness boundary; process-local locks
+  are insufficient.
+- Rewiring `LeaseLifecycleService` / `ExecutorReleaseDispatcher` / release
+  executors to dispatch teardown through `ProviderRegistry`.
+- Final teardown states, record retention, and storefront capacity-change
+  notification.
+- Changes to `PhysicalSettlementScheduler`'s current in-memory assignments.
 
 ## Non-Goals
 
-- Kubernetes, cloud, storage, power, or bandwidth providers — Ansible only.
+- Kubernetes, cloud, storage, power, or bandwidth providers.
 - Recreating the removed generic `provisioning_client` package.
-- Any storefront-side change (`pools-4`, `pools-7`).
-- Extracting these contracts into a shared package (`pools-5` — conditional
-  on a second domain actually needing them, or on
-  `market-platform-compute-30-extract-service` landing first).
-- Rewiring `LeaseLifecycleService`/`ExecutorReleaseDispatcher`/
-  `VmReleaseExecutor` to consult `ProviderRegistry` — see "Explicitly
-  Deferred This Round."
+- Extracting the contracts to a shared package before the package-boundary work
+  requires it.
+- Correlating physical fulfillment with storefront financial claim collection.
 
-## Settlement Record / Claims Boundary (resolved)
+## Settlement Record / Claims Boundary
 
-`SettlementRecord` (provisioning-side, physical-settlement state, keyed on
-`allocation_id`) and the storefront's `settlement_claims` /
-`mechanism_state` in `ClaimsEngine` (`core/storefront/settlement_lifecycle.py`,
-seller-side on-chain claim collection, keyed on `claim_ref`) are confirmed
-independent: `ClaimsEngine` has no notion of `allocation_id`, `pool_id`, or
-physical resources today, and drives arbitrary settlement-plan obligations
-through injected `check_conditions`/`collect` mechanism hooks with no
-physical-provisioning awareness. `SettlementRecord` MUST NOT reference
-`settlement_claims`/`ClaimsEngine` in this change. If a future change needs
-to correlate physical settlement with claim collection, that is new,
-separately-proposed work — not something to guess at here.
+Physical fulfillment is keyed by `allocation_id` and records the selected
+resource, provider, provider operation metadata, lifecycle state, and existing
+credential reference. The storefront's `settlement_claims` /
+`mechanism_state` and `ClaimsEngine` remain an independent financial-claim
+system keyed by `claim_ref`.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `physical-provisioning`: adds `FulfillmentProvider`, `ProviderRegistry`,
-  and durable `SettlementRecord` persistence extending the `pools-2`
-  binding.
+- `physical-provisioning`: adds the `FulfillmentService`, provider contract,
+  registry, normalized asynchronous operation model, Ansible pool-metadata
+  execution path, and idempotency guarantees.
 
 ## Dependencies and Related Changes
 
-- Requires `pools-2-physical-settlement-scheduler` (implemented; this
-  change adds the durable settlement record for fulfillment, not the
-  scheduler's own separate "persist assignments" follow-on item — see
-  "Explicitly Deferred This Round").
-- Independent of `pools-4-storefront-capacity-boundary` (neither requires
-  the other).
-- Precedes `pools-7-storefront-fulfillment-cutover`, which is the change
-  that will eventually give `select_resource`/`create` a real caller and
-  revisit both deferrals above.
-- `pools-5-shared-provisioning-package`'s residual scope (extracting these
-  contracts to a shared package) is conditional on this change landing
-  first, and on reconciling against `market-platform-compute-30-extract-service`.
+- Requires `pools-2-physical-settlement-scheduler`.
+- Precedes `pools-7-storefront-fulfillment-cutover`, which supplies the
+  production caller, durable persistence, database-backed idempotency, and
+  teardown wiring.
+- Independent of `pools-4-storefront-capacity-boundary`, though POOLS-7 depends
+  on both paths being ready.
 
 ## Impact
 
-- **Packages:** `domains/vms/provisioning/service` (provider, registry,
-  persistence). Stays VM-service-local per `pools-5`'s guidance — no
-  change to `provisioning/compute` this round.
-- **Database:** new durable settlement-record storage, extending
-  `pools-2`'s binding identity rather than adding a second table for the
-  same key.
-- **API:** none new required by this change alone; no caller invokes
-  `select_resource`/`create` yet — see `pools-7`.
-- **Compatibility:** existing `AnsibleJobService`/`AnsibleService` tests
-  must pass unchanged — this change wraps, not replaces, that machinery.
-  `LeaseLifecycleService`/`ExecutorReleaseDispatcher` are untouched.
+- **Packages:** VM provisioning service fulfillment/provider layer and DI
+  composition.
+- **Database:** none in POOLS-3; the record contract is implemented durably in
+  POOLS-7.
+- **API:** none required by POOLS-3 alone.
+- **Compatibility:** existing Ansible job and credential behavior remains in
+  place; the provider wraps and extends that machinery rather than replacing
+  it.

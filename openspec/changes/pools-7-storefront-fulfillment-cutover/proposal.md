@@ -31,10 +31,11 @@ it.
   (`vm_host` required attribute) to pool-shaped, consuming
   `pools-4-storefront-capacity-boundary`'s reservation claim shape.
 - Replace `create_vm_and_wait_with_credentials`'s direct
-  `ExecutorActionEnvelope` dispatch with a call sequence against
-  `PhysicalSettlementScheduler.select_resource` +
-  `FulfillmentProvider.create`, polling `get_status` to completion (see
-  `pools-3`'s Decision 1a — `create()` is dispatch-only by design).
+  `ExecutorActionEnvelope` dispatch with a provisioning-side
+  `FulfillmentService` call. That service coordinates
+  `PhysicalSettlementScheduler.select_resource`, provider resolution,
+  asynchronous create dispatch, and normalized status observation (see
+  `pools-3`'s asynchronous-provider decision — `create()` is dispatch-only by design).
 - Resolve `pools-3`'s deferred release-path wiring: give
   `VmReleaseExecutor` (or its replacement) a way to resolve
   `SettlementRecord` → `ProviderRegistry.require(provider).teardown(...)`
@@ -48,6 +49,14 @@ it.
   this was explicitly punted by `pools-3` to avoid scope creep into the
   scheduler while there was no caller to design against
   (`pools-3`'s `design.md`, Risks).
+- Add durable database-backed fulfillment idempotency keyed by
+  `allocation_id`. Equivalent retries return the existing fulfillment;
+  conflicting reuse fails before dispatch. Database uniqueness and
+  transactions, not process-local locks, are the correctness mechanism.
+  Explicitly handle recovery across the commit/queue-dispatch failure window.
+- Snapshot resource-pool provider configuration into executor inputs when the
+  fulfillment operation is accepted, and retain enough selected-resource and
+  provider metadata for asynchronous teardown after restart.
 - Decide the `AggregateCapacityClient` placement-policy fate:
   `fill_first`/`most_available` are storefront-side physical-placement
   logic that duplicates what `PhysicalSettlementScheduler`'s round-robin

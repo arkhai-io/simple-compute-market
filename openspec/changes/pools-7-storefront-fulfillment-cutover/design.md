@@ -48,8 +48,8 @@ cutover.
   `ExecutorReleaseDispatcher` — the dispatcher doesn't choose a physical
   resource or a mechanism.
 - `provider` (`"ansible"` today) is an **infrastructure mechanism**
-  distinction — how to reach a resource (playbook, inventory group, extra
-  vars via `AnsiblePoolConfig`). `ProviderRegistry` dispatches on this.
+  distinction — how to reach a resource (playbook and executor variables from the pool
+  provider-configuration envelope). `ProviderRegistry` dispatches on this.
 - `market-platform-compute-40-multi-domain-proof` is explicit evidence
   these coexist rather than one replacing the other: it proves
   "VM-shareable and bare-metal-exclusive allocations against the same
@@ -96,18 +96,47 @@ From `pools-2-physical-settlement-scheduler` (see its `tasks.md`
   the database layer" are also still open per that task list and are
   relevant once reservations stop being host-shaped (`pools-4`).
 
-## Open questions for whoever picks this up
+## Durable idempotency and dispatch recovery decisions
+
+POOLS-7 MUST make the database the correctness boundary for fulfillment
+idempotency. Process-local or asynchronous locks are insufficient because the
+provisioning service may have multiple replicas and may restart between steps.
+
+The durable fulfillment identity is keyed by `allocation_id`:
+
+```text
+allocation_id -> settlement/fulfillment record -> provider operation metadata
+```
+
+The persistence design MUST enforce these semantics transactionally:
+
+- an equivalent retry returns the existing fulfillment and does not dispatch a
+  second provider operation;
+- a request that reuses the allocation with a different agreement, selected
+  resource, provider, or fulfillment identity fails with a conflict; and
+- teardown is similarly idempotent and does not dispatch uncontrolled duplicate
+  work.
+
+The design must explicitly handle the failure window between committing the
+fulfillment identity and recording the asynchronous provider operation. A small
+durable dispatch state machine or equivalent outbox/recovery pattern is
+required. Executor-level deterministic command identity may be used as a final
+defense around recovery, but `AnsibleJobService` is not the primary business
+idempotency authority.
+
+Pool provider configuration is resolved and snapshotted into executor inputs at
+dispatch time so later pool edits cannot change accepted work. The persisted
+record must retain the original selected resource, provider, and sufficient
+provider metadata for later asynchronous teardown. Final teardown states and
+record retention are designed here when the real lease-release call path is
+wired.
+
+## Remaining open questions for whoever picks this up
 
 - Does `AggregateCapacityClient`'s `fill_first`/`most_available` placement
   logic get deleted outright once `PhysicalSettlementScheduler` owns
   placement, or does it downgrade to a pool-level preference hint passed
   into `SettlementRequirement.attributes`? Not analyzed this session.
-- Is a single storefront-side call sequence (`select_resource` then
-  `create` then poll `get_status`) sufficient, or does the storefront need
-  its own durable tracking of "assignment made, fulfillment pending"
-  separate from `SettlementRecord` (which lives in the provisioning
-  service, a different deployable)? Cross-service consistency during a
-  storefront restart mid-fulfillment isn't analyzed here.
 - Whether `pools-5`'s package-boundary decision (stay VM-service-local vs.
   move to `compute_provisioning`) should be forced by this change rather
   than waited on — if the storefront is going to depend on these contracts
