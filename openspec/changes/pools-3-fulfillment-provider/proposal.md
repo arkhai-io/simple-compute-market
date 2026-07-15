@@ -41,20 +41,32 @@ execution against the selected resource.
   implementation in the provisioning composition root.
 - Wire the resource pool's generic provider-configuration metadata into
   `AnsibleFulfillmentProvider`. Configuration is resolved and snapshotted into
-  executor inputs at dispatch time.
-- Stop consuming `inventory_group` in the Ansible provider's typed pool
-  config (`AnsiblePoolConfig` dataclass — see `design.md` Decision 6); it is
-  not operationally used and concrete placement already belongs to
-  `PhysicalSettlementScheduler`. Verified: no code path reads
-  `pool_config["inventory_group"]` for job dispatch — inventory is always
-  rendered per-host from the `hosts` table
-  (`AnsibleService.write_inventory`). **Scoped to the provider only** —
-  `AnsiblePoolConfigHandler`'s DB-facing validation, `db/models.py`, and
-  `db/migrations.py` are untouched this round (consistent with "Database:
-  none in POOLS-3" below); the column stays required and populated as
-  before, the provider just stops reading it. Whether to also relax the
-  handler/schema is a `pools-7`-or-later decision once there's a reason to
-  touch that migration surface.
+  executor inputs at dispatch time. This requires real changes below
+  `AnsibleFulfillmentProvider`, not just the provider itself: `AnsibleJobParams`
+  has no `playbook_path`/pool-extra-vars fields today, `_build_params` (job
+  service) explicitly reconstructs every persisted field by name rather than
+  splatting the stored dict, `_playbook_path_for_params` always selects a
+  globally configured playbook, and `_build_vm_vars` (ansible service) has no
+  generic extra-vars merge path — it hand-enumerates known fields. All four
+  need updating for a snapshotted per-pool playbook/extra-vars to actually
+  reach the dispatched job. No migration: `AnsibleJob.params` is already a
+  JSON column, so new `AnsibleJobParams` fields persist through the existing
+  `dataclasses.asdict(params)` write path. Built-in job identity fields
+  (`vm_host`, `vm_action`, executor contract fields) are authoritative;
+  collisions from pool extra-vars are rejected, not silently overridden.
+- Remove `inventory_group` from the **public** pool provider-configuration
+  contract: drop it from `AnsiblePoolConfigHandler._FIELDS`/validation, stop
+  returning it from `read_config`/pool API responses, and update the pool
+  API/import tests that currently assert it round-trips
+  (`tests/integration/test_pools_api.py`). It is not operationally used —
+  verified: no code path reads `pool_config["inventory_group"]` for job
+  dispatch, inventory is always rendered per-host from the `hosts` table
+  (`AnsibleService.write_inventory`) — and leaving it required on the public
+  API would preserve exactly the confusion this decision exists to remove.
+  No migration: `replace_config` writes a fixed internal compatibility value
+  into the still-`NOT NULL` `db/models.py` column instead of a user-supplied
+  one; the column itself and `db/migrations.py` are untouched. See `design.md`
+  Decision 6.
 - Keep existing credential behavior. POOLS-3 introduces no new
   secret-distribution or credential-publication system.
 - Preserve enough fulfillment metadata for later status checks and asynchronous
@@ -110,9 +122,17 @@ system keyed by `claim_ref`.
 
 - **Packages:** VM provisioning service fulfillment/provider layer and DI
   composition.
-- **Database:** none in POOLS-3; the record contract is implemented durably in
-  POOLS-7.
-- **API:** none required by POOLS-3 alone.
+- **Database:** no schema or migration changes. `AnsibleJob.params`'s
+  existing JSON column absorbs the new snapshotted `playbook_path`/
+  `provider_extra_vars` fields on `AnsibleJobParams` without any migration.
+  `AnsiblePoolConfigHandler`'s validation behavior changes (`inventory_group`
+  no longer required/returned on the public pool-config contract) but no
+  column is added, dropped, or altered — the durable `SettlementRecord`
+  table itself is still implemented in POOLS-7.
+- **API:** none new required by POOLS-3 alone, but the existing pool
+  create/import API's accepted/returned shape changes (`inventory_group` no
+  longer required or returned) — a compatibility-relevant behavior change
+  for any existing caller currently sending it, not just an internal detail.
 - **Compatibility:** existing Ansible job and credential behavior remains in
   place; the provider wraps and extends that machinery rather than replacing
   it.

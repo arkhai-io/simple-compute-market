@@ -419,6 +419,20 @@ class AnsibleService:
             lines.append("root_ssh_filename: not_provided")
             lines.append("root_ssh_password: not_provided")
 
+        if params.provider_extra_vars:
+            # Pool-supplied extra vars (POOLS-3 fulfillment provider). Built-in
+            # job identity/sizing fields above are authoritative — a colliding
+            # key is a pool-configuration error, not a silent override.
+            built_in_keys = {line.split(":", 1)[0].strip() for line in lines}
+            colliding = sorted(set(params.provider_extra_vars) & built_in_keys)
+            if colliding:
+                raise ValueError(
+                    "provider_extra_vars collide with built-in job variables: "
+                    f"{', '.join(colliding)}"
+                )
+            for key in sorted(params.provider_extra_vars):
+                lines.append(f"{key}: {json.dumps(params.provider_extra_vars[key])}")
+
         return "\n".join(lines) + "\n"
 
     def _inject_golden_image_credentials(self, lines: list[str]) -> None:

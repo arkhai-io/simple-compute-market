@@ -57,9 +57,13 @@ This keeps `FulfillmentService` from becoming a combined placement-and-
 execution service, and preserves the rule that providers (and, transitively,
 `FulfillmentService`) act only on the resource they were explicitly handed —
 never selecting or substituting one themselves. `FulfillmentService.create`
-and `FulfillmentService.teardown` both take a `SettlementResource` as an
-input parameter, exactly as `FulfillmentProvider.create`/`teardown` do; there
-is no scheduler dependency anywhere in this call chain.
+takes a `SettlementResource` as an input parameter, exactly as
+`FulfillmentProvider.create` does. **`teardown` and `get_status` do not** —
+see Decision 4a: once `create` has registered a fulfillment,
+`FulfillmentService` is the authoritative source for which resource,
+provider, and provider metadata that `allocation_id` maps to, not a value a
+caller passes back in. There is no scheduler dependency anywhere in this
+call chain.
 
 POOLS-3 introduces the service boundary and provider behavior, tested with a
 test caller that plays the orchestrator role (see Decision 4 for how — no
@@ -173,11 +177,23 @@ whether the allocation already has an accepted fulfillment.
 allocation_id -> fulfillment / settlement record -> provider operation metadata
 ```
 
-For the same `allocation_id`:
+**Equivalent-request definition.** Comparison is scoped to the fields that
+identify *what* is being fulfilled, not to `PhysicalSettlementRequest.resource_id`
+(an optional selection constraint on the *request* — the resolved
+`SettlementResource` the scheduler actually picked is the authoritative
+resource identity, and `resource_id` may legitimately be absent even though
+a concrete resource was still selected). For the same `allocation_id`, a
+retry is equivalent if all of the following match the stored fulfillment:
+`agreement_id`, `market`, `terms` (from the request) and the entire selected
+`SettlementResource` (`settlement_resource_id`, `pool_id`, `resource_kind`,
+`provider`, `attributes`). Both `PhysicalSettlementRequest` and
+`SettlementResource` are pydantic models with structural equality, so this
+is plain field comparison (excluding `resource_id`) — no canonical
+serialization or hashing needed for the in-memory POOLS-3 implementation.
 
 - an equivalent retry returns the existing fulfillment result;
-- a request that conflicts on agreement, selected resource, provider, or other
-  fulfillment identity fails with a conflict before another provider operation
+- a request that reuses `allocation_id` with any of those fields differing
+  fails with `FulfillmentConflictError` before another provider operation
   is dispatched.
 
 POOLS-3 specifies this behavior at the service boundary and backs it with a
@@ -195,6 +211,53 @@ surviving restarts are POOLS-7 concerns, not solved here.
 The executor job may additionally retain a deterministic command identity as a
 last defensive layer around the dispatch/persistence failure window, but that
 does not replace higher-level eligibility and duplicate validation.
+
+### 4a. `FulfillmentService` owns provider metadata after `create` — callers don't pass it back in
+
+`teardown`/`get_status` do **not** take `resource`/`provider_metadata` as
+caller-supplied parameters. A caller supplying its own copy of that data
+after `create` has already registered the fulfillment weakens the identity
+map Decision 4 establishes — the value could belong to a different
+allocation, name a different job, or simply be stale. `FulfillmentService`
+stores what it needs at `create` time and looks it up by `allocation_id`
+alone thereafter:
+
+```python
+@dataclass(frozen=True)
+class FulfillmentEntry:
+    request: "PhysicalSettlementRequest"
+    resource: "SettlementResource"
+    create_result: FulfillmentResult
+    teardown_result: FulfillmentResult | None = None
+
+
+class FulfillmentService:
+    async def create(
+        self,
+        request: "PhysicalSettlementRequest",
+        resource: "SettlementResource",
+    ) -> FulfillmentResult: ...
+
+    async def teardown(self, allocation_id: str) -> FulfillmentResult: ...
+
+    async def get_status(
+        self, allocation_id: str, operation: Literal["create", "teardown"] = "create",
+    ) -> "ProviderStatus": ...
+```
+
+`teardown` idempotency falls out of this directly: no stored
+`teardown_result` → resolve the provider from the stored `resource`, dispatch,
+and save the result; an existing `teardown_result` → return it without
+redispatching. `get_status`'s `operation` argument selects which stored
+`FulfillmentResult`'s `provider_metadata` to check status against, since
+`create`'s and `teardown`'s dispatches are tracked separately (e.g. two
+different Ansible job ids).
+
+`FulfillmentProvider`'s own contract (Decision 2) is unchanged and stays at
+the lower, stateless layer — it still takes `resource`/`provider_metadata`
+explicitly, since a provider has no identity map of its own and shouldn't
+need one. The signature simplification is specific to `FulfillmentService`,
+which does own that map.
 
 ### 5. `ProviderRegistry` maps provider strings to instances
 
@@ -237,16 +300,44 @@ operationally used: scheduling already selects one concrete
 Allowing an inventory group to influence placement would create a second,
 conflicting scheduler.
 
-Scoped to this dataclass only: `AnsiblePoolConfigHandler`'s DB-facing
-validation, `db/models.py`'s `AnsiblePoolConfig` ORM column, and
-`db/migrations.py` are untouched this round (no DB work in POOLS-3 — see
-`proposal.md` Impact). The column stays required and populated exactly as
-today; `AnsibleFulfillmentProvider` simply doesn't read it into its own typed
-config. Relaxing the handler/schema is a later decision, not part of this
-change.
+**Superseded from this document's previous revision**: leaving
+`AnsiblePoolConfigHandler`'s validation untouched would leave the confusion
+this decision exists to remove — operators would still be required to
+supply a dead field through the public pool-config API, and pool
+create/import tests already assert it round-trips
+(`tests/integration/test_pools_api.py`). Instead, POOLS-3 removes it from the
+**public contract** now while still avoiding a migration:
+
+- remove `inventory_group` from `AnsiblePoolConfigHandler._FIELDS` and stop
+  requiring/validating it as input;
+- stop returning it from `read_config`/pool API responses;
+- update the pool API/import tests that currently assert it round-trips;
+- `replace_config` writes a fixed internal compatibility value (not
+  user-supplied) into the still-`NOT NULL` `inventory_group` column so
+  existing inserts keep working with no schema change.
+
+The `db/models.py` column and `db/migrations.py` defaults are untouched —
+removing the column itself is a later, separate migration if anyone decides
+it's worth doing, not part of this change. What changes is that the field
+stops being part of the contract operators interact with at all.
 
 The `ProgrammableMockAnsibleService` seam remains inside the Ansible provider
 and existing test-controller gating remains unchanged.
+
+**Implementation note on collision timing**: pool extra-vars are merged into
+the rendered Ansible variables (and checked for collisions against built-in
+job fields) inside `AnsibleService._build_vm_vars`, which only runs when the
+background job worker actually processes the job
+(`AnsibleJobService._process_job`) — not synchronously inside `submit()`.
+A colliding extra-var therefore surfaces as a failed job, observable via
+`get_status()` returning `state=failed`, not as an exception raised
+synchronously from `create()`. This falls out of Decision 3's dispatch-only
+model rather than contradicting it: anything that can only be validated at
+execution time behaves like any other execution failure. What *is* checked
+synchronously, before dispatch, is cheaper pre-flight validation that
+doesn't require actually building the vars file — a missing pool or a
+missing `playbook_path` both raise `ProviderConfigInvalidError` directly
+from `create()`.
 
 ### 7. Settlement record contract
 

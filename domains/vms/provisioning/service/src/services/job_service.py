@@ -699,9 +699,13 @@ class AnsibleJobService:
             access_ref=params.get("access_ref"),
             bare_metal_reclaim_policy=params.get("bare_metal_reclaim_policy"),
             max_retries=params.get("max_retries"),
+            playbook_path=params.get("playbook_path"),
+            provider_extra_vars=params.get("provider_extra_vars") or {},
         )
 
     def _playbook_path_for_params(self, params: AnsibleJobParams):
+        if params.playbook_path:
+            return params.playbook_path
         if (
             params.executor_kind == "bare_metal"
             or params.executor_action in _BARE_METAL_ACTIONS
