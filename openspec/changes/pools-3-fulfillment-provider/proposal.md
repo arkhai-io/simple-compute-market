@@ -28,13 +28,33 @@ execution against the selected resource.
 - Guarantee idempotency at the `FulfillmentService` boundary: an equivalent
   retry for the same `allocation_id` returns the existing fulfillment; a
   conflicting reuse fails before another provider operation is submitted.
+  Backed by a simple in-memory dict this round (mirrors
+  `PhysicalSettlementScheduler`'s own in-memory assignment map) — enough to
+  make this change's spec scenarios true and testable, but not a concurrency
+  guarantee and not durable across restarts. See "Explicitly Deferred This
+  Round."
+- `FulfillmentService` takes an already-selected `SettlementResource` as
+  input and never calls `PhysicalSettlementScheduler` itself — placement and
+  execution stay separate services, called in sequence by whatever
+  orchestrates the workflow (the storefront, from `pools-7`).
 - Add `ProviderRegistry.require(provider)` and register the initial Ansible
   implementation in the provisioning composition root.
 - Wire the resource pool's generic provider-configuration metadata into
   `AnsibleFulfillmentProvider`. Configuration is resolved and snapshotted into
   executor inputs at dispatch time.
-- Remove `inventory_group` from `AnsiblePoolConfig`; it is not operationally
-  used and concrete placement already belongs to `PhysicalSettlementScheduler`.
+- Stop consuming `inventory_group` in the Ansible provider's typed pool
+  config (`AnsiblePoolConfig` dataclass — see `design.md` Decision 6); it is
+  not operationally used and concrete placement already belongs to
+  `PhysicalSettlementScheduler`. Verified: no code path reads
+  `pool_config["inventory_group"]` for job dispatch — inventory is always
+  rendered per-host from the `hosts` table
+  (`AnsibleService.write_inventory`). **Scoped to the provider only** —
+  `AnsiblePoolConfigHandler`'s DB-facing validation, `db/models.py`, and
+  `db/migrations.py` are untouched this round (consistent with "Database:
+  none in POOLS-3" below); the column stays required and populated as
+  before, the provider just stops reading it. Whether to also relax the
+  handler/schema is a `pools-7`-or-later decision once there's a reason to
+  touch that migration surface.
 - Keep existing credential behavior. POOLS-3 introduces no new
   secret-distribution or credential-publication system.
 - Preserve enough fulfillment metadata for later status checks and asynchronous

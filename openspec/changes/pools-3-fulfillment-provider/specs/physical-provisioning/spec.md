@@ -100,9 +100,12 @@ snapshot with the submitted operation.
 
 ### Requirement: Ansible placement remains scheduler-owned
 
-`AnsiblePoolConfig` MUST NOT include `inventory_group`. The Ansible provider
-MUST execute against the concrete Settlement Resource selected by the scheduler
-and MUST NOT use an inventory group as an alternate placement mechanism.
+The Ansible provider's typed pool configuration MUST NOT include
+`inventory_group`, and the provider MUST execute against the concrete
+Settlement Resource selected by the scheduler rather than using an inventory
+group as an alternate placement mechanism. This applies to the provider's
+own configuration type only — it does not require changing the persisted
+pool-configuration schema or its validation.
 
 #### Scenario: Ansible job is constructed
 
