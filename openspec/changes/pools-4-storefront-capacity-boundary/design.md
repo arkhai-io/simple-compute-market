@@ -140,3 +140,16 @@ absence of an order must never be translated into `claim=None`, because that
 means "select any available capacity" at the capacity boundary. If a future
 workflow needs an explicit generic-capacity operation, it receives a separately
 named API rather than overloading missing order data.
+
+### 5. Legacy-invalid listings fail closed and require explicit removal
+
+The storefront does not guess an identity for a pre-existing compute listing
+that lacks a valid `pool_id`/`resource_id`, and it does not automatically remove
+that listing from registries. Any path that would publish or republish a stored
+row validates it first. In particular, resume returns `409 Conflict` before
+clearing `paused` or contacting a registry, with an actionable instruction to
+use the existing seller-authenticated close endpoint if the operator chooses to
+unpublish it. The close path deliberately remains available for an invalid row:
+removal is the safe escape hatch and must not require the row to satisfy the new
+publication invariant. Negotiation and fulfillment retain their fail-closed
+validation backstops.

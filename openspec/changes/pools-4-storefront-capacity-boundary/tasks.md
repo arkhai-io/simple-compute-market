@@ -98,21 +98,10 @@
 
 ## Verification
 
-- [x] Ran the storefront's unit + integration suites in this session's
-      sandbox (not the canonical dev environment — no `make dist`/`make
-      reinit` wheel chain available here, so this used an ad hoc
-      `PYTHONPATH` against the package sources plus `pip install` for
-      third-party deps). Results: `test_migrations.py` 3/3,
-      `test_two_phase_reserve.py` 9/9, `test_listings_api.py` (integration)
-      31/31, reconciler-touching suites (`test_compute_allocations.py`,
-      `test_fulfillment_service.py`, `test_admin_api.py`) 44/44, full
-      `tests/unit/` 540 passed / 27 failed. All 27 failures verified
-      unrelated to this change — missing `web3` (a third-party dependency
-      this sandbox never had reason to install) and a plugin entry-point
-      lookup that only resolves through a real `pip install`/wheel
-      installation, not a raw `PYTHONPATH` — **please still run `make
-      test-storefront` in the canonical environment before merging**, this
-      sandbox run is corroborating evidence, not a replacement.
+- [x] Ran the canonical `make dist && make test-storefront` pipeline after
+      the legacy-invalid listing follow-up. Results: storefront unit suite
+      590 passed / 1 skipped; integration suite 142 passed / 2 skipped. The
+      skips are the separately documented Alkahest SDK issue.
 - [x] Confirmed the "convoluted admin sequence" this session identified —
       `POST /listings/create` called directly with an offer missing both
       `pool_id` and `resource_id` — now fails with 400 instead of silently
@@ -136,4 +125,15 @@
   arbitrary mocked capacity and returned `"fulfilled"`, which is the exact
   unscoped-claim risk `design.md`'s Decision 4 describes) and passes
   against the fix.
+
+## Legacy-invalid listing remediation
+
+- [x] Validate a stored listing before resume changes `paused` or publishes;
+      return an actionable `409 Conflict` for a legacy-invalid row.
+- [x] Validate inside the shared publication entry point so future raw-dict
+      callers cannot republish an invalid compute listing.
+- [x] Preserve the explicit seller-authenticated close path as the removal
+      escape hatch for invalid rows; do not auto-backfill or auto-unpublish.
+- [x] Add regression coverage proving failed resume leaves pause state unchanged
+      and the explicit close operation remains available.
 

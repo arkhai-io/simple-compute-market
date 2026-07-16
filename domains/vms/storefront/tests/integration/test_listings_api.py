@@ -49,13 +49,27 @@ async def db(tmp_path) -> SQLiteClient:
     return SQLiteClient(db_path=str(tmp_path / "listings_test.db"))
 
 
-async def _seed_listing(db: SQLiteClient, listing_id: str, status: str = "open") -> None:
+async def _seed_listing(
+    db: SQLiteClient,
+    listing_id: str,
+    status: str = "open",
+    *,
+    valid_capacity_identity: bool = True,
+) -> None:
+    offer_resource = {
+        "gpu_model": "H200",
+        "gpu_count": 1,
+        "sla": 99.9,
+        "region": "California, US",
+    }
+    if valid_capacity_identity:
+        offer_resource["resource_id"] = f"res-{listing_id}"
     await db.upsert_listing(
         listing_id=listing_id,
         status=status,
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={"resource_id": f"res-{listing_id}", "gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
+        offer_resource=offer_resource,
         accepted_escrows=[{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
@@ -248,6 +262,21 @@ class TestResumeListing:
             await c.resume_listing("ghost")
         assert "404" in str(exc_info.value)
 
+    async def test_legacy_invalid_listing_fails_without_clearing_pause(self, client):
+        c, db = client
+        await _seed_listing(
+            db, "legacy-invalid", valid_capacity_identity=False,
+        )
+        await db.set_listing_paused(listing_id="legacy-invalid", paused=True)
+
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.resume_listing("legacy-invalid")
+
+        error = str(exc_info.value)
+        assert "409" in error
+        assert "invalid_listing_capacity_identity" in error
+        assert await db.is_listing_paused(listing_id="legacy-invalid") is True
+
 
 # ---------------------------------------------------------------------------
 # Admin evaluate endpoints — evaluate-negotiate
@@ -257,7 +286,7 @@ class TestResumeListing:
 # is a pure dry-run of the negotiation chain against a listing row.
 # ---------------------------------------------------------------------------
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 @pytest_asyncio.fixture
@@ -500,6 +529,30 @@ async def seller_auth_full_client(db):
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
+
+
+class TestLegacyInvalidListingRemoval:
+    async def test_seller_can_explicitly_close_invalid_legacy_listing(
+        self, seller_auth_full_client,
+    ):
+        c, db = seller_auth_full_client
+        await _seed_listing(
+            db, "legacy-invalid-close", valid_capacity_identity=False,
+        )
+        with patch(
+            "market_storefront.services.publication_service.close_order",
+            new_callable=AsyncMock,
+            return_value={
+                "status": "closed",
+                "listing_id": "legacy-invalid-close",
+            },
+        ) as close_order:
+            result = await c.close_listing("legacy-invalid-close")
+
+        assert result.status == "closed"
+        close_order.assert_awaited_once_with(
+            {"listing_id": "legacy-invalid-close"}
+        )
 
 
 class TestCreateListing:

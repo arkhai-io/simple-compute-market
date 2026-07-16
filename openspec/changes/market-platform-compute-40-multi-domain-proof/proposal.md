@@ -5,7 +5,7 @@ Extraction alone does not prove that the new boundaries are truly domain- and ex
 ## What Changes
 
 - Add end-to-end scenarios in which one extracted compute provisioner loads VM and bare-metal adapters concurrently.
-- Dispatch provisioning and release by allocation-recorded executor kind rather than VM-specific routes or defaults.
+- Dispatch provisioning and release by allocation-recorded executor kind rather than VM-specific routes, provider identity, or defaults.
 - Route deal-scoped events to the owning storefront using the deal reference recorded on the allocation, not one process-global storefront setting.
 - Exercise VM-shareable and bare-metal-exclusive allocations against the same physical host and verify conflict behavior before executor work starts.
 - Verify generic provisioning modules and shared site modules do not import concrete VM or bare-metal request/result models.
@@ -30,11 +30,14 @@ None.
 - Do not require a second physical site; multi-site deployment is separate from multi-executor and multi-domain correctness.
 - Do not introduce generic packing, fractional claims, or cross-seller capacity markets.
 - Do not create a third provisioning API or retain domain-specific shared clients.
+- Do not generalize POOLS-3's Ansible fulfillment provider into bare-metal support or add multiple provider bindings for one physical resource solely for this proof.
 
 ## Dependencies and Related Changes
 
 - Requires `market-platform-domain-10-contract` for the common domain composition surface.
 - Requires `market-platform-compute-30-extract-service`, which in turn requires the site-lifecycle and provisioning-contract changes.
+- Treats landed POOLS-3 provider contracts and capacity rebinding as available primitives, not as evidence that bare-metal has provider-backed fulfillment or that provider identity may replace executor identity.
+- Requires the POOLS-4 capacity-identity contract for proof fixtures: every compute listing/claim is scoped by `pool_id` or `resource_id`, unscoped claims are invalid, and `resource_id` takes precedence when both are supplied.
 - Replaces the ambiguous second-executor/second-site scope formerly tracked by `prove-multi-domain-capacity`.
 
 ## Impact

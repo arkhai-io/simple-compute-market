@@ -23,6 +23,11 @@ Shareable VM allocations and exclusive bare-metal allocations referring to one P
 - **WHEN** a bare-metal deal requests exclusive use of that Physical Resource
 - **THEN** reservation fails and no bare-metal executor job is created
 
+#### Scenario: Alternate identities refer to the same physical resource
+
+- **WHEN** pool identity, provider reference, access alias, or a `resource_id`-preferred claim refers to a machine already represented by another allocation
+- **THEN** all representations resolve to one authoritative Physical Resource identity and cannot bypass VM-shareable versus bare-metal-exclusive conflict accounting
+
 #### Scenario: Conflicting allocation is released
 
 - **WHEN** executor release succeeds and the authoritative allocation release commits

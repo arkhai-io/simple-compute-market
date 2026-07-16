@@ -40,6 +40,11 @@ That work is done; it is not part of this change's remaining scope. The
   of truth for physical inventory, resource pools, scheduling, and
   settlement resources; the storefront owns capacity offerings/projections
   and market reservations.
+- Fail closed when a pre-existing listing violates the new identity invariant:
+  attempts to resume or republish it return an actionable conflict without
+  mutating local state. The storefront does not silently backfill or
+  automatically unpublish legacy data; the operator must explicitly close the
+  listing to remove it from registries.
 
 ## Non-Goals
 
@@ -83,7 +88,10 @@ That work is done; it is not part of this change's remaining scope. The
   `compute_inventory_pools` to `compute_capacity_pools`.
 - **API:** `POST /listings/create` now rejects a compute offer with neither
   `pool_id` nor `resource_id`; a listing carrying both is now matched as
-  specific-resource (`resource_id`), not pool-scoped.
+  specific-resource (`resource_id`), not pool-scoped. Resuming a legacy-invalid
+  listing returns `409 Conflict` and directs the operator to the explicit
+  seller-authenticated close operation; it does not alter the paused state or
+  publish the invalid row.
 - **Compatibility:** breaking only for a caller relying on being able to
   publish a compute listing with neither `pool_id` nor `resource_id` set —
   verified no such caller exists in this repository today.

@@ -44,3 +44,11 @@ which identity/identities the listing was published with, with
 #### Scenario: Settlement order is absent or malformed
 - **WHEN** VM fulfillment receives no valid non-empty settlement order
 - **THEN** fulfillment fails before probing or reserving capacity and does not convert the missing order into an unscoped claim
+
+#### Scenario: Legacy-invalid listing is resumed
+- **WHEN** an operator attempts to resume a stored compute listing that lacks a valid `pool_id` or `resource_id`
+- **THEN** the storefront returns an actionable conflict before changing pause state or publishing to a registry
+
+#### Scenario: Operator explicitly removes a legacy-invalid listing
+- **WHEN** the operator invokes the seller-authenticated close operation after the validation conflict
+- **THEN** the storefront permits the invalid listing to be closed and removed from active registry discovery without silently inventing a capacity identity

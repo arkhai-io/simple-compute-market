@@ -118,9 +118,17 @@ def _make_registry_client() -> "MultiRegistryClient":
 
 
 async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
-    """Publish a new listing to every configured registry."""
+    """Publish a validated listing to every configured registry.
+
+    Raw dictionaries are accepted for compatibility with stored rows, but they
+    must satisfy the current listing contract before any registry is contacted.
+    Legacy-invalid rows can still be explicitly closed; they cannot be
+    republished.
+    """
+    payload = order.model_dump(mode="json") if isinstance(order, Listing) else order
+    listing = Listing.model_validate(payload)
     return await publish_listing_to_registries(
-        order,
+        listing,
         enabled=settings.enable_registry_discovery,
         registry_client_factory=_make_registry_client,
         listing_request_factory=ListingRequest,
