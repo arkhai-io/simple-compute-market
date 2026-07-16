@@ -66,6 +66,11 @@ That work is done; it is not part of this change's remaining scope. The
   request shape and reservation-expiry model.
 - Independent of `pools-3-fulfillment-provider` — does not require provider
   execution to exist.
+- Landing this change is one of the two activation conditions for
+  `pools-7-storefront-fulfillment-cutover`, which replaces the storefront's
+  direct executor dispatch with the scheduler/provider path. This change
+  makes reservations pool-shaped; it does not itself change what the
+  storefront does after a reservation succeeds.
 
 ## Impact
 

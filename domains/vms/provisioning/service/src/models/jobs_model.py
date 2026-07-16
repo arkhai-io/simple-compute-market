@@ -83,6 +83,9 @@ class AnsibleJobParams:
     # Retry policy (per-job override)
     max_retries: Optional[int] = None
 
+    playbook_path: Optional[str] = None
+    provider_extra_vars: dict[str, Any] = field(default_factory=dict)
+
     def __post_init__(self) -> None:
         if not self.executor_action:
             self.executor_action = self.vm_action

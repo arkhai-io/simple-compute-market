@@ -31,7 +31,6 @@ from vm_provisioning_operator.models import HostCreate, HostUpdate
 
 _ANSIBLE_CONFIG = {
     "playbook_path": "playbooks/vm-operations.yaml",
-    "inventory_group": "kvm_hosts",
 }
 
 
@@ -203,13 +202,11 @@ pools:
     provider: ansible
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
-      inventory_group: kvm_hosts
   - id: hetzner-eu-central
     label: Hetzner EU Central
     provider: ansible
     provider_config:
       playbook_path: playbooks/vm-operations-frp.yaml
-      inventory_group: kvm_hosts_eu
 """
 
     async def test_import_creates_pool(self, client_and_queue):
@@ -219,7 +216,8 @@ pools:
         assert "hetzner-eu-central" in result.diff.created
 
         pool = await client.get_pool("hetzner-eu-central")
-        assert pool.provider_config["inventory_group"] == "kvm_hosts_eu"
+        assert pool.provider_config["playbook_path"] == "playbooks/vm-operations-frp.yaml"
+        assert "inventory_group" not in pool.provider_config
 
     async def test_reimport_is_unchanged(self, client_and_queue):
         client, _ = client_and_queue

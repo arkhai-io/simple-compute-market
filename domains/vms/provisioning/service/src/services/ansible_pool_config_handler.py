@@ -9,10 +9,14 @@ from sqlalchemy.orm import Session
 from compute_provisioning import PoolConfigValidationProblem
 from db.models import AnsiblePoolConfig
 
+# The DB # column is still NOT NULL with no migration this round.
+# This is a compatibility placeholder only — nothing reads it.
+_UNUSED_INVENTORY_GROUP_COMPAT_VALUE = "__unused__"
+
 
 class AnsiblePoolConfigHandler:
     provider = "ansible"
-    _FIELDS = frozenset({"playbook_path", "inventory_group", "extra_vars"})
+    _FIELDS = frozenset({"playbook_path", "extra_vars"})
 
     def validate_config(self, config: Mapping[str, Any]) -> dict[str, Any]:
         normalized, problems = self.validate_config_problems(config)
@@ -34,7 +38,6 @@ class AnsiblePoolConfigHandler:
                 )
             )
         playbook_path = config.get("playbook_path")
-        inventory_group = config.get("inventory_group")
         extra_vars = config.get("extra_vars", {})
         if not isinstance(playbook_path, str) or not playbook_path.strip():
             problems.append(
@@ -42,14 +45,6 @@ class AnsiblePoolConfigHandler:
                     path="playbook_path",
                     code="required_field",
                     message="provider_config.playbook_path is required for provider='ansible'",
-                )
-            )
-        if not isinstance(inventory_group, str) or not inventory_group.strip():
-            problems.append(
-                PoolConfigValidationProblem(
-                    path="inventory_group",
-                    code="required_field",
-                    message="provider_config.inventory_group is required for provider='ansible'",
                 )
             )
         if not isinstance(extra_vars, dict):
@@ -64,7 +59,6 @@ class AnsiblePoolConfigHandler:
             return None, tuple(problems)
         return {
             "playbook_path": playbook_path,
-            "inventory_group": inventory_group,
             "extra_vars": dict(extra_vars),
         }, ()
 
@@ -78,7 +72,6 @@ class AnsiblePoolConfigHandler:
             return {}
         return {
             "playbook_path": row.playbook_path,
-            "inventory_group": row.inventory_group,
             "extra_vars": row.extra_vars or {},
         }
 
@@ -95,7 +88,7 @@ class AnsiblePoolConfigHandler:
             row = AnsiblePoolConfig(pool_id=pool_id)
             db.add(row)
         row.playbook_path = normalized["playbook_path"]
-        row.inventory_group = normalized["inventory_group"]
+        row.inventory_group = _UNUSED_INVENTORY_GROUP_COMPAT_VALUE
         row.extra_vars = normalized["extra_vars"]
 
     def delete_config(self, db: Session, pool_id: str) -> None:

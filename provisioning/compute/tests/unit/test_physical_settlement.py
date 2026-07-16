@@ -17,7 +17,7 @@ def test_request_keeps_optional_explicit_resource_constraint():
         resource_id="node-7",
     )
     assert request.resource_id == "node-7"
-    assert request.terms == {}
+    assert request.requirements == {}
 
 
 def test_generic_requirement_and_candidate_are_market_neutral():

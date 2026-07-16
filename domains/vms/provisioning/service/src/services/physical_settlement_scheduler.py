@@ -122,9 +122,9 @@ class PhysicalSettlementScheduler:
         known_market = deal_ref.get("market")
         if known_market is not None and known_market != request.market:
             raise SettlementRequestMismatchError("market does not match the capacity reservation")
-        known_terms = deal_ref.get("terms")
-        if known_terms is not None and dict(known_terms) != request.terms:
-            raise SettlementRequestMismatchError("terms do not match the capacity reservation")
+        known_requirements = deal_ref.get("requirements", deal_ref.get("terms"))
+        if known_requirements is not None and dict(known_requirements) != request.requirements:
+            raise SettlementRequestMismatchError("requirements do not match the capacity reservation")
         return allocation
 
     @staticmethod
@@ -134,10 +134,10 @@ class PhysicalSettlementScheduler:
         deal_ref = allocation.get("deal_ref") or {}
         resource_kind = (
             deal_ref.get("resource_kind")
-            or request.terms.get("resource_kind")
+            or request.requirements.get("resource_kind")
             or "compute.gpu"
         )
-        attributes = dict(request.terms.get("attributes") or {})
+        attributes = dict(request.requirements.get("attributes") or {})
         return SettlementRequirement(
             resource_kind=resource_kind,
             units=max(int(allocation.get("units") or 1), 1),

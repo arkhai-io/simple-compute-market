@@ -16,6 +16,7 @@ reinit:
 		--upgrade-package arkhai-bare-metal   --reinstall-package arkhai-bare-metal \
 		--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
 		--upgrade-package arkhai-kit-site              --reinstall-package arkhai-kit-site \
+		--upgrade-package arkhai-kit-resource-pools    --reinstall-package arkhai-kit-resource-pools \
 		--upgrade-package arkhai-core-storefront        --reinstall-package arkhai-core-storefront \
 		--upgrade-package arkhai-core-storefront-client --reinstall-package arkhai-core-storefront-client \
 		--upgrade-package arkhai-vms-provisioning-operator-client --reinstall-package arkhai-vms-provisioning-operator-client

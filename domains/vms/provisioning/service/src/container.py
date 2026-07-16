@@ -23,6 +23,9 @@ from services.job_service import AnsibleJobService
 from services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from services.lease_watchdog import LeaseWatchdog
 from services.physical_settlement_scheduler import PhysicalSettlementScheduler
+from services.ansible_fulfillment_provider import AnsibleFulfillmentProvider
+from market_resource_pools import ProviderRegistry
+from services.fulfillment_service import FulfillmentService
 from services.release_executors import (
     BARE_METAL_EXECUTOR_KIND,
     BareMetalReleaseExecutor,
@@ -70,6 +73,10 @@ def _make_release_dispatcher(bare_metal_operations_service, job_service):
         },
         default_executor_kind=VM_EXECUTOR_KIND,
     )
+
+
+def _make_provider_registry(ansible_fulfillment_provider):
+    return ProviderRegistry({"ansible": ansible_fulfillment_provider})
 
 
 def _make_lease_lifecycle(
@@ -168,6 +175,28 @@ class Container(containers.DeclarativeContainer):
         pool_service=resource_pool_service,
         capacity_ledger=capacity_ledger_service,
         session_factory=session_factory,
+    )
+
+    # ------------------------------------------------------------------
+    # FulfillmentService takes an already-selected SettlementResource as
+    # input and never calls the scheduler itself.
+    # ------------------------------------------------------------------
+    ansible_fulfillment_provider = providers.Singleton(
+        AnsibleFulfillmentProvider,
+        job_service=job_service,
+        resource_pool_service=resource_pool_service,
+        job_queue_provider=_resolved_job_queue,
+    )
+
+    provider_registry = providers.Singleton(
+        _make_provider_registry,
+        ansible_fulfillment_provider=ansible_fulfillment_provider,
+    )
+
+    fulfillment_service = providers.Singleton(
+        FulfillmentService,
+        provider_registry=provider_registry,
+        capacity_ledger=capacity_ledger_service,
     )
 
     capacity_reservation_watchdog = providers.Singleton(
@@ -273,4 +302,5 @@ resolved_executor_lease_service: "ExecutorLeaseService | None" = None
 resolved_compute_contract_service = None
 resolved_resource_pool_service: "ResourcePoolService | None" = None
 resolved_physical_settlement_scheduler: "PhysicalSettlementScheduler | None" = None
+resolved_fulfillment_service: "FulfillmentService | None" = None
 resolved_capacity_reservation_watchdog: "CapacityReservationWatchdog | None" = None

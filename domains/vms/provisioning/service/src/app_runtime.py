@@ -68,6 +68,7 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_physical_settlement_scheduler = (
         container.physical_settlement_scheduler()
     )
+    _container_module.resolved_fulfillment_service = container.fulfillment_service()
     _container_module.resolved_capacity_reservation_watchdog = (
         container.capacity_reservation_watchdog()
     )

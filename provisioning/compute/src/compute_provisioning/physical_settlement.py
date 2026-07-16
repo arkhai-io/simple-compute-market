@@ -33,7 +33,7 @@ class PhysicalSettlementRequest(BaseModel):
     allocation_id: str = Field(description="Capacity Reservation identifier and idempotency key.")
     agreement_id: str = Field(description="Agreement served by this settlement.")
     market: str = Field(description="Market domain identity, for example 'vms'.")
-    terms: dict[str, Any] = Field(default_factory=dict)
+    requirements: dict[str, Any] = Field(default_factory=dict)
     resource_id: str | None = Field(
         default=None,
         description=(
