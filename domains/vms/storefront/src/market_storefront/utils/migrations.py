@@ -378,9 +378,14 @@ def _migrate_rename_compute_capacity_pools(conn: sqlite3.Connection) -> None:
     its current (post-POOLS-4) form, which creates the table under the new
     name directly, or that has already run this migration.
     """
-    if not _table_exists(conn, "compute_inventory_pools"):
-        return
-    if _table_exists(conn, "compute_capacity_pools"):
+    old_exists = _table_exists(conn, "compute_inventory_pools")
+    new_exists = _table_exists(conn, "compute_capacity_pools")
+    if old_exists and new_exists:
+        raise RuntimeError(
+            "Both compute_inventory_pools and compute_capacity_pools exist; "
+            "manual reconciliation is required before migration can continue."
+        )
+    if not old_exists:
         return
     conn.execute("ALTER TABLE compute_inventory_pools RENAME TO compute_capacity_pools")
 

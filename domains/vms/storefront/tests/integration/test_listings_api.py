@@ -55,7 +55,7 @@ async def _seed_listing(db: SQLiteClient, listing_id: str, status: str = "open")
         status=status,
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
+        offer_resource={"resource_id": f"res-{listing_id}", "gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
         accepted_escrows=[{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,

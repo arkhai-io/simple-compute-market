@@ -13,6 +13,14 @@ from alkahest_py import (
 
 MOCK_TOKEN_ADDR = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 
+_ALKAHEST_ARBITRATION_SKIP = pytest.mark.skip(
+    reason=(
+        "Temporarily disabled: alkahest-py trusted-oracle arbitrate_many "
+        "misdecodes arbitrary demand bytes as a usize offset and may hang "
+        "the interpreter during test-environment teardown after failure."
+    )
+)
+
 
 _ENV_TEST_MANAGER_SETUP = """\
 EnvTestManager could not start the local Alkahest test chain runtime.
@@ -104,6 +112,7 @@ async def full_arbitration_flow(
     return escrow_collection_uid
 
 
+@_ALKAHEST_ARBITRATION_SKIP
 def test_rust():
     env = env_test_manager()
 
@@ -132,6 +141,7 @@ def test_rust():
     assert arbitration_flow is not None
 
 
+@_ALKAHEST_ARBITRATION_SKIP
 def test_python():
     env = env_test_manager()
 

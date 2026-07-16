@@ -2,14 +2,15 @@
 
 ## Validation guards
 
-- [x] `domains/vms/storefront/src/market_storefront/services/listing_service.py`:
-      in `_parse_offer_and_escrows` (or a small helper it calls), reject a
-      compute (`ComputeResource`) offer that has neither `pool_id` nor
-      `resource_id` set, with a clear `ValueError` message. Do not default
-      `pool_id` to `resource_id` here — a `resource_id`-only offer is valid.
+- [x] `domains/vms/listings/models.py`: attach storefront-specific compute
+      listing identity validation to `Listing` with a Pydantic after-validator.
+      Normalize surrounding whitespace; reject missing, blank, or malformed
+      identifiers; require at least one of `pool_id` / `resource_id`; allow both.
+- [x] `listing_service.py`: remove the duplicate service-layer identity guard
+      and rely on construction of the validated `Listing` before persistence.
 - [x] `domains/vms/storefront/src/market_storefront/services/vm_job_spec_service.py`:
-      in `compute_capacity_claim_from_order`, raise if the built claim has
-      neither `pool_id` nor `resource_id` after extraction. Backstop for any
+      in `compute_capacity_claim_from_order`, reject a missing or empty order and
+      raise if the built claim has neither `pool_id` nor `resource_id` after extraction. Backstop for any
       listing that reaches claim-building despite the guard above.
 - [x] Same function: when both `pool_id` and `resource_id` are present,
       drop `pool_id` from the built claim so the listing is matched as
@@ -30,15 +31,19 @@
       `test_claim_survives_listing_model_validation` still passes unchanged
       (it has `resource_id` set, so the new guard doesn't affect it).
 
+- [x] `vm_fulfillment_planner.py`: reject missing, empty, or malformed
+      settlement orders instead of producing an empty plan.
+- [x] Verify missing orders fail before `capacity.probe` or reserve is called.
+
 ## Rename
 
 - [x] `domains/vms/storefront/src/market_storefront/utils/migrations.py`:
-      add a new migration entry (do not edit
-      `_migrate_compute_inventory_pools` in place) that runs
+      keep the fresh-database schema constructor on the new table name and add a
+      new migration entry for already-recorded databases that that runs
       `ALTER TABLE compute_inventory_pools RENAME TO compute_capacity_pools`,
-      guarded by existence checks so it's a no-op on a fresh database that
-      already created the table under the new name and safe to run whenever
-      the old table exists. Leave `compute_pool_members` unrenamed.
+      is a no-op when only the new table or neither table exists, renames when
+      only the old table exists, and fails when both table names exist. Leave
+      `compute_pool_members` unrenamed.
 - [x] Verify (via a migration test, not assumption) that
       `compute_pool_members`'s `FOREIGN KEY(pool_id) REFERENCES
       compute_inventory_pools(pool_id)` correctly resolves to

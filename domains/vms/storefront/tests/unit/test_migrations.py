@@ -120,3 +120,19 @@ def test_rename_migration_is_noop_when_neither_table_exists(tmp_path):
         assert tables == set()
     finally:
         conn.close()
+
+
+def test_rename_migration_rejects_ambiguous_two_table_state(tmp_path):
+    """Both table names indicate schema drift and must not be silently ignored."""
+    conn = sqlite3.connect(str(tmp_path / "ambiguous.db"))
+    try:
+        conn.execute("CREATE TABLE compute_inventory_pools (pool_id TEXT PRIMARY KEY)")
+        conn.execute("CREATE TABLE compute_capacity_pools (pool_id TEXT PRIMARY KEY)")
+        conn.commit()
+
+        import pytest
+
+        with pytest.raises(RuntimeError, match="manual reconciliation"):
+            _migrate_rename_compute_capacity_pools(conn)
+    finally:
+        conn.close()

@@ -42,6 +42,7 @@ async def db(tmp_path):
             "gpu_count": 1,
             "sla": 99.9,
             "region": "California, US",
+            "resource_id": "resource-hook",
         },
         accepted_escrows=[{
             "chain_name": "anvil",

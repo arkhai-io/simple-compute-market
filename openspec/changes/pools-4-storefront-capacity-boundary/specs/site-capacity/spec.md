@@ -4,8 +4,10 @@
 A site authority MUST own physical resource capacity and allocations; a
 storefront MUST reach capacity only through the CapacityClient boundary,
 MUST treat its own view as a projection, and MUST NOT require or select a
-`vm_host` when building an ordinary reservation claim. A listing MUST
-carry at least one of `pool_id` or `resource_id`. A listing whose offer
+`vm_host` when building an ordinary reservation claim. A compute listing MUST normalize and validate its capacity identities at model
+construction and MUST carry at least one valid `pool_id` or `resource_id`. A
+valid capacity identity starts with an alphanumeric character, contains only
+letters, digits, `.`, `_`, `:`, or `-`, and is at most 128 characters. A listing whose offer
 carries `resource_id` (whether or not `pool_id` is also present) is a
 specific-resource listing, and its reservation claim carries the explicit
 `resource_id` with `pool_id` excluded; a listing whose offer carries
@@ -33,3 +35,11 @@ which identity/identities the listing was published with, with
 #### Scenario: Listing carries neither identity
 - **WHEN** a compute listing is created with neither `pool_id` nor `resource_id` on its offer
 - **THEN** the storefront rejects the listing creation rather than publishing a listing whose reservations cannot be reliably matched to inventory
+
+#### Scenario: Listing carries a blank or malformed identity
+- **WHEN** a compute listing is created with an empty, whitespace-only, or malformed `pool_id` or `resource_id`
+- **THEN** storefront listing-model validation rejects it before persistence or publication
+
+#### Scenario: Settlement order is absent or malformed
+- **WHEN** VM fulfillment receives no valid non-empty settlement order
+- **THEN** fulfillment fails before probing or reserving capacity and does not convert the missing order into an unscoped claim

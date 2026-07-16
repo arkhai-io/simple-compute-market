@@ -190,6 +190,36 @@ def test_claim_prefers_resource_id_over_pool_id():
     assert "pool_id" not in claim
 
 
+@pytest.mark.parametrize("order", [None, {}])
+def test_claim_raises_when_order_is_missing(order):
+    from market_storefront.services.vm_job_spec_service import (
+        compute_capacity_claim_from_order,
+    )
+
+    with pytest.raises(ValueError, match="without a settlement order"):
+        compute_capacity_claim_from_order(order)
+
+
+@pytest.mark.parametrize("identity", ["", "   ", "bad/id", "bad id"])
+def test_claim_rejects_invalid_legacy_identity(identity):
+    from market_storefront.services.vm_job_spec_service import (
+        compute_capacity_claim_from_order,
+    )
+
+    row = {
+        "listing_id": "lst-invalid",
+        "offer_resource": {
+            "resource_id": identity,
+            "gpu_model": "H200",
+            "gpu_count": 1,
+            "sla": 99.0,
+            "region": "California, US",
+        },
+    }
+    with pytest.raises(ValueError):
+        compute_capacity_claim_from_order(row)
+
+
 def test_claim_raises_when_neither_pool_id_nor_resource_id_present():
     """An under-specified claim (no pool_id, no resource_id) must fail
     loudly rather than silently matching on shape attributes alone — the

@@ -58,14 +58,16 @@ This change adds two validation guards plus one priority rule in
 only whether the listing is well-formed and, when both `pool_id` and
 `resource_id` are present, which one wins:
 
-- **At listing creation** (`ListingService._parse_offer_and_escrows` or
-  equivalent): reject a compute offer that has neither `pool_id` nor
-  `resource_id`. This is the actual choke point for every way a listing's
-  `offer_resource` gets stored — the reconciler-driven publish path
-  already satisfies it; this only closes the direct
-  `POST /listings/create` path.
-- **At claim build** (`compute_capacity_claim_from_order`): raise if the
-  resulting claim carries neither key. A backstop for any listing that
+- **At listing model validation** (`Listing.model_validate`): normalize
+  surrounding whitespace and reject missing, blank, or malformed `pool_id` /
+  `resource_id` values. The rule is storefront-listing-specific rather than a
+  global `ComputeResource` invariant because compute resources also exist before
+  publication. Valid identifiers start with an alphanumeric character, contain
+  only letters, digits, `.`, `_`, `:`, or `-`, and are at most 128 characters.
+  At least one valid identity is required. The REST create path constructs this
+  model before persistence, so it receives the validation automatically.
+- **At claim build** (`compute_capacity_claim_from_order`): reject a missing or
+  empty settlement order, and raise if the resulting claim carries neither key. A backstop for any listing that
   reaches this point despite the first guard (e.g. a row written by a
   future or as-yet-unaudited path), so a missing identity fails loudly at
   reservation time instead of silently matching on shape attributes alone.
@@ -113,15 +115,14 @@ on top of a table still named for the old host-inventory model.
 
 ## Migration Plan
 
-1. Add a new, additive `compute_capacity_pools` rename migration
-   (`ALTER TABLE compute_inventory_pools RENAME TO compute_capacity_pools`)
-   rather than editing the historical `_migrate_compute_inventory_pools`
-   migration in place — that function already ran against deployed
-   databases under the old name, so rewriting it wouldn't rename an
-   already-created table. `compute_pool_members`'s `FOREIGN KEY(pool_id)
-   REFERENCES compute_inventory_pools(pool_id)` needs verifying after the
-   rename — SQLite's `RENAME TO` is expected to rewrite the reference
-   automatically, but this hasn't been confirmed against this schema.
+1. Brand-new databases create `compute_capacity_pools` directly in the
+   historical schema-construction migration. Existing databases that already
+   recorded that migration retain `compute_inventory_pools` and are upgraded by
+   a new additive rename migration (`ALTER TABLE compute_inventory_pools RENAME
+   TO compute_capacity_pools`). The rename is a no-op when only the new table
+   exists or neither table exists, and fails with an actionable schema-drift
+   error when both names exist so data is not silently abandoned.
+   `compute_pool_members`'s foreign-key target is verified by test after rename.
    `compute_pool_members` itself is not renamed — the proposal scoped the
    rename to `compute_inventory_pools` specifically, and "members" doesn't
    carry the old "inventory" framing that motivated the rename.
@@ -130,3 +131,12 @@ on top of a table still named for the old host-inventory model.
 3. Add the two validation guards (listing creation, claim build) described
    in Decision 2 above, with unit/integration tests for both the rejection
    path and the legitimate resource_id-only / pool_id-only cases.
+
+### 4. Missing orders are not generic-capacity requests
+
+A missing, empty, or malformed settlement order is invalid fulfillment input.
+The planner and claim builder fail before probing or reserving capacity. The
+absence of an order must never be translated into `claim=None`, because that
+means "select any available capacity" at the capacity boundary. If a future
+workflow needs an explicit generic-capacity operation, it receives a separately
+named API rather than overloading missing order data.
