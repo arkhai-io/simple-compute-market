@@ -1,15 +1,17 @@
 ## Why
 
-`required_attributes=("vm_host",)` in the storefront's capacity-reservation
-claim shape forces physical host selection into the storefront for the
-ordinary reservation path — verified still present today
-(`core_storefront/models/settle_models.py`, `vm_fulfillment_service.py`,
-`resource_capacity_validator.py`). The `AggregateCapacityClient`
-placement policies (`fill_first`, `most_available`, in
-`core_storefront/aggregation.py`) are symptoms of the same layering issue:
-the storefront is making a physical-placement decision that
-`pools-2-physical-settlement-scheduler` now gives provisioning a formal
-way to own.
+Originally framed around a literal `required_attributes=("vm_host",)` claim
+shape. **Verified during design review (2026-07-16), and that framing was
+already stale:** `vm_job_spec_service._REQUIRED_COMPUTE_KEYS` already
+excludes `vm_host` — no such literal exists in current code. The real gap
+is narrower: `ListingService.create_listing` accepts and stores a compute
+offer with no cross-check that it carries any resource/pool identity at
+all, so a reservation claim built from such a listing can end up matching
+on shape attributes (`region`/`gpu_model`/`gpu_count`) alone — the same bug
+class `test_claim_survives_listing_model_validation` was written to catch,
+via a different missing field. See `design.md`'s Decision 2 for the full
+trace and the resolved fix (two validation guards, plus an explicit
+priority rule for listings that carry both `pool_id` and `resource_id`).
 
 **Correction from the original plan (verified against current code, not
 assumed):** the `SiteLedger`/`SiteResourcesService` rename this item
@@ -22,21 +24,17 @@ That work is done; it is not part of this change's remaining scope. The
 
 ## What Changes
 
-- Remove the `vm_host`-specific requirement from the ordinary capacity
-  reservation path. A `resource_id` path remains valid only for
-  intentionally specific-resource listings, using `pools-2`'s
-  specific-resource request shape.
-- Update the storefront reservation claim shape to use capacity/pool
-  attributes instead of VM-host attributes; update `RemoteCapacityClient`/
-  `AggregateCapacityClient` call sites that currently assume physical host
-  selection.
+- Add a listing-creation guard rejecting a compute offer that carries
+  neither `pool_id` nor `resource_id`, and a claim-build backstop raising
+  on the same condition — see `design.md` Decision 2.
+- When a listing's offer carries **both** `pool_id` and `resource_id`, the
+  reservation claim treats it as a specific-resource listing: `resource_id`
+  is used and `pool_id` is dropped from the claim rather than requiring
+  both to match. See `design.md` Decision 2 and the `site-capacity` spec
+  delta's new scenario.
 - Rename `compute_inventory_pools` to `compute_capacity_pools` in the
   storefront SQLite schema, and update `SQLiteClient`, the listings
   reconciler, and their tests.
-- Apply `pools-2`'s reservation-expiry decision (lease-shaped windows,
-  watchdog-driven expiry at the site authority) to the storefront-facing
-  reservation path: update whatever watchdog/release/TTL wiring the
-  storefront side needs to match.
 - Confirm and, where prose has drifted, restate the ownership rule already
   expressed in `site-capacity`'s baseline spec: provisioning is the source
   of truth for physical inventory, resource pools, scheduling, and
@@ -56,14 +54,19 @@ That work is done; it is not part of this change's remaining scope. The
 
 ### Modified Capabilities
 
-- `site-capacity`: capacity reservation claims become capacity/pool-shaped
-  rather than host-shaped for the ordinary path; the specific-resource path
-  remains available for explicit opt-in listings.
+- `site-capacity`: a listing must carry `pool_id` and/or `resource_id`;
+  reservation claims are pool-shaped when only `pool_id` is present and
+  resource-specific when `resource_id` is present (with `pool_id` dropped
+  from the claim if both are set).
 
 ## Dependencies and Related Changes
 
 - Requires `pools-2-physical-settlement-scheduler`'s specific-resource
-  request shape and reservation-expiry model.
+  request shape.
+- The reservation-expiry (hold/commit/release TTL) model this proposal
+  originally expected to need storefront-side wiring for is already fully
+  implemented and interoperating correctly on both sides — verified during
+  design review, no work item exists for it in `tasks.md`.
 - Independent of `pools-3-fulfillment-provider` — does not require provider
   execution to exist.
 - Landing this change is one of the two activation conditions for
@@ -78,9 +81,9 @@ That work is done; it is not part of this change's remaining scope. The
   `domains/vms/listings`.
 - **Database:** storefront SQLite migration renaming
   `compute_inventory_pools` to `compute_capacity_pools`.
-- **API:** reservation claim wire shape changes from host-attribute-based
-  to capacity/pool-attribute-based; existing callers assuming `vm_host`
-  need updating.
-- **Compatibility:** breaking for any caller relying on `vm_host` in the
-  ordinary reservation path; the specific-resource path is the intended
-  replacement for genuinely host-specific listings.
+- **API:** `POST /listings/create` now rejects a compute offer with neither
+  `pool_id` nor `resource_id`; a listing carrying both is now matched as
+  specific-resource (`resource_id`), not pool-scoped.
+- **Compatibility:** breaking only for a caller relying on being able to
+  publish a compute listing with neither `pool_id` nor `resource_id` set —
+  verified no such caller exists in this repository today.

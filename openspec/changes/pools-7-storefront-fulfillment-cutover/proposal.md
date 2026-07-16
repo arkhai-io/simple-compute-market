@@ -91,6 +91,21 @@ for its own residual scope.
 - Removing `SettlementRecord`/`settlement_claims` independence —
   `pools-3` resolved that boundary; this change should not reopen it
   without new evidence of an actual need to correlate them.
+- **Operator-declared listing-mode hints are out of scope for this change's
+  first pass, but MUST be on its design-review agenda before implementation
+  starts.** Raised during `pools-4`'s design review (2026-07-16): a
+  datacenter operator's `ResourcePool.policy_tags` (`kit/resource-pools`)
+  is the natural place to declare whether their pool prefers pool-scoped
+  or specific-resource listing behavior — pool-level because it's the
+  operator's equipment and their call, and additive to a field the
+  resource-pool-management spec already designed for operator-declared
+  metadata. This must stay a **non-binding hint the storefront may read**,
+  never a fulfillment-lifecycle constraint enforced by provisioning —
+  `pools-2`'s "Explicit selection preserves eligibility" requirement
+  already commits to honoring an explicit `resource_id` request rather
+  than rejecting it for disagreeing with a pool's preferred scheduling
+  mode, and that should not change. See `design.md`'s "Remaining open
+  questions" for the concrete gap this surfaced.
 
 ## Capabilities
 

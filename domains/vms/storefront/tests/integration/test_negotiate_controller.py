@@ -56,7 +56,7 @@ async def _seed_listing(
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
+        offer_resource={"resource_id": f"res-{listing_id}", "gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
         accepted_escrows=[{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
@@ -267,6 +267,7 @@ class TestNegotiateNew:
             # A model the fixture's fake site doesn't carry — the
             # availability snapshot has nothing matching.
             offer_resource={
+                "resource_id": "res-neg-listing-empty",
                 "gpu_model": "B300", "gpu_count": 1, "sla": 99.9,
                 "region": "California, US",
             },
@@ -302,6 +303,7 @@ class TestNegotiateNew:
             created_at=datetime.now().isoformat(),
             updated_at=datetime.now().isoformat(),
             offer_resource={
+                "resource_id": "res-priceless",
                 "gpu_model": "H200", "gpu_count": 1, "sla": 99.9,
                 "region": "California, US",
             },
@@ -356,6 +358,7 @@ class TestNegotiateNew:
             created_at=datetime.now().isoformat(),
             updated_at=datetime.now().isoformat(),
             offer_resource={
+                "resource_id": "res-attestation",
                 "gpu_model": "H200", "gpu_count": 1, "sla": 99.9,
                 "region": "California, US",
             },
@@ -434,6 +437,7 @@ class TestNegotiateNew:
             created_at=datetime.now().isoformat(),
             updated_at=datetime.now().isoformat(),
             offer_resource={
+                "resource_id": "res-neg-listing-rtx",
                 "gpu_model": "RTX 4090", "gpu_count": 1, "sla": 99.9,
                 "region": "California, US",
             },

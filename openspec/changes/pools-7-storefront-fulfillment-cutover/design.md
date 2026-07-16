@@ -143,6 +143,46 @@ wired.
   cross-service, that's itself an argument for moving them out of a
   VM-domain-local package. Worth revisiting at activation time rather than
   deciding here.
+- **Operator listing-mode hints via `ResourcePool.policy_tags`** (raised
+  during `pools-4`'s design review, 2026-07-16 — verified, not assumed):
+
+  - `PhysicalSettlementScheduler._eligible_candidates`
+    (`domains/vms/provisioning/service/src/services/physical_settlement_scheduler.py`)
+    already filters `SiteResource.attributes["pool_id"]` against
+    `ResourcePoolService.list_pools()` — i.e. it already assumes a
+    `SiteResource`'s `pool_id` attribute reflects a *real* operator-managed
+    Resource Pool. But no code was found that syncs `ResourcePoolService`
+    pool membership into `SiteResource.attributes`. The only caller of
+    `CapacityLedgerService.register_resource` today is the storefront's own
+    `sync_site_resources()` (`market_storefront/services/capacity_client.py`),
+    pushing its locally-managed CSV/listing attributes — which, per
+    `pools-4`'s design review, are not guaranteed to carry a `pool_id` that
+    corresponds to any `ResourcePoolService` pool at all. This gap hasn't
+    bitten anything yet only because `select_resource` has no production
+    caller (per `pools-2`'s own remaining-work note) — it will matter the
+    moment this change wires one in.
+  - Given that, the natural home for an operator's listing-mode preference
+    is `ResourcePool.policy_tags` (`kit/resource-pools` — already a
+    free-form, filterable `dict[str, Any]`, already exposed through the
+    pool admin API's list/detail/export). A storefront that's colocated
+    with (or trusts) a provisioning service could read a tag like
+    `{"listing_mode": "specific_resource"}` off a pool and decide whether
+    to publish that pool's listings as resource-pinned or pool-scoped.
+  - This is explicitly a **hint**, not a constraint provisioning enforces:
+    `pools-2`'s spec already commits to honoring an explicit `resource_id`
+    request regardless of a pool's preferred mode (see this file's sibling
+    Non-Goals entry). A third-party storefront that never reads the hint at
+    all falls back to today's structural default (pool membership: a
+    listing derived from a real multi-member pool is never resource-pinned;
+    a listing derived from a single-resource pool carries that resource's
+    `resource_id`).
+  - Not designed here: the actual channel a storefront uses to learn a
+    pool's `policy_tags` across the service boundary (poll the pool admin
+    API? carried through CSV import? only relevant when storefront and
+    provisioning share an operator?), and whether/how `_eligible_candidates`'s
+    existing (undocumented) assumption that `SiteResource.attributes.pool_id`
+    already matches a real `ResourcePoolService` pool ID should itself become
+    an explicit, enforced sync rather than an implicit expectation.
 
 ## Accepted provider configuration
 

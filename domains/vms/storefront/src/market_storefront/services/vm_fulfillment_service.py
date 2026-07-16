@@ -148,18 +148,20 @@ async def fulfill_vm_obligation(
     reserved_allocation_id: str | None = None
     reserved_resource_id: str | None = None
     reserved_vm_host: str | None = None
+    order_id: str | None = None
     vm_target = f"tenant-{uuid.uuid4().hex[:4]}"
 
     logger.info("[ALKAHEST] Order for fulfillment: %s", order)
-    plan = build_vm_fulfillment_plan(
-        order=order,
-        duration_seconds=duration_seconds,
-        chain_configs=chain_configs,
-    )
-    order_id = plan.order_id
-    required_attributes = plan.required_attributes
 
     try:
+        plan = build_vm_fulfillment_plan(
+            order=order,
+            duration_seconds=duration_seconds,
+            chain_configs=chain_configs,
+        )
+        order_id = plan.order_id
+        required_attributes = plan.required_attributes
+
         reserved = await _commit_capacity_hold(
             capacity=capacity,
             held_allocation=held_allocation,

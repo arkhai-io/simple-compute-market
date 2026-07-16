@@ -55,7 +55,7 @@ async def _seed_listing(db: SQLiteClient, listing_id: str, status: str = "open")
         status=status,
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
+        offer_resource={"resource_id": f"res-{listing_id}", "gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
         accepted_escrows=[{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
@@ -319,6 +319,7 @@ async def admin_no_key_client(db) -> AsyncIterator[StorefrontClient]:
 
 
 _OFFER = {
+    "resource_id": "res-test-1",
     "gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"
 }
 # Stub accepted_escrows for API-contract tests. Address-correctness is the
@@ -523,6 +524,39 @@ class TestCreateListing:
         assert hasattr(result, "listing_id") or (
             isinstance(result, dict) and "listing_id" in result
         ), f"No listing_id in response: {result}"
+        listing_id = result.listing_id if hasattr(result, "listing_id") else result["listing_id"]
+        assert listing_id, "listing_id must be non-empty"
+
+    async def test_rejects_offer_with_neither_pool_id_nor_resource_id(
+        self, seller_auth_full_client,
+    ):
+        """POOLS-4: a compute offer with no pool_id and no resource_id can't
+        be reliably matched to inventory at reservation time and must be
+        rejected at creation rather than published."""
+        c, _ = seller_auth_full_client
+        offer_without_identity = {
+            k: v for k, v in _OFFER.items() if k not in ("pool_id", "resource_id")
+        }
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.create_listing(
+                agent_wallet_address=_TEST_WALLET,
+                offer=offer_without_identity,
+                accepted_escrows=_ACCEPTED_ESCROWS,
+                paused=True,
+            )
+        assert "400" in str(exc_info.value)
+
+    async def test_resource_id_only_offer_succeeds(self, seller_auth_full_client):
+        """A resource_id-only offer (no pool_id) is a legitimate
+        specific-resource listing, not an error."""
+        c, _ = seller_auth_full_client
+        assert "pool_id" not in _OFFER  # confirms this case is what's exercised
+        result = await c.create_listing(
+            agent_wallet_address=_TEST_WALLET,
+            offer=_OFFER,
+            accepted_escrows=_ACCEPTED_ESCROWS,
+            paused=True,
+        )
         listing_id = result.listing_id if hasattr(result, "listing_id") else result["listing_id"]
         assert listing_id, "listing_id must be non-empty"
 
