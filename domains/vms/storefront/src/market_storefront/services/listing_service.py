@@ -228,6 +228,13 @@ class ListingService:
                 "Listing offer must be a compute resource (the buyer-as-maker "
                 "token-offer shape was removed with the demand_resource cutover)."
             )
+        if offer_resource.pool_id is None and offer_resource.resource_id is None:
+            raise ValueError(
+                "Compute listing offer must carry pool_id and/or resource_id — "
+                "a listing with neither cannot be reliably matched to inventory "
+                "at reservation time. Publish through a pool (pool_id) or as a "
+                "specific-resource listing (resource_id)."
+            )
         if not request.accepted_escrows:
             raise ValueError(
                 "accepted_escrows must be a non-empty list "

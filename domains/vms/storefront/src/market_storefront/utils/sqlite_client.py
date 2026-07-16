@@ -1125,22 +1125,22 @@ class SQLiteClient(CoreSQLiteClient):
         pool_status = "active" if total_gpu_count > 0 else "deleted"
         cur.execute(
             """
-            INSERT INTO compute_inventory_pools(
+            INSERT INTO compute_capacity_pools(
               pool_id, resource_type, gpu_model, region, sla, total_gpu_count,
               status, allocation_policy, min_price, token, max_duration_seconds,
               accepted_escrows, created_at, updated_at
             )
             VALUES (?, 'compute.gpu', ?, ?, ?, ?, ?, 'first_fit', ?, ?, ?, ?, ?, ?)
             ON CONFLICT(pool_id) DO UPDATE SET
-              gpu_model=COALESCE(excluded.gpu_model, compute_inventory_pools.gpu_model),
-              region=COALESCE(excluded.region, compute_inventory_pools.region),
-              sla=COALESCE(excluded.sla, compute_inventory_pools.sla),
+              gpu_model=COALESCE(excluded.gpu_model, compute_capacity_pools.gpu_model),
+              region=COALESCE(excluded.region, compute_capacity_pools.region),
+              sla=COALESCE(excluded.sla, compute_capacity_pools.sla),
               total_gpu_count=excluded.total_gpu_count,
               status=excluded.status,
-              min_price=COALESCE(excluded.min_price, compute_inventory_pools.min_price),
-              token=COALESCE(excluded.token, compute_inventory_pools.token),
-              max_duration_seconds=COALESCE(excluded.max_duration_seconds, compute_inventory_pools.max_duration_seconds),
-              accepted_escrows=COALESCE(excluded.accepted_escrows, compute_inventory_pools.accepted_escrows),
+              min_price=COALESCE(excluded.min_price, compute_capacity_pools.min_price),
+              token=COALESCE(excluded.token, compute_capacity_pools.token),
+              max_duration_seconds=COALESCE(excluded.max_duration_seconds, compute_capacity_pools.max_duration_seconds),
+              accepted_escrows=COALESCE(excluded.accepted_escrows, compute_capacity_pools.accepted_escrows),
               updated_at=excluded.updated_at
             """,
             (

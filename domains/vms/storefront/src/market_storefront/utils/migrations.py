@@ -127,9 +127,15 @@ def _migrate_compute_allocation_callback_metadata(conn: sqlite3.Connection) -> N
 
 
 def _migrate_compute_inventory_pools(conn: sqlite3.Connection) -> None:
+    # NOTE: creates ``compute_capacity_pools`` directly (POOLS-4 rename) —
+    # a fresh database never sees the old ``compute_inventory_pools`` name.
+    # This migration keeps its original id/function name (migrations aren't
+    # renamed retroactively); see ``_migrate_rename_compute_capacity_pools``
+    # for the rename applied to databases that already ran this migration
+    # under the old table name.
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS compute_inventory_pools (
+        CREATE TABLE IF NOT EXISTS compute_capacity_pools (
           pool_id TEXT PRIMARY KEY,
           seller_id TEXT,
           resource_type TEXT NOT NULL DEFAULT 'compute.gpu',
@@ -164,7 +170,7 @@ def _migrate_compute_inventory_pools(conn: sqlite3.Connection) -> None:
           attributes TEXT,
           created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
           updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-          FOREIGN KEY(pool_id) REFERENCES compute_inventory_pools(pool_id)
+          FOREIGN KEY(pool_id) REFERENCES compute_capacity_pools(pool_id)
         )
         """
     )
@@ -284,7 +290,7 @@ def _backfill_compute_pools(conn: sqlite3.Connection) -> None:
             )
         conn.execute(
             """
-            INSERT INTO compute_inventory_pools(
+            INSERT INTO compute_capacity_pools(
               pool_id, resource_type, gpu_model, region, sla, total_gpu_count,
               status, allocation_policy, min_price, token, max_duration_seconds,
               accepted_escrows, created_at, updated_at
@@ -363,6 +369,22 @@ def _migrate_allocation_hold_expiry(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "compute_allocations", "hold_expires_at", "TEXT")
 
 
+def _migrate_rename_compute_capacity_pools(conn: sqlite3.Connection) -> None:
+    """POOLS-4: rename ``compute_inventory_pools`` to ``compute_capacity_pools``.
+
+    Pure rename — same columns, same foreign-key relationship from
+    ``compute_pool_members``, same reconciler behavior. A no-op on any
+    database that already ran ``_migrate_compute_inventory_pools`` under
+    its current (post-POOLS-4) form, which creates the table under the new
+    name directly, or that has already run this migration.
+    """
+    if not _table_exists(conn, "compute_inventory_pools"):
+        return
+    if _table_exists(conn, "compute_capacity_pools"):
+        return
+    conn.execute("ALTER TABLE compute_inventory_pools RENAME TO compute_capacity_pools")
+
+
 VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_001_compute_allocation_callback_metadata",
@@ -383,5 +405,9 @@ VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260611_007_allocation_hold_expiry",
         _migrate_allocation_hold_expiry,
+    ),
+    Migration(
+        "20260716_008_rename_compute_capacity_pools",
+        _migrate_rename_compute_capacity_pools,
     ),
 )

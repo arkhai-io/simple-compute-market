@@ -26,6 +26,19 @@ def compute_capacity_claim_from_order(order_dict: dict[str, Any] | None) -> dict
     negotiation accept paths) run after such validation. Silently returning
     ``{}`` for the model shape un-pins the claim and makes capacity
     reservations grab the wrong resource.
+
+    A listing carrying both ``pool_id`` and ``resource_id`` is treated as an
+    intentionally specific-resource listing: ``pool_id`` is dropped from the
+    claim so matching pins to the named resource rather than requiring both
+    to match (POOLS-4 design review, 2026-07-16).
+
+    Raises ``ValueError`` if a non-empty order yields neither ``pool_id``
+    nor ``resource_id`` — an under-specified claim would otherwise silently
+    match on shape attributes (region/gpu_model/gpu_count) alone, which is
+    exactly the "grabs whatever resource is first in line" bug class this
+    function exists to prevent. Listing creation is expected to already
+    reject this shape (``ListingService._parse_offer_and_escrows``); this is
+    a backstop for any listing that reaches claim-building anyway.
     """
     required_attributes: dict[str, Any] = {}
     if not order_dict:
@@ -37,6 +50,14 @@ def compute_capacity_claim_from_order(order_dict: dict[str, Any] | None) -> dict
         for key in _REQUIRED_COMPUTE_KEYS:
             if compute_resource.get(key) is not None:
                 required_attributes[key] = compute_resource[key]
+    if required_attributes.get("resource_id") is not None:
+        required_attributes.pop("pool_id", None)
+    if not required_attributes.get("pool_id") and not required_attributes.get("resource_id"):
+        order_id = order_dict.get("listing_id") or order_dict.get("order_id")
+        raise ValueError(
+            f"Cannot build a capacity claim for order {order_id!r}: neither "
+            "pool_id nor resource_id is present on its offer_resource."
+        )
     return required_attributes
 
 
