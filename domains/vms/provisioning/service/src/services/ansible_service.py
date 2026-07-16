@@ -348,8 +348,14 @@ class AnsibleService:
         path.write_text(self._build_vm_vars(params), encoding="utf-8")
         return path
 
-    def _build_vm_vars(self, params: AnsibleJobParams) -> str:
-        """Render the YAML string for the extra-vars file."""
+    def _build_builtin_var_lines(self, params: AnsibleJobParams) -> list[str]:
+        """Built-in (non-provider-extra) YAML lines for the given params.
+
+        Shared by ``_build_vm_vars`` (actual rendering) and
+        ``reserved_var_keys`` (synchronous pre-dispatch validation) so the
+        two can never disagree about which fields are built-in — see
+        POOLS-3 design.md Decision 6.
+        """
         lines = [
             f"vm_host: {params.vm_host}",
             f"vm_action: {params.vm_action}",
@@ -418,11 +424,35 @@ class AnsibleService:
         else:
             lines.append("root_ssh_filename: not_provided")
             lines.append("root_ssh_password: not_provided")
+        return lines
+
+    def reserved_var_keys(self, params: AnsibleJobParams) -> frozenset[str]:
+        """Built-in variable keys that would be emitted for these params.
+
+        Ignores ``params.provider_extra_vars`` entirely — this answers
+        "what's reserved", independent of what a caller is proposing to
+        merge in. Callers validate proposed extra-vars against this
+        *before* setting them on the params passed to ``submit()``, so a
+        collision is rejected synchronously rather than only surfacing
+        when the background job worker renders the vars file.
+        """
+        return frozenset(
+            line.split(":", 1)[0].strip()
+            for line in self._build_builtin_var_lines(params)
+        )
+
+    def _build_vm_vars(self, params: AnsibleJobParams) -> str:
+        """Render the YAML string for the extra-vars file."""
+        lines = self._build_builtin_var_lines(params)
 
         if params.provider_extra_vars:
             # Pool-supplied extra vars (POOLS-3 fulfillment provider). Built-in
             # job identity/sizing fields above are authoritative — a colliding
-            # key is a pool-configuration error, not a silent override.
+            # key is a pool-configuration error, not a silent override. This
+            # is a defensive second check: AnsibleFulfillmentProvider is
+            # expected to have already validated via reserved_var_keys()
+            # before submit(), but this path is reachable from any caller of
+            # build_vars_file, not just that provider.
             built_in_keys = {line.split(":", 1)[0].strip() for line in lines}
             colliding = sorted(set(params.provider_extra_vars) & built_in_keys)
             if colliding:

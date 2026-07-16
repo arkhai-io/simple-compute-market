@@ -106,12 +106,20 @@ system keyed by `claim_ref`.
 
 ## Impact
 
-- **Packages:** provider-neutral fulfillment contracts in `kit/resource-pools`;
-  VM provisioning service fulfillment/provider implementation and DI
-  composition.
-- **Database:** none in POOLS-3; the record contract is implemented durably in
-  POOLS-7.
-- **API:** none required by POOLS-3 alone.
+- **Packages:** provider-neutral fulfillment contracts in `kit/resource-pools`
+  (`market_resource_pools.fulfillment`); VM provisioning service
+  fulfillment/provider implementation and DI composition;
+  `kit/site`'s `CapacityLedgerService` gains `assign_settlement_resource`.
+- **Database:** no schema or migration changes (`db/models.py`,
+  `db/migrations.py` untouched). `AnsibleJob.params`'s existing JSON column
+  absorbs the new snapshotted `playbook_path`/`provider_extra_vars` fields on
+  `AnsibleJobParams` without any migration. `assign_settlement_resource` uses
+  existing `SiteAllocation`/`SiteResource` tables; no new tables. The durable
+  create/teardown `SettlementRecord` itself is still implemented in POOLS-7.
+- **API:** no new endpoint required by POOLS-3 alone, but the existing pool
+  create/import API's accepted/returned shape changes — `inventory_group` is
+  no longer required or returned — a compatibility-relevant behavior change
+  for any existing caller currently sending it.
 - **Compatibility:** existing Ansible job and credential behavior remains in
   place; the provider wraps and extends that machinery rather than replacing
   it.

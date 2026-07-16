@@ -19,14 +19,25 @@ See `proposal.md`.
 
 ## Decisions
 
-### 1. `FulfillmentService` owns physical-fulfillment consistency
+### 1. `FulfillmentService` owns physical-fulfillment consistency, not placement
 
 A provisioning-side `FulfillmentService` sits above `ProviderRegistry` and is
 the entry point future storefront-facing code calls. It owns:
 
-- validation that the allocation and selected resource may be fulfilled;
+- validation that the allocation and *already-selected* resource may be
+  fulfilled (including a side-effect-free `validate_create(...)` dry-run
+  path, shared with `create()` itself, so a future API can validate
+  request/allocation/pool/provider/resource-attribute consistency before
+  committing anything);
+- atomically rebinding the allocation's held capacity to the selected
+  resource via `CapacityLedgerService.assign_settlement_resource(...)`
+  before dispatch — this is real, durable, transactional capacity-transfer
+  logic (not the scheduler, and not a stub): it re-checks the destination
+  has capacity, releases the source, and is idempotent on repeat calls
+  with the same resource;
 - the allocation-to-fulfillment identity;
-- equivalent-retry detection and conflicting-request rejection;
+- equivalent-retry detection and conflicting-request rejection, for both
+  `create` and `teardown`;
 - provider resolution and dispatch;
 - normalization of provider operation state; and
 - persistence updates once durable settlement storage is introduced.
@@ -34,24 +45,47 @@ the entry point future storefront-facing code calls. It owns:
 The storefront owns business-workflow progression, but it MUST NOT directly
 write settlement records or decide whether a physical dispatch is a duplicate.
 
-Conceptually:
+**`FulfillmentService` does not call `PhysicalSettlementScheduler` and never
+will.** Placement and execution stay separate services, called in sequence by
+whatever orchestrates the workflow (the storefront, from `pools-7`):
 
 ```text
-storefront fulfillment workflow
+storefront (or other orchestrator) fulfillment workflow
+        |
+        |-- 1. select_resource(...) -> PhysicalSettlementScheduler   (placement)
         |
         v
-provisioning FulfillmentService
-        |-- settlement/fulfillment identity
-        |-- ProviderRegistry
-                |-- AnsibleFulfillmentProvider
-                        |-- AnsibleJobService
+        2. FulfillmentService.create(request, selected_resource)     (execution)
+                |-- capacity_ledger.assign_settlement_resource(...)   (durable rebind)
+                |-- settlement/fulfillment identity (in-memory this round; see Decision 4)
+                |-- ProviderRegistry
+                        |-- AnsibleFulfillmentProvider
+                                |-- AnsibleJobService
 ```
 
-POOLS-3 introduces the service boundary and provider behavior. POOLS-7 wires the
-storefront to it and completes the durable transaction design when settlement
-persistence is added.
+The capacity-ledger rebind is a distinct concern from the in-memory
+create/teardown identity map in Decision 4: the ledger call makes *which
+physical resource the allocation is bound to* durable and safe against a
+storefront-supplied resource that doesn't match what was actually reserved
+(the "misallocated capacity" concern from this session's implementation
+review). It does **not** make the `create`/`teardown` dispatch record
+itself durable — that remains an in-memory `FulfillmentEntry` map, and
+Decision 4's "not durable, not a concurrency guarantee, POOLS-7 replaces
+it" framing still applies to that part.
+
+POOLS-3 introduces the service boundary and provider behavior, tested with a
+test caller that plays the orchestrator role — no storefront or scheduler
+wiring is added this round. POOLS-7 wires the real storefront workflow to
+call the scheduler and then this service in sequence, and completes the
+durable transaction design for the create/teardown identity map.
 
 ### 2. Provider owns operations, not placement
+
+`FulfillmentProvider`, `FulfillmentResult`, `ProviderStatus`,
+`ProviderOperationState`, `ProviderRegistry`, and the error taxonomy live in
+`kit/resource-pools` (`market_resource_pools.fulfillment`) — see "Domain-neutral
+contracts vs. domain-specific payloads" below for why. `AnsibleFulfillmentProvider`
+and the concrete `FulfillmentService` remain in the VM provisioning service.
 
 ```python
 from abc import ABC, abstractmethod
@@ -163,22 +197,41 @@ identify *what* is being fulfilled, not to `PhysicalSettlementRequest.resource_i
 resource identity, and `resource_id` may legitimately be absent even though
 a concrete resource was still selected). For the same `allocation_id`, a
 retry is equivalent if all of the following match the stored fulfillment:
-`agreement_id`, `market`, `terms` (from the request) and the entire selected
-`SettlementResource` (`settlement_resource_id`, `pool_id`, `resource_kind`,
-`provider`, `attributes`). Both `PhysicalSettlementRequest` and
-`SettlementResource` are pydantic models with structural equality, so this
-is plain field comparison (excluding `resource_id`) — no canonical
-serialization or hashing needed for the in-memory POOLS-3 implementation.
+`agreement_id`, `market`, `requirements` (from the request — renamed from
+`terms`; see "Domain-neutral contracts vs. domain-specific payloads" below)
+and the entire selected `SettlementResource` (`settlement_resource_id`,
+`pool_id`, `resource_kind`, `provider`, `attributes`). Both
+`PhysicalSettlementRequest` and `SettlementResource` are pydantic models
+with structural equality, so this is plain field comparison (excluding
+`resource_id`) — no canonical serialization or hashing needed for the
+in-memory POOLS-3 implementation.
 
 - an equivalent retry returns the existing fulfillment result;
 - a request that reuses `allocation_id` with any of those fields differing
   fails with `FulfillmentConflictError` before another provider operation
   is dispatched.
 
-POOLS-3 specifies this behavior at the service boundary. POOLS-7 MUST enforce it
-with durable database uniqueness and transactions when persistence is added.
-Process-local or asynchronous locks are not sufficient for correctness across
-multiple replicas or restarts.
+POOLS-3 specifies this behavior at the service boundary and backs it with a
+simple in-memory dict inside `FulfillmentService` (the `FulfillmentEntry` map
+— see Decision 4a), keyed on `allocation_id` — enough to make this change's
+own spec scenarios (equivalent retry, conflicting reuse) true and testable,
+mirroring the pattern `PhysicalSettlementScheduler` already uses for its own
+in-memory assignment map. **This is not a concurrency guarantee.** It does
+not attempt to close the race between two concurrent callers for the same
+`allocation_id`, and it is explicitly not durable across restarts. POOLS-7
+MUST replace it with durable database uniqueness and transactions, and MUST
+NOT treat this dict (or any process-local/asynchronous lock) as a substitute
+for that — closing the concurrent-request race and surviving restarts are
+POOLS-7 concerns, not solved here.
+
+This is distinct from — and does not substitute for — the capacity-ledger
+rebind in Decision 1: `assign_settlement_resource` durably and atomically
+locks in *which physical resource* an allocation is bound to (closing the
+"misallocated capacity" gap) and is safe under concurrency by construction
+(a session-scoped SQL transaction). It says nothing about whether a second,
+concurrent `create()` call for the same `allocation_id` would race past this
+in-memory equivalence check before either finishes — that race is still
+open and still POOLS-7's job to close.
 
 The executor job may additionally retain a deterministic command identity as a
 last defensive layer around the dispatch/persistence failure window, but that
@@ -233,22 +286,28 @@ which does own that map.
 
 ### 5. `ProviderRegistry` maps provider strings to instances
 
+Lives in `kit/resource-pools` alongside the rest of the domain-neutral
+contract (Decision 2).
+
 ```python
 class ProviderRegistry:
     def __init__(self, providers: dict[str, FulfillmentProvider]) -> None:
-        self._providers = providers
+        self._providers = dict(providers)
 
     def require(self, provider: str) -> FulfillmentProvider:
-        if provider not in self._providers:
-            raise KeyError(f"No provider registered for '{provider}'")
-        return self._providers[provider]
+        try:
+            return self._providers[provider]
+        except KeyError:
+            raise ProviderNotFoundError(
+                f"No FulfillmentProvider registered for provider={provider!r}"
+            ) from None
 ```
 
 The VM provisioning service initially registers only
 `"ansible" -> AnsibleFulfillmentProvider`. New mechanisms extend the registry
 without provider-specific branching in fulfillment or lifecycle code.
 
-### 6. Ansible configuration is pool metadata snapshotted at dispatch
+### 6. Ansible configuration is pool metadata snapshotted at dispatch, validated eagerly
 
 ```python
 @dataclass(frozen=True)
@@ -266,11 +325,50 @@ Snapshotting occurs when fulfillment is dispatched, not when the background
 worker later starts. Editing a pool therefore cannot silently change an
 already-accepted operation or make a retry non-deterministic.
 
+Before dispatch, `_validate_resource` rejects: a pool that no longer exists,
+a disabled pool (`ResourcePool.enabled`), and a resource whose `.provider`
+doesn't match its pool's current `.provider`. `_vm_host` requires a
+non-empty `resource.attributes["vm_host"]` and raises
+`ProviderConfigInvalidError` rather than guessing — an earlier draft of this
+provider fell back to `resource.settlement_resource_id` when `vm_host` was
+absent from `attributes`, which was flagged during implementation review as
+an unverified assumption about resource-registration shape; failing loudly
+is the correct replacement regardless of how that assumption resolves.
+`validate_create` additionally parses `request.requirements` into a typed
+`VmFulfillmentRequirements` (`models/fulfillment_model.py`, VM-domain-local
+— see "Domain-neutral contracts vs. domain-specific payloads" below),
+rejecting malformed requests before any dispatch.
+
+`_validate_extra_vars` rejects pool `extra_vars` that collide with a
+reserved set of built-in job-identity keys. **Resolved during this session**
+(originally shipped as a hardcoded, incomplete list — confirmed during
+implementation review to miss real built-in fields such as `executor_kind`,
+letting a collision on those pass this check and only surface later, inside
+the background job worker, when `_build_vm_vars` ran its own complete but
+asynchronous check). Fixed by extracting `AnsibleService`'s built-in-field
+construction into a shared `_build_builtin_var_lines` helper, used both by
+`_build_vm_vars` (rendering) and a new `reserved_var_keys(params)` method
+(synchronous validation) — the two can no longer disagree about what's
+reserved, because they're the same code. `AnsibleFulfillmentProvider` calls
+this (via `AnsibleJobService.reserved_var_keys`, preserving the existing
+"no direct `AnsibleService` dependency" boundary) with the fully-built
+`AnsibleJobParams` *before* attaching `provider_extra_vars`, so the reserved
+set reflects exactly what this specific create/teardown would emit
+(conditional fields like `image_setup_type`'s golden-image branch included),
+not a static approximation.
+
 `inventory_group` is removed from `AnsiblePoolConfig`. The current execution
 path does not use it operationally: scheduling already selects one concrete
 `SettlementResource`, and Ansible execution is limited to that selected host.
 Allowing an inventory group to influence placement would create a second,
 conflicting scheduler.
+
+Provider metadata (`AnsibleFulfillmentMetadata`) retains `vm_host`,
+`vm_target`, `create_job_id`, `teardown_job_id`, and `current_job_id` from
+create through teardown, rather than re-deriving `vm_host` from the resource
+at teardown time. This closes a real bug found during implementation review:
+an earlier draft never set `vm_target` on the teardown job's params at all,
+so `vm_remove` on a shared host had no way to know which VM to remove.
 
 The `ProgrammableMockAnsibleService` seam remains inside the Ansible provider
 and existing test-controller gating remains unchanged.
@@ -350,16 +448,46 @@ publication operation that could raise it.
   restart behavior against the real call path.
 - Database-backed idempotency and the final persistence schema are deliberately
   deferred together to POOLS-7; process-local locking MUST NOT be introduced as
-  a substitute in the interim.
+  a substitute in the interim. The capacity-ledger rebind (Decision 1) is a
+  partial, real exception to this — it makes resource *binding* durable now —
+  but the create/teardown dispatch identity map is not, and is not intended
+  to be until POOLS-7.
+- `FulfillmentService.create()`'s `capacity_ledger` integration has no test
+  coverage at the `FulfillmentService` level (only in isolation, directly
+  against `CapacityLedgerService`) as of this document. `assign_settlement_resource`
+  itself is also only tested for the happy path and idempotent re-assignment —
+  not insufficient-capacity rejection, wrong-allocation-state rejection, a
+  missing allocation, or that the source resource's capacity is actually freed.
 
-## Fulfillment request and capacity boundaries
+## Domain-neutral contracts vs. domain-specific payloads
 
-`PhysicalSettlementRequest.requirements` contains concrete technical requirements, not negotiated deal terms. The storefront owns translation from negotiated commercial/provision terms into both capacity-reservation demand and fulfillment requirements. Provisioning validates the independently supplied requirements against the allocation, but neither derives fulfillment inputs from the capacity reservation nor reads workload sizing from pool provider configuration.
+This split (and the `terms` → `requirements` rename) came out of team
+design review, not solely this document. Two positions were in tension:
+`PhysicalSettlementRequest` living in the VM domain could be VM-specific and
+strongly typed (better tests, less accidental generality); but it was
+already clear other domains (bare-metal, eventually others) would need the
+same request/scheduling/fulfillment shape soon, arguing for a generic
+contract now rather than a painful generalization later.
 
-Domain-neutral fulfillment contracts and provider registration live in `kit/resource-pools`; the concrete in-memory `FulfillmentService` remains in the VM provisioning service. VM requirement parsing and Ansible translation remain VM-domain concerns.
+Resolution: `PhysicalSettlementRequest.requirements` stays a generic
+`dict[str, Any]` — the storefront translates negotiated commercial/deal
+terms into both capacity-reservation demand and fulfillment requirements;
+provisioning validates the supplied requirements against the allocation, but
+neither derives fulfillment inputs from the Capacity Reservation nor reads
+workload sizing from pool provider configuration. Domain-specific typing
+happens one layer down: `VmFulfillmentRequirements`
+(`models/fulfillment_model.py`) is VM-domain-local, not part of the shared
+contract, and is where the earlier VM-specific-typed-command proposal's
+intent (deterministic `vm_target`, explicit image/CPU/memory/disk/SSH-key
+fields) actually lives.
 
-A Capacity Settlement Assignment atomically rebinds the allocation's existing held units to the selected physical resource. Rebinding releases the source resource and charges the destination in one ledger transaction; fulfillment does not subtract capacity a second time. Repeating the same assignment is idempotent.
-
-VM fulfillment requests supply a deterministic `vm_target`. Selected VM resources must carry a non-empty `vm_host` attribute; settlement resource identifiers are not treated as implicit Ansible inventory hostnames. Provider metadata retains create/teardown job identity together with `vm_host` and `vm_target`, allowing exact teardown.
-
-Create validation is side-effect free and is shared with dry-run validation. It checks request shape, pool lifecycle/provider consistency, required resource attributes, provider registration, and provider configuration before dispatch. Real create repeats validation because dry-run is advisory.
+This also settles where `FulfillmentProvider`/`ProviderRegistry`
+(Decision 2/5) belong: once the request/resource types those classes
+operate on are domain-neutral (`PhysicalSettlementRequest`/
+`SettlementResource` already live in `compute_provisioning`, per `pools-2`),
+keeping the classes themselves VM-service-local was an awkward split either
+way. Moving them to `kit/resource-pools` is a deliberate override of
+`pools-5-shared-provisioning-package`'s stated activation condition ("a
+second domain needs them, or `market-platform-compute-30-extract-service`
+lands first") — neither has happened yet. See `pools-5`'s proposal for the
+updated rationale.

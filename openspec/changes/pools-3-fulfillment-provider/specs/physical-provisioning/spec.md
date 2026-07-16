@@ -60,7 +60,7 @@ before returning across the provider boundary.
 
 Fulfillment MUST be idempotent on `allocation_id` at the
 `FulfillmentService` boundary. Equivalence for a retried `create` is scoped
-to `agreement_id`, `market`, `terms` (from the request) and the entire
+to `agreement_id`, `market`, `requirements` (from the request) and the entire
 selected `SettlementResource` — not the request's optional `resource_id`,
 which is a selection constraint rather than part of fulfillment identity.
 Once `create` has registered a fulfillment for an `allocation_id`,
@@ -70,12 +70,12 @@ metadata for that allocation from its own stored state for `teardown` and
 
 #### Scenario: Equivalent create request is retried
 
-- **WHEN** create is requested again for the same allocation with matching agreement, market, terms, and selected resource
+- **WHEN** create is requested again for the same allocation with matching agreement, market, requirements, and selected resource
 - **THEN** the existing fulfillment is returned and no second provider operation is dispatched
 
 #### Scenario: Allocation is reused inconsistently
 
-- **WHEN** create is requested for an existing allocation where agreement, market, terms, or the selected resource differs from the stored fulfillment
+- **WHEN** create is requested for an existing allocation where agreement, market, requirements, or the selected resource differs from the stored fulfillment
 - **THEN** the request fails with a fulfillment-conflict error before another provider operation is dispatched
 
 #### Scenario: Teardown request is retried

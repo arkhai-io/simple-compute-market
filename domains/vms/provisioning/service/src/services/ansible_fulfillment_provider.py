@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -105,12 +106,24 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             )
         return self._pool_config(resource.pool_id)
 
-    @staticmethod
-    def _validate_extra_vars(extra_vars: dict[str, Any]) -> None:
-        reserved = {
-            "vm_host", "vm_action", "vm_target", "vm_ram", "vm_vcpus",
-            "vm_disk_size", "vm_os_variant", "ssh_pubkey", "escrow_uid",
-        }
+    def _validate_extra_vars(self, base_params: AnsibleJobParams, extra_vars: dict[str, Any]) -> None:
+        """Reject extra_vars colliding with a built-in field for these params.
+
+        The reserved set is derived dynamically via
+        AnsibleJobService.reserved_var_keys(base_params) — the same logic
+        AnsibleService uses when actually rendering the vars file — rather
+        than a separately hand-maintained list. This closes a gap found
+        during implementation review: a hardcoded list here previously
+        missed several real built-in fields (e.g. executor_kind), so a
+        colliding extra_var could pass this check and only get caught
+        later, asynchronously, when the background job worker rendered the
+        vars file. base_params must not have provider_extra_vars set yet —
+        reserved_var_keys ignores that field regardless, but passing an
+        already-merged params object here would be a caller error.
+        """
+        if not extra_vars:
+            return
+        reserved = self._job_service.reserved_var_keys(base_params)
         collisions = sorted(reserved.intersection(extra_vars))
         if collisions:
             raise ProviderConfigInvalidError(
@@ -128,17 +141,19 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
 
     def _build_create_params(self, request: PhysicalSettlementRequest, resource: SettlementResource) -> tuple[AnsibleJobParams, VmFulfillmentRequirements]:
         pool_config = self._validate_resource(resource)
-        self._validate_extra_vars(pool_config.extra_vars)
         req = self.validate_create(request, resource)
-        return AnsibleJobParams(
+        base_params = AnsibleJobParams(
             vm_host=self._vm_host(resource), vm_action="create", vm_target=req.vm_target,
             image_setup_type=req.image_setup_type, vm_ram=req.vm_ram, vm_vcpus=req.vm_vcpus,
             vm_disk_size=req.vm_disk_size, vm_os_variant=req.vm_os_variant, ssh_pubkey=req.ssh_pubkey,
             gpu_provisioned=req.gpu_provisioned, vm_gpu_count=req.vm_gpu_count,
             vm_gpu_device=req.vm_gpu_device, vm_gpu_devices=req.vm_gpu_devices,
             vm_gpu_partition_size=req.vm_gpu_partition_size, escrow_uid=request.allocation_id,
-            playbook_path=pool_config.playbook_path, provider_extra_vars=pool_config.extra_vars,
-        ), req
+            playbook_path=pool_config.playbook_path,
+        )
+        self._validate_extra_vars(base_params, pool_config.extra_vars)
+        params = dataclasses.replace(base_params, provider_extra_vars=pool_config.extra_vars)
+        return params, req
 
     async def create(
         self, request: PhysicalSettlementRequest, resource: SettlementResource
@@ -162,12 +177,12 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         try:
             metadata = AnsibleFulfillmentMetadata.model_validate(provider_metadata)
             pool_config = self._validate_resource(resource)
-            self._validate_extra_vars(pool_config.extra_vars)
-            params = AnsibleJobParams(
+            base_params = AnsibleJobParams(
                 vm_host=metadata.vm_host, vm_action="vm_remove", vm_target=metadata.vm_target,
                 escrow_uid=allocation_id, playbook_path=pool_config.playbook_path,
-                provider_extra_vars=pool_config.extra_vars,
             )
+            self._validate_extra_vars(base_params, pool_config.extra_vars)
+            params = dataclasses.replace(base_params, provider_extra_vars=pool_config.extra_vars)
             response = await self._job_service.submit(params, self._job_queue_provider())
         except ProviderConfigInvalidError:
             raise

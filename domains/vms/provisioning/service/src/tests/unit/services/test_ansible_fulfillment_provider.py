@@ -8,6 +8,7 @@ in integration tests, not here).
 
 from __future__ import annotations
 
+import dataclasses
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -57,6 +58,11 @@ def _pool(provider_config: dict | None = None):
 def job_service():
     svc = MagicMock()
     svc.submit = AsyncMock(return_value=SimpleNamespace(job_id="job-1", status="queued"))
+    # Real reserved_var_keys logic (not a bare MagicMock — a MagicMock's
+    # .intersection(...) result is truthy, which would make every
+    # _validate_extra_vars call raise). Backed by an actual AnsibleService
+    # so tests exercise the same dynamic derivation production code uses.
+    svc.reserved_var_keys = AnsibleService(settings=MagicMock()).reserved_var_keys
     return svc
 
 
@@ -167,29 +173,72 @@ class TestGetStatus:
 
 
 class TestExtraVarsCollision:
-    """Collision detection lives in AnsibleService._build_vm_vars, which
-    only runs when the background job worker actually renders the vars
-    file (see job_service.py's _process_job) — not synchronously from
-    create(), consistent with create() being dispatch-only. A collision
-    therefore surfaces later as a failed job, observable via get_status,
-    not as an exception from create(). Exercised directly against the
-    mechanism here; full end-to-end surfacing is job_service's own concern.
+    """Collision detection is now synchronous, before dispatch — see
+    POOLS-3 design.md Decision 6. AnsibleFulfillmentProvider derives the
+    reserved-key set dynamically via AnsibleJobService.reserved_var_keys
+    (which delegates to AnsibleService, the same logic _build_vm_vars uses
+    to render the file), instead of a separately hand-maintained list.
+    This closes a gap found during implementation review: an earlier
+    hardcoded reserved-set here missed several real built-in fields —
+    concretely, `executor_kind` — so a colliding extra_var could pass this
+    check and only be caught later, asynchronously, when the background
+    job worker rendered the vars file.
     """
 
-    def test_colliding_extra_var_raises_value_error(self):
-        ansible_service = AnsibleService(settings=MagicMock())
-        params = AnsibleJobParams(
-            vm_host="kvm1",
-            vm_action="create",
-            provider_extra_vars={"vm_host": "should-not-override"},
+    async def test_create_rejects_collision_on_a_named_builtin(
+        self, provider, resource_pool_service
+    ):
+        resource_pool_service.get_pool.return_value = _pool(
+            {"playbook_path": "playbooks/vm-operations.yaml", "extra_vars": {"vm_host": "hijacked"}}
         )
-        with pytest.raises(ValueError, match="vm_host"):
-            ansible_service._build_vm_vars(params)
+        with pytest.raises(ProviderConfigInvalidError, match="vm_host"):
+            await provider.create(_request(), _resource())
 
-    def test_non_colliding_extra_var_is_included(self):
-        ansible_service = AnsibleService(settings=MagicMock())
-        params = AnsibleJobParams(
-            vm_host="kvm1", vm_action="create", provider_extra_vars={"region": "eu"}
+    async def test_create_rejects_collision_on_a_field_the_old_hardcoded_list_missed(
+        self, provider, resource_pool_service
+    ):
+        # executor_kind is a real built-in field (see AnsibleService._build_builtin_var_lines)
+        # that was NOT in the reserved set before this fix — this is the
+        # concrete gap demonstrated during implementation review.
+        resource_pool_service.get_pool.return_value = _pool(
+            {"playbook_path": "playbooks/vm-operations.yaml", "extra_vars": {"executor_kind": "hijacked"}}
         )
-        rendered = ansible_service._build_vm_vars(params)
-        assert "region:" in rendered
+        with pytest.raises(ProviderConfigInvalidError, match="executor_kind"):
+            await provider.create(_request(), _resource())
+
+    async def test_teardown_rejects_collision_too(self, provider, resource_pool_service):
+        resource_pool_service.get_pool.return_value = _pool(
+            {"playbook_path": "playbooks/vm-operations.yaml", "extra_vars": {"vm_target": "hijacked"}}
+        )
+        with pytest.raises(ProviderConfigInvalidError, match="vm_target"):
+            await provider.teardown(
+                "alloc-1",
+                _resource(),
+                {"create_job_id": "create-job", "current_job_id": "create-job",
+                 "vm_host": "kvm1", "vm_target": "vm-alloc-1", "operation": "create"},
+            )
+
+    async def test_non_colliding_extra_var_still_reaches_dispatch(
+        self, provider, job_service, resource_pool_service
+    ):
+        resource_pool_service.get_pool.return_value = _pool(
+            {"playbook_path": "playbooks/vm-operations.yaml", "extra_vars": {"region": "eu"}}
+        )
+        await provider.create(_request(), _resource())
+        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        assert submitted_params.provider_extra_vars == {"region": "eu"}
+
+    def test_reserved_var_keys_matches_what_build_vm_vars_actually_emits(self):
+        """AnsibleService.reserved_var_keys and _build_vm_vars's own
+        internal collision check must never disagree — both now derive
+        from the same _build_builtin_var_lines helper."""
+        ansible_service = AnsibleService(settings=MagicMock())
+        params = AnsibleJobParams(vm_host="kvm1", vm_action="create")
+        reserved = ansible_service.reserved_var_keys(params)
+        assert "executor_kind" in reserved
+        assert "vm_host" in reserved
+
+        with pytest.raises(ValueError, match="executor_kind"):
+            ansible_service._build_vm_vars(
+                dataclasses.replace(params, provider_extra_vars={"executor_kind": "x"})
+            )

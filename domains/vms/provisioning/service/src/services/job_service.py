@@ -250,6 +250,16 @@ class AnsibleJobService:
                 raise LookupError(f"Job {job_id} not found")
             return self._to_status_response(job)
 
+    def reserved_var_keys(self, params: AnsibleJobParams) -> frozenset[str]:
+        """Built-in variable keys that would be emitted for these params.
+
+        Thin passthrough to AnsibleService — see its docstring. Lets
+        callers (AnsibleFulfillmentProvider) validate proposed pool
+        extra-vars synchronously, before submit(), without depending on
+        AnsibleService directly.
+        """
+        return self._ansible.reserved_var_keys(params)
+
     def get_contract_job_record(self, job_id: str) -> dict:
         """Return persisted contract correlation and executor-owned payloads."""
         with self._session_factory() as db:

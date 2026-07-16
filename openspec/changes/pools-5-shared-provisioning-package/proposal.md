@@ -51,7 +51,7 @@ verbatim:
 - Creating `core/provisioning`/`core_provisioning` under the original name.
 - Extracting anything before `pools-2`/`pools-3` exist to extract.
 
-## Activation Condition
+## Activation Condition — partially overridden during `pools-3` implementation
 
 This stays taskless until: (a) `pools-2` and `pools-3` are implemented, and
 (b) either a second domain needs `FulfillmentProvider`/`ProviderRegistry`,
@@ -59,6 +59,22 @@ or `market-platform-compute-30-extract-service` completes its cutover and
 this change's residual scope needs reconciling against the resulting
 package shape. Whichever comes first should drive a fresh design-review
 pass, not a straight implementation of this document.
+
+**Update**: during `pools-3` implementation, team design review resolved a
+separate but related tension — whether `PhysicalSettlementRequest` should be
+VM-specific/strongly-typed or a generic cross-domain contract (see
+`pools-3`'s `design.md`, "Domain-neutral contracts vs. domain-specific
+payloads"). The resolution (generic shared request/resource types, typed
+domain-specific payload one layer down) made keeping
+`FulfillmentProvider`/`ProviderRegistry` VM-service-local — while the
+request/resource types they operate on already lived in the domain-neutral
+`compute_provisioning` package — an awkward split. Those two classes (plus
+the shared error taxonomy) were moved to `kit/resource-pools` as part of
+`pools-3`, ahead of either condition (a)/(b) above being met. The concrete
+`FulfillmentService` (VM-domain orchestration) and `AnsibleFulfillmentProvider`
+stayed VM-service-local — only the domain-neutral contract moved. This
+change's remaining residual scope (if any, once (a)/(b) are met) is
+correspondingly smaller than originally written here.
 
 Related: `pools-7-storefront-fulfillment-cutover` (the storefront's
 eventual move to the scheduler/provider path) is itself gated in part on
