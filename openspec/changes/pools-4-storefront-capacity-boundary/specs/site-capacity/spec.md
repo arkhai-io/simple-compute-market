@@ -4,11 +4,12 @@
 A site authority MUST own physical resource capacity and allocations; a
 storefront MUST reach capacity only through the CapacityClient boundary,
 MUST treat its own view as a projection, and MUST NOT require or select a
-`vm_host` when building an ordinary reservation claim. A compute listing MUST normalize and validate its capacity identities at model
-construction and MUST carry at least one valid `pool_id` or `resource_id`. A
-valid capacity identity starts with an alphanumeric character, contains only
-letters, digits, `.`, `_`, `:`, or `-`, and is at most 128 characters. A listing whose offer
-carries `resource_id` (whether or not `pool_id` is also present) is a
+`vm_host` when building an ordinary reservation claim. A compute listing
+MUST normalize and validate its capacity identities at model construction
+and MUST carry at least one valid `pool_id` or `resource_id`. A valid
+capacity identity starts with an alphanumeric character, contains only
+letters, digits, `.`, `_`, `:`, or `-`, and is at most 128 characters. A
+listing whose offer carries `resource_id` (whether or not `pool_id` is also present) is a
 specific-resource listing, and its reservation claim carries the explicit
 `resource_id` with `pool_id` excluded; a listing whose offer carries
 `pool_id` with no `resource_id` is pool-scoped. There is no separate

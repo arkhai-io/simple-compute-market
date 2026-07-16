@@ -39,7 +39,7 @@
 
 - [x] `domains/vms/storefront/src/market_storefront/utils/migrations.py`:
       keep the fresh-database schema constructor on the new table name and add a
-      new migration entry for already-recorded databases that that runs
+      new migration entry for already-recorded databases that runs
       `ALTER TABLE compute_inventory_pools RENAME TO compute_capacity_pools`,
       is a no-op when only the new table or neither table exists, renames when
       only the old table exists, and fails when both table names exist. Leave
@@ -118,19 +118,22 @@
       `pool_id` and `resource_id` — now fails with 400 instead of silently
       publishing (`test_rejects_offer_with_neither_pool_id_nor_resource_id`).
 
-## Flagged for a decision — not implemented
+## Resolved follow-up
 
-- **`fulfill_vm_obligation`'s exception handling
-  (`vm_fulfillment_service.py`)**: `build_vm_fulfillment_plan(...)` — which
-  now can raise via the claim-build backstop guard — is called *before*
-  that function's `try:` block starts, so a legacy listing that predates
-  this change's creation-time guard (neither `pool_id` nor `resource_id`)
-  would raise past the function's existing graceful-failure handling
-  (`except Exception as error: ... return {"status": "error", ...}`)
-  instead of going through it, unlike every other reservation failure in
-  that function. Moving the plan-build call inside the `try:` block would
-  fix this but touches a sensitive settlement function's control flow in a
-  way this change didn't plan for and design review didn't cover — left
-  as-is pending a decision on whether that restructuring belongs in this
-  change or a follow-up.
+- [x] **`fulfill_vm_obligation`'s exception handling
+  (`vm_fulfillment_service.py`)**: `build_vm_fulfillment_plan(...)` is now
+  called *inside* that function's `try:` block instead of before it, so a
+  plan-building failure (missing/malformed order, or the claim-build
+  backstop's missing-identity guard) now goes through the same
+  graceful-failure path as every other reservation failure —
+  `apply_failure_policy`, the `"provision"/"failed"` stage event, and a
+  `{"status": "error", ...}` response — instead of raising past it.
+  `order_id` is pre-initialized alongside the other reserved-state
+  variables so the `except` block's references to it stay safe when the
+  plan itself never builds. Regression test:
+  `tests/unit/test_fulfill_vm_obligation_error_handling.py` — verified it
+  fails against the pre-fix code (a missing order silently reserved
+  arbitrary mocked capacity and returned `"fulfilled"`, which is the exact
+  unscoped-claim risk `design.md`'s Decision 4 describes) and passes
+  against the fix.
 
