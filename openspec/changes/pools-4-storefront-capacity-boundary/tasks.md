@@ -11,6 +11,12 @@
       in `compute_capacity_claim_from_order`, raise if the built claim has
       neither `pool_id` nor `resource_id` after extraction. Backstop for any
       listing that reaches claim-building despite the guard above.
+- [ ] Same function: when both `pool_id` and `resource_id` are present,
+      drop `pool_id` from the built claim so the listing is matched as
+      specific-resource (`resource_id` wins) rather than requiring both to
+      match. See `design.md` Decision 2 "Both present."
+- [ ] Test: a claim built from an offer with both `pool_id` and
+      `resource_id` set contains `resource_id` and not `pool_id`.
 - [ ] `domains/vms/storefront/tests/integration/test_listings_api.py`
       (`TestCreateListing`): add a case asserting `POST /listings/create` is
       rejected when the offer has neither `pool_id` nor `resource_id`, and a

@@ -52,8 +52,11 @@ with no `pool_id` is a legitimate, intentional specific-resource listing,
 not an error to correct by backfilling a default. `pool_id` is never
 forced onto a listing that didn't have one.
 
-This change adds two guards, not a change to which keys
-`compute_capacity_claim_from_order` pulls into a claim:
+This change adds two validation guards plus one priority rule in
+`compute_capacity_claim_from_order` — it does not change which keys are
+*eligible* to appear in a claim (`_REQUIRED_COMPUTE_KEYS` is unchanged),
+only whether the listing is well-formed and, when both `pool_id` and
+`resource_id` are present, which one wins:
 
 - **At listing creation** (`ListingService._parse_offer_and_escrows` or
   equivalent): reject a compute offer that has neither `pool_id` nor
@@ -66,6 +69,17 @@ This change adds two guards, not a change to which keys
   reaches this point despite the first guard (e.g. a row written by a
   future or as-yet-unaudited path), so a missing identity fails loudly at
   reservation time instead of silently matching on shape attributes alone.
+
+**Both present (design review, 2026-07-16):** when a listing's offer
+carries *both* `pool_id` and `resource_id`, `compute_capacity_claim_from_order`
+treats it as an intentionally specific-resource listing: `resource_id` is
+kept and `pool_id` is dropped from the built claim. Requiring both to match
+would be a stricter, unintended constraint (only satisfiable by whichever
+single resource happens to carry that exact `pool_id` *and* that exact
+`resource_id`) rather than the two independent claim shapes this change
+means to support; `resource_id` presence is the signal that a listing wants
+resource-level pinning regardless of what pool it also happens to belong
+to.
 
 ### 3. Rename is schema + call sites, not a behavior change
 
