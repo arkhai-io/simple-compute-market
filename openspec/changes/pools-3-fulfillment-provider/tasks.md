@@ -1,146 +1,183 @@
 # POOLS-3 tasks
 
-Status: implemented this session. 303/303 unit tests and 138/138
-integration tests pass (full existing suite + 27 new tests), verified in a
-clean venv against this repo's actual dependency set.
-
 ## Provider contract
 
-- [x] Add `services/fulfillment_provider.py`: `FulfillmentProvider` (ABC),
-      `FulfillmentResult`, `ProviderStatus`, `ProviderOperationState`.
-      `create`/`teardown` are dispatch-only; `resource`/`provider_metadata`
-      stay explicit parameters (this layer has no identity map — see
-      Decision 4a for how `FulfillmentService` differs).
-- [x] Define this change's own error taxonomy locally (not in
-      `compute_provisioning`): `ProviderNotFoundError`,
+- [x] **Superseded by the implementation-review correction:** add the provider-neutral contract in `kit/resource-pools` instead of `services/fulfillment_provider.py`: `FulfillmentProvider` (ABC),
+      `FulfillmentResult` (frozen dataclass, `provider_metadata` only — no
+      `credentials` field), `ProviderStatus` (frozen dataclass wrapping
+      `ProviderOperationState`), and `ProviderOperationState` (str enum:
+      `pending` / `succeeded` / `failed` / `unknown`). `create` and
+      `teardown` are both abstract, async, and dispatch-only (return
+      `FulfillmentResult` immediately after the underlying work is
+      accepted, not after it completes); `get_status` is abstract and
+      returns `ProviderStatus`.
+- [x] **Superseded by the implementation-review correction:** define the error taxonomy in the shared `kit/resource-pools` contract rather than locally in the VM
+      provisioning service (not in `compute_provisioning`): `ProviderNotFoundError`,
       `ProviderUnavailableError`, `ProviderConfigInvalidError`,
       `FulfillmentConflictError`, `FulfillmentCreateFailedError`,
       `FulfillmentStatusFailedError`, `FulfillmentTeardownFailedError`.
-      Every one has a concrete trigger, wired below.
-      `ProviderUnavailableError` is defined but has no trigger yet in this
-      change — nothing in the Ansible provider currently distinguishes
-      "unavailable" from "config invalid" or "create failed". Left defined
-      for the contract's completeness (a future provider may need it);
-      flagged here rather than silently unused.
+      Note: `pools-2` put its equivalent taxonomy in
+      `compute_provisioning/physical_settlement.py` since
+      `PhysicalSettlementRequest`/`SettlementResource` already live there.
+      This change's new errors are kept VM-service-local instead, to honor
+      `proposal.md`'s "no change to `provisioning/compute` this round" —
+      revisit if/when `pools-5` extracts these contracts to a shared
+      package, at which point reconciling with `pools-2`'s precedent makes
+      sense.
 
 ## Ansible provider
 
-- [x] Extend `models/jobs_model.py::AnsibleJobParams` with
-      `playbook_path: str | None = None` and
-      `provider_extra_vars: dict[str, Any] = field(default_factory=dict)`.
-      No migration — `AnsibleJob.params` is already JSON.
-- [x] `AnsibleJobService._build_params()` restores both fields from the
-      persisted dict.
-- [x] `AnsibleJobService._playbook_path_for_params()` prefers
-      `params.playbook_path` when present, falling back to the existing
-      executor-kind-based selection.
-- [x] `AnsibleService._build_vm_vars()` merges `provider_extra_vars` into
-      the rendered YAML. Built-in fields are authoritative — a colliding
-      key raises `ValueError`, derived dynamically from the keys already
-      emitted (not a hand-maintained list, so it can't silently drift out
-      of sync with the fields above it).
-      **Correction from the original task description**: this collision
-      check does NOT run synchronously inside `AnsibleFulfillmentProvider.
-      create()`. `build_vars_file`/`_build_vm_vars` only runs later, inside
-      `AnsibleJobService._process_job` (the background job worker), not
-      inside `submit()`. So a collision surfaces as a *failed job*,
-      discoverable via `get_status()` returning `state=failed`, not as an
-      exception raised synchronously from `create()`. This is actually
-      consistent with the dispatch-only design (Decision 3) — validation
-      that can only happen at execution time surfaces as an execution
-      failure, same as any other Ansible playbook failure would. Verified
-      directly against `_build_vm_vars` in
-      `test_ansible_fulfillment_provider.py::TestExtraVarsCollision`
-      rather than asserting a synchronous exception from `create()`.
-- [x] Add `services/ansible_fulfillment_provider.py`:
-      `AnsibleFulfillmentProvider(FulfillmentProvider)`. Depends on
-      `job_service`, `resource_pool_service`, `job_queue_provider` (no
-      direct `AnsibleService` dependency).
-- [x] Provider-local frozen `AnsiblePoolConfig` dataclass (`playbook_path`,
-      `extra_vars` — no `inventory_group`).
-- [x] `create()`: resolves pool config eagerly (missing pool or missing
-      `playbook_path` raises `ProviderConfigInvalidError` synchronously,
-      before dispatch — this part *is* checkable pre-flight, unlike the
-      extra-vars collision above), submits via `job_service.submit()`,
-      wraps unexpected submission failures as `FulfillmentCreateFailedError`.
-- [x] `teardown()`: same shape, `vm_action="vm_remove"`, wraps failures as
-      `FulfillmentTeardownFailedError`.
-- [x] `get_status()`: `LookupError` from `job_service.get_job()` → `unknown`
-      (documented 404 signal); any other exception →
-      `FulfillmentStatusFailedError`; known job states mapped per the
-      table in design.md Decision 3 (`queued`/`running` → `pending`,
-      `succeeded` → `succeeded`, `failed`/`cancelled` → `failed`).
-- [x] Confirmed `ProgrammableMockAnsibleService` needs no changes — its
-      `build_vars_file` is a stub that never calls `_build_vm_vars`.
-
-## Pool config public-contract change (`inventory_group`)
-
-- [x] Removed from `AnsiblePoolConfigHandler._FIELDS` and required-field
-      validation.
-- [x] `read_config` no longer returns it.
-- [x] `replace_config` writes a fixed internal compatibility constant
-      (`_UNUSED_INVENTORY_GROUP_COMPAT_VALUE`) into the still-`NOT NULL`
-      column instead of a user-supplied value — no migration.
-- [x] Updated `tests/integration/test_pools_api.py` (fixture + YAML import
-      test + assertion) to match the new contract.
-- [x] `tests/unit/test_database.py` needed no change — it exercises
-      `db/migrations.py`'s own `default_inventory_group` default-writing
-      directly, bypassing the handler entirely; untouched, as planned.
-- [x] `db/models.py` and `db/migrations.py` untouched — no schema change.
+- [x] Add `services/ansible_fulfillment_provider.py`: `AnsibleFulfillmentProvider(FulfillmentProvider)`
+      wrapping the existing `AnsibleJobService`/`AnsibleService`. Define the
+      provider-local frozen `AnsiblePoolConfig` dataclass (`playbook_path`,
+      `extra_vars` — no `inventory_group`; see design.md Decision 6).
+- [x] `create()`: resolve `resource_pool_service.get_pool(resource.pool_id).provider_config`,
+      validate/translate it into Ansible job variables, snapshot those
+      resolved inputs into the submitted job's stored parameters (not just
+      a `pool_id` reference — see design.md's snapshotting requirement),
+      submit via `AnsibleJobService.submit()`, and return
+      `FulfillmentResult(provider_metadata={"job_id": ..., "operation": "create"})`.
+- [x] `teardown()`: same dispatch-only shape as `create()`, targeting
+      `vm_action="vm_remove"` (or the resource's equivalent), returning
+      `FulfillmentResult(provider_metadata={"job_id": ..., "operation": "teardown"})`.
+- [x] `get_status()`: look up the job via `provider_metadata["job_id"]`,
+      map `AnsibleJobService`'s job status to `ProviderOperationState`
+      per design.md's table (`queued/running/retrying` → `pending`,
+      `succeeded` → `succeeded`, `failed/cancelled` → `failed`,
+      missing/unreadable → `unknown`).
+- [x] Confirm `ProgrammableMockAnsibleService` (selected via the `mockMode`
+      profile flag in `_make_ansible_service`) requires no changes — the
+      provider sits above `AnsibleJobService`/`AnsibleService` and the mock
+      seam is unaffected.
+- [x] **Superseded in part by synchronous validation requirements:** no database or migration changes were needed; `AnsiblePoolConfigHandler` may share the extracted provider-config validator. Original instruction: do not touch `db/models.py` or
+      `db/migrations.py` — the DB-facing `inventory_group` field stays
+      required and populated exactly as today; only the provider's own
+      typed config stops reading it. No DB/migration work this round.
 
 ## Registry
 
-- [x] `services/provider_registry.py`: `ProviderRegistry.require()`.
+- [x] **Superseded by the implementation-review correction:** add the shared registry in `kit/resource-pools` instead of `services/provider_registry.py`: `ProviderRegistry` with
+      `require(provider: str) -> FulfillmentProvider`, raising
+      `ProviderNotFoundError` for an unregistered provider string.
 
 ## Fulfillment service
 
-- [x] `services/fulfillment_service.py`: `FulfillmentService`, no
-      `PhysicalSettlementScheduler` dependency. `create` takes a
-      `SettlementResource`; `teardown`/`get_status` take only
-      `allocation_id` (Decision 4a).
-- [x] `FulfillmentEntry` frozen dataclass as the in-memory store's value
-      type.
-- [x] `create()`: equivalence check scoped to `agreement_id`/`market`/
-      `terms` (request) plus the full stored `SettlementResource` —
-      explicitly excludes `request.resource_id`. Mismatch raises
-      `FulfillmentConflictError` before any provider call.
-- [x] `teardown()`: idempotent via `entry.teardown_result`.
-- [x] `get_status(allocation_id, operation="create"|"teardown")`: selects
-      the right stored `FulfillmentResult`'s `provider_metadata`.
-- [x] In-memory `dict[str, FulfillmentEntry]`, documented as non-durable
-      and not a concurrency guarantee (pools-7 replaces it).
+- [x] Add `services/fulfillment_service.py`: `FulfillmentService`, taking
+      `provider_registry` as a dependency. It does **not** depend on or
+      call `PhysicalSettlementScheduler` — `create`/`teardown` both take an
+      already-selected `SettlementResource` as an input parameter (see
+      design.md Decision 1).
+- [x] `create(request: PhysicalSettlementRequest, resource: SettlementResource) -> FulfillmentResult`:
+      validate the request against the supplied resource, check the
+      in-memory idempotency store (below) for an existing fulfillment
+      keyed on `allocation_id` — equivalent request (same agreement,
+      resource, provider, fulfillment identity) returns the existing
+      result; conflicting reuse raises `FulfillmentConflictError` before
+      any provider call; otherwise resolve the provider via
+      `ProviderRegistry.require(resource.provider)` and dispatch.
+- [x] `teardown(allocation_id, resource, provider_metadata) -> FulfillmentResult`:
+      same idempotency treatment — retried teardown for the same
+      fulfillment is detected and does not dispatch a second provider
+      operation.
+- [x] `get_status(allocation_id, resource, provider_metadata) -> ProviderStatus`:
+      thin pass-through to the resolved provider's `get_status`.
+- [x] Idempotency store: a plain in-memory `dict[str, ...]` keyed on
+      `allocation_id`, private to `FulfillmentService`. Explicitly **not**
+      a concurrency guarantee and not durable — matches
+      `PhysicalSettlementScheduler`'s own in-memory pattern. Leave a
+      docstring/comment pointing at `pools-7` for the durable, race-safe
+      replacement, consistent with design.md Decision 4.
 
 ## DI wiring
 
-- [x] `container.py`: `ansible_fulfillment_provider` (with
-      `job_queue_provider=_resolved_job_queue` — the item the external
-      review caught missing from the original plan), `provider_registry`,
-      `fulfillment_service`. No dependency on `physical_settlement_scheduler`.
-- [x] `app_runtime.py`: `resolved_fulfillment_service` added to
-      `resolve_request_path_services()` and declared in `container.py`'s
-      `resolved_*` block. No controller/route wired.
+- [x] `container.py`: add `ansible_fulfillment_provider` (Singleton,
+      depends on `job_service`/`resource_pool_service`), `provider_registry`
+      (Singleton, registers `"ansible" -> ansible_fulfillment_provider`),
+      and `fulfillment_service` (Singleton, depends on `provider_registry`).
+      Do not wire `physical_settlement_scheduler` as a dependency of
+      `fulfillment_service` — they stay independent providers in the
+      container, exactly as they are independent classes.
+- [x] `app_runtime.py` / `container.py`'s `resolved_*` block: add
+      `resolved_fulfillment_service`, set in
+      `resolve_request_path_services()`, following the existing pattern
+      (e.g. `resolved_physical_settlement_scheduler`). No controller/route
+      wires it yet — this is just making the singleton resolvable the same
+      way the scheduler already is, for `pools-7` to consume later.
 
 ## Tests
 
-- [x] `test_fulfillment_provider.py`, `test_provider_registry.py`,
-      `test_fulfillment_service.py`, `test_ansible_fulfillment_provider.py`
-      — 27 new tests, all passing.
-- [x] `test_pools_api.py` updated for the `inventory_group` contract
-      change.
-- [x] Full existing suite reverified: 276 pre-existing unit tests + 138
-      integration tests all still pass unchanged.
+- [x] `tests/unit/services/test_fulfillment_provider.py`: `ProviderOperationState`
+      mapping/enum sanity, `FulfillmentResult`/`ProviderStatus` shape.
+- [x] `tests/unit/services/test_ansible_fulfillment_provider.py`: create/teardown
+      are dispatch-only (return before the background job completes, using
+      `ProgrammableMockAnsibleService`'s job-control hooks); config
+      snapshotting (editing the pool after dispatch does not change an
+      already-accepted operation); `get_status` state mapping, including
+      `unknown` on an unreadable/missing job.
+- [x] `tests/unit/services/test_provider_registry.py`: `require()` success
+      and `ProviderNotFoundError` for an unregistered provider string.
+- [x] `tests/unit/services/test_fulfillment_service.py`: equivalent-retry
+      returns the existing result without a second provider dispatch
+      (assert the provider mock's create/teardown call count);
+      conflicting reuse (different agreement/resource/provider for the
+      same `allocation_id`) raises `FulfillmentConflictError` before any
+      provider call; teardown retry is idempotent the same way; provider
+      resolution failure propagates `ProviderNotFoundError`. Use a fake
+      `FulfillmentProvider` here, not `AnsibleFulfillmentProvider` — this
+      is a `FulfillmentService`-boundary test, not an Ansible-integration
+      test.
+- [ ] Confirm existing `AnsibleJobService`/`AnsibleService`/scheduler test
+      suites pass unchanged (this change wraps, not replaces, that
+      machinery).
 
 ## Docs
 
-- [x] `proposal.md`/`design.md`/spec delta were finalized during the
-      design-review session before implementation; no drift found during
-      implementation except the extra-vars collision-timing detail noted
-      above, which doesn't change any documented decision — the mechanism
-      described (built-ins authoritative, collision rejected) is exactly
-      what's implemented, just observed via `get_status` rather than a
-      synchronous exception, which the dispatch-only model already implied.
-- [ ] `docs/development/ARCHITECTURE.md`: not updated this round. The
-      existing one-line summary (added during the design-review session)
-      still accurately describes the current state — provisioning-side
-      fulfillment service owns idempotent physical dispatch, no storefront
-      wiring yet. Revisit when `pools-7` gives this a production caller.
+- [x] No further openspec edits expected — `proposal.md`, `design.md`, and
+      the `physical-provisioning` spec delta were finalized during this
+      session's design review. Re-check them against the actual
+      implementation once code is written, and correct anything that
+      drifts (same discipline applied throughout this session).
+- [x] Update `docs/development/ARCHITECTURE.md` only if implementation
+      reveals the current one-line summary (added this session) needs more
+      than a sentence — keep it a current-state description, not a
+      changelog entry for this change.
+
+## Corrections from implementation review
+
+- [x] Move provider-neutral fulfillment contracts and the provider registry to
+      `kit/resource-pools`; leave the concrete `FulfillmentService` in the VM
+      provisioning service. Replace the migrated service files with tombstones
+      so their manual deletion is visible during review.
+- [x] Rename `PhysicalSettlementRequest.terms` to `requirements`. Keep deal-term
+      translation in storefront code; provisioning receives concrete technical
+      requirements and validates them independently against the allocation.
+- [x] Add typed VM fulfillment requirements containing the complete create
+      shape, including deterministic `vm_target`, image, vCPU, memory, disk, and
+      SSH key inputs. Do not source these values from pool configuration or the
+      Capacity Reservation.
+- [x] Preserve typed Ansible provider metadata containing operation identity,
+      `vm_host`, and `vm_target`; teardown MUST submit `vm_remove` with both the
+      exact host and target.
+- [x] Validate disabled pools, pool/resource/provider mismatches, missing
+      `vm_host`, malformed VM requirements, and reserved Ansible variable
+      collisions before provider dispatch.
+- [x] Add a side-effect-free `FulfillmentService.validate_create(...)` path and
+      use that same validation from create.
+- [ ] Expose the shared validation path through the public dry-run endpoint when
+      the fulfillment controller is introduced.
+- [x] Add atomic capacity-ledger settlement assignment. Rebinding an allocation
+      transfers its existing held units from the reservation resource to the
+      selected settlement resource in one transaction; fulfillment MUST NOT
+      subtract capacity again.
+- [ ] Add integration coverage that inspects persisted outbound Ansible create
+      and teardown parameters, including `vm_host`, `vm_target`, and every VM
+      create field.
+- [x] Add capacity-rebind rollback/idempotency tests and document the current
+      concurrent idempotency limitation.
+- [x] Update the provisioning service `reinit` target to upgrade and reinstall
+      `arkhai-kit-resource-pools`, ensuring `make test` consumes the wheel built
+      by the repository-level `make dist` target even when the package version
+      is unchanged.
+- [x] Record mutable provider-configuration snapshot and durable concurrent
+      idempotency concerns in POOLS-7 rather than solving them with a
+      process-local lock in POOLS-3.

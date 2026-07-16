@@ -18,9 +18,12 @@ execution against the selected resource.
   the future storefront-facing physical-fulfillment boundary and owns request
   validation, allocation-to-fulfillment identity, equivalent-retry behavior,
   conflict detection, provider resolution, and provider-state normalization.
-- Define `FulfillmentProvider`, `FulfillmentResult`, and `ProviderStatus`.
-  Providers execute against an already-selected `SettlementResource` and MUST
-  NOT select or substitute another resource.
+- Define provider-neutral fulfillment contracts in `kit/resource-pools`,
+  including `PhysicalSettlementRequest`, `FulfillmentProvider`,
+  `FulfillmentResult`, and `ProviderStatus`. The concrete
+  `FulfillmentService` remains in the VM provisioning service. Providers
+  execute against an already-selected `SettlementResource` and MUST NOT
+  select or substitute another resource.
 - Make both create and teardown dispatch-only. They return after asynchronous
   work is accepted; callers observe progress through `get_status(...)`.
 - Define normalized provider operation states: `pending`, `succeeded`,
@@ -28,47 +31,30 @@ execution against the selected resource.
 - Guarantee idempotency at the `FulfillmentService` boundary: an equivalent
   retry for the same `allocation_id` returns the existing fulfillment; a
   conflicting reuse fails before another provider operation is submitted.
-  Backed by a simple in-memory dict this round (mirrors
-  `PhysicalSettlementScheduler`'s own in-memory assignment map) — enough to
-  make this change's spec scenarios true and testable, but not a concurrency
-  guarantee and not durable across restarts. See "Explicitly Deferred This
-  Round."
-- `FulfillmentService` takes an already-selected `SettlementResource` as
-  input and never calls `PhysicalSettlementScheduler` itself — placement and
-  execution stay separate services, called in sequence by whatever
-  orchestrates the workflow (the storefront, from `pools-7`).
 - Add `ProviderRegistry.require(provider)` and register the initial Ansible
   implementation in the provisioning composition root.
 - Wire the resource pool's generic provider-configuration metadata into
-  `AnsibleFulfillmentProvider`. Configuration is resolved and snapshotted into
-  executor inputs at dispatch time. This requires real changes below
-  `AnsibleFulfillmentProvider`, not just the provider itself: `AnsibleJobParams`
-  has no `playbook_path`/pool-extra-vars fields today, `_build_params` (job
-  service) explicitly reconstructs every persisted field by name rather than
-  splatting the stored dict, `_playbook_path_for_params` always selects a
-  globally configured playbook, and `_build_vm_vars` (ansible service) has no
-  generic extra-vars merge path — it hand-enumerates known fields. All four
-  need updating for a snapshotted per-pool playbook/extra-vars to actually
-  reach the dispatched job. No migration: `AnsibleJob.params` is already a
-  JSON column, so new `AnsibleJobParams` fields persist through the existing
-  `dataclasses.asdict(params)` write path. Built-in job identity fields
-  (`vm_host`, `vm_action`, executor contract fields) are authoritative;
-  collisions from pool extra-vars are rejected, not silently overridden.
-- Remove `inventory_group` from the **public** pool provider-configuration
-  contract: drop it from `AnsiblePoolConfigHandler._FIELDS`/validation, stop
-  returning it from `read_config`/pool API responses, and update the pool
-  API/import tests that currently assert it round-trips
-  (`tests/integration/test_pools_api.py`). It is not operationally used —
-  verified: no code path reads `pool_config["inventory_group"]` for job
-  dispatch, inventory is always rendered per-host from the `hosts` table
-  (`AnsibleService.write_inventory`) — and leaving it required on the public
-  API would preserve exactly the confusion this decision exists to remove.
-  No migration: `replace_config` writes a fixed internal compatibility value
-  into the still-`NOT NULL` `db/models.py` column instead of a user-supplied
-  one; the column itself and `db/migrations.py` are untouched. See `design.md`
-  Decision 6.
+  `AnsibleFulfillmentProvider`. Configuration is validated before dispatch and
+  resolved into executor inputs. Durable snapshots that remain stable across
+  later pool edits are completed in POOLS-7.
+- Remove `inventory_group` from `AnsiblePoolConfig`; it is not operationally
+  used and concrete placement already belongs to `PhysicalSettlementScheduler`.
 - Keep existing credential behavior. POOLS-3 introduces no new
   secret-distribution or credential-publication system.
+- Rename the settlement request payload from ambiguous `terms` to concrete
+  technical `requirements`. The storefront translates negotiated deal terms;
+  provisioning validates and executes the supplied requirements without using
+  the Capacity Reservation or pool configuration as their source.
+- Require VM fulfillment requests to supply a deterministic `vm_target` and
+  complete VM create parameters. Preserve `vm_host`, `vm_target`, and provider
+  operation identifiers in provider metadata so teardown dispatches the exact
+  workload created.
+- Atomically rebind the allocation's existing capacity hold when scheduling
+  selects a different physical resource. Fulfillment does not subtract
+  capacity a second time.
+- Add a side-effect-free validation path shared with create so a later API can
+  dry-run allocation, pool, resource, provider, and request checks immediately
+  before agreement execution.
 - Preserve enough fulfillment metadata for later status checks and asynchronous
   teardown. The durable ORM and final teardown lifecycle are completed in
   `pools-7-storefront-fulfillment-cutover`.
@@ -83,14 +69,14 @@ execution against the selected resource.
   executors to dispatch teardown through `ProviderRegistry`.
 - Final teardown states, record retention, and storefront capacity-change
   notification.
-- Changes to `PhysicalSettlementScheduler`'s current in-memory assignments.
+- Durable settlement-assignment persistence beyond the atomic capacity-ledger
+  rebind introduced here.
 
 ## Non-Goals
 
 - Kubernetes, cloud, storage, power, or bandwidth providers.
 - Recreating the removed generic `provisioning_client` package.
-- Extracting the contracts to a shared package before the package-boundary work
-  requires it.
+- Moving the concrete provisioning `FulfillmentService` into a shared package.
 - Correlating physical fulfillment with storefront financial claim collection.
 
 ## Settlement Record / Claims Boundary
@@ -120,19 +106,12 @@ system keyed by `claim_ref`.
 
 ## Impact
 
-- **Packages:** VM provisioning service fulfillment/provider layer and DI
+- **Packages:** provider-neutral fulfillment contracts in `kit/resource-pools`;
+  VM provisioning service fulfillment/provider implementation and DI
   composition.
-- **Database:** no schema or migration changes. `AnsibleJob.params`'s
-  existing JSON column absorbs the new snapshotted `playbook_path`/
-  `provider_extra_vars` fields on `AnsibleJobParams` without any migration.
-  `AnsiblePoolConfigHandler`'s validation behavior changes (`inventory_group`
-  no longer required/returned on the public pool-config contract) but no
-  column is added, dropped, or altered — the durable `SettlementRecord`
-  table itself is still implemented in POOLS-7.
-- **API:** none new required by POOLS-3 alone, but the existing pool
-  create/import API's accepted/returned shape changes (`inventory_group` no
-  longer required or returned) — a compatibility-relevant behavior change
-  for any existing caller currently sending it, not just an internal detail.
+- **Database:** none in POOLS-3; the record contract is implemented durably in
+  POOLS-7.
+- **API:** none required by POOLS-3 alone.
 - **Compatibility:** existing Ansible job and credential behavior remains in
   place; the provider wraps and extends that machinery rather than replacing
   it.

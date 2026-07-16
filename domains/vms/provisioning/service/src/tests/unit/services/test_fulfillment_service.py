@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from compute_provisioning import PhysicalSettlementRequest, SettlementResource
-from services.fulfillment_provider import (
+from market_resource_pools import (
     FulfillmentConflictError,
     FulfillmentProvider,
     FulfillmentResult,
@@ -19,7 +19,7 @@ from services.fulfillment_provider import (
     ProviderStatus,
 )
 from services.fulfillment_service import FulfillmentService
-from services.provider_registry import ProviderRegistry
+from market_resource_pools import ProviderRegistry
 
 
 class _FakeProvider(FulfillmentProvider):
@@ -46,7 +46,7 @@ def _request(**overrides) -> PhysicalSettlementRequest:
         allocation_id="alloc-1",
         agreement_id="agreement-1",
         market="vms",
-        terms={"units": 1},
+        requirements={"units": 1},
     )
     defaults.update(overrides)
     return PhysicalSettlementRequest(**defaults)
@@ -106,6 +106,13 @@ class TestCreateIdempotency:
     async def test_unregistered_provider_propagates(self, service):
         with pytest.raises(ProviderNotFoundError):
             await service.create(_request(), _resource(provider="kubernetes"))
+
+    def test_unregistered_provider_is_structured_during_validation(self, service):
+        result = service.validate_create(
+            _request(), _resource(provider="kubernetes")
+        )
+        assert not result.valid
+        assert result.issues[0].code == "provider_not_found"
 
 
 class TestTeardownIdempotency:

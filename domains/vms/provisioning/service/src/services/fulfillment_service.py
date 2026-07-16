@@ -21,13 +21,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from market_resource_pools import FulfillmentValidationIssue, FulfillmentValidationResult
+
 from compute_provisioning import PhysicalSettlementRequest, SettlementResource
-from services.fulfillment_provider import (
+from market_resource_pools import (
     FulfillmentConflictError,
+    FulfillmentRequestInvalidError,
     FulfillmentResult,
+    ProviderNotFoundError,
     ProviderStatus,
 )
-from services.provider_registry import ProviderRegistry
+from market_resource_pools import ProviderRegistry
 
 
 @dataclass(frozen=True)
@@ -47,7 +51,7 @@ def _is_equivalent(
     request: PhysicalSettlementRequest,
     resource: SettlementResource,
 ) -> bool:
-    """Scoped to agreement_id/market/terms (from the request) and the entire
+    """Scoped to agreement_id/market/requirements (from the request) and the entire
     selected SettlementResource — explicitly NOT request.resource_id, which
     is an optional selection constraint on the request, not part of
     fulfillment identity. Both PhysicalSettlementRequest and
@@ -57,31 +61,76 @@ def _is_equivalent(
     return (
         entry.request.agreement_id == request.agreement_id
         and entry.request.market == request.market
-        and entry.request.terms == request.terms
+        and entry.request.requirements == request.requirements
         and entry.resource == resource
     )
 
 
 class FulfillmentService:
-    def __init__(self, *, provider_registry: ProviderRegistry) -> None:
+    def __init__(self, *, provider_registry: ProviderRegistry, capacity_ledger=None) -> None:
         self._provider_registry = provider_registry
+        self._capacity_ledger = capacity_ledger
         self._entries: dict[str, FulfillmentEntry] = {}
+
+    def validate_create(
+        self, request: PhysicalSettlementRequest, resource: SettlementResource
+    ) -> FulfillmentValidationResult:
+        issues: list[FulfillmentValidationIssue] = []
+        try:
+            provider = self._provider_registry.require(resource.provider)
+        except Exception as exc:
+            issues.append(FulfillmentValidationIssue(code="provider_not_found", message=str(exc), field="resource.provider"))
+            return FulfillmentValidationResult(tuple(issues))
+        validator = getattr(provider, "validate_create", None)
+        if validator is not None:
+            try:
+                validator(request, resource)
+            except Exception as exc:
+                issues.append(FulfillmentValidationIssue(code="request_invalid", message=str(exc)))
+        existing = self._entries.get(request.allocation_id)
+        if existing is not None and not _is_equivalent(existing, request, resource):
+            issues.append(FulfillmentValidationIssue(code="fulfillment_conflict", message="allocation already has a different fulfillment"))
+        return FulfillmentValidationResult(tuple(issues))
+
+
+    @staticmethod
+    def _raise_validation_error(validation: FulfillmentValidationResult) -> None:
+        """Preserve typed create failures while dry-run returns structured issues."""
+        message = "; ".join(issue.message for issue in validation.issues)
+        codes = {issue.code for issue in validation.issues}
+        if "provider_not_found" in codes:
+            raise ProviderNotFoundError(message)
+        if "request_invalid" in codes:
+            raise FulfillmentRequestInvalidError(message)
+        raise FulfillmentConflictError(message)
 
     async def create(
         self,
         request: PhysicalSettlementRequest,
         resource: SettlementResource,
     ) -> FulfillmentResult:
+        validation = self.validate_create(request, resource)
+        if not validation.valid:
+            self._raise_validation_error(validation)
         existing = self._entries.get(request.allocation_id)
         if existing is not None:
             if _is_equivalent(existing, request, resource):
                 return existing.create_result
             raise FulfillmentConflictError(
                 f"allocation_id={request.allocation_id!r} already has a "
-                "fulfillment with a different agreement, market, terms, or "
+                "fulfillment with a different agreement, market, requirements, or "
                 "selected resource"
             )
 
+        if self._capacity_ledger is not None:
+            assignment = self._capacity_ledger.assign_settlement_resource(
+                allocation_id=request.allocation_id,
+                settlement_resource_id=resource.settlement_resource_id,
+            )
+            if assignment is None:
+                raise FulfillmentConflictError(
+                    f"allocation_id={request.allocation_id!r} does not exist"
+                )
         provider = self._provider_registry.require(resource.provider)
         result = await provider.create(request, resource)
         self._entries[request.allocation_id] = FulfillmentEntry(

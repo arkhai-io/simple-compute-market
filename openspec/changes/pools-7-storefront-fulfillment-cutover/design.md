@@ -143,3 +143,7 @@ wired.
   cross-service, that's itself an argument for moving them out of a
   VM-domain-local package. Worth revisiting at activation time rather than
   deciding here.
+
+## Accepted provider configuration
+
+Durable fulfillment persistence must snapshot the accepted provider inputs needed for recovery and teardown so later pool edits cannot reinterpret already accepted work. Database uniqueness and dispatch recovery remain the cross-process idempotency boundary; POOLS-3's in-memory service intentionally provides only sequential retry behavior.

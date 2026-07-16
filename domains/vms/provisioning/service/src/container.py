@@ -24,7 +24,7 @@ from services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from services.lease_watchdog import LeaseWatchdog
 from services.physical_settlement_scheduler import PhysicalSettlementScheduler
 from services.ansible_fulfillment_provider import AnsibleFulfillmentProvider
-from services.provider_registry import ProviderRegistry
+from market_resource_pools import ProviderRegistry
 from services.fulfillment_service import FulfillmentService
 from services.release_executors import (
     BARE_METAL_EXECUTOR_KIND,
@@ -196,6 +196,7 @@ class Container(containers.DeclarativeContainer):
     fulfillment_service = providers.Singleton(
         FulfillmentService,
         provider_registry=provider_registry,
+        capacity_ledger=capacity_ledger_service,
     )
 
     capacity_reservation_watchdog = providers.Singleton(

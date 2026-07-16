@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from services.fulfillment_provider import ProviderNotFoundError
-from services.provider_registry import ProviderRegistry
+from market_resource_pools import ProviderNotFoundError
+from market_resource_pools import ProviderRegistry
 
 
 class _StubProvider:

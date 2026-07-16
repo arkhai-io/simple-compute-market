@@ -107,12 +107,9 @@ snapshot with the submitted operation.
 
 ### Requirement: Ansible placement remains scheduler-owned
 
-The Ansible provider's typed pool configuration MUST NOT include
-`inventory_group`, and the provider MUST execute against the concrete
-Settlement Resource selected by the scheduler rather than using an inventory
-group as an alternate placement mechanism. This applies to the provider's
-own configuration type only — it does not require changing the persisted
-pool-configuration schema or its validation.
+`AnsiblePoolConfig` MUST NOT include `inventory_group`. The Ansible provider
+MUST execute against the concrete Settlement Resource selected by the scheduler
+and MUST NOT use an inventory group as an alternate placement mechanism.
 
 #### Scenario: Ansible job is constructed
 
@@ -139,3 +136,25 @@ publication or secret-distribution system.
   and MUST replace process-local locking as the correctness mechanism.
 - Final teardown state transitions, retention, and capacity notification.
 - Changes to `PhysicalSettlementScheduler` assignment persistence.
+
+### Requirement: Concrete fulfillment requirements
+The fulfillment request SHALL carry concrete technical requirements under `requirements`. Provisioning SHALL NOT interpret negotiated commercial deal terms or source workload sizing from pool configuration or the capacity reservation.
+
+#### Scenario: VM create dispatch
+- **WHEN** a valid VM fulfillment request is accepted
+- **THEN** the provider job includes the requested VM target, memory, vCPU, disk, image mode, operating-system variant when supplied, and SSH public key
+- **AND** provider metadata records the exact VM host and target.
+
+### Requirement: Capacity assignment transfer
+A Capacity Settlement Assignment SHALL atomically transfer the allocation's existing held units to the selected settlement resource when it differs from the reserved resource. Fulfillment SHALL NOT subtract capacity again.
+
+#### Scenario: Assignment changes physical resource
+- **WHEN** a held allocation is assigned to another eligible resource
+- **THEN** the source capacity is released and destination capacity is charged in one transaction
+- **AND** retrying the same assignment does not change capacity again.
+
+### Requirement: Fulfillment validation
+Dry-run and create SHALL use the same validation rules. Validation SHALL reject disabled pools, provider mismatches, missing `vm_host`, malformed VM requirements, and provider extra variables that override reserved job inputs. Create SHALL repeat validation immediately before dispatch.
+
+### Requirement: Exact teardown identity
+Teardown SHALL use the accepted fulfillment metadata's `vm_host` and `vm_target`; it SHALL NOT infer either value from the settlement resource identifier.

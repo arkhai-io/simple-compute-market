@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from services.fulfillment_provider import (
+from market_resource_pools import (
     FulfillmentResult,
     ProviderOperationState,
     ProviderStatus,

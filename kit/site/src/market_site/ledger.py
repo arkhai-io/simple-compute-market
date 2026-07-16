@@ -321,6 +321,49 @@ class CapacityLedgerService:
             payload["hold_expires_at"] = hold_expires_at
             return payload
 
+    def assign_settlement_resource(
+        self, *, allocation_id: str, settlement_resource_id: str
+    ) -> dict[str, Any] | None:
+        """Atomically bind a held allocation to the selected physical resource.
+
+        Availability is derived from held allocations, so moving resource_id
+        transfers the existing consumption rather than subtracting it again.
+        Repeating the same assignment is idempotent.
+        """
+        with self._lock, self._session_factory() as db:
+            self._expire_stale_holds(db)
+            allocation = self._find_allocation(db, allocation_id=allocation_id)
+            if allocation is None:
+                return None
+            if allocation.state not in HELD_ALLOCATION_STATES:
+                raise CapacityConflictError(
+                    f"allocation {allocation_id} is {allocation.state}; cannot assign settlement resource"
+                )
+            if allocation.resource_id == settlement_resource_id:
+                return self._allocation_payload(allocation)
+            destination = db.get(SiteResource, settlement_resource_id)
+            if destination is None or not destination.enabled:
+                raise CapacityConflictError(
+                    f"settlement resource {settlement_resource_id!r} is unavailable"
+                )
+            held = sum(
+                row.units for row in db.query(SiteAllocation).filter(
+                    SiteAllocation.resource_id == settlement_resource_id,
+                    SiteAllocation.state.in_(HELD_ALLOCATION_STATES),
+                ).all()
+            )
+            if destination.total_units - held < allocation.units:
+                raise CapacityConflictError(
+                    f"settlement resource {settlement_resource_id!r} lacks capacity"
+                )
+            source_id = allocation.resource_id
+            allocation.resource_id = settlement_resource_id
+            allocation.vm_host = (destination.attributes or {}).get("vm_host")
+            db.add(CapacityEvent(kind="capacity_released_for_reassignment", resource_id=source_id))
+            db.add(CapacityEvent(kind="capacity_assigned_for_settlement", resource_id=settlement_resource_id))
+            db.commit()
+            return self._allocation_payload(allocation)
+
     def commit(
         self,
         *,

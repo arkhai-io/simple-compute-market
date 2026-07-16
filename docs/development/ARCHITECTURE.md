@@ -43,7 +43,7 @@ The normative dependency and plugin contracts are in the [market composition spe
 
 Use **Market Agreement**, **Capacity Offering**, **Capacity Projection**, **Capacity Reservation**, **Physical Resource**, **Resource Pool**, **Physical Settlement**, **Settlement Resource**, **PhysicalSettlementScheduler**, **FulfillmentProvider**, and **Settlement Record**. Stable cross-service identities include the agreement/deal reference and `allocation_id`; `pool_id` and `resource_id` remain boundary-sensitive; scheduling establishes `settlement_resource_id`. Provider metadata stays opaque outside the provider/lifecycle boundary.
 
-See [site capacity](../../openspec/specs/site-capacity/spec.md) and [physical provisioning](../../openspec/specs/physical-provisioning/spec.md) for the contracts behind these terms. The storefront owns the market and lease workflow, while the provisioning-side fulfillment service owns idempotent physical dispatch, provider resolution, and execution against the scheduler-selected Settlement Resource.
+See [site capacity](../../openspec/specs/site-capacity/spec.md) and [physical provisioning](../../openspec/specs/physical-provisioning/spec.md) for the contracts behind these terms. The storefront translates negotiated terms into concrete fulfillment requirements; provisioning validates those requirements against the held allocation and owns idempotent physical dispatch, provider resolution, settlement-resource assignment, and execution against the scheduler-selected Settlement Resource. Provider-neutral fulfillment contracts live in `kit/resource-pools`, while domain-specific requirement parsing and provider translation remain with the domain.
 
 ## Planning and operations
 
