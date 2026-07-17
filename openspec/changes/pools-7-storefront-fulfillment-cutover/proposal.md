@@ -72,16 +72,18 @@ This stays taskless until:
   meaningfully call a resource scheduler instead of picking its own
   `vm_host`, and
 - (b) either `market-platform-compute-30-extract-service` has completed
-  its cutover and `pools-5`'s residual scope has settled where
-  `PhysicalSettlementScheduler`/`FulfillmentProvider`/`ProviderRegistry`
-  physically live (`compute_provisioning` vs. staying VM-service-local),
-  or a second domain forces that decision sooner — whichever comes first.
+  its cutover and settled where `PhysicalSettlementScheduler`/
+  `FulfillmentProvider`/`ProviderRegistry` physically live
+  (`compute_provisioning` vs. staying VM-service-local — see that change's
+  "Absorbed from POOLS-5" section, formerly tracked by the now-closed
+  `pools-5-shared-provisioning-package`), or a second domain forces that
+  decision sooner — whichever comes first.
 
 Starting this cutover before (b) risks wiring the storefront against
 integration points that move once the package boundary resolves. A fresh
 design-review pass should precede implementation once activated, not a
-straight implementation of this document — same posture `pools-5` takes
-for its own residual scope.
+straight implementation of this document — same posture `compute-30` takes
+for its absorbed package-boundary decision.
 
 ## Non-Goals (once activated)
 
@@ -123,13 +125,13 @@ for its own residual scope.
 - Requires `pools-2-physical-settlement-scheduler` (implemented) and
   `pools-3-fulfillment-provider`.
 - Requires `pools-4-storefront-capacity-boundary` to land first.
-- Interacts with `pools-5-shared-provisioning-package`'s residual scope
-  and `market-platform-compute-30-extract-service` — see Activation
-  Condition.
+- Interacts with `market-platform-compute-30-extract-service`'s absorbed
+  package-boundary decision (formerly tracked by the now-closed
+  `pools-5-shared-provisioning-package`) — see Activation Condition.
 
 ## Impact
 
-Not assessed — scope depends on how `pools-4` and the `compute-30`/
-`pools-5` package-boundary question resolve. A future design-review
-session should reassess before this leaves taskless status, not implement
-this document as written.
+Not assessed — scope depends on how `pools-4` and `compute-30`'s absorbed
+package-boundary question resolve. A future design-review session should
+reassess before this leaves taskless status, not implement this document
+as written.

@@ -1,3 +1,8 @@
+> **Provenance note (2026-07-17):** This delta was never implemented and
+> never merged into `openspec/specs/physical-provisioning/spec.md`. It is
+> preserved verbatim here for historical record only. Do not treat it as
+> normative. See `../../proposal.md`'s "Disposition" for closure rationale.
+
 ## MODIFIED Requirements
 
 ### Requirement: Compute-owned caller contract

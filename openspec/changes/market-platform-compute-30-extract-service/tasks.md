@@ -4,6 +4,26 @@
 - [ ] 1.2 Reconcile generic versus VM-owned versus bare-metal-owned files, routes, factories, persistence, configuration, and deployment references against current code, including the landed POOLS-2 scheduler, POOLS-3 fulfillment/provider surfaces, and POOLS-4 storefront claim boundary
 - [ ] 1.3 Run current startup, job, lease, VM, bare-metal, and service API suites before moving code
 - [ ] 1.4 Update this design/specs if prerequisite implementation changed the destination boundary
+- [ ] 1.5 **Absorbed from closed POOLS-5:** delete the dead duplicate
+      `provisioning/compute/src/compute_provisioning/pools.py` and
+      `pool_config_handler.py` (byte-identical copies of the files in
+      `kit/resource-pools/src/market_resource_pools/`, unreferenced by
+      `compute_provisioning/__init__.py`, which re-exports the real ones
+      from `market_resource_pools` instead — verified by repository-wide
+      grep, 2026-07-17). Confirm via a fresh grep for
+      `compute_provisioning.pools` / `compute_provisioning.pool_config_handler`
+      submodule imports immediately before deleting, in case something
+      changed since. This is independent of task 1.6 below and does not
+      require a design decision.
+- [ ] 1.6 **Absorbed from closed POOLS-5:** as part of this change's
+      design-review pass, decide whether `PhysicalSettlementScheduler`
+      (currently VM-service-local), `FulfillmentProvider`/`ProviderRegistry`
+      (currently `kit/resource-pools`), and the `SettlementRecord`/
+      settlement-resource shapes should consolidate into
+      `compute_provisioning` alongside `pools-2`'s scheduling/request
+      contracts, or stay split as they are today. Record the decision and
+      rationale in this change's `design.md` before implementing §2–§3
+      below.
 
 ## 2. Prepare Domain-Owned Composition
 

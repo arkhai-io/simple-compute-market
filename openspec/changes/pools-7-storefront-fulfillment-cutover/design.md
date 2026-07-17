@@ -137,9 +137,11 @@ wired.
   logic get deleted outright once `PhysicalSettlementScheduler` owns
   placement, or does it downgrade to a pool-level preference hint passed
   into `SettlementRequirement.attributes`? Not analyzed this session.
-- Whether `pools-5`'s package-boundary decision (stay VM-service-local vs.
-  move to `compute_provisioning`) should be forced by this change rather
-  than waited on — if the storefront is going to depend on these contracts
+- Whether `market-platform-compute-30-extract-service`'s absorbed
+  package-boundary decision (stay VM-service-local vs. move to
+  `compute_provisioning`; formerly tracked by the now-closed
+  `pools-5-shared-provisioning-package`) should be forced by this change
+  rather than waited on — if the storefront is going to depend on these contracts
   cross-service, that's itself an argument for moving them out of a
   VM-domain-local package. Worth revisiting at activation time rather than
   deciding here.

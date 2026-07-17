@@ -39,9 +39,17 @@ The change artifacts own requirements, design, readiness, and task state. This s
 
 #### Compute provisioning
 
-1. [`market-platform-compute-10-site-lifecycle`](changes/market-platform-compute-10-site-lifecycle/) — separate site authority from executor lease and release policy.
-2. [`market-platform-compute-20-provisioning-contract`](changes/market-platform-compute-20-provisioning-contract/) — define the common VM/bare-metal command, job, lease, result, credential, and event wire.
-3. [`market-platform-compute-30-extract-service`](changes/market-platform-compute-30-extract-service/) — extract the shared service, package, image, and VM/bare-metal adapter composition.
+1. `market-platform-compute-10-site-lifecycle` — archived
+   ([`changes/archive/2026-07-13-market-platform-compute-10-site-lifecycle/`](changes/archive/2026-07-13-market-platform-compute-10-site-lifecycle/)).
+   Separated site authority from executor lease and release policy.
+2. `market-platform-compute-20-provisioning-contract` — archived
+   ([`changes/archive/2026-07-13-market-platform-compute-20-provisioning-contract/`](changes/archive/2026-07-13-market-platform-compute-20-provisioning-contract/)).
+   Defined the common VM/bare-metal command, job, lease, result, credential, and event wire.
+3. [`market-platform-compute-30-extract-service`](changes/market-platform-compute-30-extract-service/) —
+   extract the shared service, package, image, and VM/bare-metal adapter
+   composition. Unblocked (both prerequisites above are archived) but not
+   yet started, and has absorbed the closed `pools-5-shared-provisioning-package`'s
+   package-boundary decision — see that change's proposal.md.
 4. [`market-platform-compute-40-multi-domain-proof`](changes/market-platform-compute-40-multi-domain-proof/) — prove concurrent adapters, ownership-aware event routing, and cross-mode physical accounting.
 
 The two tracks can start independently. Compute changes are ordered by their numeric prefix; the final proof also depends on the domain contract. A newly discovered prerequisite stays in the current task list when required for that change's acceptance criteria, otherwise it receives the same initiative prefix and is cross-linked as an independently archivable change.
@@ -72,13 +80,16 @@ physical settlement resource selection, provider execution, and a cleaned
    path and apply `pools-2`'s reservation-expiry model storefront-side.
    Recovered and corrected against current code (the `SiteLedger`/
    `SiteResourcesService` rename it originally called for is already done).
-5. [`pools-5-shared-provisioning-package`](changes/pools-5-shared-provisioning-package/) —
-   **largely superseded.** The originally-planned `core/provisioning`
-   package already exists in a different shape
-   (`provisioning/compute`/`compute_provisioning`), and its remaining
-   extraction goal is already covered by the active
-   `market-platform-compute-30-extract-service` change. Taskless and
-   activation-gated; see its proposal.md.
+5. `pools-5-shared-provisioning-package` — **closed 2026-07-17, without
+   implementation**
+   ([`changes/archive/2026-07-17-pools-5-shared-provisioning-package/`](changes/archive/2026-07-17-pools-5-shared-provisioning-package/)).
+   The originally-planned `core/provisioning` package already existed in a
+   different shape (`provisioning/compute`/`compute_provisioning`), and its
+   remaining extraction goal — including the final package home for
+   `PhysicalSettlementScheduler`/`FulfillmentProvider`/`ProviderRegistry` —
+   was already claimed by `market-platform-compute-30-extract-service`.
+   Closed rather than left as a parallel taskless placeholder; see that
+   change's proposal.md ("Absorbed from POOLS-5").
 
 Final e2e verification (originally POOLS-6) is not yet drafted as a change
 directory.
