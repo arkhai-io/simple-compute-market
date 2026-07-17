@@ -538,3 +538,70 @@ to `reserve()` — never enforced by the provisioning service itself
 ledger capability is needed, only a place for the operator to express a
 preference and a storefront willing to read it). Left for planning to
 schedule, not required by POOLS-7's first pass.
+
+## Commit <-> async-dispatch failure window: resolved (design review continued, 2026-07-17)
+
+**Resolved: Option 1 (durable `dispatch_pending` state + startup recovery
+sweep), not Option 2 (separate outbox table).** This was previously left
+open pending verification of a specific assumption: that Option 1 is
+only safe if the underlying provider's job-submission path is idempotent
+on a deterministic key. That assumption did not hold as found, but the
+fix needed to make it hold is small, so Option 1 stands once the fix is
+in.
+
+**Confirmed gap (by inspection, not assumed):** `AnsibleJobService.submit()`
+already has a real, tested idempotency mechanism — it dedupes on
+`(allocation_id, action_kind, idempotency_key)` via a DB uniqueness
+constraint (`uq_ansible_jobs_contract_idempotency`), including correct
+handling of the concurrent-race case (catches the `IntegrityError` from
+a racing duplicate insert and returns the existing job rather than
+erroring). But this path only activates `if contract is not None`.
+`AnsibleFulfillmentProvider.create()` and `.teardown()`
+(`services/ansible_fulfillment_provider.py`) both call
+`self._job_service.submit(params, self._job_queue_provider())` with no
+`contract` argument — so this dedup is bypassed entirely on the
+fulfillment path today. Every call, retry or not, gets a fresh
+`job_id = uuid4()` and inserts a new `AnsibleJob` row. A recovery sweep
+naively retrying `create()` on a `dispatch_pending` `SettlementRecord`
+would therefore genuinely double-dispatch a real `vm_create`/`vm_remove`
+job, not safely no-op.
+
+**Resolved fix:** `AnsibleFulfillmentProvider.create()`/`.teardown()`
+construct an `ExecutorActionEnvelope` contract and pass it to
+`job_service.submit()`, with `idempotency_key=f"{allocation_id}:create"`
+/ `f"{allocation_id}:teardown"` — reusing the existing, already-migrated,
+already-tested-elsewhere mechanism (the storefront's current direct-dispatch
+path already builds equivalent keys) rather than introducing a new one.
+See `specs/physical-provisioning/spec.md`'s new "Deterministic provider
+dispatch idempotency" requirement for the normative statement of this.
+
+With that fix in place, the recovery sweep is:
+
+```python
+# Provisioning service startup, alongside the existing schema-drift check
+for record in db.query(SettlementRecord).filter_by(
+    state=SettlementRecordState.dispatch_pending.value
+):
+    # Safe to retry unconditionally: submit() with a contract either
+    # returns the original job (crashed after the DB write, before or
+    # during the provider call) or genuinely submits it for the first
+    # time (crashed before ever calling the provider). Either way,
+    # exactly one AnsibleJob is ever dispatched for this
+    # allocation_id/action_kind pair.
+    await fulfillment_service.create(record.to_request(), record.to_settlement_resource())
+```
+
+This closes the dispatch half of the failure window (did the provider
+call actually happen). The narrower remaining window — the provider call
+succeeded but the follow-up DB write recording `state="dispatching"` and
+the returned job id fails — is closed by the same sweep: a record stuck
+at `dispatch_pending` whose retried `create()` call finds the deduped
+existing job via the uniqueness constraint and simply needs its
+`provider_metadata`/`state` written correctly, which `FulfillmentService.create()`
+already does on any call, first or retried.
+
+Option 2 (a separate outbox table with a consuming worker) is not
+pursued: it would solve a problem this fix closes more cheaply by
+finishing the wiring of a dedup mechanism that already exists in this
+codebase, without changing `create()`'s synchronous-with-side-effect API
+shape.
