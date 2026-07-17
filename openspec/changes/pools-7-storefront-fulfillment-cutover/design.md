@@ -189,3 +189,185 @@ wired.
 ## Accepted provider configuration
 
 Durable fulfillment persistence must snapshot the accepted provider inputs needed for recovery and teardown so later pool edits cannot reinterpret already accepted work. Database uniqueness and dispatch recovery remain the cross-process idempotency boundary; POOLS-3's in-memory service intentionally provides only sequential retry behavior.
+
+## Scope decision: retrofit, not compute-30 extraction (design review, 2026-07-17)
+
+This session scoped POOLS-7 to retrofitting the existing VM domain
+storefront and provisioning service onto the POOLS 1-4 machinery, not to
+`market-platform-compute-30-extract-service`'s service extraction. kit
+packages (`kit/site`, `kit/resource-pools`) and the `apicredits` domain
+may be modified where genuinely cross-domain — this is permitted, not
+required, and several of the decisions below exercise that permission.
+The remainder of this section records what that design review settled.
+
+### `SiteResource` is retired; replaced by two distinct, differently-scoped entities
+
+Tracing why `PhysicalSettlementScheduler` and the storefront's local CSV
+inventory could disagree about `pool_id` (see "Operator listing-mode
+hints" above) surfaced a bigger problem than a missing sync: the
+storefront was maintaining its own shadow copy of physical inventory
+(`resources` table, hand-curated CSV) instead of treating the
+provisioning service's `hosts`/`resource_pools` tables as authoritative.
+Fixing the sync gap without fixing the ownership inversion would just
+move where the drift originates.
+
+Resolved shape:
+
+- **`site_resource_pools`** (renamed from `SiteResource`, `kit/site`,
+  hosted by the provisioning service) — stays **host-granular**, one row
+  per physical resource, exactly as `SiteResource` is today. It is no
+  longer independently authored by the storefront's CSV push; it is
+  derived from the provisioning service's own `hosts` + `resource_pools`
+  tables (POOLS-1), which are the actual single source of truth for host
+  inventory and pool membership. `pool_id` becomes a real, enforced
+  attribute rather than a storefront-authored guess that happens to
+  collide with an operator pool ID.
+- **`CapacityReservation`** (renamed from `SiteAllocation`) — the
+  hold/lease-tail row. Its primary claim target changes from an
+  always-concrete `resource_id` to `pool_id`; `settlement_resource_id`
+  becomes a nullable field populated once, by `assign_settlement_resource`,
+  when `PhysicalSettlementScheduler` makes its placement decision — not
+  rebound from one resource to another the way an earlier draft of this
+  review proposed. See "Host-granular matching is a feasibility
+  guarantee, not an aggregation choice" below for why this is now Option
+  A (reserve against one concrete resource up front; the scheduler
+  reassigns among *equally eligible* resources) rather than Option B
+  (reserve against a pool-level aggregate with no concrete resource until
+  scheduling) from this change's earlier draft.
+- **`CapacityProjection`** (storefront-side, new) — the storefront's
+  read-only, pull-based mirror of every connected provisioning service's
+  pool/capacity state (`GET /api/v1/pools`, which already exists and is
+  already reachable — the storefront already holds the admin key for
+  each configured site). This is the only place aggregation across hosts
+  happens, and it is explicitly advisory/display-only (pricing, listing
+  publication) — never the thing admission control checks against. Keyed
+  by `(site, pool_id)`, since pool IDs are only unique per provisioning
+  service.
+- **Physical Resource** (vocabulary term, unchanged) — already used
+  across kit with per-domain implementations; no change needed.
+
+This decision explicitly extends beyond the VM domain: `apicredits`
+today calls `CapacityLedgerService` directly with no pool concept at all
+("token quota resources carry no host"). The intent is for `apicredits`
+to also adopt a capacity-reservation-against-a-pooled-view shape, not
+just the VM domain — `kit/site`'s reshape must stay generic enough to
+carry a non-physical, non-host-shaped notion of "pool" (a quota bucket)
+as well as VM's host-shaped one.
+
+### Host-granular matching is a feasibility guarantee, not an aggregation choice (design review, 2026-07-17)
+
+An earlier draft of this review proposed collapsing `site_resource_pools`
+into one row per pool (aggregate `total_units`). **This is wrong and MUST
+NOT be implemented**: today's row-per-host matching
+(`_resource_matches`/`_find_candidate` in `kit/site/ledger.py`) is what
+guarantees a reservation for N units only succeeds when *some single
+host* actually has N units free — the arithmetic never sums across rows.
+Replacing that with one pool-level aggregate row would let a reservation
+succeed against a pool's total free capacity even when no single host in
+that pool can serve the shape (e.g. 500 units free scattered one-per-host
+across 500 machines, and a request for 4 units on one host). This is the
+`pools-6` risk *"pool-level aggregation can hide that dimensions live on
+different physical resources"* realized at **reservation** time instead
+of scheduling time — worse, because it means accepting a deal the system
+cannot structurally fulfill.
+
+**Resolved:** `site_resource_pools` rows stay host-granular.
+`CapacityReservation` binds to one concrete, feasibility-verified host at
+reservation time (today's mechanism, just correctly sourced from
+`hosts`/`resource_pools` instead of storefront CSV). This is "Option A"
+from this change's earlier draft, not "Option B" (deferring all resource
+selection to scheduling) — Option B is deferred to `pools-6` alongside
+multidimensional capacity, not attempted here. `assign_settlement_resource`
+remains a real, atomic capacity-transfer mechanism, but its role is
+narrowed: a **fairness reassignment among already-equally-eligible
+hosts**, not a relaxation of feasibility that reservation-time admission
+already established.
+
+### Reservation-time admission and scheduling-time eligibility MUST share one predicate
+
+`kit/site/ledger.py`'s `_resource_matches` (reservation admission) and
+`PhysicalSettlementScheduler._eligible_candidates` (scheduling
+eligibility) are two independent implementations of "does this shape fit
+this resource" today. This is the same class of bug as the `pool_id`
+mismatch this review started from: two things that must agree, with
+nothing forcing them to. Resolved direction: extract a single
+`resource_satisfies_requirement(resource, requirement) -> bool` predicate
+that both call sites use — reservation calls it to gate admission ("does
+at least one host qualify"), scheduling calls it to build the eligible
+set for policy selection. Exact home for this predicate (alongside
+`PhysicalSettlementScheduler` in `compute_provisioning`, or in
+`kit/site` where the resource rows themselves live) is not decided;
+resolve during planning.
+
+### `PhysicalSettlementScheduler` and `DeterministicRoundRobinPolicy` move to `compute_provisioning`, not `kit/resource-pools`
+
+Both are already effectively domain-neutral (`DeterministicRoundRobinPolicy`
+verified to contain zero VM-specific logic — it only sorts `pool_id`/
+`resource_id` strings). Moving them out of VM-service-local code was
+considered for `kit/resource-pools` (where `FulfillmentProvider`/
+`ProviderRegistry` already live, per `pools-3`), but that destination is
+**not viable**: `PhysicalSettlementScheduler` needs real runtime imports
+from `compute_provisioning` (`SettlementCandidate`, `SettlementRequirement`,
+`SettlementResource`, `PhysicalSettlementRequest` — constructed, not just
+type-hinted, unlike `FulfillmentProvider`'s string-quoted forward
+references), and `compute_provisioning` already depends on
+`kit/resource-pools` (`provisioning/compute/pyproject.toml`). Adding the
+reverse edge would close a cycle.
+
+`compute_provisioning` has no such problem — it already depends on both
+`kit/site` and `kit/resource-pools`, and the settlement types the
+scheduler operates on already live there (`pools-2`). **Resolved:**
+`PhysicalSettlementScheduler` and `DeterministicRoundRobinPolicy` move
+into `compute_provisioning`.
+
+This incidentally resolves part of the open, unresolved question
+`market-platform-compute-30-extract-service` inherited from the closed
+`pools-5-shared-provisioning-package` ("should `PhysicalSettlementScheduler`
+... consolidate into `compute_provisioning`") — without POOLS-7 taking on
+compute-30's actual service-extraction scope. This is the same kind of
+narrow, deliberate override `pools-3` already made once for
+`FulfillmentProvider`/`ProviderRegistry`; see that change's `design.md`,
+"Domain-neutral contracts vs. domain-specific payloads." `compute-30`'s
+proposal has been updated to reflect this as resolved rather than open.
+
+Two pre-existing domain leaks were found while confirming this move is
+safe, and should be fixed as part of it rather than carried into a
+supposedly domain-neutral shared package:
+
+- `kit/site/ledger.py`'s `_UNIT_CLAIM_KEYS = ("units", "gpu_count")` is a
+  module-level constant hardcoding a VM-specific alias into otherwise
+  domain-neutral ledger code. Should become a `CapacityLedgerService.__init__`
+  parameter (default `("units",)`), with the VM composition root supplying
+  `("units", "gpu_count")` explicitly — same pattern already used for
+  `required_attributes`.
+- `PhysicalSettlementScheduler._requirement`'s fallback
+  (`resource_kind = ... or "compute.gpu"`) silently defaults to a
+  VM-flavored value. Once shared across domains this default is wrong for
+  `apicredits`. Should become a required field with no fallback, or an
+  injected per-domain default at the composition root.
+
+## Dependency on POOLS-6: multidimensional capacity is a prerequisite, not parallel work
+
+Design review (2026-07-17) surfaced a correctness gap that blocks
+`site_resource_pools`/`CapacityReservation` from being trustworthy even
+with the host-granularity fix above: **`Host` (`domains/vms/provisioning/
+service/src/db/models.py`) has no memory, disk, or vCPU capacity field —
+only `gpu_count`.** Reservation admission can therefore verify GPU-count
+bin-packing correctly but cannot verify that a negotiated shape
+(vCPU/memory/disk, carried today only in `VmFulfillmentRequirements` at
+*fulfillment* time, downstream of admission) actually fits any real
+host. A reservation can be admitted for a shape no physical machine can
+serve.
+
+This is a real instance of `pools-6`'s deliberately-abstract problem
+statement, not a new problem — see `pools-6-multidimensional-fair-scheduling/
+proposal.md`'s "Concrete, currently-unenforced gap" addition. POOLS-7's
+reservation-admission work depends on `pools-6` resolving multidimensional
+capacity tracking; it is not POOLS-7's scope to solve, and POOLS-7 MUST
+NOT quietly re-derive a partial answer (e.g. adding only a memory field to
+`Host` without going through `pools-6`'s design questions on dimension
+normalization, units, and fairness) in order to unblock itself. Sequencing:
+`pools-6` resolves multidimensional capacity vectors first; POOLS-7's
+reservation-admission and scheduling-eligibility work (including the
+shared `resource_satisfies_requirement` predicate above) consumes that
+result rather than working around its absence.
