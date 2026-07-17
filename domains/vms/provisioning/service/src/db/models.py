@@ -22,27 +22,6 @@ class CredentialRole(str, enum.Enum):
     tenant = "tenant"
 
 
-class LeaseStatus(str, enum.Enum):
-    """Lifecycle states for a VM lease tracked in the vm_leases table.
-
-    pending   — lease_start_utc is in the future; VM may not yet be running.
-    active    — lease is running; lease_end_utc is in the future.
-    releasing — lease_end_utc has passed; watchdog submitted a vm_remove job to
-                confirm VM cleanup and is waiting for it to complete before
-                releasing the storefront resource.
-    released       — vm_remove succeeded and capacity is available again.
-    release_failed — vm_remove failed/timed out; capacity remains held.
-    unmanaged      — lifecycle oversight released; admin cleanup is required.
-    """
-
-    pending        = "pending"
-    active         = "active"
-    releasing      = "releasing"
-    released       = "released"
-    release_failed = "release_failed"
-    unmanaged      = "unmanaged"
-
-
 class AnsibleJob(Base):
     __tablename__ = "ansible_jobs"
     __table_args__ = (
@@ -196,71 +175,3 @@ from market_site.db import (  # noqa: F401
     SiteAllocation,
     SiteResource,
 )
-
-
-class VmLease(Base):
-    """Tracks active VM leases so the LeaseWatchdog can release storefront
-    resources when leases expire — replacing the storefront's polling pattern.
-
-    resource_id:
-        The storefront-assigned resource identifier (e.g. 'compute-kvm1-001').
-        Stored as unvalidated TEXT; the provisioning service has no resources
-        table, so no FK constraint is possible. Application-level FK enforced
-        by the storefront (caller).
-
-    escrow_uid:
-        On-chain escrow UID from the deal. Unique per lease — one deal produces
-        exactly one lease. Used for recovery queries and idempotency.
-
-    vm_host / vm_target:
-        KVM host alias and libvirt domain name. Used when submitting vm_remove jobs.
-
-    lease_start_utc / lease_end_utc:
-        Lease window boundaries in UTC. lease_start_utc is nullable (None means
-        "starts immediately on creation"). The watchdog acts when
-        lease_end_utc < now AND status IN (active, pending).
-
-    status:
-        LeaseStatus enum value. Transitions:
-          pending  → active    (when lease_start_utc passes or is None at creation)
-          active   → releasing (when lease_end_utc passes, watchdog submits vm_remove job)
-          releasing→ released       (vm_remove job succeeds)
-          releasing→ release_failed (vm_remove fails or times out)
-          active   → unmanaged      (operator releases lifecycle oversight)
-
-    create_job_id:
-        Provisioning job_id of the VM creation job. Allows tracing from lease
-        back to the original job that produced the VM.
-
-    vm_remove_job_id:
-        Provisioning job_id for the most recent vm_remove Ansible job submitted by
-        the watchdog. Nullable — only set during the 'releasing' phase. Allows
-        operators to query ``GET /api/v1/jobs/{vm_remove_job_id}`` for details.
-    """
-
-    __tablename__ = "vm_leases"
-
-    id = Column(
-        String, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    resource_id = Column(String, nullable=False, index=True)
-    allocation_id = Column(String, nullable=True, index=True)
-    escrow_uid = Column(String, nullable=False, unique=True, index=True)
-    vm_host = Column(String, nullable=False)
-    vm_target = Column(String, nullable=False)
-    lease_start_utc = Column(DateTime(timezone=True), nullable=True)
-    lease_end_utc = Column(DateTime(timezone=True), nullable=False, index=True)
-    status = Column(
-        String, nullable=False, default=LeaseStatus.pending.value, index=True
-    )
-    create_job_id = Column(String, nullable=True)
-    vm_remove_job_id = Column(String, nullable=True)
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )

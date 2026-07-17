@@ -177,7 +177,45 @@ def _migrate_hosts_public_host(engine: Engine) -> None:
 
 
 def _migrate_vm_leases_table(engine: Engine) -> None:
-    Base.metadata.tables["vm_leases"].create(bind=engine, checkfirst=True)
+    """Historical step, kept for correct replay against any DB still
+    catching up from scratch. vm_leases was dropped for good by
+    ``_migrate_drop_vm_leases_table`` below — this only recreates a table
+    that migration then removes. Defined via raw SQL rather than
+    ``Base.metadata.tables["vm_leases"]`` because the VmLease ORM model
+    (which this table backed) was removed once the table itself was
+    confirmed dead code; migration history must stay replayable without
+    depending on a model that no longer exists.
+    """
+    if engine.dialect.name == "postgresql":
+        id_default = "(gen_random_uuid()::text)"
+    else:
+        id_default = "(lower(hex(randomblob(16))))"
+    with engine.begin() as connection:
+        connection.execute(text(
+            f"""
+            CREATE TABLE IF NOT EXISTS vm_leases (
+                id VARCHAR PRIMARY KEY DEFAULT {id_default},
+                resource_id VARCHAR NOT NULL,
+                escrow_uid VARCHAR NOT NULL UNIQUE,
+                vm_host VARCHAR NOT NULL,
+                vm_target VARCHAR NOT NULL,
+                lease_start_utc TIMESTAMP,
+                lease_end_utc TIMESTAMP NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'pending',
+                create_job_id VARCHAR,
+                vm_remove_job_id VARCHAR,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+            )
+            """
+        ))
+    for index_name, sql in (
+        ("ix_vm_leases_resource_id", "CREATE INDEX IF NOT EXISTS ix_vm_leases_resource_id ON vm_leases (resource_id)"),
+        ("ix_vm_leases_escrow_uid", "CREATE INDEX IF NOT EXISTS ix_vm_leases_escrow_uid ON vm_leases (escrow_uid)"),
+        ("ix_vm_leases_lease_end_utc", "CREATE INDEX IF NOT EXISTS ix_vm_leases_lease_end_utc ON vm_leases (lease_end_utc)"),
+        ("ix_vm_leases_status", "CREATE INDEX IF NOT EXISTS ix_vm_leases_status ON vm_leases (status)"),
+    ):
+        _create_index_if_missing(engine, index_name, sql)
 
 
 def _migrate_vm_leases_allocation_id(engine: Engine) -> None:
@@ -189,6 +227,22 @@ def _migrate_vm_leases_allocation_id(engine: Engine) -> None:
             "CREATE INDEX IF NOT EXISTS ix_vm_leases_allocation_id "
             "ON vm_leases (allocation_id)",
         )
+
+
+def _migrate_drop_vm_leases_table(engine: Engine) -> None:
+    """Drop vm_leases for good.
+
+    Confirmed dead: no code anywhere in this repository ever constructs a
+    VmLease row (the ORM model backing this table has been removed —
+    db/models.py). The live lease watchdog operates entirely through
+    SiteAllocation (market_site.db) instead. This is a genuine DROP, not a
+    disable/soft-delete — there is no data to preserve (the table has
+    always been empty in practice) and no application-level FK references
+    it (VmLease.resource_id was always an unvalidated TEXT column, per its
+    own former docstring).
+    """
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS vm_leases"))
 
 
 def _migrate_site_allocations_executor_fields(engine: Engine) -> None:
@@ -306,5 +360,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260713_002_resource_pools_and_hosts_pool_id",
         _migrate_resource_pools_and_hosts_pool_id,
+    ),
+    Migration(
+        "20260718_001_drop_vm_leases_table",
+        _migrate_drop_vm_leases_table,
     ),
 )
