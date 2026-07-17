@@ -31,11 +31,17 @@ it.
   (`vm_host` required attribute) to pool-shaped, consuming
   `pools-4-storefront-capacity-boundary`'s reservation claim shape.
 - Replace `create_vm_and_wait_with_credentials`'s direct
-  `ExecutorActionEnvelope` dispatch with a provisioning-side
-  `FulfillmentService` call. That service coordinates
-  `PhysicalSettlementScheduler.select_resource`, provider resolution,
-  asynchronous create dispatch, and normalized status observation (see
-  `pools-3`'s asynchronous-provider decision — `create()` is dispatch-only by design).
+  `ExecutorActionEnvelope` dispatch with two provisioning-side calls the
+  storefront invokes as separate operations — schedule
+  (`PhysicalSettlementScheduler.select_resource`) and dispatch
+  (`FulfillmentService.create`) — plus an optional convenience operation
+  that composes both for callers that don't need the pricing-preview
+  behavior. **`FulfillmentService` does not call the scheduler and never
+  will** (`pools-3`'s explicit, unchanged boundary decision); the
+  storefront calls them in sequence because `select_resource`'s result
+  can be commercially material before a deal is finalized (see
+  `design.md`, "Storefront orchestrates scheduling and dispatch as
+  separate calls").
 - Resolve `pools-3`'s deferred release-path wiring: give
   `VmReleaseExecutor` (or its replacement) a way to resolve
   `SettlementRecord` → `ProviderRegistry.require(provider).teardown(...)`
@@ -63,9 +69,52 @@ it.
   policy is meant to own. Likely removed or reduced to pool-level
   preference once the storefront stops picking concrete resources itself.
 
-## Activation Condition
+## Status
 
-This stays taskless until:
+This change is active — a full design review (2026-07-15 through
+2026-07-17) resolved the scope and package-boundary questions this
+section originally deferred. It is not yet planned (no `tasks.md`); the
+next step is planning, not a further design-review pass, unless planning
+surfaces a genuine new ambiguity.
+
+**Resolved scope, superseding the original activation gate below:**
+this change retrofits the existing VM domain storefront and provisioning
+service onto the POOLS 1-4 machinery. It does not perform
+`market-platform-compute-30-extract-service`'s service extraction —
+where `PhysicalSettlementScheduler`/`DeterministicRoundRobinPolicy` live
+was decided directly by this change's design review (moved to
+`compute_provisioning`; see `design.md`) rather than waited on. `kit/site`
+and `kit/resource-pools` may be modified where genuinely cross-domain,
+and the `apicredits` domain is explicitly in scope for the same
+capacity-reservation-against-a-pooled-view reshape, not just VM — both
+permitted, not required, exercised where this review found real need.
+
+**Dependencies, current as of this review:**
+
+- `pools-2-physical-settlement-scheduler` — implemented prerequisite.
+- `pools-3-fulfillment-provider` — implemented prerequisite.
+- `pools-4-storefront-capacity-boundary` — prerequisite; verify landed
+  status at planning time (see original activation condition below —
+  this dependency itself is unchanged, only the compute-30 half of the
+  original gate is resolved).
+- `pools-6-multidimensional-fair-scheduling` — **blocking prerequisite**,
+  found during this review, not part of the original gate: `Host` has no
+  memory/disk/vCPU capacity field, so reservation admission cannot verify
+  a negotiated shape fits any real machine. See `design.md`, "Dependency
+  on POOLS-6." This change's reservation-admission work must not begin
+  implementation until `pools-6` resolves multidimensional capacity
+  tracking.
+- `pools-8-capacity-projection-and-listing-hints` — related, not
+  blocking, but consequential: this change alone fixes
+  provisioning-service-side `pool_id` correctness; the storefront's own
+  claim-building isn't fixed until `pools-8` also lands. See `design.md`,
+  "Scope split: `CapacityProjection` and hints move to `pools-8`."
+- `market-platform-compute-30-extract-service` — related follow-on, not
+  an activation prerequisite or blocker.
+
+**Original activation condition (superseded above, kept for history):**
+
+This stayed taskless until:
 
 - (a) `pools-4-storefront-capacity-boundary` has landed — the storefront
   needs to already be asking for pool-shaped capacity before it can
@@ -79,11 +128,8 @@ This stays taskless until:
   `pools-5-shared-provisioning-package`), or a second domain forces that
   decision sooner — whichever comes first.
 
-Starting this cutover before (b) risks wiring the storefront against
-integration points that move once the package boundary resolves. A fresh
-design-review pass should precede implementation once activated, not a
-straight implementation of this document — same posture `compute-30` takes
-for its absorbed package-boundary decision.
+(b) was resolved directly rather than waited on, per "Resolved scope"
+above.
 
 ## Non-Goals (once activated)
 
@@ -93,21 +139,16 @@ for its absorbed package-boundary decision.
 - Removing `SettlementRecord`/`settlement_claims` independence —
   `pools-3` resolved that boundary; this change should not reopen it
   without new evidence of an actual need to correlate them.
-- **Operator-declared listing-mode hints are out of scope for this change's
-  first pass, but MUST be on its design-review agenda before implementation
-  starts.** Raised during `pools-4`'s design review (2026-07-16): a
-  datacenter operator's `ResourcePool.policy_tags` (`kit/resource-pools`)
-  is the natural place to declare whether their pool prefers pool-scoped
-  or specific-resource listing behavior — pool-level because it's the
-  operator's equipment and their call, and additive to a field the
-  resource-pool-management spec already designed for operator-declared
-  metadata. This must stay a **non-binding hint the storefront may read**,
-  never a fulfillment-lifecycle constraint enforced by provisioning —
-  `pools-2`'s "Explicit selection preserves eligibility" requirement
-  already commits to honoring an explicit `resource_id` request rather
-  than rejecting it for disagreeing with a pool's preferred scheduling
-  mode, and that should not change. See `design.md`'s "Remaining open
-  questions" for the concrete gap this surfaced.
+- **Operator-declared listing-mode hints, and `CapacityProjection`
+  (the storefront's pool/capacity mirror they depend on), are fully out
+  of scope — moved to `pools-8-capacity-projection-and-listing-hints`.**
+  Originally this change's proposal required listing-mode hints be on
+  this change's design-review agenda before implementation; that review
+  happened, and its conclusion was to split this work out entirely
+  rather than design it here, given its size and separability from the
+  fulfillment-cutover mechanics. See `design.md`, "Scope split:
+  `CapacityProjection` and hints move to `pools-8`" for the consequence
+  this split has for this change's own `pool_id`-correctness fix.
 
 ## Capabilities
 
@@ -123,15 +164,25 @@ for its absorbed package-boundary decision.
 ## Dependencies and Related Changes
 
 - Requires `pools-2-physical-settlement-scheduler` (implemented) and
-  `pools-3-fulfillment-provider`.
+  `pools-3-fulfillment-provider` (implemented).
 - Requires `pools-4-storefront-capacity-boundary` to land first.
-- Interacts with `market-platform-compute-30-extract-service`'s absorbed
+- **Requires `pools-6-multidimensional-fair-scheduling`** — blocking
+  prerequisite for reservation-admission work; see "Status" above.
+- Related, not blocking: `pools-8-capacity-projection-and-listing-hints`
+  — required for this change's `pool_id`-correctness fix to be complete
+  end-to-end on the storefront side; see "Status" above.
+- Interacted with `market-platform-compute-30-extract-service`'s absorbed
   package-boundary decision (formerly tracked by the now-closed
-  `pools-5-shared-provisioning-package`) — see Activation Condition.
+  `pools-5-shared-provisioning-package`) — resolved directly by this
+  change's design review rather than waited on; see "Status" above.
 
 ## Impact
 
-Not assessed — scope depends on how `pools-4` and `compute-30`'s absorbed
-package-boundary question resolve. A future design-review session should
-reassess before this leaves taskless status, not implement this document
-as written.
+Touches `kit/site` (`site_resource_pools`/`CapacityReservation` reshape),
+`compute_provisioning` (scheduler/policy relocation, `SettlementRecord`),
+the VM provisioning service (models, migrations, services, release
+lifecycle), and the VM storefront's reservation/orchestration path.
+Blocked on `pools-6` for reservation-admission correctness; not fully
+complete end-to-end without `pools-8`. Detailed file-level impact is a
+planning-step output, not assessed further here — this section will be
+revised once `tasks.md` exists.

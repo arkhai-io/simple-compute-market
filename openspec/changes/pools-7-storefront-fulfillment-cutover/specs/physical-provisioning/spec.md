@@ -27,18 +27,18 @@ second, duplicate Ansible job for the same physical operation.
 
 #### Scenario: Recovery sweep retries a pending dispatch
 
-- **WHEN** a `SettlementRecord` is found in `dispatch_pending` state at
-  service startup and `FulfillmentService.create` is retried for that
-  allocation
+- **WHEN** a `SettlementRecord` is found in `dispatch_pending` state by
+  the periodic recovery sweep and `FulfillmentService.create` is retried
+  for that allocation
 - **THEN** at most one Ansible create job is ever dispatched for that
   allocation, and the retry observes the originally-submitted job rather
   than a new one
 
 #### Scenario: Recovery sweep retries a pending teardown dispatch
 
-- **WHEN** a `SettlementRecord` is found in a teardown-dispatch-pending
-  state at service startup and `FulfillmentService.teardown` is retried
-  for that allocation
+- **WHEN** a `SettlementRecord` is found in `teardown_dispatch_pending`
+  state by the periodic recovery sweep and `FulfillmentService.teardown`
+  is retried for that allocation
 - **THEN** at most one Ansible teardown job is ever dispatched for that
   allocation, and the retry observes the originally-submitted job rather
   than a new one

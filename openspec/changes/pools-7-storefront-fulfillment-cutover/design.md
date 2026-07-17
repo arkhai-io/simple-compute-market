@@ -147,15 +147,18 @@ wired.
   `compute_provisioning`); `compute-30`'s own proposal has been updated
   to match.
 - **Operator listing-mode hints via `ResourcePool.policy_tags`** —
-  **RESOLVED, see "Listing-mode hint consumption" below.** The channel
-  question this bullet originally left open (how a storefront learns a
-  pool's `policy_tags` across the service boundary) is answered by
-  `CapacityProjection` (this file's "`SiteResource` is retired" section):
-  the pull-based pool mirror carries `policy_tags` along for free, no new
-  channel needed. The `_eligible_candidates`/`SiteResource.attributes.pool_id`
-  sync gap this bullet also raised is separately resolved by the same
-  section — `site_resource_pools` is now derived from `hosts`/
-  `resource_pools`, not storefront-pushed.
+  **designed, then SPLIT OUT to `pools-8-capacity-projection-and-listing-hints`
+  along with `CapacityProjection`** (see "Scope split: `CapacityProjection`
+  and hints move to `pools-8`" below) — not resolved in this change. The
+  channel question this bullet originally left open (how a storefront
+  learns a pool's `policy_tags` across the service boundary) was answered
+  during this review by `CapacityProjection`: the pull-based pool mirror
+  carries `policy_tags` along for free, no new channel needed — but the
+  design itself now lives in `pools-8`, not here. The
+  `_eligible_candidates`/`SiteResource.attributes.pool_id` sync gap this
+  bullet also raised IS resolved in this change (unaffected by the scope
+  split) — see "`SiteResource` is retired," below: `site_resource_pools`
+  is now derived from `hosts`/`resource_pools`, not storefront-pushed.
 
 ## Accepted provider configuration
 
@@ -209,15 +212,11 @@ Resolved shape:
   up front; the scheduler reassigns among *equally eligible* resources),
   not Option B (reserve against a pool-level aggregate with no concrete
   resource until scheduling) from this change's earlier draft.
-- **`CapacityProjection`** (storefront-side, new) — the storefront's
-  read-only, pull-based mirror of every connected provisioning service's
-  pool/capacity state (`GET /api/v1/pools`, which already exists and is
-  already reachable — the storefront already holds the admin key for
-  each configured site). This is the only place aggregation across hosts
-  happens, and it is explicitly advisory/display-only (pricing, listing
-  publication) — never the thing admission control checks against. Keyed
-  by `(site, pool_id)`, since pool IDs are only unique per provisioning
-  service.
+- **`CapacityProjection`** (storefront-side) — **split out of this
+  change, see "Scope split: CapacityProjection and hints move to
+  `pools-8`" below.** Briefly: the storefront's read-only mirror of every
+  connected provisioning service's pool/capacity state, for
+  pricing/listing display only, never for admission.
 - **Physical Resource** (vocabulary term, unchanged) — already used
   across kit with per-domain implementations; no change needed.
 
@@ -367,9 +366,22 @@ for the same reason).
 ```python
 class SettlementRecordState(str, enum.Enum):
     assigned         = "assigned"          # scheduler picked a resource,
-                                            # no dispatch yet — the ONLY
-                                            # state in which the row may
-                                            # still be re-selected/mutated
+                                            # no dispatch yet. May persist
+                                            # for a real, potentially long
+                                            # window (see "Expected time
+                                            # between scheduling and
+                                            # dispatch" below) — but is NOT
+                                            # mutable: a repeat
+                                            # select_resource call for this
+                                            # allocation_id is an ordinary
+                                            # idempotent-retry-or-conflict
+                                            # check, same shape as
+                                            # FulfillmentService.create's.
+                                            # See "Requirements change under
+                                            # negotiation" below for how a
+                                            # changed shape is actually
+                                            # handled (a NEW allocation_id,
+                                            # never mutation of this one).
     dispatch_pending = "dispatch_pending"  # about to call provider.create();
                                             # written durably BEFORE the
                                             # call, for crash recovery
@@ -380,11 +392,17 @@ class SettlementRecordState(str, enum.Enum):
     active           = "active"            # provider reports succeeded
     failed           = "failed"            # validation rejected, or
                                             # provider reports failed
+    teardown_dispatch_pending = "teardown_dispatch_pending"  # about to
+                                            # call provider.teardown();
+                                            # written durably BEFORE the
+                                            # call — teardown's analogue of
+                                            # dispatch_pending, same
+                                            # recovery-sweep treatment
     tearing_down     = "tearing_down"
     torn_down        = "torn_down"
     teardown_failed  = "teardown_failed"
     abandoned        = "abandoned"         # reservation expired/released/
-                                            # changed while still
+                                            # was superseded while still
                                             # "assigned" — no physical work
                                             # was ever dispatched. Terminal,
                                             # not re-enterable: a rejected
@@ -410,9 +428,11 @@ class SettlementRecord(Base):
     settlement_resource_id = Column(String, nullable=False)
     provider = Column(String, nullable=False)
     requirements = Column(JSON, nullable=False)   # for equivalence checks;
-                                                    # mutable while state=="assigned"
-                                                    # (negotiation may still change
-                                                    # requirements before dispatch)
+                                                    # IMMUTABLE once written —
+                                                    # a changed shape gets a
+                                                    # new allocation_id, see
+                                                    # "Requirements change
+                                                    # under negotiation"
     provider_metadata = Column(JSON, nullable=False, default=dict)
     teardown_provider_metadata = Column(JSON, nullable=True)
     state = Column(String, nullable=False, default=SettlementRecordState.assigned.value)
@@ -420,36 +440,39 @@ class SettlementRecord(Base):
     updated_at = Column(DateTime, ...)
 ```
 
-### Two different idempotency rules depending on `state`
+### `select_resource` idempotency is uniform — no state-dependent mutation branch
 
-`select_resource`'s existing-record handling is NOT a single uniform
-"record exists -> return it" rule. The dividing line is whether `state`
-has left `assigned`:
+An earlier draft of this review gave `state == "assigned"` a special,
+mutable carve-out — repeat calls could overwrite `pool_id`/
+`settlement_resource_id`/`requirements` to accommodate negotiation
+changing the deal's shape before dispatch. **Resolved: this is wrong and
+is removed.** See "Requirements change under negotiation" below —
+allowing in-place mutation of an admitted reservation's shape is
+dangerous (the held capacity may no longer correspond to what's
+recorded, and it undermines the exact auditability property motivating a
+single-row state machine in the first place). The correct handling is a
+new `allocation_id` entirely, never mutation of this one.
 
-- **`state == "assigned"` (including no record at all):** the row is
-  still a mutable scheduling decision. `select_resource` is free to
-  re-run eligibility/selection and overwrite `pool_id`,
-  `settlement_resource_id`, `provider`, and `requirements` — needed for
-  the case where negotiation changes the deal's requirements (or the
-  buyer's requested capacity) after an initial schedule but before
-  dispatch. `assign_settlement_resource` already handles the capacity
-  side of a genuine re-pick atomically (no-op if the resource is
-  unchanged; moves held units correctly if it's a real reassignment) —
-  `select_resource` now also calls it on re-selection, not only on first
-  selection.
-- **`state != "assigned"` (dispatch has started or finished):** the row
-  is the immutable, equivalence-checked record `pools-3` already
-  specified. `select_resource` returns it as-is; an explicit-resource
-  request that disagrees with `settlement_resource_id` fails with
-  `SettlementRequestMismatchError`. No expiry check applies on this path
-  — the `CapacityReservation`'s TTL hold is irrelevant once real physical
-  work exists; only equivalence/conflict rules apply from here.
+With that removed, `select_resource`'s existing-record handling is
+uniform regardless of `state`:
+
+```python
+existing = db.get(SettlementRecord, request.allocation_id, with_for_update=True)
+if existing is not None:
+    if _is_equivalent(existing, request):
+        return existing.to_settlement_resource()   # idempotent retry
+    raise SettlementRequestMismatchError(...)       # conflicting reuse
+
+# No record yet — the only path that can ever write one.
+allocation = self._require_valid_allocation(db, request)   # may raise
+                                                              # CapacityReservationExpiredError
+...
+```
 
 `CapacityReservation` expiry (`CapacityReservationExpiredError`) is
-therefore checked **only** on the "still assigned, may re-schedule"
-path, never on the "already dispatched" fast-return path — an allocation
-whose TTL lapsed after dispatch already succeeded must not have its
-retries start failing.
+therefore checked **only** when no `SettlementRecord` exists yet for this
+`allocation_id` — an allocation whose TTL lapsed after it was already
+scheduled (or dispatched) must not have its retries start failing.
 
 **If an operator requests scheduling against an already-expired
 `CapacityReservation`, `select_resource` MUST reject it.** The storefront
@@ -462,22 +485,25 @@ TTL hint" below for an operator-side lever on that.
 
 ### `abandoned` state and the lease-lifecycle watchdog
 
-A `CapacityReservation` can expire, release, or have its requirements
-change while its `SettlementRecord` is still sitting in `assigned`
-(nothing dispatched yet) — this is expected to be the common case for
-delay between scheduling and dispatch, not the exception; see below. The
-existing watchdog that already sweeps expired/released
+A `CapacityReservation` can expire, release, or be superseded by a fresh
+reservation (see "Requirements change under negotiation" below) while its
+`SettlementRecord` is still sitting in `assigned` (nothing dispatched
+yet) — this is expected to be a common way to reach this state, not the
+exception. The existing watchdog that already sweeps expired/released
 `CapacityReservation` rows (`LeaseLifecycleService.check_leases`) should
 also transition any `assigned`-state `SettlementRecord` for that
 allocation to `abandoned` — reusing the existing sweep rather than adding
-a second, parallel watchdog. No capacity cleanup is needed as part of
-that specific transition: `assign_settlement_resource` only ever moves
-*which* resource the reservation's already-held units point at, and the
-reservation's own release path already frees whatever resource it
-currently points to, independent of whether a `SettlementRecord` was
-ever created. `abandoned` exists purely for audit clarity, so a
-`settlement_records` row never sits at `assigned` forever with no
-explanation of why it stalled.
+a second, parallel watchdog. This is also the mechanism a supersede
+resolves through: releasing the *old* `allocation_id`'s reservation after
+a new one succeeds runs through this same release path, and its
+`SettlementRecord` (if any existed) picks up `abandoned` the same way.
+No capacity cleanup is needed as part of that specific transition:
+`assign_settlement_resource` only ever moves *which* resource the
+reservation's already-held units point at, and the reservation's own
+release path already frees whatever resource it currently points to,
+independent of whether a `SettlementRecord` was ever created. `abandoned`
+exists purely for audit clarity, so a `settlement_records` row never sits
+at `assigned` forever with no explanation of why it stalled.
 
 ### Expected time between scheduling and dispatch
 
@@ -488,27 +514,50 @@ in practice is between **reservation and scheduling**, not between
 scheduling and dispatch — a `CapacityReservation` may sit unscheduled for
 a long time and can expire before it's ever scheduled. A real (if
 uncommon) case for delay between scheduling and dispatch specifically:
-scheduling happening as part of agent lease negotiation itself (e.g. a
-delayed lease start time, or a late-stage negotiation change), most
-plausibly triggered by the buyer's requested capacity/requirements
-changing mid-negotiation after an earlier schedule. The
-still-`assigned`/mutable-until-dispatch design above is what accommodates
-this without treating it as an error case.
+scheduling happening as part of agent lease negotiation itself, most
+plausibly because the storefront calls `select_resource` *before*
+finalizing price — the resource actually selected can be commercially
+material (see "Storefront orchestrates scheduling and dispatch as
+separate calls" below) — so a real window can open between "resource is
+known" and "deal is finalized and dispatch is triggered." The
+still-`assigned`, non-mutable design above accommodates this without
+treating it as an error case: the record simply waits in `assigned`,
+idempotently, until either dispatch or a supersede/release reaches it.
 
-### Pool-level reservation TTL hint (flagged, not designed here)
+### Requirements change under negotiation: supersede, never mutate (design review continued, 2026-07-17)
 
-An operator may want a pool-level limit on how long a
-`CapacityReservation` against their resources can sit unscheduled/held —
-raised during this review as a real, well-motivated use case, not
-designed here. Same shape and posture as the listing-mode hint above:
-an additive `ResourcePool.policy_tags` entry
-(`{"max_reservation_hold_seconds": 900}`), read and voluntarily respected
-by a cooperating storefront when it chooses the `ttl_seconds` it passes
-to `reserve()` — never enforced by the provisioning service itself
-(`reserve()` already accepts a caller-supplied `ttl_seconds`; no new
-ledger capability is needed, only a place for the operator to express a
-preference and a storefront willing to read it). Left for planning to
-schedule, not required by POOLS-7's first pass.
+**Resolved:** if a deal's requirements change after a
+`CapacityReservation`/`SettlementRecord` already exists for it (still
+`assigned`, not yet dispatched), the caller mints a **new**
+`allocation_id`, reserves capacity for the *new* shape under it, and only
+**after that reservation succeeds** releases the *old* `allocation_id`'s
+`CapacityReservation`. Never mutates the existing reservation or
+`SettlementRecord` in place.
+
+Ordering matters and is the crux of the decision: **reserve-new, then
+release-old — never release-old-then-reserve-new.** If a new reservation
+attempt fails (the updated shape genuinely isn't available), the old
+reservation MUST remain untouched and valid — the negotiation continues
+on the original terms, and whatever's negotiating (an agent, most likely)
+takes the failure back into the negotiation ("can't do X, can still do
+Y") rather than the system having destroyed a working reservation while
+chasing one that didn't pan out. This is achievable with existing
+primitives — an ordinary `reserve()` call for the new shape, then an
+ordinary `release()` of the old `allocation_id` — no new ledger mechanism
+needed.
+
+This is also why the `select_resource` idempotency simplification above
+is correct rather than a loss of capability: every "requirements changed"
+case that used to motivate mutating a record in place is now a *new*
+`allocation_id`'s first-time `select_resource` call, which the ordinary
+(no existing record) path already handles.
+
+### Pool-level reservation TTL hint — split out, see `pools-8`
+
+Moved to `pools-8-capacity-projection-and-listing-hints` alongside the
+listing-mode hint, per the scope-split decision below — same
+`policy_tags`-hint shape and posture, not required for POOLS-7's first
+pass.
 
 ## Commit <-> async-dispatch failure window: resolved (design review continued, 2026-07-17)
 
@@ -700,77 +749,175 @@ still-possible generic/unpinned case, special-case pinned claims to route
 directly by known site, or something else, is not decided here — this is
 a question for planning, not resolved by this design review.
 
-## Listing-mode hint consumption: resolved (design review continued, 2026-07-17)
 
-Resolves the channel question the original "Operator listing-mode hints"
-entry above left open. No new channel is needed: `CapacityProjection`
-(this file's "`SiteResource` is retired" section) already pulls pool
-metadata from `GET /api/v1/pools`, so `policy_tags` rides along once the
-sync carries it:
+## Listing-mode hint consumption — split out, see `pools-8`
+
+Moved to `pools-8-capacity-projection-and-listing-hints` in full (schema,
+`resolve_vm_listing_mode`/`resolve_apicredits_listing_mode`,
+extensibility argument, enforcement posture), per the scope-split
+decision below — it depends on `CapacityProjection` carrying
+`policy_tags`, which is no longer this change's scope.
+
+## Scope split: `CapacityProjection` and hints move to `pools-8` (design review continued, 2026-07-17)
+
+**Resolved:** `CapacityProjection`, the listing-mode hint, and the
+pool-level reservation TTL hint move to a new change,
+`pools-8-capacity-projection-and-listing-hints`. Reasoning: this change
+is already large (`site_resource_pools`/`CapacityReservation`/
+`SettlementRecord`/scheduler-and-fulfillment orchestration/idempotent
+dispatch/release-path wiring), and `CapacityProjection` is a materially
+separate subsystem — pull schedules, freshness, multi-site keys,
+publication reactions, its own storage and migrations — not inherently
+part of the fulfillment-cutover mechanics. The two hints depend on
+`CapacityProjection` carrying `policy_tags`, so they move with it.
+
+**This split has a real consequence, not a free one, and it must stay
+visible rather than be quietly absorbed:** this change's "`SiteResource`
+is retired" fix makes `site_resource_pools`/`PhysicalSettlementScheduler`
+correctly source `pool_id` from `hosts`/`resource_pools` — closing the
+provisioning-service side of the original `pool_id`-namespace bug this
+whole review started from. But the storefront's own claim-building
+(`vm_job_spec_service.py`) still sources the `pool_id`/`resource_id` it
+puts into a reservation request from the storefront's local, independently-
+authored inventory today. Until `pools-8` lands and actually replaces
+that local table with `CapacityProjection`, the storefront can still send
+claims naming pool/resource identities that don't correspond to anything
+real — which, after this change's fix, now fails cleanly at admission
+(a real `NoEligibleSettlementResourceError`/similar) instead of silently
+matching the wrong thing. That's strictly better than today's silent
+mismatch risk, but it is not the same as the bug being fully closed
+end-to-end. `pools-7`'s `proposal.md` Dependencies section should state
+this plainly: `pools-7` alone fixes provisioning-side correctness;
+`pools-8` is required for the storefront to reliably send valid claims.
+
+## Storefront orchestrates scheduling and dispatch as separate calls (design review continued, 2026-07-17)
+
+**Resolved: confirms POOLS-3's design was already correct as written —
+no correction needed there.** `pools-3`'s `design.md` diagram names "the
+storefront" as the orchestrator calling `select_resource(...)` then
+`FulfillmentService.create(...)` in sequence. An earlier pass of this
+review flagged apparent tension between that and this change's atomic,
+single-transaction `select_resource` design — there isn't one, once the
+reason for the split is understood: **`select_resource`'s result can be
+commercially material to the negotiation before a deal is finalized**
+(e.g. a larger node's price for the same requested capacity may differ
+from a smaller one, and the buyer/agent may need to know which node was
+selected before price is finalized). Scheduling capacity and finalizing
+a deal are genuinely separate decisions the storefront needs to make at
+separate times, not an implementation detail to hide behind one call.
+
+Resolved shape: two required storefront-facing operations, plus one
+optional convenience operation:
+
+1. **Schedule** — invokes `select_resource`. Returns the selected
+   `SettlementResource` (so it can inform pricing/negotiation). Does not
+   dispatch anything.
+2. **Dispatch** — invokes `FulfillmentService.create` against an
+   already-scheduled allocation. This is where `dispatch_pending` and
+   everything downstream in the state machine begins.
+3. **(Optional) Atomic convenience operation** — calls (1) then (2) in
+   one request, for callers that don't need the pricing-preview behavior
+   and just want to fulfill immediately. Not required; a thin
+   composition of the two required operations, not a third code path.
+
+Each of (1) and (2) remains its own atomic transaction internally (this
+file's earlier transaction-boundary decisions are unaffected) — "the
+storefront calls them separately" describes the *external* API shape,
+not the internal transaction boundary of either call. Exact route/wire
+shapes (the concrete API contract `create_vm_and_wait_with_credentials`
+gets replaced by — request/response bodies, status representation,
+credentials retrieval, teardown request/response) are not decided here;
+left for planning.
+
+## Transaction boundary and repository ownership, stated explicitly (design review continued, 2026-07-17)
+
+Two things that were implicit in this file's code sketches rather than
+stated as requirements, made explicit here:
+
+- **`assign_settlement_resource` (capacity rebind) and `SettlementRecord`
+  creation/transition MUST share one database transaction.** Achievable
+  because `CapacityLedgerService`, `ResourcePoolService`, and (per the
+  `compute_provisioning` migration decision above) `PhysicalSettlementScheduler`
+  all already live in the same provisioning-service process/database — this
+  isn't a cross-service transaction, it's an ordinary single-database one.
+  A sequence that moves capacity, commits, and only then inserts the
+  settlement record as a second commit is NOT acceptable — a crash between
+  those two commits leaves a moved reservation with no durable scheduling
+  identity, silently reintroducing the exact failure window point 2 exists
+  to close.
+- **`SettlementRecord`'s model/repository interface lives in
+  `compute_provisioning`, alongside `PhysicalSettlementScheduler` and the
+  request/resource dataclasses it already owns — not in `kit/resource-pools`
+  alongside `ResourcePool`.** It is physical-settlement lifecycle state,
+  not pool-administration state; it belongs with the scheduler that writes
+  it, for the same reasons the scheduler itself moved there. The concrete
+  SQLAlchemy table is still composed into whichever service's actual
+  database (the VM provisioning service's, today).
+
+## Provider input snapshot: prepare/dispatch split (design review continued, 2026-07-17)
+
+Concretizes a principle this file already stated in passing ("Accepted
+provider configuration," above) without a mechanism. **Resolved:** the
+provider prepares its execution input synchronously, before the
+transaction that marks a record `dispatch_pending` commits; dispatch
+itself happens after commit, against the already-prepared, now-durable
+input — not by re-reading live pool/host configuration during a recovery
+retry.
 
 ```python
-class CachedResourcePool(Base):
-    __tablename__ = "capacity_projection_pools"
-
-    site = Column(String, primary_key=True)
-    pool_id = Column(String, primary_key=True)
-    label = Column(String, nullable=False)
-    provider = Column(String, nullable=False)
-    enabled = Column(Boolean, nullable=False)
-    policy_tags = Column(JSON, nullable=False, default=dict)
-    synced_at = Column(DateTime, nullable=False)
+prepared = provider.prepare_create(request, resource, pool_config)
+# `prepared` is a serializable, normalized representation of exactly what
+# will be submitted — stored on the SettlementRecord (or a related column)
+# as part of the same transaction that sets state=dispatch_pending.
+...
+await provider.dispatch_create(prepared)   # post-commit; safe to retry
+                                             # via the recovery sweep using
+                                             # the SAME stored `prepared`
+                                             # value, never a fresh read
 ```
 
-The reconciler-driven publish path (`domains/vms/listings/reconciler.py`,
-`cli_publish.py`) already has a structural default, confirmed during
-`pools-4`'s design review: a listing derived from a single-resource pool
-is resource-pinned; one derived from a real multi-member pool is
-pool-scoped. This change's scope is narrower than originally framed: let
-an explicit hint override that default, don't replace it.
+This is what makes the recovery sweep (point 2) correct against a pool
+edited or deleted *after* a record was accepted: accepted work is
+insulated from later configuration changes because it dispatches from a
+frozen snapshot, not a live re-read.
 
-```python
-# kit/resource-pools — domain-neutral: the key name only.
-LISTING_MODE_TAG = "listing_mode"
+## Recovery sweep: periodic, not startup-only (design review continued, 2026-07-17)
 
-# domains/vms — VM-domain interpretation + default.
-class VmListingMode(str, Enum):
-    pooled = "pooled"
-    specific_resource = "specific_resource"
+**Resolved:** the `dispatch_pending`/`teardown_dispatch_pending` recovery
+sweep (point 2) runs periodically, not only at process startup. A
+startup-only sweep misses the case where a provider call fails
+transiently (e.g. a network blip to the Ansible controller) while the
+process keeps running — that record would never be retried until the
+next restart. Same query, same idempotent-retry logic as the startup
+sweep; just scheduled periodically instead of once. Multi-replica safety
+(claiming rows so multiple replicas don't double-process the same record
+— `SELECT ... FOR UPDATE SKIP LOCKED` or an equivalent claim/lease
+pattern) is required regardless of whether the sweep is startup-only or
+periodic, and is left for planning to specify concretely.
 
-def resolve_vm_listing_mode(pool: CachedResourcePool, member_count: int) -> VmListingMode:
-    declared = pool.policy_tags.get(LISTING_MODE_TAG)
-    if declared in (VmListingMode.pooled.value, VmListingMode.specific_resource.value):
-        return VmListingMode(declared)
-    return (VmListingMode.specific_resource if member_count == 1
-            else VmListingMode.pooled)   # unchanged pools-4 structural default
-```
+## Legacy allocations during cutover (design review continued, 2026-07-17)
 
-**Extensibility confirmed against `apicredits`**, not just asserted: since
-`apicredits` is explicitly in scope for this session's broader
-`kit`/`CapacityReservation` reshape, the shape only counts as
-domain-neutral if `apicredits` can express something VM doesn't need
-without touching `kit/resource-pools`. It can — same `LISTING_MODE_TAG`
-key, a wholly different enum and default rule, zero kit changes:
+Real gap, not addressed by "no allocation without a `SettlementRecord`"
+alone — that describes the target *steady state*, not what happens to
+allocations already in flight, created under the old direct-dispatch
+path, at the moment this change deploys. **Resolved: two acceptable
+strategies, choice deferred to planning, but whichever is chosen MUST be
+stated explicitly rather than silently assumed:**
 
-```python
-class ApiCreditsListingMode(str, Enum):
-    shared_quota = "shared_quota"     # listing draws from a pooled quota bucket
-    dedicated_key = "dedicated_key"   # listing is pinned to one provider API key
+1. **Fabricate a `SettlementRecord` for each pre-existing allocation
+   during migration** — backfill a row (state reflecting whatever's
+   inferable about the allocation's actual status, e.g. `active` for a
+   running VM) so every allocation uniformly has one going forward, and
+   the release path never needs a "no settlement record" branch at all.
+2. **Explicitly accept a compatibility break** — allocations created
+   before the cutover marker are not migrated; release for them continues
+   through the pre-existing direct-dispatch-aware path (or an equivalent
+   documented fallback) rather than being forced through
+   `PhysicalSettlementScheduler`/`FulfillmentService`. This is acceptable
+   for this codebase's maturity level ("that's OK from time to time," not
+   a production migration with an SLA) but MUST be written down as a
+   deliberate decision in whatever change implements the cutover, not
+   discovered by a future reader as an unstated gap.
 
-def resolve_apicredits_listing_mode(pool: CachedResourcePool) -> ApiCreditsListingMode:
-    declared = pool.policy_tags.get(LISTING_MODE_TAG)
-    if declared in (ApiCreditsListingMode.shared_quota.value, ApiCreditsListingMode.dedicated_key.value):
-        return ApiCreditsListingMode(declared)
-    return ApiCreditsListingMode.shared_quota
-```
-
-`kit/resource-pools` owns one string key; each domain owns its own enum
-and default rule; no cross-domain coupling.
-
-**Enforcement posture unchanged, restated for the record:**
-`PhysicalSettlementScheduler`'s explicit-`resource_id` eligibility path
-(`pools-2`) is unaffected by a pool's `listing_mode` regardless — a
-buyer's explicit resource request is honored even against a pool tagged
-`pooled`. A storefront that never reads the tag, or one running against a
-provisioning service that predates this feature, falls through to the
-unchanged structural default. Purely additive.
+Either way, this needs a concrete plan before implementation — not
+resolved further here.
