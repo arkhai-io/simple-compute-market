@@ -524,27 +524,77 @@ still-`assigned`, non-mutable design above accommodates this without
 treating it as an error case: the record simply waits in `assigned`,
 idempotently, until either dispatch or a supersede/release reaches it.
 
-### Requirements change under negotiation: supersede, never mutate (design review continued, 2026-07-17)
+### Requirements change under negotiation: supersede, never mutate (design review continued, 2026-07-17; ordering corrected 2026-07-17)
 
 **Resolved:** if a deal's requirements change after a
 `CapacityReservation`/`SettlementRecord` already exists for it (still
 `assigned`, not yet dispatched), the caller mints a **new**
-`allocation_id`, reserves capacity for the *new* shape under it, and only
-**after that reservation succeeds** releases the *old* `allocation_id`'s
-`CapacityReservation`. Never mutates the existing reservation or
+`allocation_id`, reserves capacity for the *new* shape under it, and the
+*old* `allocation_id`'s `CapacityReservation` is released as part of the
+same atomic operation. Never mutates the existing reservation or
 `SettlementRecord` in place.
 
-Ordering matters and is the crux of the decision: **reserve-new, then
-release-old — never release-old-then-reserve-new.** If a new reservation
-attempt fails (the updated shape genuinely isn't available), the old
-reservation MUST remain untouched and valid — the negotiation continues
-on the original terms, and whatever's negotiating (an agent, most likely)
-takes the failure back into the negotiation ("can't do X, can still do
-Y") rather than the system having destroyed a working reservation while
-chasing one that didn't pan out. This is achievable with existing
-primitives — an ordinary `reserve()` call for the new shape, then an
-ordinary `release()` of the old `allocation_id` — no new ledger mechanism
-needed.
+**The mechanism is one atomic ledger transaction, not two independently-
+committed calls in a chosen order.** An earlier version of this decision
+proposed "reserve-new, then release-old" as two ordinary, separate
+`reserve()`/`release()` calls specifically to guarantee the old
+reservation survives if the new one fails. That ordering has a real
+false-negative bug: evaluating the new shape's availability *before*
+releasing the old reservation means the check runs against a view where
+the old hold is still artificially consuming capacity — a resource that
+would satisfy the new request the moment the old hold clears can
+incorrectly report as unavailable, because that capacity is invisible
+until release actually happens. Reversing the order (release-then-reserve)
+would fix the visibility problem but reintroduces the original risk: a
+failed re-reservation would leave the negotiation with nothing, since the
+old reservation is already gone.
+
+Both properties — the new shape's availability evaluated *as if* the old
+hold were already released, and the old reservation left completely
+untouched if the new shape can't be satisfied — are only simultaneously
+achievable via one transaction that releases-then-reserves internally,
+committing only on success and rolling back in full on failure:
+
+```python
+def resize_reservation(
+    self, db, *, old_allocation_id: str, new_claim: dict, ttl_seconds: int,
+) -> str:
+    """Atomically supersede a CapacityReservation with a new shape."""
+    with db.begin():
+        old = self._require_active_reservation(db, old_allocation_id, for_update=True)
+        self._release_locked(db, old)          # frees old's held units,
+                                                  # visible only inside
+                                                  # this open transaction
+        resource, available = self._find_candidate(db, new_claim)  # now
+                                                  # correctly sees the
+                                                  # capacity old was
+                                                  # holding
+        if resource is None:
+            raise CapacityUnavailableError(...)  # transaction rolls back
+                                                    # in full — old's
+                                                    # release is undone,
+                                                    # nothing commits, old
+                                                    # remains exactly as
+                                                    # it was
+        new_allocation_id = self._reserve_locked(db, resource, new_claim, ttl_seconds)
+        if old_settlement_record_exists(db, old_allocation_id):
+            # mark it abandoned synchronously, in this same transaction —
+            # don't wait for the lease-lifecycle watchdog's next sweep
+            self._mark_settlement_abandoned(db, old_allocation_id)
+        return new_allocation_id   # committed atomically with everything above
+```
+
+Row locking (`for_update=True` on the old reservation, plus whatever
+locking `_find_candidate`'s candidate resources already use) prevents a
+concurrent transaction from grabbing the momentarily-freed capacity while
+this transaction is still open. This generalizes the atomic-rebind
+pattern `assign_settlement_resource` already uses (release source,
+check/claim destination, atomically) to a case that pattern doesn't
+already cover: there, source and destination are always *different*
+physical resources (or a true no-op when identical), so the old hold
+never blocks the new claim's availability check. Here, source and
+destination can legitimately be the *same* resource or same pool — which
+is exactly when the false-negative risk shows up.
 
 This is also why the `select_resource` idempotency simplification above
 is correct rather than a loss of capability: every "requirements changed"
