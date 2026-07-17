@@ -223,17 +223,21 @@ Resolved shape:
   attribute rather than a storefront-authored guess that happens to
   collide with an operator pool ID.
 - **`CapacityReservation`** (renamed from `SiteAllocation`) — the
-  hold/lease-tail row. Its primary claim target changes from an
-  always-concrete `resource_id` to `pool_id`; `settlement_resource_id`
-  becomes a nullable field populated once, by `assign_settlement_resource`,
-  when `PhysicalSettlementScheduler` makes its placement decision — not
-  rebound from one resource to another the way an earlier draft of this
-  review proposed. See "Host-granular matching is a feasibility
-  guarantee, not an aggregation choice" below for why this is now Option
-  A (reserve against one concrete resource up front; the scheduler
-  reassigns among *equally eligible* resources) rather than Option B
-  (reserve against a pool-level aggregate with no concrete resource until
-  scheduling) from this change's earlier draft.
+  hold/lease-tail row. `resource_id` still binds **immediately**, at
+  `reserve()` time, to one concrete, feasibility-verified host — exactly
+  as `SiteAllocation` does today (see "Host-granular matching is a
+  feasibility guarantee" below for why this must not change to a
+  pool-only claim). `pool_id` is carried alongside it, denormalized from
+  that resource, so pool-scoped queries don't need a join.
+  `settlement_resource_id` is a separate, nullable field: NULL until
+  `PhysicalSettlementScheduler` runs, then set by
+  `assign_settlement_resource` — in the common case equal to `resource_id`
+  (the scheduler confirms the host `reserve()` already picked), differing
+  only when round-robin fairness reassigns to a different, equally
+  eligible host. This is Option A (reserve against one concrete resource
+  up front; the scheduler reassigns among *equally eligible* resources),
+  not Option B (reserve against a pool-level aggregate with no concrete
+  resource until scheduling) from this change's earlier draft.
 - **`CapacityProjection`** (storefront-side, new) — the storefront's
   read-only, pull-based mirror of every connected provisioning service's
   pool/capacity state (`GET /api/v1/pools`, which already exists and is
@@ -371,3 +375,166 @@ normalization, units, and fairness) in order to unblock itself. Sequencing:
 reservation-admission and scheduling-eligibility work (including the
 shared `resource_satisfies_requirement` predicate above) consumes that
 result rather than working around its absence.
+
+## `SettlementRecord` shape (design review continued, 2026-07-17)
+
+**Resolved: one row, one state machine** — not a separate
+scheduler-owned assignment table plus a distinct fulfillment record.
+Reasoning: `select_resource` and `FulfillmentService.create` are, per
+`pools-3`'s own diagram, meant to be called in sequence by one
+orchestrator as part of one fulfillment step, not separated by
+meaningful business time in the common case (see "Expected time between
+scheduling and dispatch" below for the one real exception). A single row
+answers "does this allocation have a settlement, and what state is it
+in" with one lookup, keeps both services' idempotency checks on the same
+primary key, and gives an admin one row to read per allocation instead of
+reconciling two tables — the same auditability property already valued
+in this codebase's lease-lifecycle design (`SiteAllocation`/
+`CapacityReservation` merging the hold and the lease tail into one row
+for the same reason).
+
+```python
+class SettlementRecordState(str, enum.Enum):
+    assigned         = "assigned"          # scheduler picked a resource,
+                                            # no dispatch yet — the ONLY
+                                            # state in which the row may
+                                            # still be re-selected/mutated
+    dispatch_pending = "dispatch_pending"  # about to call provider.create();
+                                            # written durably BEFORE the
+                                            # call, for crash recovery
+                                            # (see point 2, commit <->
+                                            # async-dispatch failure window)
+    dispatching      = "dispatching"       # provider accepted the job;
+                                            # tracking metadata recorded
+    active           = "active"            # provider reports succeeded
+    failed           = "failed"            # validation rejected, or
+                                            # provider reports failed
+    tearing_down     = "tearing_down"
+    torn_down        = "torn_down"
+    teardown_failed  = "teardown_failed"
+    abandoned        = "abandoned"         # reservation expired/released/
+                                            # changed while still
+                                            # "assigned" — no physical work
+                                            # was ever dispatched. Terminal,
+                                            # not re-enterable: a rejected
+                                            # (expired) CapacityReservation
+                                            # blocks select_resource from
+                                            # ever reaching this record
+                                            # again, so select_resource
+                                            # itself never needs to special-
+                                            # case "abandoned" vs. "no
+                                            # record" — the reservation
+                                            # check upstream already
+                                            # distinguishes them.
+
+
+class SettlementRecord(Base):
+    __tablename__ = "settlement_records"
+
+    allocation_id = Column(String, ForeignKey("capacity_reservations.allocation_id"),
+                            primary_key=True)
+    agreement_id = Column(String, nullable=False)
+    market = Column(String, nullable=False)
+    pool_id = Column(String, nullable=False)
+    settlement_resource_id = Column(String, nullable=False)
+    provider = Column(String, nullable=False)
+    requirements = Column(JSON, nullable=False)   # for equivalence checks;
+                                                    # mutable while state=="assigned"
+                                                    # (negotiation may still change
+                                                    # requirements before dispatch)
+    provider_metadata = Column(JSON, nullable=False, default=dict)
+    teardown_provider_metadata = Column(JSON, nullable=True)
+    state = Column(String, nullable=False, default=SettlementRecordState.assigned.value)
+    created_at = Column(DateTime, ...)
+    updated_at = Column(DateTime, ...)
+```
+
+### Two different idempotency rules depending on `state`
+
+`select_resource`'s existing-record handling is NOT a single uniform
+"record exists -> return it" rule. The dividing line is whether `state`
+has left `assigned`:
+
+- **`state == "assigned"` (including no record at all):** the row is
+  still a mutable scheduling decision. `select_resource` is free to
+  re-run eligibility/selection and overwrite `pool_id`,
+  `settlement_resource_id`, `provider`, and `requirements` — needed for
+  the case where negotiation changes the deal's requirements (or the
+  buyer's requested capacity) after an initial schedule but before
+  dispatch. `assign_settlement_resource` already handles the capacity
+  side of a genuine re-pick atomically (no-op if the resource is
+  unchanged; moves held units correctly if it's a real reassignment) —
+  `select_resource` now also calls it on re-selection, not only on first
+  selection.
+- **`state != "assigned"` (dispatch has started or finished):** the row
+  is the immutable, equivalence-checked record `pools-3` already
+  specified. `select_resource` returns it as-is; an explicit-resource
+  request that disagrees with `settlement_resource_id` fails with
+  `SettlementRequestMismatchError`. No expiry check applies on this path
+  — the `CapacityReservation`'s TTL hold is irrelevant once real physical
+  work exists; only equivalence/conflict rules apply from here.
+
+`CapacityReservation` expiry (`CapacityReservationExpiredError`) is
+therefore checked **only** on the "still assigned, may re-schedule"
+path, never on the "already dispatched" fast-return path — an allocation
+whose TTL lapsed after dispatch already succeeded must not have its
+retries start failing.
+
+**If an operator requests scheduling against an already-expired
+`CapacityReservation`, `select_resource` MUST reject it.** The storefront
+handles that failure by requesting a fresh `CapacityReservation` (which
+may itself fail if the physical picture changed in the interim) — this
+is an existing, already-designed failure path in `pools-2`'s error
+taxonomy, not new work. It is deliberately the storefront's
+responsibility how long a hold it asks for; see "Pool-level reservation
+TTL hint" below for an operator-side lever on that.
+
+### `abandoned` state and the lease-lifecycle watchdog
+
+A `CapacityReservation` can expire, release, or have its requirements
+change while its `SettlementRecord` is still sitting in `assigned`
+(nothing dispatched yet) — this is expected to be the common case for
+delay between scheduling and dispatch, not the exception; see below. The
+existing watchdog that already sweeps expired/released
+`CapacityReservation` rows (`LeaseLifecycleService.check_leases`) should
+also transition any `assigned`-state `SettlementRecord` for that
+allocation to `abandoned` — reusing the existing sweep rather than adding
+a second, parallel watchdog. No capacity cleanup is needed as part of
+that specific transition: `assign_settlement_resource` only ever moves
+*which* resource the reservation's already-held units point at, and the
+reservation's own release path already frees whatever resource it
+currently points to, independent of whether a `SettlementRecord` was
+ever created. `abandoned` exists purely for audit clarity, so a
+`settlement_records` row never sits at `assigned` forever with no
+explanation of why it stalled.
+
+### Expected time between scheduling and dispatch
+
+Normally short — scheduling shouldn't happen until fulfillment is about
+to occur, at which point there is little reason for delay between
+`select_resource` and `FulfillmentService.create`. The gap that matters
+in practice is between **reservation and scheduling**, not between
+scheduling and dispatch — a `CapacityReservation` may sit unscheduled for
+a long time and can expire before it's ever scheduled. A real (if
+uncommon) case for delay between scheduling and dispatch specifically:
+scheduling happening as part of agent lease negotiation itself (e.g. a
+delayed lease start time, or a late-stage negotiation change), most
+plausibly triggered by the buyer's requested capacity/requirements
+changing mid-negotiation after an earlier schedule. The
+still-`assigned`/mutable-until-dispatch design above is what accommodates
+this without treating it as an error case.
+
+### Pool-level reservation TTL hint (flagged, not designed here)
+
+An operator may want a pool-level limit on how long a
+`CapacityReservation` against their resources can sit unscheduled/held —
+raised during this review as a real, well-motivated use case, not
+designed here. Same shape and posture as the listing-mode hint above:
+an additive `ResourcePool.policy_tags` entry
+(`{"max_reservation_hold_seconds": 900}`), read and voluntarily respected
+by a cooperating storefront when it chooses the `ttl_seconds` it passes
+to `reserve()` — never enforced by the provisioning service itself
+(`reserve()` already accepts a caller-supplied `ttl_seconds`; no new
+ledger capability is needed, only a place for the operator to express a
+preference and a storefront willing to read it). Left for planning to
+schedule, not required by POOLS-7's first pass.
