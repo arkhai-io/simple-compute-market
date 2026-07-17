@@ -605,3 +605,126 @@ pursued: it would solve a problem this fix closes more cheaply by
 finishing the wiring of a dedup mechanism that already exists in this
 codebase, without changing `create()`'s synchronous-with-side-effect API
 shape.
+
+## `fill_first`/`most_available`: resolved (design review continued, 2026-07-17)
+
+### `CapacityProjection` MUST NOT replace the live per-request snapshot these policies read
+
+`fill_first`/`most_available` run inside `AggregateCapacityClient.probe()`/
+`.reserve()`, choosing which site to try first for one specific,
+in-flight request, via a live `_snapshots()` call at request time.
+`CapacityProjection` (this file's earlier "`SiteResource` is retired"
+section) is explicitly advisory/display-only, refreshed on its own pull
+cadence, and can be stale by design — it exists for pricing/listing
+publication, never for admission. **These MUST stay two separate
+mechanisms**: `CapacityProjection` for display, live per-request
+`_snapshots()` for routing. A stale `CapacityProjection` entry routing a
+real reservation attempt toward an empty site would turn a display cache
+into a load-bearing routing input, defeating the reason it's allowed to
+be stale in the first place.
+
+### Bug fix: `most_available` ignores `claim`
+
+Confirmed: `most_available` accepts `claim` but never uses it —
+`_site_available_units` sums every row's `available_units` regardless of
+pool/resource/attribute match, so a site with capacity in an unrelated
+pool can look "most available" for a request it cannot serve. Fix:
+
+```python
+# core/storefront/aggregation.py
+
+def _resource_matches_claim(row: Mapping[str, Any], claim: Mapping[str, Any] | None) -> bool:
+    """Best-effort client-side ranking hint only — NOT an enforcement
+    point. Deliberately does not import kit/site (the aggregator is a
+    storefront-process concept and must not depend on
+    provisioning-service-internal packages); operates on the plain-dict
+    snapshot() payload that crosses the HTTP boundary."""
+    if not claim:
+        return True
+    attrs = row.get("attributes") or {}
+    for key, expected in claim.items():
+        if key in ("units", "gpu_count"):
+            continue
+        if attrs.get(key, row.get(key)) != expected:
+            return False
+    return True
+
+def _site_available_units(snapshot, claim):
+    return sum(max(int(r.get("available_units") or 0), 0)
+               for r in snapshot if _resource_matches_claim(r, claim))
+```
+
+**Deliberately NOT sharing code with `kit/site`'s `_resource_matches` or
+`PhysicalSettlementScheduler`'s `resource_satisfies_requirement`**, unlike
+the earlier `pool_id`-mismatch and matching-logic-duplication fixes in
+this document. Those two are enforcement/eligibility gates where drift is
+a correctness bug (an admitted-but-unfulfillable reservation). This one
+is a best-effort ranking hint that only affects *try order* —
+`probe()`/`reserve()` on the chosen site remain the real, authoritative
+check, and `AggregateCapacityClient.reserve()` already falls through to
+the next site on refusal. A wrong ranking here costs one extra
+round-trip, not an incorrect admission. Duplicating the shape of the
+check across the HTTP process boundary is an acceptable, deliberate
+trade-off in this one case — do not "fix" this later by forcing a shared
+predicate across that boundary.
+
+### No bundling with the `policy_tags` listing-mode hint
+
+Considered and rejected: `ResourcePool.policy_tags` is a property of one
+pool within one site; `fill_first`/`most_available` choose among *sites*
+(different provisioning services). A pool-level preference does not
+translate into a site-ranking signal without aggregating every pool's
+hint across every site into one score — a materially different, later
+feature, not a natural extension of this fix. The listing-mode hint stays
+scoped to how the storefront *publishes* listings, never to placement
+ranking.
+
+### Layered ownership model (expanded per design review request)
+
+Three genuinely distinct decisions, at three different times, owned by
+two different processes, must not be conflated:
+
+| Decision | Owned by | When | Mechanism |
+|---|---|---|---|
+| Which pool/resource a listing represents | Storefront | **Publish time** | Listing-mode hint (point 4) + `CapacityProjection`, baked into the listing's `offer_resource.pool_id`/`resource_id` at creation (POOLS-4) |
+| Which site to route a reserve/probe call to | Storefront (`AggregateCapacityClient`) | **Reserve/negotiate time** | `fill_first`/`most_available`, live `_snapshots()` |
+| Which concrete host within that pool fulfills the reservation | Provisioning service (`PhysicalSettlementScheduler`) | **Schedule time** | Deterministic round-robin (or later, a `pools-6` policy) |
+
+`aggregation.py`'s own docstring already states the reasoning for the
+second layer staying storefront-owned rather than moving into
+`compute_provisioning`/kit alongside the third: *"pooling/placement is a
+commercial judgment per seller... it lives in the storefront process, not
+in a site and not in a shared service."* Nothing in this session's
+`compute_provisioning`/kit consolidation work changes that — the second
+and third layers pick among fundamentally different things (sites vs.
+hosts within one already-chosen site) and are correctly already
+separated by process boundary, not just by convention.
+
+### Open question surfaced by writing this table down: is the second layer's fallback still meaningful post-POOLS-4?
+
+Not resolved here — flagged for planning. Before POOLS-4, a claim could
+be a generic attribute shape (`region`, `gpu_model`, `gpu_count`) with no
+`pool_id`/`resource_id`, so the same claim could legitimately match
+equivalent fungible capacity at more than one site, and trying sites in
+ranked order with fallback-on-refusal made sense. POOLS-4 now requires
+every listing's claim to carry `pool_id` and/or `resource_id`
+("unscoped claims are invalid"), and `pool_id`/`resource_id` are only
+unique **within one site** (this file's `CapacityProjection` section).
+Once a specific listing is published, its pool/resource identity — and
+therefore its owning site — is already fixed at publish time (the first
+row of the table above). Trying that *same, now-pinned* claim against a
+second site's `reserve()` will almost always find no matching pool/
+resource there at all (a coincidental name collision aside), rather than
+legitimately finding equivalent capacity elsewhere the way it could
+pre-POOLS-4.
+
+This suggests `AggregateCapacityClient`'s try-in-order-with-fallback
+behavior may now be effectively vestigial for pool/resource-pinned VM
+listings — the real routing decision for a specific deal may just be
+"look up the one site this listing's pool/resource is known to live at"
+(deterministic, since every row crossing the HTTP boundary is already
+site-tagged — `_tagged(site, payload)`), not "try each site in ranked
+order." Whether to keep the ranked-fallback code path for a
+still-possible generic/unpinned case, special-case pinned claims to route
+directly by known site, or something else, is not decided here — this is
+a question for planning, not resolved by this design review.
