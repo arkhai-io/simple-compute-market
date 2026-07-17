@@ -133,58 +133,29 @@ wired.
 
 ## Remaining open questions for whoever picks this up
 
-- Does `AggregateCapacityClient`'s `fill_first`/`most_available` placement
-  logic get deleted outright once `PhysicalSettlementScheduler` owns
-  placement, or does it downgrade to a pool-level preference hint passed
-  into `SettlementRequirement.attributes`? Not analyzed this session.
-- Whether `market-platform-compute-30-extract-service`'s absorbed
-  package-boundary decision (stay VM-service-local vs. move to
-  `compute_provisioning`; formerly tracked by the now-closed
-  `pools-5-shared-provisioning-package`) should be forced by this change
-  rather than waited on — if the storefront is going to depend on these contracts
-  cross-service, that's itself an argument for moving them out of a
-  VM-domain-local package. Worth revisiting at activation time rather than
-  deciding here.
-- **Operator listing-mode hints via `ResourcePool.policy_tags`** (raised
-  during `pools-4`'s design review, 2026-07-16 — verified, not assumed):
-
-  - `PhysicalSettlementScheduler._eligible_candidates`
-    (`domains/vms/provisioning/service/src/services/physical_settlement_scheduler.py`)
-    already filters `SiteResource.attributes["pool_id"]` against
-    `ResourcePoolService.list_pools()` — i.e. it already assumes a
-    `SiteResource`'s `pool_id` attribute reflects a *real* operator-managed
-    Resource Pool. But no code was found that syncs `ResourcePoolService`
-    pool membership into `SiteResource.attributes`. The only caller of
-    `CapacityLedgerService.register_resource` today is the storefront's own
-    `sync_site_resources()` (`market_storefront/services/capacity_client.py`),
-    pushing its locally-managed CSV/listing attributes — which, per
-    `pools-4`'s design review, are not guaranteed to carry a `pool_id` that
-    corresponds to any `ResourcePoolService` pool at all. This gap hasn't
-    bitten anything yet only because `select_resource` has no production
-    caller (per `pools-2`'s own remaining-work note) — it will matter the
-    moment this change wires one in.
-  - Given that, the natural home for an operator's listing-mode preference
-    is `ResourcePool.policy_tags` (`kit/resource-pools` — already a
-    free-form, filterable `dict[str, Any]`, already exposed through the
-    pool admin API's list/detail/export). A storefront that's colocated
-    with (or trusts) a provisioning service could read a tag like
-    `{"listing_mode": "specific_resource"}` off a pool and decide whether
-    to publish that pool's listings as resource-pinned or pool-scoped.
-  - This is explicitly a **hint**, not a constraint provisioning enforces:
-    `pools-2`'s spec already commits to honoring an explicit `resource_id`
-    request regardless of a pool's preferred mode (see this file's sibling
-    Non-Goals entry). A third-party storefront that never reads the hint at
-    all falls back to today's structural default (pool membership: a
-    listing derived from a real multi-member pool is never resource-pinned;
-    a listing derived from a single-resource pool carries that resource's
-    `resource_id`).
-  - Not designed here: the actual channel a storefront uses to learn a
-    pool's `policy_tags` across the service boundary (poll the pool admin
-    API? carried through CSV import? only relevant when storefront and
-    provisioning share an operator?), and whether/how `_eligible_candidates`'s
-    existing (undocumented) assumption that `SiteResource.attributes.pool_id`
-    already matches a real `ResourcePoolService` pool ID should itself become
-    an explicit, enforced sync rather than an implicit expectation.
+- **RESOLVED, see "`fill_first`/`most_available`: resolved" below.**
+  ~~Does `AggregateCapacityClient`'s `fill_first`/`most_available`
+  placement logic get deleted outright...~~ — kept, bug-fixed, not
+  bundled with the listing-mode hint. That same section also surfaced a
+  new, still-open question: whether the site-fallback behavior itself is
+  now vestigial for pool/resource-pinned claims post-POOLS-4.
+- **RESOLVED, see "Scope decision: retrofit, not compute-30 extraction"
+  below.** ~~Whether `market-platform-compute-30-extract-service`'s
+  absorbed package-boundary decision... should be forced by this
+  change...~~ — forced, for `PhysicalSettlementScheduler`/
+  `DeterministicRoundRobinPolicy` specifically (moved to
+  `compute_provisioning`); `compute-30`'s own proposal has been updated
+  to match.
+- **Operator listing-mode hints via `ResourcePool.policy_tags`** —
+  **RESOLVED, see "Listing-mode hint consumption" below.** The channel
+  question this bullet originally left open (how a storefront learns a
+  pool's `policy_tags` across the service boundary) is answered by
+  `CapacityProjection` (this file's "`SiteResource` is retired" section):
+  the pull-based pool mirror carries `policy_tags` along for free, no new
+  channel needed. The `_eligible_candidates`/`SiteResource.attributes.pool_id`
+  sync gap this bullet also raised is separately resolved by the same
+  section — `site_resource_pools` is now derived from `hosts`/
+  `resource_pools`, not storefront-pushed.
 
 ## Accepted provider configuration
 
@@ -728,3 +699,78 @@ order." Whether to keep the ranked-fallback code path for a
 still-possible generic/unpinned case, special-case pinned claims to route
 directly by known site, or something else, is not decided here — this is
 a question for planning, not resolved by this design review.
+
+## Listing-mode hint consumption: resolved (design review continued, 2026-07-17)
+
+Resolves the channel question the original "Operator listing-mode hints"
+entry above left open. No new channel is needed: `CapacityProjection`
+(this file's "`SiteResource` is retired" section) already pulls pool
+metadata from `GET /api/v1/pools`, so `policy_tags` rides along once the
+sync carries it:
+
+```python
+class CachedResourcePool(Base):
+    __tablename__ = "capacity_projection_pools"
+
+    site = Column(String, primary_key=True)
+    pool_id = Column(String, primary_key=True)
+    label = Column(String, nullable=False)
+    provider = Column(String, nullable=False)
+    enabled = Column(Boolean, nullable=False)
+    policy_tags = Column(JSON, nullable=False, default=dict)
+    synced_at = Column(DateTime, nullable=False)
+```
+
+The reconciler-driven publish path (`domains/vms/listings/reconciler.py`,
+`cli_publish.py`) already has a structural default, confirmed during
+`pools-4`'s design review: a listing derived from a single-resource pool
+is resource-pinned; one derived from a real multi-member pool is
+pool-scoped. This change's scope is narrower than originally framed: let
+an explicit hint override that default, don't replace it.
+
+```python
+# kit/resource-pools — domain-neutral: the key name only.
+LISTING_MODE_TAG = "listing_mode"
+
+# domains/vms — VM-domain interpretation + default.
+class VmListingMode(str, Enum):
+    pooled = "pooled"
+    specific_resource = "specific_resource"
+
+def resolve_vm_listing_mode(pool: CachedResourcePool, member_count: int) -> VmListingMode:
+    declared = pool.policy_tags.get(LISTING_MODE_TAG)
+    if declared in (VmListingMode.pooled.value, VmListingMode.specific_resource.value):
+        return VmListingMode(declared)
+    return (VmListingMode.specific_resource if member_count == 1
+            else VmListingMode.pooled)   # unchanged pools-4 structural default
+```
+
+**Extensibility confirmed against `apicredits`**, not just asserted: since
+`apicredits` is explicitly in scope for this session's broader
+`kit`/`CapacityReservation` reshape, the shape only counts as
+domain-neutral if `apicredits` can express something VM doesn't need
+without touching `kit/resource-pools`. It can — same `LISTING_MODE_TAG`
+key, a wholly different enum and default rule, zero kit changes:
+
+```python
+class ApiCreditsListingMode(str, Enum):
+    shared_quota = "shared_quota"     # listing draws from a pooled quota bucket
+    dedicated_key = "dedicated_key"   # listing is pinned to one provider API key
+
+def resolve_apicredits_listing_mode(pool: CachedResourcePool) -> ApiCreditsListingMode:
+    declared = pool.policy_tags.get(LISTING_MODE_TAG)
+    if declared in (ApiCreditsListingMode.shared_quota.value, ApiCreditsListingMode.dedicated_key.value):
+        return ApiCreditsListingMode(declared)
+    return ApiCreditsListingMode.shared_quota
+```
+
+`kit/resource-pools` owns one string key; each domain owns its own enum
+and default rule; no cross-domain coupling.
+
+**Enforcement posture unchanged, restated for the record:**
+`PhysicalSettlementScheduler`'s explicit-`resource_id` eligibility path
+(`pools-2`) is unaffected by a pool's `listing_mode` regardless — a
+buyer's explicit resource request is honored even against a pool tagged
+`pooled`. A storefront that never reads the tag, or one running against a
+provisioning service that predates this feature, falls through to the
+unchanged structural default. Purely additive.
