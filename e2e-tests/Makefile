@@ -12,7 +12,7 @@ MODULE ?= contracts
 
 # Path to the monorepo .dist/ wheel directory, relative to e2e-tests/.
 # Used by uv when resolving pure-Python internal packages (arkhai-vms-buyer,
-# arkhai-kit-policy, arkhai-vms-storefront, arkhai-vms-provisioning-client) that are distributed as wheels rather than editable
+# arkhai-kit-policy, arkhai-vms-storefront, and the VM operator client) that are distributed as wheels rather than editable
 # source installs.  The Dockerfile passes --find-links /dist on the uv sync
 # CLI instead; this variable is for local development only.
 DIST_DIR ?= ../.dist
@@ -33,7 +33,7 @@ reinit: init-venv
 	uv sync --find-links $(DIST_DIR) \
 	--upgrade-package arkhai-core-registry-client    --reinstall-package arkhai-core-registry-client \
 	--upgrade-package arkhai-core-storefront-client  --reinstall-package arkhai-core-storefront-client \
-	--upgrade-package arkhai-vms-provisioning-client --reinstall-package arkhai-vms-provisioning-client \
+	--upgrade-package arkhai-vms-provisioning-operator-client --reinstall-package arkhai-vms-provisioning-operator-client \
 	--upgrade-package arkhai-vms-storefront          --reinstall-package arkhai-vms-storefront
 
 # -----------------------------------------------------------------------

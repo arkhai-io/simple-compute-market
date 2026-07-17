@@ -1,4 +1,4 @@
-.PHONY: help install reinit serve test test-unit test-integration clean build build-image deploy docker-run-dev
+.PHONY: help install reinit serve migrate test test-unit test-integration clean build build-image deploy docker-run-dev
 
 .DEFAULT_GOAL := help
 
@@ -14,9 +14,12 @@ install: ## Install dependencies using uv
 reinit:
 	uv sync --dev --find-links $(DIST_DIR) \
 		--upgrade-package arkhai-bare-metal   --reinstall-package arkhai-bare-metal \
+		--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
 		--upgrade-package arkhai-kit-site              --reinstall-package arkhai-kit-site \
+		--upgrade-package arkhai-kit-resource-pools    --reinstall-package arkhai-kit-resource-pools \
+		--upgrade-package arkhai-core-storefront        --reinstall-package arkhai-core-storefront \
 		--upgrade-package arkhai-core-storefront-client --reinstall-package arkhai-core-storefront-client \
-		--upgrade-package arkhai-vms-provisioning-client  --reinstall-package arkhai-vms-provisioning-client
+		--upgrade-package arkhai-vms-provisioning-operator-client --reinstall-package arkhai-vms-provisioning-operator-client
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 # Absolute path to the sibling VM provisioning IaC tree, resolved from this Makefile's
@@ -32,6 +35,9 @@ serve: ## Start the unified API + job processing server locally
 	PROVISIONING_MANAGEMENT_VARS_PATH="$(IAC_DIR)/ansible/inventory/management-vars.yaml" \
 	ANSIBLE_CONFIG="$(IAC_DIR)/ansible/ansible.cfg" \
 	uv run uvicorn main:app --host 0.0.0.0 --port 8081 --reload
+
+migrate: ## Apply DB migrations locally, outside Docker (idempotent — safe to re-run)
+	PYTHONPATH=src uv run python -m db.migrate
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 

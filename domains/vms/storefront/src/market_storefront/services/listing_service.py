@@ -216,10 +216,10 @@ class ListingService:
         try:
             normalized_offer = self._normalize_token_resource(request.offer)
             from market_storefront.domain_runtime import (
-                get_storefront_domain_runtime,
+                get_market_domain_contract,
             )
 
-            get_storefront_domain_runtime().listing(normalized_offer)
+            get_market_domain_contract().codecs.listing(normalized_offer)
             offer_resource = parse_resource_from_dict(normalized_offer)
         except Exception as exc:
             raise ValueError(f"Invalid offer resource: {exc}") from exc

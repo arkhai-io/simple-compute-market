@@ -216,8 +216,8 @@ def make_capacity_router(
     ) -> AllocationResponse:
         """Shorten an active lease (settlement decided the deal is over).
 
-        The ledger's watchdog picks the new expiry up through the normal
-        lease-end path; returns ``allocation: null`` when the allocation
+        The injected compute lease watchdog observes the new expiry through the
+        normal lease-end path. Returns ``allocation: null`` when the allocation
         is unknown or no longer held.
         """
         return AllocationResponse(allocation=ledger.truncate_lease(

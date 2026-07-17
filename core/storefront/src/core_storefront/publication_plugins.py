@@ -1,75 +1,83 @@
-"""Discovery for domain-owned storefront publication sources.
-
-Core storefront owns the runner/executable side; domain packages expose
-publication-source factories through this entry-point group when they support
-optional seller inventory publication.
-"""
+"""Discovery of publication capabilities on installed market domains."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from importlib.metadata import entry_points
-from typing import Any, Protocol
+from typing import Any
+
+from market_core import MarketDomainContract, validate_domain_contract
 
 from .publication_sources import PublicationSource
 
-PUBLICATION_SOURCE_GROUP = "market.storefront_publication_sources"
-
-
-class PublicationSourceFactory(Protocol):
-    """Factory loaded from ``market.storefront_publication_sources``.
-
-    Concrete storefront composition roots pass the callbacks required by the
-    selected domain adapter. The core loader intentionally does not prescribe
-    those kwargs; it only resolves the named factory.
-    """
-
-    def __call__(self, **kwargs: Any) -> PublicationSource: ...
+STOREFRONT_DOMAIN_GROUP = "market.storefront_domains"
 
 
 def _iter_entry_points() -> list[Any]:
-    return list(entry_points(group=PUBLICATION_SOURCE_GROUP))
+    return list(entry_points(group=STOREFRONT_DOMAIN_GROUP))
 
 
-def load_publication_source_factory(name: str) -> PublicationSourceFactory:
-    """Load a domain publication-source factory by entry-point name."""
+def _load_domain_entry_point(name: str) -> MarketDomainContract:
     normalized = name.replace("-", "_")
     matches = [
-        ep for ep in _iter_entry_points()
-        if ep.name == name or ep.name.replace("-", "_") == normalized
+        entry_point
+        for entry_point in _iter_entry_points()
+        if entry_point.name == name
+        or entry_point.name.replace("-", "_") == normalized
     ]
     if not matches:
         available = ", ".join(list_publication_source_factories()) or "(none)"
         raise KeyError(
-            f"Unknown storefront publication source {name!r}. "
-            f"Installed sources: {available}"
+            f"Unknown storefront market domain {name!r}. "
+            f"Installed publication domains: {available}"
         )
     if len(matches) > 1:
         providers = ", ".join(
-            f"{getattr(ep, 'value', ep)!s}" for ep in matches
+            str(getattr(entry_point, "value", entry_point))
+            for entry_point in matches
         )
         raise RuntimeError(
-            f"Multiple storefront publication sources named {name!r}: {providers}"
+            f"Multiple storefront market domains named {name!r}: {providers}"
         )
-    factory = matches[0].load()
-    if not callable(factory):
+    loaded = matches[0].load()
+    if not isinstance(loaded, MarketDomainContract):
         raise TypeError(
-            f"Storefront publication source {name!r} did not load a callable"
+            f"Storefront market domain {name!r} must resolve to a "
+            f"MarketDomainContract, got {type(loaded).__name__}"
         )
-    return factory
+    return validate_domain_contract(loaded)
 
 
 def build_publication_source(name: str, **kwargs: Any) -> PublicationSource:
-    """Load and call a named publication-source factory."""
-    source = load_publication_source_factory(name)(**kwargs)
+    """Build a selected domain's declared publication source."""
+    domain = _load_domain_entry_point(name)
+    if domain.publication is None:
+        raise TypeError(
+            f"Storefront market domain {domain.identity!s} does not declare "
+            "the publication capability"
+        )
+    if domain.publication.source_factory is None:
+        raise TypeError(
+            f"Storefront market domain {domain.identity!s} has direct "
+            "publication but no publication source factory"
+        )
+    source = domain.publication.source_factory(**kwargs)
     if not isinstance(source, PublicationSource):
         raise TypeError(
-            f"Storefront publication source {name!r} returned "
+            f"Storefront market domain {domain.identity!s} returned "
             f"{type(source).__name__}, expected PublicationSource"
         )
     return source
 
 
 def list_publication_source_factories() -> list[str]:
-    """List installed publication-source entry-point names."""
-    return sorted({ep.name for ep in _iter_entry_points()})
+    """List installed domain entry points that declare publication."""
+    names: list[str] = []
+    for entry_point in _iter_entry_points():
+        loaded = entry_point.load()
+        if (
+            isinstance(loaded, MarketDomainContract)
+            and loaded.publication is not None
+            and loaded.publication.source_factory is not None
+        ):
+            names.append(entry_point.name)
+    return sorted(set(names))

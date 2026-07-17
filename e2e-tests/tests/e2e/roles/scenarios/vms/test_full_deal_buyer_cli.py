@@ -1274,7 +1274,7 @@ class TestStage11a_VerifyReleasingState:
         If the lease is already 'released' here, the vm_remove job completed before
         this assertion — ensure the REMOVE_RULE_ID mock gate is still armed.
         """
-        require_state(deal_state, "lease_status", "vm_remove_job_id", "reserved_resource_id")
+        require_state(deal_state, "lease_status", "remove_job_id", "reserved_resource_id")
         assert deal_state.lease_status == "releasing", (
             f"Stage 10b did not leave lease in 'releasing' state. "
             f"Current: {deal_state.lease_status!r}"
@@ -1324,7 +1324,7 @@ class TestStage11b_WatchdogReleasesResource:
         Teardown: resume_watchdog() so background timer cycles work normally
         after the test module completes.
         """
-        require_state(deal_state, "vm_remove_job_id", "lease_id",
+        require_state(deal_state, "remove_job_id", "lease_id",
                       "reserved_resource_id", "_lease_expiry_armed")
 
         # Step 1 — unblock the vm_remove job

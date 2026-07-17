@@ -34,11 +34,11 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import container as _container_module
-from provisioning_client import ProvisioningClient
+from vm_provisioning_operator import ProvisioningClient
 from db.database import create_session_factory
 
 from db.models import Base
@@ -221,10 +221,24 @@ def db_engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    # resource_pools must exist before Base's ansible_pool_configs FK resolves.
+    from market_resource_pools.db import Base as PoolsBase
+    PoolsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     # Site-ledger tables ride market_site's own metadata.
     from market_site.db import Base as SiteBase
     SiteBase.metadata.create_all(bind=engine)
+    # HostService requires pool_id to reference an existing pool. The real
+    # migration always seeds "default" before hosts.pool_id can be NOT
+    # NULL (see db/migrations.py); mirror that guarantee here since this
+    # fixture builds schema directly rather than through the migration.
+    from db.models import DEFAULT_POOL_ID, ResourcePool
+    with Session(engine) as session:
+        session.add(ResourcePool(
+            id=DEFAULT_POOL_ID, label="Default Pool", provider="ansible",
+            enabled=True, policy_tags={},
+        ))
+        session.commit()
     return engine
 
 
@@ -346,6 +360,13 @@ async def client_and_queue(
         settings=mock_settings,
     )
 
+    from market_resource_pools import ResourcePoolService
+    from services.ansible_pool_config_handler import AnsiblePoolConfigHandler
+    resource_pool_service = ResourcePoolService(
+        session_factory=session_factory,
+        handlers={"ansible": AnsiblePoolConfigHandler()},
+    )
+
     job_service = AnsibleJobService(
         settings=mock_settings,
         session_factory=session_factory,
@@ -356,11 +377,24 @@ async def client_and_queue(
     from market_site.ledger import CapacityLedgerService
     capacity_ledger_service = CapacityLedgerService(session_factory=session_factory)
 
-    from services.site_resources_service import SiteResourcesService
-    site_resources_service = SiteResourcesService(capacity_ledger_service)
+    from services.physical_settlement_scheduler import PhysicalSettlementScheduler
+    physical_settlement_scheduler = PhysicalSettlementScheduler(
+        pool_service=resource_pool_service,
+        capacity_ledger=capacity_ledger_service,
+        session_factory=session_factory,
+    )
+
+    from services.capacity_reservation_watchdog import CapacityReservationWatchdog
+    capacity_reservation_watchdog = CapacityReservationWatchdog(
+        capacity_ledger_service=capacity_ledger_service,
+        settings=mock_settings,
+    )
+
+    from market_site.authority import LedgerSiteAuthority
+    site_authority = LedgerSiteAuthority(capacity_ledger_service)
 
     from services.bare_metal_lease_service import BareMetalLeaseService
-    bare_metal_lease_service = BareMetalLeaseService(site_resources_service)
+    bare_metal_lease_service = BareMetalLeaseService(site_authority)
 
     from services.bare_metal_operations_service import BareMetalOperationsService
     bare_metal_operations_service = BareMetalOperationsService(
@@ -370,26 +404,35 @@ async def client_and_queue(
         host_service=host_service,
     )
 
+    from compute_provisioning.release import ExecutorReleaseDispatcher
     from services.release_executors import (
         BARE_METAL_EXECUTOR_KIND,
         BareMetalReleaseExecutor,
-        ExecutorReleaseDispatcher,
         VM_EXECUTOR_KIND,
         VmReleaseExecutor,
     )
-    release_dispatcher = ExecutorReleaseDispatcher({
-        BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
-            release_delegate=bare_metal_operations_service.reclaim_access_for_allocation,
-        ),
-        VM_EXECUTOR_KIND: VmReleaseExecutor(job_service=None),
-    })
+    release_dispatcher = ExecutorReleaseDispatcher(
+        {
+            BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
+                release_delegate=bare_metal_operations_service.reclaim_access_for_allocation,
+            ),
+            VM_EXECUTOR_KIND: VmReleaseExecutor(job_service=None),
+        },
+        default_executor_kind=VM_EXECUTOR_KIND,
+    )
 
-    from services.lease_lifecycle_service import LeaseLifecycleService
+    from services.deal_event_sink import notify_storefront_capacity_released
+    from compute_provisioning.lease_lifecycle import LeaseLifecycleService
     lease_lifecycle_service = LeaseLifecycleService(
         settings=mock_settings,
-        site_resources_service=site_resources_service,
-        job_service=None,  # tests poll direct-release only when a release executor returns it
-        release_dispatcher=release_dispatcher,
+        site_authority=site_authority,
+        release_jobs=None,
+        executor_release=release_dispatcher,
+        capacity_released_notifier=(
+            lambda allocation: notify_storefront_capacity_released(
+                mock_settings, allocation
+            )
+        ),
     )
 
     # Fresh queue per test — caller can inject on_job_started via fixture params
@@ -410,11 +453,14 @@ async def client_and_queue(
     app.container.system_service.override(system_service)
     app.container.session_factory.override(session_factory)
     app.container.host_service.override(host_service)
-    app.container.site_resources_service.override(site_resources_service)
+    app.container.site_authority.override(site_authority)
     app.container.bare_metal_lease_service.override(bare_metal_lease_service)
     app.container.bare_metal_operations_service.override(bare_metal_operations_service)
     app.container.lease_lifecycle_service.override(lease_lifecycle_service)
     app.container.capacity_ledger_service.override(capacity_ledger_service)
+    app.container.resource_pool_service.override(resource_pool_service)
+    app.container.physical_settlement_scheduler.override(physical_settlement_scheduler)
+    app.container.capacity_reservation_watchdog.override(capacity_reservation_watchdog)
 
     # Wire resolved module-level variables
     _container_module.resolved_job_service = job_service
@@ -426,9 +472,27 @@ async def client_and_queue(
     _container_module.resolved_bare_metal_operations_service = bare_metal_operations_service
     _container_module.resolved_lease_lifecycle_service = lease_lifecycle_service
     _container_module.resolved_capacity_ledger_service = capacity_ledger_service
+    _container_module.resolved_resource_pool_service = resource_pool_service
+    _container_module.resolved_physical_settlement_scheduler = (
+        physical_settlement_scheduler
+    )
+    _container_module.resolved_capacity_reservation_watchdog = (
+        capacity_reservation_watchdog
+    )
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()
+    from compute_provisioning.executor_leases import ExecutorLeaseService
+    from services.compute_contract_service import build_compute_contract_service
+    _container_module.resolved_executor_lease_service = ExecutorLeaseService(
+        site_authority
+    )
+    _container_module.resolved_compute_contract_service = build_compute_contract_service(
+        site_authority=site_authority,
+        job_service=job_service,
+        vm_operations=_container_module.resolved_vm_operations_service,
+        bare_metal_operations=bare_metal_operations_service,
+    )
     _container_module.resolved_host_operations_service = app.container.host_operations_service()
 
     processing_task = asyncio.create_task(
@@ -466,7 +530,7 @@ async def client_and_queue(
     app.container.system_service.reset_override()
     app.container.session_factory.reset_override()
     app.container.host_service.reset_override()
-    app.container.site_resources_service.reset_override()
+    app.container.site_authority.reset_override()
     app.container.bare_metal_lease_service.reset_override()
     app.container.bare_metal_operations_service.reset_override()
     app.container.lease_lifecycle_service.reset_override()

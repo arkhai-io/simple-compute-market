@@ -25,12 +25,13 @@ from core_buyer.orchestrator import (
     fetch_listing_dict_multi,
     query_registry_for_matches_multi,
 )
-from core_buyer.plugins import BuyerSchemaPlugin, discover_plugins
+from core_buyer.plugins import discover_domains
 from core_buyer.registry_config import (
     resolve_discovery_timeout,
     resolve_indexer_auth,
     resolve_indexer_urls,
 )
+from market_core import MarketDomainContract, validate_domain_contracts
 
 if TYPE_CHECKING:
     from market_policy.buyer_policy import BuyerPolicy
@@ -204,17 +205,16 @@ def _build_generic_listing_app() -> typer.Typer:
 def _make_plugin_required_stub(verb: str):
     def stub(ctx: typer.Context) -> None:
         typer.secho(
-            f"`market {verb}` needs a registry schema plugin and none is "
-            f"installed. Install your registry's buyer schema package "
-            f"(e.g. market-buyer for the VM compute schema); core only "
-            f"provides generic listing browsing via "
+            f"`market {verb}` needs a buyer market domain and none is "
+            f"installed. Install your market domain's buyer package; core "
+            f"only provides generic listing browsing via "
             f"`market listing list --filter name=value`.",
             err=True, fg=typer.colors.RED,
         )
         raise typer.Exit(2)
 
     stub.__name__ = verb
-    stub.__doc__ = f"Unavailable: `{verb}` requires a registry schema plugin."
+    stub.__doc__ = f"Unavailable: `{verb}` requires a buyer market domain."
     return stub
 
 
@@ -238,26 +238,27 @@ def _registered_names(app: typer.Typer) -> set[str]:
     return names
 
 
-def build_app(plugins: list[BuyerSchemaPlugin] | None = None) -> typer.Typer:
-    """Assemble the ``market`` app from core verbs + installed schema plugins.
+def build_app(domains: list[MarketDomainContract] | None = None) -> typer.Typer:
+    """Assemble the ``market`` app from core verbs + installed domains.
 
-    ``plugins=None`` discovers installed plugins through the
-    ``market.buyer_plugins`` entry-point group; tests pass an explicit list.
+    ``domains=None`` discovers installed contracts through the
+    ``market.buyer_domains`` entry-point group; tests pass an explicit list.
     """
-    if plugins is None:
-        plugins = discover_plugins()
+    if domains is None:
+        domains = discover_domains()
+    else:
+        domains = list(validate_domain_contracts(domains))
 
     app = typer.Typer(no_args_is_help=True)
 
     def version_callback(value: bool) -> None:
         if value:
             typer.echo(f"market (arkhai-core-buyer) version {_dist_version('arkhai-core-buyer')}")
-            for plugin in plugins:
-                suffix = (
-                    f" ({plugin.distribution} {_dist_version(plugin.distribution)})"
-                    if plugin.distribution else ""
+            for domain in domains:
+                typer.echo(
+                    f"  market domain: {domain.identity} "
+                    f"(contract {domain.contract_version})"
                 )
-                typer.echo(f"  schema plugin: {plugin.schema_id}{suffix}")
             raise typer.Exit()
 
     @app.callback()
@@ -279,21 +280,20 @@ def build_app(plugins: list[BuyerSchemaPlugin] | None = None) -> typer.Typer:
     @app.command("plugins")
     def list_plugins() -> None:
         """List installed registry schema plugins."""
-        if not plugins:
+        if not domains:
             typer.echo(
-                "No buyer schema plugins installed. Only generic listing "
+                "No buyer market domains installed. Only generic listing "
                 "browsing (--filter passthrough) is available."
             )
             return
-        for plugin in plugins:
-            suffix = (
-                f"  [{plugin.distribution} {_dist_version(plugin.distribution)}]"
-                if plugin.distribution else ""
+        for domain in domains:
+            typer.echo(
+                f"{domain.identity}  [contract {domain.contract_version}]"
             )
-            typer.echo(f"{plugin.schema_id}{suffix}")
 
-    for plugin in plugins:
-        plugin.register(app)
+    for domain in domains:
+        if domain.buyer is not None:
+            domain.buyer.register_commands(app)
 
     claimed = _registered_names(app)
     if "listing" not in claimed:

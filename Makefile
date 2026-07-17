@@ -8,7 +8,8 @@ GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-client dist-compute-provisioning dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-kit-site dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-kits dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: dist-apicredits-domain
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -23,7 +24,7 @@ DIST_DIR := ${CURDIR}/.dist
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-kit-site dist-alkahest dist-config dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-client dist-compute-provisioning dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-buyer
+dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-kits dist-alkahest dist-config dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-buyer
 
 dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -55,7 +56,7 @@ dist-policy: ## Build arkhai-kit-policy wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_kit_policy-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-policy produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-provisioning-client: ## Build arkhai-vms-provisioning-client wheel into .dist/
+dist-provisioning-operator-client: dist-compute-provisioning ## Build arkhai-vms-provisioning-operator-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd domains/vms/provisioning/client && uv build --wheel --out-dir $(DIST_DIR)
 
@@ -65,13 +66,19 @@ dist-compute-provisioning: ## Build arkhai-compute-provisioning wheel into .dist
 	@ls $(DIST_DIR)/arkhai_compute_provisioning-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-compute-provisioning produced a platform-specific wheel — must build inside Docker" && exit 1)
 
+dist-apicredits-domain: ## Build arkhai-apicredits-domain wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd domains/apicredits && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_apicredits_domain-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-apicredits-domain produced a platform-specific wheel — must build inside Docker" && exit 1)
+
 dist-apicredits-service: ## Build arkhai-apicredits-service wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd domains/apicredits/service && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_apicredits_service-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-apicredits-service produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-apicredits-storefront: ## Build arkhai-apicredits-storefront wheel into .dist/
+dist-apicredits-storefront: dist-apicredits-domain ## Build arkhai-apicredits-storefront wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd domains/apicredits/storefront && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_apicredits_storefront-*-none-any.whl > /dev/null 2>&1 || \
@@ -89,7 +96,7 @@ dist-apicredits-sample-app: ## Build arkhai-apicredits-sample-app wheel into .di
 	@ls $(DIST_DIR)/arkhai_apicredits_sample_app-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-apicredits-sample-app produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-apicredits-buyer: ## Build arkhai-apicredits-buyer wheel into .dist/
+dist-apicredits-buyer: dist-apicredits-domain ## Build arkhai-apicredits-buyer wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd domains/apicredits/buyer && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_apicredits_buyer-*-none-any.whl > /dev/null 2>&1 || \
@@ -127,11 +134,8 @@ dist-arkhai-core-storefront: ## Build arkhai-core-storefront wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_core_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-kit-site: ## Build arkhai-kit-site wheel into .dist/
-	-mkdir -p $(DIST_DIR)
-	cd kit/site && $(MAKE) build DIST_DIR=$(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_kit_site-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-kit-site produced a platform-specific wheel — must build inside Docker" && exit 1)
+dist-kits: ## Build kit-owned wheels into .dist/
+	$(MAKE) -C kit dist DIST_DIR=$(DIST_DIR)
 
 dist-alkahest: ## Build arkhai-kit-alkahest wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -201,7 +205,7 @@ build-dev: build build-dev-env build-test-image
 # (`arkhai:storefront`, `arkhai:provisioning`) and just the wheels they
 # consume via --find-links. Skips `build-registry` (sellers point at
 # someone else's registry).
-build-seller: init-prerequisites dist-storefront-client dist-identity dist-core dist-arkhai-core-storefront dist-alkahest dist-config dist-bare-metal dist-storefront dist-policy dist-provisioning-client dist-compute-provisioning dist-registry-client ## Build only what a seller needs: storefront + provisioning images.
+build-seller: init-prerequisites dist-storefront-client dist-identity dist-core dist-arkhai-core-storefront dist-alkahest dist-config dist-bare-metal dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-registry-client ## Build only what a seller needs: storefront + provisioning images.
 	$(MAKE) -j2 build-storefront build-provisioning
 
 # Same as build-seller, but the provisioning image's in-container appuser
@@ -271,7 +275,7 @@ init-zero-tier:
 init-buyer: dist-vms
 	cd domains/vms/buyer && make init
 
-init-storefront: dist-vms dist-bare-metal dist-policy dist-provisioning-client dist-storefront-client dist-registry-client
+init-storefront: dist-vms dist-bare-metal dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-storefront-client dist-registry-client
 	cd domains/vms/storefront && make init
 
 init-arkhai-core-registry: dist-registry-client
@@ -350,7 +354,7 @@ PYTHON_REGISTRY := https://$(AR_LOCATION)-python.pkg.dev/$(AR_PROJECT)/$(AR_PREF
 
 STOREFRONT_CLIENT_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' core/storefront-client/pyproject.toml | head -1)
 REGISTRY_CLIENT_VERSION   := $(shell sed -n 's/^version = "\(.*\)"/\1/p' core/registry-client/pyproject.toml | head -1)
-PROVISIONING_CLIENT_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' domains/vms/provisioning/client/pyproject.toml | head -1)
+PROVISIONING_OPERATOR_CLIENT_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' domains/vms/provisioning/client/pyproject.toml | head -1)
 # ---------------------------------------------------------------------------
 # Push — publish built artifacts to Artifact Registry.
 #
@@ -432,7 +436,7 @@ push-charts: _require-ar-project dist-helm
 push-wheels: _require-ar-project
 	$(call publish_python_wheel,arkhai-core-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)
 	$(call publish_python_wheel,arkhai-core-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
-	$(call publish_python_wheel,arkhai-vms-provisioning-client,$(PROVISIONING_CLIENT_VERSION),$(DIST_DIR)/arkhai_vms_provisioning_client-$(PROVISIONING_CLIENT_VERSION)-py3-none-any.whl)
+	$(call publish_python_wheel,arkhai-vms-provisioning-operator-client,$(PROVISIONING_OPERATOR_CLIENT_VERSION),$(DIST_DIR)/arkhai_vms_provisioning_operator_client-$(PROVISIONING_OPERATOR_CLIENT_VERSION)-py3-none-any.whl)
 
 push-cli: _require-ar-project
 	gcloud artifacts generic upload \
@@ -446,7 +450,7 @@ push-cli: _require-ar-project
 clobber-wheels: _require-ar-project
 	$(call clobber_python_wheel,arkhai-core-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)
 	$(call clobber_python_wheel,arkhai-core-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
-	$(call clobber_python_wheel,arkhai-vms-provisioning-client,$(PROVISIONING_CLIENT_VERSION),$(DIST_DIR)/arkhai_vms_provisioning_client-$(PROVISIONING_CLIENT_VERSION)-py3-none-any.whl)
+	$(call clobber_python_wheel,arkhai-vms-provisioning-operator-client,$(PROVISIONING_OPERATOR_CLIENT_VERSION),$(DIST_DIR)/arkhai_vms_provisioning_operator_client-$(PROVISIONING_OPERATOR_CLIENT_VERSION)-py3-none-any.whl)
 
 code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot
@@ -461,6 +465,13 @@ review-diff: ## Write a binary-safe HEAD-relative diff for review without changi
 	@OUTFILE="${CURDIR}/.snapshot/$(GIT_NAME)-${GIT_SUFFIX}.diff"; \
 	echo "Creating $$OUTFILE ..."; \
 	git diff --binary HEAD > "$$OUTFILE"; \
+	echo "Done: $$OUTFILE"
+
+last-diff: ## Write a binary-safe diff for the most recent commit.
+	@mkdir -p .snapshot
+	@OUTFILE="${CURDIR}/.snapshot/$(GIT_NAME)-${GIT_SUFFIX}-last.diff"; \
+	echo "Creating $$OUTFILE ..."; \
+	git diff --binary HEAD^ HEAD > "$$OUTFILE"; \
 	echo "Done: $$OUTFILE"
 
 review-wheelhouse: vendor-wheels ## Package vendored dependency wheels for offline review/test runs.

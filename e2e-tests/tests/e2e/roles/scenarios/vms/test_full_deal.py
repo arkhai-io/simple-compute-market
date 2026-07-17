@@ -678,7 +678,14 @@ class TestStage05b_NegotiationStartsAndVisible:
             listing_id=deal_state.seller_listing_id,
             buyer_address=buyer_config["wallet_address"],
             initial_amount=BUYER_INITIAL_PRICE,
-            duration_seconds=DURATION_HOURS * 3600,
+            provision_terms={
+                "kind": "compute.v1",
+                "version": 1,
+                "payload": {
+                    "duration_seconds": DURATION_HOURS * 3600,
+                    "ssh_public_key": "",
+                },
+            },
             token=DEMAND_RESOURCE["token"]["contract_address"],
         )
         neg_id = resp.get("negotiation_id") if isinstance(resp, dict) else None
@@ -1337,7 +1344,7 @@ class TestStage11a_VerifyReleasingState:
         If the lease is already 'released' here, the vm_remove job completed before
         this assertion — ensure the REMOVE_RULE_ID mock gate is still armed.
         """
-        require_state(deal_state, "lease_status", "vm_remove_job_id", "reserved_resource_id")
+        require_state(deal_state, "lease_status", "remove_job_id", "reserved_resource_id")
         assert deal_state.lease_status == "releasing", (
             f"Stage 10b did not leave lease in 'releasing' state. "
             f"Current: {deal_state.lease_status!r}"
@@ -1387,7 +1394,7 @@ class TestStage11b_WatchdogReleasesResource:
         Teardown: resume_watchdog() so background timer cycles work normally
         after the test module completes.
         """
-        require_state(deal_state, "vm_remove_job_id", "lease_id",
+        require_state(deal_state, "remove_job_id", "lease_id",
                       "reserved_resource_id", "_lease_expiry_armed")
 
         # Step 1 — unblock the vm_remove job

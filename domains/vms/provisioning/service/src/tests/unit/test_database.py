@@ -1,9 +1,11 @@
+import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from db.database import init_db
-from db.models import AnsibleJob, Host
+from db.database import run_migrations
+from db.migrations import SchemaDriftError, check_schema_version
+from db.models import AnsibleJob, AnsiblePoolConfig, DEFAULT_POOL_ID, Host, ResourcePool
 
 
 def _sqlite_memory_engine():
@@ -70,11 +72,15 @@ def _create_pre_migration_tables(engine):
         ))
 
 
-def test_init_db_applies_versioned_migrations_to_old_sqlite_schema():
+def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     engine = _sqlite_memory_engine()
     _create_pre_migration_tables(engine)
 
-    init_db(engine)
+    run_migrations(
+        engine,
+        default_playbook_path="/configured/playbook.yaml",
+        default_inventory_group="legacy_hosts",
+    )
 
     inspector = inspect(engine)
     ansible_columns = {
@@ -89,6 +95,14 @@ def test_init_db_applies_versioned_migrations_to_old_sqlite_schema():
     }
 
     assert "escrow_uid" in ansible_columns
+    assert {
+        "contract_version",
+        "allocation_id",
+        "deal_ref",
+        "executor_kind",
+        "action_kind",
+        "idempotency_key",
+    }.issubset(ansible_columns)
     assert "public_host" in host_columns
     assert "vm_leases" in inspector.get_table_names()
     assert "allocation_id" in lease_columns
@@ -99,11 +113,37 @@ def test_init_db_applies_versioned_migrations_to_old_sqlite_schema():
         "executor_ref",
     }.issubset(allocation_columns)
 
+    assert "resource_pools" in inspector.get_table_names()
+    assert "ansible_pool_configs" in inspector.get_table_names()
+    assert "pool_id" in host_columns
+
     with Session(engine) as session:
         host = session.query(Host).one()
         job = session.query(AnsibleJob).one()
         assert host.public_host is None
         assert job.escrow_uid is None
+        # The pre-existing host (inserted before the migration ran) is
+        # backfilled to the default pool by the column's DB-level DEFAULT.
+        assert host.pool_id == DEFAULT_POOL_ID
+
+        default_pool = session.query(ResourcePool).filter(
+            ResourcePool.id == DEFAULT_POOL_ID
+        ).one()
+        assert default_pool.label == "Default Pool"
+        assert default_pool.provider == "ansible"
+        assert default_pool.enabled is True
+
+        # No ORM relationship crosses the resource_pools/ansible_pool_configs
+        # boundary — ResourcePool and AnsiblePoolConfig now live in separate
+        # declarative registries (market_resource_pools vs. this service's
+        # own Base), so navigation is by explicit pool_id lookup, matching
+        # how PoolConfigHandler implementations already read this table.
+        ansible_config = session.query(AnsiblePoolConfig).filter(
+            AnsiblePoolConfig.pool_id == DEFAULT_POOL_ID
+        ).one()
+        assert ansible_config.playbook_path == "/configured/playbook.yaml"
+        assert ansible_config.inventory_group == "legacy_hosts"
+        assert ansible_config.extra_vars == {}
 
     with engine.begin() as connection:
         migration_ids = {
@@ -117,15 +157,17 @@ def test_init_db_applies_versioned_migrations_to_old_sqlite_schema():
         "20260603_003_vm_leases_table",
         "20260603_004_vm_leases_allocation_id",
         "20260707_001_site_allocations_executor_fields",
+        "20260713_001_ansible_jobs_contract_fields",
+        "20260713_002_resource_pools_and_hosts_pool_id",
     }
 
 
-def test_init_db_migrations_are_idempotent():
+def test_run_migrations_is_idempotent():
     engine = _sqlite_memory_engine()
     _create_pre_migration_tables(engine)
 
-    init_db(engine)
-    init_db(engine)
+    run_migrations(engine)
+    run_migrations(engine)
 
     inspector = inspect(engine)
     ansible_columns = [
@@ -140,15 +182,56 @@ def test_init_db_migrations_are_idempotent():
     ]
 
     assert ansible_columns.count("escrow_uid") == 1
+    assert ansible_columns.count("contract_version") == 1
+    assert ansible_columns.count("allocation_id") == 1
+    assert ansible_columns.count("deal_ref") == 1
+    assert ansible_columns.count("executor_kind") == 1
+    assert ansible_columns.count("action_kind") == 1
+    assert ansible_columns.count("idempotency_key") == 1
     assert host_columns.count("public_host") == 1
+    assert host_columns.count("pool_id") == 1
     assert lease_columns.count("allocation_id") == 1
     assert allocation_columns.count("executor_kind") == 1
     assert allocation_columns.count("executor_target") == 1
     assert allocation_columns.count("release_job_id") == 1
     assert allocation_columns.count("executor_ref") == 1
 
+    with Session(engine) as session:
+        assert session.query(ResourcePool).filter(
+            ResourcePool.id == DEFAULT_POOL_ID
+        ).count() == 1
+
     with engine.begin() as connection:
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 5
+    assert migration_count == 7
+
+
+# ---------------------------------------------------------------------------
+# check_schema_version — the startup drift guard
+# ---------------------------------------------------------------------------
+
+
+class TestCheckSchemaVersion:
+    def test_passes_after_run_migrations(self):
+        engine = _sqlite_memory_engine()
+        run_migrations(engine)
+        check_schema_version(engine)  # must not raise
+
+    def test_raises_on_fresh_engine_with_no_migrations_table(self):
+        engine = _sqlite_memory_engine()
+        with pytest.raises(SchemaDriftError):
+            check_schema_version(engine)
+
+    def test_raises_when_behind_the_latest_migration(self):
+        engine = _sqlite_memory_engine()
+        run_migrations(engine)
+        # Simulate an older DB that's missing the most recent migration.
+        with engine.begin() as connection:
+            connection.execute(text(
+                "DELETE FROM schema_migrations WHERE id = "
+                "'20260713_002_resource_pools_and_hosts_pool_id'"
+            ))
+        with pytest.raises(SchemaDriftError):
+            check_schema_version(engine)

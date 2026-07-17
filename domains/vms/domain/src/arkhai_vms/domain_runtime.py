@@ -1,10 +1,17 @@
-"""VM implementation of the core storefront domain runtime."""
+"""VM implementation of the core market-domain contract."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from core_storefront.domain_runtime import StorefrontDomainRuntime
+from market_core import (
+    MARKET_DOMAIN_CONTRACT_VERSION,
+    DomainCapability,
+    DomainIdentity,
+    ImmutableCodecCapability,
+    ImmutablePublicationCapability,
+    MarketDomainContract,
+)
 
 from .provision_terms import VM_PROVISION_KIND
 from .schema import (
@@ -41,18 +48,30 @@ def _normalize_result(value: Any) -> VmResult:
     return VmResult.model_validate(value)
 
 
-VM_STOREFRONT_RUNTIME = StorefrontDomainRuntime(
-    schema_id=VM_PROVISION_KIND,
-    normalize_listing=_normalize_listing,
-    normalize_message=_normalize_message,
-    normalize_terms=_normalize_terms,
-    normalize_materialization=_normalize_materialization,
-    normalize_receipt=_normalize_receipt,
-    normalize_result=_normalize_result,
+def _publication_source(**kwargs: Any) -> Any:
+    from .storefront_adapter import vm_publication_adapter
+
+    return vm_publication_adapter(**kwargs)
+
+
+VM_MARKET_DOMAIN = MarketDomainContract(
+    identity=DomainIdentity(VM_PROVISION_KIND),
+    contract_version=MARKET_DOMAIN_CONTRACT_VERSION,
+    codecs=ImmutableCodecCapability(
+        normalize_listing=_normalize_listing,
+        normalize_message=_normalize_message,
+        normalize_terms=_normalize_terms,
+        normalize_materialization=_normalize_materialization,
+        normalize_receipt=_normalize_receipt,
+        normalize_result=_normalize_result,
+    ),
+    declared_capabilities=frozenset({DomainCapability.PUBLICATION}),
+    publication=ImmutablePublicationCapability(
+        source_factory=_publication_source,
+    ),
 )
 
 
-def storefront_runtime() -> StorefrontDomainRuntime:
-    """Return the VM domain runtime for core storefront composition."""
-    return VM_STOREFRONT_RUNTIME
-
+def market_domain() -> MarketDomainContract:
+    """Return the VM market-domain contract."""
+    return VM_MARKET_DOMAIN

@@ -1,10 +1,15 @@
-"""API-credits implementation of the core storefront domain runtime."""
+"""API-credits implementation of the core market-domain contract."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from core_storefront.domain_runtime import StorefrontDomainRuntime
+from market_core import (
+    MARKET_DOMAIN_CONTRACT_VERSION,
+    DomainIdentity,
+    ImmutableCodecCapability,
+    MarketDomainContract,
+)
 
 from domains.apicredits.schema import (
     API_CREDITS_SCHEMA_KIND,
@@ -41,17 +46,20 @@ def _normalize_result(value: Any) -> ApiCreditsResult:
     return ApiCreditsResult.model_validate(value)
 
 
-API_CREDITS_STOREFRONT_RUNTIME = StorefrontDomainRuntime(
-    schema_id=API_CREDITS_SCHEMA_KIND,
-    normalize_listing=_normalize_listing,
-    normalize_message=_normalize_message,
-    normalize_terms=_normalize_terms,
-    normalize_materialization=_normalize_materialization,
-    normalize_receipt=_normalize_receipt,
-    normalize_result=_normalize_result,
+API_CREDITS_MARKET_DOMAIN = MarketDomainContract(
+    identity=DomainIdentity(API_CREDITS_SCHEMA_KIND),
+    contract_version=MARKET_DOMAIN_CONTRACT_VERSION,
+    codecs=ImmutableCodecCapability(
+        normalize_listing=_normalize_listing,
+        normalize_message=_normalize_message,
+        normalize_terms=_normalize_terms,
+        normalize_materialization=_normalize_materialization,
+        normalize_receipt=_normalize_receipt,
+        normalize_result=_normalize_result,
+    ),
 )
 
 
-def storefront_runtime() -> StorefrontDomainRuntime:
-    """Return the API-credits domain runtime for core storefront composition."""
-    return API_CREDITS_STOREFRONT_RUNTIME
+def market_domain() -> MarketDomainContract:
+    """Return the API-credit market-domain contract."""
+    return API_CREDITS_MARKET_DOMAIN

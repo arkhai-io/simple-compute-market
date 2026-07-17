@@ -203,7 +203,7 @@ def provisioning_client():
     every non-health route on a single shared admin key (X-Admin-Key);
     there is no per-agent identity.
     """
-    from provisioning_client import SyncProvisioningClient
+    from vm_provisioning_operator import SyncProvisioningClient
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
     admin_key = str(settings.SELLER.ADMIN_API_KEY or "") or None
     client = SyncProvisioningClient(
@@ -243,8 +243,8 @@ def _ensure_provisioning_host_registered(provisioning_client):
     Real-host integration tests use a real key path; this fixture is
     only relevant when ``ACTIVE_PROFILES=mock``.
     """
-    from provisioning_client import ProvisioningError
-    from provisioning_client import HostCreate
+    from vm_provisioning_operator import ProvisioningError
+    from vm_provisioning_operator import HostCreate
 
     host_name = "kvm1"
 

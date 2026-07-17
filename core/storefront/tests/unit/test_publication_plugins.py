@@ -6,6 +6,14 @@ import pytest
 
 import core_storefront.publication_plugins as plugins
 from core_storefront.publication_sources import PublicationSource
+from market_core import (
+    MARKET_DOMAIN_CONTRACT_VERSION,
+    DomainCapability,
+    DomainIdentity,
+    ImmutableCodecCapability,
+    ImmutablePublicationCapability,
+    MarketDomainContract,
+)
 
 
 class FakeEntryPoint:
@@ -32,48 +40,85 @@ def _factory(**_kwargs: Any) -> PublicationSource:
     )
 
 
-def test_load_publication_source_factory_from_entry_point(monkeypatch) -> None:
+def _domain(factory=_factory) -> MarketDomainContract:
+    normalize = lambda value: value
+    return MarketDomainContract(
+        identity=DomainIdentity("external.v1"),
+        contract_version=MARKET_DOMAIN_CONTRACT_VERSION,
+        codecs=ImmutableCodecCapability(
+            normalize_listing=normalize,
+            normalize_message=normalize,
+            normalize_terms=normalize,
+            normalize_materialization=normalize,
+            normalize_receipt=normalize,
+            normalize_result=normalize,
+        ),
+        declared_capabilities=frozenset({DomainCapability.PUBLICATION}),
+        publication=ImmutablePublicationCapability(source_factory=factory),
+    )
+
+
+def test_build_publication_source_from_domain_entry_point(monkeypatch) -> None:
     monkeypatch.setattr(
         plugins,
         "_iter_entry_points",
-        lambda: [FakeEntryPoint("bare_metal", "pkg:factory", _factory)],
+        lambda: [FakeEntryPoint("external", "pkg:domain", _domain())],
     )
 
-    assert plugins.list_publication_source_factories() == ["bare_metal"]
-    assert plugins.load_publication_source_factory("bare-metal") is _factory
-    assert plugins.build_publication_source("bare_metal").name == "demo"
+    assert plugins.list_publication_source_factories() == ["external"]
+    assert plugins.build_publication_source("external").name == "demo"
 
 
-def test_unknown_publication_source_mentions_available(monkeypatch) -> None:
+def test_direct_publication_domain_is_not_a_source_factory(monkeypatch) -> None:
+    domain = _domain()
+    domain = MarketDomainContract(
+        identity=domain.identity,
+        contract_version=domain.contract_version,
+        codecs=domain.codecs,
+        declared_capabilities=domain.declared_capabilities,
+        publication=ImmutablePublicationCapability(publish=lambda **_: None),
+    )
     monkeypatch.setattr(
         plugins,
         "_iter_entry_points",
-        lambda: [FakeEntryPoint("vms", "pkg:factory", _factory)],
+        lambda: [FakeEntryPoint("direct", "pkg:domain", domain)],
     )
 
-    with pytest.raises(KeyError, match="Installed sources: vms"):
-        plugins.load_publication_source_factory("missing")
+    assert plugins.list_publication_source_factories() == []
 
 
-def test_duplicate_publication_source_names_are_rejected(monkeypatch) -> None:
+def test_unknown_domain_mentions_available(monkeypatch) -> None:
+    monkeypatch.setattr(
+        plugins,
+        "_iter_entry_points",
+        lambda: [FakeEntryPoint("external", "pkg:domain", _domain())],
+    )
+
+    with pytest.raises(KeyError, match="Installed publication domains: external"):
+        plugins.build_publication_source("missing")
+
+
+def test_duplicate_domain_entry_names_are_rejected(monkeypatch) -> None:
     monkeypatch.setattr(
         plugins,
         "_iter_entry_points",
         lambda: [
-            FakeEntryPoint("vms", "pkg_a:factory", _factory),
-            FakeEntryPoint("vms", "pkg_b:factory", _factory),
+            FakeEntryPoint("external", "pkg_a:domain", _domain()),
+            FakeEntryPoint("external", "pkg_b:domain", _domain()),
         ],
     )
 
-    with pytest.raises(RuntimeError, match="Multiple storefront publication sources"):
-        plugins.load_publication_source_factory("vms")
+    with pytest.raises(RuntimeError, match="Multiple storefront market domains"):
+        plugins.build_publication_source("external")
 
 
-def test_publication_source_factory_must_return_source(monkeypatch) -> None:
+def test_publication_capability_must_return_source(monkeypatch) -> None:
     monkeypatch.setattr(
         plugins,
         "_iter_entry_points",
-        lambda: [FakeEntryPoint("bad", "pkg:factory", lambda: object())],
+        lambda: [
+            FakeEntryPoint("bad", "pkg:domain", _domain(lambda **_: object()))
+        ],
     )
 
     with pytest.raises(TypeError, match="expected PublicationSource"):

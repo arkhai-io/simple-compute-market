@@ -125,6 +125,7 @@ def test_round0_payload_carries_quantity_key_and_scaled_amount():
     round0 = captured[0]
     assert round0["provision_terms"] == {
         "kind": "api_credits.v1",
+        "version": 1,
         "payload": {"quantity": 100, "key": {"mode": "existing", "key_id": "ak_42"}},
     }
     # listed_price opens at initial_price × quantity, absolute.

@@ -321,6 +321,49 @@ class CapacityLedgerService:
             payload["hold_expires_at"] = hold_expires_at
             return payload
 
+    def assign_settlement_resource(
+        self, *, allocation_id: str, settlement_resource_id: str
+    ) -> dict[str, Any] | None:
+        """Atomically bind a held allocation to the selected physical resource.
+
+        Availability is derived from held allocations, so moving resource_id
+        transfers the existing consumption rather than subtracting it again.
+        Repeating the same assignment is idempotent.
+        """
+        with self._lock, self._session_factory() as db:
+            self._expire_stale_holds(db)
+            allocation = self._find_allocation(db, allocation_id=allocation_id)
+            if allocation is None:
+                return None
+            if allocation.state not in HELD_ALLOCATION_STATES:
+                raise CapacityConflictError(
+                    f"allocation {allocation_id} is {allocation.state}; cannot assign settlement resource"
+                )
+            if allocation.resource_id == settlement_resource_id:
+                return self._allocation_payload(allocation)
+            destination = db.get(SiteResource, settlement_resource_id)
+            if destination is None or not destination.enabled:
+                raise CapacityConflictError(
+                    f"settlement resource {settlement_resource_id!r} is unavailable"
+                )
+            held = sum(
+                row.units for row in db.query(SiteAllocation).filter(
+                    SiteAllocation.resource_id == settlement_resource_id,
+                    SiteAllocation.state.in_(HELD_ALLOCATION_STATES),
+                ).all()
+            )
+            if destination.total_units - held < allocation.units:
+                raise CapacityConflictError(
+                    f"settlement resource {settlement_resource_id!r} lacks capacity"
+                )
+            source_id = allocation.resource_id
+            allocation.resource_id = settlement_resource_id
+            allocation.vm_host = (destination.attributes or {}).get("vm_host")
+            db.add(CapacityEvent(kind="capacity_released_for_reassignment", resource_id=source_id))
+            db.add(CapacityEvent(kind="capacity_assigned_for_settlement", resource_id=settlement_resource_id))
+            db.commit()
+            return self._allocation_payload(allocation)
+
     def commit(
         self,
         *,
@@ -380,7 +423,14 @@ class CapacityLedgerService:
                 db, allocation_id=allocation_id,
                 escrow_uid=None if allocation_id else escrow_uid,
             )
-            if allocation is None or allocation.state not in HELD_ALLOCATION_STATES:
+            if allocation is None:
+                return None
+            if allocation.state in {
+                AllocationState.released.value,
+                AllocationState.force_released.value,
+            }:
+                return self._allocation_payload(allocation)
+            if allocation.state not in HELD_ALLOCATION_STATES:
                 return None
             allocation.state = state
             allocation.released_at = datetime.now(timezone.utc).isoformat()
@@ -396,7 +446,7 @@ class CapacityLedgerService:
         allocation_id: str,
         lease_end_utc: str,
     ) -> dict[str, Any] | None:
-        """End a lease early; teardown stays with the ledger's watchdog."""
+        """End a lease early; injected compute lifecycle observes the new expiry."""
         with self._lock, self._session_factory() as db:
             allocation = self._find_allocation(db, allocation_id=allocation_id)
             if allocation is None or allocation.state not in HELD_ALLOCATION_STATES:
@@ -688,6 +738,19 @@ class CapacityLedgerService:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def expire_due_holds(self) -> None:
+        """Public entry point for a periodic watchdog to sweep expired holds.
+
+        Every ``reserve``/``commit``/``release``/``probe`` call already runs
+        :meth:`_expire_stale_holds` lazily against its own open session, so
+        an uncommitted hold is self-healing the moment anything touches the
+        ledger again. This method exists for the case where nothing does —
+        an idle site with no incoming requests — so a hold doesn't sit
+        expired-but-unreleased indefinitely.
+        """
+        with self._lock, self._session_factory() as db:
+            self._expire_stale_holds(db)
 
     def _expire_stale_holds(self, db: Session) -> None:
         """Lapse TTL'd reservations whose hold expired without a commit.

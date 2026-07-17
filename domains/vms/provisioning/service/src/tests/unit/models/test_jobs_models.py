@@ -1,8 +1,8 @@
 """
 Unit tests for typed VM request model validation.
 
-``ProvisionRequest`` has been replaced by typed per-operation models in
-``provisioning_client.models``.  Validation is now distributed:
+``ProvisionRequest`` has been replaced by direct VM operator request models in
+``vm_provisioning_operator.models``. Validation is now distributed:
 
   - ``vm_target`` is no longer validated here — it is a required URL path
     parameter enforced by FastAPI routing, not a model field.
@@ -19,7 +19,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from provisioning_client.models import CreateVmRequest, VmActionRequest
+from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
 from models.vm_request_model import build_create_params, build_simple_params
 
 

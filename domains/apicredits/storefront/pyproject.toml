@@ -1,13 +1,14 @@
 [project]
 name = "arkhai-apicredits-storefront"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Seller-side storefront for the API-credits domain: quota-backed listings, sync negotiation with ownership/quota guards, issuance-backed settlement."
 requires-python = ">=3.12"
 dependencies = [
-    "arkhai-core",
+    "arkhai-core>=0.2.0",
+    "arkhai-apicredits-domain",
     "arkhai-core-registry-client",
-    "arkhai-core-storefront",
+    "arkhai-core-storefront>=0.2.0",
     "arkhai-kit-alkahest",
     "arkhai-kit-config",
     "arkhai-kit-identity",
@@ -26,6 +27,9 @@ dependencies = [
 
 [project.scripts]
 apicredits-storefront = "apicredits_storefront.cli:app"
+
+[project.entry-points."market.storefront_domains"]
+apicredits = "apicredits_storefront.domain_runtime:APICREDITS_STOREFRONT_DOMAIN"
 
 [dependency-groups]
 dev = [

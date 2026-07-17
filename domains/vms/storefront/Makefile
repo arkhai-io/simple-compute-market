@@ -4,7 +4,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 
 # Path to the monorepo .dist/ wheel directory, relative to domains/vms/storefront/.
 # Used by uv when resolving pure-Python internal packages
-# (arkhai-kit-policy, arkhai-vms-provisioning-client) that are
+# (arkhai-kit-policy, arkhai-compute-provisioning) that are
 # distributed as wheels rather than editable source installs. The
 # Dockerfile passes --find-links /dist on the uv sync CLI instead;
 # this variable is for local development only.
@@ -25,7 +25,7 @@ reinit: ## Force-reinstall internal wheels without bumping versions. Use after m
 	--upgrade-package arkhai-kit-config              --reinstall-package arkhai-kit-config \
 	--upgrade-package arkhai-kit-policy              --reinstall-package arkhai-kit-policy \
 	--upgrade-package arkhai-vms              --reinstall-package arkhai-vms \
-	--upgrade-package arkhai-vms-provisioning-client --reinstall-package arkhai-vms-provisioning-client \
+	--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
 	--upgrade-package arkhai-core-storefront-client  --reinstall-package arkhai-core-storefront-client \
 	--upgrade-package arkhai-core-registry-client    --reinstall-package arkhai-core-registry-client
 

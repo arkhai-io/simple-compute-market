@@ -157,62 +157,28 @@ class TokenResource(Resource):
 
 
 class ProvisionTerms(BaseModel):
-    """Opaque off-chain delivery terms negotiated alongside escrow terms.
+    """Versioned, schema-opaque delivery terms negotiated with escrow terms.
 
-    The core protocol treats provision terms as a schema-tagged payload:
-    ``kind`` identifies the market/schema-specific interpreter and
-    ``payload`` carries that interpreter's data. Core code treats
-    ``payload`` as opaque; interpreting it (and constructing it) is the
-    job of domain adapters — e.g. ``arkhai_vms.provision_terms`` for
-    the ``compute.v1`` payload shape.
+    ``kind`` selects the domain interpreter, ``version`` selects that
+    domain-owned provision payload schema, and ``payload`` is opaque to core.
+    Legacy flat compute fields and transitional key names are intentionally
+    rejected.
     """
 
+    model_config = {"extra": "forbid"}
+
     kind: str = Field(
-        description="Schema/interpreter for this provision payload.",
+        min_length=1,
+        description="Stable domain interpreter for this provision payload.",
+    )
+    version: int = Field(
+        ge=1,
+        description="Domain-owned provision payload schema version.",
     )
     payload: dict[str, Any] = Field(
         default_factory=dict,
-        description="Schema-specific provision terms. Opaque to market core.",
+        description="Domain-specific provision terms. Opaque to market core.",
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_legacy_wire_shapes(cls, value: Any) -> Any:
-        """LEGACY wire compatibility — not part of the carrier contract.
-
-        Early compute clients (including the current ``storefront-client``
-        wheel) send a flat ``{duration_seconds, ssh_public_key,
-        compute_resource}`` dict with no ``kind``/``payload`` envelope,
-        and some transitional payloads used ``schema``/``terms`` key
-        names. Normalize all of those into the envelope here so old wire
-        data and run logs keep parsing. The ``compute.v1`` literal below
-        is a legacy wire tag, not a core interpretation of the payload.
-        Remove once no deployed client sends the flat shape.
-        """
-        if not isinstance(value, dict):
-            return value
-
-        data = dict(value)
-        if "schema" in data and "kind" not in data:
-            data["kind"] = data.pop("schema")
-        if "terms" in data and "payload" not in data:
-            data["payload"] = data.pop("terms")
-
-        legacy_keys = {"duration_seconds", "ssh_public_key", "compute_resource"}
-        if "payload" not in data and legacy_keys.intersection(data):
-            payload: dict[str, Any] = {}
-            for key in legacy_keys:
-                if key in data:
-                    raw = data.pop(key)
-                    if key == "duration_seconds" and raw is not None:
-                        try:
-                            raw = int(raw)
-                        except (TypeError, ValueError):
-                            pass
-                    payload[key] = raw
-            data["kind"] = data.get("kind") or "compute.v1"
-            data["payload"] = payload
-        return data
 
 
 class EscrowTerms(BaseModel):

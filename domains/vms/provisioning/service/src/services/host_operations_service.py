@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from provisioning_client.models import JobSubmitResponse, VmActionRequest
+from vm_provisioning_operator.models import JobSubmitResponse, VmActionRequest
 from models.ansible import ConnectivityResult
 from models.vm_request_model import build_simple_params
 from services.async_job_queue import AsyncJobQueue

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import inspect
 
-from provisioning_client import ProvisioningClient, SyncProvisioningClient
+from vm_provisioning_operator import ProvisioningClient, SyncProvisioningClient
 
 
 def _public_methods(cls: type) -> dict[str, inspect.Signature]:

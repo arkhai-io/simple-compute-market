@@ -103,6 +103,19 @@ ssh_decryption_key = ""
 # inventory via a Kubernetes Secret without requiring a POST /hosts/import call.
 inventory_ini = ""
 
+# Resource pool definitions
+# Path to a YAML file of pool definitions (see ARCHITECTURE.md § Physical
+# Settlement Scheduler and FulfillmentProvider Architecture, "Pool seeding
+# and admin surfaces" for the format). When set, imported at every service
+# startup (idempotent upsert — same pattern as inventory_ini). Empty by
+# default: the system-created "default" pool (seeded by the resource_pools
+# migration) is enough for a fresh checkout with no operator-supplied pools.
+pool_definitions_path = ""
+
+# Legacy/default pool migration configuration. Existing hosts are backfilled
+# into this real Ansible pool. Override the inventory group where needed.
+default_pool_inventory_group = "kvm_hosts"
+
 # Lease watchdog
 # Polls vm_leases for expired leases, submits a check Ansible job to confirm
 # VM cleanup, then patches the storefront resource back to 'available'.
@@ -112,6 +125,8 @@ inventory_ini = ""
 lease_watchdog_enabled = true
 lease_watchdog_poll_interval_seconds = 60
 lease_watchdog_grace_period_seconds = 300
+capacity_reservation_watchdog_enabled = true
+capacity_reservation_watchdog_poll_interval_seconds = 60
 storefront_url = ""
 # Shared secret with the storefront. Dual purpose: signs the outbound
 # lease-watchdog callback to the storefront, and gates every inbound request

@@ -19,12 +19,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from db.database import create_session_factory
-from db.models import Base, Host
-from provisioning_client.models import HostCreate, HostUpdate
+from db.models import Base, DEFAULT_POOL_ID, Host, ResourcePool
+from vm_provisioning_operator.models import HostCreate, HostUpdate
 from services.host_service import HostService, _parse_ini
 
 
@@ -40,7 +40,20 @@ def db_engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    # resource_pools must exist before Base's ansible_pool_configs FK resolves.
+    from market_resource_pools.db import Base as PoolsBase
+    PoolsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    # HostService requires pool_id to reference an existing pool. The real
+    # migration always seeds "default" before hosts.pool_id can be NOT
+    # NULL (see db/migrations.py); mirror that guarantee here since this
+    # fixture builds schema directly rather than through the migration.
+    with Session(engine) as session:
+        session.add(ResourcePool(
+            id=DEFAULT_POOL_ID, label="Default Pool", provider="ansible",
+            enabled=True, policy_tags={},
+        ))
+        session.commit()
     return engine
 
 
@@ -329,3 +342,61 @@ class TestListHosts:
         result = svc.list_hosts(search="alph")
         assert len(result) == 1
         assert result[0].name == "alpha"
+
+
+# ---------------------------------------------------------------------------
+# pool_id assignment
+# ---------------------------------------------------------------------------
+
+
+class TestHostPoolAssignment:
+    def test_register_host_defaults_to_default_pool(self, svc):
+        host = svc.register_host(HostCreate(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            ssh_key_type="path", ssh_key_value="/key",
+        ))
+        assert host.pool_id == DEFAULT_POOL_ID
+
+    def test_register_host_with_explicit_pool_id(self, svc, session_factory):
+        with session_factory() as db:
+            db.add(ResourcePool(
+                id="hetzner-eu", label="Hetzner EU", provider="ansible",
+                enabled=True, policy_tags={},
+            ))
+            db.commit()
+
+        host = svc.register_host(HostCreate(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            ssh_key_type="path", ssh_key_value="/key", pool_id="hetzner-eu",
+        ))
+        assert host.pool_id == "hetzner-eu"
+
+    def test_register_host_with_nonexistent_pool_id_raises(self, svc):
+        with pytest.raises(ValueError):
+            svc.register_host(HostCreate(
+                name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+                ssh_key_type="path", ssh_key_value="/key", pool_id="does-not-exist",
+            ))
+
+    def test_update_host_reassigns_pool(self, svc, session_factory):
+        svc.register_host(HostCreate(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            ssh_key_type="path", ssh_key_value="/key",
+        ))
+        with session_factory() as db:
+            db.add(ResourcePool(
+                id="hetzner-eu", label="Hetzner EU", provider="ansible",
+                enabled=True, policy_tags={},
+            ))
+            db.commit()
+
+        updated = svc.update_host("kvm1", HostUpdate(pool_id="hetzner-eu"))
+        assert updated.pool_id == "hetzner-eu"
+
+    def test_update_host_with_nonexistent_pool_id_raises(self, svc):
+        svc.register_host(HostCreate(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            ssh_key_type="path", ssh_key_value="/key",
+        ))
+        with pytest.raises(ValueError):
+            svc.update_host("kvm1", HostUpdate(pool_id="does-not-exist"))

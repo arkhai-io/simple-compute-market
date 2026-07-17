@@ -142,18 +142,69 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal"
-version = "0.1.0"
+version = "0.2.0"
+source = { registry = "../../../../.dist" }
+dependencies = [
+    { name = "arkhai-core" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_bare_metal-0.2.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-compute-provisioning"
+version = "0.5.0"
+source = { registry = "../../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-resource-pools" },
+    { name = "arkhai-kit-site" },
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_compute_provisioning-0.5.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-core"
+version = "0.2.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.2.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-core-storefront-client"
+version = "0.16.0"
+source = { registry = "../../../../.dist" }
+dependencies = [
+    { name = "eth-account" },
+    { name = "httpx" },
+]
+wheels = [
+    { path = "arkhai_core_storefront_client-0.16.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-resource-pools"
+version = "0.1.0"
+source = { registry = "../../../../.dist" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "sqlalchemy" },
+]
+wheels = [
+    { path = "arkhai_kit_resource_pools-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "fastapi" },
@@ -161,31 +212,21 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_site-0.1.0-py3-none-any.whl" },
-]
-
-[[package]]
-name = "arkhai-core-storefront-client"
-version = "0.15.0"
-source = { registry = "../../../../.dist" }
-dependencies = [
-    { name = "eth-account" },
-    { name = "httpx" },
-]
-wheels = [
-    { path = "arkhai_core_storefront_client-0.15.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-vms-provisioning"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "arkhai-bare-metal" },
-    { name = "arkhai-kit-site" },
+    { name = "arkhai-compute-provisioning" },
     { name = "arkhai-core-storefront-client" },
-    { name = "arkhai-vms-provisioning-client" },
+    { name = "arkhai-kit-resource-pools" },
+    { name = "arkhai-kit-site" },
+    { name = "arkhai-vms-provisioning-operator-client" },
     { name = "cachetools" },
     { name = "cryptography" },
     { name = "dependency-injector" },
@@ -212,9 +253,11 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "arkhai-bare-metal", specifier = ">=0.1.0" },
-    { name = "arkhai-kit-site", specifier = ">=0.1.0" },
+    { name = "arkhai-compute-provisioning", specifier = ">=0.5.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.11.0" },
-    { name = "arkhai-vms-provisioning-client", specifier = ">=0.1.1" },
+    { name = "arkhai-kit-resource-pools", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-site", specifier = ">=0.2.0" },
+    { name = "arkhai-vms-provisioning-operator-client", specifier = ">=0.3.0" },
     { name = "cachetools", specifier = ">=5.3" },
     { name = "cryptography", specifier = ">=42.0" },
     { name = "dependency-injector", specifier = ">=4.41.0" },
@@ -238,15 +281,16 @@ dev = [
 ]
 
 [[package]]
-name = "arkhai-vms-provisioning-client"
-version = "0.1.1"
+name = "arkhai-vms-provisioning-operator-client"
+version = "0.3.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
+    { name = "arkhai-compute-provisioning" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_provisioning_client-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_vms_provisioning_operator_client-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]

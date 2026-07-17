@@ -7,12 +7,10 @@
 # Bump `version` on backwards-incompatible changes.  Add filters
 # without bumping (etag changes; clients re-fetch).
 #
-# `schema.id` is the registry's stable schema identity — the name a
-# buyer schema plugin declares compatibility with
-# (BuyerSchemaPlugin.schema_id). With several registries configured,
-# the buyer offers each plugin only registries whose declared id
-# matches; registries without the header match any plugin
-# (pre-identity deployments).
+# `schema.id` is the registry's stable listing-schema identity. Buyer-domain
+# commands declare which registry schemas they understand and query only
+# registries whose declared id matches; registries without the header match
+# any domain for compatibility with pre-identity deployments.
 
 version: 4
 

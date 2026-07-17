@@ -116,7 +116,7 @@ market listing show <listing_id>
 market buy \
   --gpu-model H200 \
   --duration-hours 1 \
-  --initial-price 1 \
+  --initial-price 2 \
   --max-price 2 \
   --settlement-timeout 1800 \
   --yes
@@ -184,6 +184,10 @@ market escrow reclaim <escrow_uid>
 - **Prices on the CLI are human / whole-token units per hour.** `2`
   with 6-decimal USDC = $2/hr. Run-log entries record post-scaling
   base units.
+- **A bisection opening below the seller's advertised floor can terminate
+  immediately.** Set `--initial-price` to at least the listing's advertised
+  primary rate. The default `listed_price` policy opens at that rate
+  automatically.
 - **`market buy` and `settle` are not idempotent on chain.** A buy
   that fails after escrow creation locks funds until `expiration_unix`.
   Resume with `market buy --from <run_id>`, don't re-`buy` from scratch.

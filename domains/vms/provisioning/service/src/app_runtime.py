@@ -12,7 +12,7 @@ from compute_provisioning.startup import (
 import container as _container_module
 from config import settings
 from container import container
-from db.database import init_db
+from db.migrations import check_schema_version
 from services.async_job_queue import AsyncJobQueue
 
 logger = logging.getLogger(__name__)
@@ -28,9 +28,19 @@ def apply_ansible_config() -> None:
 
 
 def initialise_container_resources() -> None:
+    """Wire the DI container and verify the DB schema is up to date.
+
+    Migrations are no longer applied in-process here (see ARCHITECTURE.md
+    § Schema Migration Execution) — they must be applied ahead of time via
+    the Helm init container, ``python -m db.migrate``, or ``make migrate``.
+    This step only checks the schema version and fails fast with an
+    actionable message if it's behind, so a missed migration surfaces as an
+    obvious startup error rather than a query hitting a missing column
+    later.
+    """
     container.init_resources()
-    init_db(container.db_engine())
-    logger.info("Database initialised")
+    check_schema_version(container.db_engine())
+    logger.info("Database schema check passed")
 
 
 def resolve_request_path_services() -> None:
@@ -51,6 +61,16 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_bare_metal_lease_service = container.bare_metal_lease_service()
     _container_module.resolved_bare_metal_operations_service = (
         container.bare_metal_operations_service()
+    )
+    _container_module.resolved_executor_lease_service = container.executor_lease_service()
+    _container_module.resolved_compute_contract_service = container.compute_contract_service()
+    _container_module.resolved_resource_pool_service = container.resource_pool_service()
+    _container_module.resolved_physical_settlement_scheduler = (
+        container.physical_settlement_scheduler()
+    )
+    _container_module.resolved_fulfillment_service = container.fulfillment_service()
+    _container_module.resolved_capacity_reservation_watchdog = (
+        container.capacity_reservation_watchdog()
     )
 
 
@@ -111,6 +131,38 @@ def seed_inventory_if_empty() -> None:
         )
 
 
+def import_pool_definitions_if_configured() -> None:
+    # ------------------------------------------------------------------
+    # Pool-definitions import — runs at every startup when configured.
+    #
+    # Unlike the old "empty table" seeding idea, this always imports when
+    # pool_definitions_path is set: import is idempotent/diff-based (see
+    # ResourcePoolService.import_pools), so re-running it on every restart
+    # is the correct behavior — the same idiom as the `inventory_ini`
+    # setting ("parsed and upserted... at every service startup").
+    #
+    # The system-created "default" pool always exists by this point (the
+    # resource_pools migration seeds it), so there is no "create default if
+    # empty" fallback here — that concern moved into the migration.
+    # ------------------------------------------------------------------
+    path = getattr(settings, "resolved_pool_definitions_path", None)
+    if path is None:
+        logger.info("Pool-definitions import: no pool_definitions_path configured — skipped")
+        return
+
+    if not path.exists():
+        raise FileNotFoundError(f"Configured pool-definitions file does not exist: {path}")
+
+    pool_service = _container_module.resolved_resource_pool_service
+    yaml_text = path.read_text(encoding="utf-8")
+    diff = pool_service.import_pools(yaml_text, validate_only=False)
+    logger.info(
+        "Pool-definitions import from %s: created=%d updated=%d disabled=%d unchanged=%d",
+        path,
+        len(diff.created), len(diff.updated), len(diff.disabled), len(diff.unchanged),
+    )
+
+
 def create_job_queue() -> None:
     # AsyncJobQueue is a plain object; instantiate inside the running event loop.
     _container_module.resolved_job_queue = AsyncJobQueue(
@@ -130,6 +182,9 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
             resolve_request_path_services,
         ),
         ComputeProvisioningStartupStep("seed-inventory", seed_inventory_if_empty),
+        ComputeProvisioningStartupStep(
+            "import-pool-definitions", import_pool_definitions_if_configured
+        ),
         ComputeProvisioningStartupStep("create-job-queue", create_job_queue),
     )
 
@@ -181,6 +236,33 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
         )
     else:
         logger.info("Lease watchdog disabled (lease_watchdog_enabled=false)")
+
+    # Capacity reservation watchdog — only started when enabled in config
+    # (default: true). Every reserve/commit/release call already lazily
+    # sweeps expired holds; this only catches an otherwise-idle site.
+    reservation_watchdog_enabled = bool(
+        getattr(settings, "capacity_reservation_watchdog_enabled", True)
+    )
+    if reservation_watchdog_enabled:
+        tasks.append(
+            ComputeProvisioningBackgroundTask(
+                "capacity-reservation-watchdog",
+                lambda: _container_module.resolved_capacity_reservation_watchdog.run(),
+                "Capacity reservation watchdog started (interval=%ds)",
+                (
+                    getattr(
+                        settings,
+                        "capacity_reservation_watchdog_poll_interval_seconds",
+                        60,
+                    ),
+                ),
+            )
+        )
+    else:
+        logger.info(
+            "Capacity reservation watchdog disabled "
+            "(capacity_reservation_watchdog_enabled=false)"
+        )
 
     return tuple(tasks)
 

@@ -31,9 +31,21 @@ class ApiCreditsListing(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _accept_offer_resource_payload(cls, value: Any) -> Any:
+        # Domain models can cross a source/wheel import boundary in the
+        # storefront image. Structurally identical Pydantic classes loaded
+        # from those two locations do not pass isinstance validation, so
+        # normalize models back to their wire representation first.
+        if isinstance(value, BaseModel):
+            value = value.model_dump(mode="json")
         if not isinstance(value, dict):
             return value
         if "offer_resource" in value:
+            offer_resource = value["offer_resource"]
+            if isinstance(offer_resource, BaseModel):
+                return {
+                    **value,
+                    "offer_resource": offer_resource.model_dump(mode="json"),
+                }
             return value
         return {"offer_resource": value}
 

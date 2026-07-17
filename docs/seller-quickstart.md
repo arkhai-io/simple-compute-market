@@ -256,6 +256,16 @@ touching libvirt. To create real VMs:
   scheme, host, port, no trailing slash.
 - **`admin_api_key` empty or missing** — provisioning service can't
   call back on lease expiry, leases never release.
+- **A globally paused storefront rejects every new negotiation with
+  `503 {"reason":"global"}`.** Global pause is process-local and separate
+  from per-listing pause. Resume it through the authenticated
+  `POST /admin/resume` endpoint before accepting buyers.
+- **The resource importer and storefront must use the same SQLite path.**
+  A mismatch leaves the running storefront with no resources and causes
+  `409 no_matching_inventory`. Check `resource_count` in
+  `GET /api/v1/system/status`; zero usually means the importer wrote a
+  different database. Prefer an explicit importer `--db-path` or
+  `STOREFRONT_DB_PATH`.
 - **`resources.csv` prices are human / whole-token units.** Use
   fractional strings (`"0.50"`) for sub-token rates. `0` is a literal
   free offering.

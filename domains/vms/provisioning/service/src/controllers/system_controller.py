@@ -31,7 +31,7 @@ from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
 
 import container as _container_module
-from provisioning_client.models import (
+from vm_provisioning_operator.models import (
     AnsibleReadinessResponse,
     HealthResponse,
     VersionResponse,

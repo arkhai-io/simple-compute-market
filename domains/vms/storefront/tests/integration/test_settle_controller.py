@@ -44,7 +44,12 @@ async def db(tmp_path):
     return SQLiteClient(db_path=str(db_path))
 
 
-async def _seed_listing(db: SQLiteClient, listing_id: str) -> None:
+async def _seed_listing(
+    db: SQLiteClient,
+    listing_id: str,
+    *,
+    resource_id: str | None = None,
+) -> None:
     """Seed a minimal compute listing into SQLite for evaluate tests."""
     now = datetime.now().isoformat()
     await db.upsert_listing(
@@ -54,6 +59,7 @@ async def _seed_listing(db: SQLiteClient, listing_id: str) -> None:
         updated_at=now,
         paused=False,
         offer_resource={
+            "resource_id": resource_id or f"res-{listing_id}",
             "gpu_model": "H200", "gpu_count": 1, "sla": 99.0,
             "region": "California, US",
         },
@@ -246,7 +252,11 @@ class TestEvaluateSettle:
     async def test_with_matching_inventory_returns_would_submit_true(self, admin_client):
         """Listing + matching inventory resource → would_submit=True with vm_host."""
         c, db = admin_client
-        await _seed_listing(db, "settle-eval-match")
+        await _seed_listing(
+            db,
+            "settle-eval-match",
+            resource_id="r-eval-match",
+        )
         await db.upsert_resource(
             resource_id="r-eval-match",
             resource_type="compute.gpu",

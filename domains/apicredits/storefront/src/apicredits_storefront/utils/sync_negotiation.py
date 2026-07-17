@@ -35,7 +35,6 @@ from domains.apicredits.listings.pricing import (
 )
 from domains.apicredits.negotiation.storefront_round import (
     ApiCreditsSellerRoundHook,
-    default_seller_round_hook,
 )
 from domains.apicredits.negotiation.terms import (
     provision_key_id,
@@ -77,8 +76,11 @@ def _default_min_price() -> Any:
 def _default_seller_round_hook(sqlite_client: Any) -> ApiCreditsSellerRoundHook:
     from apicredits_storefront.services.capacity_client import build_capacity_client
     from apicredits_storefront.services.keys_lookup import lookup_key_record
+    from apicredits_storefront.domain_runtime import get_market_domain_contract
 
-    return default_seller_round_hook(
+    policy = get_market_domain_contract().storefront
+    assert policy is not None
+    return policy.run_negotiation_policy(
         build_capacity_client(lambda: sqlite_client),
         lookup_key_record,
         negotiation_config=_negotiation_settings(),
@@ -114,7 +116,7 @@ def _seller_reference_amount(listing: dict[str, Any], quantity: int | None) -> i
 
 
 def _normalize_api_credits_message_terms(provision_terms: Any) -> Any | None:
-    """Normalize provision terms through the injected API-credits runtime."""
+    """Validate the API-credit envelope before negotiation policy runs."""
     if provision_terms is None:
         return None
     raw = (
@@ -122,18 +124,9 @@ def _normalize_api_credits_message_terms(provision_terms: Any) -> Any | None:
         if hasattr(provision_terms, "model_dump")
         else provision_terms
     )
-    try:
-        from apicredits_storefront.domain_runtime import (
-            get_storefront_domain_runtime,
-        )
+    from apicredits_storefront.domain_runtime import get_market_domain_contract
 
-        return get_storefront_domain_runtime().message(raw)
-    except Exception:
-        # Legacy behavior tolerated foreign/empty provision envelopes by
-        # treating them as absent API-credit delivery terms.
-        if provision_quantity(provision_terms) is None:
-            return None
-        raise
+    return get_market_domain_contract().codecs.message(raw)
 
 
 def _accepted_escrow_artifacts(

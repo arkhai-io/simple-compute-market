@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import pytest
 
-from provisioning_client import ProvisioningClient, ProvisioningError
-from provisioning_client.models import HostCreate, HostListResponse, HostResponse, HostUpdate
+from vm_provisioning_operator import ProvisioningClient, ProvisioningError
+from vm_provisioning_operator.models import HostCreate, HostListResponse, HostResponse, HostUpdate
 
 
 _SAMPLE_HOST = HostCreate(

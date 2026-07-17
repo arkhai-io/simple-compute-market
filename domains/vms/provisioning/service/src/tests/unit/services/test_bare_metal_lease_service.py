@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from market_resource_pools.db import Base as PoolsBase
 from market_site.db import Base as SiteBase
 from market_site.ledger import (
     ALLOCATION_MODE_EXCLUSIVE,
@@ -17,8 +18,8 @@ from db.models import Base
 from services.bare_metal_lease_service import (
     BareMetalLeaseService,
 )
-from services.lease_lifecycle_service import LeaseNotFoundError
-from services.site_resources_service import SiteResourcesService
+from compute_provisioning.lease_lifecycle import LeaseNotFoundError
+from market_site.authority import LedgerSiteAuthority
 
 
 @pytest.fixture
@@ -28,6 +29,8 @@ def ledger() -> CapacityLedgerService:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    # resource_pools must exist before Base's ansible_pool_configs FK resolves.
+    PoolsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     SiteBase.metadata.create_all(bind=engine)
     session_factory = sessionmaker(bind=engine)
@@ -57,7 +60,7 @@ def test_register_bare_metal_lease_attaches_executor_metadata(
         allocation_id=reserved["allocation_id"],
         lease_end_utc="2099-01-01 00:00",
     )
-    svc = BareMetalLeaseService(SiteResourcesService(ledger))
+    svc = BareMetalLeaseService(LedgerSiteAuthority(ledger))
 
     lease = svc.register_lease(
         BareMetalLeaseCreate(
@@ -96,7 +99,7 @@ def test_register_bare_metal_lease_by_escrow_when_allocation_id_omitted(
         allocation_id=reserved["allocation_id"],
         lease_end_utc="2099-01-01 00:00",
     )
-    svc = BareMetalLeaseService(SiteResourcesService(ledger))
+    svc = BareMetalLeaseService(LedgerSiteAuthority(ledger))
 
     lease = svc.register_lease(
         BareMetalLeaseCreate(
@@ -116,7 +119,7 @@ def test_register_bare_metal_lease_by_escrow_when_allocation_id_omitted(
 def test_register_bare_metal_lease_missing_allocation_raises(
     ledger: CapacityLedgerService,
 ):
-    svc = BareMetalLeaseService(SiteResourcesService(ledger))
+    svc = BareMetalLeaseService(LedgerSiteAuthority(ledger))
 
     with pytest.raises(LeaseNotFoundError):
         svc.register_lease(

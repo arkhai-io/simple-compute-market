@@ -7,12 +7,16 @@ persisted service databases across image upgrades.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from sqlalchemy import Engine, inspect, text
+from sqlalchemy.orm import Session
 
-from db.models import Base
+from db.models import AnsiblePoolConfig, Base, DEFAULT_POOL_ID, ResourcePool
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -21,16 +25,75 @@ class Migration:
     apply: Callable[[Engine], None]
 
 
-def apply_schema_migrations(engine: Engine) -> None:
-    """Apply all known migrations once, tracking completion in the database."""
+class SchemaDriftError(RuntimeError):
+    """Raised at startup when the DB schema is behind the code's expectations.
+
+    Per ARCHITECTURE.md § Schema Migration Execution: the service no longer
+    applies migrations automatically at startup. An operator (or the Helm
+    init container, or `make migrate` for local dev) must run them first.
+    """
+
+
+def apply_schema_migrations(
+    engine: Engine,
+    *,
+    default_playbook_path: str = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml",
+    default_inventory_group: str = "kvm_hosts",
+) -> None:
+    """Apply all known migrations once, tracking completion in the database.
+
+    Idempotent: migrations already recorded in ``schema_migrations`` are
+    skipped, so this is safe to call repeatedly (the CLI entrypoint and the
+    Helm init container both call it unconditionally on every run/restart).
+    """
     _ensure_schema_migrations_table(engine)
     applied = _applied_migration_ids(engine)
 
     for migration in _MIGRATIONS:
         if migration.id in applied:
             continue
-        migration.apply(engine)
+        if migration.id == "20260713_002_resource_pools_and_hosts_pool_id":
+            _migrate_resource_pools_and_hosts_pool_id(
+                engine,
+                default_playbook_path=default_playbook_path,
+                default_inventory_group=default_inventory_group,
+            )
+        else:
+            migration.apply(engine)
         _record_migration(engine, migration.id)
+        logger.info("Applied migration: %s", migration.id)
+
+
+def check_schema_version(engine: Engine) -> None:
+    """Fail fast if the DB schema is behind the last known migration.
+
+    Called by the main service container at startup instead of applying
+    migrations in-process. Raises :class:`SchemaDriftError` with an
+    actionable message if ``schema_migrations`` is missing the most recent
+    migration id — meaning migrations were never run, or the code shipped
+    in this image is ahead of what's been applied to this database.
+    """
+    expected = _MIGRATIONS[-1].id if _MIGRATIONS else None
+    if expected is None:
+        return
+
+    if not _table_exists(engine, "schema_migrations"):
+        raise SchemaDriftError(_drift_message(current="<no migrations table>", expected=expected))
+
+    applied = _applied_migration_ids(engine)
+    if expected not in applied:
+        current = sorted(applied)[-1] if applied else "<none>"
+        raise SchemaDriftError(_drift_message(current=current, expected=expected))
+
+
+def _drift_message(*, current: str, expected: str) -> str:
+    return (
+        f"Database schema is at version {current}, service expects {expected}.\n"
+        "Apply migrations before starting the service:\n"
+        "  docker run <image> python -m db.migrate        (docker / local)\n"
+        "  kubectl apply -f migrate-job.yaml               (Kubernetes without init container)\n"
+        "  make migrate                                    (local dev, outside Docker)"
+    )
 
 
 def _ensure_schema_migrations_table(engine: Engine) -> None:
@@ -135,6 +198,98 @@ def _migrate_site_allocations_executor_fields(engine: Engine) -> None:
     _add_column_if_missing(engine, "site_allocations", "executor_ref", "JSON")
 
 
+def _migrate_ansible_jobs_contract_fields(engine: Engine) -> None:
+    for column_name, column_sql in (
+        ("contract_version", "VARCHAR"),
+        ("allocation_id", "VARCHAR"),
+        ("deal_ref", "JSON"),
+        ("executor_kind", "VARCHAR"),
+        ("action_kind", "VARCHAR"),
+        ("idempotency_key", "VARCHAR"),
+    ):
+        _add_column_if_missing(engine, "ansible_jobs", column_name, column_sql)
+    if _table_exists(engine, "ansible_jobs"):
+        _create_index_if_missing(
+            engine,
+            "ix_ansible_jobs_allocation_id",
+            "CREATE INDEX IF NOT EXISTS ix_ansible_jobs_allocation_id "
+            "ON ansible_jobs (allocation_id)",
+        )
+        _create_index_if_missing(
+            engine,
+            "uq_ansible_jobs_contract_idempotency",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_ansible_jobs_contract_idempotency "
+            "ON ansible_jobs (allocation_id, action_kind, idempotency_key)",
+        )
+
+
+def _migrate_resource_pools_and_hosts_pool_id(
+    engine: Engine,
+    *,
+    default_playbook_path: str = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml",
+    default_inventory_group: str = "kvm_hosts",
+) -> None:
+    """Create resource_pools/ansible_pool_configs, seed the "default" pool,
+    and add hosts.pool_id as NOT NULL.
+
+    Ordering matters: the default pool row must exist before the
+    hosts.pool_id column is added, since the column carries both a
+    NOT NULL constraint and a DEFAULT of DEFAULT_POOL_ID — on Postgres the
+    FK would fail validation against a not-yet-existing referenced row.
+    Pre-existing hosts are backfilled to "default" by the column DEFAULT
+    itself (SQLite and Postgres both apply DEFAULT to existing rows when a
+    NOT NULL column is added), so no separate UPDATE statement is needed.
+
+    This is the one deliberate exception to "migrations are schema-only":
+    seeding a single deterministic system row is what makes the NOT NULL
+    constraint possible without a nullable transitional state. It is not
+    open-ended business-logic seeding (that stays in app_runtime's YAML
+    pool-definitions import).
+    """
+    from market_resource_pools.db import Base as PoolsBase
+
+    PoolsBase.metadata.tables["resource_pools"].create(bind=engine, checkfirst=True)
+    Base.metadata.tables["ansible_pool_configs"].create(bind=engine, checkfirst=True)
+
+    with Session(engine) as session:
+        exists = (
+            session.query(ResourcePool).filter(ResourcePool.id == DEFAULT_POOL_ID).one_or_none()
+        )
+        if exists is None:
+            session.add(ResourcePool(
+                id=DEFAULT_POOL_ID,
+                label="Default Pool",
+                provider="ansible",
+                enabled=True,
+                policy_tags={},
+            ))
+            session.flush()
+
+        config = (
+            session.query(AnsiblePoolConfig)
+            .filter(AnsiblePoolConfig.pool_id == DEFAULT_POOL_ID)
+            .one_or_none()
+        )
+        if config is None:
+            # Migration values intentionally come from active provisioning
+            # configuration: the default pool is a backwards-compatible
+            # representation of how all existing hosts are provisioned today.
+            session.add(AnsiblePoolConfig(
+                pool_id=DEFAULT_POOL_ID,
+                playbook_path=default_playbook_path,
+                inventory_group=default_inventory_group,
+                extra_vars={},
+            ))
+        session.commit()
+
+    _add_column_if_missing(
+        engine,
+        "hosts",
+        "pool_id",
+        f"VARCHAR NOT NULL DEFAULT '{DEFAULT_POOL_ID}' REFERENCES resource_pools(id)",
+    )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -143,5 +298,13 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260707_001_site_allocations_executor_fields",
         _migrate_site_allocations_executor_fields,
+    ),
+    Migration(
+        "20260713_001_ansible_jobs_contract_fields",
+        _migrate_ansible_jobs_contract_fields,
+    ),
+    Migration(
+        "20260713_002_resource_pools_and_hosts_pool_id",
+        _migrate_resource_pools_and_hosts_pool_id,
     ),
 )

@@ -263,8 +263,13 @@ def test_reserve_decrements_and_releases_restore(seeded: CapacityLedgerService):
     assert released is not None and released["state"] == "released"
     assert seeded.snapshot()[0]["available_units"] == 8
 
-    # Idempotent: a second release finds nothing held.
-    assert seeded.release(deal_ref={"escrow_uid": "0xesc"}) is None
+    # Idempotent: duplicate release returns the authoritative terminal row
+    # without advancing the anonymous capacity event version.
+    _, version_before = seeded.events_after(0)
+    duplicate = seeded.release(allocation_id=reserved["allocation_id"])
+    _, version_after = seeded.events_after(0)
+    assert duplicate == released
+    assert version_after == version_before
 
 
 def test_future_reservation_ignores_non_overlapping_current_lease(seeded: CapacityLedgerService):
@@ -336,6 +341,33 @@ def test_ttl_hold_expires_without_commit(seeded: CapacityLedgerService):
         db.commit()
 
     assert seeded.snapshot()[0]["available_units"] == 8
+    lapsed = seeded.get_allocation(reserved["allocation_id"])
+    assert lapsed["state"] == "released"
+    assert lapsed["failure_reason"] == "hold_expired"
+
+
+def test_expire_due_holds_reclaims_without_another_ledger_call(
+    seeded: CapacityLedgerService,
+):
+    """The watchdog's public entry point, exercised directly rather than
+    via the lazy sweep every reserve/commit/release already runs."""
+    reserved = seeded.reserve(
+        claim={"gpu_count": 8}, deal_ref={"escrow_uid": "0xwatchdog"}, ttl_seconds=60,
+    )
+    assert reserved["hold_expires_at"] is not None
+
+    from market_site.db import SiteAllocation
+    with seeded._session_factory() as db:
+        row = db.get(SiteAllocation, reserved["allocation_id"])
+        row.hold_expires_at = (
+            datetime.now(timezone.utc) - timedelta(seconds=1)
+        ).isoformat()
+        db.commit()
+
+    # No reserve/commit/release/probe call in between — only the public
+    # sweep entry point a periodic watchdog would call.
+    seeded.expire_due_holds()
+
     lapsed = seeded.get_allocation(reserved["allocation_id"])
     assert lapsed["state"] == "released"
     assert lapsed["failure_reason"] == "hold_expired"

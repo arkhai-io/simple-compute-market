@@ -11,7 +11,7 @@ from arkhai_bare_metal import (
     NODE_RECLAIM_ACCESS_ACTION,
     bare_metal_executor_ref,
 )
-from provisioning_client.models import JobSubmitResponse
+from vm_provisioning_operator.models import JobSubmitResponse
 
 from services.bare_metal_operations_service import (
     BareMetalHostValidationError,

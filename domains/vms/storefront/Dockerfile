@@ -53,7 +53,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-vms \
             --refresh-package arkhai-bare-metal \
             --refresh-package arkhai-vms-storefront \
-            --refresh-package arkhai-vms-provisioning-client; \
+            --refresh-package arkhai-compute-provisioning; \
     else \
         uv sync --no-sources --no-dev --no-install-project --find-links /.dist \
             --refresh-package arkhai-core \
@@ -67,7 +67,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-vms \
             --refresh-package arkhai-bare-metal \
             --refresh-package arkhai-vms-storefront \
-            --refresh-package arkhai-vms-provisioning-client; \
+            --refresh-package arkhai-compute-provisioning; \
     fi
 
 # Stage 2: Lean runtime image
@@ -148,7 +148,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --refresh-package arkhai-vms \
         --refresh-package arkhai-bare-metal \
         --refresh-package arkhai-vms-storefront \
-        --refresh-package arkhai-vms-provisioning-client
+        --refresh-package arkhai-compute-provisioning
 
 ARG PORT=8080
 ENV PORT=${PORT}

@@ -9,7 +9,10 @@ from core_storefront.stage_log import stage_event
 
 from alkahest_py import AlkahestClient
 
-from provisioning_client import CreateVmRequest, ProvisioningClient
+from compute_provisioning import (
+    ComputeProvisioningClient,
+    LeaseRegistration,
+)
 from market_storefront.services.provisioning_orchestration_service import (
     create_vm_and_wait_with_credentials,
 )
@@ -30,6 +33,8 @@ async def _do_provision(
     vm_host: str,
     vm_target: str,
     on_job_submitted: Callable[[str], Awaitable[None]] | None = None,
+    allocation_id: str,
+    deal_ref: dict[str, Any],
 ) -> dict:
     """Submit a create VM job to the provisioning service and return the result.
 
@@ -55,7 +60,9 @@ async def _do_provision(
         timeout=timeout,
         poll_interval=poll_interval,
         vm_host=vm_host,
-        request=CreateVmRequest(**params),
+        allocation_id=allocation_id,
+        deal_ref=deal_ref,
+        parameters=params,
         on_job_submitted=on_job_submitted,
     )
 
@@ -140,20 +147,23 @@ async def _register_vm_lease_with_settings(
     lease_end_dt = datetime.strptime(lease_end_utc, "%Y-%m-%d %H:%M").replace(
         tzinfo=timezone.utc,
     )
-    async with ProvisioningClient(
+    async with ComputeProvisioningClient(
         settings.provisioning.service_url,
         admin_key=settings.admin_api_key,
         timeout=10,
     ) as client:
-        await client.register_lease(
-            resource_id=resource_id,
-            allocation_id=allocation_id,
-            escrow_uid=escrow_uid,
-            vm_host=vm_host,
-            vm_target=vm_target,
-            lease_start_utc=lease_start_utc,
+        await client.register_lease(LeaseRegistration(
+            allocation_id=allocation_id or resource_id,
+            deal_ref={"escrow_uid": escrow_uid},
+            executor_kind="vm",
+            executor_target=vm_target,
+            lease_start_utc=(
+                datetime.fromisoformat(lease_start_utc.replace("Z", "+00:00"))
+                if lease_start_utc
+                else None
+            ),
             lease_end_utc=lease_end_dt,
-        )
+        ))
 
 
 async def fulfill_compute_obligation(

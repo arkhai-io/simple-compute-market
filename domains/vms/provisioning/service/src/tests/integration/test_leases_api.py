@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 import container as _container_module
 import pytest
 
-from provisioning_client import ProvisioningError
+from vm_provisioning_operator import ProvisioningError
 
 
 def _future_dt(hours: int = 2) -> str:
@@ -197,6 +197,35 @@ class TestUpdateLease:
         assert updated["vm_host"] == "kvm2"
         assert updated["vm_target"] == "migrated-vm"
         assert updated["status"] == "active"
+
+    async def test_patch_through_generic_executor_lease_service(
+        self, client_and_queue, monkeypatch,
+    ):
+        """The VM controller can update through the executor-neutral service."""
+        from compute_provisioning.executor_leases import ExecutorLeaseService
+        from market_site.authority import LedgerSiteAuthority
+
+        client, _ = client_and_queue
+        lease = await _register(client, "escrow-patch-generic")
+        generic_leases = ExecutorLeaseService(
+            LedgerSiteAuthority(_container_module.resolved_capacity_ledger_service),
+            executor_kind="vm",
+        )
+        monkeypatch.setattr(
+            _container_module,
+            "resolved_lease_lifecycle_service",
+            generic_leases,
+        )
+
+        updated = await client.update_lease(
+            lease["id"],
+            vm_host="kvm-generic",
+            vm_target="generic-migrated-vm",
+        )
+
+        assert updated["vm_host"] == "kvm-generic"
+        assert updated["vm_target"] == "generic-migrated-vm"
+
 
     async def test_patch_nonexistent_lease_returns_404(self, client_and_queue):
         client, _ = client_and_queue

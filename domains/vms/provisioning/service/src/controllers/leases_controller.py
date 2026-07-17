@@ -17,7 +17,7 @@ from fastapi_utils.cbv import cbv
 
 import container as _container_module
 from market_site.ledger import parse_utc as _parse_utc
-from provisioning_client.models import (
+from vm_provisioning_operator.models import (
     LeaseCreate,
     LeaseForceReleaseRequest,
     LeaseListResponse,
@@ -27,7 +27,11 @@ from provisioning_client.models import (
     LeaseTerminateRequest,
     LeaseUpdate,
 )
-from services.lease_lifecycle_service import (
+from compute_provisioning.executor_leases import (
+    ExecutorLeaseRegistration,
+    ExecutorLeaseUpdate,
+)
+from compute_provisioning.lease_lifecycle import (
     InvalidLeaseStateError,
     LeaseLifecycleError,
     LeaseLifecycleService,
@@ -38,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/leases", tags=["leases"])
 admin_router = APIRouter(prefix="/admin/leases", tags=["admin", "leases"])
+_VM_EXECUTOR_KIND = "vm"
 
 _LEASE_STATUS = {
     "reserved": "pending",
@@ -117,7 +122,18 @@ class LeasesController:
     )
     def create_lease(self, body: LeaseCreate) -> LeaseResponse:
         try:
-            attached = self._leases.register_lease(body)
+            attached = self._leases.register_lease(
+                ExecutorLeaseRegistration(
+                    allocation_id=body.allocation_id,
+                    escrow_uid=body.escrow_uid,
+                    executor_kind=_VM_EXECUTOR_KIND,
+                    executor_target=body.vm_target,
+                    executor_ref={"vm_host": body.vm_host},
+                    lease_start_utc=body.lease_start_utc,
+                    lease_end_utc=body.lease_end_utc,
+                    create_job_id=body.create_job_id,
+                )
+            )
         except LeaseNotFoundError as exc:
             raise _http_error(exc) from exc
         logger.info(
@@ -155,7 +171,20 @@ class LeasesController:
     )
     def update_lease(self, lease_id: str, body: LeaseUpdate) -> LeaseResponse:
         try:
-            updated = self._leases.update_lease(lease_id, body)
+            updated = self._leases.update_lease(
+                lease_id,
+                ExecutorLeaseUpdate(
+                    executor_kind=(
+                        _VM_EXECUTOR_KIND if body.vm_host or body.vm_target else None
+                    ),
+                    executor_target=body.vm_target,
+                    executor_ref={"vm_host": body.vm_host} if body.vm_host else None,
+                    lease_start_utc=body.lease_start_utc,
+                    lease_end_utc=body.lease_end_utc,
+                    release_job_id=body.vm_remove_job_id,
+                    create_job_id=body.create_job_id,
+                ),
+            )
         except LeaseLifecycleError as exc:
             raise _http_error(exc) from exc
         logger.info("[LEASES] Updated fields on allocation %s", lease_id)

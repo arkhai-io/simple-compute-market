@@ -1,8 +1,7 @@
 """VM-domain interpretation of the compute.v1 provision payload.
 
 The core carrier (``market_core.schemas.ProvisionTerms``) is an opaque
-``{kind, payload}`` envelope; these are the domain accessors that
-interpret it, used by the storefront on wire-received terms.
+``{kind, version, payload}`` envelope; these are the domain accessors.
 """
 
 from __future__ import annotations
@@ -21,6 +20,7 @@ from market_core.schemas import ProvisionTerms
 def test_accessors_read_a_core_envelope():
     terms = ProvisionTerms.model_validate({
         "kind": "compute.v1",
+        "version": 1,
         "payload": {
             "duration_seconds": 3600,
             "start_utc": "2030-01-01T00:00:00Z",
@@ -45,7 +45,7 @@ def test_accessors_read_a_plain_dict():
 
 
 def test_accessors_tolerate_missing_or_foreign_payloads():
-    foreign = ProvisionTerms(kind="fiat.v1", payload={"invoice_id": "inv-1"})
+    foreign = ProvisionTerms(kind="fiat.v1", version=1, payload={"invoice_id": "inv-1"})
 
     assert provision_duration_seconds(foreign) is None
     assert provision_start_utc(foreign) is None
@@ -64,6 +64,7 @@ def test_make_vm_provision_terms_matches_the_wire_shape():
 
     assert terms.model_dump() == {
         "kind": "compute.v1",
+        "version": 1,
         "payload": {
             "duration_seconds": 3600,
             "start_utc": "2030-01-01T00:00:00Z",
@@ -83,5 +84,6 @@ def test_make_vm_provision_terms_omits_absent_compute_resource():
 
     assert terms.model_dump() == {
         "kind": "compute.v1",
+        "version": 1,
         "payload": {"duration_seconds": 60, "ssh_public_key": "k"},
     }
