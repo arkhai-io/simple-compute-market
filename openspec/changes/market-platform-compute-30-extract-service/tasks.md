@@ -44,13 +44,13 @@
 - [x] 4.1 Point destination factories at the existing service-owned databases and ordered migration histories, including POOLS-6's additive multidimensional-capacity migration
 - [x] 4.2 Preserve job, allocation, deal, lease, credential, event, settlement-resource, fulfillment, capacity-dimension, and candidate-availability data and behavior across the move
 - [x] 4.3 Preserve POOLS-3's durable capacity rebind and explicitly process-local fulfillment identity semantics without implying restart-safe dispatch recovery
-- [ ] 4.4 Verify startup failure, retry scheduler, watchdog, worker, and graceful cancellation behavior in the destination app
+- [x] 4.4 Verify startup failure, retry scheduler, watchdog, worker, and graceful cancellation behavior in the destination app
 - [x] 4.5 Add import-boundary tests rejecting concrete domain executor and fulfillment-provider implementations from generic compute modules and confirm extraction does not join the provider-only path to executor dispatch
 
 ## 5. Package and Deploy the Service
 
-- [ ] 5.1 Add supported API and worker console commands and complete runtime dependency metadata, including `kit/resource-pools` fulfillment contracts
-- [ ] 5.2 Build/install the destination wheel with VM and bare-metal adapter extras outside the repository layout
+- [x] 5.1 Add supported API and worker console commands and complete runtime dependency metadata, including `kit/resource-pools` fulfillment contracts
+- [x] 5.2 Build/install the destination wheel with VM and bare-metal adapter extras outside the repository layout
 - [ ] 5.3 Add the destination Dockerfile/image and verify health, readiness, background lifecycle, and graceful shutdown
 - [ ] 5.4 Migrate manifests, image references, operator configuration, and local/e2e launch paths
 

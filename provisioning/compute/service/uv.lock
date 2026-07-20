@@ -234,14 +234,10 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
-    { name = "arkhai-bare-metal" },
-    { name = "arkhai-bare-metal-provisioning-adapter" },
     { name = "arkhai-compute-provisioning" },
     { name = "arkhai-core-storefront-client" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-site" },
-    { name = "arkhai-vms-provisioning-adapter" },
-    { name = "arkhai-vms-provisioning-operator-client" },
     { name = "cachetools" },
     { name = "cryptography" },
     { name = "dependency-injector" },
@@ -258,8 +254,16 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 
+[package.optional-dependencies]
+adapters = [
+    { name = "arkhai-bare-metal-provisioning-adapter" },
+    { name = "arkhai-vms-provisioning-adapter" },
+]
+
 [package.dev-dependencies]
 dev = [
+    { name = "arkhai-bare-metal-provisioning-adapter" },
+    { name = "arkhai-vms-provisioning-adapter" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -267,14 +271,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
-    { name = "arkhai-bare-metal", editable = "../../../domains/bare_metal" },
-    { name = "arkhai-bare-metal-provisioning-adapter", editable = "../../../domains/bare_metal/provisioning/adapter" },
+    { name = "arkhai-bare-metal-provisioning-adapter", marker = "extra == 'adapters'", editable = "../../../domains/bare_metal/provisioning/adapter" },
     { name = "arkhai-compute-provisioning", editable = "../" },
     { name = "arkhai-core-storefront-client", editable = "../../../core/storefront-client" },
     { name = "arkhai-kit-resource-pools", editable = "../../../kit/resource-pools" },
     { name = "arkhai-kit-site", editable = "../../../kit/site" },
-    { name = "arkhai-vms-provisioning-adapter", editable = "../../../domains/vms/provisioning/adapter" },
-    { name = "arkhai-vms-provisioning-operator-client", editable = "../../../domains/vms/provisioning/client" },
+    { name = "arkhai-vms-provisioning-adapter", marker = "extra == 'adapters'", editable = "../../../domains/vms/provisioning/adapter" },
     { name = "cachetools", specifier = ">=5.3" },
     { name = "cryptography", specifier = ">=42.0" },
     { name = "dependency-injector", specifier = ">=4.41.0" },
@@ -290,9 +292,12 @@ requires-dist = [
     { name = "typing-inspect", specifier = ">=0.9.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
 ]
+provides-extras = ["adapters"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "arkhai-bare-metal-provisioning-adapter", editable = "../../../domains/bare_metal/provisioning/adapter" },
+    { name = "arkhai-vms-provisioning-adapter", editable = "../../../domains/vms/provisioning/adapter" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
 ]
