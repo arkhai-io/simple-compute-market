@@ -8,7 +8,7 @@ GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-kits dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-provisioning-adapters dist-compute-provisioning-service dist-kits dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
 .PHONY: dist-apicredits-domain
 
 # ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@ DIST_DIR := ${CURDIR}/.dist
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-kits dist-alkahest dist-config dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-buyer
+dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-kits dist-alkahest dist-config dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-provisioning-adapters dist-compute-provisioning-service dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-buyer
 
 dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -65,6 +65,17 @@ dist-compute-provisioning: ## Build arkhai-compute-provisioning wheel into .dist
 	cd provisioning/compute && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_compute_provisioning-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-compute-provisioning produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+dist-provisioning-adapters: dist-compute-provisioning dist-bare-metal dist-provisioning-operator-client ## Build VM and bare-metal provisioning adapter wheels.
+	-mkdir -p $(DIST_DIR)
+	cd domains/vms/provisioning/adapter && uv build --wheel --out-dir $(DIST_DIR)
+	cd domains/bare_metal/provisioning/adapter && uv build --wheel --out-dir $(DIST_DIR)
+
+dist-compute-provisioning-service: dist-compute-provisioning dist-provisioning-adapters ## Build the extracted compute service wheel.
+	-mkdir -p $(DIST_DIR)
+	cd provisioning/compute/service && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_compute_provisioning_service-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: compute provisioning service produced a platform-specific wheel" && exit 1)
 
 dist-apicredits-domain: ## Build arkhai-apicredits-domain wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -167,7 +178,7 @@ test-core:
 	cd core && make test
 
 test-provisioning:
-	cd domains/vms/provisioning/service && make test
+	cd provisioning/compute/service && make test
 
 test-provisioning-iac:
 	cd domains/vms/provisioning/iac && make validate-tests
@@ -202,10 +213,10 @@ build: init-prerequisites dist build-buyer
 build-dev: build build-dev-env build-test-image
 
 # Seller-only build: the two runtime images a seller actually needs
-# (`arkhai:storefront`, `arkhai:provisioning`) and just the wheels they
+# (`arkhai:storefront`, `arkhai:compute-provisioning`) and just the wheels they
 # consume via --find-links. Skips `build-registry` (sellers point at
 # someone else's registry).
-build-seller: init-prerequisites dist-storefront-client dist-identity dist-core dist-arkhai-core-storefront dist-alkahest dist-config dist-bare-metal dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-registry-client ## Build only what a seller needs: storefront + provisioning images.
+build-seller: init-prerequisites dist-storefront-client dist-identity dist-core dist-arkhai-core-storefront dist-alkahest dist-config dist-bare-metal dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-provisioning-adapters dist-compute-provisioning-service dist-registry-client ## Build only what a seller needs: storefront + provisioning images.
 	$(MAKE) -j2 build-storefront build-provisioning
 
 # Same as build-seller, but the provisioning image's in-container appuser
@@ -236,7 +247,7 @@ build-storefront:
 	cd domains/vms/storefront && make build
 
 build-provisioning:
-	cd domains/vms/provisioning/service && make build
+	cd provisioning/compute/service && make build
 
 # API-credits domain images (item 6). Built from the repo root so each
 # Dockerfile's `COPY .dist/` + `COPY domains/` resolve. The api-credits
@@ -316,7 +327,7 @@ deploy-storefront:
 	cd domains/vms/storefront && make deploy
 
 deploy-provisioning:
-	cd domains/vms/provisioning/service && make deploy
+	cd provisioning/compute/service && make deploy
 
 test-deployment:
 	cd e2e-tests && make test

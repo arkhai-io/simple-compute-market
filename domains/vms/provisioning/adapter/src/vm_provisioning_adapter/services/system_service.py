@@ -60,7 +60,7 @@ def _read_version() -> str:
     try:
         from importlib.metadata import version, PackageNotFoundError
         try:
-            return version("arkhai-vms-provisioning")
+            return version("arkhai-compute-provisioning-service")
         except PackageNotFoundError:
             pass
     except ImportError:

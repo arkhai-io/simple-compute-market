@@ -90,7 +90,7 @@ def _drift_message(*, current: str, expected: str) -> str:
     return (
         f"Database schema is at version {current}, service expects {expected}.\n"
         "Apply migrations before starting the service:\n"
-        "  docker run <image> python -m db.migrate        (docker / local)\n"
+        "  docker run <image> compute-provisioning-migrate (docker / local)\n"
         "  kubectl apply -f migrate-job.yaml               (Kubernetes without init container)\n"
         "  make migrate                                    (local dev, outside Docker)"
     )

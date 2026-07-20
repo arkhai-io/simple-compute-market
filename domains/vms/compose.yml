@@ -193,11 +193,11 @@ services:
       retries: 3
 
   # 4. Provisioning service.
-  # Configuration is bundled in the image (domains/vms/provisioning/service/src/settings.toml,
+  # Configuration is bundled in the compute provisioning service wheel,
   # plus dynaconf profile loading via ACTIVE_PROFILES). Compose-time
   # overrides go in `environment:` below.
   provisioning:
-    image: arkhai:provisioning
+    image: arkhai:compute-provisioning
     platform: linux/amd64
     depends_on:
       redis:

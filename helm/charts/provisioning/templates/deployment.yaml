@@ -35,7 +35,7 @@ spec:
         - name: provisioning-migrate
           image: {{ include "provisioning.image" . }}
           imagePullPolicy: {{ .Values.server.image.pullPolicy }}
-          command: ["python", "-m", "db.migrate"]
+          command: ["compute-provisioning-migrate"]
           env:
             - name: ACTIVE_PROFILES
               value: {{ if .Values.mockMode }}"production,provisioning-secrets,mock"{{ else }}"production,provisioning-secrets"{{ end }}

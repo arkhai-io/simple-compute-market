@@ -42,12 +42,12 @@ def run_migrations(
 ) -> None:
     """Create all tables and apply versioned migrations.
 
-    This is the full migration entrypoint: ``python -m db.migrate`` (CLI,
+    This is the full migration entrypoint: ``compute-provisioning-migrate`` (CLI,
     for local dev and the Helm init container) and ``make migrate`` both
     call this. It is idempotent — safe to run on every deploy/restart.
 
     The main service container does **not** call this at startup; it calls
-    :func:`db.migrations.check_schema_version` instead and fails fast if
+    :func:`compute_provisioning_service.db.migrations.check_schema_version` instead and fails fast if
     migrations haven't been applied. See ARCHITECTURE.md § Schema Migration
     Execution.
     """

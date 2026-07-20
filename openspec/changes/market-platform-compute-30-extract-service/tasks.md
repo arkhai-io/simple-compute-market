@@ -51,8 +51,8 @@
 
 - [x] 5.1 Add supported API and worker console commands and complete runtime dependency metadata, including `kit/resource-pools` fulfillment contracts
 - [x] 5.2 Build/install the destination wheel with VM and bare-metal adapter extras outside the repository layout
-- [ ] 5.3 Add the destination Dockerfile/image and verify health, readiness, background lifecycle, and graceful shutdown
-- [ ] 5.4 Migrate manifests, image references, operator configuration, and local/e2e launch paths
+- [x] 5.3 Add the destination Dockerfile/image and verify health, readiness, background lifecycle, and graceful shutdown
+- [x] 5.4 Migrate manifests, image references, operator configuration, and local/e2e launch paths
 
 ## 6. Complete the Ownership Cutover
 

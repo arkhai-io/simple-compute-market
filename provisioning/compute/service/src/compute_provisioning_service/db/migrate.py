@@ -1,6 +1,6 @@
 """Standalone migration CLI entrypoint.
 
-    python -m db.migrate
+    compute-provisioning-migrate
 
 Invokes the same migration logic the application used to run in-process at
 startup (see ARCHITECTURE.md § Schema Migration Execution). Used by:
