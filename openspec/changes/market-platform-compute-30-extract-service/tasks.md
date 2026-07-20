@@ -32,8 +32,8 @@
 
 ## 3. Establish the Destination Service
 
-- [ ] 3.1 Create the installable `provisioning/compute/service` package and compute-owned composition root
-- [ ] 3.2 Move generic FastAPI assembly, middleware, startup/shutdown ordering, and background task lifecycle
+- [x] 3.1 Create the installable `provisioning/compute/service` package and compute-owned composition root
+- [x] 3.2 Move generic FastAPI assembly, middleware, startup/shutdown ordering, and background task lifecycle
 - [ ] 3.3 Move generic job read/control, executor-neutral lease, watchdog, general health/version, capacity mount, event-delivery, `PhysicalSettlementScheduler`, `DeterministicRoundRobinPolicy`, `FulfillmentService`, and provider-registry composition surfaces into the extracted service
 - [ ] 3.4 Keep VM host/action/playbook/result behavior, VM fulfillment requirements, `AnsibleFulfillmentProvider`, and direct operator routes in the VM package
 - [ ] 3.5 Keep POOLS-4/6 listing identity validation, multidimensional capacity-claim construction, VM fulfillment-plan construction, and storefront failure-policy/event handling in the VM storefront
@@ -41,9 +41,9 @@
 
 ## 4. Preserve Runtime and Persistence
 
-- [ ] 4.1 Point destination factories at the existing service-owned databases and ordered migration histories, including POOLS-6's additive multidimensional-capacity migration
-- [ ] 4.2 Preserve job, allocation, deal, lease, credential, event, settlement-resource, fulfillment, capacity-dimension, and candidate-availability data and behavior across the move
-- [ ] 4.3 Preserve POOLS-3's durable capacity rebind and explicitly process-local fulfillment identity semantics without implying restart-safe dispatch recovery
+- [x] 4.1 Point destination factories at the existing service-owned databases and ordered migration histories, including POOLS-6's additive multidimensional-capacity migration
+- [x] 4.2 Preserve job, allocation, deal, lease, credential, event, settlement-resource, fulfillment, capacity-dimension, and candidate-availability data and behavior across the move
+- [x] 4.3 Preserve POOLS-3's durable capacity rebind and explicitly process-local fulfillment identity semantics without implying restart-safe dispatch recovery
 - [ ] 4.4 Verify startup failure, retry scheduler, watchdog, worker, and graceful cancellation behavior in the destination app
 - [ ] 4.5 Add import-boundary tests rejecting concrete domain executor and fulfillment-provider implementations from generic compute modules and confirm extraction does not join the provider-only path to executor dispatch
 

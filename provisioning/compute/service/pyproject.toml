@@ -5,10 +5,32 @@ license = "MIT"
 description = "Deployable cross-domain compute provisioning service"
 requires-python = ">=3.12"
 dependencies = [
-    "arkhai-compute-provisioning>=0.5.0",
+    "arkhai-kit-site>=0.2.0",
     "arkhai-kit-resource-pools>=0.1.0",
+    "arkhai-compute-provisioning>=0.5.0",
+    "arkhai-core-storefront-client>=0.11.0",
+    "arkhai-bare-metal>=0.1.0",
+    "arkhai-vms-provisioning-operator-client>=0.3.0",
+    "dynaconf>=3.0.0",
     "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "python-multipart>=0.0.20",
+    "dependency-injector>=4.41.0",
+    "fastapi-utils>=0.8.0",
+    "typing-inspect>=0.9.0",
+    "pydantic>=2.7",
+    "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9",
+    "httpx>=0.28.1",
+    "aiohttp>=3.9",
+    "cachetools>=5.3",
+    "pyyaml>=6.0",
+    "cryptography>=42.0",
 ]
+
+[project.scripts]
+compute-provisioning-api = "compute_provisioning_service.main:run"
+compute-provisioning-migrate = "compute_provisioning_service.db.migrate:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -19,13 +41,19 @@ packages = ["src/compute_provisioning_service"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests/unit"]
+testpaths = ["tests/unit", "tests/integration"]
+asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
+    "pytest-asyncio>=0.23",
 ]
 
 [tool.uv.sources]
 arkhai-compute-provisioning = { path = "..", editable = true }
+arkhai-kit-site = { path = "../../../kit/site", editable = true }
 arkhai-kit-resource-pools = { path = "../../../kit/resource-pools", editable = true }
+arkhai-core-storefront-client = { path = "../../../core/storefront-client", editable = true }
+arkhai-bare-metal = { path = "../../../domains/bare_metal", editable = true }
+arkhai-vms-provisioning-operator-client = { path = "../../../domains/vms/provisioning/client", editable = true }
