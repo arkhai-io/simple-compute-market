@@ -74,6 +74,7 @@ class FakeSite:
                 "resource_id": rid,
                 "total_units": body["total_units"],
                 "attributes": body.get("attributes") or {},
+                "capacity": body.get("capacity"),
                 "enabled": body.get("enabled", True),
             }
             self._emit("released", rid)
@@ -186,7 +187,14 @@ class FakeSite:
 
     def _match(self, claim: dict) -> dict | None:
         claim = claim or {}
-        requested = int(claim.get("gpu_count") or 1)
+        # compute_capacity_claim_from_order now always routes gpu_count.
+        # This fake only proves the GPU-count contract this test double
+        # documents itself as covering but it must at least read the
+        # quantity from the new location and skip "dimensions" in the
+        # attribute-equality mismatch check the same way the real
+        # ledger's _resource_matches skips it.
+        dimensions = claim.get("dimensions") or {}
+        requested = int(dimensions.get("gpu_count") or claim.get("gpu_count") or 1)
         for rid, row in self.resources.items():
             if not row["enabled"]:
                 continue
@@ -194,7 +202,7 @@ class FakeSite:
             top_level = {"resource_id": rid, "pool_id": rid}
             mismatched = any(
                 attrs.get(k, top_level.get(k)) != v
-                for k, v in claim.items() if k != "gpu_count"
+                for k, v in claim.items() if k not in ("gpu_count", "dimensions")
             )
             if mismatched:
                 continue

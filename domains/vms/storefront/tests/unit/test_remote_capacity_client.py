@@ -203,6 +203,55 @@ async def test_sync_site_resources_preserves_shared_host_attributes(site: FakeSi
     assert "info-1" not in site.resources
 
 
+@pytest.mark.asyncio
+async def test_sync_site_resources_forwards_multidimensional_capacity(site: FakeSite):
+    """vcpu_count/ram_gb/disk_gb already sit in the local row's attributes.
+    Sync must forward them into the ledger's capacity map, not just gpu_count."""
+    rows = [
+        {
+            "resource_id": "compute-kvm1-002",
+            "resource_type": "compute.gpu",
+            "resource_subtype": "h200",
+            "value": 8,
+            "state": "available",
+            "attributes": {
+                "vm_host": "kvm2",
+                "vcpu_count": 64,
+                "ram_gb": 512,
+                "disk_gb": 4000,
+            },
+        },
+        {
+            # A listing without a declared shape (older listing) still
+            # syncs -- gpu_count only, nothing crashes on missing fields.
+            "resource_id": "compute-kvm1-003",
+            "resource_type": "compute.gpu",
+            "value": 4,
+            "state": "available",
+            "attributes": {"vm_host": "kvm3"},
+        },
+    ]
+
+    class FakeDb:
+        async def list_resources(self):
+            return rows
+
+    real_remote = cc.RemoteCapacityClient
+
+    def fake_remote(base_url, admin_key):
+        return real_remote(base_url, admin_key, transport=site.transport())
+
+    with patch("market_storefront.utils.config.settings", _settings()):
+        with patch.object(cc, "RemoteCapacityClient", fake_remote):
+            synced = await cc.sync_site_resources(lambda: FakeDb())
+
+    assert synced == 2
+    assert site.resources["compute-kvm1-002"]["capacity"] == {
+        "gpu_count": 8, "vcpu_count": 64, "ram_gb": 512, "disk_gb": 4000,
+    }
+    assert site.resources["compute-kvm1-003"]["capacity"] == {"gpu_count": 4}
+
+
 def test_build_always_aggregates_site_authorities():
     with patch("market_storefront.utils.config.settings", _settings()):
         built = cc.build_capacity_client(lambda: None)
@@ -269,6 +318,40 @@ async def test_subscriber_closes_and_reopens_with_site_availability(
     assert [c[0] for c in calls] == ["close", "reopen"]
     # Availability came from the site snapshot, keyed for the home site.
     assert calls[0][2][(None, "compute-kvm1-001")] == 6
+
+
+@pytest.mark.asyncio
+async def test_subscriber_runs_both_passes_for_mixed_direction_capacity_change(
+    client: cc.RemoteCapacityClient,
+):
+    """A mixed-direction registration e.g. GPU count grew while RAM shrank.
+    "capacity_changed" must run both reconciliation passes and not be silently
+    ignored like an unrecognized kind would be."""
+    calls: list[str] = []
+
+    async def fake_close(db_path, *, member_availability=None):
+        calls.append("close")
+        return []
+
+    async def fake_reopen(db_path, *, member_availability=None):
+        calls.append("reopen")
+        return []
+
+    subscriber = cc._make_listing_reconcile_subscriber(
+        lambda: SimpleNamespace(db_path="/tmp/x.db"), client,
+    )
+    with patch(
+        "market_storefront.services.publication_service."
+        "close_stale_compute_listings_after_capacity_change",
+        fake_close,
+    ), patch(
+        "market_storefront.services.publication_service."
+        "reopen_available_compute_listings_after_capacity_change",
+        fake_reopen,
+    ):
+        await subscriber(CapacityDelta(kind="capacity_changed", version=1))
+
+    assert calls == ["close", "reopen"]
 
 
 @pytest.mark.asyncio

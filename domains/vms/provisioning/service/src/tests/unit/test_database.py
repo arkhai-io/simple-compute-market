@@ -1,11 +1,12 @@
 import pytest
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from db.database import run_migrations
 from db.migrations import SchemaDriftError, check_schema_version
 from db.models import AnsibleJob, AnsiblePoolConfig, DEFAULT_POOL_ID, Host, ResourcePool
+from market_site.ledger import CapacityLedgerService
 
 
 def _sqlite_memory_engine():
@@ -70,6 +71,92 @@ def _create_pre_migration_tables(engine):
             )
             """
         ))
+        # Pre-POOLS-6 shape of the site-authority ledger tables: no
+        # capacity/dimensions/dimensions columns yet. A populated row
+        # here exercises the actual additive-column migration path,
+        # rather than only the fresh-create-all path a brand new table
+        # would take.
+        connection.execute(text(
+            """
+            CREATE TABLE site_resources (
+                resource_id VARCHAR NOT NULL,
+                resource_type VARCHAR NOT NULL,
+                resource_subtype VARCHAR,
+                total_units INTEGER NOT NULL,
+                attributes JSON,
+                enabled BOOLEAN NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                PRIMARY KEY (resource_id)
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            INSERT INTO site_resources (
+                resource_id, resource_type, resource_subtype, total_units,
+                attributes, enabled
+            ) VALUES (
+                'pre-existing-gpu', 'compute.gpu', 'h200', 8,
+                '{"vm_host": "kvm1"}', 1
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            CREATE TABLE site_allocations (
+                allocation_id VARCHAR NOT NULL,
+                resource_id VARCHAR NOT NULL,
+                units INTEGER NOT NULL,
+                state VARCHAR NOT NULL,
+                deal_ref JSON,
+                escrow_uid VARCHAR,
+                hold_expires_at VARCHAR,
+                executor_kind VARCHAR,
+                executor_target VARCHAR,
+                release_job_id VARCHAR,
+                executor_ref JSON,
+                vm_host VARCHAR,
+                vm_target VARCHAR,
+                lease_start_utc VARCHAR,
+                lease_end_utc VARCHAR,
+                create_job_id VARCHAR,
+                vm_remove_job_id VARCHAR,
+                failure_reason VARCHAR,
+                failure_message TEXT,
+                released_at VARCHAR,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                PRIMARY KEY (allocation_id)
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            INSERT INTO site_allocations (
+                allocation_id, resource_id, units, state, deal_ref
+            ) VALUES (
+                'pre-existing-alloc', 'pre-existing-gpu', 3, 'reserved', '{}'
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            CREATE TABLE capacity_events (
+                version INTEGER NOT NULL,
+                kind VARCHAR NOT NULL,
+                resource_id VARCHAR,
+                occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                PRIMARY KEY (version)
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            INSERT INTO capacity_events (version, kind, resource_id)
+            VALUES (1, 'reserved', 'pre-existing-gpu')
+            """
+        ))
 
 
 def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
@@ -113,6 +200,31 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "release_job_id",
         "executor_ref",
     }.issubset(allocation_columns)
+
+    # capacity/dimensions columns land on genuinely
+    # pre-existing site-authority tables via the additive-column
+    # migration path, not only via create_all() on a brand new table
+    resource_columns = {
+        column["name"] for column in inspector.get_columns("site_resources")
+    }
+    event_columns = {
+        column["name"] for column in inspector.get_columns("capacity_events")
+    }
+    assert "capacity" in resource_columns
+    assert "dimensions" in allocation_columns
+    assert "dimensions" in event_columns
+
+    # The pre-existing row (inserted before the migration ran, with
+    # capacity/dimensions left NULL) reads correctly through the real
+    # ledger's fallback-to-legacy-fields logic, not just via a raw column
+    # check.
+    ledger = CapacityLedgerService(sessionmaker(bind=engine))
+    snapshot = {row["resource_id"]: row for row in ledger.snapshot()}
+    pre_existing = snapshot["pre-existing-gpu"]
+    assert pre_existing["capacity"] == {"gpu_count": 8}
+    assert pre_existing["available"] == {"gpu_count": 5}  # 8 total - 3 held
+    allocation = ledger.get_allocation("pre-existing-alloc")
+    assert allocation["dimensions"] == {"gpu_count": 3}
 
     assert "resource_pools" in inspector.get_table_names()
     assert "ansible_pool_configs" in inspector.get_table_names()
@@ -161,6 +273,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260713_001_ansible_jobs_contract_fields",
         "20260713_002_resource_pools_and_hosts_pool_id",
         "20260718_001_drop_vm_leases_table",
+        "20260720_001_multidimensional_capacity",
     }
 
 
@@ -194,6 +307,15 @@ def test_run_migrations_is_idempotent():
     assert allocation_columns.count("executor_target") == 1
     assert allocation_columns.count("release_job_id") == 1
     assert allocation_columns.count("executor_ref") == 1
+    assert allocation_columns.count("dimensions") == 1
+    resource_columns = [
+        column["name"] for column in inspector.get_columns("site_resources")
+    ]
+    event_columns = [
+        column["name"] for column in inspector.get_columns("capacity_events")
+    ]
+    assert resource_columns.count("capacity") == 1
+    assert event_columns.count("dimensions") == 1
 
     with Session(engine) as session:
         assert session.query(ResourcePool).filter(
@@ -204,7 +326,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 8
+    assert migration_count == 9
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +352,7 @@ class TestCheckSchemaVersion:
         with engine.begin() as connection:
             connection.execute(text(
                 "DELETE FROM schema_migrations WHERE id = "
-                "'20260718_001_drop_vm_leases_table'"
+                "'20260720_001_multidimensional_capacity'"
             ))
         with pytest.raises(SchemaDriftError):
             check_schema_version(engine)

@@ -190,6 +190,56 @@ def test_claim_prefers_resource_id_over_pool_id():
     assert "pool_id" not in claim
 
 
+# ----------------------------------------------------------------------
+# multidimensional claim building
+# ----------------------------------------------------------------------
+
+def test_claim_carries_dimensions_when_listing_declares_a_shape():
+    """gpu_count/vcpu_count/ram_gb/disk_gb move into a dimensions map,
+    checked with full held/available accounting -- not required_attributes
+    exact-match, which would incorrectly demand every future claim declare
+    the identical quantity rather than merely fit within it."""
+    from market_storefront.services.vm_job_spec_service import (
+        compute_capacity_claim_from_order,
+    )
+
+    row = {
+        "listing_id": "lst-shaped",
+        "offer_resource": {
+            "resource_id": "res-shaped", "gpu_model": "H200", "gpu_count": 2,
+            "sla": 99.0, "region": "California, US",
+            "vcpu_count": 8, "ram_gb": 64, "disk_gb": 500,
+        },
+    }
+    claim = compute_capacity_claim_from_order(row)
+    assert claim["dimensions"] == {
+        "gpu_count": 2, "vcpu_count": 8, "ram_gb": 64, "disk_gb": 500,
+    }
+    # gpu_count moved off the top level entirely -- it's a dimensions-only
+    # key now, not also an exact-match attribute.
+    assert "gpu_count" not in claim
+    assert claim["resource_id"] == "res-shaped"
+
+
+def test_claim_omits_undeclared_dimensions_for_older_listings():
+    """A listing published before vcpu_count/ram_gb/disk_gb existed (or
+    that simply never set them) still produces a valid claim -- gpu_count
+    alone, exactly like every claim before this change."""
+    from market_storefront.services.vm_job_spec_service import (
+        compute_capacity_claim_from_order,
+    )
+
+    row = {
+        "listing_id": "lst-unshaped",
+        "offer_resource": {
+            "resource_id": "res-unshaped", "gpu_model": "H200", "gpu_count": 1,
+            "sla": 99.0, "region": "California, US",
+        },
+    }
+    claim = compute_capacity_claim_from_order(row)
+    assert claim["dimensions"] == {"gpu_count": 1}
+
+
 @pytest.mark.parametrize("order", [None, {}])
 def test_claim_raises_when_order_is_missing(order):
     from market_storefront.services.vm_job_spec_service import (

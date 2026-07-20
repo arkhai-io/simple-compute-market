@@ -41,6 +41,21 @@ Shareable VM slices and exclusive bare-metal allocations referring to the same p
 - **WHEN** an exclusive bare-metal reservation targets the same physical host
 - **THEN** the site ledger rejects the exclusive reservation
 
+### Requirement: Multidimensional capacity accounting
+A site resource MAY declare total capacity across more than one named quantity dimension (for example `gpu_count`, `vcpu_count`, `ram_gb`, `disk_gb`); a claim's requested quantities MUST be checked and held against every declared dimension, not only a single default quantity, with held/available accounting kept exact under concurrent holds. A dimension a resource does not declare MUST NOT be assumed to have room. This accounting is per resource row: it does not aggregate or cross-check declared or held capacity across multiple resource rows that happen to share a physical host (see "Cross-mode physical accounting" above for the one cross-row check that does exist, which is scoped to exclusive/shareable mode conflicts, not capacity sums).
+
+#### Scenario: A reservation would exceed a secondary dimension
+- **WHEN** a claim requests more of a declared dimension (for example memory) than the resource has available, even though another dimension (for example GPU count) would fit
+- **THEN** the reservation is rejected rather than admitted for a shape the resource cannot serve
+
+#### Scenario: Concurrent holds accumulate per dimension
+- **WHEN** two separate holds are placed on one shareable resource
+- **THEN** each declared dimension's available quantity reflects the sum of both holds, not just the dimension the first hold happened to request
+
+#### Scenario: Legacy single-quantity claims are unaffected
+- **WHEN** a claim requests a quantity using the legacy `units`/`gpu_count` key instead of a dimensions map
+- **THEN** it is checked and held exactly as it was before multidimensional capacity existed, translated internally to the primary dimension
+
 ### Requirement: Executor-neutral site authority
 The site authority MUST own Physical Resources, settlement-relevant Resource Pool identities, Capacity Reservations, committed allocations, deal ownership references, capacity versions, and capacity events without depending on lease watchdogs, job runners, or concrete executor teardown states. A provisioner MAY stage administrative pool membership and provider configuration, but those records MUST NOT alter settlement selection until integrated through the site-authority boundary.
 
@@ -73,6 +88,7 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 ## Evidence
 
 - Reserve/commit/release, hold TTL, versioned anonymous events, and cross-mode conflicts: `kit/site/tests/unit/test_ledger.py`.
+- Multidimensional capacity (declared-dimension fit, concurrent per-dimension holds, legacy-claim compatibility, per-dimension event deltas): `kit/site/tests/unit/test_ledger.py` (POOLS-6 pass 1 tests).
 - Site-tagged soft-state aggregation and failure isolation: `core/storefront/tests/unit/test_aggregation.py`.
 - Storefront-to-site HTTP contract: `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`.
 - “Do not close on ignorance” reconciliation: `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py`.

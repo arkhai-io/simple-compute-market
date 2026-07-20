@@ -218,6 +218,7 @@ class RemoteCapacityClient:
         total_units: int,
         resource_subtype: str | None = None,
         attributes: Mapping[str, Any] | None = None,
+        capacity: Mapping[str, Any] | None = None,
         enabled: bool = True,
     ) -> dict[str, Any]:
         async with self._http() as http:
@@ -227,6 +228,7 @@ class RemoteCapacityClient:
                     "total_units": int(total_units),
                     "resource_subtype": resource_subtype,
                     "attributes": dict(attributes or {}),
+                    "capacity": dict(capacity) if capacity else None,
                     "enabled": enabled,
                 },
                 headers=self._headers(),

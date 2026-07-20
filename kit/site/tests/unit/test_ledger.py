@@ -653,3 +653,272 @@ def test_gpu_count_validation(seeded: CapacityLedgerService):
         seeded.probe(claim={"gpu_count": "many"})
     with pytest.raises(ValueError):
         seeded.reserve(claim={"gpu_count": 0}, deal_ref={})
+
+
+# ----------------------------------------------------------------------
+# multidimensional capacity
+# ----------------------------------------------------------------------
+
+@pytest.fixture
+def multidim(ledger: CapacityLedgerService) -> CapacityLedgerService:
+    ledger.register_resource(
+        resource_id="compute-kvm2-001",
+        total_units=8,
+        resource_subtype="h200",
+        attributes={"vm_host": "kvm2", "gpu_model": "H200", "region": "us-west"},
+        capacity={"gpu_count": 8, "vcpu_count": 64, "ram_gb": 512, "disk_gb": 4000},
+    )
+    return ledger
+
+
+def test_register_resource_reports_multidimensional_capacity(
+    multidim: CapacityLedgerService,
+):
+    row = multidim.snapshot()[0]
+    assert row["capacity"] == {"gpu_count": 8, "vcpu_count": 64, "ram_gb": 512, "disk_gb": 4000}
+    assert row["available"] == {"gpu_count": 8, "vcpu_count": 64, "ram_gb": 512, "disk_gb": 4000}
+    # total_units mirrors capacity["gpu_count"] for payload compatibility.
+    assert row["available_units"] == 8
+
+
+def test_dimension_claim_fits_and_holds_every_dimension(
+    multidim: CapacityLedgerService,
+):
+    reserved = multidim.reserve(
+        claim={"dimensions": {"gpu_count": 2, "vcpu_count": 8, "ram_gb": 64, "disk_gb": 500}},
+        deal_ref={"escrow_uid": "0xdim"},
+    )
+    assert reserved is not None
+    assert reserved["dimensions"] == {"gpu_count": 2, "vcpu_count": 8, "ram_gb": 64, "disk_gb": 500}
+    assert reserved["available"] == {
+        "gpu_count": 6, "vcpu_count": 56, "ram_gb": 448, "disk_gb": 3500,
+    }
+    row = multidim.snapshot()[0]
+    assert row["available"] == {
+        "gpu_count": 6, "vcpu_count": 56, "ram_gb": 448, "disk_gb": 3500,
+    }
+    # Legacy single-quantity fields still mirror the primary dimension.
+    assert reserved["allocated_gpu_count"] == 2
+    assert reserved["available_gpu_count"] == 6
+
+
+def test_dimension_claim_rejected_when_secondary_dimension_does_not_fit(
+    multidim: CapacityLedgerService,
+):
+    """GPU count alone would fit; RAM would not -- must still be rejected.
+    """
+    assert multidim.probe(
+        claim={"dimensions": {"gpu_count": 1, "ram_gb": 9999}},
+    ) is None
+    assert multidim.reserve(
+        claim={"dimensions": {"gpu_count": 1, "ram_gb": 9999}},
+        deal_ref={"escrow_uid": "0xtoobig"},
+    ) is None
+    # Capacity is untouched by the rejected attempt.
+    assert multidim.snapshot()[0]["available"]["ram_gb"] == 512
+
+
+def test_dimension_claim_rejected_for_dimension_resource_never_declares(
+    multidim: CapacityLedgerService,
+):
+    """A dimension the candidate never mentions can't be assumed to have
+    room -- distinct from "declared but full"."""
+    assert multidim.probe(
+        claim={"dimensions": {"gpu_count": 1, "network_bandwidth_gbps": 10}},
+    ) is None
+
+
+def test_concurrent_shareable_holds_accumulate_per_dimension(
+    multidim: CapacityLedgerService,
+):
+    """Two separate holds on one shareable resource must both be counted
+    against RAM, not just against GPU count -- the correctness gap a
+    declared-capacity-only gate would have missed."""
+    first = multidim.reserve(
+        claim={"dimensions": {"gpu_count": 1, "ram_gb": 300}},
+        deal_ref={"escrow_uid": "0xfirst"},
+    )
+    assert first is not None
+    # A second hold that alone would fit RAM's remainder does fit...
+    second = multidim.reserve(
+        claim={"dimensions": {"gpu_count": 1, "ram_gb": 200}},
+        deal_ref={"escrow_uid": "0xsecond"},
+    )
+    assert second is not None
+    # ...but a third that would push combined RAM over capacity must not.
+    assert multidim.reserve(
+        claim={"dimensions": {"gpu_count": 1, "ram_gb": 50}},
+        deal_ref={"escrow_uid": "0xthird"},
+    ) is None
+    assert multidim.snapshot()[0]["available"]["ram_gb"] == 12
+
+
+def test_legacy_claim_without_dimensions_still_works_on_multidim_resource(
+    multidim: CapacityLedgerService,
+):
+    reserved = multidim.reserve(
+        claim={"gpu_count": 3}, deal_ref={"escrow_uid": "0xlegacy"},
+    )
+    assert reserved is not None
+    assert reserved["allocated_gpu_count"] == 3
+    assert reserved["available_gpu_count"] == 5
+    # Legacy claims never mention the secondary dimensions, so they are
+    # not checked or held -- documented pass-1 scope, not a regression:
+    # legacy claims behave exactly as they did before this change.
+    assert multidim.snapshot()[0]["available"]["ram_gb"] == 512
+
+
+def test_pre_migration_resource_falls_back_to_gpu_count_only_capacity(
+    seeded: CapacityLedgerService,
+):
+    """A resource registered without ``capacity`` only ever declares
+    gpu_count. Any other requested dimension correctly fails to fit
+    rather than being silently ignored."""
+    assert seeded.probe(claim={"dimensions": {"gpu_count": 1}}) is not None
+    assert seeded.probe(claim={"dimensions": {"gpu_count": 1, "ram_gb": 1}}) is None
+
+
+def test_release_restores_every_dimension(multidim: CapacityLedgerService):
+    reserved = multidim.reserve(
+        claim={"dimensions": {"gpu_count": 2, "vcpu_count": 8, "ram_gb": 64, "disk_gb": 500}},
+        deal_ref={"escrow_uid": "0xrelease"},
+    )
+    multidim.release(allocation_id=reserved["allocation_id"])
+    row = multidim.snapshot()[0]
+    assert row["available"] == {"gpu_count": 8, "vcpu_count": 64, "ram_gb": 512, "disk_gb": 4000}
+
+
+def test_capacity_events_carry_signed_per_dimension_deltas(
+    multidim: CapacityLedgerService,
+):
+    reserved = multidim.reserve(
+        claim={"dimensions": {"gpu_count": 2, "ram_gb": 64}},
+        deal_ref={"escrow_uid": "0xevt"},
+    )
+    multidim.release(allocation_id=reserved["allocation_id"])
+    events, _ = multidim.events_after(0)
+    by_kind = {e["kind"]: e for e in events}
+    assert by_kind["reserved"]["dimensions"] == {"gpu_count": -2, "ram_gb": -64}
+    assert by_kind["released"]["dimensions"] == {"gpu_count": 2, "ram_gb": 64}
+
+
+def test_registration_event_delta_is_capacity_minus_previous_capacity(
+    ledger: CapacityLedgerService,
+):
+    ledger.register_resource(
+        resource_id="growing", total_units=2, capacity={"gpu_count": 2, "ram_gb": 100},
+    )
+    ledger.register_resource(
+        resource_id="growing", total_units=4, capacity={"gpu_count": 4, "ram_gb": 100},
+    )
+    events, _ = ledger.events_after(0)
+    deltas = [e["dimensions"] for e in events if e["resource_id"] == "growing"]
+    assert deltas[0] == {"gpu_count": 2, "ram_gb": 100}
+    assert deltas[1] == {"gpu_count": 2, "ram_gb": 0}
+
+def test_explicit_empty_dimensions_map_is_rejected(seeded: CapacityLedgerService):
+    """{"dimensions": {}} declares nothing to request -- must fail loudly,
+    not silently fall through to the legacy single-quantity default of 1
+    (a real bug found in code review: presence was checked as truthiness)."""
+    with pytest.raises(ValueError):
+        seeded.probe(claim={"dimensions": {}})
+    with pytest.raises(ValueError):
+        seeded.reserve(claim={"dimensions": {}}, deal_ref={})
+
+
+@pytest.mark.parametrize("raw", [[], "not-a-mapping", None, 5])
+def test_malformed_dimensions_types_are_rejected(seeded: CapacityLedgerService, raw):
+    with pytest.raises(ValueError):
+        seeded.probe(claim={"dimensions": raw})
+
+
+@pytest.mark.parametrize("value", [0, -1, "not-a-number"])
+def test_dimensions_values_must_be_positive_numbers(
+    seeded: CapacityLedgerService, value,
+):
+    with pytest.raises(ValueError):
+        seeded.probe(claim={"dimensions": {"gpu_count": value}})
+
+
+def test_dimensions_reject_nan_and_infinity(seeded: CapacityLedgerService):
+    """NaN/Infinity parse cleanly into Decimal but raise InvalidOperation
+    on comparison -- must surface as the same clean ValueError as any
+    other malformed quantity, not an uncaught decimal.InvalidOperation
+    """
+    with pytest.raises(ValueError):
+        seeded.probe(claim={"dimensions": {"gpu_count": float("nan")}})
+    with pytest.raises(ValueError):
+        seeded.probe(claim={"dimensions": {"gpu_count": float("inf")}})
+
+
+def test_register_resource_rejects_conflicting_total_units_and_capacity(
+    ledger: CapacityLedgerService,
+):
+    """total_units is documented as a mirror of capacity['gpu_count']; two
+    disagreeing values is a caller bug, not something to silently resolve
+    in capacity's favor."""
+    with pytest.raises(ValueError):
+        ledger.register_resource(
+            resource_id="conflicted", total_units=8, capacity={"gpu_count": 4},
+        )
+    # Consistent values are fine.
+    ledger.register_resource(
+        resource_id="consistent", total_units=8, capacity={"gpu_count": 8, "ram_gb": 64},
+    )
+    assert ledger.snapshot()[0]["capacity"]["gpu_count"] == 8
+
+
+def test_mixed_direction_capacity_change_gets_neutral_event_kind(
+    ledger: CapacityLedgerService,
+):
+    """GPU count growing while RAM shrinks has no single grew/shrank
+    direction -- must not be mislabeled "released" (implying availability
+    only increased) or "reserved"."""
+    ledger.register_resource(
+        resource_id="host-1", total_units=4, capacity={"gpu_count": 4, "ram_gb": 512},
+    )
+    ledger.register_resource(
+        resource_id="host-1", total_units=8, capacity={"gpu_count": 8, "ram_gb": 128},
+    )
+    events, _ = ledger.events_after(0)
+    kinds = [e["kind"] for e in events if e["resource_id"] == "host-1"]
+    assert kinds == ["released", "capacity_changed"]
+
+
+def test_pure_grow_and_pure_shrink_keep_their_kind(ledger: CapacityLedgerService):
+    ledger.register_resource(
+        resource_id="r", total_units=4, capacity={"gpu_count": 4, "ram_gb": 100},
+    )
+    ledger.register_resource(
+        resource_id="r", total_units=8, capacity={"gpu_count": 8, "ram_gb": 200},
+    )
+    ledger.register_resource(
+        resource_id="r", total_units=2, capacity={"gpu_count": 2, "ram_gb": 50},
+    )
+    events, _ = ledger.events_after(0)
+    kinds = [e["kind"] for e in events if e["resource_id"] == "r"]
+    assert kinds == ["released", "released", "reserved"]
+
+
+def test_disabling_alone_is_reserved_even_with_unchanged_capacity(
+    ledger: CapacityLedgerService,
+):
+    ledger.register_resource(resource_id="r", total_units=4, enabled=True)
+    ledger.register_resource(resource_id="r", total_units=4, enabled=False)
+    events, _ = ledger.events_after(0)
+    kinds = [e["kind"] for e in events if e["resource_id"] == "r"]
+    assert kinds == ["released", "reserved"]
+
+
+def test_scheduler_credit_back_covers_full_capacity_legacy_allocation():
+    """Ledger-level regression test for the scheduler-level one in
+    test_physical_settlement_scheduler.py: reserving *all* of a
+    resource's capacity via a legacy gpu_count-only claim must still
+    report a fully-populated dimensions map, since the scheduler's
+    credit-back logic depends on it never being empty for a
+    pre-migration-style allocation."""
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", total_units=4)
+    reserved = ledger.reserve(claim={"gpu_count": 4}, deal_ref={})
+    allocation = ledger.get_allocation(reserved["allocation_id"])
+    assert allocation["dimensions"] == {"gpu_count": 4}

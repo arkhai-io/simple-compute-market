@@ -141,7 +141,9 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
     ]
     assert latest == events[-1]["version"]
     # Anonymity on the wire: events never carry deal context.
-    assert all(set(e) <= {"version", "kind", "resource_id", "occurred_at"}
+    # "dimensions" is anonymous capacity-delta data, not deal context,
+    # so it belongs in the allowed set alongside kind/resource_id/version.
+    assert all(set(e) <= {"version", "kind", "resource_id", "occurred_at", "dimensions"}
                for e in events)
 
 

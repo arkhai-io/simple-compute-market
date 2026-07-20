@@ -114,6 +114,12 @@ async def member_availability_view(
 # listings whose GPU slice no longer fits.
 _CONSUMING_DELTA_KINDS = frozenset({"reserved", "committed", "lease_truncated"})
 
+# A mixed-direction capacity registration (e.g. GPU count grew while RAM
+# shrank -- POOLS-6 pass 1) can simultaneously strand some listings and
+# free up others; neither "consuming" nor "released" alone is safe, so
+# both reconciliation passes run.
+_MIXED_DIRECTION_DELTA_KINDS = frozenset({"capacity_changed"})
+
 
 def _make_listing_reconcile_subscriber(
     sqlite_client_factory: SQLiteClientFactory,
@@ -124,7 +130,9 @@ def _make_listing_reconcile_subscriber(
     This is the storefront's *reaction* to a capacity delta, not part of
     the moving deal's flow — another seller's reservation invalidates
     our listings just the same. Consuming deltas close stranded
-    listings, "released" reopens ones that fit again.
+    listings, "released" reopens ones that fit again, and a mixed-
+    direction "capacity_changed" registration runs both passes since it
+    can do both at once.
     """
 
     async def _reconcile_listings(delta: CapacityDelta) -> None:
@@ -136,7 +144,7 @@ def _make_listing_reconcile_subscriber(
 
         db_path = sqlite_client_factory().db_path
         availability = await member_availability_view(client, db_path)
-        if delta.kind in _CONSUMING_DELTA_KINDS:
+        if delta.kind in _CONSUMING_DELTA_KINDS or delta.kind in _MIXED_DIRECTION_DELTA_KINDS:
             closed = await close_stale_compute_listings_after_capacity_change(
                 db_path, member_availability=availability,
             )
@@ -148,7 +156,7 @@ def _make_listing_reconcile_subscriber(
                     capacity_version=delta.version,
                     closed_listing_ids=closed,
                 )
-        elif delta.kind == "released":
+        if delta.kind == "released" or delta.kind in _MIXED_DIRECTION_DELTA_KINDS:
             reopened = await reopen_available_compute_listings_after_capacity_change(
                 db_path, member_availability=availability,
             )
@@ -276,11 +284,21 @@ async def sync_site_resources(
             total_units = max(int(total), 0)
         except (TypeError, ValueError):
             total_units = 0
+        # forward whichever dimensions the row's attributes declare, using
+        # the same vocabulary resource_capacity_validator.py already checks
+        # host totals against. gpu_count always goes through explicitly so
+        # it's present even when the row's "value" (not its attributes) is
+        # the only place total GPU count is recorded.
+        capacity = {"gpu_count": total_units}
+        for key in ("vcpu_count", "ram_gb", "disk_gb"):
+            if attrs.get(key) is not None:
+                capacity[key] = attrs[key]
         await client.register_resource(
             str(row["resource_id"]),
             total_units=total_units,
             resource_subtype=row.get("resource_subtype"),
             attributes=attrs,
+            capacity=capacity,
             enabled=str(row.get("state") or "") != "deleted",
         )
         synced += 1

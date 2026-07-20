@@ -174,3 +174,97 @@ def test_disabling_pool_does_not_depend_on_existing_assignment(services):
     scheduler.select_resource(_request(allocation_id))
     disabled = pools.disable_pool("pool-a")
     assert disabled.enabled is False
+
+# ----------------------------------------------------------------------
+# multidimensional eligibility
+# ----------------------------------------------------------------------
+
+def _resource_with_capacity(ledger, resource_id: str, pool_id: str, *, capacity: dict, enabled=True):
+    ledger.register_resource(
+        resource_id=resource_id,
+        resource_type="compute.gpu",
+        total_units=capacity.get("gpu_count", 1),
+        enabled=enabled,
+        attributes={"pool_id": pool_id},
+        capacity=capacity,
+    )
+
+
+def _reserve_with_dimensions(ledger, dimensions: dict, agreement="agreement-1", **deal):
+    ref = {"agreement_id": agreement, "market": "vms", "requirements": {"dimensions": dimensions}, **deal}
+    result = ledger.reserve(claim={"dimensions": dimensions}, deal_ref=ref)
+    assert result is not None
+    return result["allocation_id"]
+
+
+def test_scheduler_excludes_candidate_that_fits_gpu_but_not_memory(services):
+    """Two resources have enough GPU; only one also has enough RAM. The
+    scheduler's own eligibility scan (independent of which resource the
+    ledger's admission happened to reserve against) must still exclude
+    the RAM-short one, not just prove *some* resource exists."""
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource_with_capacity(
+        ledger, "roomy", "pool-a",
+        capacity={"gpu_count": 8, "vcpu_count": 32, "ram_gb": 256, "disk_gb": 1000},
+    )
+    _resource_with_capacity(
+        ledger, "ram-short", "pool-a",
+        capacity={"gpu_count": 8, "vcpu_count": 32, "ram_gb": 16, "disk_gb": 1000},
+    )
+    dims = {"gpu_count": 1, "ram_gb": 64}
+    allocation_id = _reserve_with_dimensions(ledger, dims)
+    # Pinning the RAM-short resource explicitly must fail eligibility,
+    # checked before any assignment memoizes a different resource.
+    with pytest.raises(NoEligibleSettlementResourceError):
+        scheduler.select_resource(_request(
+            allocation_id, requirements={"dimensions": dims}, resource_id="ram-short",
+        ))
+    resource = scheduler.select_resource(
+        _request(allocation_id, requirements={"dimensions": dims})
+    )
+    assert resource.settlement_resource_id == "roomy"
+
+
+def test_scheduler_selects_candidate_that_fits_every_dimension(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource_with_capacity(
+        ledger, "r1", "pool-a",
+        capacity={"gpu_count": 8, "vcpu_count": 32, "ram_gb": 256, "disk_gb": 1000},
+    )
+    dims = {"gpu_count": 2, "vcpu_count": 8, "ram_gb": 64, "disk_gb": 200}
+    allocation_id = _reserve_with_dimensions(ledger, dims)
+    resource = scheduler.select_resource(
+        _request(allocation_id, requirements={"dimensions": dims})
+    )
+    assert resource.settlement_resource_id == "r1"
+
+
+def test_scheduler_still_schedules_legacy_gpu_only_requests(services):
+    """Reservations made before pass 1 (no dimensions) keep scheduling
+    exactly as they did under round-robin."""
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a", units=10)
+    allocation_id = _reserve(ledger)
+    resource = scheduler.select_resource(_request(allocation_id))
+    assert resource.settlement_resource_id == "r1"
+
+
+def test_scheduler_credit_back_covers_full_capacity_legacy_allocation(services):
+    """A legacy allocation reserving *all* of a resource's capacity must
+    still be schedulable: the eligibility scan credits the allocation's
+    own held quantity back before checking fit, and that credit-back must
+    not silently become a no-op for an allocation whose claim never
+    mentioned "dimensions", but locking the invariant in with a test at
+    the layer that actually depends on it)."""
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a", units=4)
+    result = ledger.reserve(claim={"gpu_count": 4}, deal_ref={
+        "agreement_id": "agreement-1", "market": "vms",
+    })
+    assert result is not None
+    resource = scheduler.select_resource(_request(result["allocation_id"]))
+    assert resource.settlement_resource_id == "r1"

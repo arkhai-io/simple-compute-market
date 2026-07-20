@@ -77,6 +77,7 @@ def make_capacity_router(
             resource_type=body.resource_type,
             resource_subtype=body.resource_subtype,
             attributes=body.attributes,
+            capacity=body.capacity,
             enabled=body.enabled,
         )
         logger.info(
