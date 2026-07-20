@@ -1,10 +1,11 @@
 """Watchdog over ledger allocations: local release + deal event, no PATCH.
 
-The legacy vm_leases leg keeps its own tests
-(test_lease_lifecycle_service.py); these cover the merged-row leg added
-for remote-capacity mode — release happens in the ledger's local
-transaction, the owning storefront gets a point-to-point
-capacity-released event, and the resource PATCH callback never fires.
+These cover the SiteAllocation-backed lease lifecycle: release happens in
+the ledger's local transaction, the owning storefront gets a
+point-to-point capacity-released event, and the resource PATCH callback
+never fires. (The legacy vm_leases table/model this superseded — and its
+own now-removed test file — were confirmed dead and cleaned up
+separately; see db/models.py and db/migrations.py.)
 """
 
 from __future__ import annotations

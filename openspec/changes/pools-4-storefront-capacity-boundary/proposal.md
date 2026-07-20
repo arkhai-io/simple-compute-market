@@ -53,7 +53,8 @@ That work is done; it is not part of this change's remaining scope. The
   prefixes. Left as naming debt, not blocking.
 - Any provider execution or scheduler behavior change — this change only
   changes what the storefront asks for, not how provisioning fulfills it.
-- Package extraction (`pools-5`).
+- Package extraction (tracked by `market-platform-compute-30-extract-service`,
+  which absorbed the now-closed `pools-5-shared-provisioning-package`).
 
 ## Capabilities
 

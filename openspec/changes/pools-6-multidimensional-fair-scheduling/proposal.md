@@ -33,6 +33,38 @@ A richer scheduler must still preserve the durable properties established by POO
 - Treating abstract aggregate capacity as proof that one concrete resource can fit a request.
 - Changing Capacity Settlement Assignment or physical-settlement caller contracts solely to accommodate one algorithm.
 
+## Concrete, currently-unenforced gap (found during POOLS-7 design review, 2026-07-17)
+
+While designing `pools-7-storefront-fulfillment-cutover`'s reservation/
+scheduling retrofit, we confirmed this change's abstract problem
+statement has a concrete, currently-live instance, not just a future
+risk: **`Host` (`domains/vms/provisioning/service/src/db/models.py`) has
+no memory, disk, or vCPU capacity field — only `gpu_count`.** Reservation
+admission (`kit/site/ledger.py`) can therefore correctly bin-pack on GPU
+count against real hosts, but nothing in the capacity layer verifies a
+negotiated shape's memory/disk/vCPU actually fits any physical host
+before a Capacity Reservation is admitted. `VmFulfillmentRequirements`
+(`pools-3`) carries these fields, but only at fulfillment time — downstream
+of the point where admission has already committed to a reservation.
+
+Net effect: **a Capacity Reservation can be admitted today for a shape no
+physical machine can serve**, with the mismatch only surfacing later, at
+fulfillment or scheduling time, as an unexplained failure rather than a
+clean admission-time rejection. `pools-7` treats resolving this as a
+prerequisite it consumes from this change, not something it re-derives
+piecemeal (e.g. adding an ad hoc memory column to `Host` without going
+through the dimension-normalization questions below) — see `pools-7`'s
+`design.md`, "Dependency on POOLS-6."
+
+This is offered as a concrete, scoped starting point for design work on
+this change — unlike the rest of this document, which is deliberately
+abstract and names no selected direction. It does not itself answer the
+"Non-Work / Deferred Decisions" questions below (what dimensions are
+first-class, how units normalize, whether pools are weighted, etc.); it
+just establishes that at minimum, VM memory/disk/vCPU must become
+first-class, admission-time-checked dimensions before `pools-7`'s
+reservation-admission path can be considered correct.
+
 ## Status of the requirement delta
 
 The `## ADDED Requirements` in this change's `specs/physical-provisioning/spec.md` use the standard openspec delta header — openspec's delta model has no separate "proposed but not yet decided" state, every change is a proposal until archived. That header does **not** mean this is implementation-ready: the "Non-Work / Deferred Decisions" list below and the open questions in `design.md` must be resolved in a dedicated design session before any of these requirements are implemented or this change is archived. Treat this change directory as a placeholder for problem framing, not a ready-to-build spec.

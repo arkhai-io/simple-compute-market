@@ -87,9 +87,6 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         column["name"] for column in inspector.get_columns("ansible_jobs")
     }
     host_columns = {column["name"] for column in inspector.get_columns("hosts")}
-    lease_columns = {
-        column["name"] for column in inspector.get_columns("vm_leases")
-    }
     allocation_columns = {
         column["name"] for column in inspector.get_columns("site_allocations")
     }
@@ -104,8 +101,12 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "idempotency_key",
     }.issubset(ansible_columns)
     assert "public_host" in host_columns
-    assert "vm_leases" in inspector.get_table_names()
-    assert "allocation_id" in lease_columns
+    # vm_leases is created by an early migration and dropped by the final
+    # one (20260718_001_drop_vm_leases_table) — dead table, superseded by
+    # site_allocations. Both migration steps stay in history (append-only)
+    # so replay against any pre-existing DB state is correct, but the
+    # end state after a full run has no vm_leases table.
+    assert "vm_leases" not in inspector.get_table_names()
     assert {
         "executor_kind",
         "executor_target",
@@ -159,6 +160,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260707_001_site_allocations_executor_fields",
         "20260713_001_ansible_jobs_contract_fields",
         "20260713_002_resource_pools_and_hosts_pool_id",
+        "20260718_001_drop_vm_leases_table",
     }
 
 
@@ -174,9 +176,6 @@ def test_run_migrations_is_idempotent():
         column["name"] for column in inspector.get_columns("ansible_jobs")
     ]
     host_columns = [column["name"] for column in inspector.get_columns("hosts")]
-    lease_columns = [
-        column["name"] for column in inspector.get_columns("vm_leases")
-    ]
     allocation_columns = [
         column["name"] for column in inspector.get_columns("site_allocations")
     ]
@@ -190,7 +189,7 @@ def test_run_migrations_is_idempotent():
     assert ansible_columns.count("idempotency_key") == 1
     assert host_columns.count("public_host") == 1
     assert host_columns.count("pool_id") == 1
-    assert lease_columns.count("allocation_id") == 1
+    assert "vm_leases" not in inspector.get_table_names()
     assert allocation_columns.count("executor_kind") == 1
     assert allocation_columns.count("executor_target") == 1
     assert allocation_columns.count("release_job_id") == 1
@@ -205,7 +204,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 7
+    assert migration_count == 8
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +230,7 @@ class TestCheckSchemaVersion:
         with engine.begin() as connection:
             connection.execute(text(
                 "DELETE FROM schema_migrations WHERE id = "
-                "'20260713_002_resource_pools_and_hosts_pool_id'"
+                "'20260718_001_drop_vm_leases_table'"
             ))
         with pytest.raises(SchemaDriftError):
             check_schema_version(engine)
