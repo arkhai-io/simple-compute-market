@@ -44,21 +44,27 @@ It never reached its activation condition, and this change already claimed
 ownership of resolving its package-boundary question, so its scope is
 folded in here rather than tracked in two places. Concretely:
 
-- **Open decision, carried forward unresolved:** whether
-  `PhysicalSettlementScheduler` (`domains/vms/provisioning/service`,
-  VM-service-local), `FulfillmentProvider`/`ProviderRegistry`
-  (`kit/resource-pools`), and the `SettlementRecord`/settlement-resource
-  shapes they operate on should consolidate into `compute_provisioning`
-  once this extraction lands, or stay split the way they are today.
+- **Resolved by `pools-7-storefront-fulfillment-cutover`'s design review
+  (2026-07-17), ahead of this change's own extraction work:**
+  `PhysicalSettlementScheduler` and `DeterministicRoundRobinPolicy` move
+  from VM-service-local code into `compute_provisioning` — not into
+  `kit/resource-pools`, which would close a circular dependency
+  (`compute_provisioning` already depends on `kit/resource-pools`; the
+  scheduler needs real runtime imports from `compute_provisioning`'s
+  settlement types, unlike `FulfillmentProvider`'s string-quoted forward
+  references). `FulfillmentProvider`/`ProviderRegistry`/error taxonomy
+  remain in `kit/resource-pools`, per `pools-3`'s original placement.
   `pools-2`'s scheduling/request contracts (`PhysicalSettlementRequest`,
   `SettlementResource`, `SettlementCandidate`, `SettlementRequirement`,
-  `SettlementSchedulingPolicy`) already live in `compute_provisioning`;
-  `pools-3`'s `FulfillmentProvider`/`ProviderRegistry`/error taxonomy live
-  in `kit/resource-pools` instead — a deliberate override of POOLS-5's gate
-  made during `pools-3` (see that change's `design.md`, "Domain-neutral
-  contracts vs. domain-specific payloads"). This proposal's task list (§1)
-  should reconcile that split as part of "Verify Prerequisites and Current
-  Ownership," not treat it as pre-decided.
+  `SettlementSchedulingPolicy`) already lived in `compute_provisioning`
+  before this. See `pools-7`'s `design.md`, "`PhysicalSettlementScheduler`
+  and `DeterministicRoundRobinPolicy` move to `compute_provisioning`."
+  This is the same kind of narrow, deliberate override of waiting for this
+  change's activation that `pools-3` already made once for
+  `FulfillmentProvider`/`ProviderRegistry` — resolving where a class lives
+  is not this change's service-extraction scope, and this proposal's task
+  list (§1) should verify the moved location during "Verify Prerequisites
+  and Current Ownership" rather than treat it as still open.
 - **Concrete, verified, gate-independent finding:** `provisioning/compute/
   src/compute_provisioning/pools.py` and `pool_config_handler.py` are
   byte-identical duplicates of the files in `kit/resource-pools/src/
