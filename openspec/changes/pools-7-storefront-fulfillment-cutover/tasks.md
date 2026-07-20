@@ -112,7 +112,7 @@ design.
 
 - [ ] 11.1 Remove superseded `allocation_id`, `SiteAllocation`, direct-host storefront placement, process-local settlement maps/locks, and obsolete executor/provider fields after migrations and callers are complete.
 - [ ] 11.2 Fix `most_available`'s claim-blindness bug (it accepts a `claim` parameter but never filters by it) and keep `fill_first`/`most_available` as pure pre-reservation site-selection policy — they have never performed host-level physical placement, only ordered which site to attempt first, so there is no placement logic to remove. Per `design.md`'s "Site fallback after POOLS-4": site fallback/ranking is meaningful only before a capacity reservation exists; once one exists it is owned by exactly one site with no fallback. Do not delete or restructure these policies beyond the claim-blindness fix.
-- [ ] 11.3 Update container composition, package dependencies, wheel/reinit targets, Docker images, and deployment configuration for `kit/physical-settlement` and its watchdog workers.
+- [ ] 11.3 Update the extracted compute service composition, package dependencies, wheel/reinit targets, Docker image, and deployment configuration for `kit/physical-settlement` and its watchdog workers; register VM/Ansible behavior through `domains/vms/provisioning/adapter`.
 - [ ] 11.4 Ensure logs, traces, exception payloads, and request logging redact credentials and prepared secret material.
 - [ ] 11.5 Run repository-wide import, typing, migration, unit, integration, and end-to-end suites and fix all renamed-contract consumers.
 
@@ -120,5 +120,5 @@ design.
 
 - [ ] 12.1 Update `ARCHITECTURE.md` service map, terminology table, ID definitions, lifecycle ownership, transaction boundaries, recovery workers, pull-based status/result query contract, and teardown flow. Note `provisioning-result-push-delivery` as planned future work, not implemented by this change.
 - [ ] 12.2 Update baseline `site-capacity` and `physical-provisioning` specs to incorporate completed POOLS-2/3/4/6/7 behavior when the change is archived.
-- [ ] 12.3 Update VM provisioning/storefront README and operator documentation for migrations, watchdog health, status/result query usage, and recovery procedures without lease-expiry sequencing instructions.
+- [ ] 12.3 Update compute provisioning service, VM adapter, storefront, and operator documentation for migrations, watchdog health, status/result query usage, and recovery procedures without lease-expiry sequencing instructions.
 - [ ] 12.4 Verify the implementation against every POOLS-7 scenario and archive the OpenSpec change after validation.

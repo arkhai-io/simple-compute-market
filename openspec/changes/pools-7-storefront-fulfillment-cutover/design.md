@@ -6,6 +6,15 @@ result delivery, and teardown. This document records the design decisions
 approved during the POOLS-7 discuss phase and is the design basis for the
 implementation plan.
 
+**Implementation baseline after Compute-30:** service composition, persistence,
+migrations, generic APIs, and workers now live in
+`provisioning/compute/service`; VM/Ansible implementations and operator routes
+live in `domains/vms/provisioning/adapter`; bare-metal implementations live in
+`domains/bare_metal/provisioning/adapter`. Historical discussion below that says
+"VM provisioning service" describes the pre-extraction code but does not assign
+new POOLS-7 work back to the removed package. POOLS-7 applies those decisions to
+the extracted service and adapter entry points.
+
 ## Current storefront fulfillment path (verified, not assumed)
 
 1. `vm_fulfillment_service.py` reserves capacity against the site
@@ -869,9 +878,10 @@ The shared lifecycle and concrete reusable SQLAlchemy implementation live in a
 new `kit/physical-settlement` package, not `kit/resource-pools` and not the
 base `compute_provisioning` package. The kit owns domain-neutral scheduling,
 fulfillment persistence, repository, recovery-claim, provisioned-resource, and
-result-outbox infrastructure. The VM provisioning service composes the shared
-metadata into its database, owns the Alembic migration, and supplies VM/Ansible
-adapters and worker composition.
+durable result state read by the pull query API; v1 has no result-delivery
+outbox. The extracted compute provisioning service composes the shared metadata
+into its database, owns the migration, API, and worker composition, while the
+VM provisioning adapter supplies VM/Ansible behavior.
 
 ## Provider input snapshot: prepare/dispatch split (design review continued, 2026-07-17)
 
@@ -975,9 +985,11 @@ from both `kit/resource-pools` and the base `compute_provisioning` package.
 The kit owns domain-neutral settlement and fulfillment lifecycle types,
 scheduler/policy code, versioned prepared-operation contracts, SQLAlchemy
 mappings and generic repositories, transition validation, recovery-claim
-infrastructure, provisioned-resource records, and durable result-delivery
-outbox models. VM-specific Ansible adapters, API routes, worker composition,
-and migrations remain in the VM provisioning service.
+infrastructure, provisioned-resource records, and durable result state read by
+pull queries. V1 does not add result-delivery outbox models. VM-specific Ansible
+providers and operator routes remain in the VM provisioning adapter; generic
+settlement APIs, worker composition, and service-owned migrations remain in the
+extracted compute provisioning service.
 
 The concrete SQLAlchemy implementation belongs in the shared kit when it is
 genuinely reusable across domains; services compose the shared metadata and

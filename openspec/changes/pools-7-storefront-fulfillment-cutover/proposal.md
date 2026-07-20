@@ -3,7 +3,7 @@
 `pools-2-physical-settlement-scheduler` and `pools-3-fulfillment-provider`
 build a generic-scheduling-then-provider-execution path
 (`PhysicalSettlementScheduler.select_resource` → `FulfillmentProvider.create`)
-inside the VM provisioning service, but **nothing calls it**. The
+inside the extracted compute provisioning service, but **nothing calls it**. The
 storefront's actual fulfillment path today (verified against current code,
 not assumed) is entirely separate:
 
@@ -83,36 +83,34 @@ This change is active and design-complete. The design review completed on
 2026-07-20, and `tasks.md` is the implementation plan for the cutover.
 
 **Resolved scope, superseding the original activation gate below:**
-this change retrofits the existing VM domain storefront and provisioning
-service onto the POOLS 1-4 machinery. It does not perform
-`market-platform-compute-30-extract-service`'s service extraction —
-the shared physical-settlement lifecycle, persistence, scheduler, and recovery
-contracts live was decided directly by this change's design review (a new
-`kit/physical-settlement` package; see `design.md`) rather than waited on. `kit/site`
-and `kit/resource-pools` may be modified where genuinely cross-domain,
-and the `apicredits` domain is explicitly in scope for the same
-capacity-reservation-against-a-pooled-view reshape, not just VM — both
-permitted, not required, exercised where this review found real need.
+this change retrofits the VM domain storefront and the extracted compute
+provisioning service onto the POOLS 1-4 machinery. Compute-30 landed first and
+moved service composition to `provisioning/compute/service`, VM/Ansible behavior
+to `domains/vms/provisioning/adapter`, and bare-metal behavior to
+`domains/bare_metal/provisioning/adapter`; POOLS-7 consumes that layout rather
+than performing another service extraction. The shared physical-settlement
+lifecycle, persistence, scheduler, and recovery destination remains the new
+`kit/physical-settlement` package decided by this change's design review.
+`kit/site` and `kit/resource-pools` may be modified where genuinely
+cross-domain, and the `apicredits` domain is explicitly in scope for the same
+capacity-reservation-against-a-pooled-view reshape, not just VM.
 
 **Dependencies, current as of this review:**
 
 - `pools-2-physical-settlement-scheduler` — implemented prerequisite.
 - `pools-3-fulfillment-provider` — implemented prerequisite.
 - `pools-4-storefront-capacity-boundary` — implemented prerequisite.
-- `pools-6-multidimensional-fair-scheduling` — **blocking prerequisite**,
-  found during this review, not part of the original gate: `Host` has no
-  memory/disk/vCPU capacity field, so reservation admission cannot verify
-  a negotiated shape fits any real machine. See `design.md`, "Dependency
-  on POOLS-6." This change's reservation-admission work must not begin
-  implementation until `pools-6` resolves multidimensional capacity
-  tracking.
+- `pools-6-multidimensional-fair-scheduling` — implemented prerequisite;
+  multidimensional reservation and scheduler fit accounting landed before
+  this change begins implementation.
 - `pools-8-capacity-projection-and-listing-hints` — related, not
   blocking, but consequential: this change alone fixes
   provisioning-service-side `pool_id` correctness; the storefront's own
   claim-building isn't fixed until `pools-8` also lands. See `design.md`,
   "Scope split: `CapacityProjection` and hints move to `pools-8`."
-- `market-platform-compute-30-extract-service` — related follow-on, not
-  an activation prerequisite or blocker.
+- `market-platform-compute-30-extract-service` — implemented related change;
+  it was not a behavioral prerequisite, but was selected to land first, so
+  this plan now targets the extracted service and adapter paths.
 
 ## Non-Goals
 
@@ -149,15 +147,13 @@ permitted, not required, exercised where this review found real need.
 - Requires `pools-2-physical-settlement-scheduler` (implemented) and
   `pools-3-fulfillment-provider` (implemented).
 - Requires `pools-4-storefront-capacity-boundary` (implemented).
-- **Requires `pools-6-multidimensional-fair-scheduling`** — blocking
-  prerequisite for reservation-admission work; see "Status" above.
+- Requires `pools-6-multidimensional-fair-scheduling` (implemented).
 - Related, not blocking: `pools-8-capacity-projection-and-listing-hints`
   — required for this change's `pool_id`-correctness fix to be complete
   end-to-end on the storefront side; see "Status" above.
-- Interacted with `market-platform-compute-30-extract-service`'s absorbed
-  package-boundary decision (formerly tracked by the now-closed
-  `pools-5-shared-provisioning-package`) — resolved directly by this
-  change's design review rather than waited on; see "Status" above.
+- Follows the implemented `market-platform-compute-30-extract-service`
+  package layout. Compute-30 did not create `kit/physical-settlement` or
+  implement this change's durable lifecycle.
 - Related, not blocking, follow-on: `provisioning-result-push-delivery`
   (not yet started) — adds a push transport for `SettlementResult`
   alongside this change's pull-based `get_fulfillment_status`/
@@ -172,7 +168,8 @@ Touches `kit/site` (`site_resource_pools`/`CapacityReservation` reshape),
 persistence, recovery, and pull-based result/status query contracts —
 push delivery is `provisioning-result-push-delivery`'s scope, not this
 change's),
-the VM provisioning service (models, migrations, services, release
-lifecycle), and the VM storefront's reservation/orchestration path.
-Blocked on `pools-6` for reservation-admission correctness; not fully
-complete end-to-end without `pools-8`. The dependency-ordered implementation work is defined in `tasks.md`.
+the extracted compute provisioning service (models, migrations, generic
+services, API and workers), the VM provisioning adapter (Ansible provider and
+release behavior), and the VM storefront's reservation/orchestration path.
+POOLS-6 has landed; the result is not fully complete end-to-end without
+POOLS-8. The dependency-ordered implementation work is defined in `tasks.md`.
