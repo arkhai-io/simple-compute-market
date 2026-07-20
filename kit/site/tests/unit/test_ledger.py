@@ -815,3 +815,110 @@ def test_registration_event_delta_is_capacity_minus_previous_capacity(
     deltas = [e["dimensions"] for e in events if e["resource_id"] == "growing"]
     assert deltas[0] == {"gpu_count": 2, "ram_gb": 100}
     assert deltas[1] == {"gpu_count": 2, "ram_gb": 0}
+
+def test_explicit_empty_dimensions_map_is_rejected(seeded: CapacityLedgerService):
+    """{"dimensions": {}} declares nothing to request -- must fail loudly,
+    not silently fall through to the legacy single-quantity default of 1
+    (a real bug found in code review: presence was checked as truthiness)."""
+    with pytest.raises(ValueError):
+        seeded.probe(claim={"dimensions": {}})
+    with pytest.raises(ValueError):
+        seeded.reserve(claim={"dimensions": {}}, deal_ref={})
+
+
+@pytest.mark.parametrize("raw", [[], "not-a-mapping", None, 5])
+def test_malformed_dimensions_types_are_rejected(seeded: CapacityLedgerService, raw):
+    with pytest.raises(ValueError):
+        seeded.probe(claim={"dimensions": raw})
+
+
+@pytest.mark.parametrize("value", [0, -1, "not-a-number"])
+def test_dimensions_values_must_be_positive_numbers(
+    seeded: CapacityLedgerService, value,
+):
+    with pytest.raises(ValueError):
+        seeded.probe(claim={"dimensions": {"gpu_count": value}})
+
+
+def test_dimensions_reject_nan_and_infinity(seeded: CapacityLedgerService):
+    """NaN/Infinity parse cleanly into Decimal but raise InvalidOperation
+    on comparison -- must surface as the same clean ValueError as any
+    other malformed quantity, not an uncaught decimal.InvalidOperation
+    """
+    with pytest.raises(ValueError):
+        seeded.probe(claim={"dimensions": {"gpu_count": float("nan")}})
+    with pytest.raises(ValueError):
+        seeded.probe(claim={"dimensions": {"gpu_count": float("inf")}})
+
+
+def test_register_resource_rejects_conflicting_total_units_and_capacity(
+    ledger: CapacityLedgerService,
+):
+    """total_units is documented as a mirror of capacity['gpu_count']; two
+    disagreeing values is a caller bug, not something to silently resolve
+    in capacity's favor."""
+    with pytest.raises(ValueError):
+        ledger.register_resource(
+            resource_id="conflicted", total_units=8, capacity={"gpu_count": 4},
+        )
+    # Consistent values are fine.
+    ledger.register_resource(
+        resource_id="consistent", total_units=8, capacity={"gpu_count": 8, "ram_gb": 64},
+    )
+    assert ledger.snapshot()[0]["capacity"]["gpu_count"] == 8
+
+
+def test_mixed_direction_capacity_change_gets_neutral_event_kind(
+    ledger: CapacityLedgerService,
+):
+    """GPU count growing while RAM shrinks has no single grew/shrank
+    direction -- must not be mislabeled "released" (implying availability
+    only increased) or "reserved"."""
+    ledger.register_resource(
+        resource_id="host-1", total_units=4, capacity={"gpu_count": 4, "ram_gb": 512},
+    )
+    ledger.register_resource(
+        resource_id="host-1", total_units=8, capacity={"gpu_count": 8, "ram_gb": 128},
+    )
+    events, _ = ledger.events_after(0)
+    kinds = [e["kind"] for e in events if e["resource_id"] == "host-1"]
+    assert kinds == ["released", "capacity_changed"]
+
+
+def test_pure_grow_and_pure_shrink_keep_their_kind(ledger: CapacityLedgerService):
+    ledger.register_resource(
+        resource_id="r", total_units=4, capacity={"gpu_count": 4, "ram_gb": 100},
+    )
+    ledger.register_resource(
+        resource_id="r", total_units=8, capacity={"gpu_count": 8, "ram_gb": 200},
+    )
+    ledger.register_resource(
+        resource_id="r", total_units=2, capacity={"gpu_count": 2, "ram_gb": 50},
+    )
+    events, _ = ledger.events_after(0)
+    kinds = [e["kind"] for e in events if e["resource_id"] == "r"]
+    assert kinds == ["released", "released", "reserved"]
+
+
+def test_disabling_alone_is_reserved_even_with_unchanged_capacity(
+    ledger: CapacityLedgerService,
+):
+    ledger.register_resource(resource_id="r", total_units=4, enabled=True)
+    ledger.register_resource(resource_id="r", total_units=4, enabled=False)
+    events, _ = ledger.events_after(0)
+    kinds = [e["kind"] for e in events if e["resource_id"] == "r"]
+    assert kinds == ["released", "reserved"]
+
+
+def test_scheduler_credit_back_covers_full_capacity_legacy_allocation():
+    """Ledger-level regression test for the scheduler-level one in
+    test_physical_settlement_scheduler.py: reserving *all* of a
+    resource's capacity via a legacy gpu_count-only claim must still
+    report a fully-populated dimensions map, since the scheduler's
+    credit-back logic depends on it never being empty for a
+    pre-migration-style allocation."""
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", total_units=4)
+    reserved = ledger.reserve(claim={"gpu_count": 4}, deal_ref={})
+    allocation = ledger.get_allocation(reserved["allocation_id"])
+    assert allocation["dimensions"] == {"gpu_count": 4}

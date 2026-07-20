@@ -139,16 +139,18 @@ class PhysicalSettlementScheduler:
         )
         attributes = dict(request.requirements.get("attributes") or {})
         # dimensions is authoritative when the reservation carries one.
-        # Otherwise fall back to the allocation's legacy  single-quantity "units",
-        # translated to the primary dimension, so reservations made before this
-        # change keep scheduling unchanged.
+        #  Otherwise fall back to the allocation's own dimensions which
+        # ledger.get_allocation() always populates.
+        # Even for a pre-migration allocation that only ever had "units"
+        # (CapacityLedgerService._allocation_dimensions applies that
+        # fallback once, centrally, before this dict ever reaches the
+        # scheduler). Do NOT re-derive a "units" fallback here: it would
+        # be dead code today and, worse, a second copy of a rule that
+        # must only live in one place (found in code review, 2026-07-20;
+        # see test_scheduler_schedules_full-capacity_legacy_allocation).
         dimensions = dict(
-            request.requirements.get("dimensions")
-            or allocation.get("dimensions")
-            or {}
+            request.requirements.get("dimensions") or allocation["dimensions"]
         )
-        if not dimensions:
-            dimensions = {"gpu_count": max(int(allocation.get("units") or 1), 1)}
         return SettlementRequirement(
             resource_kind=resource_kind,
             dimensions=dimensions,
@@ -161,7 +163,9 @@ class PhysicalSettlementScheduler:
         allocation: dict[str, Any],
     ) -> list[SettlementCandidate]:
         pools = {pool.id: pool for pool in self._pool_service.list_pools(enabled_only=True)}
-        allocation_dimensions = dict(allocation.get("dimensions") or {})
+        # Guaranteed non-empty by CapacityLedgerService.get_allocation() --
+        # see the comment in _requirement().
+        allocation_dimensions = dict(allocation["dimensions"])
         candidates: list[SettlementCandidate] = []
         for payload in self._capacity_ledger.list_resources():
             attributes = dict(payload.get("attributes") or {})

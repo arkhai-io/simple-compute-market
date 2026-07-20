@@ -150,7 +150,7 @@ class CapacityEvent(Base):
     __tablename__ = "capacity_events"
 
     version = Column(Integer, primary_key=True, autoincrement=True)
-    kind = Column(String, nullable=False)  # "reserved"|"committed"|"released"|"lease_truncated"
+    kind = Column(String, nullable=False)  # "reserved"|"committed"|"released"|"lease_truncated"|"capacity_changed"
     resource_id = Column(String, nullable=True, index=True)
     # Signed per-dimension delta, e.g. {"gpu_count": -1, "vcpu": -4} for a
     # reserve, {"gpu_count": 1, "vcpu": 4} for a release (POOLS-6 pass 1).

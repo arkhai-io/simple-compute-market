@@ -102,15 +102,24 @@ only tracks pass-2 questions.
 ## Pass 1 design resolution (2026-07-20)
 
 - **Dimension representation:** a generic `dict[str, Decimal]` map (e.g.
-  `{"gpu_count": 1, "vcpu": 4, "memory_mb": 16384, "disk_gb": 200}`) on
+  `{"gpu_count": 1, "vcpu_count": 4, "ram_gb": 16, "disk_gb": 200}`) on
   requirements, candidates, `SiteResource.capacity`, and
   `SiteAllocation.dimensions` — not fixed named fields. Multi-domain-ready,
   matches `design.md`'s original candidate-model sketch.
-- **Resource-bundle semantics:** for the VM domain, a `SiteResource` row
-  already corresponds 1:1 to one physical host (existing `vm_host`
-  attribute). No new cross-row bundling machinery is needed for pass 1;
-  bundling is deferred to whenever a domain needs dimensions spread across
-  rows.
+- **Resource-bundle semantics:** each requested dimension is checked
+  against the *one* `SiteResource` row admission targets, not aggregated
+  across rows sharing a physical host. No new cross-row bundling
+  machinery is needed for pass 1; bundling is deferred to whenever a
+  domain needs dimensions spread across rows. **Correction (code review,
+  2026-07-20):** this bullet previously (and wrongly) claimed a
+  `SiteResource` row is 1:1 with one physical host — this codebase
+  already registers multiple rows against one host (VM-slice + bare-metal
+  sharing a `physical_host_id`, pre-dating this change). See `design.md`'s
+  "Ledger and scheduler changes backing this" section for the corrected
+  account, including the resulting known limitation: ledger-level
+  enforcement that sibling slices on one host don't jointly oversubscribe
+  it (beyond the existing exclusive/shareable mode conflict check) remains
+  an open gap, unchanged by this pass.
 - **Fit-check correctness:** full per-dimension held/available accounting,
   extending `CapacityLedgerService`'s existing lease-window held-units
   machinery, not a declared-capacity-only gate. The storefront's

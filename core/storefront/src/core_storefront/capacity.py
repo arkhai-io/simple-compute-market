@@ -48,7 +48,7 @@ class CapacityDelta:
     versions from different sites are unrelated sequences.
     """
 
-    kind: str  # "reserved" | "committed" | "released" | "lease_truncated"
+    kind: str  # "reserved" | "committed" | "released" | "lease_truncated" | "capacity_changed"
     version: int
     resource_id: str | None = None
     pool_id: str | None = None

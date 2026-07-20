@@ -250,3 +250,21 @@ def test_scheduler_still_schedules_legacy_gpu_only_requests(services):
     allocation_id = _reserve(ledger)
     resource = scheduler.select_resource(_request(allocation_id))
     assert resource.settlement_resource_id == "r1"
+
+
+def test_scheduler_credit_back_covers_full_capacity_legacy_allocation(services):
+    """A legacy allocation reserving *all* of a resource's capacity must
+    still be schedulable: the eligibility scan credits the allocation's
+    own held quantity back before checking fit, and that credit-back must
+    not silently become a no-op for an allocation whose claim never
+    mentioned "dimensions", but locking the invariant in with a test at
+    the layer that actually depends on it)."""
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a", units=4)
+    result = ledger.reserve(claim={"gpu_count": 4}, deal_ref={
+        "agreement_id": "agreement-1", "market": "vms",
+    })
+    assert result is not None
+    resource = scheduler.select_resource(_request(result["allocation_id"]))
+    assert resource.settlement_resource_id == "r1"

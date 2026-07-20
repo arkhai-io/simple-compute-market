@@ -55,12 +55,35 @@ capacity. `DeterministicRoundRobinPolicy` needs no change — it only sorts
 the caller-contract-stability goal above.
 
 For the VM domain, dimensions on different concrete resources are never
-combined: a `SiteResource` row already corresponds 1:1 to one physical
-host (existing `vm_host` attribute), so the row itself is the schedulable
-bundle. No cross-row bundling machinery was needed for pass 1. A future
-domain that needs dimensions spread across rows (e.g. a bundle spanning
-multiple discrete cards) will need to design that explicitly — pass 1
-does not generalize to it.
+combined: each requested dimension is checked against the *one*
+`SiteResource` row admission targets, not aggregated across rows, so the
+row itself is the schedulable bundle. No cross-row bundling machinery
+was needed for pass 1. A future domain that needs dimensions spread
+across rows (e.g. a bundle spanning multiple discrete cards) will need
+to design that explicitly — pass 1 does not generalize to it.
+
+**Correction (code review, 2026-07-20):** an earlier version of this
+paragraph claimed a `SiteResource` row is "1:1 with one physical host."
+That's wrong — this codebase already registers *multiple* `SiteResource`
+rows against the same physical host (see `test_ledger.py`'s
+`_shared_host_ledger`/`_register_dual_mode_host` fixtures, which predate
+this change: a shareable VM-slice row and an exclusive bare-metal row
+can share one `physical_host_id`). `_has_physical_host_conflict` only
+guards **exclusive-vs-shareable mode conflicts** between sibling rows on
+one host — it has never been a general "sum of sibling capacities ≤ host
+total" check, not even for GPU count before pools-6. That invariant has
+always been enforced only at data-entry time, by
+`resource_capacity_validator.py`, on the storefront's local inventory
+table — not by the site ledger. Pass 1 does not introduce a *new* hole
+here: vcpu/ram/disk get exactly the level of protection GPU count
+already had (checked against the specific resource row admission
+targets, not cross-checked against sibling rows sharing a host). But
+**ledger-level enforcement that sibling slices sharing a physical host
+don't jointly oversubscribe it (on any dimension, not just exclusive
+mode) remains an open gap**, unchanged by this change and not claimed to
+be closed by it. Recorded here as a known limitation and candidate for a
+future change, not silently resolved by this paragraph's earlier
+inaccurate framing.
 
 ### Ledger and scheduler changes backing this
 

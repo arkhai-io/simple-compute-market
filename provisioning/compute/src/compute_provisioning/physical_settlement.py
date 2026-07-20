@@ -60,6 +60,10 @@ class SettlementRequirement(BaseModel):
         if not value:
             raise ValueError("dimensions must declare at least one quantity")
         for key, amount in value.items():
+            # NaN/Infinity parse cleanly through pydantic's Decimal
+            # coercion but raise InvalidOperation on comparison.
+            if not amount.is_finite():
+                raise ValueError(f"dimensions[{key}] must be a finite number, got {amount}")
             if amount <= 0:
                 raise ValueError(f"dimensions[{key}] must be > 0, got {amount}")
         return value

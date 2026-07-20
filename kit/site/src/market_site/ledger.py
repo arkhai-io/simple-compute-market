@@ -155,6 +155,9 @@ def _to_decimal(value: Any, *, label: str) -> Decimal:
         amount = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise ValueError(f"{label} must be numeric, got {value!r}") from exc
+    # NaN/Infinity parse without error but raise InvalidOperation on comparison
+    if not amount.is_finite():
+        raise ValueError(f"{label} must be a finite number, got {value!r}")
     if amount <= 0:
         raise ValueError(f"{label} must be > 0, got {amount}")
     return amount
@@ -163,19 +166,28 @@ def _to_decimal(value: Any, *, label: str) -> Decimal:
 def _requested_dimensions(claim: Mapping[str, Any] | None) -> dict[str, Decimal]:
     """Parse a claim's quantity request as a dimensions map.
 
-    ``dimensions`` is authoritative when present. Otherwise falls back to
-    the legacy single-quantity claim (``units``/``gpu_count``), translated
-    to ``{"gpu_count": n}`` so every existing caller's claim shape keeps
+    ``dimensions`` is authoritative when *present* — not merely truthy.
+    ``{"dimensions": {}}`` is a malformed claim (declares nothing to
+    request) and must fail loudly rather than silently falling through to
+    the legacy single-quantity parse, which would otherwise default to a
+    request the caller never actually made.
+    Only the *absence* of the key falls back to the legacy
+    single-quantity claim (``units``/``gpu_count``), translated to
+    ``{"gpu_count": n}`` so every existing caller's claim shape keeps
     working unchanged.
     """
     claim = claim or {}
-    raw = claim.get(_DIMENSIONS_CLAIM_KEY)
-    if raw:
-        return {
-            str(key): _to_decimal(value, label=f"dimensions[{key}]")
-            for key, value in raw.items()
-        }
-    return {PRIMARY_DIMENSION: Decimal(_requested_units(claim))}
+    if _DIMENSIONS_CLAIM_KEY not in claim:
+        return {PRIMARY_DIMENSION: Decimal(_requested_units(claim))}
+    raw = claim[_DIMENSIONS_CLAIM_KEY]
+    if not isinstance(raw, Mapping) or not raw:
+        raise ValueError(
+            f"dimensions must be a non-empty mapping, got {raw!r}"
+        )
+    return {
+        str(key): _to_decimal(value, label=f"dimensions[{key}]")
+        for key, value in raw.items()
+    }
 
 
 def _serialize_dimensions(dimensions: Mapping[str, Decimal]) -> dict[str, float | int]:
@@ -193,6 +205,8 @@ def _to_decimal_nonneg(value: Any, *, label: str) -> Decimal:
         amount = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise ValueError(f"{label} must be numeric, got {value!r}") from exc
+    if not amount.is_finite():
+        raise ValueError(f"{label} must be a finite number, got {value!r}")
     if amount < 0:
         raise ValueError(f"{label} must be >= 0, got {amount}")
     return amount
@@ -224,6 +238,29 @@ def _allocation_dimensions(allocation: SiteAllocation) -> dict[str, Decimal]:
             for key, value in allocation.dimensions.items()
         }
     return {PRIMARY_DIMENSION: Decimal(int(allocation.units or 0))}
+
+
+def _capacity_change_kind(
+    delta: Mapping[str, Decimal], *, old_enabled: bool | None, new_enabled: bool,
+) -> str:
+    """Classify a capacity-registration delta for the event feed's ``kind``.
+
+    A single grew/shrank boolean cannot represent a mixed-direction
+    change (e.g. GPU count grows while RAM shrinks). Returns "capacity_changed"
+    for that case rather than mislabeling it "released" or "reserved".
+    Enablement toggling folds in as its own signed contribution: going disabled is a
+    decrease, going enabled is an increase, regardless of the capacity
+    numbers, since a disabled resource is unavailable no matter what its
+    declared capacity says.
+    """
+    signs = {1 if amount > 0 else -1 for amount in delta.values() if amount != 0}
+    if old_enabled is not None and old_enabled != new_enabled:
+        signs.add(1 if new_enabled else -1)
+    if not signs or signs == {1}:
+        return "released"
+    if signs == {-1}:
+        return "reserved"
+    return "capacity_changed"
 
 
 def _resource_matches(
@@ -295,26 +332,43 @@ class CapacityLedgerService:
 
         ``capacity`` is the multidimensional total.
         ``total_units`` remains a service-maintained mirror of ``capacity["gpu_count"]``.
-        When ``capacity`` omits ``gpu_count``, the supplied ``total_units`` fills it in.
+        When ``capacity`` includes ``gpu_count`` *and* it disagrees with
+        ``total_units``, that is a caller bug, raises ``ValueError``.
 
-        An upsert that changes capacity (units, enablement) emits a
-        "released" or "reserved"-equivalent availability change; we use
-        "released" for grows/registrations and "reserved" for shrinks so
-        subscribers reconcile in the right direction without a new kind.
-        The event's ``dimensions`` carries the signed per-dimension delta.
+        An upsert emits a signed per-dimension delta on the event
+        (authoritative). ``kind`` is a coarser hint for legacy
+        single-dimension consumers: "released" when every changed
+        dimension and enablement moved to a non-decreasing net effect,
+        "reserved" when every changed dimension and enablement moved to a
+        non-increasing net effect, and "capacity_changed" when the
+        direction is genuinely mixed (e.g. GPU count grew while RAM
+        shrank) -- a case a single grew/shrank boolean cannot represent.
+        First-time registration is always "released": brand new capacity
+        appearing is unambiguous.
         """
         with self._lock, self._session_factory() as db:
             row = db.get(SiteResource, resource_id)
             old_capacity = _resource_capacity(row) if row is not None else {}
+            old_enabled = bool(row.enabled) if row is not None else None
             new_dimensions = dict(capacity or {})
-            new_dimensions.setdefault(PRIMARY_DIMENSION, int(total_units))
+            if PRIMARY_DIMENSION in new_dimensions:
+                supplied = _to_decimal_nonneg(
+                    new_dimensions[PRIMARY_DIMENSION], label="capacity[gpu_count]",
+                )
+                if supplied != Decimal(int(total_units)):
+                    raise ValueError(
+                        f"capacity['gpu_count']={supplied} disagrees with "
+                        f"total_units={total_units}; pass one consistent value"
+                    )
+            else:
+                new_dimensions[PRIMARY_DIMENSION] = int(total_units)
             new_capacity = {
                 str(key): _to_decimal_nonneg(value, label=f"capacity[{key}]")
                 for key, value in new_dimensions.items()
             }
-            mirrored_units = int(new_capacity.get(PRIMARY_DIMENSION, Decimal(int(total_units))))
-            grew = True
-            if row is None:
+            mirrored_units = int(new_capacity[PRIMARY_DIMENSION])
+            is_new = row is None
+            if is_new:
                 row = SiteResource(
                     resource_id=resource_id,
                     resource_type=resource_type,
@@ -326,7 +380,6 @@ class CapacityLedgerService:
                 )
                 db.add(row)
             else:
-                grew = (mirrored_units, enabled) >= (int(row.total_units), bool(row.enabled))
                 row.resource_type = resource_type
                 row.resource_subtype = resource_subtype
                 row.total_units = mirrored_units
@@ -337,8 +390,11 @@ class CapacityLedgerService:
                 key: new_capacity.get(key, Decimal(0)) - old_capacity.get(key, Decimal(0))
                 for key in set(new_capacity) | set(old_capacity)
             }
+            kind = "released" if is_new else _capacity_change_kind(
+                delta, old_enabled=old_enabled, new_enabled=enabled,
+            )
             db.add(CapacityEvent(
-                kind="released" if grew else "reserved",
+                kind=kind,
                 resource_id=resource_id,
                 dimensions=_serialize_dimensions(delta),
             ))
