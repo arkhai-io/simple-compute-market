@@ -155,7 +155,7 @@ make test
 
 This runs unit + integration tests for:
 
-- `domains/vms/provisioning/service`
+- `provisioning/compute/service`
 - `core/registry`
 - `storefront`
 

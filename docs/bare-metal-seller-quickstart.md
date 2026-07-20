@@ -16,7 +16,7 @@ your own listing registry instead of pointing at an existing one, see
 
 > Transitional packaging note: the bare-metal domain schema lives in
 > `domains/bare_metal`, while the current runnable provisioning/site authority
-> still lives under `domains/vms/provisioning/service`. Until the storefront
+> still lives under `provisioning/compute/service`. Until the storefront
 > package split is complete, some compose service names and commands still use
 > the VM seller image.
 

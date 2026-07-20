@@ -379,7 +379,7 @@ class TestStage00h_ProvisioningStorefrontLink:
 
         If this fails with storefront='unconfigured':
           - For deploy-docker: ensure storefront_url and storefront_admin_key
-            are set in domains/vms/provisioning/service/src/config/config-docker.yml.
+            are set in provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml.
             The compose service name resolved by docker DNS is 'bob-storefront'.
           - For Helm: provisioning.storefront.url defaults to the release's
             bob storefront Service; provisioning.storefront.adminKey defaults
@@ -403,7 +403,7 @@ class TestStage00h_ProvisioningStorefrontLink:
             f"Provisioning cannot reach storefront: checks.storefront={sf_check!r}\n"
             "The lease watchdog will not be able to release resources when leases expire.\n"
             "For deploy-docker: verify storefront_url in "
-            "domains/vms/provisioning/service/src/config/config-docker.yml points to "
+            "provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml points to "
             "'http://bob-storefront:8001' and both containers share the compose "
             "project's default network.\n"
             f"Full health response: {health}"
@@ -883,7 +883,7 @@ class TestStage07b_VerifyEscrow:
 # the real submit via `market settle`, the resource is reserved by the
 # time we could run them — and their narrow coverage is already exercised
 # by domains/vms/storefront/tests/integration/test_settle_controller.py
-# (evaluate_settle) and domains/vms/provisioning/service/src/tests/unit/services/
+# (evaluate_settle) and provisioning/compute/service/tests/unit/services/
 # test_programmable_mock.py (evaluate_job).
 # ===========================================================================
 

@@ -204,7 +204,7 @@ def _serialize_dimensions(dimensions: Mapping[str, Decimal]) -> dict[str, float 
     The suggested fix (serialize as a canonical decimal string via
     ``format(amount, "f")``, parse back through ``Decimal`` on read) is
     NOT purely a change to this function: `PhysicalSettlementScheduler`
-    (`domains/vms/provisioning/service/src/services/
+    (`provisioning/compute/service/src/compute_provisioning_service/services/
     physical_settlement_scheduler.py`) does raw ``+``/``>=`` arithmetic
     directly on `_resource_payload()`'s output in the same process (no
     JSON round-trip -- it holds a direct `CapacityLedgerService`

@@ -385,7 +385,7 @@ class TestStage00h_ProvisioningStorefrontLink:
 
         If this fails with storefront='unconfigured':
           - For deploy-docker: ensure storefront_url and storefront_admin_key
-            are set in domains/vms/provisioning/service/src/config/config-docker.yml.
+            are set in provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml.
             The compose service name resolved by docker DNS is 'bob-storefront'.
           - For Helm: provisioning.storefront.url defaults to the release's
             bob storefront Service; provisioning.storefront.adminKey defaults
@@ -409,7 +409,7 @@ class TestStage00h_ProvisioningStorefrontLink:
             f"Provisioning cannot reach storefront: checks.storefront={sf_check!r}\n"
             "The lease watchdog will not be able to release resources when leases expire.\n"
             "For deploy-docker: verify storefront_url in "
-            "domains/vms/provisioning/service/src/config/config-docker.yml points to "
+            "provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml points to "
             "'http://bob-storefront:8001' and both containers share the compose "
             "project's default network.\n"
             f"Full health response: {health}"

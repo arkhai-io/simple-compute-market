@@ -36,7 +36,7 @@ make build-seller
 ```
 
 `build-seller` builds the two images you need (`arkhai:storefront`,
-`arkhai:provisioning`) and the wheels they consume — ~3 minutes on a
+`arkhai:compute-provisioning`) and the wheels they consume — ~3 minutes on a
 warm machine. Build on Linux; macOS hits a known cross-platform
 `uv sync` issue.
 

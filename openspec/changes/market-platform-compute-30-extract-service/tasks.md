@@ -56,10 +56,10 @@
 
 ## 6. Complete the Ownership Cutover
 
-- [ ] 6.1 Migrate all remaining imports and callers from VM-owned generic provisioning paths
-- [ ] 6.2 Remove the old VM-owned generic service/client distributions and transitional re-exports
-- [ ] 6.3 Remove obsolete Dockerfiles, commands, and image references after destination parity is proven
-- [ ] 6.4 Scan active packages and deployments for stale ownership paths or parent-directory dependency assumptions
+- [x] 6.1 Migrate all remaining imports and callers from VM-owned generic provisioning paths
+- [x] 6.2 Remove the old VM-owned generic service/client distributions and transitional re-exports
+- [x] 6.3 Remove obsolete Dockerfiles, commands, and image references after destination parity is proven
+- [x] 6.4 Scan active packages and deployments for stale ownership paths or parent-directory dependency assumptions
 
 ## 7. Verify the Extraction
 
