@@ -14,9 +14,16 @@ Design resolution (2026-07-20, resolved):
       candidates, `SiteResource.capacity`, and `SiteAllocation.dimensions`
       (not fixed named fields) — multi-domain-ready, matches this file's
       original candidate-model sketch.
-- [x] Resource-bundle semantics: a `SiteResource` row already corresponds
-      1:1 to one physical host for the VM domain (existing `vm_host`
-      attribute) — no new cross-row bundling machinery needed for pass 1.
+- [x] Resource-bundle semantics: each requested dimension is checked
+      against the *one* `SiteResource` row admission targets, not
+      aggregated across rows sharing a physical host — no new cross-row
+      bundling machinery needed for pass 1. (Corrected 2026-07-20: this
+      bullet originally claimed a row is 1:1 with a physical host, which
+      is wrong — this codebase already registers multiple rows against
+      one host. See `design.md`'s "Ledger and scheduler changes backing
+      this" section for the accurate account and the resulting known
+      limitation: ledger-level cross-slice host-total enforcement remains
+      an open gap, unchanged by this pass.)
 - [x] Admission-time fit-check correctness: full per-dimension held/available
       accounting, extending `CapacityLedgerService`'s existing lease-window
       held-units machinery rather than a declared-capacity-only gate.

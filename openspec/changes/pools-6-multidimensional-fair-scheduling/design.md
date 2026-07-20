@@ -111,6 +111,18 @@ inaccurate framing.
   (not deferred to pass 2), matching the observability goal below.
 - `PhysicalSettlementScheduler._requirement`/`_eligible_candidates` build
   and evaluate `dimensions` the same way.
+- **Decimal precision (resolved, code review 2026-07-20):** JSON storage
+  serializes non-integral `Decimal` amounts as Python `float`
+  (`_serialize_dimensions`), which loses exact precision for values like
+  0.1. Pass 1's actual VM dimensions are always integral in practice, so
+  this is documented as a known limitation rather than fixed now. A real
+  fix (canonical decimal strings, parsed back through `Decimal` on read)
+  is not confined to that one function: `PhysicalSettlementScheduler`
+  does raw arithmetic directly on ledger payloads in the same process (no
+  JSON boundary to hide behind), so a string-valued `available` map would
+  need the scheduler updated too, plus every test asserting numeric
+  literals against these payloads. Revisit if a real fractional dimension
+  is ever needed.
 
 ### VM domain wiring — deliberately scoped down for pass 1
 

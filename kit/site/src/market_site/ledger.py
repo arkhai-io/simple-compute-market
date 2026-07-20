@@ -191,7 +191,32 @@ def _requested_dimensions(claim: Mapping[str, Any] | None) -> dict[str, Decimal]
 
 
 def _serialize_dimensions(dimensions: Mapping[str, Decimal]) -> dict[str, float | int]:
-    """JSON-column-safe representation: whole numbers as int, else float."""
+    """JSON-column-safe representation: whole numbers as int, else float.
+
+    KNOWN LIMITATION (code review, 2026-07-20): a non-integral amount
+    loses exact precision through this float conversion, e.g. 0.1 can't
+    be represented exactly in binary floating point. Pass 1's actual VM
+    dimensions (gpu_count/vcpu_count/ram_gb/disk_gb) are always integral
+    in practice, so this doesn't currently bite -- deferred rather than
+    fixed here per the same design-review decision that scoped pass 1 to
+    integral dimensions.
+
+    The suggested fix (serialize as a canonical decimal string via
+    ``format(amount, "f")``, parse back through ``Decimal`` on read) is
+    NOT purely a change to this function: `PhysicalSettlementScheduler`
+    (`domains/vms/provisioning/service/src/services/
+    physical_settlement_scheduler.py`) does raw ``+``/``>=`` arithmetic
+    directly on `_resource_payload()`'s output in the same process (no
+    JSON round-trip -- it holds a direct `CapacityLedgerService`
+    reference), so a string-valued `available` map would break that
+    arithmetic immediately, not just at a wire boundary. A correct fix
+    needs the scheduler to Decimal-parse before arithmetic too, plus
+    updating every test that currently asserts numeric literals against
+    these payloads (`test_ledger.py`, `test_physical_settlement_
+    scheduler.py`, `test_remote_capacity_client.py`,
+    `test_two_phase_reserve.py`, `test_database.py`). Revisit if a real
+    fractional dimension is ever needed.
+    """
     result: dict[str, float | int] = {}
     for key, amount in dimensions.items():
         as_int = int(amount)
