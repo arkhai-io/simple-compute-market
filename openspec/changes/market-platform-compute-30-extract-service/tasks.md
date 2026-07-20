@@ -1,9 +1,9 @@
 ## 1. Verify Prerequisites and Current Ownership
 
 - [ ] 1.1 Confirm the site-lifecycle and compute-provisioning contract changes are implemented, synchronized, archived, and passing focused tests
-- [ ] 1.2 Reconcile generic versus VM-owned versus bare-metal-owned files, routes, factories, persistence, configuration, and deployment references against current code, including the landed POOLS-2 scheduler, POOLS-3 fulfillment/provider surfaces, and POOLS-4 storefront claim boundary
-- [ ] 1.3 Run current startup, job, lease, VM, bare-metal, and service API suites before moving code
-- [ ] 1.4 Update this design/specs if prerequisite implementation changed the destination boundary
+- [ ] 1.2 Reconcile generic versus VM-owned versus bare-metal-owned files, routes, factories, persistence, configuration, and deployment references against current code, including the landed POOLS-2 scheduler, POOLS-3 fulfillment/provider surfaces, POOLS-4 storefront claim boundary, and POOLS-6 multidimensional capacity and scheduling behavior
+- [ ] 1.3 Run current startup, job, lease, VM, bare-metal, service API, physical-settlement scheduler, and multidimensional capacity suites before moving code
+- [ ] 1.4 Update this design/specs if the current implementation changed the destination boundary
 - [ ] 1.5 **Absorbed from closed POOLS-5:** delete the dead duplicate
       `provisioning/compute/src/compute_provisioning/pools.py` and
       `pool_config_handler.py` (byte-identical copies of the files in
@@ -13,17 +13,14 @@
       grep, 2026-07-17). Confirm via a fresh grep for
       `compute_provisioning.pools` / `compute_provisioning.pool_config_handler`
       submodule imports immediately before deleting, in case something
-      changed since. This is independent of task 1.6 below and does not
-      require a design decision.
-- [ ] 1.6 **Absorbed from closed POOLS-5:** as part of this change's
-      design-review pass, decide whether `PhysicalSettlementScheduler`
-      (currently VM-service-local), `FulfillmentProvider`/`ProviderRegistry`
-      (currently `kit/resource-pools`), and the `SettlementRecord`/
-      settlement-resource shapes should consolidate into
-      `compute_provisioning` alongside `pools-2`'s scheduling/request
-      contracts, or stay split as they are today. Record the decision and
-      rationale in this change's `design.md` before implementing §2–§3
-      below.
+      changed since.
+- [ ] 1.6 Confirm the selected pre-POOLS-7 boundary against the current tree:
+      move `PhysicalSettlementScheduler`, `DeterministicRoundRobinPolicy`, and
+      `FulfillmentService` from the VM-owned service into the extracted compute
+      service; keep domain-neutral settlement contracts in
+      `compute_provisioning`, provider contracts in `kit/resource-pools`, and
+      concrete providers in their domains; do not create
+      `kit/physical-settlement` or implement POOLS-7 durability in this change
 
 ## 2. Prepare Domain-Owned Composition
 
@@ -37,15 +34,15 @@
 
 - [ ] 3.1 Create the installable `provisioning/compute/service` package and compute-owned composition root
 - [ ] 3.2 Move generic FastAPI assembly, middleware, startup/shutdown ordering, and background task lifecycle
-- [ ] 3.3 Move generic job read/control, executor-neutral lease, watchdog, general health/version, capacity mount, event-delivery, `FulfillmentService`, and provider-registry composition surfaces
+- [ ] 3.3 Move generic job read/control, executor-neutral lease, watchdog, general health/version, capacity mount, event-delivery, `PhysicalSettlementScheduler`, `DeterministicRoundRobinPolicy`, `FulfillmentService`, and provider-registry composition surfaces into the extracted service
 - [ ] 3.4 Keep VM host/action/playbook/result behavior, VM fulfillment requirements, `AnsibleFulfillmentProvider`, and direct operator routes in the VM package
-- [ ] 3.5 Keep POOLS-4 listing identity validation, capacity-claim construction, VM fulfillment-plan construction, and storefront failure-policy/event handling in the VM storefront
+- [ ] 3.5 Keep POOLS-4/6 listing identity validation, multidimensional capacity-claim construction, VM fulfillment-plan construction, and storefront failure-policy/event handling in the VM storefront
 - [ ] 3.6 Keep bare-metal access/action/result/reclaim behavior and operator routes in the bare-metal package
 
 ## 4. Preserve Runtime and Persistence
 
-- [ ] 4.1 Point destination factories at the existing service-owned databases and ordered migration histories
-- [ ] 4.2 Preserve job, allocation, deal, lease, credential, event, settlement-resource, and fulfillment identifiers and behavior across the move
+- [ ] 4.1 Point destination factories at the existing service-owned databases and ordered migration histories, including POOLS-6's additive multidimensional-capacity migration
+- [ ] 4.2 Preserve job, allocation, deal, lease, credential, event, settlement-resource, fulfillment, capacity-dimension, and candidate-availability data and behavior across the move
 - [ ] 4.3 Preserve POOLS-3's durable capacity rebind and explicitly process-local fulfillment identity semantics without implying restart-safe dispatch recovery
 - [ ] 4.4 Verify startup failure, retry scheduler, watchdog, worker, and graceful cancellation behavior in the destination app
 - [ ] 4.5 Add import-boundary tests rejecting concrete domain executor and fulfillment-provider implementations from generic compute modules and confirm extraction does not join the provider-only path to executor dispatch
@@ -66,7 +63,8 @@
 
 ## 7. Verify the Extraction
 
-- [ ] 7.1 Run destination app/startup/lifecycle and generic job/lease/capacity/fulfillment API suites
-- [ ] 7.2 Run affected VM and bare-metal executor/release suites plus POOLS-2 scheduler and POOLS-3 provider/fulfillment suites
-- [ ] 7.3 Run destination wheel/image smoke tests and the focused storefront provisioning scenario, including POOLS-4 `pool_id`/`resource_id` claim precedence and missing/malformed-order failure before capacity probe or reserve
-- [ ] 7.4 Validate package boundaries and OpenSpec artifacts after behavioral verification
+- [ ] 7.1 Run destination app/startup/lifecycle and generic job/lease/capacity/settlement/fulfillment API suites
+- [ ] 7.2 Run affected VM and bare-metal executor/release suites plus POOLS-2 scheduler, POOLS-3 provider/fulfillment, and POOLS-6 multidimensional capacity/scheduling suites
+- [ ] 7.3 Run destination wheel/image smoke tests and the focused storefront provisioning scenario, including POOLS-4 `pool_id`/`resource_id` claim precedence, missing/malformed-order failure before capacity probe or reserve, and POOLS-6 secondary-dimension fit rejection
+- [ ] 7.4 Validate package boundaries and Compute-30 OpenSpec artifacts after behavioral verification
+- [ ] 7.5 After Compute-30 lands, reconcile POOLS-7's planning paths, migration owner, service composition, worker/package setup, and tests to the extracted compute service before POOLS-7 implementation begins
