@@ -1,6 +1,8 @@
 ## Context
 
-Shared app, lifecycle, and startup helpers already exist under `provisioning/compute`, but the deployable service, composition container, generic controllers, job lifecycle, fulfillment coordination, and image remain hosted under `domains/vms/provisioning/service`. POOLS-3 added a concrete VM-service-local `FulfillmentService`, mechanism-neutral provider contracts in `kit/resource-pools`, an Ansible provider in the VM package, and durable capacity rebinding. Compute-30 now classifies and moves the coordinator's mechanism-neutral orchestration by ownership; that generic placement was not itself a POOLS-3 outcome. The prerequisite changes make site authority independent and replace the VM-owned shared wire, allowing package movement without redesigning behavior concurrently.
+Shared app, lifecycle, and startup helpers already exist under `provisioning/compute`, but the deployable service, composition container, generic controllers, job lifecycle, fulfillment coordination, and image remain hosted under `domains/vms/provisioning/service`. POOLS-3 added a concrete VM-service-local `FulfillmentService`, mechanism-neutral provider contracts in `kit/resource-pools`, an Ansible provider in the VM package, and durable capacity rebinding. POOLS-6 pass 1 subsequently added multidimensional capacity accounting, settlement requirements/candidates, and additive migration state across these same packages. Compute-30 now classifies and moves the current mechanism-neutral orchestration by ownership without redesigning those behaviors.
+
+Compute-30 will land before POOLS-7. POOLS-7 is related but non-blocking: it later creates `kit/physical-settlement`, adds durable settlement/fulfillment recovery, and cuts the storefront over to that lifecycle against the extracted service layout.
 
 ## Goals / Non-Goals
 
@@ -9,7 +11,7 @@ Shared app, lifecycle, and startup helpers already exist under `provisioning/com
 - Establish `provisioning/compute/service` as the deployable composition root.
 - Move only executor-neutral orchestration and operator surfaces.
 - Register VM and bare-metal executor and fulfillment-provider implementations as explicit adapter contributions.
-- Move generic fulfillment coordination while retaining concrete provider behavior in its domain package.
+- Move the current generic scheduler and fulfillment coordination while retaining concrete provider behavior in its domain package.
 - Produce supported package, API/worker commands, image, and deployment cutover.
 - Remove obsolete VM-owned generic paths after migration.
 
@@ -19,6 +21,8 @@ Shared app, lifecycle, and startup helpers already exist under `provisioning/com
 - Redesign the established site or compute-provisioning contracts.
 - Add new executor kinds, multi-site topology, or placement policy.
 - Add multiple provider/access bindings to one physical resource or redesign POOLS-3 pool membership.
+- Implement POOLS-7's durable settlement lifecycle, recovery, `kit/physical-settlement` package, result queries, or storefront cutover.
+- Redesign or independently guarantee transitional single-quantity capacity aliases while moving the service.
 - Retain indefinite aliases or duplicate images.
 
 ## Decisions
@@ -43,7 +47,13 @@ Registration rejects duplicate executor/action kinds, duplicate fulfillment-prov
 
 ### Move generic surfaces by ownership
 
-Move generic job read/control, executor-neutral lease lifecycle, watchdog control, general health/version, capacity authority mounting, event delivery, `FulfillmentService`, and provider-registry composition. Keep KVM host/VM routes, `AnsibleFulfillmentProvider`, `VmFulfillmentRequirements`, Ansible VM playbook construction, VM result parsing, and VM release implementation in the VM package. Keep POOLS-4 listing identity validation, `compute_capacity_claim_from_order`, VM fulfillment-plan construction, and storefront failure-policy/event handling in the VM storefront: these translate a market listing into a capacity claim and are not generic provisioner composition. Keep bare-metal access grant/reclaim and concrete lease mapping in bare metal.
+Move generic job read/control, executor-neutral lease lifecycle, watchdog control, general health/version, capacity authority mounting, event delivery, `PhysicalSettlementScheduler`, `DeterministicRoundRobinPolicy`, `FulfillmentService`, and provider-registry composition into the extracted service. Keep the current domain-neutral settlement request/resource contracts in the base `compute_provisioning` package until POOLS-7 moves them into `kit/physical-settlement`. Keep KVM host/VM routes, `AnsibleFulfillmentProvider`, `VmFulfillmentRequirements`, Ansible VM playbook construction, VM result parsing, and VM release implementation in the VM package. Keep POOLS-4/6 listing identity validation, multidimensional capacity-claim construction, VM fulfillment-plan construction, and storefront failure-policy/event handling in the VM storefront: these translate a market listing into a capacity claim and are not generic provisioner composition. Keep bare-metal access grant/reclaim and concrete lease mapping in bare metal.
+
+### Land before POOLS-7 without absorbing its scope
+
+Compute-30 targets the current pre-POOLS-7 tree. It moves existing scheduler and fulfillment behavior as-is rather than creating POOLS-7's shared kit, durable settlement aggregate, recovery workers, result/status query API, or storefront call path. This deliberately creates one short-lived intermediate placement: domain-neutral settlement contracts remain in `compute_provisioning`, while scheduler and coordinator implementations live in `provisioning/compute/service`. POOLS-7 then moves the reusable contracts and implementation into its approved `kit/physical-settlement` boundary and updates the extracted service's composition, migrations, workers, packaging, and tests.
+
+The two changes are not behavioral prerequisites. The selected order only avoids concurrent edits to the old VM-owned composition root. After Compute-30 lands, POOLS-7's planning artifacts must be reconciled to the new paths before POOLS-7 implementation begins.
 
 ### Keep executor and provider identity orthogonal
 
@@ -51,7 +61,9 @@ The committed allocation's `executor_kind` selects VM or bare-metal domain seman
 
 ### Keep one service process and persistence owner
 
-The extracted service retains the current databases and migration histories under service ownership. Existing identifiers and tables remain compatible. This change moves package/category ownership, not database authority or cross-service relational boundaries. POOLS-3's capacity rebind remains durable, while its process-local fulfillment identity map remains process-local during this extraction; database-backed fulfillment identity and dispatch recovery stay in POOLS-7.
+The extracted service retains the current databases and ordered migration histories under service ownership, including POOLS-6's multidimensional capacity columns and migration. Existing identifiers and tables retain their current behavior across the move. This change moves package/category ownership, not database authority or cross-service relational boundaries. POOLS-3's capacity rebind remains durable, while its process-local fulfillment identity map remains process-local during this extraction; database-backed fulfillment identity and dispatch recovery stay in POOLS-7.
+
+Compute-30 does not make the transitional `total_units`/`units` mirrors or legacy claim aliases a new compatibility promise. It simply does not redesign the capacity wire during extraction. A later capacity-contract cutover may remove those forms by updating all controlled callers together.
 
 ### Ship the package and deployment in the same change
 
@@ -63,7 +75,7 @@ Update repository callers, test fixtures, image references, and deployment confi
 
 ### Verification and rollback
 
-First prove route and startup parity in-process; then run VM and bare-metal provisioning/lifecycle tests against the destination app; finally exercise the destination image and focused end-to-end flow. Rollback redeploys the prior service/image against the unchanged compatible database. No old import aliases remain in the completed tree.
+First prove route and startup parity in-process; then run VM and bare-metal provisioning/lifecycle tests against the destination app, including POOLS-6 multidimensional reservation and scheduling coverage; finally exercise the destination image and focused end-to-end flow. Rollback redeploys the prior service/image against the unchanged database and migration history. No old import aliases remain in the completed tree.
 
 ## Risks / Trade-offs
 
@@ -72,3 +84,5 @@ First prove route and startup parity in-process; then run VM and bare-metal prov
 - **Packaging all adapters may pull heavy VM dependencies into every deployment.** Initial trade-off accepted for one compute image; adapter extras or separate images can be proposed once an operator requires them.
 - **Clean cutover requires coordinated manifests and packages.** Accepted because maintaining the old ownership would undermine the extraction; rollback uses the previous coherent release set.
 - **Executor and provider registries can be accidentally conflated.** Mitigation: validate each namespace independently and test that provider identity cannot select or override an allocation's executor adapter.
+- **POOLS-7 planning points at the old VM-owned service and will become stale after extraction.** Mitigation: keep POOLS-7 out of Compute-30's implementation scope, then reconcile its paths, migration owner, composition, packaging, and tests immediately after Compute-30 lands and before POOLS-7 implementation.
+- **The pre-POOLS-7 settlement placement is intentionally temporary.** Mitigation: keep the move mechanical and preserve import boundaries so POOLS-7 can extract the reusable implementation without another behavioral redesign.
