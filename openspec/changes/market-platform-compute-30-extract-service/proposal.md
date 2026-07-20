@@ -6,6 +6,8 @@ The deployable compute provisioner still lives under `domains/vms` even though i
 
 - Move generic API assembly, job lifecycle, executor-neutral lease lifecycle, watchdog scheduling, capacity mounting, fulfillment coordination, health surfaces, and executor/provider registration to `provisioning/compute/service`.
 - Define the compute provisioner composition root and load VM and bare-metal routers, action factories, executors, fulfillment providers, readiness checks, and optional operator surfaces as domain adapters.
+- Preserve POOLS-6's landed multidimensional capacity, reservation, settlement-requirement, candidate-availability, migration, and compatibility behavior across the package move.
+- Treat POOLS-7 as related, non-blocking work: consume `kit/physical-settlement` when it has landed, or relocate the current settlement composition without implementing POOLS-7's durability and storefront-cutover redesign when it has not.
 - Keep VM KVM/Ansible behavior, `AnsibleFulfillmentProvider`, VM fulfillment requirements, playbooks, direct VM routes, and result interpretation in `domains/vms`.
 - Keep bare-metal access grant/reclaim behavior, routes, and result interpretation in `domains/bare_metal`.
 - Add supported API and worker console entry points, package metadata, Dockerfile/image, and deployment configuration for the extracted service.
@@ -13,8 +15,10 @@ The deployable compute provisioner still lives under `domains/vms` even though i
 - **BREAKING**: generic provisioning package/import ownership and deployment image names change in one clean cutover.
 - State: **Unblocked, not started.** `market-platform-compute-10-site-lifecycle`
   and `market-platform-compute-20-provisioning-contract` archived
-  2026-07-13. `tasks.md` is still fully unchecked as of 2026-07-17 —
-  verified against the task list, not assumed.
+  2026-07-13. POOLS-6 pass 1 landed on 2026-07-20. POOLS-7 is related and
+  overlaps package/composition paths, but neither change is an activation
+  prerequisite for the other; landing order is reconciled at implementation
+  kickoff. `tasks.md` remains fully unchecked.
 
 ## Capabilities
 
@@ -36,71 +40,47 @@ None.
 - Do not add multi-site deployment proof; this change establishes one extracted service with both current compute adapters.
 - Do not redesign POOLS-3's one-pool/one-provider resource model or add multiple provider bindings for one physical resource; that is separate follow-on work.
 
-## Absorbed from POOLS-5 (closed 2026-07-17)
+## POOLS-5 Boundary Follow-up (closed 2026-07-17)
 
-`pools-5-shared-provisioning-package` is closed and archived at
+`pools-5-shared-provisioning-package` is archived at
 `openspec/changes/archive/2026-07-17-pools-5-shared-provisioning-package/`.
-It never reached its activation condition, and this change already claimed
-ownership of resolving its package-boundary question, so its scope is
-folded in here rather than tracked in two places. Concretely:
+Two outcomes remain relevant:
 
-- **Resolved by `pools-7-storefront-fulfillment-cutover`'s design review
-  (2026-07-15 through 2026-07-21), ahead of this change's own extraction
-  work:** `PhysicalSettlementScheduler`, `DeterministicRoundRobinPolicy`,
-  and `pools-2`'s scheduling/request contracts (`PhysicalSettlementRequest`,
-  `SettlementResource`, `SettlementCandidate`, `SettlementRequirement`,
-  `SettlementSchedulingPolicy` — previously in `compute_provisioning`)
-  move into a new dedicated package, **`kit/physical-settlement`** — not
-  `kit/resource-pools` (would close a circular dependency:
-  `compute_provisioning` already depends on `kit/resource-pools`, and the
-  scheduler needs real runtime imports from the settlement types, unlike
-  `FulfillmentProvider`'s string-quoted forward references), and not
-  `compute_provisioning` either, on reflection — that package was scoped
-  as thin cross-domain HTTP helpers, not a scheduling/persistence engine;
-  growing it to hold a scheduler, ORM persistence, recovery-claim
-  machinery, and a result outbox would have been a scope mismatch even
-  setting the dependency graph aside. `kit/physical-settlement` also now
-  owns the durable settlement/fulfillment persistence layer, recovery
-  infrastructure, and provisioned-resource records `pools-7` designed.
-  `FulfillmentProvider`/`ProviderRegistry`/error taxonomy remain in
-  `kit/resource-pools`, per `pools-3`'s original placement, unchanged.
-  See `pools-7`'s `design.md`, "Final planning decisions" → "Shared
-  package boundary" (authoritative; supersedes that same file's earlier,
-  now-corrected section that concluded `compute_provisioning`). This is
-  the same kind of narrow, deliberate override of waiting for this
-  change's activation that `pools-3` already made once for
-  `FulfillmentProvider`/`ProviderRegistry` — resolving where these live
-  is not this change's service-extraction scope, and this proposal's task
-  list (§1) should verify the moved location during "Verify Prerequisites
-  and Current Ownership" (checking for `kit/physical-settlement`, not
-  `compute_provisioning`) rather than treat it as still open.
-- **Concrete, verified, gate-independent finding:** `provisioning/compute/
-  src/compute_provisioning/pools.py` and `pool_config_handler.py` are
-  byte-identical duplicates of the files in `kit/resource-pools/src/
-  market_resource_pools/`. `compute_provisioning/__init__.py` does not
-  import its own local copies — it re-exports `PoolCreate`, `PoolReplace`,
-  `PoolUpdate`, `PoolConfigHandler`, `PoolConfigValidationProblem`, etc.
-  from `market_resource_pools` instead. A repository-wide grep (2026-07-17)
-  found no submodule import of `compute_provisioning.pools` or
-  `compute_provisioning.pool_config_handler` anywhere. These two files are
-  dead, unreferenced duplicates — see `tasks.md` §2 for the cleanup task.
-  This is independent of the open decision above: removing dead duplicate
-  files is not a package-boundary extraction and does not require this
-  change's activation gate to be cleared.
+- POOLS-7's design review resolved the eventual shared destination for
+  `PhysicalSettlementScheduler`, `DeterministicRoundRobinPolicy`, the
+  domain-neutral settlement contracts, and its new durable lifecycle and
+  recovery implementation as **`kit/physical-settlement`**. That package is
+  POOLS-7 scope and does not exist until POOLS-7 implements it.
+  `FulfillmentProvider`/`ProviderRegistry` and their error taxonomy remain in
+  `kit/resource-pools`. Compute-30 does not reopen this boundary or implement
+  POOLS-7's durability redesign.
+- The two byte-identical, unreferenced copies
+  `compute_provisioning/pools.py` and `pool_config_handler.py` remain a
+  Compute-30 cleanup item. Their live implementations and public re-exports
+  already come from `market_resource_pools`.
+
+At implementation kickoff, Compute-30 checks POOLS-7's landing status. If
+POOLS-7 has landed, the extracted service composes `kit/physical-settlement`.
+If it has not, Compute-30 relocates current generic settlement composition as
+part of the service extraction while preserving behavior; POOLS-7 later moves
+that code into the approved kit. Whichever change lands second reconciles the
+resulting package paths, migrations, composition, and tests. This is a merge
+coordination rule, not a prerequisite in either direction.
 
 ## Dependencies and Related Changes
 
 - Requires `market-platform-compute-10-site-lifecycle` and `market-platform-compute-20-provisioning-contract` to be implemented, synchronized, and archived.
-- Treats the landed POOLS-3 fulfillment service, provider registry, Ansible provider, and capacity rebind behavior as prerequisite implementation to preserve and relocate by ownership.
+- Treats the landed POOLS-3 fulfillment service, provider registry, Ansible provider, and capacity rebind behavior as implementation to preserve and relocate by ownership.
 - Preserves POOLS-4's storefront-owned capacity-identity boundary: compute listings and claims remain explicitly `pool_id`- or `resource_id`-scoped, `resource_id` wins when both are present, and missing/malformed orders fail before capacity probing or reservation.
-- Resolves the package-boundary question formerly recorded by `pools-5-shared-provisioning-package` (closed 2026-07-17; see "Absorbed from POOLS-5" above); `pools-7-storefront-fulfillment-cutover` remains responsible for storefront wiring and durable fulfillment recovery.
+- Preserves POOLS-6 pass 1's generic `dimensions`/`available` capacity model, multidimensional ledger accounting, legacy GPU-unit compatibility, and additive migration history.
+- Treats `pools-7-storefront-fulfillment-cutover` as related, non-blocking work. POOLS-7 owns `kit/physical-settlement`, durable settlement/fulfillment recovery, pull-based result/status queries, and storefront cutover; push delivery remains the separate `provisioning-result-push-delivery` change.
 - Absorbs the launch/package outcome formerly tracked by `add-provisioning-cli`.
 - Uses the lifecycle-event dependency direction established by the compute provisioning contract; no separate callback-client extraction remains planned.
 - `market-platform-compute-40-multi-domain-proof` supplies the broader end-to-end architecture proof after cutover.
 
 ## Impact
 
-- Affected paths: `domains/vms/provisioning/service`, `domains/vms/provisioning/client`, `domains/bare_metal`, `provisioning/compute`, `kit/resource-pools`, deployment manifests, package metadata, Dockerfiles, and images.
-- Wire and persistence: preserved from the prerequisite contracts; startup and package ownership change.
+- Affected paths: `domains/vms/provisioning/service`, `domains/vms/provisioning/client`, `domains/bare_metal`, `provisioning/compute`, `kit/resource-pools`, and, when already present from POOLS-7, `kit/physical-settlement`, plus deployment manifests, package metadata, Dockerfiles, and images.
+- Wire and persistence: preserve the landed multidimensional capacity and migration contracts and whichever pre- or post-POOLS-7 settlement lifecycle exists at kickoff; startup and package ownership change.
 - Deployment: service image and launch commands change, requiring coordinated manifest and operator updates.
 - Packaging: generic distributions move from VM ownership to the top-level compute provisioning category.
