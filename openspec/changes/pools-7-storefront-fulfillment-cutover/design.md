@@ -1,11 +1,10 @@
 ## Context
 
-Captured during the `pools-3-fulfillment-provider` design-review session
-(2026-07-15), before any implementation of `pools-3` existed. This file is
-reference material for whoever picks this change up — it is not a design
-this change has committed to; it records what was verified true at the
-time so a future session doesn't have to re-derive it, and can verify it's
-still true before proceeding.
+POOLS-7 cuts the storefront and provisioning services over from the current
+direct executor path to durable physical-resource scheduling, fulfillment,
+result delivery, and teardown. This document records the design decisions
+approved during the POOLS-7 discuss phase and is the design basis for the
+implementation plan.
 
 ## Current storefront fulfillment path (verified, not assumed)
 
@@ -130,35 +129,6 @@ record must retain the original selected resource, provider, and sufficient
 provider metadata for later asynchronous teardown. Final teardown states and
 record retention are designed here when the real lease-release call path is
 wired.
-
-## Remaining open questions for whoever picks this up
-
-- **RESOLVED, see "`fill_first`/`most_available`: resolved" below.**
-  ~~Does `AggregateCapacityClient`'s `fill_first`/`most_available`
-  placement logic get deleted outright...~~ — kept, bug-fixed, not
-  bundled with the listing-mode hint. That same section also surfaced a
-  new, still-open question: whether the site-fallback behavior itself is
-  now vestigial for pool/resource-pinned claims post-POOLS-4.
-- **RESOLVED, see "Scope decision: retrofit, not compute-30 extraction"
-  below.** ~~Whether `market-platform-compute-30-extract-service`'s
-  absorbed package-boundary decision... should be forced by this
-  change...~~ — forced, for `PhysicalSettlementScheduler`/
-  `DeterministicRoundRobinPolicy` specifically (moved to
-  `compute_provisioning`); `compute-30`'s own proposal has been updated
-  to match.
-- **Operator listing-mode hints via `ResourcePool.policy_tags`** —
-  **designed, then SPLIT OUT to `pools-8-capacity-projection-and-listing-hints`
-  along with `CapacityProjection`** (see "Scope split: `CapacityProjection`
-  and hints move to `pools-8`" below) — not resolved in this change. The
-  channel question this bullet originally left open (how a storefront
-  learns a pool's `policy_tags` across the service boundary) was answered
-  during this review by `CapacityProjection`: the pull-based pool mirror
-  carries `policy_tags` along for free, no new channel needed — but the
-  design itself now lives in `pools-8`, not here. The
-  `_eligible_candidates`/`SiteResource.attributes.pool_id` sync gap this
-  bullet also raised IS resolved in this change (unaffected by the scope
-  split) — see "`SiteResource` is retired," below: `site_resource_pools`
-  is now derived from `hosts`/`resource_pools`, not storefront-pushed.
 
 ## Accepted provider configuration
 
@@ -770,7 +740,13 @@ and third layers pick among fundamentally different things (sites vs.
 hosts within one already-chosen site) and are correctly already
 separated by process boundary, not just by convention.
 
-### Open question surfaced by writing this table down: is the second layer's fallback still meaningful post-POOLS-4?
+### Site fallback after POOLS-4
+
+Site fallback remains meaningful only before a capacity reservation exists.
+Once a storefront has selected a site and that site has created the capacity
+reservation, scheduling and fulfillment MUST remain with that provisioning
+authority. A site receiving an unknown capacity reservation, pool, or resource
+identifier returns an error and MUST NOT reinterpret or forward it.
 
 Not resolved here — flagged for planning. Before POOLS-4, a claim could
 be a generic attribute shape (`region`, `gpu_model`, `gpu_count`) with no
@@ -840,69 +816,43 @@ end-to-end. `pools-7`'s `proposal.md` Dependencies section should state
 this plainly: `pools-7` alone fixes provisioning-side correctness;
 `pools-8` is required for the storefront to reliably send valid claims.
 
-## Storefront orchestrates scheduling and dispatch as separate calls (design review continued, 2026-07-17)
+## Storefront orchestrates scheduling and fulfillment as separate calls
 
-**Resolved: confirms POOLS-3's design was already correct as written —
-no correction needed there.** `pools-3`'s `design.md` diagram names "the
-storefront" as the orchestrator calling `select_resource(...)` then
-`FulfillmentService.create(...)` in sequence. An earlier pass of this
-review flagged apparent tension between that and this change's atomic,
-single-transaction `select_resource` design — there isn't one, once the
-reason for the split is understood: **`select_resource`'s result can be
-commercially material to the negotiation before a deal is finalized**
-(e.g. a larger node's price for the same requested capacity may differ
-from a smaller one, and the buyer/agent may need to know which node was
-selected before price is finalized). Scheduling capacity and finalizing
-a deal are genuinely separate decisions the storefront needs to make at
-separate times, not an implementation detail to hide behind one call.
+The storefront owns progress through negotiation, site/pool selection,
+capacity reservation, resource scheduling, and the decision to begin
+fulfillment. The provisioning service does not receive agreement or negotiation
+identity.
 
-Resolved shape: two required storefront-facing operations, plus one
-optional convenience operation:
+Two required operations remain separate because the selected physical resource
+may be commercially material before fulfillment begins:
 
-1. **Schedule** — invokes `select_resource`. Returns the selected
-   `SettlementResource` (so it can inform pricing/negotiation). Does not
-   dispatch anything.
-2. **Dispatch** — invokes `FulfillmentService.create` against an
-   already-scheduled allocation. This is where `dispatch_pending` and
-   everything downstream in the state machine begins.
-3. **(Optional) Atomic convenience operation** — calls (1) then (2) in
-   one request, for callers that don't need the pricing-preview behavior
-   and just want to fulfill immediately. Not required; a thin
-   composition of the two required operations, not a third code path.
+1. **`schedule_resource(capacity_reservation_id, requirements)`** — selects
+   and durably assigns a settlement resource without executing a provider.
+2. **`begin_fulfillment(capacity_reservation_id, request)`** — accepts the
+   already-scheduled reservation and returns a durable `fulfillment_id`.
 
-Each of (1) and (2) remains its own atomic transaction internally (this
-file's earlier transaction-boundary decisions are unaffected) — "the
-storefront calls them separately" describes the *external* API shape,
-not the internal transaction boundary of either call. Exact route/wire
-shapes (the concrete API contract `create_vm_and_wait_with_credentials`
-gets replaced by — request/response bodies, status representation,
-credentials retrieval, teardown request/response) are not decided here;
-left for planning.
+A thin convenience operation may compose them for callers that do not need the
+selection preview, but it MUST use the same two application paths. After
+acceptance, fulfillment status and whole-fulfillment teardown are addressed by
+`fulfillment_id`; provisioned outputs receive neutral
+`provisioned_resource_id` values rather than exposing VM-specific identity as
+the generic contract.
 
-## Transaction boundary and repository ownership, stated explicitly (design review continued, 2026-07-17)
+## Transaction boundary and shared package ownership
 
-Two things that were implicit in this file's code sketches rather than
-stated as requirements, made explicit here:
+`assign_settlement_resource` (capacity rebind) and settlement-record
+creation/transition MUST share one database transaction. A sequence that moves
+capacity, commits, and then inserts the settlement record is not acceptable.
+The same atomic rule applies when abandonment releases or supersedes reserved
+capacity.
 
-- **`assign_settlement_resource` (capacity rebind) and `SettlementRecord`
-  creation/transition MUST share one database transaction.** Achievable
-  because `CapacityLedgerService`, `ResourcePoolService`, and (per the
-  `compute_provisioning` migration decision above) `PhysicalSettlementScheduler`
-  all already live in the same provisioning-service process/database — this
-  isn't a cross-service transaction, it's an ordinary single-database one.
-  A sequence that moves capacity, commits, and only then inserts the
-  settlement record as a second commit is NOT acceptable — a crash between
-  those two commits leaves a moved reservation with no durable scheduling
-  identity, silently reintroducing the exact failure window point 2 exists
-  to close.
-- **`SettlementRecord`'s model/repository interface lives in
-  `compute_provisioning`, alongside `PhysicalSettlementScheduler` and the
-  request/resource dataclasses it already owns — not in `kit/resource-pools`
-  alongside `ResourcePool`.** It is physical-settlement lifecycle state,
-  not pool-administration state; it belongs with the scheduler that writes
-  it, for the same reasons the scheduler itself moved there. The concrete
-  SQLAlchemy table is still composed into whichever service's actual
-  database (the VM provisioning service's, today).
+The shared lifecycle and concrete reusable SQLAlchemy implementation live in a
+new `kit/physical-settlement` package, not `kit/resource-pools` and not the
+base `compute_provisioning` package. The kit owns domain-neutral scheduling,
+fulfillment persistence, repository, recovery-claim, provisioned-resource, and
+result-outbox infrastructure. The VM provisioning service composes the shared
+metadata into its database, owns the Alembic migration, and supplies VM/Ansible
+adapters and worker composition.
 
 ## Provider input snapshot: prepare/dispatch split (design review continued, 2026-07-17)
 
@@ -945,29 +895,192 @@ sweep; just scheduled periodically instead of once. Multi-replica safety
 pattern) is required regardless of whether the sweep is startup-only or
 periodic, and is left for planning to specify concretely.
 
-## Legacy allocations during cutover (design review continued, 2026-07-17)
+## Active allocation backfill during cutover
 
-Real gap, not addressed by "no allocation without a `SettlementRecord`"
-alone — that describes the target *steady state*, not what happens to
-allocations already in flight, created under the old direct-dispatch
-path, at the moment this change deploys. **Resolved: two acceptable
-strategies, choice deferred to planning, but whichever is chosen MUST be
-stated explicitly rather than silently assumed:**
+The migration uses a uniform backfill rather than a long-lived legacy release
+branch or an operator-managed cutover marker. Existing hosts are first placed
+in the default resource pool. Every active or releasing VM capacity reservation
+then receives a settlement/fulfillment record with the selected resource,
+Ansible provider, and versioned teardown input inferred from the durable fields
+the current release path already uses (`vm_host`, `vm_target` or
+`executor_target`, and executor identity).
 
-1. **Fabricate a `SettlementRecord` for each pre-existing allocation
-   during migration** — backfill a row (state reflecting whatever's
-   inferable about the allocation's actual status, e.g. `active` for a
-   running VM) so every allocation uniformly has one going forward, and
-   the release path never needs a "no settlement record" branch at all.
-2. **Explicitly accept a compatibility break** — allocations created
-   before the cutover marker are not migrated; release for them continues
-   through the pre-existing direct-dispatch-aware path (or an equivalent
-   documented fallback) rather than being forced through
-   `PhysicalSettlementScheduler`/`FulfillmentService`. This is acceptable
-   for this codebase's maturity level ("that's OK from time to time," not
-   a production migration with an SLA) but MUST be written down as a
-   deliberate decision in whatever change implements the cutover, not
-   discovered by a future reader as an unstated gap.
+Historical create input may be absent for already-running VMs. The migration
+fails visibly when an active reservation cannot be mapped unambiguously and
+need not fabricate records for terminal expired VMs without a retention use
+case.
 
-Either way, this needs a concrete plan before implementation — not
-resolved further here.
+## Final planning decisions (design review completed 2026-07-20)
+
+This section is authoritative where it conflicts with earlier chronological
+review notes in this document.
+
+### Cross-domain identities and terminology
+
+The provisioning boundary is capacity-reservation-centric and MUST NOT carry
+storefront commercial identities such as negotiation, buyer, deal, or
+agreement identifiers.
+
+- `allocation_id` is renamed broadly to `capacity_reservation_id`.
+- `capacity_reservation_id` identifies the admitted capacity and is the
+  idempotency boundary for scheduling and `begin_fulfillment`.
+- `begin_fulfillment` returns a durable `fulfillment_id` identifying the
+  post-acceptance provisioning lifecycle aggregate.
+- A fulfillment may produce zero or more `ProvisionedResource` records, each
+  with a globally unique `provisioned_resource_id` and an optional
+  domain-specific `domain_resource_ref` such as a VM ID or pod UID.
+- `settlement_resource_id` identifies the selected underlying physical supply
+  resource. It is not the provisioned VM/pod identity.
+- Whole-fulfillment status and teardown use `fulfillment_id`. The schema MUST
+  support multiple provisioned resources. Per-resource teardown is a future
+  extension unless implementation discovers a current caller that requires it.
+- Public APIs use fulfillment-specific verbs such as `schedule_resource`,
+  `begin_fulfillment`, `get_fulfillment_status`,
+  `get_fulfillment_result`, and `begin_fulfillment_teardown`. “Dispatch” is
+  retained only as an internal provider-command term.
+
+A capacity reservation is owned by exactly one provisioning authority. Once a
+reservation exists there is no cross-site fallback: an unknown reservation,
+pool, or resource identifier is rejected rather than reinterpreted or
+forwarded. Pool, resource, reservation, fulfillment, and provisioned-resource
+identifiers MUST be globally unique opaque identifiers. Planning may select
+UUIDv7 after reviewing repository conventions; ownership remains explicit via
+`site_id` rather than encoded into identifier strings. Requirements MUST also
+review whether any site-plus-pool composite identity is needed for routing or
+integrity.
+
+### Shared package boundary
+
+Create a new `kit/physical-settlement` package. This is intentionally separate
+from both `kit/resource-pools` and the base `compute_provisioning` package.
+The kit owns domain-neutral settlement and fulfillment lifecycle types,
+scheduler/policy code, versioned prepared-operation contracts, SQLAlchemy
+mappings and generic repositories, transition validation, recovery-claim
+infrastructure, provisioned-resource records, and durable result-delivery
+outbox models. VM-specific Ansible adapters, API routes, worker composition,
+and migrations remain in the VM provisioning service.
+
+The concrete SQLAlchemy implementation belongs in the shared kit when it is
+genuinely reusable across domains; services compose the shared metadata and
+apply migrations in their own databases.
+
+### Scheduling and fulfillment boundary
+
+The storefront owns progress through negotiation, site/pool selection,
+capacity reservation, physical-resource scheduling, and the decision to begin
+fulfillment. The provisioning service only needs the local
+`capacity_reservation_id` and scheduling requirements, which MUST NOT exceed
+the admitted reservation.
+
+Scheduling and fulfillment remain separate calls because the selected physical
+resource may be commercially material before fulfillment begins. Scheduling
+atomically rebinds capacity, where fairness requires it, and creates the
+immutable assigned settlement record. A changed requirement supersedes the
+reservation; it never mutates an accepted assignment under the same
+`capacity_reservation_id`.
+
+Once `begin_fulfillment` is durably accepted, the provisioning service owns all
+forward progress: provider-command submission, recovery, provider-status
+convergence, provisioned-resource persistence, settlement-result delivery,
+teardown, and final physical-resource reclamation. The storefront is not
+responsible for polling a provider job to advance this lifecycle.
+
+### Settlement and fulfillment persistence
+
+There is one durable settlement/fulfillment aggregate per capacity reservation.
+Equivalent retries return the existing aggregate; conflicting reuse fails
+before provider submission. State transition validation is implemented through
+a compact table-driven service mechanism rather than stored procedures or a
+method for every edge.
+
+`assign_settlement_resource`, settlement creation/transition, and any
+reservation capacity movement MUST share one database transaction. Likewise,
+transitioning an unfulfilled assigned settlement to `abandoned` and releasing
+or superseding its capacity reservation MUST be atomic. Lease lifecycle code
+performs the transition directly where possible; watchdog processing is a
+reconciliation backstop.
+
+Prepared provider create and teardown payloads are normalized, serializable,
+and versioned. Any generic dictionary persisted durably or sent cross-domain
+MUST carry a schema version and kind discriminator. Provider input is frozen
+before committing a pending provider-command state and is never reconstructed
+from mutable live pool configuration during retry.
+
+### Active-allocation migration and backfill
+
+POOLS-7 performs a comprehensive breaking migration suitable for independently
+operated sites without lease-expiry coordination instructions.
+
+1. Existing hosts are migrated into a default resource pool and corresponding
+   resource/pool membership records.
+2. Every active or releasing VM capacity reservation is backfilled with a
+   durable settlement/fulfillment record.
+3. The migration derives selected resource, provider identity, and versioned
+   teardown input from the same durable fields the current release path uses
+   (`vm_host`, `vm_target`/`executor_target`, and executor identity).
+4. Historical create input may be absent for already-active backfilled
+   fulfillments; this does not prevent status representation or teardown.
+5. Rows are marked as backfilled for auditability.
+6. The migration fails loudly when an active reservation cannot be mapped
+   unambiguously; it does not create a silently incomplete teardown record.
+7. Historical terminal/expired allocations need not be fabricated unless a
+   separate retention requirement exists.
+
+After successful migration, no long-lived legacy release branch or operator
+cutover marker is required.
+
+### Provider recovery and lifecycle convergence
+
+Pending provider commands are claimed in short transactions using a
+multi-replica-safe claim/lease pattern. Database locks are released before any
+long-running external provider call. Recovery uses bounded batches,
+exponential backoff with jitter, claim expiry after worker death, and
+idempotent deterministic provider command identities.
+
+The watchdog framework has logically separate handlers for create-command
+submission/recovery, provider-status convergence, result delivery, teardown
+submission/recovery, and abandonment reconciliation. Records in both pending
+and in-progress states converge without storefront polling.
+
+### Durable pushed SettlementResult delivery
+
+The provisioning service pushes a versioned `SettlementResult` to the
+storefront; inter-service polling is not the primary result-delivery contract.
+A terminal or otherwise reportable fulfillment transition and its delivery
+obligation are committed atomically through a durable outbox.
+
+Delivery is at-least-once with exactly-once logical application:
+
+- each result has a stable globally unique `result_id`;
+- the storefront authenticates the source, deduplicates by `result_id`,
+  persists the result, commits, and only then acknowledges;
+- lost acknowledgements cause harmless retries;
+- retries use exponential backoff with jitter and a capped interval but do not
+  permanently abandon an undelivered result while the fulfillment is active;
+- operator metrics, alerts, audit history, and a manual replay mechanism are
+  required.
+
+Raw credentials MUST NOT be stored in settlement rows, generic JSON columns,
+or outbox payloads. The delivery worker obtains or refreshes credentials just
+in time, keeps them in memory for the authenticated encrypted request, and
+then discards them. If recovery rotates credentials, a monotonic
+`credential_generation` prevents an older retry from replacing a newer
+credential set at the storefront. Fulfillment state and result-delivery state
+are separate: successful provisioning remains successful while delivery is
+retrying.
+
+### Breaking cleanup scope
+
+This work item is approved for broad schema cleanup. Planning and implementation
+MUST include coherent renames and removal of superseded paths rather than
+preserving ambiguous compatibility names indefinitely, including:
+
+- `SiteAllocation` to `CapacityReservation`;
+- `allocation_id` to `capacity_reservation_id`;
+- retirement/replacement of `SiteResource` where the final host, pool,
+  membership, and reservable-capacity model requires it;
+- globally unique identifiers and explicit site ownership;
+- removal of direct storefront executor submission and polling;
+- replacement of the old release path after backfilled settlement teardown is
+  operational;
+- corresponding API/client/schema/fixture/test/architecture changes.

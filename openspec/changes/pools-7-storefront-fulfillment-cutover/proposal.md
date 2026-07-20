@@ -20,12 +20,11 @@ not assumed) is entirely separate:
 
 So there are two parallel, non-interacting systems today: the one the
 storefront actually uses, and the one `pools-2`/`pools-3` are building.
-This change is where that gets reconciled — but not yet, and not without
-more information than exists in this session. It's recorded now as a
-placeholder so a future session has the full context without re-deriving
-it.
+POOLS-7 reconciles these paths by cutting the storefront over to durable
+physical-resource scheduling and fulfillment managed by the provisioning
+service.
 
-## What This Change Will Eventually Cover
+## What This Change Covers
 
 - Change the storefront's ordinary reservation path from host-shaped
   (`vm_host` required attribute) to pool-shaped, consuming
@@ -33,7 +32,7 @@ it.
 - Replace `create_vm_and_wait_with_credentials`'s direct
   `ExecutorActionEnvelope` dispatch with two provisioning-side calls the
   storefront invokes as separate operations — schedule
-  (`PhysicalSettlementScheduler.select_resource`) and dispatch
+  (`PhysicalSettlementScheduler.select_resource`) and begin fulfillment
   (`FulfillmentService.create`) — plus an optional convenience operation
   that composes both for callers that don't need the pricing-preview
   behavior. **`FulfillmentService` does not call the scheduler and never
@@ -56,7 +55,7 @@ it.
   scheduler while there was no caller to design against
   (`pools-3`'s `design.md`, Risks).
 - Add durable database-backed fulfillment idempotency keyed by
-  `allocation_id`. Equivalent retries return the existing fulfillment;
+  `capacity_reservation_id`. Equivalent retries return the existing fulfillment;
   conflicting reuse fails before dispatch. Database uniqueness and
   transactions, not process-local locks, are the correctness mechanism.
   Explicitly handle recovery across the commit/queue-dispatch failure window.
@@ -71,19 +70,16 @@ it.
 
 ## Status
 
-This change is active — a full design review (2026-07-15 through
-2026-07-17) resolved the scope and package-boundary questions this
-section originally deferred. It is not yet planned (no `tasks.md`); the
-next step is planning, not a further design-review pass, unless planning
-surfaces a genuine new ambiguity.
+This change is active and design-complete. The design review completed on
+2026-07-20, and `tasks.md` is the implementation plan for the cutover.
 
 **Resolved scope, superseding the original activation gate below:**
 this change retrofits the existing VM domain storefront and provisioning
 service onto the POOLS 1-4 machinery. It does not perform
 `market-platform-compute-30-extract-service`'s service extraction —
-where `PhysicalSettlementScheduler`/`DeterministicRoundRobinPolicy` live
-was decided directly by this change's design review (moved to
-`compute_provisioning`; see `design.md`) rather than waited on. `kit/site`
+the shared physical-settlement lifecycle, persistence, scheduler, and recovery
+contracts live was decided directly by this change's design review (a new
+`kit/physical-settlement` package; see `design.md`) rather than waited on. `kit/site`
 and `kit/resource-pools` may be modified where genuinely cross-domain,
 and the `apicredits` domain is explicitly in scope for the same
 capacity-reservation-against-a-pooled-view reshape, not just VM — both
@@ -93,10 +89,7 @@ permitted, not required, exercised where this review found real need.
 
 - `pools-2-physical-settlement-scheduler` — implemented prerequisite.
 - `pools-3-fulfillment-provider` — implemented prerequisite.
-- `pools-4-storefront-capacity-boundary` — prerequisite; verify landed
-  status at planning time (see original activation condition below —
-  this dependency itself is unchanged, only the compute-30 half of the
-  original gate is resolved).
+- `pools-4-storefront-capacity-boundary` — implemented prerequisite.
 - `pools-6-multidimensional-fair-scheduling` — **blocking prerequisite**,
   found during this review, not part of the original gate: `Host` has no
   memory/disk/vCPU capacity field, so reservation admission cannot verify
@@ -112,26 +105,7 @@ permitted, not required, exercised where this review found real need.
 - `market-platform-compute-30-extract-service` — related follow-on, not
   an activation prerequisite or blocker.
 
-**Original activation condition (superseded above, kept for history):**
-
-This stayed taskless until:
-
-- (a) `pools-4-storefront-capacity-boundary` has landed — the storefront
-  needs to already be asking for pool-shaped capacity before it can
-  meaningfully call a resource scheduler instead of picking its own
-  `vm_host`, and
-- (b) either `market-platform-compute-30-extract-service` has completed
-  its cutover and settled where `PhysicalSettlementScheduler`/
-  `FulfillmentProvider`/`ProviderRegistry` physically live
-  (`compute_provisioning` vs. staying VM-service-local — see that change's
-  "Absorbed from POOLS-5" section, formerly tracked by the now-closed
-  `pools-5-shared-provisioning-package`), or a second domain forces that
-  decision sooner — whichever comes first.
-
-(b) was resolved directly rather than waited on, per "Resolved scope"
-above.
-
-## Non-Goals (once activated)
+## Non-Goals
 
 - Anything `pools-4` already covers (claim-shape change itself).
 - Kubernetes/cloud/other non-Ansible providers — inherits `pools-3`'s
@@ -152,7 +126,7 @@ above.
 
 ## Capabilities
 
-### Modified Capabilities (once activated)
+### Modified Capabilities
 
 - `site-capacity`: storefront capacity reservation and fulfillment call
   shape changes to consume the scheduler/provider path.
@@ -165,7 +139,7 @@ above.
 
 - Requires `pools-2-physical-settlement-scheduler` (implemented) and
   `pools-3-fulfillment-provider` (implemented).
-- Requires `pools-4-storefront-capacity-boundary` to land first.
+- Requires `pools-4-storefront-capacity-boundary` (implemented).
 - **Requires `pools-6-multidimensional-fair-scheduling`** — blocking
   prerequisite for reservation-admission work; see "Status" above.
 - Related, not blocking: `pools-8-capacity-projection-and-listing-hints`
@@ -179,10 +153,8 @@ above.
 ## Impact
 
 Touches `kit/site` (`site_resource_pools`/`CapacityReservation` reshape),
-`compute_provisioning` (scheduler/policy relocation, `SettlementRecord`),
+`kit/physical-settlement` (scheduler/policy relocation, settlement persistence, recovery, and result-delivery contracts),
 the VM provisioning service (models, migrations, services, release
 lifecycle), and the VM storefront's reservation/orchestration path.
 Blocked on `pools-6` for reservation-admission correctness; not fully
-complete end-to-end without `pools-8`. Detailed file-level impact is a
-planning-step output, not assessed further here — this section will be
-revised once `tasks.md` exists.
+complete end-to-end without `pools-8`. The dependency-ordered implementation work is defined in `tasks.md`.

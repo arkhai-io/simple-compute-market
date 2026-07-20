@@ -1,52 +1,194 @@
 ## ADDED Requirements
 
-### Requirement: Deterministic provider dispatch idempotency
+### Requirement: Durable capacity-reservation settlement identity
 
-The Ansible fulfillment provider MUST submit create and teardown jobs
-through the job service's contract-based deduplication path, with a
-deterministic idempotency key derived from `allocation_id` and action
-kind (`create` or `teardown`). A repeated dispatch for the same
-allocation and action MUST return the originally-submitted job rather
-than submitting a duplicate.
+The provisioning service MUST maintain exactly one durable fulfillment
+aggregate for each accepted `capacity_reservation_id`. `begin_fulfillment`
+MUST be idempotent by `capacity_reservation_id`: equivalent retries return the
+same `fulfillment_id`, while conflicting reuse fails before provider command
+submission.
 
-This is distinct from and does not replace `pools-3`'s "Idempotent
-fulfillment identity" requirement, which governs whether
-`FulfillmentService.create`/`teardown` accept or reject a retried
-*request* (equivalent vs. conflicting, at the `allocation_id` boundary).
-This requirement governs whether an *accepted* request's dispatch to the
-underlying job runner is itself safe to retry — the layer below
-`FulfillmentService`, exercised specifically by the durable
-`dispatch_pending` recovery sweep this change introduces (see
-`design.md`, "`SettlementRecord` shape" and "commit ↔ async-dispatch
-failure window"). Prior to this change, `AnsibleFulfillmentProvider`
-called the job service without a contract, bypassing its existing
-`(allocation_id, action_kind, idempotency_key)` uniqueness constraint
-entirely — confirmed by inspection, not assumed — so a recovery-driven
-retry of a `dispatch_pending` `SettlementRecord` would have submitted a
-second, duplicate Ansible job for the same physical operation.
+#### Scenario: Equivalent fulfillment retry
+- **WHEN** `begin_fulfillment` is repeated with an equivalent request for an
+  already accepted capacity reservation
+- **THEN** the existing `fulfillment_id` and state are returned and no second
+  fulfillment aggregate is created
 
-#### Scenario: Recovery sweep retries a pending dispatch
+#### Scenario: Conflicting fulfillment retry
+- **WHEN** the same capacity reservation is reused with conflicting selected
+  resource, provider, requirements, or fulfillment identity
+- **THEN** the request fails before any provider command is submitted
 
-- **WHEN** a `SettlementRecord` is found in `dispatch_pending` state by
-  the periodic recovery sweep and `FulfillmentService.create` is retried
-  for that allocation
-- **THEN** at most one Ansible create job is ever dispatched for that
-  allocation, and the retry observes the originally-submitted job rather
-  than a new one
+### Requirement: Separate scheduling and fulfillment acceptance
 
-#### Scenario: Recovery sweep retries a pending teardown dispatch
+The provisioning service MUST expose scheduling and beginning fulfillment as
+separate operations. Scheduling MUST accept a local `capacity_reservation_id`
+and requirements that do not exceed the reservation, and MUST return the
+selected settlement resource without beginning provider execution.
+`begin_fulfillment` MUST resolve the durable scheduled assignment by
+`capacity_reservation_id` and MUST NOT accept an arbitrary caller-selected
+resource as authoritative.
 
-- **WHEN** a `SettlementRecord` is found in `teardown_dispatch_pending`
-  state by the periodic recovery sweep and `FulfillmentService.teardown`
-  is retried for that allocation
-- **THEN** at most one Ansible teardown job is ever dispatched for that
-  allocation, and the retry observes the originally-submitted job rather
-  than a new one
+#### Scenario: Resource selected before fulfillment
+- **WHEN** the storefront schedules an active capacity reservation
+- **THEN** the selected settlement resource is persisted and returned without
+  submitting a provider command
 
-#### Scenario: Concurrent duplicate dispatch races
+#### Scenario: Unknown owning authority
+- **WHEN** a site receives an unknown reservation, pool, or resource identifier
+- **THEN** it rejects the request and does not forward, reinterpret, or fall
+  back to another site
 
-- **WHEN** two callers submit create (or two callers submit teardown)
-  for the same allocation concurrently
-- **THEN** the job service's uniqueness constraint resolves the race so
-  both callers observe the same job identity and only one job is ever
-  enqueued
+### Requirement: Atomic scheduling persistence
+
+Capacity reassignment, where required for fair scheduling, and durable
+settlement-record creation or transition MUST commit in one database
+transaction. A changed requirement MUST supersede the capacity reservation
+rather than mutate an accepted assignment under the same identifier.
+
+#### Scenario: Crash during assignment transaction
+- **WHEN** scheduling fails before the transaction commits
+- **THEN** neither the capacity movement nor the settlement assignment is
+  visible
+
+#### Scenario: Reservation requirements change
+- **WHEN** requirements change after an assignment is accepted
+- **THEN** the original reservation is superseded and a new reservation is
+  scheduled rather than mutating the existing assignment
+
+### Requirement: Fulfillment and provisioned-resource identities
+
+`begin_fulfillment` MUST return a durable `fulfillment_id`. A fulfillment MUST
+support zero or more provisioned-resource outputs, each with a globally unique
+`provisioned_resource_id` and an optional domain-specific reference. Whole
+fulfillment status and teardown MUST use `fulfillment_id`; cross-domain
+contracts MUST NOT use VM-specific identifiers as the generic teardown
+identity.
+
+#### Scenario: Multi-resource fulfillment representation
+- **WHEN** one fulfillment creates multiple independently identifiable outputs
+- **THEN** all outputs are represented under the same `fulfillment_id` with
+  distinct `provisioned_resource_id` values
+
+### Requirement: Versioned prepared provider operations
+
+Before committing a pending provider-command state, the provider MUST prepare
+and validate a normalized serializable payload containing a schema version and
+kind discriminator. Recovery MUST dispatch from the stored payload and MUST
+NOT reconstruct accepted input from mutable live pool or host configuration.
+
+#### Scenario: Pool configuration changes after acceptance
+- **WHEN** provider configuration changes after fulfillment acceptance but
+  before a recovery retry
+- **THEN** the retry uses the original stored prepared payload
+
+### Requirement: Deterministic provider command idempotency
+
+Create and teardown provider commands MUST use the job service's
+contract-based deduplication path with deterministic identifiers derived from
+`capacity_reservation_id` or `fulfillment_id`, action kind, and command schema
+version. Repeated or concurrent submission of the same logical action MUST
+observe one underlying job.
+
+#### Scenario: Recovery retries create submission
+- **WHEN** a pending create command is retried after an uncertain submission
+- **THEN** at most one underlying create job is enqueued and the existing job
+  identity is observed
+
+#### Scenario: Recovery retries teardown submission
+- **WHEN** a pending teardown command is retried after an uncertain submission
+- **THEN** at most one underlying teardown job is enqueued and the existing job
+  identity is observed
+
+### Requirement: Provisioning-owned lifecycle convergence
+
+After `begin_fulfillment` is durably accepted, the provisioning service MUST
+own provider submission, retry, provider-status convergence, output
+persistence, settlement-result delivery, teardown, and final physical-resource
+reclamation. Progress MUST NOT depend on storefront polling.
+
+Pending and in-progress work MUST be recovered periodically with a
+multi-replica-safe claim/lease mechanism. Database locks MUST be released
+before external provider calls.
+
+#### Scenario: Process restarts after acceptance
+- **WHEN** the provisioning process restarts with a pending or in-progress
+  fulfillment
+- **THEN** periodic recovery resumes and converges the lifecycle without a new
+  storefront command
+
+#### Scenario: Worker dies after claiming work
+- **WHEN** a worker dies after committing a claim but before completing the
+  external call
+- **THEN** the claim expires and another worker can safely retry the operation
+
+### Requirement: Durable pushed SettlementResult
+
+The provisioning service MUST push a versioned `SettlementResult` to the
+storefront through a durable outbox. The fulfillment transition and delivery
+obligation MUST commit atomically. Delivery MUST be at-least-once and the
+storefront MUST apply it idempotently by stable `result_id`, persisting before
+acknowledgement.
+
+Retries MUST use exponential backoff with jitter and a capped interval and
+MUST NOT permanently abandon an undelivered result while the fulfillment
+remains active. Operator metrics, alerts, audit history, and manual replay MUST
+be available.
+
+#### Scenario: Crash before result send
+- **WHEN** the provisioning process commits fulfillment success and crashes
+  before sending the result
+- **THEN** the durable outbox causes the result to be delivered after recovery
+
+#### Scenario: Acknowledgement is lost
+- **WHEN** the storefront persists a result but its acknowledgement is lost
+- **THEN** the provisioning service retries and the storefront treats the same
+  `result_id` as an idempotent duplicate
+
+### Requirement: Credentials are transient delivery material
+
+Raw credentials MUST NOT be persisted in settlement records, generic JSON
+columns, or result outbox payloads. The delivery worker MUST obtain or refresh
+credentials just in time, transmit them only over an authenticated encrypted
+channel, and discard them afterward. Where refreshing rotates credentials, a
+monotonic `credential_generation` MUST prevent stale retries from replacing a
+newer generation.
+
+#### Scenario: Storefront unavailable during credential delivery
+- **WHEN** successful fulfillment credentials cannot be delivered because the
+  storefront is unavailable
+- **THEN** fulfillment remains successful, result delivery remains retryable,
+  and credentials can be obtained or refreshed for a later attempt
+
+### Requirement: Atomic abandonment and release
+
+Transitioning an unfulfilled assigned settlement to `abandoned` and releasing
+or superseding its capacity reservation MUST occur in one database
+transaction. Lease lifecycle code SHOULD perform this transition directly;
+periodic watchdog processing MUST reconcile missed transitions.
+
+#### Scenario: Reservation expires before fulfillment begins
+- **WHEN** an assigned reservation expires before `begin_fulfillment`
+- **THEN** the assignment becomes abandoned and its held capacity is released
+  atomically
+
+### Requirement: Active fulfillment migration
+
+The migration MUST place existing hosts into a default resource pool and MUST
+backfill settlement/fulfillment records for every active or releasing VM
+capacity reservation. It MUST infer the selected resource, provider, and
+versioned teardown input from durable fields used by the existing release
+path. Historical create input MAY be absent for already-active fulfillments.
+The migration MUST fail when an active reservation cannot be mapped
+unambiguously.
+
+#### Scenario: Existing active VM
+- **WHEN** the migration encounters an active VM with resolvable host, target,
+  and executor metadata
+- **THEN** it creates a backfilled fulfillment record capable of durable
+  teardown without a legacy release branch
+
+#### Scenario: Ambiguous active VM mapping
+- **WHEN** an active VM cannot be mapped unambiguously to a resource and
+  teardown input
+- **THEN** migration fails visibly rather than creating a partial record
