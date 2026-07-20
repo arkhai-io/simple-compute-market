@@ -25,10 +25,10 @@
 ## 2. Prepare Domain-Owned Composition
 
 - [ ] 2.1 Move remaining request-path service resolution and background wiring from the VM `main` module into a local composition module
-- [ ] 2.2 Define the compute executor adapter bundle, optional fulfillment-provider contributions, and startup validation in the destination package
+- [x] 2.2 Define the compute executor adapter bundle, optional fulfillment-provider contributions, and startup validation in the destination package
 - [ ] 2.3 Export VM routers, job/action factories, release executor, result/credential codec, `AnsibleFulfillmentProvider`, readiness checks, and operator surfaces as one VM adapter
 - [ ] 2.4 Export corresponding access grant/reclaim, release, codec, readiness, and operator surfaces as one bare-metal adapter without requiring a provider contribution where none exists
-- [ ] 2.5 Reject duplicate provider identities independently from duplicate executor/action kinds and verify provider registration does not claim or select an executor kind
+- [x] 2.5 Reject duplicate provider identities independently from duplicate executor/action kinds and verify provider registration does not claim or select an executor kind
 
 ## 3. Establish the Destination Service
 
