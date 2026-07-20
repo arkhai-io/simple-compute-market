@@ -31,9 +31,9 @@ from pathlib import Path
 from typing import Optional
 from unittest.mock import MagicMock
 
-from compute_provisioning_service.models.ansible import ConnectivityResult, InventoryHost, InventoryResponse
-from compute_provisioning_service.models.jobs_model import AnsibleJobParams, AnsibleRunResult
-from compute_provisioning_service.services.ansible_service import AnsibleError, AnsibleResult, AnsibleRun
+from vm_provisioning_adapter.models.ansible import ConnectivityResult, InventoryHost, InventoryResponse
+from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
+from vm_provisioning_adapter.services.ansible_service import AnsibleError, AnsibleResult, AnsibleRun
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +150,7 @@ class MockAnsibleService:
         public_host: str | None = None,
     ) -> AnsibleRunResult:
         """Delegate to real parsing logic — only subprocess boundary is mocked."""
-        from compute_provisioning_service.services.ansible_service import AnsibleService
+        from vm_provisioning_adapter.services.ansible_service import AnsibleService
         real = AnsibleService.__new__(AnsibleService)
         real._settings = self._settings
         return real.parse_playbook_result(result, params, public_host=public_host)
@@ -354,7 +354,7 @@ class ProgrammableMockAnsibleService(MockAnsibleService):
         rule_matched (rule_id or None), would_pause, and any errors.
         No job is created or queued.
         """
-        from compute_provisioning_service.models.system_model import EvaluateJobResponse
+        from vm_provisioning_adapter.models.system_model import EvaluateJobResponse
 
         errors: list[str] = []
         host_exists = False
@@ -411,7 +411,7 @@ class ProgrammableMockAnsibleService(MockAnsibleService):
             if rule.pause_before_result and rule._gate:
                 await rule._gate.wait()
             if rule.fail_with:
-                from compute_provisioning_service.services.ansible_service import AnsibleError
+                from vm_provisioning_adapter.services.ansible_service import AnsibleError
                 raise AnsibleError(rule.fail_with, stdout="", stderr=rule.fail_with)
             if rule.result_stdout:
                 original_stdout = self._stdout

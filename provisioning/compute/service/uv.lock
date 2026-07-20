@@ -215,6 +215,7 @@ dependencies = [
     { name = "arkhai-core-storefront-client" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-site" },
+    { name = "arkhai-vms-provisioning-adapter" },
     { name = "arkhai-vms-provisioning-operator-client" },
     { name = "cachetools" },
     { name = "cryptography" },
@@ -246,6 +247,7 @@ requires-dist = [
     { name = "arkhai-core-storefront-client", editable = "../../../core/storefront-client" },
     { name = "arkhai-kit-resource-pools", editable = "../../../kit/resource-pools" },
     { name = "arkhai-kit-site", editable = "../../../kit/site" },
+    { name = "arkhai-vms-provisioning-adapter", editable = "../../../domains/vms/provisioning/adapter" },
     { name = "arkhai-vms-provisioning-operator-client", editable = "../../../domains/vms/provisioning/client" },
     { name = "cachetools", specifier = ">=5.3" },
     { name = "cryptography", specifier = ">=42.0" },
@@ -337,6 +339,38 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
+
+[[package]]
+name = "arkhai-vms-provisioning-adapter"
+version = "0.1.0"
+source = { editable = "../../../domains/vms/provisioning/adapter" }
+dependencies = [
+    { name = "arkhai-bare-metal" },
+    { name = "arkhai-compute-provisioning" },
+    { name = "arkhai-compute-provisioning-service" },
+    { name = "arkhai-kit-resource-pools" },
+    { name = "arkhai-vms-provisioning-operator-client" },
+    { name = "cryptography" },
+    { name = "dependency-injector" },
+    { name = "pydantic" },
+    { name = "sqlalchemy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "arkhai-bare-metal", editable = "../../../domains/bare_metal" },
+    { name = "arkhai-compute-provisioning", editable = "../" },
+    { name = "arkhai-compute-provisioning-service", editable = "." },
+    { name = "arkhai-kit-resource-pools", editable = "../../../kit/resource-pools" },
+    { name = "arkhai-vms-provisioning-operator-client", editable = "../../../domains/vms/provisioning/client" },
+    { name = "cryptography", specifier = ">=42.0" },
+    { name = "dependency-injector", specifier = ">=4.41.0" },
+    { name = "pydantic", specifier = ">=2.7" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.2" }]
 
 [[package]]
 name = "arkhai-vms-provisioning-operator-client"

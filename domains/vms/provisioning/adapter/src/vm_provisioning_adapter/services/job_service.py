@@ -36,7 +36,7 @@ from compute_provisioning_service.db.models import (
     CredentialRole,
     JobStatus,
 )
-from compute_provisioning_service.models.jobs_model import (
+from vm_provisioning_adapter.models.jobs_model import (
     AnsibleJobParams,
     AnsibleRunResult,
 )
@@ -48,7 +48,7 @@ from vm_provisioning_operator.models import (
     JobStatusResponse,
     JobSubmitResponse,
 )
-from compute_provisioning_service.services.ansible_service import AnsibleError, AnsibleService
+from vm_provisioning_adapter.services.ansible_service import AnsibleError, AnsibleService
 
 logger = logging.getLogger(__name__)
 

@@ -11,15 +11,15 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from vm_provisioning_operator.models import JobSubmitResponse, VmActionRequest
-from compute_provisioning_service.models.ansible import ConnectivityResult
-from compute_provisioning_service.models.vm_request_model import build_simple_params
+from vm_provisioning_adapter.models.ansible import ConnectivityResult
+from vm_provisioning_adapter.models.vm_request_model import build_simple_params
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
-from compute_provisioning_service.services.host_service import HostNotFoundError
+from vm_provisioning_adapter.services.host_service import HostNotFoundError
 
 if TYPE_CHECKING:
-    from compute_provisioning_service.services.ansible_service import AnsibleService
-    from compute_provisioning_service.services.host_service import HostService
-    from compute_provisioning_service.services.job_service import AnsibleJobService
+    from vm_provisioning_adapter.services.ansible_service import AnsibleService
+    from vm_provisioning_adapter.services.host_service import HostService
+    from vm_provisioning_adapter.services.job_service import AnsibleJobService
 
 
 class HostOperationsService:

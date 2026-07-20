@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
 from compute_provisioning_service.db.models import AnsibleJob, JobStatus
-from compute_provisioning_service.services.job_service import AnsibleJobService
+from vm_provisioning_adapter.services.job_service import AnsibleJobService
 
 
 class _RecordingQueue:

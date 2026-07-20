@@ -13,7 +13,7 @@ from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 
 from compute_provisioning_service.main import app
-from compute_provisioning_service.services.ansible_service import AnsibleError
+from vm_provisioning_adapter.services.ansible_service import AnsibleError
 
 from vm_provisioning_operator.models import HostCreate
 

@@ -15,14 +15,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from compute_provisioning import PhysicalSettlementRequest, SettlementResource
-from compute_provisioning_service.services.ansible_fulfillment_provider import AnsibleFulfillmentProvider
-from compute_provisioning_service.services.ansible_service import AnsibleService
+from vm_provisioning_adapter.services.ansible_fulfillment_provider import AnsibleFulfillmentProvider
+from vm_provisioning_adapter.services.ansible_service import AnsibleService
 from market_resource_pools import (
     FulfillmentStatusFailedError,
     ProviderConfigInvalidError,
     ProviderOperationState,
 )
-from compute_provisioning_service.models.jobs_model import AnsibleJobParams
+from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 
 
 def _request() -> PhysicalSettlementRequest:

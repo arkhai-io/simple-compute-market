@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from compute_provisioning_service.config import Settings
-from compute_provisioning_service.services.ansible_service import (
+from vm_provisioning_adapter.services.ansible_service import (
     AnsibleError,
     AnsibleResult,
     AnsibleRun,

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from vm_provisioning_operator.models import CreateVmRequest, JobSubmitResponse, VmActionRequest
-from compute_provisioning_service.services.vm_operations_service import VmOperationsService
+from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
 
 
 @pytest.mark.asyncio

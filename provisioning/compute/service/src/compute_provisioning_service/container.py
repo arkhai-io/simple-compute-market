@@ -10,20 +10,20 @@ from market_site.ledger import CapacityLedgerService
 
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.db.database import create_db_engine, create_session_factory
-from compute_provisioning_service.services.ansible_service import AnsibleService
-from compute_provisioning_service.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
+from vm_provisioning_adapter.services.ansible_service import AnsibleService
+from vm_provisioning_adapter.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
 from compute_provisioning_service.services.bare_metal_lease_service import BareMetalLeaseService
 from compute_provisioning_service.services.compute_contract_service import build_compute_contract_service
 from compute_provisioning_service.services.bare_metal_operations_service import BareMetalOperationsService
 from compute_provisioning_service.services.deal_event_sink import StorefrontLifecycleEventSink, notify_storefront_capacity_released
-from compute_provisioning_service.services.host_operations_service import HostOperationsService
-from compute_provisioning_service.services.host_service import HostService
-from compute_provisioning_service.services.job_service import AnsibleJobService
+from vm_provisioning_adapter.services.host_operations_service import HostOperationsService
+from vm_provisioning_adapter.services.host_service import HostService
+from vm_provisioning_adapter.services.job_service import AnsibleJobService
 from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
 from compute_provisioning_service.services.physical_settlement_scheduler import PhysicalSettlementScheduler
-from compute_provisioning_service.services.ansible_fulfillment_provider import AnsibleFulfillmentProvider
+from vm_provisioning_adapter.services.ansible_fulfillment_provider import AnsibleFulfillmentProvider
 from market_resource_pools import ProviderRegistry
 from compute_provisioning_service.services.fulfillment_service import FulfillmentService
 from compute_provisioning_service.services.release_executors import (
@@ -32,8 +32,8 @@ from compute_provisioning_service.services.release_executors import (
     VM_EXECUTOR_KIND,
     VmReleaseExecutor,
 )
-from compute_provisioning_service.services.system_service import SystemService
-from compute_provisioning_service.services.vm_operations_service import VmOperationsService
+from vm_provisioning_adapter.services.system_service import SystemService
+from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
 
 
 def _resolved_job_queue():
@@ -47,7 +47,7 @@ def _make_ansible_service(cfg):
     import os
     active = [p.strip() for p in os.environ.get("ACTIVE_PROFILES", "").split(",") if p.strip()]
     if "mock" in active:
-        from compute_provisioning_service.services.mock_ansible_service import ProgrammableMockAnsibleService
+        from vm_provisioning_adapter.services.mock_ansible_service import ProgrammableMockAnsibleService
         return ProgrammableMockAnsibleService(cfg)
     return AnsibleService(cfg)
 

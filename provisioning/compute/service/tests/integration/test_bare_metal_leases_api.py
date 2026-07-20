@@ -17,7 +17,7 @@ from httpx import ASGITransport, AsyncClient
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 from compute_provisioning_service.db.models import AnsibleJob
-from compute_provisioning_service.services.ansible_service import AnsibleResult
+from vm_provisioning_adapter.services.ansible_service import AnsibleResult
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
 from vm_provisioning_operator.models import HostCreate
 from compute_provisioning_service.main import app

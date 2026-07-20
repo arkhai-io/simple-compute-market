@@ -36,7 +36,7 @@ from vm_provisioning_operator.models import (
     HealthResponse,
     VersionResponse,
 )
-from compute_provisioning_service.services.system_service import SystemService
+from vm_provisioning_adapter.services.system_service import SystemService
 
 _health_router = APIRouter(tags=["system"])
 _system_router = APIRouter(prefix="/system", tags=["system"])

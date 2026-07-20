@@ -112,7 +112,7 @@ class HostService:
         """
         key_value = data.ssh_key_value
         if data.ssh_key_type == "embedded":
-            from compute_provisioning_service.crypto import encrypt_key
+            from vm_provisioning_adapter.crypto import encrypt_key
             key_value = encrypt_key(key_value, self._settings.ssh_decryption_key)
 
         pool_id = data.pool_id or DEFAULT_POOL_ID
@@ -166,7 +166,7 @@ class HostService:
             if data.ssh_key_value is not None:
                 key_value = data.ssh_key_value
                 if effective_type == "embedded":
-                    from compute_provisioning_service.crypto import encrypt_key
+                    from vm_provisioning_adapter.crypto import encrypt_key
                     key_value = encrypt_key(key_value, self._settings.ssh_decryption_key)
                 host.ssh_key_value = key_value
 
@@ -236,7 +236,7 @@ class HostService:
 
                 if ssh_key_type == "embedded":
                     from pathlib import Path
-                    from compute_provisioning_service.crypto import encrypt_key
+                    from vm_provisioning_adapter.crypto import encrypt_key
                     raw = Path(key_value).read_text(encoding="utf-8")
                     key_value = encrypt_key(raw, self._settings.ssh_decryption_key)
 
@@ -324,7 +324,7 @@ class HostService:
         """
         if host.ssh_key_type == "path":
             return host.ssh_key_value
-        from compute_provisioning_service.crypto import decrypt_key
+        from vm_provisioning_adapter.crypto import decrypt_key
         return decrypt_key(host.ssh_key_value, self._settings.ssh_decryption_key)
 
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from compute_provisioning_service.models.jobs_model import AnsibleJobParams
+from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
 
 

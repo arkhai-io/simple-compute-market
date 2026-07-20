@@ -40,12 +40,12 @@ from vm_provisioning_operator.models import (
     InventoryInfo,
     SshKeyInfo,
 )
-from compute_provisioning_service.services.ansible_service import AnsibleService
+from vm_provisioning_adapter.services.ansible_service import AnsibleService
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session, sessionmaker
 
-    from compute_provisioning_service.services.host_service import HostService
+    from vm_provisioning_adapter.services.host_service import HostService
     from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
     from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 

@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from compute_provisioning_service.services.provisioning_service import (
+from vm_provisioning_adapter.services.provisioning_service import (
     ProvisioningParams,
     ProvisioningService,
 )

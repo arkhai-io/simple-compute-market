@@ -17,9 +17,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from compute_provisioning_service.services.mock_ansible_service import MockRule, ProgrammableMockAnsibleService
-from compute_provisioning_service.services.ansible_service import AnsibleError, AnsibleRun
-from compute_provisioning_service.models.jobs_model import AnsibleJobParams
+from vm_provisioning_adapter.services.mock_ansible_service import MockRule, ProgrammableMockAnsibleService
+from vm_provisioning_adapter.services.ansible_service import AnsibleError, AnsibleRun
+from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +200,7 @@ class TestEvaluateJob:
     """ProgrammableMockAnsibleService.evaluate_job — dry-run host+rule check."""
 
     def _make_svc(self):
-        from compute_provisioning_service.services.mock_ansible_service import ProgrammableMockAnsibleService
+        from vm_provisioning_adapter.services.mock_ansible_service import ProgrammableMockAnsibleService
         return ProgrammableMockAnsibleService(
             settings=MagicMock(resolved_playbook_path=Path("/fake/pb.yml"),
                                resolved_inventory_path=Path("/fake/hosts"),
@@ -208,7 +208,7 @@ class TestEvaluateJob:
         )
 
     def _params(self, host: str = "kvm1", vm_action: str = "create"):
-        from compute_provisioning_service.models.jobs_model import AnsibleJobParams
+        from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
         return AnsibleJobParams(vm_host=host, vm_action=vm_action, vm_target="t1")
 
     def _mock_host_service(self, host_exists: bool = True):
@@ -232,7 +232,7 @@ class TestEvaluateJob:
         assert result.would_pause is False
 
     def test_armed_rule_matching_params_reflected_in_result(self):
-        from compute_provisioning_service.services.mock_ansible_service import MockRule
+        from vm_provisioning_adapter.services.mock_ansible_service import MockRule
         mock_svc = self._make_svc()
         mock_svc.add_rule(MockRule(
             rule_id="r1",
@@ -244,7 +244,7 @@ class TestEvaluateJob:
         assert result.would_pause is True
 
     def test_non_matching_rule_returns_rule_matched_none(self):
-        from compute_provisioning_service.services.mock_ansible_service import MockRule
+        from vm_provisioning_adapter.services.mock_ansible_service import MockRule
         mock_svc = self._make_svc()
         mock_svc.add_rule(MockRule(
             rule_id="r-delete",
@@ -257,7 +257,7 @@ class TestEvaluateJob:
 
     def test_does_not_create_or_modify_any_job(self):
         """evaluate_job is read-only — no side effects on the mock service state."""
-        from compute_provisioning_service.services.mock_ansible_service import MockRule
+        from vm_provisioning_adapter.services.mock_ansible_service import MockRule
         mock_svc = self._make_svc()
         mock_svc.add_rule(MockRule(rule_id="r1", match={"vm_action": "create"}, pause_before_result=False))
         _ = mock_svc.evaluate_job(self._params(), self._mock_host_service(True))

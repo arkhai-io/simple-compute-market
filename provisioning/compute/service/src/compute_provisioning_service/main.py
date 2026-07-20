@@ -33,11 +33,11 @@ logger = logging.getLogger(__name__)
 
 # Controller imports must come AFTER container.py is imported so the module-level
 # container instance exists before @cbv decorators run.
-from compute_provisioning_service.controllers.system_controller import SystemController   # noqa: E402
-from compute_provisioning_service.controllers.jobs_controller import AnsibleJobsController  # noqa: E402
-from compute_provisioning_service.controllers.hosts_controller import HostController      # noqa: E402
-from compute_provisioning_service.controllers.vms_controller import VmController          # noqa: E402
-from compute_provisioning_service.controllers.leases_controller import AdminLeasesController, LeasesController   # noqa: E402
+from vm_provisioning_adapter.controllers.system_controller import SystemController   # noqa: E402
+from vm_provisioning_adapter.controllers.jobs_controller import AnsibleJobsController  # noqa: E402
+from vm_provisioning_adapter.controllers.hosts_controller import HostController      # noqa: E402
+from vm_provisioning_adapter.controllers.vms_controller import VmController          # noqa: E402
+from vm_provisioning_adapter.controllers.leases_controller import AdminLeasesController, LeasesController   # noqa: E402
 from compute_provisioning_service.controllers.bare_metal_leases_controller import BareMetalLeasesController  # noqa: E402
 from compute_provisioning_service.controllers.compute_contract_controller import ComputeContractController  # noqa: E402
 from compute_provisioning_service.controllers.pools_controller import PoolController  # noqa: E402
@@ -212,7 +212,7 @@ app = build_compute_provisioning_app(
 import os as _os
 _active_profiles = [p.strip() for p in _os.environ.get("ACTIVE_PROFILES", "").split(",") if p.strip()]
 if "mock" in _active_profiles:
-    from compute_provisioning_service.controllers.test_controller import make_router as _make_test_router
+    from vm_provisioning_adapter.controllers.test_controller import make_router as _make_test_router
     app.include_router(_make_test_router())                                         # /test/*
     logger.info("Test controller mounted at /test/* (mock profile active)")
 

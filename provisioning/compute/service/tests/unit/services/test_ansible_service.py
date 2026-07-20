@@ -18,8 +18,8 @@ from arkhai_bare_metal import (
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
 )
-from compute_provisioning_service.models.jobs_model import AnsibleJobParams
-from compute_provisioning_service.services.ansible_service import AnsibleService
+from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
+from vm_provisioning_adapter.services.ansible_service import AnsibleService
 
 
 # ---------------------------------------------------------------------------
@@ -455,7 +455,7 @@ class TestPublicHostInventory:
 
 class TestPublicHostConnection:
     def test_vm_host_ip_and_ssh_command_prefer_public_host(self):
-        from compute_provisioning_service.services.ansible_service import AnsibleResult
+        from vm_provisioning_adapter.services.ansible_service import AnsibleResult
 
         svc = _make_service()
         result = AnsibleResult(

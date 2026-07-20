@@ -25,7 +25,7 @@ from sqlalchemy.pool import StaticPool
 from compute_provisioning_service.db.database import create_session_factory
 from compute_provisioning_service.db.models import Base, DEFAULT_POOL_ID, Host, ResourcePool
 from vm_provisioning_operator.models import HostCreate, HostUpdate
-from compute_provisioning_service.services.host_service import HostService, _parse_ini
+from vm_provisioning_adapter.services.host_service import HostService, _parse_ini
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +212,7 @@ class TestSeedFromIni:
 class TestRegisterHostEmbeddedKey:
     def test_embedded_key_is_encrypted_in_db(self, svc, settings, tmp_path):
         from cryptography.fernet import Fernet
-        from compute_provisioning_service.crypto import decrypt_key
+        from vm_provisioning_adapter.crypto import decrypt_key
 
         key = Fernet.generate_key().decode()
         settings.ssh_decryption_key = key

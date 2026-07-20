@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from compute_provisioning_service.db.models import Host
-from compute_provisioning_service.models.ansible import ConnectivityResult
+from vm_provisioning_adapter.models.ansible import ConnectivityResult
 from vm_provisioning_operator.models import JobSubmitResponse, VmActionRequest
-from compute_provisioning_service.services.host_operations_service import HostOperationsService
-from compute_provisioning_service.services.host_service import HostNotFoundError
+from vm_provisioning_adapter.services.host_operations_service import HostOperationsService
+from vm_provisioning_adapter.services.host_service import HostNotFoundError
 
 
 def _host() -> Host:

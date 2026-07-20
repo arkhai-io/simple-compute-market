@@ -160,12 +160,12 @@ class AsyncProvisioningTestClient:
             body["ssh_pubkey"] = ssh_pubkey
         return await self._post("/test/evaluate-job", body)
 from compute_provisioning_service.main import app
-from compute_provisioning_service.services.ansible_service import AnsibleResult, AnsibleRun, AnsibleService
+from vm_provisioning_adapter.services.ansible_service import AnsibleResult, AnsibleRun, AnsibleService
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
-from compute_provisioning_service.services.host_service import HostService
-from compute_provisioning_service.services.job_service import AnsibleJobService
-from compute_provisioning_service.services.mock_ansible_service import ProgrammableMockAnsibleService
-from compute_provisioning_service.services.system_service import SystemService
+from vm_provisioning_adapter.services.host_service import HostService
+from vm_provisioning_adapter.services.job_service import AnsibleJobService
+from vm_provisioning_adapter.services.mock_ansible_service import ProgrammableMockAnsibleService
+from vm_provisioning_adapter.services.system_service import SystemService
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +304,7 @@ def fake_ansible(fake_inventory_path) -> MagicMock:
     mock.write_inventory.return_value = fake_inv_tmp
 
     # check_connectivity_with_inventory — synchronous mock returning reachable
-    from compute_provisioning_service.models.ansible import ConnectivityResult
+    from vm_provisioning_adapter.models.ansible import ConnectivityResult
     from unittest.mock import AsyncMock as _AsyncMock
     mock.check_connectivity_with_inventory = _AsyncMock(
         return_value=ConnectivityResult(host="kvm1", reachable=True, detail="mock ping ok")
@@ -361,7 +361,7 @@ async def client_and_queue(
     )
 
     from market_resource_pools import ResourcePoolService
-    from compute_provisioning_service.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
+    from vm_provisioning_adapter.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
     resource_pool_service = ResourcePoolService(
         session_factory=session_factory,
         handlers={"ansible": AnsiblePoolConfigHandler()},
@@ -503,7 +503,7 @@ async def client_and_queue(
     transport = ASGITransport(app=app)
 
     # Mount the test controller if not already present
-    from compute_provisioning_service.controllers.test_controller import make_router as _make_test_router
+    from vm_provisioning_adapter.controllers.test_controller import make_router as _make_test_router
     _test_prefix = "/test"
     _already_mounted = any(
         getattr(r, "path", "").startswith(_test_prefix) for r in app.routes

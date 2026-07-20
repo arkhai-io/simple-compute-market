@@ -18,8 +18,8 @@ from arkhai_bare_metal import (
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
 )
-from compute_provisioning_service.models.jobs_model import AnsibleJobParams, AnsibleRunResult
-from compute_provisioning_service.services.job_service import AnsibleJobService
+from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
+from vm_provisioning_adapter.services.job_service import AnsibleJobService
 
 
 # ---------------------------------------------------------------------------

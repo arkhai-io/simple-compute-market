@@ -13,11 +13,11 @@ from typing import TYPE_CHECKING, Optional
 
 from compute_provisioning.contracts import ExecutorActionEnvelope
 from vm_provisioning_operator.models import CreateVmRequest, JobSubmitResponse, VmActionRequest
-from compute_provisioning_service.models.vm_request_model import build_create_params, build_simple_params
+from vm_provisioning_adapter.models.vm_request_model import build_create_params, build_simple_params
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
 
 if TYPE_CHECKING:
-    from compute_provisioning_service.services.job_service import AnsibleJobService
+    from vm_provisioning_adapter.services.job_service import AnsibleJobService
 
 
 class VmOperationsService:

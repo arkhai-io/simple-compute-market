@@ -13,7 +13,7 @@ from arkhai_bare_metal import (
     PHYSICAL_HOST_ID_REF_KEY,
     bare_metal_executor_ref,
 )
-from compute_provisioning_service.models.jobs_model import AnsibleJobParams
+from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 
 logger = logging.getLogger(__name__)
 

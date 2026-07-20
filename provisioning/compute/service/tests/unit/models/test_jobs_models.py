@@ -20,7 +20,7 @@ import pytest
 from pydantic import ValidationError
 
 from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
-from compute_provisioning_service.models.vm_request_model import build_create_params, build_simple_params
+from vm_provisioning_adapter.models.vm_request_model import build_create_params, build_simple_params
 
 
 # ---------------------------------------------------------------------------

@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
 from compute_provisioning import PhysicalSettlementRequest, SettlementResource
-from compute_provisioning_service.models.jobs_model import AnsibleJobParams
-from compute_provisioning_service.models.fulfillment_model import AnsibleFulfillmentMetadata, VmFulfillmentRequirements
+from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
+from vm_provisioning_adapter.models.fulfillment_model import AnsibleFulfillmentMetadata, VmFulfillmentRequirements
 from market_resource_pools import (
     FulfillmentCreateFailedError,
     FulfillmentProvider,
@@ -23,7 +23,7 @@ from market_resource_pools import (
 if TYPE_CHECKING:
     from market_resource_pools import ResourcePoolService
     from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
-    from compute_provisioning_service.services.job_service import AnsibleJobService
+    from vm_provisioning_adapter.services.job_service import AnsibleJobService
 
 
 @dataclass(frozen=True)

@@ -50,8 +50,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from compute_provisioning_service import container as _container_module
-from compute_provisioning_service.models.system_model import EvaluateJobRequest, EvaluateJobResponse  # server-only test controller models
-from compute_provisioning_service.services.job_service import AnsibleJobService
+from vm_provisioning_adapter.models.system_model import EvaluateJobRequest, EvaluateJobResponse  # server-only test controller models
+from vm_provisioning_adapter.services.job_service import AnsibleJobService
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ def _get_programmable_mock():
     this router is only mounted under that condition, but defensive).
     """
     svc = _container_module.resolved_ansible_service
-    from compute_provisioning_service.services.mock_ansible_service import ProgrammableMockAnsibleService
+    from vm_provisioning_adapter.services.mock_ansible_service import ProgrammableMockAnsibleService
     if not isinstance(svc, ProgrammableMockAnsibleService):
         raise HTTPException(
             status_code=503,
@@ -112,7 +112,7 @@ def add_mock_rule(body: MockRuleRequest) -> dict:
     dict is a subset of the incoming job params wins.
     """
     mock = _get_programmable_mock()
-    from compute_provisioning_service.services.mock_ansible_service import MockRule
+    from vm_provisioning_adapter.services.mock_ansible_service import MockRule
     rule = MockRule(
         rule_id=body.rule_id,
         match=body.match,
@@ -262,8 +262,8 @@ async def evaluate_job(body: EvaluateJobRequest) -> EvaluateJobResponse:
     host existence and mock rule matching. Only available when the service
     is running in mock mode. Used by e2e stage 08c.
     """
-    from compute_provisioning_service.models.jobs_model import AnsibleJobParams
-    from compute_provisioning_service.services.mock_ansible_service import ProgrammableMockAnsibleService
+    from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
+    from vm_provisioning_adapter.services.mock_ansible_service import ProgrammableMockAnsibleService
 
     ansible_svc = _container_module.resolved_ansible_service
     host_svc = _container_module.resolved_host_service

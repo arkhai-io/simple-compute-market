@@ -28,7 +28,7 @@ from vm_provisioning_operator.models import (
     JobLogsResponse,
     JobStatusResponse,
 )
-from compute_provisioning_service.services.job_service import AnsibleJobService
+from vm_provisioning_adapter.services.job_service import AnsibleJobService
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 

@@ -39,12 +39,12 @@ from arkhai_bare_metal import (
     NODE_RECLAIM_ACCESS_ACTION,
 )
 from compute_provisioning_service.config import Settings
-from compute_provisioning_service.models.ansible import (
+from vm_provisioning_adapter.models.ansible import (
     ConnectivityResult,
     InventoryHost,
     InventoryResponse,
 )
-from compute_provisioning_service.models.jobs_model import AnsibleJobParams, AnsibleRunResult
+from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
 
 logger = logging.getLogger(__name__)
 
@@ -300,7 +300,7 @@ class AnsibleService:
                 key_ref = host.ssh_key_value
             else:
                 # Decrypt and write a companion temp key file
-                from compute_provisioning_service.crypto import decrypt_key
+                from vm_provisioning_adapter.crypto import decrypt_key
                 secret = getattr(self._settings, "ssh_decryption_key", "")
                 plaintext = decrypt_key(host.ssh_key_value, secret)
                 key_file = _Path(tempfile.gettempdir()) / f"{host.name}_key_{nonce}"

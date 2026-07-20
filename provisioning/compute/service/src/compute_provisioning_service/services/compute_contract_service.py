@@ -25,8 +25,8 @@ from compute_provisioning import (
 from market_site.authority import SiteAuthorityPort
 from vm_provisioning_operator.models import CreateVmRequest
 from compute_provisioning_service.services.bare_metal_operations_service import BareMetalOperationsService
-from compute_provisioning_service.services.job_service import AnsibleJobService
-from compute_provisioning_service.services.vm_operations_service import VmOperationsService
+from vm_provisioning_adapter.services.job_service import AnsibleJobService
+from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
 
 
 class AllocationNotProvisionableError(ValueError):

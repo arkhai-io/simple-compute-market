@@ -31,12 +31,12 @@ from compute_provisioning_service.db.database import create_session_factory
 from compute_provisioning_service.db.models import Base
 from compute_provisioning_service.main import app
 from vm_provisioning_operator.models import CreateVmRequest
-from compute_provisioning_service.services.ansible_service import AnsibleService
+from vm_provisioning_adapter.services.ansible_service import AnsibleService
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
-from compute_provisioning_service.services.host_service import HostService
-from compute_provisioning_service.services.job_service import AnsibleJobService
-from compute_provisioning_service.services.mock_ansible_service import MockRule, ProgrammableMockAnsibleService
-from compute_provisioning_service.services.system_service import SystemService
+from vm_provisioning_adapter.services.host_service import HostService
+from vm_provisioning_adapter.services.job_service import AnsibleJobService
+from vm_provisioning_adapter.services.mock_ansible_service import MockRule, ProgrammableMockAnsibleService
+from vm_provisioning_adapter.services.system_service import SystemService
 
 HOST = "kvm1"
 
@@ -121,7 +121,7 @@ async def client_and_queue(
     _container_module.resolved_system_service = system_service
     _container_module.resolved_host_service = host_service
 
-    from compute_provisioning_service.controllers.test_controller import make_router as _make_test_router
+    from vm_provisioning_adapter.controllers.test_controller import make_router as _make_test_router
     _test_prefix = "/test"
     _already_mounted = any(
         getattr(r, "path", "").startswith(_test_prefix) for r in app.routes

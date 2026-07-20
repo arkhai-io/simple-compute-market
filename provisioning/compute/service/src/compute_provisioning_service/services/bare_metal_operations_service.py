@@ -19,15 +19,15 @@ from arkhai_bare_metal import (
 )
 from compute_provisioning.contracts import ExecutorActionEnvelope
 from compute_provisioning_service.config import DEFAULT_BARE_METAL_RECLAIM_POLICY
-from compute_provisioning_service.models.jobs_model import AnsibleJobParams
+from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 from vm_provisioning_operator.models import JobSubmitResponse
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
 from compute_provisioning_service.services.bare_metal_lease_service import bare_metal_access_ref
 from compute_provisioning_service.services.release_executors import get_physical_host_id
 
 if TYPE_CHECKING:
-    from compute_provisioning_service.services.job_service import AnsibleJobService
-    from compute_provisioning_service.services.host_service import HostService
+    from vm_provisioning_adapter.services.job_service import AnsibleJobService
+    from vm_provisioning_adapter.services.host_service import HostService
 
 
 def _access_value(access_ref: dict[str, Any] | None, *keys: str) -> str | None:
