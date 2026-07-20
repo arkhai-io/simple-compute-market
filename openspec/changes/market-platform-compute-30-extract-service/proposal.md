@@ -6,8 +6,8 @@ The deployable compute provisioner still lives under `domains/vms` even though i
 
 - Move generic API assembly, job lifecycle, executor-neutral lease lifecycle, watchdog scheduling, capacity mounting, fulfillment coordination, health surfaces, and executor/provider registration to `provisioning/compute/service`.
 - Define the compute provisioner composition root and load VM and bare-metal routers, action factories, executors, fulfillment providers, readiness checks, and optional operator surfaces as domain adapters.
-- Preserve POOLS-6's landed multidimensional capacity, reservation, settlement-requirement, candidate-availability, migration, and compatibility behavior across the package move.
-- Treat POOLS-7 as related, non-blocking work: consume `kit/physical-settlement` when it has landed, or relocate the current settlement composition without implementing POOLS-7's durability and storefront-cutover redesign when it has not.
+- Preserve POOLS-6's landed multidimensional capacity, reservation, settlement-requirement, candidate-availability, and migration behavior across the package move.
+- Proceed before POOLS-7: relocate the current settlement composition without implementing POOLS-7's durability and storefront-cutover redesign, then let POOLS-7 adapt to the extracted service layout and create `kit/physical-settlement` afterward.
 - Keep VM KVM/Ansible behavior, `AnsibleFulfillmentProvider`, VM fulfillment requirements, playbooks, direct VM routes, and result interpretation in `domains/vms`.
 - Keep bare-metal access grant/reclaim behavior, routes, and result interpretation in `domains/bare_metal`.
 - Add supported API and worker console entry points, package metadata, Dockerfile/image, and deployment configuration for the extracted service.
@@ -17,8 +17,9 @@ The deployable compute provisioner still lives under `domains/vms` even though i
   and `market-platform-compute-20-provisioning-contract` archived
   2026-07-13. POOLS-6 pass 1 landed on 2026-07-20. POOLS-7 is related and
   overlaps package/composition paths, but neither change is an activation
-  prerequisite for the other; landing order is reconciled at implementation
-  kickoff. `tasks.md` remains fully unchecked.
+  prerequisite for the other. Compute-30 will land first and POOLS-7 will
+  reconcile to its extracted layout afterward. `tasks.md` remains fully
+  unchecked.
 
 ## Capabilities
 
@@ -59,20 +60,19 @@ Two outcomes remain relevant:
   Compute-30 cleanup item. Their live implementations and public re-exports
   already come from `market_resource_pools`.
 
-At implementation kickoff, Compute-30 checks POOLS-7's landing status. If
-POOLS-7 has landed, the extracted service composes `kit/physical-settlement`.
-If it has not, Compute-30 relocates current generic settlement composition as
-part of the service extraction while preserving behavior; POOLS-7 later moves
-that code into the approved kit. Whichever change lands second reconciles the
-resulting package paths, migrations, composition, and tests. This is a merge
-coordination rule, not a prerequisite in either direction.
+Compute-30 proceeds against the current pre-POOLS-7 tree. It relocates current
+generic settlement composition as part of the service extraction without
+implementing POOLS-7's new lifecycle. After Compute-30 lands, POOLS-7 reconciles
+its package paths, migrations, composition, and tests to the extracted service
+and moves the shared settlement code into the approved kit. This selected
+landing order is a merge-coordination decision, not a prerequisite relationship.
 
 ## Dependencies and Related Changes
 
 - Requires `market-platform-compute-10-site-lifecycle` and `market-platform-compute-20-provisioning-contract` to be implemented, synchronized, and archived.
 - Treats the landed POOLS-3 fulfillment service, provider registry, Ansible provider, and capacity rebind behavior as implementation to preserve and relocate by ownership.
 - Preserves POOLS-4's storefront-owned capacity-identity boundary: compute listings and claims remain explicitly `pool_id`- or `resource_id`-scoped, `resource_id` wins when both are present, and missing/malformed orders fail before capacity probing or reservation.
-- Preserves POOLS-6 pass 1's generic `dimensions`/`available` capacity model, multidimensional ledger accounting, legacy GPU-unit compatibility, and additive migration history.
+- Preserves POOLS-6 pass 1's generic `dimensions`/`available` capacity model, multidimensional ledger accounting, and additive migration history. Compute-30 does not establish a requirement to retain the transitional single-quantity aliases; changing or removing that wire shape belongs to a capacity-contract cutover that updates all controlled callers together.
 - Treats `pools-7-storefront-fulfillment-cutover` as related, non-blocking work. POOLS-7 owns `kit/physical-settlement`, durable settlement/fulfillment recovery, pull-based result/status queries, and storefront cutover; push delivery remains the separate `provisioning-result-push-delivery` change.
 - Absorbs the launch/package outcome formerly tracked by `add-provisioning-cli`.
 - Uses the lifecycle-event dependency direction established by the compute provisioning contract; no separate callback-client extraction remains planned.
@@ -80,7 +80,7 @@ coordination rule, not a prerequisite in either direction.
 
 ## Impact
 
-- Affected paths: `domains/vms/provisioning/service`, `domains/vms/provisioning/client`, `domains/bare_metal`, `provisioning/compute`, `kit/resource-pools`, and, when already present from POOLS-7, `kit/physical-settlement`, plus deployment manifests, package metadata, Dockerfiles, and images.
-- Wire and persistence: preserve the landed multidimensional capacity and migration contracts and whichever pre- or post-POOLS-7 settlement lifecycle exists at kickoff; startup and package ownership change.
+- Affected paths: `domains/vms/provisioning/service`, `domains/vms/provisioning/client`, `domains/bare_metal`, `provisioning/compute`, `kit/resource-pools`, deployment manifests, package metadata, Dockerfiles, and images. POOLS-7 later creates `kit/physical-settlement` against the extracted layout.
+- Wire and persistence: preserve the landed multidimensional capacity and migration contracts plus the current pre-POOLS-7 settlement lifecycle; startup and package ownership change.
 - Deployment: service image and launch commands change, requiring coordinated manifest and operator updates.
 - Packaging: generic distributions move from VM ownership to the top-level compute provisioning category.
