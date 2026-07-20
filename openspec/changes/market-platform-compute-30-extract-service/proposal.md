@@ -45,26 +45,35 @@ ownership of resolving its package-boundary question, so its scope is
 folded in here rather than tracked in two places. Concretely:
 
 - **Resolved by `pools-7-storefront-fulfillment-cutover`'s design review
-  (2026-07-17), ahead of this change's own extraction work:**
-  `PhysicalSettlementScheduler` and `DeterministicRoundRobinPolicy` move
-  from VM-service-local code into `compute_provisioning` — not into
-  `kit/resource-pools`, which would close a circular dependency
-  (`compute_provisioning` already depends on `kit/resource-pools`; the
-  scheduler needs real runtime imports from `compute_provisioning`'s
-  settlement types, unlike `FulfillmentProvider`'s string-quoted forward
-  references). `FulfillmentProvider`/`ProviderRegistry`/error taxonomy
-  remain in `kit/resource-pools`, per `pools-3`'s original placement.
-  `pools-2`'s scheduling/request contracts (`PhysicalSettlementRequest`,
+  (2026-07-15 through 2026-07-21), ahead of this change's own extraction
+  work:** `PhysicalSettlementScheduler`, `DeterministicRoundRobinPolicy`,
+  and `pools-2`'s scheduling/request contracts (`PhysicalSettlementRequest`,
   `SettlementResource`, `SettlementCandidate`, `SettlementRequirement`,
-  `SettlementSchedulingPolicy`) already lived in `compute_provisioning`
-  before this. See `pools-7`'s `design.md`, "`PhysicalSettlementScheduler`
-  and `DeterministicRoundRobinPolicy` move to `compute_provisioning`."
-  This is the same kind of narrow, deliberate override of waiting for this
+  `SettlementSchedulingPolicy` — previously in `compute_provisioning`)
+  move into a new dedicated package, **`kit/physical-settlement`** — not
+  `kit/resource-pools` (would close a circular dependency:
+  `compute_provisioning` already depends on `kit/resource-pools`, and the
+  scheduler needs real runtime imports from the settlement types, unlike
+  `FulfillmentProvider`'s string-quoted forward references), and not
+  `compute_provisioning` either, on reflection — that package was scoped
+  as thin cross-domain HTTP helpers, not a scheduling/persistence engine;
+  growing it to hold a scheduler, ORM persistence, recovery-claim
+  machinery, and a result outbox would have been a scope mismatch even
+  setting the dependency graph aside. `kit/physical-settlement` also now
+  owns the durable settlement/fulfillment persistence layer, recovery
+  infrastructure, and provisioned-resource records `pools-7` designed.
+  `FulfillmentProvider`/`ProviderRegistry`/error taxonomy remain in
+  `kit/resource-pools`, per `pools-3`'s original placement, unchanged.
+  See `pools-7`'s `design.md`, "Final planning decisions" → "Shared
+  package boundary" (authoritative; supersedes that same file's earlier,
+  now-corrected section that concluded `compute_provisioning`). This is
+  the same kind of narrow, deliberate override of waiting for this
   change's activation that `pools-3` already made once for
-  `FulfillmentProvider`/`ProviderRegistry` — resolving where a class lives
+  `FulfillmentProvider`/`ProviderRegistry` — resolving where these live
   is not this change's service-extraction scope, and this proposal's task
   list (§1) should verify the moved location during "Verify Prerequisites
-  and Current Ownership" rather than treat it as still open.
+  and Current Ownership" (checking for `kit/physical-settlement`, not
+  `compute_provisioning`) rather than treat it as still open.
 - **Concrete, verified, gate-independent finding:** `provisioning/compute/
   src/compute_provisioning/pools.py` and `pool_config_handler.py` are
   byte-identical duplicates of the files in `kit/resource-pools/src/

@@ -39,8 +39,17 @@ service.
   will** (`pools-3`'s explicit, unchanged boundary decision); the
   storefront calls them in sequence because `select_resource`'s result
   can be commercially material before a deal is finalized (see
-  `design.md`, "Storefront orchestrates scheduling and dispatch as
+  `design.md`, "Storefront orchestrates scheduling and fulfillment as
   separate calls").
+- **Result and credential retrieval is pull-based for this change**:
+  `get_fulfillment_status`/`get_fulfillment_result`, read directly from
+  durable state, over the existing storefront→provisioning auth
+  direction. A push-based delivery transport was designed but requires a
+  new provisioning→storefront authenticated channel that doesn't exist
+  in this codebase yet — designing that channel is split out to a
+  separate change, `provisioning-result-push-delivery`, rather than
+  built inside this one. See `design.md`, "`SettlementResult` delivery:
+  pull for v1, push deferred to a separate change."
 - Resolve `pools-3`'s deferred release-path wiring: give
   `VmReleaseExecutor` (or its replacement) a way to resolve
   `SettlementRecord` → `ProviderRegistry.require(provider).teardown(...)`
@@ -149,11 +158,20 @@ permitted, not required, exercised where this review found real need.
   package-boundary decision (formerly tracked by the now-closed
   `pools-5-shared-provisioning-package`) — resolved directly by this
   change's design review rather than waited on; see "Status" above.
+- Related, not blocking, follow-on: `provisioning-result-push-delivery`
+  (not yet started) — adds a push transport for `SettlementResult`
+  alongside this change's pull-based `get_fulfillment_status`/
+  `get_fulfillment_result`, once a provisioning→storefront authenticated
+  channel is designed. Does not require redesigning this change's durable
+  persistence layer, only adds delivery on top of it.
 
 ## Impact
 
 Touches `kit/site` (`site_resource_pools`/`CapacityReservation` reshape),
-`kit/physical-settlement` (scheduler/policy relocation, settlement persistence, recovery, and result-delivery contracts),
+`kit/physical-settlement` (scheduler/policy relocation, settlement
+persistence, recovery, and pull-based result/status query contracts —
+push delivery is `provisioning-result-push-delivery`'s scope, not this
+change's),
 the VM provisioning service (models, migrations, services, release
 lifecycle), and the VM storefront's reservation/orchestration path.
 Blocked on `pools-6` for reservation-admission correctness; not fully

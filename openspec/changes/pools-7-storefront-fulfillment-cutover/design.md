@@ -243,7 +243,18 @@ set for policy selection. Exact home for this predicate (alongside
 `kit/site` where the resource rows themselves live) is not decided;
 resolve during planning.
 
-### `PhysicalSettlementScheduler` and `DeterministicRoundRobinPolicy` move to `compute_provisioning`, not `kit/resource-pools`
+### `PhysicalSettlementScheduler` and `DeterministicRoundRobinPolicy`: package destination — SUPERSEDED, see "Shared package boundary" below
+
+**Superseded by "Final planning decisions" → "Shared package boundary,"
+below — this section's conclusion (`compute_provisioning`) is no longer
+correct; kept for the historical reasoning, which still explains *why*
+`kit/resource-pools` doesn't work.** The final decision moved these (and
+the `pools-2` request/resource types that previously lived in
+`compute_provisioning`) into a new dedicated package,
+`kit/physical-settlement`, instead — a cleaner fix to the same circular-
+dependency problem identified below, and a better scope fit than
+growing `compute_provisioning` (which was scoped as a thin cross-domain
+HTTP-helpers package, not a scheduling/persistence engine).
 
 Both are already effectively domain-neutral (`DeterministicRoundRobinPolicy`
 verified to contain zero VM-specific logic — it only sorts `pool_id`/
@@ -260,9 +271,14 @@ reverse edge would close a cycle.
 
 `compute_provisioning` has no such problem — it already depends on both
 `kit/site` and `kit/resource-pools`, and the settlement types the
-scheduler operates on already live there (`pools-2`). **Resolved:**
-`PhysicalSettlementScheduler` and `DeterministicRoundRobinPolicy` move
-into `compute_provisioning`.
+scheduler operates on already lived there (`pools-2`). At the time this
+was written, the conclusion was that `PhysicalSettlementScheduler` and
+`DeterministicRoundRobinPolicy` should move into `compute_provisioning`
+on that basis. **This conclusion is superseded** — see the note at the
+top of this section: the same reasoning (avoid the `kit/resource-pools`
+cycle) is satisfied more cleanly by a new dedicated package,
+`kit/physical-settlement`, which also took the `pools-2` request/resource
+types with it rather than leaving them in `compute_provisioning`.
 
 This incidentally resolves part of the open, unresolved question
 `market-platform-compute-30-extract-service` inherited from the closed
@@ -272,7 +288,10 @@ compute-30's actual service-extraction scope. This is the same kind of
 narrow, deliberate override `pools-3` already made once for
 `FulfillmentProvider`/`ProviderRegistry`; see that change's `design.md`,
 "Domain-neutral contracts vs. domain-specific payloads." `compute-30`'s
-proposal has been updated to reflect this as resolved rather than open.
+proposal has been updated (2026-07-21, corrected from an earlier pass
+that said `compute_provisioning` and was never actually applied) to
+reflect this as resolved — landing in `kit/physical-settlement`, not
+`compute_provisioning` — rather than open.
 
 Two pre-existing domain leaks were found while confirming this move is
 safe, and should be fixed as part of it rather than carried into a
@@ -1038,36 +1057,78 @@ exponential backoff with jitter, claim expiry after worker death, and
 idempotent deterministic provider command identities.
 
 The watchdog framework has logically separate handlers for create-command
-submission/recovery, provider-status convergence, result delivery, teardown
-submission/recovery, and abandonment reconciliation. Records in both pending
-and in-progress states converge without storefront polling.
+submission/recovery, provider-status convergence, teardown
+submission/recovery, and abandonment reconciliation — no separate
+result-delivery handler in v1, since `get_fulfillment_status`/
+`get_fulfillment_result` are pull-based reads with no background delivery
+work to recover (see below). Records in both pending and in-progress
+states converge without depending on the storefront prompting recovery —
+unrelated to, and unaffected by, the pull-vs-push question for result
+delivery specifically.
 
-### Durable pushed SettlementResult delivery
+### `SettlementResult` delivery: pull for v1, push deferred to a separate change
 
-The provisioning service pushes a versioned `SettlementResult` to the
-storefront; inter-service polling is not the primary result-delivery contract.
-A terminal or otherwise reportable fulfillment transition and its delivery
-obligation are committed atomically through a durable outbox.
+**Revised (2026-07-21):** the durable, atomic, push-based outbox design
+below this note's replacement is **not implemented in POOLS-7**. Reason:
+pushing `SettlementResult` requires an authenticated provisioning→storefront
+channel that doesn't exist in this codebase today — every existing trust
+relationship is storefront→provisioning (one shared `admin_api_key` per
+site; `StorefrontAuthMiddleware`'s own docstring: *"the provisioning
+service is an internal dependency of a single storefront"*). Designing
+that new channel properly — including that one storefront authenticates
+pushes from *N* distinct provisioning services, not a single symmetric
+secret — is real scope on its own, and doing it inside POOLS-7 risked
+scope creep onto an already-large change. It's split into its own
+change: `provisioning-result-push-delivery` (not yet started). POOLS-7
+keeps the goal in view but ships pull for v1, on the existing, already-
+solved storefront→provisioning auth direction.
 
-Delivery is at-least-once with exactly-once logical application:
+**What this changes, precisely — the resilience goal is not abandoned,
+only the transport is:**
 
-- each result has a stable globally unique `result_id`;
-- the storefront authenticates the source, deduplicates by `result_id`,
-  persists the result, commits, and only then acknowledges;
-- lost acknowledgements cause harmless retries;
-- retries use exponential backoff with jitter and a capped interval but do not
-  permanently abandon an undelivered result while the fulfillment is active;
-- operator metrics, alerts, audit history, and a manual replay mechanism are
-  required.
+- `get_fulfillment_status(fulfillment_id)` and
+  `get_fulfillment_result(fulfillment_id)` become real, storefront-callable
+  read endpoints, using the existing auth direction. Both read directly
+  from the durably persisted fulfillment/settlement aggregate (section 3
+  of this file) — there is no separate outbox table for these two calls,
+  because a read endpoint has nothing to retry-until-acknowledged; the
+  storefront just calls again if it wants fresher information. This
+  drops the delivery-worker/retry-with-backoff/acknowledgement machinery
+  from the design entirely — it existed to solve a push problem
+  (provisioning doesn't know if a push it can't observe an ack for
+  landed) that a pull model doesn't have.
+- **Credentials are fetched on read, not pre-fetched and queued.**
+  `get_fulfillment_result`'s handler itself obtains or refreshes
+  credentials at the moment it's called, returns them in that response,
+  and does not persist them — same never-at-rest posture as the original
+  push design, just triggered by the storefront's request instead of a
+  background worker's schedule. This preserves "raw credentials MUST NOT
+  be persisted" without needing an outbox at all.
+- **`credential_generation` still matters, for a different reason.**
+  Originally it prevented a stale push retry from clobbering a newer
+  credential set the storefront already received. In a pull model there's
+  no retry race to prevent, but a client that cached an earlier response
+  still benefits from knowing whether its cached credentials are stale
+  relative to a later rotation — `credential_generation` in the response
+  serves that purpose instead.
+- **Durable, atomic result *persistence* is unaffected** — a terminal or
+  otherwise reportable fulfillment transition still commits atomically
+  with whatever `SettlementResult`-shaped data `get_fulfillment_result`
+  will later read (this file's "Transaction boundary" decisions,
+  unchanged). What's dropped is only the *delivery* half (push worker,
+  outbox-as-delivery-queue, ack tracking) — not the durability half.
+- Raw job polling of the old executor path is still removed, per
+  "Breaking cleanup scope" below — this is the old, VM-job-shaped
+  polling being retired, not a re-introduction of it under a new name.
+  `get_fulfillment_status`/`get_fulfillment_result` poll a normalized,
+  durable, cross-domain fulfillment abstraction, not a raw Ansible job.
 
-Raw credentials MUST NOT be stored in settlement rows, generic JSON columns,
-or outbox payloads. The delivery worker obtains or refreshes credentials just
-in time, keeps them in memory for the authenticated encrypted request, and
-then discards them. If recovery rotates credentials, a monotonic
-`credential_generation` prevents an older retry from replacing a newer
-credential set at the storefront. Fulfillment state and result-delivery state
-are separate: successful provisioning remains successful while delivery is
-retrying.
+When `provisioning-result-push-delivery` lands, it adds a push transport
+*alongside* pull (pull is a reasonable permanent reconciliation backstop
+even after push exists, per point 2's earlier discussion of exactly this
+concern) — it does not need to redesign the durable persistence layer
+built here, only add the new auth channel and a delivery worker that
+reads from the same already-durable state.
 
 ### Breaking cleanup scope
 

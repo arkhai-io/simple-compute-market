@@ -1,5 +1,6 @@
 ## 1. Finalize shared contracts and package skeleton
 
+- [ ] 1.0 Verify `pools-6-multidimensional-fair-scheduling` has landed and `Host` (or its replacement) carries real memory/disk/vCPU capacity fields before proceeding past task 1. `proposal.md` lists this as a blocking prerequisite for reservation-admission work (tasks 2 and 4) — this task exists so the plan fails loudly rather than silently proceeding without it if implementation ever starts out of the intended POOLS-6-then-POOLS-7 order.
 - [ ] 1.1 Create `kit/physical-settlement` using repository-standard Python kit packaging, Makefile, tests, typing marker, and distribution/reinit conventions.
 - [ ] 1.2 Define globally unique opaque ID value types for `capacity_reservation_id`, `fulfillment_id`, `provisioned_resource_id`, `settlement_resource_id`, and `result_id`; evaluate UUIDv7 against repository conventions and document the selected format.
 - [ ] 1.3 Decide and document whether routing/integrity requires an explicit site-plus-pool composite reference in addition to globally unique `pool_id` and explicit `site_id`.
@@ -20,9 +21,9 @@
 
 ## 3. Add shared settlement persistence
 
-- [ ] 3.1 Define shared SQLAlchemy mappings for the fulfillment/settlement aggregate, provisioned-resource outputs, versioned prepared operations, recovery claims, and result-delivery outbox.
+- [ ] 3.1 Define shared SQLAlchemy mappings for the fulfillment/settlement aggregate, provisioned-resource outputs, versioned prepared operations, and recovery claims. No result-delivery outbox in v1 — result/credential retrieval is pull-based (section 8); see `design.md`, "`SettlementResult` delivery: pull for v1, push deferred to a separate change."
 - [ ] 3.2 Implement generic SQLAlchemy repositories using caller-supplied sessions so site-capacity and settlement changes can share one transaction.
-- [ ] 3.3 Define fulfillment, provider-command, teardown, abandonment, and result-delivery states plus a compact table-driven transition validator.
+- [ ] 3.3 Define fulfillment, provider-command, teardown, and abandonment states plus a compact table-driven transition validator. No separate result-delivery state machine in v1 (see 3.1).
 - [ ] 3.4 Persist canonical request identity/fingerprints and enforce one fulfillment aggregate per `capacity_reservation_id`.
 - [ ] 3.5 Implement equivalent retry return and conflicting retry rejection before provider submission.
 - [ ] 3.6 Model one fulfillment to many `ProvisionedResource` rows with aggregate status; leave per-resource teardown unexposed unless a current caller requires it.
@@ -34,7 +35,7 @@
 - [ ] 4.2 Implement `schedule_resource(capacity_reservation_id, requirements)` against the local owning site only.
 - [ ] 4.3 In one transaction, lock/validate the active reservation, select an eligible resource, perform any fair capacity rebind, and create or return the immutable assigned settlement record.
 - [ ] 4.4 Reject unknown reservation/pool/resource identifiers rather than forwarding, reinterpreting, or trying another site.
-- [ ] 4.5 Make changed requirements supersede the reservation instead of mutating an accepted assignment.
+- [ ] 4.5 Make changed requirements supersede the reservation instead of mutating an accepted assignment, via one atomic transaction that releases the old capacity reservation and reserves the new shape within the same transaction (`design.md`'s `resize_reservation` sketch) — NOT two independently-committed `release()`/`reserve()` calls in either order. Two separate calls has a real false-negative bug: reserving the new shape before releasing the old evaluates availability against a view where the old hold is still artificially consuming capacity, so a resource that would satisfy the new request the moment the old hold clears can incorrectly report unavailable. Releasing first avoids that but risks losing the old reservation if the new one then fails. Only one transaction that releases-then-reserves internally, committing on success and rolling back in full on failure, gives both correctness properties at once.
 - [ ] 4.6 Atomically abandon assigned-but-unfulfilled settlements and release/supersede their capacity during lease lifecycle events; add watchdog reconciliation.
 - [ ] 4.7 Add race, retry, rollback, expiry, supersession, and multi-replica scheduling tests.
 
@@ -67,23 +68,33 @@
 - [ ] 7.5 Add metrics and structured operator diagnostics for stuck claims, retry age, provider failures, and non-terminal lifecycle age.
 - [ ] 7.6 Add crash-window, restart, multi-replica, backoff, and eventual-convergence tests.
 
-## 8. Implement durable pushed SettlementResult delivery
+## 8. Implement pull-based fulfillment status and result queries
 
-- [ ] 8.1 Define the versioned `SettlementResult` contract containing `result_id`, `fulfillment_id`, `capacity_reservation_id`, aggregate state, provisioned-resource outputs, failure details, and credential-generation metadata without persisted raw credentials.
-- [ ] 8.2 Insert the result-delivery outbox row atomically with each reportable fulfillment transition.
-- [ ] 8.3 Add an authenticated storefront result-receiver endpoint/client contract that deduplicates by `result_id`, persists before acknowledgement, and rejects incorrectly routed site/reservation results.
-- [ ] 8.4 Implement a delivery worker handler that claims due rows, obtains or refreshes credentials just in time, sends them only in memory over the authenticated encrypted channel, and records acknowledgement or retry state.
-- [ ] 8.5 Implement capped exponential backoff with jitter and indefinite retry while the fulfillment remains active; do not dead-letter buyer credential delivery after a fixed attempt count.
-- [ ] 8.6 Add monotonic `credential_generation` handling so stale retries cannot replace newer credentials.
-- [ ] 8.7 Keep fulfillment state separate from result-delivery state and expose metrics, alerts, audit history, oldest-undelivered age, and a manual replay operation.
-- [ ] 8.8 Add tests for crash-before-send, crash-after-send, lost acknowledgement, duplicate delivery, storefront outage, credential refresh/rotation, stale generation, restart, and manual replay.
+Push-based `SettlementResult` delivery was designed (see `design.md`,
+"`SettlementResult` delivery: pull for v1, push deferred to a separate
+change") but requires a new provisioning→storefront authenticated
+channel that does not exist yet. Building that channel is split out to
+`provisioning-result-push-delivery` (separate change, not yet started)
+rather than built here, to avoid scope creep into an already-large
+change. This section implements pull instead, over the existing
+storefront→provisioning auth direction — durable persistence (section 3)
+is unaffected; only the delivery transport differs from the original
+design.
+
+- [ ] 8.1 Implement `get_fulfillment_status(fulfillment_id)`, reading directly from the durable fulfillment aggregate (section 3) — no separate outbox or delivery-acknowledgement state; a read reflects current state on demand.
+- [ ] 8.2 Implement `get_fulfillment_result(fulfillment_id)`, returning the normalized result contract (`fulfillment_id`, `capacity_reservation_id`, aggregate state, provisioned-resource outputs, failure details, `credential_generation`) without persisting credentials.
+- [ ] 8.3 Fetch or refresh credentials at the moment `get_fulfillment_result` is called, transmit them only in that response over the authenticated encrypted channel, and do not persist them afterward.
+- [ ] 8.4 Add a monotonic `credential_generation` to `get_fulfillment_result` responses so a caller holding an earlier cached response can detect staleness after a rotation.
+- [ ] 8.5 Add authorization checks rejecting a query for a `fulfillment_id`/`capacity_reservation_id` the calling storefront does not own.
+- [ ] 8.6 Add tests for: query after process restart, query for a fulfillment that never reaches a terminal state, repeated queries returning consistent state, credential rotation between two queries, and querying a fulfillment owned by a different storefront.
+- [ ] 8.7 Record `provisioning-result-push-delivery` as a named follow-on in this change's implementation notes/README so its dependency on this section's durable persistence layer (not needing to be redesigned) is visible to whoever picks it up.
 
 ## 9. Cut over storefront orchestration
 
 - [ ] 9.1 Replace host-shaped ordinary storefront reservation assumptions with the implemented POOLS-4 capacity-reservation claim and owning-site routing.
 - [ ] 9.2 Replace direct `ExecutorActionEnvelope` submission and provider-job polling with `schedule_resource` followed by `begin_fulfillment` when the commercial workflow is ready.
 - [ ] 9.3 Persist `capacity_reservation_id`, selected settlement resource, and returned `fulfillment_id` in storefront workflow state so negotiation and fulfillment resume after restart.
-- [ ] 9.4 Consume pushed `SettlementResult` idempotently and deliver/retain buyer-facing credential state according to the storefront's security model.
+- [ ] 9.4 Poll `get_fulfillment_status`/`get_fulfillment_result` (pull-based, per section 8) at appropriate points in the storefront's workflow and deliver/retain buyer-facing credential state according to the storefront's security model.
 - [ ] 9.5 Map VM-domain job/provider states to the shared fulfillment lifecycle invariant without leaking raw VM job status cross-domain.
 - [ ] 9.6 Remove `create_vm_and_wait_with_credentials` and ordinary storefront polling/direct executor dispatch after all callers are migrated; tombstone deleted paths where repository workflow requires it.
 - [ ] 9.7 Add storefront restart, duplicate result, site-routing, negotiation-resume, and end-to-end credential-delivery tests.
@@ -100,14 +111,14 @@
 ## 11. Remove obsolete schema and compatibility paths
 
 - [ ] 11.1 Remove superseded `allocation_id`, `SiteAllocation`, direct-host storefront placement, process-local settlement maps/locks, and obsolete executor/provider fields after migrations and callers are complete.
-- [ ] 11.2 Reassess and remove/reduce storefront `fill_first`/`most_available` physical-placement behavior now that physical scheduling belongs to the provisioning service; retain only pre-reservation site/pool policy that remains meaningful.
-- [ ] 11.3 Update container composition, package dependencies, wheel/reinit targets, Docker images, and deployment configuration for `kit/physical-settlement` and its watchdog/result-delivery workers.
+- [ ] 11.2 Fix `most_available`'s claim-blindness bug (it accepts a `claim` parameter but never filters by it) and keep `fill_first`/`most_available` as pure pre-reservation site-selection policy — they have never performed host-level physical placement, only ordered which site to attempt first, so there is no placement logic to remove. Per `design.md`'s "Site fallback after POOLS-4": site fallback/ranking is meaningful only before a capacity reservation exists; once one exists it is owned by exactly one site with no fallback. Do not delete or restructure these policies beyond the claim-blindness fix.
+- [ ] 11.3 Update container composition, package dependencies, wheel/reinit targets, Docker images, and deployment configuration for `kit/physical-settlement` and its watchdog workers.
 - [ ] 11.4 Ensure logs, traces, exception payloads, and request logging redact credentials and prepared secret material.
 - [ ] 11.5 Run repository-wide import, typing, migration, unit, integration, and end-to-end suites and fix all renamed-contract consumers.
 
 ## 12. Documentation and specification closure
 
-- [ ] 12.1 Update `ARCHITECTURE.md` service map, terminology table, ID definitions, lifecycle ownership, transaction boundaries, recovery workers, pushed-result protocol, and teardown flow.
+- [ ] 12.1 Update `ARCHITECTURE.md` service map, terminology table, ID definitions, lifecycle ownership, transaction boundaries, recovery workers, pull-based status/result query contract, and teardown flow. Note `provisioning-result-push-delivery` as planned future work, not implemented by this change.
 - [ ] 12.2 Update baseline `site-capacity` and `physical-provisioning` specs to incorporate completed POOLS-2/3/4/6/7 behavior when the change is archived.
-- [ ] 12.3 Update VM provisioning/storefront README and operator documentation for migrations, watchdog health, result-delivery alerts, manual replay, and recovery procedures without lease-expiry sequencing instructions.
+- [ ] 12.3 Update VM provisioning/storefront README and operator documentation for migrations, watchdog health, status/result query usage, and recovery procedures without lease-expiry sequencing instructions.
 - [ ] 12.4 Verify the implementation against every POOLS-7 scenario and archive the OpenSpec change after validation.

@@ -122,43 +122,64 @@ before external provider calls.
   external call
 - **THEN** the claim expires and another worker can safely retry the operation
 
-### Requirement: Durable pushed SettlementResult
+### Requirement: Durable fulfillment status and result queries
 
-The provisioning service MUST push a versioned `SettlementResult` to the
-storefront through a durable outbox. The fulfillment transition and delivery
-obligation MUST commit atomically. Delivery MUST be at-least-once and the
-storefront MUST apply it idempotently by stable `result_id`, persisting before
-acknowledgement.
+The provisioning service MUST expose `get_fulfillment_status(fulfillment_id)`
+and `get_fulfillment_result(fulfillment_id)` over the existing
+storefront→provisioning authenticated channel. Both MUST read directly
+from durably persisted fulfillment state; neither requires a separate
+delivery-acknowledgement mechanism, since a read reflects current state
+on demand rather than requiring retry-until-acknowledged delivery.
 
-Retries MUST use exponential backoff with jitter and a capped interval and
-MUST NOT permanently abandon an undelivered result while the fulfillment
-remains active. Operator metrics, alerts, audit history, and manual replay MUST
-be available.
+Push-based delivery of `SettlementResult` to the storefront is out of
+scope for this requirement — see `provisioning-result-push-delivery`
+(separate change, not yet started). This requirement's durability
+guarantee is unaffected by that change's absence: a terminal or
+otherwise reportable fulfillment transition commits atomically with the
+state these queries read, regardless of whether or when it is polled.
 
-#### Scenario: Crash before result send
-- **WHEN** the provisioning process commits fulfillment success and crashes
-  before sending the result
-- **THEN** the durable outbox causes the result to be delivered after recovery
+#### Scenario: Status query after process restart
+- **WHEN** `get_fulfillment_status` is called for a fulfillment whose
+  provisioning process previously restarted mid-lifecycle
+- **THEN** it returns the current, recovered state without requiring the
+  storefront to have polled during the restart window
 
-#### Scenario: Acknowledgement is lost
-- **WHEN** the storefront persists a result but its acknowledgement is lost
-- **THEN** the provisioning service retries and the storefront treats the same
-  `result_id` as an idempotent duplicate
+#### Scenario: Result query for a completed fulfillment
+- **WHEN** `get_fulfillment_result` is called for a fulfillment that
+  reached a terminal successful state
+- **THEN** it returns the normalized result and, if applicable,
+  credentials obtained fresh for this call
 
-### Requirement: Credentials are transient delivery material
+#### Scenario: Repeated result queries are idempotent by construction
+- **WHEN** `get_fulfillment_result` is called more than once for the same
+  `fulfillment_id`
+- **THEN** each call independently reflects current durable state; no
+  deduplication bookkeeping is required because reads have no delivery
+  side effect to duplicate
+
+### Requirement: Credentials are fetched on read, never persisted at rest
 
 Raw credentials MUST NOT be persisted in settlement records, generic JSON
-columns, or result outbox payloads. The delivery worker MUST obtain or refresh
-credentials just in time, transmit them only over an authenticated encrypted
-channel, and discard them afterward. Where refreshing rotates credentials, a
-monotonic `credential_generation` MUST prevent stale retries from replacing a
-newer generation.
+columns, or any other durable storage. `get_fulfillment_result`'s handler
+MUST obtain or refresh credentials at the moment it is called, return
+them only in that response over the authenticated encrypted channel, and
+MUST NOT persist them afterward. Where credentials can rotate, each
+response MUST include a monotonic `credential_generation` so a caller
+holding an earlier cached response can detect staleness.
 
-#### Scenario: Storefront unavailable during credential delivery
-- **WHEN** successful fulfillment credentials cannot be delivered because the
-  storefront is unavailable
-- **THEN** fulfillment remains successful, result delivery remains retryable,
-  and credentials can be obtained or refreshed for a later attempt
+#### Scenario: Credentials rotate between two queries
+- **WHEN** credentials are rotated between two `get_fulfillment_result`
+  calls for the same fulfillment
+- **THEN** the later call returns a higher `credential_generation` than
+  the earlier one, and the caller can detect that its cached copy is
+  stale
+
+#### Scenario: Fulfillment succeeds but is never queried
+- **WHEN** a fulfillment reaches a successful terminal state and
+  `get_fulfillment_result` is never called
+- **THEN** fulfillment remains successful and credentials remain
+  obtainable on demand whenever the storefront does call, with no
+  separate delivery-retry state to manage
 
 ### Requirement: Atomic abandonment and release
 
