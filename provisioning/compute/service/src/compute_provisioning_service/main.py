@@ -31,14 +31,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Controller imports must come AFTER container.py is imported so the module-level
-# container instance exists before @cbv decorators run.
-from vm_provisioning_adapter.controllers.system_controller import SystemController   # noqa: E402
-from vm_provisioning_adapter.controllers.jobs_controller import AnsibleJobsController  # noqa: E402
-from vm_provisioning_adapter.controllers.hosts_controller import HostController      # noqa: E402
-from vm_provisioning_adapter.controllers.vms_controller import VmController          # noqa: E402
-from vm_provisioning_adapter.controllers.leases_controller import AdminLeasesController, LeasesController   # noqa: E402
-from compute_provisioning_service.controllers.bare_metal_leases_controller import BareMetalLeasesController  # noqa: E402
+# Adapter router imports come AFTER container.py so controller decorators can
+# resolve the shared composition module without creating an import cycle.
+from vm_provisioning_adapter.routers import vm_mock_router, vm_router_mounts  # noqa: E402
+from bare_metal_provisioning_adapter.routers import bare_metal_router_mounts  # noqa: E402
 from compute_provisioning_service.controllers.compute_contract_controller import ComputeContractController  # noqa: E402
 from compute_provisioning_service.controllers.pools_controller import PoolController  # noqa: E402
 from market_site.router import make_capacity_router  # noqa: E402
@@ -188,15 +184,9 @@ app = build_compute_provisioning_app(
         ),
     ),
     routers=(
-        ComputeProvisioningRouterMount(SystemController.make_health_router()),
-        ComputeProvisioningRouterMount(SystemController.make_system_router(), "/api/v1"),
+        *vm_router_mounts(),
+        *bare_metal_router_mounts(),
         ComputeProvisioningRouterMount(ComputeContractController.make_router(), "/api/v1"),
-        ComputeProvisioningRouterMount(AnsibleJobsController.make_router(), "/api/v1"),
-        ComputeProvisioningRouterMount(HostController.make_router(), "/api/v1"),
-        ComputeProvisioningRouterMount(VmController.make_router(), "/api/v1"),
-        ComputeProvisioningRouterMount(LeasesController.make_router(), "/api/v1"),
-        ComputeProvisioningRouterMount(BareMetalLeasesController.make_router(), "/api/v1"),
-        ComputeProvisioningRouterMount(AdminLeasesController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(PoolController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(
             make_capacity_router(
@@ -212,8 +202,7 @@ app = build_compute_provisioning_app(
 import os as _os
 _active_profiles = [p.strip() for p in _os.environ.get("ACTIVE_PROFILES", "").split(",") if p.strip()]
 if "mock" in _active_profiles:
-    from vm_provisioning_adapter.controllers.test_controller import make_router as _make_test_router
-    app.include_router(_make_test_router())                                         # /test/*
+    app.include_router(vm_mock_router())                                             # /test/*
     logger.info("Test controller mounted at /test/* (mock profile active)")
 
 # Expose the container on the app instance for integration test overrides.

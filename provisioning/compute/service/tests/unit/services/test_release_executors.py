@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from compute_provisioning_service.services.release_executors import (
+from bare_metal_provisioning_adapter.release import (
     PHYSICAL_HOST_ID_REF_KEY,
     bare_metal_executor_ref,
     get_physical_host_id,

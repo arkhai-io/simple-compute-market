@@ -25,11 +25,10 @@ from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning_service.services.deal_event_sink import notify_storefront_capacity_released
-from compute_provisioning_service.services.release_executors import (
+from vm_provisioning_adapter.release import VM_EXECUTOR_KIND, VmReleaseExecutor
+from bare_metal_provisioning_adapter.release import (
     BARE_METAL_EXECUTOR_KIND,
     BareMetalReleaseExecutor,
-    VM_EXECUTOR_KIND,
-    VmReleaseExecutor,
     bare_metal_executor_ref,
 )
 

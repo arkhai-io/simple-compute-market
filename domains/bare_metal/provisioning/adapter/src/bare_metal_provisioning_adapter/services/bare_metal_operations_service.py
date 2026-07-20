@@ -22,8 +22,8 @@ from compute_provisioning_service.config import DEFAULT_BARE_METAL_RECLAIM_POLIC
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 from vm_provisioning_operator.models import JobSubmitResponse
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
-from compute_provisioning_service.services.bare_metal_lease_service import bare_metal_access_ref
-from compute_provisioning_service.services.release_executors import get_physical_host_id
+from bare_metal_provisioning_adapter.services.bare_metal_lease_service import bare_metal_access_ref
+from bare_metal_provisioning_adapter.release import get_physical_host_id
 
 if TYPE_CHECKING:
     from vm_provisioning_adapter.services.job_service import AnsibleJobService

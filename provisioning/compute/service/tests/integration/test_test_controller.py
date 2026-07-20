@@ -108,7 +108,39 @@ async def client_and_queue(
         settings=mock_settings,
         host_service=host_service,
     )
+    job_queue = AsyncJobQueue(max_concurrent=2)
 
+    from vm_provisioning_adapter.runtime import VmProvisioningRuntime
+    from vm_provisioning_adapter.services.ansible_pool_config_handler import (
+        AnsiblePoolConfigHandler,
+    )
+    from vm_provisioning_adapter.services.host_operations_service import (
+        HostOperationsService,
+    )
+    from vm_provisioning_adapter.services.vm_operations_service import (
+        VmOperationsService,
+    )
+    vm_runtime = VmProvisioningRuntime(
+        config=mock_settings,
+        session_factory=session_factory,
+        job_queue_provider=lambda: job_queue,
+        ansible_service=programmable_mock,
+        host_service=host_service,
+        pool_config_handler=AnsiblePoolConfigHandler(),
+        job_service=job_service,
+        vm_operations_service=VmOperationsService(
+            job_service=job_service,
+            job_queue_provider=lambda: job_queue,
+        ),
+        host_operations_service=HostOperationsService(
+            ansible_service=programmable_mock,
+            host_service=host_service,
+            job_service=job_service,
+            job_queue_provider=lambda: job_queue,
+        ),
+    )
+
+    app.container.vm_runtime.override(vm_runtime)
     app.container.ansible_service.override(programmable_mock)
     app.container.job_service.override(job_service)
     app.container.system_service.override(system_service)
@@ -129,7 +161,6 @@ async def client_and_queue(
     if not _already_mounted:
         app.include_router(_make_test_router())
 
-    job_queue = AsyncJobQueue(max_concurrent=2)
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()
     _container_module.resolved_host_operations_service = app.container.host_operations_service()
@@ -152,6 +183,7 @@ async def client_and_queue(
     except asyncio.CancelledError:
         pass
 
+    app.container.vm_runtime.reset_override()
     app.container.ansible_service.reset_override()
     app.container.job_service.reset_override()
     app.container.system_service.reset_override()

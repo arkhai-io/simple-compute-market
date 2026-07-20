@@ -13,7 +13,7 @@ from arkhai_bare_metal import (
 )
 from vm_provisioning_operator.models import JobSubmitResponse
 
-from compute_provisioning_service.services.bare_metal_operations_service import (
+from bare_metal_provisioning_adapter.services.bare_metal_operations_service import (
     BareMetalHostValidationError,
     BareMetalOperationsService,
 )

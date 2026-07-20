@@ -24,20 +24,20 @@
 
 ## 2. Prepare Domain-Owned Composition
 
-- [ ] 2.1 Move remaining request-path service resolution and background wiring from the VM `main` module into a local composition module
+- [x] 2.1 Move remaining request-path service resolution and background wiring from the VM `main` module into a local composition module
 - [x] 2.2 Define the compute executor adapter bundle, optional fulfillment-provider contributions, and startup validation in the destination package
-- [ ] 2.3 Export VM routers, job/action factories, release executor, result/credential codec, `AnsibleFulfillmentProvider`, readiness checks, and operator surfaces as one VM adapter
-- [ ] 2.4 Export corresponding access grant/reclaim, release, codec, readiness, and operator surfaces as one bare-metal adapter without requiring a provider contribution where none exists
+- [x] 2.3 Export VM routers, job/action factories, release executor, result/credential codec, `AnsibleFulfillmentProvider`, readiness checks, and operator surfaces as one VM adapter
+- [x] 2.4 Export corresponding access grant/reclaim, release, codec, readiness, and operator surfaces as one bare-metal adapter without requiring a provider contribution where none exists
 - [x] 2.5 Reject duplicate provider identities independently from duplicate executor/action kinds and verify provider registration does not claim or select an executor kind
 
 ## 3. Establish the Destination Service
 
 - [x] 3.1 Create the installable `provisioning/compute/service` package and compute-owned composition root
 - [x] 3.2 Move generic FastAPI assembly, middleware, startup/shutdown ordering, and background task lifecycle
-- [ ] 3.3 Move generic job read/control, executor-neutral lease, watchdog, general health/version, capacity mount, event-delivery, `PhysicalSettlementScheduler`, `DeterministicRoundRobinPolicy`, `FulfillmentService`, and provider-registry composition surfaces into the extracted service
-- [ ] 3.4 Keep VM host/action/playbook/result behavior, VM fulfillment requirements, `AnsibleFulfillmentProvider`, and direct operator routes in the VM package
-- [ ] 3.5 Keep POOLS-4/6 listing identity validation, multidimensional capacity-claim construction, VM fulfillment-plan construction, and storefront failure-policy/event handling in the VM storefront
-- [ ] 3.6 Keep bare-metal access/action/result/reclaim behavior and operator routes in the bare-metal package
+- [x] 3.3 Move generic job read/control, executor-neutral lease, watchdog, general health/version, capacity mount, event-delivery, `PhysicalSettlementScheduler`, `DeterministicRoundRobinPolicy`, `FulfillmentService`, and provider-registry composition surfaces into the extracted service
+- [x] 3.4 Keep VM host/action/playbook/result behavior, VM fulfillment requirements, `AnsibleFulfillmentProvider`, and direct operator routes in the VM package
+- [x] 3.5 Keep POOLS-4/6 listing identity validation, multidimensional capacity-claim construction, VM fulfillment-plan construction, and storefront failure-policy/event handling in the VM storefront
+- [x] 3.6 Keep bare-metal access/action/result/reclaim behavior and operator routes in the bare-metal package
 
 ## 4. Preserve Runtime and Persistence
 
@@ -45,7 +45,7 @@
 - [x] 4.2 Preserve job, allocation, deal, lease, credential, event, settlement-resource, fulfillment, capacity-dimension, and candidate-availability data and behavior across the move
 - [x] 4.3 Preserve POOLS-3's durable capacity rebind and explicitly process-local fulfillment identity semantics without implying restart-safe dispatch recovery
 - [ ] 4.4 Verify startup failure, retry scheduler, watchdog, worker, and graceful cancellation behavior in the destination app
-- [ ] 4.5 Add import-boundary tests rejecting concrete domain executor and fulfillment-provider implementations from generic compute modules and confirm extraction does not join the provider-only path to executor dispatch
+- [x] 4.5 Add import-boundary tests rejecting concrete domain executor and fulfillment-provider implementations from generic compute modules and confirm extraction does not join the provider-only path to executor dispatch
 
 ## 5. Package and Deploy the Service
 

@@ -393,10 +393,10 @@ async def client_and_queue(
     from market_site.authority import LedgerSiteAuthority
     site_authority = LedgerSiteAuthority(capacity_ledger_service)
 
-    from compute_provisioning_service.services.bare_metal_lease_service import BareMetalLeaseService
+    from bare_metal_provisioning_adapter.services.bare_metal_lease_service import BareMetalLeaseService
     bare_metal_lease_service = BareMetalLeaseService(site_authority)
 
-    from compute_provisioning_service.services.bare_metal_operations_service import BareMetalOperationsService
+    from bare_metal_provisioning_adapter.services.bare_metal_operations_service import BareMetalOperationsService
     bare_metal_operations_service = BareMetalOperationsService(
         job_service=job_service,
         job_queue_provider=lambda: job_queue,
@@ -405,11 +405,10 @@ async def client_and_queue(
     )
 
     from compute_provisioning.release import ExecutorReleaseDispatcher
-    from compute_provisioning_service.services.release_executors import (
+    from vm_provisioning_adapter.release import VM_EXECUTOR_KIND, VmReleaseExecutor
+    from bare_metal_provisioning_adapter.release import (
         BARE_METAL_EXECUTOR_KIND,
         BareMetalReleaseExecutor,
-        VM_EXECUTOR_KIND,
-        VmReleaseExecutor,
     )
     release_dispatcher = ExecutorReleaseDispatcher(
         {
@@ -438,6 +437,33 @@ async def client_and_queue(
     # Fresh queue per test — caller can inject on_job_started via fixture params
     job_queue = AsyncJobQueue(max_concurrent=2)
 
+    from vm_provisioning_adapter.runtime import VmProvisioningRuntime
+    from vm_provisioning_adapter.services.host_operations_service import (
+        HostOperationsService,
+    )
+    from vm_provisioning_adapter.services.vm_operations_service import (
+        VmOperationsService,
+    )
+    vm_runtime = VmProvisioningRuntime(
+        config=mock_settings,
+        session_factory=session_factory,
+        job_queue_provider=lambda: job_queue,
+        ansible_service=fake_ansible,
+        host_service=host_service,
+        pool_config_handler=AnsiblePoolConfigHandler(),
+        job_service=job_service,
+        vm_operations_service=VmOperationsService(
+            job_service=job_service,
+            job_queue_provider=lambda: job_queue,
+        ),
+        host_operations_service=HostOperationsService(
+            ansible_service=fake_ansible,
+            host_service=host_service,
+            job_service=job_service,
+            job_queue_provider=lambda: job_queue,
+        ),
+    )
+
     system_service = SystemService(
         ansible_service=fake_ansible,
         settings=mock_settings,
@@ -448,6 +474,7 @@ async def client_and_queue(
     )
 
     # Override container providers
+    app.container.vm_runtime.override(vm_runtime)
     app.container.ansible_service.override(fake_ansible)
     app.container.job_service.override(job_service)
     app.container.system_service.override(system_service)
@@ -482,16 +509,29 @@ async def client_and_queue(
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()
+    from compute_provisioning import ExecutorAdapterRegistry
     from compute_provisioning.executor_leases import ExecutorLeaseService
-    from compute_provisioning_service.services.compute_contract_service import build_compute_contract_service
+    from compute_provisioning_service.services.compute_contract_service import ComputeContractService
+    from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
+    from bare_metal_provisioning_adapter.compute_adapter import BareMetalComputeAdapter
     _container_module.resolved_executor_lease_service = ExecutorLeaseService(
         site_authority
     )
-    _container_module.resolved_compute_contract_service = build_compute_contract_service(
+    _container_module.resolved_compute_contract_service = ComputeContractService(
         site_authority=site_authority,
         job_service=job_service,
-        vm_operations=_container_module.resolved_vm_operations_service,
-        bare_metal_operations=bare_metal_operations_service,
+        adapters=ExecutorAdapterRegistry(
+            [
+                VmComputeAdapter(
+                    site_authority,
+                    _container_module.resolved_vm_operations_service,
+                ),
+                BareMetalComputeAdapter(
+                    site_authority,
+                    bare_metal_operations_service,
+                ),
+            ]
+        ),
     )
     _container_module.resolved_host_operations_service = app.container.host_operations_service()
 
@@ -525,6 +565,7 @@ async def client_and_queue(
         pass
 
     # Reset container overrides
+    app.container.vm_runtime.reset_override()
     app.container.ansible_service.reset_override()
     app.container.job_service.reset_override()
     app.container.system_service.reset_override()

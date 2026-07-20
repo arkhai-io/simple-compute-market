@@ -14,11 +14,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi_utils.cbv import cbv
 
 from compute_provisioning_service import container as _container_module
-from compute_provisioning_service.services.bare_metal_lease_service import (
+from bare_metal_provisioning_adapter.services.bare_metal_lease_service import (
     BareMetalLeaseService,
     bare_metal_access_ref,
 )
-from compute_provisioning_service.services.bare_metal_operations_service import (
+from bare_metal_provisioning_adapter.services.bare_metal_operations_service import (
     BareMetalHostValidationError,
     BareMetalOperationsService,
 )

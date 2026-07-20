@@ -15,7 +15,7 @@ from market_site.ledger import (
     CapacityLedgerService,
 )
 from compute_provisioning_service.db.models import Base
-from compute_provisioning_service.services.bare_metal_lease_service import (
+from bare_metal_provisioning_adapter.services.bare_metal_lease_service import (
     BareMetalLeaseService,
 )
 from compute_provisioning.lease_lifecycle import LeaseNotFoundError

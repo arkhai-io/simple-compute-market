@@ -1,55 +1,35 @@
 from __future__ import annotations
 
+from typing import Any
+
 from dependency_injector import containers, providers
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.executor_leases import ExecutorLeaseService
-from compute_provisioning.release import ExecutorReleaseDispatcher
 from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
 
+from bare_metal_provisioning_adapter.runtime import build_bare_metal_runtime
+from vm_provisioning_adapter.runtime import build_vm_runtime
+
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.db.database import create_db_engine, create_session_factory
-from vm_provisioning_adapter.services.ansible_service import AnsibleService
-from vm_provisioning_adapter.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
-from compute_provisioning_service.services.bare_metal_lease_service import BareMetalLeaseService
-from compute_provisioning_service.services.compute_contract_service import build_compute_contract_service
-from compute_provisioning_service.services.bare_metal_operations_service import BareMetalOperationsService
+from compute_provisioning_service.composition import compose_adapter_bundles
+from compute_provisioning_service.services.compute_contract_service import ComputeContractService
 from compute_provisioning_service.services.deal_event_sink import StorefrontLifecycleEventSink, notify_storefront_capacity_released
-from vm_provisioning_adapter.services.host_operations_service import HostOperationsService
-from vm_provisioning_adapter.services.host_service import HostService
-from vm_provisioning_adapter.services.job_service import AnsibleJobService
 from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
 from compute_provisioning_service.services.physical_settlement_scheduler import PhysicalSettlementScheduler
-from vm_provisioning_adapter.services.ansible_fulfillment_provider import AnsibleFulfillmentProvider
-from market_resource_pools import ProviderRegistry
 from compute_provisioning_service.services.fulfillment_service import FulfillmentService
-from compute_provisioning_service.services.release_executors import (
-    BARE_METAL_EXECUTOR_KIND,
-    BareMetalReleaseExecutor,
-    VM_EXECUTOR_KIND,
-    VmReleaseExecutor,
-)
-from vm_provisioning_adapter.services.system_service import SystemService
-from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
+
+DEFAULT_EXECUTOR_KIND = "vm"
 
 
 def _resolved_job_queue():
     if resolved_job_queue is None:
         raise RuntimeError("Job queue is not initialised")
     return resolved_job_queue
-
-
-def _make_ansible_service(cfg):
-    """Return ProgrammableMockAnsibleService when ACTIVE_PROFILES includes 'mock'."""
-    import os
-    active = [p.strip() for p in os.environ.get("ACTIVE_PROFILES", "").split(",") if p.strip()]
-    if "mock" in active:
-        from vm_provisioning_adapter.services.mock_ansible_service import ProgrammableMockAnsibleService
-        return ProgrammableMockAnsibleService(cfg)
-    return AnsibleService(cfg)
 
 
 def _make_engine():
@@ -60,23 +40,47 @@ def _make_session_factory(engine):
     return create_session_factory(engine)
 
 
-def _make_release_dispatcher(bare_metal_operations_service, job_service):
-    return ExecutorReleaseDispatcher(
-        {
-            BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
-                release_delegate=bare_metal_operations_service.reclaim_access_for_allocation,
-            ),
-            VM_EXECUTOR_KIND: VmReleaseExecutor(
-                job_service=job_service,
-                job_queue_provider=_resolved_job_queue,
-            ),
-        },
-        default_executor_kind=VM_EXECUTOR_KIND,
+def _runtime_value(runtime, name):
+    return getattr(runtime, name)
+
+
+def _vm_fulfillment_provider(runtime, resource_pool_service):
+    return runtime.fulfillment_provider(resource_pool_service)
+
+
+def _vm_bundle(runtime, site_authority, resource_pool_service):
+    return runtime.adapter_bundle(site_authority, resource_pool_service)
+
+
+def _bare_metal_bundle(runtime, site_authority):
+    return runtime.adapter_bundle(site_authority)
+
+
+def _system_service(runtime, lease_lifecycle_service):
+    return runtime.system_service(lease_lifecycle_service=lease_lifecycle_service)
+
+
+def _compose_adapters(vm_bundle, bare_metal_bundle):
+    return compose_adapter_bundles(
+        [vm_bundle, bare_metal_bundle],
+        default_executor_kind=DEFAULT_EXECUTOR_KIND,
     )
 
 
-def _make_provider_registry(ansible_fulfillment_provider):
-    return ProviderRegistry({"ansible": ansible_fulfillment_provider})
+def _provider_registry(composed_adapters):
+    return composed_adapters.provider_registry
+
+
+def _release_dispatcher(composed_adapters):
+    return composed_adapters.release_dispatcher
+
+
+def _make_compute_contract_service(site_authority, job_service, composed_adapters):
+    return ComputeContractService(
+        site_authority=site_authority,
+        job_service=job_service,
+        adapters=composed_adapters.executor_registry,
+    )
 
 
 def _make_lease_lifecycle(
@@ -87,7 +91,7 @@ def _make_lease_lifecycle(
         site_authority,
         executor_release=release_dispatcher,
         release_jobs=job_service,
-        default_executor_kind=VM_EXECUTOR_KIND,
+        default_executor_kind=DEFAULT_EXECUTOR_KIND,
         capacity_released_notifier=(
             lambda allocation: notify_storefront_capacity_released(
                 cfg, allocation, sink=lifecycle_event_sink
@@ -122,47 +126,51 @@ class Container(containers.DeclarativeContainer):
     )
 
     # ------------------------------------------------------------------
-    # Services
+    # Domain runtimes are loaded through adapter entry points. Generic
+    # composition never imports concrete request/action/provider models.
     # ------------------------------------------------------------------
-    ansible_service = providers.Singleton(
-        _make_ansible_service,
-        cfg=config,
-    )
-
-    host_service = providers.Singleton(
-        HostService,
+    vm_runtime = providers.Singleton(
+        build_vm_runtime,
+        config=config,
         session_factory=session_factory,
-        settings=config,
+        job_queue_provider=providers.Object(_resolved_job_queue),
     )
 
-    ansible_pool_config_handler = providers.Singleton(AnsiblePoolConfigHandler)
+    ansible_service = providers.Callable(
+        _runtime_value,
+        runtime=vm_runtime,
+        name=providers.Object("ansible_service"),
+    )
+    host_service = providers.Callable(
+        _runtime_value,
+        runtime=vm_runtime,
+        name=providers.Object("host_service"),
+    )
+    ansible_pool_config_handler = providers.Callable(
+        _runtime_value,
+        runtime=vm_runtime,
+        name=providers.Object("pool_config_handler"),
+    )
+    job_service = providers.Callable(
+        _runtime_value,
+        runtime=vm_runtime,
+        name=providers.Object("job_service"),
+    )
+    vm_operations_service = providers.Callable(
+        _runtime_value,
+        runtime=vm_runtime,
+        name=providers.Object("vm_operations_service"),
+    )
+    host_operations_service = providers.Callable(
+        _runtime_value,
+        runtime=vm_runtime,
+        name=providers.Object("host_operations_service"),
+    )
 
     resource_pool_service = providers.Singleton(
         ResourcePoolService,
         session_factory=session_factory,
         handlers=providers.Dict(ansible=ansible_pool_config_handler),
-    )
-
-    job_service = providers.Singleton(
-        AnsibleJobService,
-        settings=config,
-        session_factory=session_factory,
-        ansible_service=ansible_service,
-        host_service=host_service,
-    )
-
-    vm_operations_service = providers.Factory(
-        VmOperationsService,
-        job_service=job_service,
-        job_queue_provider=_resolved_job_queue,
-    )
-
-    host_operations_service = providers.Factory(
-        HostOperationsService,
-        ansible_service=ansible_service,
-        host_service=host_service,
-        job_service=job_service,
-        job_queue_provider=_resolved_job_queue,
     )
 
     capacity_ledger_service = providers.Singleton(
@@ -182,21 +190,9 @@ class Container(containers.DeclarativeContainer):
     # input and never calls the scheduler itself.
     # ------------------------------------------------------------------
     ansible_fulfillment_provider = providers.Singleton(
-        AnsibleFulfillmentProvider,
-        job_service=job_service,
+        _vm_fulfillment_provider,
+        runtime=vm_runtime,
         resource_pool_service=resource_pool_service,
-        job_queue_provider=_resolved_job_queue,
-    )
-
-    provider_registry = providers.Singleton(
-        _make_provider_registry,
-        ansible_fulfillment_provider=ansible_fulfillment_provider,
-    )
-
-    fulfillment_service = providers.Singleton(
-        FulfillmentService,
-        provider_registry=provider_registry,
-        capacity_ledger=capacity_ledger_service,
     )
 
     capacity_reservation_watchdog = providers.Singleton(
@@ -210,17 +206,23 @@ class Container(containers.DeclarativeContainer):
         ledger=capacity_ledger_service,
     )
 
-    bare_metal_lease_service = providers.Singleton(
-        BareMetalLeaseService,
+    bare_metal_runtime = providers.Singleton(
+        build_bare_metal_runtime,
         site_authority=site_authority,
-    )
-
-    bare_metal_operations_service = providers.Factory(
-        BareMetalOperationsService,
         job_service=job_service,
-        job_queue_provider=_resolved_job_queue,
-        settings=config,
+        job_queue_provider=providers.Object(_resolved_job_queue),
+        config=config,
         host_service=host_service,
+    )
+    bare_metal_lease_service = providers.Callable(
+        _runtime_value,
+        runtime=bare_metal_runtime,
+        name=providers.Object("lease_service"),
+    )
+    bare_metal_operations_service = providers.Callable(
+        _runtime_value,
+        runtime=bare_metal_runtime,
+        name=providers.Object("operations_service"),
     )
 
     executor_lease_service = providers.Singleton(
@@ -228,18 +230,46 @@ class Container(containers.DeclarativeContainer):
         site_authority=site_authority,
     )
 
-    compute_contract_service = providers.Factory(
-        build_compute_contract_service,
+    vm_adapter_bundle = providers.Singleton(
+        _vm_bundle,
+        runtime=vm_runtime,
         site_authority=site_authority,
-        job_service=job_service,
-        vm_operations=vm_operations_service,
-        bare_metal_operations=bare_metal_operations_service,
+        resource_pool_service=resource_pool_service,
     )
 
-    release_dispatcher = providers.Factory(
-        _make_release_dispatcher,
-        bare_metal_operations_service=bare_metal_operations_service,
+    bare_metal_adapter_bundle = providers.Singleton(
+        _bare_metal_bundle,
+        runtime=bare_metal_runtime,
+        site_authority=site_authority,
+    )
+
+    composed_adapters = providers.Singleton(
+        _compose_adapters,
+        vm_bundle=vm_adapter_bundle,
+        bare_metal_bundle=bare_metal_adapter_bundle,
+    )
+
+    provider_registry = providers.Singleton(
+        _provider_registry,
+        composed_adapters=composed_adapters,
+    )
+
+    release_dispatcher = providers.Singleton(
+        _release_dispatcher,
+        composed_adapters=composed_adapters,
+    )
+
+    compute_contract_service = providers.Factory(
+        _make_compute_contract_service,
+        site_authority=site_authority,
         job_service=job_service,
+        composed_adapters=composed_adapters,
+    )
+
+    fulfillment_service = providers.Singleton(
+        FulfillmentService,
+        provider_registry=provider_registry,
+        capacity_ledger=capacity_ledger_service,
     )
 
     lifecycle_event_sink = providers.Singleton(
@@ -263,12 +293,8 @@ class Container(containers.DeclarativeContainer):
     )
 
     system_service = providers.Singleton(
-        SystemService,
-        ansible_service=ansible_service,
-        settings=config,
-        host_service=host_service,
-        session_factory=session_factory,
-        job_queue_provider=_resolved_job_queue,
+        _system_service,
+        runtime=vm_runtime,
         lease_lifecycle_service=lease_lifecycle_service,
     )
 
@@ -285,19 +311,19 @@ container = Container()
 # ---------------------------------------------------------------------------
 from sqlalchemy.orm import sessionmaker, Session  # noqa: E402
 
-resolved_job_service: "AnsibleJobService | None" = None
+resolved_job_service: Any | None = None
 resolved_session_factory: "sessionmaker[Session] | None" = None
-resolved_ansible_service: "AnsibleService | None" = None
+resolved_ansible_service: Any | None = None
 resolved_job_queue: "AsyncJobQueue | None" = None
-resolved_system_service: "SystemService | None" = None
-resolved_host_service: "HostService | None" = None
-resolved_vm_operations_service: "VmOperationsService | None" = None
-resolved_host_operations_service: "HostOperationsService | None" = None
+resolved_system_service: Any | None = None
+resolved_host_service: Any | None = None
+resolved_vm_operations_service: Any | None = None
+resolved_host_operations_service: Any | None = None
 resolved_lease_lifecycle_service: "LeaseLifecycleService | None" = None
 resolved_lease_watchdog: "LeaseWatchdog | None" = None
 resolved_capacity_ledger_service: "CapacityLedgerService | None" = None
-resolved_bare_metal_lease_service: "BareMetalLeaseService | None" = None
-resolved_bare_metal_operations_service: "BareMetalOperationsService | None" = None
+resolved_bare_metal_lease_service: Any | None = None
+resolved_bare_metal_operations_service: Any | None = None
 resolved_executor_lease_service: "ExecutorLeaseService | None" = None
 resolved_compute_contract_service = None
 resolved_resource_pool_service: "ResourcePoolService | None" = None
