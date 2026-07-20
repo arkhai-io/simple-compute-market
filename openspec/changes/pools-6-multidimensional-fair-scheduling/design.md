@@ -24,10 +24,12 @@ A future policy must score actual concrete candidates or explicitly model a sche
 The sketch below is now the actual implementation shape, not a future
 possibility. `SettlementCandidate.available` and
 `SettlementRequirement.dimensions` (`compute_provisioning/physical_settlement.py`)
-are `dict[str, Decimal]` maps, e.g. `{"gpu_count": 1, "vcpu": 4,
-"memory_mb": 16384, "disk_gb": 200}` — a generic map was chosen over fixed
+are `dict[str, Decimal]` maps, e.g. `{"gpu_count": 1, "vcpu_count": 4,
+"ram_gb": 16, "disk_gb": 200}` — a generic map was chosen over fixed
 named fields to stay multi-domain-ready without a fixed vocabulary baked
-into the type.
+into the type. Key names follow the vocabulary `ComputeResource` and
+`resource_capacity_validator.py` already used, rather than introducing a
+second one (e.g. `memory_mb`) for the same quantities.
 
 ```python
 class SettlementCandidate(BaseModel):
@@ -89,20 +91,27 @@ does not generalize to it.
 
 ### VM domain wiring — deliberately scoped down for pass 1
 
-`ComputeResource` (`domains/vms/listings/models.py`) had no vCPU/RAM/disk
-field at all before pass 1, and no code path negotiated one — VM shape was
-effectively unspecified below the listing's `gpu_model`/`gpu_count`. Pass 1
-adds `vcpu_count`/`ram_gb`/`disk_gb` to `ComputeResource` as a **fixed,
-seller-declared listing attribute**, the same way `gpu_model` already
-works — every order against a listing gets the same shape. This is enough
-to prove the multidimensional admission path end-to-end for the VM domain
-without opening the negotiation-protocol question of buyer-selectable VM
-sizing, which is real future work (long-term direction, per the change
-owner) but needs its own design review and stakeholder team sign-off
-before it's picked up. `capacity_client.py` and `vm_job_spec_service.py`
-wire this fixed shape through registration and claim-building
-respectively; nothing here should be read as precedent for skipping that
-future review when negotiated sizing is eventually designed.
+`ComputeResource` (`domains/vms/listings/models.py`) already has
+`vcpu_count`/`ram_gb`/`disk_gb` fields — a per-slice, seller-declared
+shape, populated the same way `gpu_model`/`gpu_count` are. (Correcting the
+proposal's original "concrete gap" framing, which said `ComputeResource`
+had no such fields at all — that was wrong; the actual gap was narrower.)
+What was missing was purely in claim-building:
+`compute_capacity_claim_from_order` (`vm_job_spec_service.py`) only ever
+forwarded `pool_id`/`resource_id`/`region`/`gpu_model`/`gpu_count` into the
+reservation claim, so the already-existing shape fields never reached
+admission. Pass 1 adds a `dimensions` map (`gpu_count`, and
+`vcpu_count`/`ram_gb`/`disk_gb` when the listing declares them) to that
+claim, and `capacity_client.py`'s `sync_site_resources` forwards the same
+vocabulary from the storefront's local inventory into
+`SiteResource.capacity`. No schema change to `ComputeResource` was needed.
+VM shape is still a **fixed, seller-declared listing attribute** for pass
+1, not a per-order negotiated dimension — every order against a listing
+gets the same shape, and buyer-selectable VM sizing remains real future
+work (long-term direction, per the change owner) that needs its own
+design review and stakeholder team sign-off before it's picked up.
+Nothing here should be read as precedent for skipping that future review
+when negotiated sizing is eventually designed.
 
 ## Projected dominant utilization
 

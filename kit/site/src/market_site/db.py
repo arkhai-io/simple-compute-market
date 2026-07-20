@@ -76,6 +76,10 @@ class SiteResource(Base):
     resource_type = Column(String, nullable=False, default="compute.gpu")
     resource_subtype = Column(String, nullable=True)  # e.g. "h200"
     total_units = Column(Integer, nullable=False, default=0)
+    # total_units is a service-maintained mirror of capacity["gpu_count"]
+    # kept for payload/caller compatibility. May be null for pre-migration
+    # rows, in which case total_units is the only known dimension (gpu_count).
+    capacity = Column(JSON, nullable=True)
     attributes = Column(JSON, nullable=True)
     enabled = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -105,6 +109,9 @@ class SiteAllocation(Base):
     allocation_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     resource_id = Column(String, nullable=False, index=True)
     units = Column(Integer, nullable=False, default=1)
+    # units mirrors dimensions["gpu_count"] for payload/caller compatibility.
+    # May be null for pre-migration rows, in which case dimensions is {"gpu_count": units}.
+    dimensions = Column(JSON, nullable=True)
     state = Column(
         String, nullable=False, default=AllocationState.reserved.value, index=True
     )
@@ -145,4 +152,9 @@ class CapacityEvent(Base):
     version = Column(Integer, primary_key=True, autoincrement=True)
     kind = Column(String, nullable=False)  # "reserved"|"committed"|"released"|"lease_truncated"
     resource_id = Column(String, nullable=True, index=True)
+    # Signed per-dimension delta, e.g. {"gpu_count": -1, "vcpu": -4} for a
+    # reserve, {"gpu_count": 1, "vcpu": 4} for a release (POOLS-6 pass 1).
+    # Null for events that don't change held capacity (e.g. "committed",
+    # "lease_truncated") or for pre-migration rows.
+    dimensions = Column(JSON, nullable=True)
     occurred_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

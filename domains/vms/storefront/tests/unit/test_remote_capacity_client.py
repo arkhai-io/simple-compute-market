@@ -203,6 +203,53 @@ async def test_sync_site_resources_preserves_shared_host_attributes(site: FakeSi
     assert "info-1" not in site.resources
 
 
+@pytest.mark.asyncio
+async def test_sync_site_resources_forwards_multidimensional_capacity(site: FakeSite):
+    rows = [
+        {
+            "resource_id": "compute-kvm1-002",
+            "resource_type": "compute.gpu",
+            "resource_subtype": "h200",
+            "value": 8,
+            "state": "available",
+            "attributes": {
+                "vm_host": "kvm2",
+                "vcpu_count": 64,
+                "ram_gb": 512,
+                "disk_gb": 4000,
+            },
+        },
+        {
+            # A listing without a declared shape (older listing) still
+            # syncs -- gpu_count only, nothing crashes on missing fields.
+            "resource_id": "compute-kvm1-003",
+            "resource_type": "compute.gpu",
+            "value": 4,
+            "state": "available",
+            "attributes": {"vm_host": "kvm3"},
+        },
+    ]
+
+    class FakeDb:
+        async def list_resources(self):
+            return rows
+
+    real_remote = cc.RemoteCapacityClient
+
+    def fake_remote(base_url, admin_key):
+        return real_remote(base_url, admin_key, transport=site.transport())
+
+    with patch("market_storefront.utils.config.settings", _settings()):
+        with patch.object(cc, "RemoteCapacityClient", fake_remote):
+            synced = await cc.sync_site_resources(lambda: FakeDb())
+
+    assert synced == 2
+    assert site.resources["compute-kvm1-002"]["capacity"] == {
+        "gpu_count": 8, "vcpu_count": 64, "ram_gb": 512, "disk_gb": 4000,
+    }
+    assert site.resources["compute-kvm1-003"]["capacity"] == {"gpu_count": 4}
+
+
 def test_build_always_aggregates_site_authorities():
     with patch("market_storefront.utils.config.settings", _settings()):
         built = cc.build_capacity_client(lambda: None)

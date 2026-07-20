@@ -74,6 +74,7 @@ class FakeSite:
                 "resource_id": rid,
                 "total_units": body["total_units"],
                 "attributes": body.get("attributes") or {},
+                "capacity": body.get("capacity"),
                 "enabled": body.get("enabled", True),
             }
             self._emit("released", rid)

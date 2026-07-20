@@ -8,14 +8,24 @@ the ``/api/v1/capacity`` HTTP surface, which mirrors the
 ``core_storefront.capacity.CapacityClient`` contract verb for verb.
 
 Matching semantics: a claim is an exact-match attribute mapping plus a
-``units`` request (``gpu_count`` is the VM domain's alias), checked
-first against the resource's attributes JSON and then against its
-top-level fields. Domain-specific eligibility should normally be
-expressed in those claims — for example VM claims name ``vm_host`` while
-bare-metal claims name ``physical_host_id`` and ``allocation_mode``.
-``required_attributes`` remains available for single-domain hosts that
-need a coarse local invariant, but multi-domain provisioners should pass
-none.
+quantity request, checked first against the resource's attributes JSON
+and then against its top-level fields. Domain-specific eligibility should
+normally be expressed in those claims — for example VM claims name
+``vm_host`` while bare-metal claims name ``physical_host_id`` and
+``allocation_mode``. ``required_attributes`` remains available for
+single-domain hosts that need a coarse local invariant, but multi-domain
+provisioners should pass none.
+
+A claim's ``dimensions`` mapping is authoritative when present and is
+checked against every dimension a candidate resource declares in its
+``capacity`` map.
+
+Legacy single-quantity claims (``units``/``gpu_count``) keep working.
+They translate internally to ``dimensions={"gpu_count": n}``.
+``SiteResource.total_units`` and ``SiteAllocation.units`` remain
+service-maintained mirrors for payload and caller compatibility.
+
+``capacity``/``dimensions`` are the source of truth.
 
 Mutations serialize on a process-level lock: the site authority is the
 serialization point for reserves across storefronts, and that point is
@@ -30,6 +40,7 @@ import logging
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping, Optional, Sequence
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -115,9 +126,16 @@ def _windows_overlap(
 # Claim keys that request a unit count rather than matching an attribute.
 # "units" is the generic key; "gpu_count" is the VM domain's alias.
 _UNIT_CLAIM_KEYS = ("units", "gpu_count")
+_DIMENSIONS_CLAIM_KEY = "dimensions"
+
+# The dimension that SiteResource.total_units / SiteAllocation.units /
+# legacy single-quantity claims all mean. Every pre-pass-1 caller speaks
+# only this one dimension, so it's what they mirror into/out of.
+PRIMARY_DIMENSION = "gpu_count"
 
 
 def _requested_units(claim: Mapping[str, Any] | None) -> int:
+    """Legacy single-quantity parse, kept for the primary-dimension mirror."""
     claim = claim or {}
     key = next((k for k in _UNIT_CLAIM_KEYS if claim.get(k) is not None), None)
     if key is None:
@@ -130,6 +148,82 @@ def _requested_units(claim: Mapping[str, Any] | None) -> int:
     if requested < 1:
         raise ValueError(f"{key} must be >= 1, got {requested}")
     return requested
+
+
+def _to_decimal(value: Any, *, label: str) -> Decimal:
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be numeric, got {value!r}") from exc
+    if amount <= 0:
+        raise ValueError(f"{label} must be > 0, got {amount}")
+    return amount
+
+
+def _requested_dimensions(claim: Mapping[str, Any] | None) -> dict[str, Decimal]:
+    """Parse a claim's quantity request as a dimensions map.
+
+    ``dimensions`` is authoritative when present. Otherwise falls back to
+    the legacy single-quantity claim (``units``/``gpu_count``), translated
+    to ``{"gpu_count": n}`` so every existing caller's claim shape keeps
+    working unchanged.
+    """
+    claim = claim or {}
+    raw = claim.get(_DIMENSIONS_CLAIM_KEY)
+    if raw:
+        return {
+            str(key): _to_decimal(value, label=f"dimensions[{key}]")
+            for key, value in raw.items()
+        }
+    return {PRIMARY_DIMENSION: Decimal(_requested_units(claim))}
+
+
+def _serialize_dimensions(dimensions: Mapping[str, Decimal]) -> dict[str, float | int]:
+    """JSON-column-safe representation: whole numbers as int, else float."""
+    result: dict[str, float | int] = {}
+    for key, amount in dimensions.items():
+        as_int = int(amount)
+        result[key] = as_int if Decimal(as_int) == amount else float(amount)
+    return result
+
+
+def _to_decimal_nonneg(value: Any, *, label: str) -> Decimal:
+    """Like :func:`_to_decimal` but allows zero (a declared-but-empty dimension)."""
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be numeric, got {value!r}") from exc
+    if amount < 0:
+        raise ValueError(f"{label} must be >= 0, got {amount}")
+    return amount
+
+
+def _resource_capacity(resource: SiteResource) -> dict[str, Decimal]:
+    """A resource's declared total capacity per dimension.
+
+    Falls back to ``{"gpu_count": total_units}`` for pre-migration rows
+    that have never had ``capacity`` populated.
+    """
+    if resource.capacity:
+        return {
+            str(key): _to_decimal_nonneg(value, label=f"capacity[{key}]")
+            for key, value in resource.capacity.items()
+        }
+    return {PRIMARY_DIMENSION: Decimal(int(resource.total_units or 0))}
+
+
+def _allocation_dimensions(allocation: SiteAllocation) -> dict[str, Decimal]:
+    """An allocation's held quantity per dimension.
+
+    Falls back to ``{"gpu_count": units}`` for pre-migration rows that
+    have never had ``dimensions`` populated.
+    """
+    if allocation.dimensions:
+        return {
+            str(key): Decimal(str(value))
+            for key, value in allocation.dimensions.items()
+        }
+    return {PRIMARY_DIMENSION: Decimal(int(allocation.units or 0))}
 
 
 def _resource_matches(
@@ -151,7 +245,7 @@ def _resource_matches(
         "gpu_count": resource.total_units,
     }
     for key, expected in claim.items():
-        if key in _UNIT_CLAIM_KEYS:
+        if key in _UNIT_CLAIM_KEYS or key == _DIMENSIONS_CLAIM_KEY:
             continue
         actual = attrs.get(key, top_level.get(key))
         if actual != expected:
@@ -194,38 +288,59 @@ class CapacityLedgerService:
         resource_type: str = "compute.gpu",
         resource_subtype: str | None = None,
         attributes: Mapping[str, Any] | None = None,
+        capacity: Mapping[str, Any] | None = None,
         enabled: bool = True,
     ) -> dict[str, Any]:
         """Insert or update a ledger resource; emits a delta on change.
+
+        ``capacity`` is the multidimensional total.
+        ``total_units`` remains a service-maintained mirror of ``capacity["gpu_count"]``.
+        When ``capacity`` omits ``gpu_count``, the supplied ``total_units`` fills it in.
 
         An upsert that changes capacity (units, enablement) emits a
         "released" or "reserved"-equivalent availability change; we use
         "released" for grows/registrations and "reserved" for shrinks so
         subscribers reconcile in the right direction without a new kind.
+        The event's ``dimensions`` carries the signed per-dimension delta.
         """
         with self._lock, self._session_factory() as db:
             row = db.get(SiteResource, resource_id)
+            old_capacity = _resource_capacity(row) if row is not None else {}
+            new_dimensions = dict(capacity or {})
+            new_dimensions.setdefault(PRIMARY_DIMENSION, int(total_units))
+            new_capacity = {
+                str(key): _to_decimal_nonneg(value, label=f"capacity[{key}]")
+                for key, value in new_dimensions.items()
+            }
+            mirrored_units = int(new_capacity.get(PRIMARY_DIMENSION, Decimal(int(total_units))))
             grew = True
             if row is None:
                 row = SiteResource(
                     resource_id=resource_id,
                     resource_type=resource_type,
                     resource_subtype=resource_subtype,
-                    total_units=int(total_units),
+                    total_units=mirrored_units,
+                    capacity=_serialize_dimensions(new_capacity),
                     attributes=dict(attributes or {}),
                     enabled=enabled,
                 )
                 db.add(row)
             else:
-                grew = (int(total_units), enabled) >= (int(row.total_units), bool(row.enabled))
+                grew = (mirrored_units, enabled) >= (int(row.total_units), bool(row.enabled))
                 row.resource_type = resource_type
                 row.resource_subtype = resource_subtype
-                row.total_units = int(total_units)
+                row.total_units = mirrored_units
+                row.capacity = _serialize_dimensions(new_capacity)
                 row.attributes = dict(attributes or {})
                 row.enabled = enabled
+            delta = {
+                key: new_capacity.get(key, Decimal(0)) - old_capacity.get(key, Decimal(0))
+                for key in set(new_capacity) | set(old_capacity)
+            }
             db.add(CapacityEvent(
                 kind="released" if grew else "reserved",
                 resource_id=resource_id,
+                dimensions=_serialize_dimensions(delta),
             ))
             db.commit()
             return self._resource_payload(db, db.get(SiteResource, resource_id))
@@ -256,7 +371,7 @@ class CapacityLedgerService:
         lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         """Dry-run match for ``claim`` — consumes nothing."""
-        requested = _requested_units(claim)
+        requested = _requested_dimensions(claim)
         window_start, window_end = _lease_window(
             lease_start_utc=lease_start_utc,
             lease_duration_seconds=lease_duration_seconds,
@@ -279,7 +394,7 @@ class CapacityLedgerService:
         lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         """Atomically check-and-reserve capacity matching ``claim``."""
-        requested = _requested_units(claim)
+        requested = _requested_dimensions(claim)
         deal = dict(deal_ref or {})
         window_start, window_end = _lease_window(
             lease_start_utc=lease_start_utc,
@@ -296,10 +411,12 @@ class CapacityLedgerService:
                 hold_expires_at = (
                     datetime.now(timezone.utc) + timedelta(seconds=float(ttl_seconds))
                 ).isoformat()
+            mirrored_units = int(requested.get(PRIMARY_DIMENSION, Decimal(0)))
             allocation = SiteAllocation(
                 allocation_id=str(uuid.uuid4()),
                 resource_id=resource.resource_id,
-                units=requested,
+                units=mirrored_units,
+                dimensions=_serialize_dimensions(requested),
                 state=AllocationState.reserved.value,
                 deal_ref=deal,
                 escrow_uid=deal.get("escrow_uid"),
@@ -314,9 +431,17 @@ class CapacityLedgerService:
                 lease_end_utc=window_end.isoformat() if window_end else None,
             )
             db.add(allocation)
-            db.add(CapacityEvent(kind="reserved", resource_id=resource.resource_id))
+            db.add(CapacityEvent(
+                kind="reserved",
+                resource_id=resource.resource_id,
+                dimensions=_serialize_dimensions({k: -v for k, v in requested.items()}),
+            ))
             db.commit()
-            payload = self._match_payload(resource, available - requested, requested)
+            available_after = {
+                key: available.get(key, Decimal(0)) - requested.get(key, Decimal(0))
+                for key in set(available) | set(requested)
+            }
+            payload = self._match_payload(resource, available_after, requested)
             payload["allocation_id"] = allocation.allocation_id
             payload["hold_expires_at"] = hold_expires_at
             return payload
@@ -346,21 +471,31 @@ class CapacityLedgerService:
                 raise CapacityConflictError(
                     f"settlement resource {settlement_resource_id!r} is unavailable"
                 )
-            held = sum(
-                row.units for row in db.query(SiteAllocation).filter(
-                    SiteAllocation.resource_id == settlement_resource_id,
-                    SiteAllocation.state.in_(HELD_ALLOCATION_STATES),
-                ).all()
+            allocation_dims = _allocation_dimensions(allocation)
+            held = self._held_dimensions(db, settlement_resource_id)
+            capacity = _resource_capacity(destination)
+            insufficient = any(
+                capacity.get(dim, Decimal(0)) - held.get(dim, Decimal(0)) < amount
+                for dim, amount in allocation_dims.items()
             )
-            if destination.total_units - held < allocation.units:
+            if insufficient:
                 raise CapacityConflictError(
                     f"settlement resource {settlement_resource_id!r} lacks capacity"
                 )
             source_id = allocation.resource_id
             allocation.resource_id = settlement_resource_id
             allocation.vm_host = (destination.attributes or {}).get("vm_host")
-            db.add(CapacityEvent(kind="capacity_released_for_reassignment", resource_id=source_id))
-            db.add(CapacityEvent(kind="capacity_assigned_for_settlement", resource_id=settlement_resource_id))
+            serialized_dims = _serialize_dimensions(allocation_dims)
+            db.add(CapacityEvent(
+                kind="capacity_released_for_reassignment",
+                resource_id=source_id,
+                dimensions=serialized_dims,
+            ))
+            db.add(CapacityEvent(
+                kind="capacity_assigned_for_settlement",
+                resource_id=settlement_resource_id,
+                dimensions=_serialize_dimensions({k: -v for k, v in allocation_dims.items()}),
+            ))
             db.commit()
             return self._allocation_payload(allocation)
 
@@ -436,7 +571,11 @@ class CapacityLedgerService:
             allocation.released_at = datetime.now(timezone.utc).isoformat()
             allocation.failure_reason = failure_reason
             allocation.failure_message = failure_message
-            db.add(CapacityEvent(kind="released", resource_id=allocation.resource_id))
+            db.add(CapacityEvent(
+                kind="released",
+                resource_id=allocation.resource_id,
+                dimensions=_serialize_dimensions(_allocation_dimensions(allocation)),
+            ))
             db.commit()
             return self._allocation_payload(allocation)
 
@@ -703,6 +842,7 @@ class CapacityLedgerService:
                     "version": row.version,
                     "kind": row.kind,
                     "resource_id": row.resource_id,
+                    "dimensions": dict(row.dimensions) if row.dimensions else None,
                     "occurred_at": (
                         row.occurred_at.isoformat() if row.occurred_at else None
                     ),
@@ -787,13 +927,17 @@ class CapacityLedgerService:
         if lapsed:
             db.commit()
 
-    def _held_units(
+    def _held_dimensions(
         self,
         db: Session,
         resource_id: str,
         lease_start: datetime | None = None,
         lease_end: datetime | None = None,
-    ) -> int:
+    ) -> dict[str, Decimal]:
+        """Sum held quantity per dimension across overlapping allocations.
+
+        Generalizes the old single-dimension ``_held_units``.
+        """
         rows = (
             db.query(SiteAllocation)
             .filter(
@@ -802,35 +946,53 @@ class CapacityLedgerService:
             )
             .all()
         )
+        totals: dict[str, Decimal] = {}
+
+        def _accumulate(row: SiteAllocation) -> None:
+            for key, amount in _allocation_dimensions(row).items():
+                totals[key] = totals.get(key, Decimal(0)) + amount
+
         if lease_start is None and lease_end is None:
-            return sum(int(row.units or 0) for row in rows)
-        total = 0
+            for row in rows:
+                _accumulate(row)
+            return totals
         for row in rows:
             if row.state in {
                 AllocationState.releasing.value,
                 AllocationState.release_failed.value,
                 AllocationState.unmanaged.value,
             }:
-                total += int(row.units or 0)
+                _accumulate(row)
                 continue
             row_start = parse_utc(row.lease_start_utc)
             row_end = parse_utc(row.lease_end_utc)
             if row_start is None and row_end is None:
                 # Legacy/current holds without a window block every window.
-                total += int(row.units or 0)
+                _accumulate(row)
                 continue
             if _windows_overlap(lease_start, lease_end, row_start, row_end):
-                total += int(row.units or 0)
-        return total
+                _accumulate(row)
+        return totals
+
+    def _held_units(
+        self,
+        db: Session,
+        resource_id: str,
+        lease_start: datetime | None = None,
+        lease_end: datetime | None = None,
+    ) -> int:
+        """Legacy single-dimension accessor, kept for the primary mirror."""
+        held = self._held_dimensions(db, resource_id, lease_start, lease_end)
+        return int(held.get(PRIMARY_DIMENSION, Decimal(0)))
 
     def _find_candidate(
         self,
         db: Session,
         claim: Mapping[str, Any] | None,
-        requested: int,
+        requested: Mapping[str, Decimal],
         lease_start: datetime | None = None,
         lease_end: datetime | None = None,
-    ) -> tuple[SiteResource, int] | None:
+    ) -> tuple[SiteResource, dict[str, Decimal]] | None:
         rows = (
             db.query(SiteResource)
             .filter(SiteResource.enabled.is_(True))
@@ -850,10 +1012,20 @@ class CapacityLedgerService:
                 db, resource, lease_start, lease_end,
             ):
                 continue
-            available = int(resource.total_units or 0) - self._held_units(
-                db, resource.resource_id, lease_start, lease_end
+            capacity = _resource_capacity(resource)
+            held = self._held_dimensions(db, resource.resource_id, lease_start, lease_end)
+            available = {
+                key: capacity.get(key, Decimal(0)) - held.get(key, Decimal(0))
+                for key in capacity
+            }
+            # Hard fit: every requested dimension must both be declared by
+            # this resource (a dimension the resource never mentions can't
+            # be assumed to have room) and have enough unallocated capacity.
+            fits = all(
+                available.get(dim, Decimal(0)) >= amount
+                for dim, amount in requested.items()
             )
-            if available < requested:
+            if not fits:
                 continue
             return resource, available
         return None
@@ -881,24 +1053,30 @@ class CapacityLedgerService:
 
     def _resource_payload(self, db: Session, row: SiteResource) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
-        held = self._held_units(
+        capacity = _resource_capacity(row)
+        held = self._held_dimensions(
             db,
             row.resource_id,
             now,
             now + timedelta(microseconds=1),
         )
         total = int(row.total_units or 0)
+        held_primary = int(held.get(PRIMARY_DIMENSION, Decimal(0)))
         blocked = self._has_physical_host_conflict(
             db, row, now, now + timedelta(microseconds=1),
         )
         if blocked:
-            available = 0
+            available_map = {key: Decimal(0) for key in capacity}
             state = "leased"
         else:
-            available = max(total - held, 0)
-            if available >= total or held <= 0:
+            available_map = {
+                key: max(capacity.get(key, Decimal(0)) - held.get(key, Decimal(0)), Decimal(0))
+                for key in capacity
+            }
+            available_primary = int(available_map.get(PRIMARY_DIMENSION, Decimal(total)))
+            if available_primary >= total or held_primary <= 0:
                 state = "available"
-            elif available > 0:
+            elif available_primary > 0:
                 state = "available"
             else:
                 state = "leased"
@@ -909,7 +1087,9 @@ class CapacityLedgerService:
             "unit": "count",
             "value": total,
             "state": state,
-            "available_units": available,
+            "available_units": int(available_map.get(PRIMARY_DIMENSION, Decimal(total))),
+            "capacity": _serialize_dimensions(capacity),
+            "available": _serialize_dimensions(available_map),
             "attributes": dict(row.attributes or {}),
             "enabled": bool(row.enabled),
         }
@@ -980,14 +1160,22 @@ class CapacityLedgerService:
 
     @staticmethod
     def _match_payload(
-        resource: SiteResource, available: int, requested: int
+        resource: SiteResource,
+        available: Mapping[str, Decimal],
+        requested: Mapping[str, Decimal],
     ) -> dict[str, Any]:
         """Shape a probe/reserve result like the embedded adapter's.
 
         pool/member are storefront (aggregator) concepts the site does not
         know; they are present-and-None for payload compatibility.
+        ``requested``/``available`` are full per-dimension maps (POOLS-6
+        pass 1); ``allocated_units``/``available_units`` and their
+        ``*_gpu_count`` aliases stay byte-compatible by mirroring the
+        primary (``gpu_count``) dimension.
         """
         attrs = dict(resource.attributes or {})
+        allocated_primary = int(requested.get(PRIMARY_DIMENSION, Decimal(0)))
+        available_primary = int(available.get(PRIMARY_DIMENSION, Decimal(0)))
         return {
             "resource_id": resource.resource_id,
             "pool_id": None,
@@ -997,12 +1185,15 @@ class CapacityLedgerService:
             "unit": "count",
             "state": "available",
             "value": int(resource.total_units or 0),
-            "allocated_units": requested,
-            "available_units": available,
+            "allocated_units": allocated_primary,
+            "available_units": available_primary,
             # VM-domain aliases, kept so the remote client stays
             # byte-compatible with the embedded adapter it replaced.
-            "allocated_gpu_count": requested,
-            "available_gpu_count": available,
+            "allocated_gpu_count": allocated_primary,
+            "available_gpu_count": available_primary,
+            "dimensions": _serialize_dimensions(requested),
+            "available": _serialize_dimensions(available),
+            "capacity": _serialize_dimensions(_resource_capacity(resource)),
             "attributes": attrs,
         }
 
@@ -1014,6 +1205,7 @@ class CapacityLedgerService:
             "pool_id": None,
             "units": int(allocation.units or 0),
             "allocated_gpu_count": int(allocation.units or 0),
+            "dimensions": _serialize_dimensions(_allocation_dimensions(allocation)),
             "state": allocation.state,
             "deal_ref": dict(allocation.deal_ref or {}),
             "escrow_uid": allocation.escrow_uid,

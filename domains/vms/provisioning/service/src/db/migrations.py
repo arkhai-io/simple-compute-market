@@ -229,6 +229,21 @@ def _migrate_vm_leases_allocation_id(engine: Engine) -> None:
         )
 
 
+def _migrate_multidimensional_capacity(engine: Engine) -> None:
+    """Add POOLS-6 pass-1 multidimensional capacity columns.
+
+    Additive-only: ``site_resources.total_units`` and
+    ``site_allocations.units`` are left in place as service-maintained
+    mirrors of ``capacity["gpu_count"]``/``dimensions["gpu_count"]`` so
+    existing readers keep working unchanged. Pre-migration rows have
+    ``capacity``/``dimensions`` = NULL; the ledger falls back to
+    ``{"gpu_count": total_units}``/``{"gpu_count": units}`` for those rows.
+    """
+    _add_column_if_missing(engine, "site_resources", "capacity", "JSON")
+    _add_column_if_missing(engine, "site_allocations", "dimensions", "JSON")
+    _add_column_if_missing(engine, "capacity_events", "dimensions", "JSON")
+
+
 def _migrate_drop_vm_leases_table(engine: Engine) -> None:
     """Drop vm_leases for good.
 
@@ -364,5 +379,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260718_001_drop_vm_leases_table",
         _migrate_drop_vm_leases_table,
+    ),
+    Migration(
+        "20260720_001_multidimensional_capacity",
+        _migrate_multidimensional_capacity,
     ),
 )

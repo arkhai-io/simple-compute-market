@@ -87,6 +87,7 @@ Shared storefront/provisioner DTOs, executor-neutral resource-pool models, and g
 ## Evidence
 
 - VM and bare-metal allocation executor metadata: `domains/vms/provisioning/service/tests/integration/test_leases_api.py` and `test_bare_metal_leases_api.py`.
+- Multidimensional scheduling eligibility (fit rejected on a secondary dimension even when GPU count would fit, legacy gpu-only requests unaffected): `domains/vms/provisioning/service/src/tests/unit/services/test_physical_settlement_scheduler.py` (POOLS-6 pass 1 tests).
 - Persisted asynchronous job lifecycle and polling: `domains/vms/provisioning/service/tests/integration/test_vms_api.py`.
 - Executor-specific release, failed-release capacity retention, retry, and force release: `domains/vms/provisioning/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `unit/services/test_ledger_lease_lifecycle.py`.
 
@@ -96,4 +97,4 @@ Shared storefront/provisioner DTOs, executor-neutral resource-pool models, and g
 
 Physical provisioning distinguishes **Capacity Reservation → Capacity Settlement Assignment → Physical Settlement → Provisioned Resource / Active Workload**. Generic scheduling chooses an eligible Settlement Resource. Physical Settlement is provider-specific execution on that assigned resource. Provider-specific reachability, credentials, topology, and execution failures remain downstream of generic scheduling eligibility.
 
-The current scheduling policy is deterministic round-robin through a replaceable policy interface. Generic policy and orchestration code use resource kind, units, pool identity, and opaque attributes and do not import market-specific executor persistence models.
+The current scheduling policy is deterministic round-robin through a replaceable policy interface. Generic policy and orchestration code use resource kind, a per-dimension quantity map (`dimensions`/`available`, checked against every dimension a candidate declares — POOLS-6 pass 1), pool identity, and opaque attributes and do not import market-specific executor persistence models.

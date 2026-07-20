@@ -51,26 +51,36 @@ Design resolution (2026-07-20, resolved):
 
 Implementation:
 
-- [ ] Add `dimensions`/`available` maps to `SettlementRequirement`/
+- [x] Add `dimensions`/`available` maps to `SettlementRequirement`/
       `SettlementCandidate` in `compute_provisioning/physical_settlement.py`.
-- [ ] Add `SiteResource.capacity` and `SiteAllocation.dimensions` columns
+- [x] Add `SiteResource.capacity` and `SiteAllocation.dimensions` columns
       (`kit/site/src/market_site/db.py`) plus additive migrations in
-      `domains/vms/provisioning/service/src/db/migrations.py`.
-- [ ] Generalize `CapacityLedgerService` held/available accounting,
+      `domains/vms/provisioning/service/src/db/migrations.py` (also added
+      `CapacityEvent.dimensions` for the per-dimension delta feed).
+- [x] Generalize `CapacityLedgerService` held/available accounting,
       matching, `register_resource`, `probe`/`reserve`, and payload
       builders to be dimension-aware; keep legacy single-quantity claims
       (`units`/`gpu_count`) working unchanged via internal translation.
-- [ ] Update `PhysicalSettlementScheduler._requirement`/
+- [x] Update `PhysicalSettlementScheduler._requirement`/
       `_eligible_candidates` to build/evaluate `dimensions`.
-- [ ] Add fixed `vcpu_count`/`ram_gb`/`disk_gb` fields to `ComputeResource`
-      (`domains/vms/listings/models.py`).
-- [ ] Wire `capacity_client.py`'s `register_resource` call to populate
-      `capacity` from the already-present host CSV columns.
-- [ ] Wire `vm_job_spec_service.py`'s claim building to include
-      `dimensions` from the listing's fixed shape.
-- [ ] Update/add tests: `kit/site` ledger, scheduler, capacity_client,
-      vm_job_spec_service, listings model.
-- [ ] Promote the shipped pass-1 behavior from this change's spec delta
+- [x] ~~Add fixed `vcpu_count`/`ram_gb`/`disk_gb` fields to
+      `ComputeResource`~~ — not needed; those fields already existed
+      (see `design.md`'s "VM domain wiring" correction). The actual gap
+      was `compute_capacity_claim_from_order` never forwarding them.
+- [x] Wire `vm_job_spec_service.py`'s claim building to include a
+      `dimensions` map (`gpu_count`, `vcpu_count`, `ram_gb`, `disk_gb`)
+      from the listing's fixed shape, alongside the existing exact-match
+      attributes.
+- [x] Wire `capacity_client.py`'s `register_resource` call to populate
+      `capacity` from the storefront's local row attributes (same
+      vocabulary as `resource_capacity_validator.py`). Plumbed `capacity`
+      through the HTTP boundary (`http_models.py`, `router.py`,
+      `RemoteCapacityClient`).
+- [x] Update/add tests: `kit/site` ledger (10 new + 30 existing passing),
+      scheduler (3 new + 9 existing passing), `capacity_client`/
+      `sync_site_resources` (1 new, existing passing),
+      `vm_job_spec_service` claim-building (2 new, existing passing).
+- [x] Promote the shipped pass-1 behavior from this change's spec delta
       into baseline `site-capacity`/`physical-provisioning` specs; record
       the deferred negotiated-VM-sizing question and the pools-8
       validator-deletion dependency in the relevant proposals.

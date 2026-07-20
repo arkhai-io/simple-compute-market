@@ -138,9 +138,20 @@ class PhysicalSettlementScheduler:
             or "compute.gpu"
         )
         attributes = dict(request.requirements.get("attributes") or {})
+        # dimensions is authoritative when the reservation carries one.
+        # Otherwise fall back to the allocation's legacy  single-quantity "units",
+        # translated to the primary dimension, so reservations made before this
+        # change keep scheduling unchanged.
+        dimensions = dict(
+            request.requirements.get("dimensions")
+            or allocation.get("dimensions")
+            or {}
+        )
+        if not dimensions:
+            dimensions = {"gpu_count": max(int(allocation.get("units") or 1), 1)}
         return SettlementRequirement(
             resource_kind=resource_kind,
-            units=max(int(allocation.get("units") or 1), 1),
+            dimensions=dimensions,
             attributes=attributes,
         )
 
@@ -150,6 +161,7 @@ class PhysicalSettlementScheduler:
         allocation: dict[str, Any],
     ) -> list[SettlementCandidate]:
         pools = {pool.id: pool for pool in self._pool_service.list_pools(enabled_only=True)}
+        allocation_dimensions = dict(allocation.get("dimensions") or {})
         candidates: list[SettlementCandidate] = []
         for payload in self._capacity_ledger.list_resources():
             attributes = dict(payload.get("attributes") or {})
@@ -160,14 +172,20 @@ class PhysicalSettlementScheduler:
                 continue
             if payload.get("resource_type") != requirement.resource_kind:
                 continue
-            available_units = int(payload.get("available_units") or 0)
+            available = dict(payload.get("available") or {})
             # The current ledger reserves against a concrete line item before
-            # POOLS-2 scheduling. Credit this allocation's own held units back
-            # during eligibility evaluation; POOLS-3 persistence will move the
-            # concrete claim into the assignment transaction.
+            # POOLS-2 scheduling. Credit this allocation's own held
+            # dimensions back during eligibility evaluation; POOLS-3
+            # persistence will move the concrete claim into the assignment
+            # transaction.
             if payload.get("resource_id") == allocation.get("resource_id"):
-                available_units += requirement.units
-            if available_units < requirement.units:
+                for key, amount in allocation_dimensions.items():
+                    available[key] = available.get(key, 0) + amount
+            fits = all(
+                available.get(dim, 0) >= amount
+                for dim, amount in requirement.dimensions.items()
+            )
+            if not fits:
                 continue
             if any(attributes.get(key) != value for key, value in requirement.attributes.items()):
                 continue
@@ -177,7 +195,7 @@ class PhysicalSettlementScheduler:
                     resource_id=payload["resource_id"],
                     pool_id=pool_id,
                     resource_kind=payload["resource_type"],
-                    available_units=available_units,
+                    available=available,
                     provider=pool.provider,
                     attributes=attributes,
                 )

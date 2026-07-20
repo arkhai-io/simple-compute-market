@@ -83,6 +83,19 @@ storefront to reliably send *valid* claims in the first place.
   lands (see "Why" above).
 - Depends on `kit/resource-pools`' `GET /api/v1/pools` admin API
   (already exists) for the pull source.
+- **`resource_capacity_validator.py` deletion (from `pools-6` pass 1,
+  design review 2026-07-20):** this module validates operator CSV
+  imports against the storefront's local `resources` table — the same
+  table this change retires in favor of `CapacityProjection`. It was
+  deliberately left as-is during `pools-6` pass 1 rather than migrated,
+  specifically so it could be deleted outright once this change removes
+  the table it operates on, instead of needing its own migration path.
+  Dimension vocabulary (`vcpu_count`/`ram_gb`/`disk_gb`) was converged
+  between it and the site ledger's admission-time capacity check in pass
+  1 for exactly this reason. When planning this change, confirm the
+  local `resources` table has no remaining readers before deleting
+  `resource_capacity_validator.py` and its call site in
+  `SQLiteClient.upsert_resource`.
 
 ## Impact
 

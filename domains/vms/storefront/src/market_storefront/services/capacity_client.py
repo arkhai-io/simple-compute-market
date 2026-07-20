@@ -276,11 +276,21 @@ async def sync_site_resources(
             total_units = max(int(total), 0)
         except (TypeError, ValueError):
             total_units = 0
+        # forward whichever dimensions the row's attributes declare, using
+        # the same vocabulary resource_capacity_validator.py already checks
+        # host totals against. gpu_count always goes through explicitly so
+        # it's present even when the row's "value" (not its attributes) is
+        # the only place total GPU count is recorded.
+        capacity = {"gpu_count": total_units}
+        for key in ("vcpu_count", "ram_gb", "disk_gb"):
+            if attrs.get(key) is not None:
+                capacity[key] = attrs[key]
         await client.register_resource(
             str(row["resource_id"]),
             total_units=total_units,
             resource_subtype=row.get("resource_subtype"),
             attributes=attrs,
+            capacity=capacity,
             enabled=str(row.get("state") or "") != "deleted",
         )
         synced += 1

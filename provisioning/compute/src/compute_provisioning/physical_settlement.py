@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class PhysicalSettlementError(Exception):
@@ -44,20 +45,37 @@ class PhysicalSettlementRequest(BaseModel):
 
 
 class SettlementRequirement(BaseModel):
-    """Generic capacity shape used to evaluate concrete candidates."""
+    """Generic capacity shape used to evaluate concrete candidates.
+
+    ``dimensions`` At least one positive dimension is required.
+    """
 
     resource_kind: str
-    units: int = Field(gt=0)
+    dimensions: dict[str, Decimal] = Field(default_factory=dict)
     attributes: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("dimensions")
+    @classmethod
+    def _dimensions_positive_and_nonempty(cls, value: dict[str, Decimal]) -> dict[str, Decimal]:
+        if not value:
+            raise ValueError("dimensions must declare at least one quantity")
+        for key, amount in value.items():
+            if amount <= 0:
+                raise ValueError(f"dimensions[{key}] must be > 0, got {amount}")
+        return value
 
 
 class SettlementCandidate(BaseModel):
-    """One concrete resource eligible for physical settlement evaluation."""
+    """One concrete resource eligible for physical settlement evaluation.
+
+    ``available`` A dimension a candidate never mentions is treated
+    as unavailable (zero), matching the ledger's hard fit rule.
+    """
 
     resource_id: str
     pool_id: str
     resource_kind: str
-    available_units: int
+    available: dict[str, Decimal] = Field(default_factory=dict)
     enabled: bool = True
     provider: str
     attributes: dict[str, Any] = Field(default_factory=dict)

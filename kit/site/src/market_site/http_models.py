@@ -33,6 +33,14 @@ class ResourceRegisterRequest(BaseModel):
             "Market schema (pricing, escrows) stays on the storefront."
         ),
     )
+    capacity: Optional[dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Multidimensional total capacity."
+            "e.g. {'gpu_count': 8, 'vcpu_count': 192, 'ram_gb': 2048, 'disk_gb': 20000}."
+            "When omitted, defaults to {'gpu_count': total_units}."
+        ),
+    )
     enabled: bool = Field(default=True)
 
 

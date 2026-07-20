@@ -66,6 +66,19 @@ just establishes that at minimum, VM memory/disk/vCPU must become
 first-class, admission-time-checked dimensions before `pools-7`'s
 reservation-admission path can be considered correct.
 
+**Correction (implementation, 2026-07-20):** the framing above is
+accurate for `Host` (the provisioning service's own inventory table,
+used for Ansible dispatch) but overstates the gap on the listing side.
+`ComputeResource` (`domains/vms/listings/models.py`) already has
+`vcpu_count`/`ram_gb`/`disk_gb` fields — a per-slice, seller-declared
+shape, populated the same way `gpu_model`/`gpu_count` are. The actual gap
+was narrower: `compute_capacity_claim_from_order`
+(`vm_job_spec_service.py`) never forwarded those already-existing fields
+past claim-building, so nothing downstream ever saw them. No schema
+change to `ComputeResource` was needed; the fix was in claim-building and
+the ledger's admission check. See `design.md`'s "Pass 1 design resolution"
+section for the corrected account.
+
 ## Two-pass implementation split (decided in design review, 2026-07-20)
 
 This change is split into two passes so the concrete admission-correctness
@@ -110,11 +123,13 @@ only tracks pass-2 questions.
   POOLS-2 used for its process-local assignment cursors.
 - **`CapacityEvent` payload:** extended with per-dimension deltas in pass 1,
   not deferred.
-- **VM shape scope:** vcpu/ram/disk become a **fixed, seller-declared
+- **VM shape scope:** vcpu/ram/disk are a **fixed, seller-declared
   listing attribute** (like `gpu_model` already is) for pass 1, not a
-  per-order negotiated dimension — `ComputeResource` currently has no
-  vCPU/RAM/disk field at all, and no code path negotiates one. Making VM
-  shape buyer-negotiable is real, larger future work that touches the
+  per-order negotiated dimension. `ComputeResource` already has
+  `vcpu_count`/`ram_gb`/`disk_gb` fields (correcting the "concrete gap"
+  framing above, which understated what already existed) — the gap was
+  that claim-building never forwarded them. Making VM shape
+  buyer-negotiable is real, larger future work that touches the
   negotiation-protocol boundary; it needs its own design review with
   stakeholder sign-off before it's picked up. Do not let pass 1 or pass 2
   quietly grow to cover it.
