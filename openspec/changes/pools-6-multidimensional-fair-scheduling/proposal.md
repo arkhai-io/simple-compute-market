@@ -32,6 +32,7 @@ A richer scheduler must still preserve the durable properties established by POO
 - Moving provider-specific health, credentials, or execution checks into generic policy code.
 - Treating abstract aggregate capacity as proof that one concrete resource can fit a request.
 - Changing Capacity Settlement Assignment or physical-settlement caller contracts solely to accommodate one algorithm.
+- Making VM shape (vcpu/ram/disk) a buyer-negotiated, per-order dimension. Pass 1 treats it as a fixed, seller-declared listing attribute; negotiated sizing is deferred future work requiring its own design review of the negotiation-protocol boundary.
 
 ## Concrete, currently-unenforced gap (found during POOLS-7 design review, 2026-07-17)
 
@@ -65,9 +66,75 @@ just establishes that at minimum, VM memory/disk/vCPU must become
 first-class, admission-time-checked dimensions before `pools-7`'s
 reservation-admission path can be considered correct.
 
+## Two-pass implementation split (decided in design review, 2026-07-20)
+
+This change is split into two passes so the concrete admission-correctness
+gap doesn't wait on the much larger fairness-policy question:
+
+- **Pass 1** — give the capacity model a real multidimensional
+  representation and make reservation admission check it, so a reservation
+  can never be admitted for a shape no physical host could serve. Selection
+  among fitting candidates stays deterministic round-robin (POOLS-2)
+  unchanged. This closes the "Concrete, currently-unenforced gap" section
+  above and is what `pools-7` is blocked on.
+- **Pass 2** — pick and implement an actual fairness/placement policy
+  (lowest projected dominant utilization, consumer-aware DRF, or another
+  candidate direction below) as a second `SettlementSchedulingPolicy`,
+  proving the protocol's generality.
+
+Pass 1's design questions are resolved below. Pass 2's are not — see
+`design.md` and the "Non-Work / Deferred Decisions" section, which now
+only tracks pass-2 questions.
+
+## Pass 1 design resolution (2026-07-20)
+
+- **Dimension representation:** a generic `dict[str, Decimal]` map (e.g.
+  `{"gpu_count": 1, "vcpu": 4, "memory_mb": 16384, "disk_gb": 200}`) on
+  requirements, candidates, `SiteResource.capacity`, and
+  `SiteAllocation.dimensions` — not fixed named fields. Multi-domain-ready,
+  matches `design.md`'s original candidate-model sketch.
+- **Resource-bundle semantics:** for the VM domain, a `SiteResource` row
+  already corresponds 1:1 to one physical host (existing `vm_host`
+  attribute). No new cross-row bundling machinery is needed for pass 1;
+  bundling is deferred to whenever a domain needs dimensions spread across
+  rows.
+- **Fit-check correctness:** full per-dimension held/available accounting,
+  extending `CapacityLedgerService`'s existing lease-window held-units
+  machinery, not a declared-capacity-only gate. The storefront's
+  pre-reservation checks remain projections that can be invalidated at
+  actual reserve time — only the site-authority ledger's own accounting
+  needs to be exact under concurrency.
+- **`total_units` handling:** stays as a service-maintained mirror of
+  `capacity["gpu_count"]` rather than a full cutover of every existing
+  reader — the same documented intermediate-state-limitation pattern
+  POOLS-2 used for its process-local assignment cursors.
+- **`CapacityEvent` payload:** extended with per-dimension deltas in pass 1,
+  not deferred.
+- **VM shape scope:** vcpu/ram/disk become a **fixed, seller-declared
+  listing attribute** (like `gpu_model` already is) for pass 1, not a
+  per-order negotiated dimension — `ComputeResource` currently has no
+  vCPU/RAM/disk field at all, and no code path negotiates one. Making VM
+  shape buyer-negotiable is real, larger future work that touches the
+  negotiation-protocol boundary; it needs its own design review with
+  stakeholder sign-off before it's picked up. Do not let pass 1 or pass 2
+  quietly grow to cover it.
+- **`resource_capacity_validator.py`:** left as-is. It validates operator
+  CSV input against the storefront's local `resources` table, a different
+  concern from the admission-time fit gate, and that local table is
+  already slated for retirement by `pools-8`'s `CapacityProjection`.
+  Dimension vocabulary (`vcpu_count`/`ram_gb`/`disk_gb`) is converged so
+  the validator can be deleted outright when `pools-8` lands, instead of
+  migrated now — recorded as a dependency in `pools-8`'s proposal.
+- **Package boundary:** pass 1 stays inside current package boundaries
+  (`compute_provisioning`, `kit/site`). Moving
+  `PhysicalSettlementScheduler`/`DeterministicRoundRobinPolicy` and the
+  shared `resource_satisfies_requirement` predicate into a new
+  `kit/physical-settlement` package is `pools-7`'s decision and its scope
+  to execute, not pools-6's to preempt.
+
 ## Status of the requirement delta
 
-The `## ADDED Requirements` in this change's `specs/physical-provisioning/spec.md` use the standard openspec delta header — openspec's delta model has no separate "proposed but not yet decided" state, every change is a proposal until archived. That header does **not** mean this is implementation-ready: the "Non-Work / Deferred Decisions" list below and the open questions in `design.md` must be resolved in a dedicated design session before any of these requirements are implemented or this change is archived. Treat this change directory as a placeholder for problem framing, not a ready-to-build spec.
+The `## ADDED Requirements` in this change's `specs/physical-provisioning/spec.md` use the standard openspec delta header — openspec's delta model has no separate "proposed but not yet decided" state, every change is a proposal until archived. Pass 1's design is now resolved (above) and ready to implement; pass 2's is not. The "Non-Work / Deferred Decisions" list below and the open questions in `design.md` cover only pass 2 and must be resolved in a follow-up design session before pass-2 requirements are implemented or this change is archived.
 
 ## Candidate directions
 
@@ -92,13 +159,14 @@ No candidate is selected by this change.
 - External scheduler dependencies may bring worker, queue, or cluster-runtime assumptions larger than the policy boundary.
 - Explainability is required so operators can understand why a resource won or why no candidate fit.
 
-## Non-Work / Deferred Decisions
+## Non-Work / Deferred Decisions (pass 2)
 
-This change records questions for a future design session; it does not answer them now.
+Pass 1's dimension-representation and admission-correctness questions are
+resolved above. These remaining questions are pass 2's — a future design
+session must answer them before a fairness/placement policy is implemented.
 
-- What is the fairness subject: buyer, agreement, organization, queue, workload class, or another principal?
+- What is the fairness subject: buyer, agreement, organization, queue, workload class, or another principal? (Buyer/agreement was the leading candidate raised in the 2026-07-20 review — it matches the Market Agreement identity already in the system — but it was not confirmed; pin this at the start of pass 2.)
 - What is the fairness scope: provisioning domain, market, provider, compatible pool group, or global installation?
-- Which dimensions are first-class, what units do they use, and how are quantities normalized?
 - Are pools equal participants or weighted by total usable capacity?
 - Is the primary objective spreading, dominant-share fairness, utilization, bin packing, cost, or an ordered combination?
 - How are indivisible resources such as bare-metal nodes represented?

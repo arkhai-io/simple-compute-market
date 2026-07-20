@@ -19,28 +19,90 @@ The previous draft grouped independent resource rows by `resource_type`, calcula
 
 A future policy must score actual concrete candidates or explicitly model a schedulable resource bundle whose dimensions are co-located.
 
-## Candidate capacity model
+## Candidate capacity model — resolved for pass 1 (design review, 2026-07-20)
 
-A future candidate may expose maps such as:
+The sketch below is now the actual implementation shape, not a future
+possibility. `SettlementCandidate.available` and
+`SettlementRequirement.dimensions` (`compute_provisioning/physical_settlement.py`)
+are `dict[str, Decimal]` maps, e.g. `{"gpu_count": 1, "vcpu": 4,
+"memory_mb": 16384, "disk_gb": 200}` — a generic map was chosen over fixed
+named fields to stay multi-domain-ready without a fixed vocabulary baked
+into the type.
 
 ```python
-class MultidimensionalCandidate:
+class SettlementCandidate(BaseModel):
     resource_id: str
     pool_id: str
-    total: Mapping[str, Decimal]
-    allocated: Mapping[str, Decimal]
-    attributes: Mapping[str, object]
+    resource_kind: str
+    available: dict[str, Decimal]      # replaces available_units
+    enabled: bool = True
+    provider: str
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class SettlementRequirement(BaseModel):
+    resource_kind: str
+    dimensions: dict[str, Decimal]     # replaces units
+    attributes: dict[str, Any] = Field(default_factory=dict)
 ```
 
-A reservation may expose:
+Hard fit is evaluated before fairness: for every required dimension, the
+candidate must define positive total capacity and have enough unallocated
+capacity. `DeterministicRoundRobinPolicy` needs no change — it only sorts
+`pool_id`/`resource_id` strings and never inspects dimensions, confirming
+the caller-contract-stability goal above.
 
-```python
-class MultidimensionalRequirement:
-    dimensions: Mapping[str, Decimal]
-    attributes: Mapping[str, object]
-```
+For the VM domain, dimensions on different concrete resources are never
+combined: a `SiteResource` row already corresponds 1:1 to one physical
+host (existing `vm_host` attribute), so the row itself is the schedulable
+bundle. No cross-row bundling machinery was needed for pass 1. A future
+domain that needs dimensions spread across rows (e.g. a bundle spanning
+multiple discrete cards) will need to design that explicitly — pass 1
+does not generalize to it.
 
-Hard fit is evaluated before fairness. For every required dimension, the candidate must define positive total capacity and have enough unallocated capacity. Dimensions on different concrete resources cannot be combined unless the resource model explicitly declares them one schedulable bundle.
+### Ledger and scheduler changes backing this
+
+- `SiteResource` gains a `capacity: dict[str, Decimal]` column.
+  `total_units` is kept as a service-maintained mirror of
+  `capacity["gpu_count"]` rather than replaced outright — an
+  intermediate-state limitation in the same spirit as POOLS-2's
+  process-local assignment cursors, chosen to avoid a breaking payload-shape
+  migration for existing callers.
+- `SiteAllocation` gains a `dimensions: dict[str, Decimal]` column.
+  `CapacityLedgerService`'s held-units accounting (`_held_units` and
+  friends) generalizes to sum `dimensions` per key across overlapping held
+  allocations in a lease window, falling back to `{"gpu_count": units}`
+  for pre-migration rows. This gives full per-dimension held/available
+  accounting under concurrency — a declared-capacity-only gate (checking
+  the request against a host's total without accounting for other current
+  holds) was considered and rejected: it would still let two shareable
+  allocations on one host jointly overcommit a secondary dimension like
+  RAM even though each fits the host's total individually.
+- `probe`/`reserve` claims gain an optional `dimensions` map, authoritative
+  when present. Legacy single-quantity claims (`units`/`gpu_count`) keep
+  working unchanged via internal translation to
+  `dimensions={"gpu_count": n}` — no existing caller's claim shape breaks.
+- `CapacityEvent` payloads are extended with per-dimension deltas in pass 1
+  (not deferred to pass 2), matching the observability goal below.
+- `PhysicalSettlementScheduler._requirement`/`_eligible_candidates` build
+  and evaluate `dimensions` the same way.
+
+### VM domain wiring — deliberately scoped down for pass 1
+
+`ComputeResource` (`domains/vms/listings/models.py`) had no vCPU/RAM/disk
+field at all before pass 1, and no code path negotiated one — VM shape was
+effectively unspecified below the listing's `gpu_model`/`gpu_count`. Pass 1
+adds `vcpu_count`/`ram_gb`/`disk_gb` to `ComputeResource` as a **fixed,
+seller-declared listing attribute**, the same way `gpu_model` already
+works — every order against a listing gets the same shape. This is enough
+to prove the multidimensional admission path end-to-end for the VM domain
+without opening the negotiation-protocol question of buyer-selectable VM
+sizing, which is real future work (long-term direction, per the change
+owner) but needs its own design review and stakeholder team sign-off
+before it's picked up. `capacity_client.py` and `vm_job_spec_service.py`
+wire this fixed shape through registration and claim-building
+respectively; nothing here should be read as precedent for skipping that
+future review when negotiated sizing is eventually designed.
 
 ## Projected dominant utilization
 
@@ -123,6 +185,37 @@ The policy should be tested through simulations and invariants rather than only 
 - topology-constrained candidate sets;
 - failure and explicit reassignment workflows.
 
-## Non-Work / Deferred Decisions
+## Package boundary (resolved, 2026-07-20)
 
-The proposal's deferred questions are intentionally unresolved. This design must be revised in a later discuss → plan → implement session before normative requirements or code are added.
+Pass 1 keeps all its changes inside the current package boundaries
+(`compute_provisioning`, `kit/site`). `pools-7`'s design already planned to
+move `PhysicalSettlementScheduler`, `DeterministicRoundRobinPolicy`, and a
+shared `resource_satisfies_requirement` predicate into a new
+`kit/physical-settlement` package (final home between that and `kit/site`
+left to `pools-7`'s own planning). That package doesn't exist yet because
+`pools-7` hasn't started. Pools-6 does not create it or preempt that
+decision — the pass-1 dimension model is written against the existing
+`compute_provisioning`/`kit/site` locations and pools-7 inherits the move.
+
+## `resource_capacity_validator.py` (resolved, 2026-07-20)
+
+Left as-is for pass 1 rather than migrated or deleted. It's a
+storefront-local data-integrity check on operator CSV input (does an
+import overcommit a host's declared totals), a different concern from the
+admission-time fit gate this change adds to `CapacityLedgerService`. It
+also operates on the storefront's local `resources` table, which
+`pools-8`'s `CapacityProjection` is already slated to retire — extracting
+a shared kit helper now would invest in a mechanism scheduled for deletion
+in a change that hasn't started. Dimension vocabulary
+(`vcpu_count`/`ram_gb`/`disk_gb`) is converged between the two so the
+validator can be deleted outright, not migrated, once `pools-8` lands.
+
+## Non-Work / Deferred Decisions (pass 2)
+
+Pass 1's dimension model, admission correctness, and VM-domain wiring are
+resolved above and ready to implement. Everything below is pass 2 —
+fairness/placement policy selection — and remains genuinely open. This
+design must be revised in a later discuss → plan → implement session
+before pass-2 normative requirements or code are added. Confirmed so far:
+fairness subject leaned toward buyer/agreement in the 2026-07-20 review
+but was not pinned down; treat it as still open.
