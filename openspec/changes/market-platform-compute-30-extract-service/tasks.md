@@ -1,10 +1,10 @@
 ## 1. Verify Prerequisites and Current Ownership
 
-- [ ] 1.1 Confirm the site-lifecycle and compute-provisioning contract changes are implemented, synchronized, archived, and passing focused tests
-- [ ] 1.2 Reconcile generic versus VM-owned versus bare-metal-owned files, routes, factories, persistence, configuration, and deployment references against current code, including the landed POOLS-2 scheduler, POOLS-3 fulfillment/provider surfaces, POOLS-4 storefront claim boundary, and POOLS-6 multidimensional capacity and scheduling behavior
-- [ ] 1.3 Run current startup, job, lease, VM, bare-metal, service API, physical-settlement scheduler, and multidimensional capacity suites before moving code
-- [ ] 1.4 Update this design/specs if the current implementation changed the destination boundary
-- [ ] 1.5 **Absorbed from closed POOLS-5:** delete the dead duplicate
+- [x] 1.1 Confirm the site-lifecycle and compute-provisioning contract changes are implemented, synchronized, archived, and passing focused tests
+- [x] 1.2 Reconcile generic versus VM-owned versus bare-metal-owned files, routes, factories, persistence, configuration, and deployment references against current code, including the landed POOLS-2 scheduler, POOLS-3 fulfillment/provider surfaces, POOLS-4 storefront claim boundary, and POOLS-6 multidimensional capacity and scheduling behavior
+- [x] 1.3 Run current startup, job, lease, VM, bare-metal, service API, physical-settlement scheduler, and multidimensional capacity suites before moving code
+- [x] 1.4 Update this design/specs if the current implementation changed the destination boundary
+- [x] 1.5 **Absorbed from closed POOLS-5:** delete the dead duplicate
       `provisioning/compute/src/compute_provisioning/pools.py` and
       `pool_config_handler.py` (byte-identical copies of the files in
       `kit/resource-pools/src/market_resource_pools/`, unreferenced by
@@ -14,7 +14,7 @@
       `compute_provisioning.pools` / `compute_provisioning.pool_config_handler`
       submodule imports immediately before deleting, in case something
       changed since.
-- [ ] 1.6 Confirm the selected pre-POOLS-7 boundary against the current tree:
+- [x] 1.6 Confirm the selected pre-POOLS-7 boundary against the current tree:
       move `PhysicalSettlementScheduler`, `DeterministicRoundRobinPolicy`, and
       `FulfillmentService` from the VM-owned service into the extracted compute
       service; keep domain-neutral settlement contracts in
