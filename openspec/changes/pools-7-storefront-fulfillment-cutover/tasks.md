@@ -147,3 +147,10 @@ design.
 - [x] Cross-link site-capacity, resource-pool-management, physical-provisioning, and deployment-state specs to the fulfillment and wheel-development boundaries they own.
 - [x] Add the POOLS-7 design-promotion record mapping accepted decisions to permanent documentation.
 - [x] Replace Section 1 changelog/task/change-document comments and docstrings with present-tense rationale and stable spec references.
+
+
+### Section 1 validation corrections
+
+- [x] Replace stale `allocation_id` local references in fulfillment teardown and status paths with `capacity_reservation_id`.
+- [x] Configure the isolated VM lease-lifecycle test ledger with the same `gpu_count` claim alias used by the production composition root.
+- [x] Re-run the affected fulfillment and lease-lifecycle tests as part of repository validation.

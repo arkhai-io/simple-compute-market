@@ -52,7 +52,9 @@ def session_factory():
 
 @pytest.fixture
 def ledger(session_factory) -> CapacityLedgerService:
-    svc = CapacityLedgerService(session_factory)
+    svc = CapacityLedgerService(
+        session_factory, unit_claim_keys=("units", "gpu_count")
+    )
     svc.register_resource(
         resource_id="compute-kvm1-001",
         total_units=8,

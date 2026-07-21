@@ -155,7 +155,9 @@ class FulfillmentService:
 
         provider = self._provider_registry.require(entry.resource.provider)
         result = await provider.teardown(
-            allocation_id, entry.resource, entry.create_result.provider_metadata
+            capacity_reservation_id,
+            entry.resource,
+            entry.create_result.provider_metadata,
         )
         self._entries[capacity_reservation_id] = FulfillmentEntry(
             request=entry.request,
@@ -174,18 +176,18 @@ class FulfillmentService:
         result = entry.create_result if operation == "create" else entry.teardown_result
         if result is None:
             raise LookupError(
-                f"allocation_id={allocation_id!r} has no {operation!r} operation "
+                f"capacity_reservation_id={capacity_reservation_id!r} has no {operation!r} operation "
                 "to check status for"
             )
         provider = self._provider_registry.require(entry.resource.provider)
         return await provider.get_status(
-            allocation_id, entry.resource, result.provider_metadata
+            capacity_reservation_id, entry.resource, result.provider_metadata
         )
 
     def _require_entry(self, capacity_reservation_id: str) -> FulfillmentEntry:
         entry = self._entries.get(capacity_reservation_id)
         if entry is None:
             raise LookupError(
-                f"No fulfillment exists for allocation_id={allocation_id!r}"
+                f"No fulfillment exists for capacity_reservation_id={capacity_reservation_id!r}"
             )
         return entry

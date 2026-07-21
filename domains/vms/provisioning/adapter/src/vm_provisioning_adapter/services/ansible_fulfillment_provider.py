@@ -179,7 +179,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             pool_config = self._validate_resource(resource)
             base_params = AnsibleJobParams(
                 vm_host=metadata.vm_host, vm_action="vm_remove", vm_target=metadata.vm_target,
-                escrow_uid=allocation_id, playbook_path=pool_config.playbook_path,
+                escrow_uid=capacity_reservation_id, playbook_path=pool_config.playbook_path,
             )
             self._validate_extra_vars(base_params, pool_config.extra_vars)
             params = dataclasses.replace(base_params, provider_extra_vars=pool_config.extra_vars)
