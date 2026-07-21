@@ -1,15 +1,8 @@
-"""Unit tests for deterministic Capacity Settlement Assignment scheduling.
+"""Tests for deterministic settlement-resource scheduling.
 
-Moved and adapted from ``provisioning/compute/service/tests/unit/services/
-test_physical_settlement_scheduler.py`` (tombstoned at its old location).
-Adaptations, both required by the the fulfillment contract migration move:
-
-- ``allocation_id``/``agreement_id`` request fields become
-  ``capacity_reservation_id`` only; the old agreement-mismatch test is
-  dropped (the scheduler no longer receives an agreement identity to
-  mismatch against -- see scheduler.py's module docstring).
-- The scheduler fixture now passes ``default_resource_kind="compute.gpu"``
-  explicitly, since ``_requirement`` no longer silently defaults it.
+The fixtures exercise both generic multidimensional requirements and the VM
+composition's ``gpu_count`` unit alias. The site ledger remains domain-neutral
+by default, so the fixture opts into that alias explicitly.
 """
 
 from __future__ import annotations
