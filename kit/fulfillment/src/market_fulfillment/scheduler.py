@@ -1,35 +1,8 @@
-"""Deterministic, executor-neutral capacity settlement scheduling.
+"""Settlement-resource selection over site capacity and resource pools.
 
-Moved from ``provisioning/compute/service/src/compute_provisioning_service/
-services/physical_settlement_scheduler.py`` (design.md,
-pools-7-storefront-fulfillment-cutover, "Shared package boundary";
-tasks.md 1.4).
-
-Two changes from the pre-move version, both decided in design.md and
-required by tasks.md 1.4/1.5:
-
-- ``allocation_id`` is renamed to ``capacity_reservation_id`` and
-  ``agreement_id`` is dropped from ``PhysicalSettlementRequest`` and from
-  this scheduler's reservation-match check. The provisioning boundary is
-  capacity-reservation-centric and MUST NOT carry storefront commercial
-  identities (design.md, "Cross-domain identities and terminology"). The
-  narrower request-identity/conflict guarantee this check used to give
-  (rejecting a retry against a different agreement) is not replaced here
-  -- it becomes Section 3's durable canonical-request-fingerprint work
-  (tasks.md 3.4/3.5) against a real persisted record, not this
-  process-local in-memory map.
-- ``_requirement``'s ``resource_kind`` fallback no longer silently
-  defaults to ``"compute.gpu"``. That was a VM-flavored default leaking
-  into otherwise domain-neutral scheduling code (design.md, "Two
-  pre-existing domain leaks"). The scheduler now takes an optional
-  ``default_resource_kind`` at construction time, supplied explicitly by
-  the domain composition root; with no default configured and no
-  ``resource_kind`` in the deal or request, ``_requirement`` raises rather
-  than guessing.
-
-The in-memory assignment map is unchanged in this move -- it is still the
-intermediate implementation boundary tasks.md Section 4 replaces with
-database-backed selection (tasks.md 4.1).
+Scheduling owns placement and returns an already-selected SettlementResource.
+Providers execute against that resource and do not perform independent
+placement. See ``openspec/specs/fulfillment/spec.md#scheduling-and-assignment``.
 """
 
 from __future__ import annotations

@@ -1,10 +1,8 @@
-"""Deterministic round-robin policy for eligible settlement candidates.
+"""Deterministic round-robin settlement scheduling policy.
 
-Moved from ``provisioning/compute/service/src/compute_provisioning_service/
-services/deterministic_round_robin_policy.py`` (design.md,
-pools-7-storefront-fulfillment-cutover, "Shared package boundary";
-tasks.md 1.4). Verified to contain zero VM-specific logic -- it only sorts
-``pool_id``/``resource_id`` strings.
+The policy is domain-neutral: it orders and selects normalized settlement
+candidates without importing VM, executor, or provider-specific vocabulary.
+See ``openspec/specs/fulfillment/spec.md#scheduling-and-assignment``.
 """
 
 from __future__ import annotations

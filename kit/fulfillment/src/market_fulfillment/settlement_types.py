@@ -1,22 +1,9 @@
-"""Executor-neutral contracts for capacity settlement scheduling.
+"""Domain-neutral physical settlement request and resource carriers.
 
-Moved from ``provisioning/compute/src/compute_provisioning/physical_settlement.py``
-(design.md, pools-7-storefront-fulfillment-cutover, "Shared package
-boundary"; tasks.md 1.4). The original location remains only as a
-tombstone pointing here.
-
-Renamed per tasks.md 1.5 ("Remove provisioning commercial identity from
-shared contracts"): ``allocation_id`` -> ``capacity_reservation_id``
-throughout, and ``agreement_id`` is dropped entirely -- the provisioning
-boundary is capacity-reservation-centric and MUST NOT carry storefront
-commercial identities such as negotiation, buyer, deal, or agreement
-identifiers (design.md, "Cross-domain identities and terminology").
-``CapacitySettlementAssignment`` (the pre-move type that paired a resource
-with an ``agreement_id``) is not carried forward: it had no production
-caller and its only real content -- an allocation/reservation id plus a
-``SettlementResource`` -- is exactly what
-``PhysicalSettlementScheduler.select_resource`` already returns and
-records without needing a dedicated wrapper type.
+The provisioning boundary is capacity-reservation-centric. Commercial agreement
+identity remains with the storefront, while normalized multidimensional
+requirements cross into fulfillment.
+See ``openspec/specs/fulfillment/spec.md#physical-settlement-request``.
 """
 
 from __future__ import annotations

@@ -1,11 +1,8 @@
-"""Unit tests for executor-neutral fulfillment contracts.
+"""Unit tests for domain-neutral settlement request and resource carriers.
 
-Replaces ``provisioning/compute/tests/unit/test_physical_settlement.py``
-(tombstoned): that file predated pass-1 multidimensional capacity and
-asserted a ``units``/``available_units`` shape these models no longer
-have, and it exercised ``agreement_id``/``CapacitySettlementAssignment``,
-both removed from the moved contracts (tasks.md 1.5; settlement_types.py
-module docstring).
+The tests enforce the current fulfillment specification: commercial identity
+and legacy allocation aliases stay outside the request, while normalized
+multidimensional requirements remain market-neutral.
 """
 
 from decimal import Decimal

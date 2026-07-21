@@ -1,6 +1,6 @@
 """Package-boundary tests proving dependency direction and carrier purity.
 
-tasks.md 1.7. Mirrors the AST-scan pattern used by ``kit/site/tests/unit/
+the kit dependency contract. Mirrors the AST-scan pattern used by ``kit/site/tests/unit/
 test_import_boundaries.py`` and ``provisioning/compute/service/tests/
 unit/test_import_boundaries.py``.
 

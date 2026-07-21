@@ -1,13 +1,90 @@
-# Arkhai OpenSpec Index
+# Arkhai OpenSpec Guide
 
-OpenSpec is the canonical home for normative system behavior and planned changes.
+OpenSpec separates the system's durable current contract from the temporary work required to change it.
 
-- `specs/` describes current, implemented capability contracts.
-- `changes/` describes proposed deltas and their implementation tasks.
-- `changes/archive/` records completed changes after their deltas are synchronized.
+- `specs/` describes the implemented system: behavior, ownership, invariants, lifecycle semantics, and durable design rationale.
+- `changes/` describes a transition: proposal, alternatives, unresolved questions, delta requirements, migration concerns, and implementation tasks.
+- `changes/archive/` records completed transitions after their durable results have been synchronized into `specs/` and, where repository-wide, `docs/development/ARCHITECTURE.md`.
 - `config.yaml` supplies repository context and artifact-quality rules.
 
 Use `bunx @fission-ai/openspec@latest list` to inspect active changes, `show <name>` to read one, and `validate --all --strict` before review.
+
+## Documentation placement
+
+| Knowledge | Permanent home |
+|---|---|
+| Repository-wide dependency layers, authority boundaries, common vocabulary, and major flows | `docs/development/ARCHITECTURE.md` |
+| Subsystem behavior, package ownership, lifecycle, identifiers, errors, and durable rationale | `openspec/specs/<subsystem>/spec.md` |
+| Proposed behavior and unresolved alternatives | `openspec/changes/<change>/proposal.md` and `design.md` |
+| Implementation sequence, files, validation, and manual migration work | `openspec/changes/<change>/tasks.md` |
+| Change provenance and review discussion | Git history and pull requests |
+
+`ARCHITECTURE.md` is a current-state cross-system map. It should link to detailed subsystem specifications rather than duplicate every endpoint and state transition. Permanent specs may include rationale when it is needed to prevent a future implementation from violating an important boundary; they should not preserve the chronology of how the decision was reached.
+
+## Capability specification pattern
+
+A subsystem specification should normally contain:
+
+1. Purpose and responsibilities.
+2. Non-responsibilities and authority boundaries.
+3. Package or service ownership.
+4. Dependency constraints.
+5. Official terminology and identifiers.
+6. Lifecycle and state semantics.
+7. Behavioral requirements and acceptance scenarios.
+8. Error, retry, idempotency, and versioning rules where applicable.
+9. Durable rationale for non-obvious architectural choices.
+10. Evidence pointing to the tests or implementation surfaces that prove the current contract.
+
+Specifications describe the current system. Avoid wording such as "completed in POOLS-7" or "formerly lived in". Planned and partially implemented behavior remains in a change until it is true.
+
+## Change documentation requirements
+
+Every non-trivial `proposal.md` should identify permanent documentation impact:
+
+```markdown
+## Permanent documentation impact
+
+- [ ] `docs/development/ARCHITECTURE.md`
+- [ ] Existing subsystem specification
+- [ ] New subsystem specification
+- [ ] No permanent documentation change
+
+### Knowledge to promote
+
+- <material accepted decision and intended permanent destination>
+```
+
+Every implementation-ready `tasks.md` should name the exact promotion work rather than using a generic "update docs" task.
+
+During implementation, maintain a promotion record in the active change:
+
+```markdown
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| Fulfillment owns provider-neutral execution contracts | `openspec/specs/fulfillment/spec.md#ownership` |
+| Kit dependency layers | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
+```
+
+The record is change history and remains in the change directory. The destination documents describe only the resulting current state.
+
+## Implementation completion checklist
+
+Before marking implementation complete:
+
+- [ ] Code and tests satisfy the change specification.
+- [ ] Existing completed tasks remain preserved; corrections are appended or amended.
+- [ ] Every accepted material decision has been classified as permanent, temporary, superseded, or rejected.
+- [ ] Subsystem-specific durable knowledge is present in `openspec/specs`.
+- [ ] Repository-wide durable knowledge is present in `ARCHITECTURE.md`.
+- [ ] Permanent documents describe current state rather than completion history.
+- [ ] Production code contains no references to `openspec/changes`, task IDs, previous file locations, or migration provenance.
+- [ ] Non-obvious comments communicate local rationale and invariants.
+- [ ] The active change contains a design-promotion record.
+- [ ] Manual deletions are represented by review tombstones and listed in the delivery summary.
+- [ ] Validation evidence and any unrun suites are disclosed.
 
 ## Current capability specifications
 
@@ -19,113 +96,20 @@ Use `bunx @fission-ai/openspec@latest list` to inspect active changes, `show <na
 | [Settlement servicing](specs/settlement-servicing/spec.md) | Plans, claims, mechanism codecs, and heartbeats |
 | [Storefront publication](specs/storefront-publication/spec.md) | Seller surfaces, listing reconciliation, and domain runtimes |
 | [Site capacity](specs/site-capacity/spec.md) | Capacity authority, reservations, aggregation, and events |
-| [Physical provisioning](specs/physical-provisioning/spec.md) | Scheduling, fulfillment, jobs, and lease release |
+| [Resource-pool management](specs/resource-pool-management/spec.md) | Pool administration, provider configuration, and host membership |
+| [Fulfillment](specs/fulfillment/spec.md) | Settlement-resource scheduling, provider execution contracts, identities, and versioned envelopes |
+| [Physical provisioning](specs/physical-provisioning/spec.md) | Executor dispatch, asynchronous jobs, and lease release |
 | [Buyer orchestration](specs/buyer-orchestration/spec.md) | Plugins, policy selection, aggregation, and recovery |
-| [Deployment and state](specs/deployment-state/spec.md) | Topology, persistence, migrations, and packaging |
+| [Deployment and state](specs/deployment-state/spec.md) | Topology, persistence, migrations, packaging, and internal wheels |
 | [Testing and compatibility](specs/test-compatibility/spec.md) | Test levels, fixtures, e2e staging, and rollout contracts |
 | [Planning governance](specs/planning-governance/spec.md) | Specification ownership, evidence, and change readiness |
 
-## Active changes
-
-### Market platform initiative — audited
-
-**Goal:** Establish one core market-domain contract implemented by VM, bare metal, and API credits, plus an optional shared compute-provisioning contract and service used by VM and bare metal.
-
-The change artifacts own requirements, design, readiness, and task state. This section is navigation and sequencing only.
-
-#### Domain composition
-
-1. [`market-platform-domain-10-contract`](changes/market-platform-domain-10-contract/) — define and adopt the common core/domain API and versioned provision-terms envelope.
-
-#### Compute provisioning
-
-1. `market-platform-compute-10-site-lifecycle` — archived
-   ([`changes/archive/2026-07-13-market-platform-compute-10-site-lifecycle/`](changes/archive/2026-07-13-market-platform-compute-10-site-lifecycle/)).
-   Separated site authority from executor lease and release policy.
-2. `market-platform-compute-20-provisioning-contract` — archived
-   ([`changes/archive/2026-07-13-market-platform-compute-20-provisioning-contract/`](changes/archive/2026-07-13-market-platform-compute-20-provisioning-contract/)).
-   Defined the common VM/bare-metal command, job, lease, result, credential, and event wire.
-3. `market-platform-compute-30-extract-service` — archived
-   ([`changes/archive/2026-07-21-market-platform-compute-30-extract-service/`](changes/archive/2026-07-21-market-platform-compute-30-extract-service/)).
-   Extracted the shared service, package, image, and VM/bare-metal adapter
-   composition, including the closed `pools-5-shared-provisioning-package`'s
-   package-boundary decision.
-4. [`market-platform-compute-40-multi-domain-proof`](changes/market-platform-compute-40-multi-domain-proof/) — prove concurrent adapters, ownership-aware event routing, and cross-mode physical accounting.
-
-The two tracks can start independently. Compute changes are ordered by their numeric prefix; the final proof also depends on the domain contract. A newly discovered prerequisite stays in the current task list when required for that change's acceptance criteria, otherwise it receives the same initiative prefix and is cross-linked as an independently archivable change.
-
-### Resource pool physical settlement
-
-**Goal:** Move from operator-managed pool administration to pool-aware
-physical settlement resource selection, provider execution, and a cleaned
--up storefront capacity boundary.
-
-1. `pools-1-resource-pool-foundation` — archived
-   ([`changes/archive/2026-07-13-pools-1-resource-pool-foundation/`](changes/archive/2026-07-13-pools-1-resource-pool-foundation/)).
-   Resource pools, provider configuration, host membership, and the
-   administrative API.
-2. [`pools-2-physical-settlement-scheduler`](changes/pools-2-physical-settlement-scheduler/) —
-   bind a capacity reservation to a specific settlement resource through
-   `PhysicalSettlementScheduler`, without yet persisting the binding or
-   executing fulfillment against it. Design-reviewed; entering planning.
-3. [`pools-3-fulfillment-provider`](changes/pools-3-fulfillment-provider/) —
-   `FulfillmentProvider` ABC, `ProviderRegistry`, the Ansible provider, and
-   durable `SettlementRecord` persistence. Proposal/design recovered from
-   pre-migration planning and verified against current code; still carries
-   one unresolved design-review topic (`SettlementRecord` vs. the
-   storefront's `settlement_claims`/`ClaimsEngine` ownership boundary) and
-   has not had its own design-review session yet.
-4. [`pools-4-storefront-capacity-boundary`](changes/pools-4-storefront-capacity-boundary/) —
-   remove host-specific placement from the ordinary storefront reservation
-   path and apply `pools-2`'s reservation-expiry model storefront-side.
-   Recovered and corrected against current code (the `SiteLedger`/
-   `SiteResourcesService` rename it originally called for is already done).
-5. `pools-5-shared-provisioning-package` — **closed 2026-07-17, without
-   implementation**
-   ([`changes/archive/2026-07-17-pools-5-shared-provisioning-package/`](changes/archive/2026-07-17-pools-5-shared-provisioning-package/)).
-   The originally-planned `core/provisioning` package already existed in a
-   different shape (`provisioning/compute`/`compute_provisioning`), and its
-   remaining extraction goal — including the final package home for
-   `PhysicalSettlementScheduler`/`FulfillmentProvider`/`ProviderRegistry` —
-   was already claimed by `market-platform-compute-30-extract-service`.
-   Closed rather than left as a parallel taskless placeholder; see that
-   change's proposal.md ("Absorbed from POOLS-5").
-
-Final e2e verification (originally POOLS-6) is not yet drafted as a change
-directory.
-
-### Imported change index — specification required
-
-The following proposals/designs are a normalized index of the former TODO and design documents, not implementation-ready plans. Their generated task lists were removed. Before implementation, audit the proposal against current code, rewrite its delta requirements and acceptance scenarios, make its design decisions explicit, and only then create a concrete task artifact. The audited market-platform changes above are no longer part of this imported set.
-- `add-database-migration-commands`
-- `migrate-registry-to-postgres` — application work; Cloud SQL provisioning remains externally blocked
-- `add-settlement-plan-shapes`
-- `finish-buyer-cli-residue`
-- `configure-pypi-trusted-publishing`
-- `type-core-packages`
-- `remove-relative-uv-sources`
-- `prune-storefront-database`
-- `deduplicate-dynaconf-bootstrap`
-- `separate-marketplace-registry`
-- `fix-golden-image-config`
-- `automate-seller-spot`
-- `complete-development-documentation`
-
-### Deferred, conditional, or design-gated
-
-These also require the same specification audit, and their activation condition must be satisfied before tasks are created:
-
-- `index-registry-filters` — activate when measured `/listings` latency requires indexes
-- `extract-e2e-project` — activate when external operators need an independent runner
-- `add-host-capacity-filters` — expand tasks after its API/ranking design review
-
 ## Contributor workflow
 
-1. Audit the owning capability spec against current code and focused evidence.
-2. Update one independently archivable change with concrete delta requirements and design decisions.
-3. Keep imported, deferred, conditional, and externally blocked changes taskless.
-4. Create implementation tasks only after the proposal, delta spec, and design are implementation-ready.
-5. Implement from that audited task list and run focused behavioral checks.
-6. Synchronize the verified delta and archive the completed change.
-
-`docs/development/ARCHITECTURE.md` is the non-normative orientation page. User-facing current behavior and troubleshooting belong in the relevant buyer, seller, or registry documentation; intended changes and their current behavioral context belong in OpenSpec.
+1. Read `AGENTS.md`, `docs/development/ARCHITECTURE.md`, the owning permanent specs, and the active change.
+2. Audit the proposed delta against current code and focused evidence.
+3. Resolve design questions in the active change and identify permanent documentation impact.
+4. Preserve completed tasks and create or amend an implementation plan only after the design is ready.
+5. Implement code, tests, permanent documentation, and the change's design-promotion record together.
+6. Run focused behavioral, package, typing, and integration checks appropriate to the boundary.
+7. Synchronize the verified delta, confirm no production code references temporary change documents, and archive the completed change.

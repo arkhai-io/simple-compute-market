@@ -1,18 +1,4 @@
-"""Versioned payload envelopes for cross-domain generic dictionaries.
-
-tasks.md 1.6: "Add versioned payload envelopes for prepared provider
-create/teardown inputs, provider metadata, and ``SettlementResult``;
-prohibit unversioned cross-domain generic dictionaries."
-
-This module defines the shared envelope shape only. The concrete payload
-kinds it wraps -- prepared provider create/teardown input (tasks.md 6.3/
-6.4), provider metadata (6.6), and ``SettlementResult`` (8.2) -- are added
-by the sections that need them; this section only establishes that no
-generic ``dict[str, Any]`` crosses a domain or persistence boundary
-without a schema version and a kind discriminator attached, so that a
-later reader can tell what shape it is holding and whether it understands
-that shape's version before trusting its contents.
-"""
+"""Versioned envelopes for generic payloads crossing durable boundaries."""
 
 from __future__ import annotations
 
@@ -24,18 +10,13 @@ PayloadT = TypeVar("PayloadT")
 
 
 class VersionedEnvelope(BaseModel, Generic[PayloadT]):
-    """Wraps a normalized, serializable payload with a schema version and
-    kind discriminator.
+    """Identify a payload schema before it crosses a domain or persistence boundary.
 
-    ``kind`` identifies the payload shape (e.g. ``"ansible_create_input"``,
-    ``"settlement_result"``); ``schema_version`` is an integer a reader
-    increments on any incompatible shape change to that ``kind``. A reader
-    that does not recognize a ``(kind, schema_version)`` pair MUST refuse
-    to interpret ``payload`` rather than guess at its shape -- this is what
-    makes it safe to persist these durably (tasks.md 3.1) and dispatch
-    them from a frozen snapshot on retry (design.md, "Provider input
-    snapshot: prepare/dispatch split") without a later code change
-    silently misreading an older row.
+    Readers must recognize both ``kind`` and ``schema_version`` before
+    interpreting the payload. This prevents retries or persisted records from
+    being decoded according to a newer, incompatible provider schema.
+
+    See ``openspec/specs/fulfillment/spec.md#versioned-envelopes``.
     """
 
     kind: str = Field(min_length=1)
@@ -46,5 +27,6 @@ class VersionedEnvelope(BaseModel, Generic[PayloadT]):
 
 
 def envelope(kind: str, schema_version: int, payload: Any) -> VersionedEnvelope[Any]:
-    """Convenience constructor mirroring ``VersionedEnvelope``'s fields."""
+    """Construct an immutable versioned envelope."""
+
     return VersionedEnvelope(kind=kind, schema_version=schema_version, payload=payload)

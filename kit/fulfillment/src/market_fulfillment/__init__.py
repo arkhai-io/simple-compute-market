@@ -1,9 +1,10 @@
-"""Domain-neutral fulfillment scheduling and fulfillment contracts.
+"""Domain-neutral settlement-resource scheduling and fulfillment contracts.
 
-See ``docs/development/ARCHITECTURE.md`` and
-``openspec/changes/pools-7-storefront-fulfillment-cutover/design.md``
-("Shared package boundary") for why this package exists separately from
-``kit/resource-pools`` and ``compute_provisioning``.
+The package sits above the site and resource-pool authority kits so those
+lower layers remain independent of provider execution. Domain adapters own
+provider-specific translation and infrastructure behavior.
+
+See ``openspec/specs/fulfillment/spec.md``.
 """
 
 from .envelopes import VersionedEnvelope, envelope

@@ -334,7 +334,7 @@ class AnsibleService:
         return inv_path
 
     # ------------------------------------------------------------------
-    # Vars file construction (formerly ProvisioningService._write_vars_file)
+    # Vars file construction
     # ------------------------------------------------------------------
 
     def build_vars_file(self, params: AnsibleJobParams) -> Path:
@@ -495,7 +495,7 @@ class AnsibleService:
             lines.append("root_ssh_password: not_provided")
 
     # ------------------------------------------------------------------
-    # Output parsing (formerly ProvisioningService._parse_result)
+    # Output parsing
     # ------------------------------------------------------------------
 
     def parse_playbook_result(

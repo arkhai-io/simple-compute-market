@@ -1,8 +1,6 @@
-"""Replaceable policy contracts for capacity settlement scheduling.
+"""Policy contract for selecting among eligible settlement candidates.
 
-Moved from ``provisioning/compute/src/compute_provisioning/scheduling.py``
-(design.md, pools-7-storefront-fulfillment-cutover, "Shared package
-boundary"; tasks.md 1.4).
+See ``openspec/specs/fulfillment/spec.md#scheduling-and-assignment``.
 """
 
 from __future__ import annotations

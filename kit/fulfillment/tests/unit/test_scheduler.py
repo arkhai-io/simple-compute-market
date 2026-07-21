@@ -2,7 +2,7 @@
 
 Moved and adapted from ``provisioning/compute/service/tests/unit/services/
 test_physical_settlement_scheduler.py`` (tombstoned at its old location).
-Adaptations, both required by the tasks.md 1.4/1.5 move:
+Adaptations, both required by the the fulfillment contract migration move:
 
 - ``allocation_id``/``agreement_id`` request fields become
   ``capacity_reservation_id`` only; the old agreement-mismatch test is

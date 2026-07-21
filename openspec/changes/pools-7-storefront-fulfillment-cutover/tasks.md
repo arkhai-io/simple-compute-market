@@ -136,3 +136,14 @@ design.
 - [ ] 12.2 Update baseline `site-capacity` and `physical-provisioning` specs to incorporate completed POOLS-2/3/4/6/7 behavior when the change is archived.
 - [ ] 12.3 Update compute provisioning service, VM adapter, storefront, and operator documentation for migrations, watchdog health, status/result query usage, and recovery procedures without lease-expiry sequencing instructions.
 - [ ] 12.4 Verify the implementation against every POOLS-7 scenario and archive the OpenSpec change after validation.
+
+## Section 1 documentation-system retrofit
+
+- [x] Preserve the completed Section 1 task history and add this retrofit as a separate completed workstream.
+- [x] Add root `AGENTS.md` with discuss/plan/implement, documentation-promotion, production-comment, wheel, validation, and tombstone rules.
+- [x] Expand `openspec/README.md` with permanent-vs-change placement rules, subsystem-spec structure, documentation-impact declarations, promotion records, and completion criteria.
+- [x] Rebuild `docs/development/ARCHITECTURE.md` as the current repository-wide map for system shape, package layers, authorities, vocabulary, major flows, deployment, packaging, and tests.
+- [x] Add `openspec/specs/fulfillment/spec.md` and promote approved POOLS scheduling/provider/identifier/envelope decisions into it.
+- [x] Cross-link site-capacity, resource-pool-management, physical-provisioning, and deployment-state specs to the fulfillment and wheel-development boundaries they own.
+- [x] Add the POOLS-7 design-promotion record mapping accepted decisions to permanent documentation.
+- [x] Replace Section 1 changelog/task/change-document comments and docstrings with present-tense rationale and stable spec references.
