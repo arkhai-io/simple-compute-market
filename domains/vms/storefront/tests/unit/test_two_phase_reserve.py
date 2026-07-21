@@ -8,7 +8,10 @@ from unittest.mock import patch
 
 import pytest
 
-from market_storefront.services.vm_fulfillment_service import _commit_capacity_hold
+from market_storefront.services.vm_fulfillment_service import (
+    _commit_capacity_hold,
+    _commit_fresh_reservation,
+)
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.sync_negotiation import _place_capacity_hold
 
@@ -77,6 +80,41 @@ async def test_valid_hold_commits_before_provisioning():
     assert commit["allocation_id"] == "alloc-1"
     assert commit["idempotency_ref"] == "0xesc"
     assert captured[0][1] == "capacity_hold_committed"
+
+
+@pytest.mark.asyncio
+async def test_fresh_reservation_commits_before_provisioning():
+    capacity = FakeCapacity()
+    captured, stage_event = _events()
+
+    await _commit_fresh_reservation(
+        capacity=capacity,
+        reserved=_hold(),
+        escrow_uid="0xesc",
+        duration_seconds=3600,
+        stage_event=stage_event,
+    )
+
+    commit = capacity.commit_calls[0]
+    assert commit["allocation_id"] == "alloc-1"
+    assert commit["resource_id"] == "res-1"
+    assert commit["idempotency_ref"] == "0xesc"
+    assert captured[0][1] == "capacity_reservation_committed"
+
+
+@pytest.mark.asyncio
+async def test_fresh_reservation_commit_failure_is_not_ignored():
+    capacity = FakeCapacity(commit_error=RuntimeError("409 conflict"))
+    _, stage_event = _events()
+
+    with pytest.raises(RuntimeError, match="409 conflict"):
+        await _commit_fresh_reservation(
+            capacity=capacity,
+            reserved=_hold(),
+            escrow_uid="0xesc",
+            duration_seconds=3600,
+            stage_event=stage_event,
+        )
 
 
 @pytest.mark.asyncio

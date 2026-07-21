@@ -104,6 +104,42 @@ async def _commit_capacity_hold(
         site=held_allocation.get("site"),
     )
     return dict(held_allocation)
+
+
+async def _commit_fresh_reservation(
+    *,
+    capacity: Any,
+    reserved: dict[str, Any],
+    escrow_uid: str,
+    duration_seconds: int,
+    stage_event: StageEventFn,
+    start_utc: str | None = None,
+) -> None:
+    """Promote a settlement-time fallback reservation before provisioning."""
+    allocation_id = reserved.get("allocation_id")
+    resource_id = reserved.get("resource_id")
+    if not allocation_id or not resource_id:
+        raise RuntimeError("Reserved capacity is missing allocation identity")
+    lease_start_utc, lease_end_utc = _lease_window_strings(
+        start_utc=start_utc,
+        duration_seconds=duration_seconds,
+    )
+    await capacity.commit(
+        resource_id=str(resource_id),
+        allocation_id=str(allocation_id),
+        lease_start_utc=lease_start_utc,
+        lease_end_utc=lease_end_utc,
+        idempotency_ref=escrow_uid,
+    )
+    stage_event(
+        "provision", "capacity_reservation_committed",
+        escrow_uid=escrow_uid,
+        allocation_id=allocation_id,
+        resource_id=resource_id,
+        site=reserved.get("site"),
+    )
+
+
 # Site-authority capacity client (core_storefront.capacity.CapacityClient
 # shape); duck-typed so this concept module needs no core import.
 CapacityClientLike = Any
@@ -180,6 +216,15 @@ async def fulfill_vm_obligation(
                 lease_start_utc=start_utc,
                 lease_duration_seconds=duration_seconds,
             )
+            if reserved:
+                await _commit_fresh_reservation(
+                    capacity=capacity,
+                    reserved=reserved,
+                    escrow_uid=escrow_uid,
+                    duration_seconds=duration_seconds,
+                    start_utc=start_utc,
+                    stage_event=stage_event,
+                )
         if not reserved:
             raise RuntimeError("No available compute VM matched required attributes")
         reserved_allocation_id = (
