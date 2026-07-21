@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from market_physical_settlement import PhysicalSettlementRequest, SettlementResource
-from market_resource_pools import (
+from market_fulfillment import PhysicalSettlementRequest, SettlementResource
+from market_fulfillment import (
     FulfillmentConflictError,
     FulfillmentProvider,
     FulfillmentResult,
@@ -19,7 +19,7 @@ from market_resource_pools import (
     ProviderStatus,
 )
 from compute_provisioning_service.services.fulfillment_service import FulfillmentService
-from market_resource_pools import ProviderRegistry
+from market_fulfillment import ProviderRegistry
 
 
 class _FakeProvider(FulfillmentProvider):

@@ -21,17 +21,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from market_resource_pools import FulfillmentValidationIssue, FulfillmentValidationResult
+from market_fulfillment import FulfillmentValidationIssue, FulfillmentValidationResult
 
-from market_physical_settlement import PhysicalSettlementRequest, SettlementResource
-from market_resource_pools import (
+from market_fulfillment import PhysicalSettlementRequest, SettlementResource
+from market_fulfillment import (
     FulfillmentConflictError,
     FulfillmentRequestInvalidError,
     FulfillmentResult,
     ProviderNotFoundError,
     ProviderStatus,
 )
-from market_resource_pools import ProviderRegistry
+from market_fulfillment import ProviderRegistry
 
 
 @dataclass(frozen=True)
@@ -132,7 +132,7 @@ class FulfillmentService:
 
         if self._capacity_ledger is not None:
             # CapacityLedgerService.assign_settlement_resource's own
-            # parameter is still named allocation_id (kit/site's
+            # parameter is still named capacity_reservation_id (kit/site's
             # SiteAllocation/allocation_id rename is tasks.md Section 2,
             # not this section) -- passing capacity_reservation_id
             # through positionally-by-keyword to it is correct as long as
@@ -152,8 +152,8 @@ class FulfillmentService:
         )
         return result
 
-    async def teardown(self, allocation_id: str) -> FulfillmentResult:
-        entry = self._require_entry(allocation_id)
+    async def teardown(self, capacity_reservation_id: str) -> FulfillmentResult:
+        entry = self._require_entry(capacity_reservation_id)
         if entry.teardown_result is not None:
             return entry.teardown_result
 
@@ -161,7 +161,7 @@ class FulfillmentService:
         result = await provider.teardown(
             allocation_id, entry.resource, entry.create_result.provider_metadata
         )
-        self._entries[allocation_id] = FulfillmentEntry(
+        self._entries[capacity_reservation_id] = FulfillmentEntry(
             request=entry.request,
             resource=entry.resource,
             create_result=entry.create_result,
@@ -171,10 +171,10 @@ class FulfillmentService:
 
     async def get_status(
         self,
-        allocation_id: str,
+        capacity_reservation_id: str,
         operation: Literal["create", "teardown"] = "create",
     ) -> ProviderStatus:
-        entry = self._require_entry(allocation_id)
+        entry = self._require_entry(capacity_reservation_id)
         result = entry.create_result if operation == "create" else entry.teardown_result
         if result is None:
             raise LookupError(
@@ -186,8 +186,8 @@ class FulfillmentService:
             allocation_id, entry.resource, result.provider_metadata
         )
 
-    def _require_entry(self, allocation_id: str) -> FulfillmentEntry:
-        entry = self._entries.get(allocation_id)
+    def _require_entry(self, capacity_reservation_id: str) -> FulfillmentEntry:
+        entry = self._entries.get(capacity_reservation_id)
         if entry is None:
             raise LookupError(
                 f"No fulfillment exists for allocation_id={allocation_id!r}"

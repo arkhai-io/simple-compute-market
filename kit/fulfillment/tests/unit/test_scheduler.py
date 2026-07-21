@@ -21,7 +21,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from market_physical_settlement import (
+from market_fulfillment import (
     CapacityReservationExpiredError,
     MissingResourceKindError,
     NoEligibleSettlementResourceError,

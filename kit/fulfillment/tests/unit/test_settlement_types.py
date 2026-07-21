@@ -1,4 +1,4 @@
-"""Unit tests for executor-neutral physical-settlement contracts.
+"""Unit tests for executor-neutral fulfillment contracts.
 
 Replaces ``provisioning/compute/tests/unit/test_physical_settlement.py``
 (tombstoned): that file predated pass-1 multidimensional capacity and
@@ -12,7 +12,7 @@ from decimal import Decimal
 
 import pytest
 
-from market_physical_settlement import (
+from market_fulfillment import (
     PhysicalSettlementRequest,
     SettlementCandidate,
     SettlementRequirement,

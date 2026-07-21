@@ -6,10 +6,10 @@ import dataclasses
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
-from market_physical_settlement import PhysicalSettlementRequest, SettlementResource
+from market_fulfillment import PhysicalSettlementRequest, SettlementResource
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 from vm_provisioning_adapter.models.fulfillment_model import AnsibleFulfillmentMetadata, VmFulfillmentRequirements
-from market_resource_pools import (
+from market_fulfillment import (
     FulfillmentCreateFailedError,
     FulfillmentProvider,
     FulfillmentResult,
@@ -172,7 +172,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         return FulfillmentResult(provider_metadata=metadata.model_dump())
 
     async def teardown(
-        self, allocation_id: str, resource: SettlementResource, provider_metadata: dict[str, Any]
+        self, capacity_reservation_id: str, resource: SettlementResource, provider_metadata: dict[str, Any]
     ) -> FulfillmentResult:
         try:
             metadata = AnsibleFulfillmentMetadata.model_validate(provider_metadata)
@@ -195,7 +195,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
 
     async def get_status(
         self,
-        allocation_id: str,
+        capacity_reservation_id: str,
         resource: SettlementResource,
         provider_metadata: dict[str, Any],
     ) -> ProviderStatus:

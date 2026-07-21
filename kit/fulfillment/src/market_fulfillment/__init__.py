@@ -1,4 +1,4 @@
-"""Domain-neutral physical-settlement scheduling and fulfillment contracts.
+"""Domain-neutral fulfillment scheduling and fulfillment contracts.
 
 See ``docs/development/ARCHITECTURE.md`` and
 ``openspec/changes/pools-7-storefront-fulfillment-cutover/design.md``
@@ -13,6 +13,24 @@ from .ids import (
     new_provisioned_resource_id,
     new_result_id,
     new_settlement_resource_id,
+)
+from .provider import (
+    FulfillmentConflictError,
+    FulfillmentCreateFailedError,
+    FulfillmentError,
+    FulfillmentProvider,
+    FulfillmentRequestInvalidError,
+    FulfillmentResult,
+    FulfillmentStatusFailedError,
+    FulfillmentTeardownFailedError,
+    FulfillmentValidationIssue,
+    FulfillmentValidationResult,
+    ProviderConfigInvalidError,
+    ProviderNotFoundError,
+    ProviderOperationState,
+    ProviderRegistry,
+    ProviderStatus,
+    ProviderUnavailableError,
 )
 from .round_robin_policy import DeterministicRoundRobinPolicy
 from .scheduler import MissingResourceKindError, PhysicalSettlementScheduler
@@ -31,6 +49,22 @@ from .settlement_types import (
 
 __all__ = [
     "CapacityReservationExpiredError",
+    "FulfillmentConflictError",
+    "FulfillmentCreateFailedError",
+    "FulfillmentError",
+    "FulfillmentProvider",
+    "FulfillmentRequestInvalidError",
+    "FulfillmentResult",
+    "FulfillmentStatusFailedError",
+    "FulfillmentTeardownFailedError",
+    "FulfillmentValidationIssue",
+    "FulfillmentValidationResult",
+    "ProviderConfigInvalidError",
+    "ProviderNotFoundError",
+    "ProviderOperationState",
+    "ProviderRegistry",
+    "ProviderStatus",
+    "ProviderUnavailableError",
     "DeterministicRoundRobinPolicy",
     "MissingResourceKindError",
     "NoEligibleSettlementResourceError",

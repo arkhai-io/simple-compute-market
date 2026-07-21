@@ -1,4 +1,4 @@
-"""Globally unique opaque identifiers for the physical-settlement lifecycle.
+"""Globally unique opaque identifiers for the fulfillment lifecycle.
 
 Format decision (design.md, pools-7-storefront-fulfillment-cutover, "Final
 planning decisions" -> "Cross-domain identities and terminology"): UUIDv7 via

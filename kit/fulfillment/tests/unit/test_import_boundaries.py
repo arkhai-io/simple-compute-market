@@ -5,7 +5,7 @@ test_import_boundaries.py`` and ``provisioning/compute/service/tests/
 unit/test_import_boundaries.py``.
 
 Dependency direction (design.md, "Shared package boundary" and "Final
-planning decisions"): ``kit/physical-settlement`` depends on ``kit/site``
+planning decisions"): ``kit/fulfillment`` depends on ``kit/site``
 (``market_site``) and ``kit/resource-pools`` (``market_resource_pools``).
 Nothing here may depend on ``compute_provisioning``, the extracted
 compute provisioning service, any VM/bare-metal domain package, or the
@@ -52,8 +52,8 @@ def _imported_module_names(source_path: Path) -> list[tuple[int, str]]:
     return found
 
 
-def test_physical_settlement_modules_do_not_import_downstream_packages():
-    package_root = Path(__file__).parents[2] / "src" / "market_physical_settlement"
+def test_fulfillment_modules_do_not_import_downstream_packages():
+    package_root = Path(__file__).parents[2] / "src" / "market_fulfillment"
     violations = []
 
     for source_path in package_root.glob("*.py"):
@@ -72,7 +72,7 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
     pool service) and ids.py (which needs uuid6) may reach outside this
     package plus pydantic/sqlalchemy/uuid6.
     """
-    package_root = Path(__file__).parents[2] / "src" / "market_physical_settlement"
+    package_root = Path(__file__).parents[2] / "src" / "market_fulfillment"
     allowed_external_by_module = {
         "__init__.py": set(),  # only imports its own siblings
         "ids.py": {"uuid6"},
@@ -81,6 +81,7 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
         "round_robin_policy.py": set(),
         "envelopes.py": {"pydantic", "typing"},
         "scheduler.py": {"market_resource_pools", "market_site"},
+        "provider.py": set(),
     }
     violations = []
     for source_path in package_root.glob("*.py"):
@@ -89,9 +90,9 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
             continue
         for _, module_name in _imported_module_names(source_path):
             top_level = module_name.split(".")[0]
-            is_local = module_name.startswith(".") or top_level == "market_physical_settlement"
+            is_local = module_name.startswith(".") or top_level == "market_fulfillment"
             is_stdlib_or_typing = top_level in {
-                "__future__", "datetime", "decimal", "threading", "typing", "enum", "abc",
+                "__future__", "dataclasses", "datetime", "decimal", "threading", "typing", "enum", "abc",
             }
             if is_local or is_stdlib_or_typing:
                 continue

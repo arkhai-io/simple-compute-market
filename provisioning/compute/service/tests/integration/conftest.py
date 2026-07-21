@@ -380,7 +380,7 @@ async def client_and_queue(
         unit_claim_keys=("units", "gpu_count"),
     )
 
-    from market_physical_settlement import PhysicalSettlementScheduler
+    from market_fulfillment import PhysicalSettlementScheduler
     physical_settlement_scheduler = PhysicalSettlementScheduler(
         pool_service=resource_pool_service,
         capacity_ledger=capacity_ledger_service,

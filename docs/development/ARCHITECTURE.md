@@ -39,7 +39,7 @@ The normative dependency and plugin contracts are in the [market composition spe
 | Deployment, persistence, migrations, and packaging | [Deployment and state](../../openspec/specs/deployment-state/spec.md) |
 | Test levels, fixtures, e2e staging, and compatibility | [Testing and compatibility](../../openspec/specs/test-compatibility/spec.md) |
 
-## Official physical-settlement vocabulary
+## Official fulfillment vocabulary
 
 Use **Market Agreement**, **Capacity Offering**, **Capacity Projection**, **Capacity Reservation**, **Physical Resource**, **Resource Pool**, **Physical Settlement**, **Settlement Resource**, **PhysicalSettlementScheduler**, **FulfillmentProvider**, and **Settlement Record**. Stable cross-service identities include the agreement/deal reference and `allocation_id`; `pool_id` and `resource_id` remain boundary-sensitive; scheduling establishes `settlement_resource_id`. Provider metadata stays opaque outside the provider/lifecycle boundary.
 
@@ -65,3 +65,17 @@ Source comments may still mention historical section names while they migrate to
 - “API-credits market domain” → [Market composition](../../openspec/specs/market-composition/spec.md), [Storefront publication](../../openspec/specs/storefront-publication/spec.md), and [Site capacity](../../openspec/specs/site-capacity/spec.md)
 - “State Management and Schema Migration Strategy” → [Deployment and state](../../openspec/specs/deployment-state/spec.md)
 - “Testing Strategy” → [Testing and compatibility](../../openspec/specs/test-compatibility/spec.md)
+
+## Kit dependency layers
+
+Kit packages follow a one-way dependency hierarchy:
+
+1. Foundation packages provide generic identity, configuration, and policy primitives.
+2. Authority packages such as `kit/site` and `kit/resource-pools` own capacity and pool administration and depend only on foundation packages.
+3. `kit/fulfillment` owns domain-neutral physical-settlement scheduling and fulfillment-provider contracts and may depend on the authority packages.
+
+Dependencies must not point upward. This rule includes imports guarded by `TYPE_CHECKING`; type-only imports are architectural dependencies. Deployed services and domain adapters may depend on any kit layer, but kit packages do not import deployed services or domain adapters.
+
+Internal Python dependencies are consumed as wheels from the repository `.dist` directory. Touched projects must not add editable relative sibling paths merely to make local development work. Their `init` and `reinit` targets build or consume prerequisite wheels and explicitly upgrade/reinstall changed internal packages.
+
+The aggregate `kit` test target builds prerequisite internal wheels and runs every kit subproject's default test suite.

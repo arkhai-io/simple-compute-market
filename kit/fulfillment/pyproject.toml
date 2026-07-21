@@ -1,8 +1,8 @@
 [project]
-name = "arkhai-kit-physical-settlement"
+name = "arkhai-kit-fulfillment"
 version = "0.1.0"
 license = "MIT"
-description = "Domain-neutral physical-settlement scheduling and fulfillment lifecycle contracts: capacity settlement scheduling, deterministic placement policy, and shared opaque identifiers."
+description = "Domain-neutral fulfillment scheduling and fulfillment lifecycle contracts: capacity settlement scheduling, deterministic placement policy, and shared opaque identifiers."
 requires-python = ">=3.12"
 dependencies = [
     "arkhai-kit-site>=0.2.0",
@@ -17,7 +17,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/market_physical_settlement"]
+packages = ["src/market_fulfillment"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
@@ -27,7 +27,3 @@ testpaths = ["tests/unit"]
 dev = [
     "pytest>=8.3.4,<9.0.0",
 ]
-
-[tool.uv.sources]
-arkhai-kit-site = { path = "../site", editable = true }
-arkhai-kit-resource-pools = { path = "../resource-pools", editable = true }

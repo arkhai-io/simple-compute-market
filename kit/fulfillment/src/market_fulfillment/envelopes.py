@@ -38,7 +38,7 @@ class VersionedEnvelope(BaseModel, Generic[PayloadT]):
     silently misreading an older row.
     """
 
-    kind: str
+    kind: str = Field(min_length=1)
     schema_version: int = Field(ge=1)
     payload: PayloadT
 

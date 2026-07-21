@@ -1,30 +1,31 @@
-.PHONY: test test-alkahest test-config test-identity test-policy test-physical-settlement dist dist-site dist-resource-pools dist-physical-settlement
+.PHONY: test test-alkahest test-config test-identity test-policy test-site test-resource-pools test-fulfillment dist dist-site dist-resource-pools dist-fulfillment
 
 DIST_DIR ?= $(abspath ../.dist)
 
-# NOTE: this aggregate target has never run kit/site's or
-# kit/resource-pools' own test suites (pre-existing, not introduced by
-# this change) -- test-physical-settlement is added as a standalone
-# target for the same reason, matching that existing convention rather
-# than silently changing it. Flagged for a future cleanup pass.
-test: test-alkahest test-config test-identity test-policy
+test: dist test-alkahest test-config test-identity test-policy test-site test-resource-pools test-fulfillment
 
 test-alkahest:
-	cd alkahest && make test
+	cd alkahest && $(MAKE) test DIST_DIR=$(DIST_DIR)
 
 test-config:
-	cd config && make test
+	cd config && $(MAKE) test DIST_DIR=$(DIST_DIR)
 
 test-identity:
-	cd identity && make test
+	cd identity && $(MAKE) test DIST_DIR=$(DIST_DIR)
 
 test-policy:
-	cd policy && make test
+	cd policy && $(MAKE) test DIST_DIR=$(DIST_DIR)
 
-test-physical-settlement:
-	cd physical-settlement && make test
+test-site:
+	cd site && $(MAKE) test DIST_DIR=$(DIST_DIR)
 
-dist: dist-site dist-resource-pools dist-physical-settlement
+test-resource-pools:
+	cd resource-pools && $(MAKE) test DIST_DIR=$(DIST_DIR)
+
+test-fulfillment:
+	cd fulfillment && $(MAKE) test DIST_DIR=$(DIST_DIR)
+
+dist: dist-site dist-resource-pools dist-fulfillment
 
 dist-site:
 	-mkdir -p $(DIST_DIR)
@@ -38,8 +39,8 @@ dist-resource-pools:
 	@ls $(DIST_DIR)/arkhai_kit_resource_pools-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-resource-pools produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-physical-settlement: dist-site dist-resource-pools
+dist-fulfillment: dist-site dist-resource-pools
 	-mkdir -p $(DIST_DIR)
-	cd physical-settlement && $(MAKE) build DIST_DIR=$(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_kit_physical_settlement-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-kit-physical-settlement produced a platform-specific wheel — must build inside Docker" && exit 1)
+	cd fulfillment && $(MAKE) build DIST_DIR=$(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_kit_fulfillment-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-fulfillment produced a platform-specific wheel — must build inside Docker" && exit 1)

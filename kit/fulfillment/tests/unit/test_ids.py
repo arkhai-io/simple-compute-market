@@ -2,7 +2,7 @@
 
 import uuid
 
-from market_physical_settlement import (
+from market_fulfillment import (
     new_capacity_reservation_id,
     new_fulfillment_id,
     new_provisioned_resource_id,

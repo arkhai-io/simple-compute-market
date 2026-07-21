@@ -14,10 +14,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from market_physical_settlement import PhysicalSettlementRequest, SettlementResource
+from market_fulfillment import PhysicalSettlementRequest, SettlementResource
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import AnsibleFulfillmentProvider
 from vm_provisioning_adapter.services.ansible_service import AnsibleService
-from market_resource_pools import (
+from market_fulfillment import (
     FulfillmentStatusFailedError,
     ProviderConfigInvalidError,
     ProviderOperationState,
