@@ -66,5 +66,5 @@
 - [x] 7.1 Run destination app/startup/lifecycle and generic job/lease/capacity/settlement/fulfillment API suites
 - [x] 7.2 Run affected VM and bare-metal executor/release suites plus POOLS-2 scheduler, POOLS-3 provider/fulfillment, and POOLS-6 multidimensional capacity/scheduling suites
 - [x] 7.3 Run destination wheel/image smoke tests and the focused storefront provisioning scenario, including POOLS-4 `pool_id`/`resource_id` claim precedence, missing/malformed-order failure before capacity probe or reserve, and POOLS-6 secondary-dimension fit rejection
-- [ ] 7.4 Validate package boundaries and Compute-30 OpenSpec artifacts after behavioral verification
+- [x] 7.4 Validate package boundaries and Compute-30 OpenSpec artifacts after behavioral verification
 - [x] 7.5 After Compute-30 lands, reconcile POOLS-7's planning paths, migration owner, service composition, worker/package setup, and tests to the extracted compute service before POOLS-7 implementation begins
