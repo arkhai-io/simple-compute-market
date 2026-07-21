@@ -93,6 +93,7 @@ services:
 
   seller-provisioning:
     image: arkhai:compute-provisioning
+    command: ["sh", "-c", "compute-provisioning-migrate && exec compute-provisioning-api"]
     ports:
       - "8081:8081"
     depends_on:
