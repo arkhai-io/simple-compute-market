@@ -812,6 +812,36 @@ class AdminController:
             reopened_listing_ids=result.reopened_listing_ids,
         )
 
+    def _open_derived_compute_listing_ids(self) -> set[str]:
+        """Snapshot open derived listings before an allocation changes capacity."""
+        conn = sqlite3.connect(
+            f"file:{self._db.db_path}?mode=ro&nolock=1",
+            uri=True,
+            timeout=5,
+        )
+        try:
+            rows = conn.execute(
+                """
+                SELECT d.listing_id
+                FROM derived_compute_listings d
+                JOIN listings l ON l.listing_id = d.listing_id
+                WHERE d.status = 'open' AND l.status = 'open'
+                """
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return set()
+        finally:
+            conn.close()
+        return {str(row[0]) for row in rows}
+
+    async def _closed_since_snapshot(self, listing_ids: set[str]) -> set[str]:
+        closed: set[str] = set()
+        for listing_id in listing_ids:
+            row = await self._db.load_listing(listing_id=listing_id)
+            if row and row.get("status") == "closed":
+                closed.add(listing_id)
+        return closed
+
     @router.post(
         "/portfolio/reservations",
         response_model=ReserveCapacityResponse,
@@ -827,6 +857,7 @@ class AdminController:
         every other reservation, so partial GPU capacity accounting and
         derived-listing reconciliation stay consistent across consumers.
         """
+        open_listing_ids = self._open_derived_compute_listing_ids()
         reserved = await self._capacity().reserve(
             claim=body.required_attributes or None,
             deal_ref={
@@ -841,6 +872,14 @@ class AdminController:
                 detail="No available compute VM matched required attributes",
             )
         closed_listing_ids = await self._close_oversized_compute_listings()
+        # The capacity-delta subscriber can race this inline reconciliation.
+        # Include listings that were open when reservation began but that the
+        # subscriber closed first, so the response reports the full effect of
+        # this allocation rather than only the inline worker's share.
+        closed_listing_ids = sorted(
+            set(closed_listing_ids)
+            | await self._closed_since_snapshot(open_listing_ids)
+        )
         stage_event(
             "portfolio",
             "capacity_reserved_by_admin",

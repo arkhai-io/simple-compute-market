@@ -25,7 +25,10 @@ from market_storefront.middleware.admin_auth import require_admin_key
 import market_storefront.server as _server
 from market_storefront.controllers.admin_controller import router as admin_router
 from market_storefront.controllers.system_controller import router as system_router
-from domains.vms.listings.reconciler import record_derived_listing
+from domains.vms.listings.reconciler import (
+    mark_derived_listings_closed,
+    record_derived_listing,
+)
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.services.system_service import SystemService
 from storefront_client.client import StorefrontClient, StorefrontClientError
@@ -375,6 +378,52 @@ class TestFulfillmentEvents:
             3: "closed",
             4: "closed",
         }
+
+    async def test_admin_reserve_reports_listings_closed_by_delta_race(self, client):
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+        fake = _fake_pool_site()
+        original_handle = fake._handle
+
+        def handle_with_delta_reconciliation(request):
+            response = original_handle(request)
+            if (
+                request.method == "POST"
+                and request.url.path == "/api/v1/capacity/reservations"
+            ):
+                conn = sqlite3.connect(db.db_path)
+                try:
+                    conn.execute(
+                        "UPDATE listings SET status = 'closed' WHERE listing_id = ?",
+                        ("listing-3x",),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+                mark_derived_listings_closed(db.db_path, ["listing-3x"])
+            return response
+
+        fake._handle = handle_with_delta_reconciliation
+        with site_capacity(fake):
+            response = await c._post(
+                "/api/v1/admin/portfolio/reservations",
+                {
+                    "required_attributes": {
+                        "resource_id": "pool-h200-1",
+                        "gpu_count": 2,
+                    },
+                    "listing_id": "listing-2x-manual",
+                    "escrow_uid": "manual-escrow-2x",
+                },
+                extra_headers=c._admin_headers(),
+            )
+
+        assert sorted(response["closed_listing_ids"]) == [
+            "listing-3x",
+            "listing-4x",
+        ]
 
     async def test_admin_reserve_capacity_returns_409_when_no_capacity(self, client):
         from tests.fake_site import site_capacity
