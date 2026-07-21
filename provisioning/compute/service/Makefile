@@ -6,6 +6,10 @@ help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 DIST_DIR ?= ../../../.dist
+# Podman does not reliably invalidate a runtime-stage COPY when only the
+# referenced builder stage changes. Include the wheel set in the runtime cache
+# key so a rebuilt adapter/service can never be hidden by a stale final stage.
+DIST_FINGERPRINT := $(shell find $(DIST_DIR) -maxdepth 1 -type f -name '*.whl' -exec cksum {} + 2>/dev/null | LC_ALL=C sort | cksum | awk '{print $$1}')
 IAC_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../../domains/vms/provisioning/iac)
 
 install: ## Install service and development dependencies
@@ -57,6 +61,7 @@ build-image: ## Build the wheel-only destination image
 		--ulimit nofile=65536 \
 		--build-arg APPUSER_UID=$(APPUSER_UID) \
 		--build-arg APPUSER_GID=$(APPUSER_GID) \
+		--build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) \
 		-t $(IMAGE_NAME):$(IMAGE_TAG) \
 		-f Dockerfile ../../..
 

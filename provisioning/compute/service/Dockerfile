@@ -103,6 +103,11 @@ RUN groupadd --gid ${APPUSER_GID} appuser && \
 WORKDIR /app
 RUN chown appuser:appuser /app
 
+# Podman can otherwise reuse these cross-stage COPY layers after the builder's
+# wheel installation changes. The Makefile derives this value from .dist.
+ARG DIST_FINGERPRINT=unknown
+LABEL org.arkhai.dist-fingerprint="${DIST_FINGERPRINT}"
+
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 COPY --from=builder --chown=appuser:appuser /home/appuser/ansible-venv /home/appuser/ansible-venv
 COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
