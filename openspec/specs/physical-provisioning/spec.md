@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the implemented allocation-backed executor dispatch, asynchronous job, and lease release behavior in the VM provisioning service.
+Define the implemented allocation-backed executor dispatch, asynchronous job, and lease release behavior in the compute provisioning service.
 
 ## Requirements
 
@@ -84,14 +84,57 @@ Shared storefront/provisioner DTOs, executor-neutral resource-pool models, and g
 - **WHEN** the VM operator client or provisioning service creates, validates, imports, or returns a resource-pool model
 - **THEN** that executor-neutral model resolves from `compute_provisioning` and no removed generic provisioning-client package is required
 
+### Requirement: Compute-owned provisioning service
+
+Cross-domain compute orchestration, including mechanism-neutral fulfillment coordination, MUST run from a deployable service owned by `provisioning/compute`, while VM and bare-metal packages retain their concrete executor and fulfillment-provider semantics and register them through explicit adapter bundles.
+
+#### Scenario: Extracted service starts with current adapters
+
+- **WHEN** the compute provisioner starts with VM and bare-metal adapters configured
+- **THEN** it mounts generic job, lease, capacity, fulfillment, health, and watchdog surfaces plus each adapter's declared executor, provider, and operator surfaces
+
+#### Scenario: Generic service is inspected for dependencies
+
+- **WHEN** package and import boundaries are checked
+- **THEN** generic compute service modules do not import concrete VM or bare-metal request, action, result, playbook, provider, fulfillment-requirement, or access models
+
+### Requirement: Validated executor registration
+
+Service composition MUST reject duplicate executor/action kinds, duplicate fulfillment-provider identities, and incomplete adapter bundles before accepting traffic. Executor and provider registries MUST remain separate authority dimensions: registering or resolving a provider does not claim, infer, or override an executor kind. This extraction does not join POOLS-3's provider-only fulfillment path to executor dispatch.
+
+#### Scenario: Two adapters claim one executor kind
+
+- **WHEN** composition registers duplicate ownership for an executor/action kind
+- **THEN** startup fails with both registrations identified and no server begins serving
+
+#### Scenario: Two adapters claim one provider identity
+
+- **WHEN** composition registers duplicate ownership for a fulfillment-provider identity
+- **THEN** startup fails with both registrations identified and no server begins serving
+
+#### Scenario: Provider and executor registrations coexist
+
+- **WHEN** service composition registers executor adapters and fulfillment providers
+- **THEN** each registration remains in its own namespace and provider availability does not select or replace an executor adapter
+
+### Requirement: Clean ownership cutover
+
+After callers and deployments migrate, generic provisioning service and client paths under the VM domain MUST be removed rather than retained as aliases or compatibility distributions.
+
+#### Scenario: Extraction completes
+
+- **WHEN** repository package, import, image, and manifest references are reconciled
+- **THEN** generic compute provisioning resolves only from the top-level provisioning category and domain packages contain only their concrete adapters and assets
+
 ## Evidence
 
-- VM and bare-metal allocation executor metadata: `domains/vms/provisioning/service/tests/integration/test_leases_api.py` and `test_bare_metal_leases_api.py`.
-- Multidimensional scheduling eligibility (fit rejected on a secondary dimension even when GPU count would fit, legacy gpu-only requests unaffected): `domains/vms/provisioning/service/src/tests/unit/services/test_physical_settlement_scheduler.py` (POOLS-6 pass 1 tests).
-- Persisted asynchronous job lifecycle and polling: `domains/vms/provisioning/service/tests/integration/test_vms_api.py`.
-- Executor-specific release, failed-release capacity retention, retry, and force release: `domains/vms/provisioning/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `unit/services/test_ledger_lease_lifecycle.py`.
+- VM and bare-metal allocation executor metadata: `provisioning/compute/service/tests/integration/test_leases_api.py` and `test_bare_metal_leases_api.py`.
+- Multidimensional scheduling eligibility (fit rejected on a secondary dimension even when GPU count would fit, legacy gpu-only requests unaffected): `provisioning/compute/service/tests/unit/services/test_physical_settlement_scheduler.py` (POOLS-6 pass 1 tests).
+- Persisted asynchronous job lifecycle and polling: `provisioning/compute/service/tests/integration/test_vms_api.py`.
+- Executor-specific release, failed-release capacity retention, retry, and force release: `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `unit/services/test_ledger_lease_lifecycle.py`.
+- Adapter composition and generic import boundaries: `provisioning/compute/service/tests/unit/test_composition.py` and `test_import_boundaries.py`.
 
-`PhysicalSettlementScheduler`, `FulfillmentProvider`, and a durable mechanism-neutral settlement record are not implemented baseline contracts. Deployment relocation remains proposed in `market-platform-compute-30-extract-service`.
+`PhysicalSettlementScheduler` and the process-local fulfillment-provider coordination implemented by the extracted service are baseline contracts. Durable mechanism-neutral settlement recovery remains deferred to `pools-7-storefront-fulfillment-cutover`.
 
 ## Capacity settlement lifecycle
 
