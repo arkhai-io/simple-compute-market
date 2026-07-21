@@ -13,7 +13,7 @@ dependencies = [
     "arkhai-kit-config",
     "arkhai-kit-identity",
     "arkhai-kit-policy",
-    "alkahest-py==1.1.0",
+    "alkahest-py==1.1.2",
     "fastapi~=0.115.8",
     # [all] carries typing-inspect, which fastapi_utils.cbv imports
     # unconditionally under pydantic v2.

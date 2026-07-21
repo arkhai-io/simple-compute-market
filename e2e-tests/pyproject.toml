@@ -7,7 +7,7 @@ name = "arkhai-e2e-tests"
 version = "0.1.0"
 license = "MIT"
 description = "End-to-end integration tests for Arkhai deployed blockchain environments"
-requires-python = ">=3.13,<3.15"
+requires-python = ">=3.13,<3.14"
 dependencies = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -17,7 +17,7 @@ dependencies = [
     "web3>=7.0",
     "eth-account>=0.12",
     "eth-typing>=4.0",
-    "alkahest-py==1.1.0",
+    "alkahest-py==1.1.2",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
     "rich>=13.0",
