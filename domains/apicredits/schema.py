@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -42,11 +43,13 @@ class ApiCreditsListing(BaseModel):
         if "offer_resource" in value:
             offer_resource = value["offer_resource"]
             if isinstance(offer_resource, BaseModel):
-                return {
-                    **value,
-                    "offer_resource": offer_resource.model_dump(mode="json"),
-                }
-            return value
+                offer_resource = offer_resource.model_dump(mode="json")
+            elif isinstance(offer_resource, str):
+                try:
+                    offer_resource = json.loads(offer_resource)
+                except (TypeError, ValueError):
+                    return value
+            return {**value, "offer_resource": offer_resource}
         return {"offer_resource": value}
 
     @model_validator(mode="after")

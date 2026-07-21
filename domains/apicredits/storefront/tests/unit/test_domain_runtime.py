@@ -104,6 +104,18 @@ def test_domain_runtime_normalizes_offer_resource_from_foreign_model() -> None:
     assert listing.offer_resource.resource_id == "quota-a"
 
 
+def test_domain_runtime_normalizes_json_encoded_offer_resource() -> None:
+    listing = market_domain().codecs.listing({
+        "offer_resource": (
+            '{"kind":"api_credits.v1","service_name":"Acme Inference",'
+            '"resource_id":"quota-a"}'
+        ),
+    })
+
+    assert listing.offer_resource.service_name == "Acme Inference"
+    assert listing.offer_resource.resource_id == "quota-a"
+
+
 def test_domain_runtime_surfaces_api_credits_validation_errors() -> None:
     runtime = market_domain()
 
