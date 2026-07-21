@@ -155,7 +155,7 @@ class TestDeletePool:
     ):
         """`default` can be disabled like any other pool it just can never
         be hard-deleted or stop being the fallback for hosts that omit pool_id.
-        See openspec/changes/pools-2-fulfillment-scheduler/design.md,
+        See openspec/specs/fulfillment/spec.md,
         decision 8."""
         client, _ = client_and_queue
 

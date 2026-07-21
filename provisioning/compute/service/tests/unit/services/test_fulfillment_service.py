@@ -89,7 +89,7 @@ class TestCreateIdempotency:
 
     async def test_conflicting_requirements_raises_before_dispatch(self, service, provider):
         # agreement_id no longer exists on PhysicalSettlementRequest
-        # (tasks.md 1.5) -- requirements is the field this equivalence
+        # requirements are the normalized values this equivalence
         # check now has left, besides market and the resource, to prove a
         # same-capacity_reservation_id retry with a genuinely different
         # request is rejected rather than silently treated as a retry.

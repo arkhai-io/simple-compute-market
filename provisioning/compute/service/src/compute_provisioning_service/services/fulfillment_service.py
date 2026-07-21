@@ -11,9 +11,9 @@ future storefront-facing code calls. It owns:
 - provider resolution and dispatch;
 - normalization of provider operation state.
 
-It does NOT call PhysicalSettlementScheduler and never will — placement and
-execution stay separate services, called in sequence by whatever
-orchestrates the workflow. See design.md Decision 1.
+It does not call ``PhysicalSettlementScheduler``. Placement and provider
+execution are separate boundaries and orchestration calls them in sequence.
+See ``openspec/specs/fulfillment/spec.md#scheduling-and-assignment``.
 """
 
 from __future__ import annotations
@@ -36,9 +36,10 @@ from market_fulfillment import ProviderRegistry
 
 @dataclass(frozen=True)
 class FulfillmentEntry:
-    """One allocation's fulfillment record (in-memory this round — see
-    POOLS 3 design.md Decision 4.
-    No a concurrency guarantees, not durable across restarts"""
+    """Process-local fulfillment state used until durable lifecycle records own retries.
+
+    This store provides no cross-process concurrency or restart recovery.
+    """
 
     request: PhysicalSettlementRequest
     resource: SettlementResource
@@ -58,11 +59,9 @@ def _is_equivalent(
     SettlementResource are pydantic models with structural equality, so
     this is plain field comparison, not a custom fingerprint hash.
 
-    No longer scoped to agreement_id: PhysicalSettlementRequest dropped it
-    entirely (tasks.md 1.5) -- the provisioning boundary is
-    capacity-reservation-centric and MUST NOT carry storefront commercial
-    identities (design.md, "Cross-domain identities and terminology").
-    ``capacity_reservation_id`` is not compared here either, deliberately:
+    The provisioning boundary is capacity-reservation-centric and does not
+    carry storefront commercial identity. ``capacity_reservation_id`` is not
+    compared here because it is already the lookup key:
     it is the dict key entries are already looked up by (see
     ``FulfillmentService.create``/``validate_create``), so comparing it
     again would be redundant with the lookup that got here.
@@ -131,12 +130,9 @@ class FulfillmentService:
             )
 
         if self._capacity_ledger is not None:
-            # CapacityLedgerService.assign_settlement_resource's own
-            # parameter is still named capacity_reservation_id (kit/site's
-            # SiteAllocation/allocation_id rename is tasks.md Section 2,
-            # not this section) -- passing capacity_reservation_id
-            # through positionally-by-keyword to it is correct as long as
-            # the keyword name matches kit/site's current signature.
+            # Assignment is recorded before provider dispatch so retries cannot
+            # bind the same admitted capacity to a different physical resource.
+            # See openspec/specs/fulfillment/spec.md#scheduling-and-assignment.
             assignment = self._capacity_ledger.assign_settlement_resource(
                 allocation_id=request.capacity_reservation_id,
                 settlement_resource_id=resource.settlement_resource_id,
