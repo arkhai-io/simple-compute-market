@@ -1,13 +1,13 @@
 ## 1. Finalize shared contracts and package skeleton
 
-- [ ] 1.0 Verify `pools-6-multidimensional-fair-scheduling` has landed and `Host` (or its replacement) carries real memory/disk/vCPU capacity fields before proceeding past task 1. `proposal.md` lists this as a blocking prerequisite for reservation-admission work (tasks 2 and 4) — this task exists so the plan fails loudly rather than silently proceeding without it if implementation ever starts out of the intended POOLS-6-then-POOLS-7 order.
-- [ ] 1.1 Create `kit/physical-settlement` using repository-standard Python kit packaging, Makefile, tests, typing marker, and distribution/reinit conventions.
-- [ ] 1.2 Define globally unique opaque ID value types for `capacity_reservation_id`, `fulfillment_id`, `provisioned_resource_id`, `settlement_resource_id`, and `result_id`; evaluate UUIDv7 against repository conventions and document the selected format.
-- [ ] 1.3 Decide and document whether routing/integrity requires an explicit site-plus-pool composite reference in addition to globally unique `pool_id` and explicit `site_id`.
-- [ ] 1.4 Move domain-neutral physical-settlement request/resource types, `PhysicalSettlementScheduler`, and `DeterministicRoundRobinPolicy` into the new kit without introducing VM/storefront dependencies.
-- [ ] 1.5 Remove provisioning commercial identity from shared contracts: delete `agreement_id` and rename `allocation_id` to `capacity_reservation_id` across new interfaces.
-- [ ] 1.6 Add versioned payload envelopes for prepared provider create/teardown inputs, provider metadata, and `SettlementResult`; prohibit unversioned cross-domain generic dictionaries.
-- [ ] 1.7 Add package-boundary/import tests proving dependency direction and carrier purity.
+- [x] 1.0 Verify `pools-6-multidimensional-fair-scheduling` has landed and `Host` (or its replacement) carries real memory/disk/vCPU capacity fields before proceeding past task 1. `proposal.md` lists this as a blocking prerequisite for reservation-admission work (tasks 2 and 4) — this task exists so the plan fails loudly rather than silently proceeding without it if implementation ever starts out of the intended POOLS-6-then-POOLS-7 order. **Resolved 2026-07-21 (design.md, "Dependency on POOLS-6"): pass 1 (the dimensions-map mechanism) is landed and is what this change builds on; pass 2 (real per-dimension `Host` fields) remains open `pools-6` scope. Proceeding against pass-1 wiring as a deliberate, documented decision, not a silent gap.**
+- [x] 1.1 Create `kit/physical-settlement` using repository-standard Python kit packaging, Makefile, tests, typing marker, and distribution/reinit conventions.
+- [x] 1.2 Define globally unique opaque ID value types for `capacity_reservation_id`, `fulfillment_id`, `provisioned_resource_id`, `settlement_resource_id`, and `result_id`; evaluate UUIDv7 against repository conventions and document the selected format. **Resolved: UUIDv7 via the `uuid6` package (design.md, "Final planning decisions").**
+- [x] 1.3 Decide and document whether routing/integrity requires an explicit site-plus-pool composite reference in addition to globally unique `pool_id` and explicit `site_id`. **Resolved: not needed (design.md, "Final planning decisions").**
+- [x] 1.4 Move domain-neutral physical-settlement request/resource types, `PhysicalSettlementScheduler`, and `DeterministicRoundRobinPolicy` into the new kit without introducing VM/storefront dependencies.
+- [x] 1.5 Remove provisioning commercial identity from shared contracts: delete `agreement_id` and rename `allocation_id` to `capacity_reservation_id` across new interfaces.
+- [x] 1.6 Add versioned payload envelopes for prepared provider create/teardown inputs, provider metadata, and `SettlementResult`; prohibit unversioned cross-domain generic dictionaries. (Envelope shape only this section — concrete payload kinds land with the sections that need them, per envelopes.py's docstring.)
+- [x] 1.7 Add package-boundary/import tests proving dependency direction and carrier purity.
 
 ## 2. Reshape site capacity and identifiers
 

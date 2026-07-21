@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "arkhai-kit-site>=0.2.0",
     "arkhai-kit-resource-pools>=0.1.0",
+    "arkhai-kit-physical-settlement>=0.1.0",
     "arkhai-compute-provisioning>=0.5.0",
     "arkhai-core-storefront-client>=0.11.0",
     "dynaconf>=3.0.0",
@@ -61,6 +62,7 @@ dev = [
 arkhai-compute-provisioning = { path = "..", editable = true }
 arkhai-kit-site = { path = "../../../kit/site", editable = true }
 arkhai-kit-resource-pools = { path = "../../../kit/resource-pools", editable = true }
+arkhai-kit-physical-settlement = { path = "../../../kit/physical-settlement", editable = true }
 arkhai-core-storefront-client = { path = "../../../core/storefront-client", editable = true }
 arkhai-bare-metal = { path = "../../../domains/bare_metal", editable = true }
 arkhai-bare-metal-provisioning-adapter = { path = "../../../domains/bare_metal/provisioning/adapter", editable = true }

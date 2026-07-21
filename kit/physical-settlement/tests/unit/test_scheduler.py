@@ -1,4 +1,16 @@
-"""Unit tests for deterministic Capacity Settlement Assignment scheduling."""
+"""Unit tests for deterministic Capacity Settlement Assignment scheduling.
+
+Moved and adapted from ``provisioning/compute/service/tests/unit/services/
+test_physical_settlement_scheduler.py`` (tombstoned at its old location).
+Adaptations, both required by the tasks.md 1.4/1.5 move:
+
+- ``allocation_id``/``agreement_id`` request fields become
+  ``capacity_reservation_id`` only; the old agreement-mismatch test is
+  dropped (the scheduler no longer receives an agreement identity to
+  mismatch against -- see scheduler.py's module docstring).
+- The scheduler fixture now passes ``default_resource_kind="compute.gpu"``
+  explicitly, since ``_requirement`` no longer silently defaults it.
+"""
 
 from __future__ import annotations
 
@@ -9,10 +21,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from compute_provisioning import (
+from market_physical_settlement import (
     CapacityReservationExpiredError,
+    MissingResourceKindError,
     NoEligibleSettlementResourceError,
     PhysicalSettlementRequest,
+    PhysicalSettlementScheduler,
     SettlementEntityNotFoundError,
     SettlementRequestMismatchError,
 )
@@ -20,7 +34,6 @@ from market_resource_pools import PoolCreate, ResourcePoolService
 from market_resource_pools.db import Base as PoolsBase
 from market_site.db import Base as SiteBase
 from market_site.ledger import CapacityLedgerService
-from compute_provisioning_service.services.physical_settlement_scheduler import PhysicalSettlementScheduler
 
 
 class _Handler:
@@ -43,8 +56,11 @@ def services():
     SiteBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
     pools = ResourcePoolService(factory, {"ansible": _Handler()})
-    ledger = CapacityLedgerService(factory)
-    scheduler = PhysicalSettlementScheduler(pools, ledger)
+    # This test suite's claims are VM-flavored ("gpu_count"); opt into
+    # that alias explicitly the same way the VM composition root does
+    # (kit/site's own default is domain-neutral -- see ledger.py).
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"))
+    scheduler = PhysicalSettlementScheduler(pools, ledger, default_resource_kind="compute.gpu")
     return pools, ledger, scheduler
 
 
@@ -72,28 +88,18 @@ def _reserve(ledger, agreement="agreement-1", **deal):
     return result["allocation_id"]
 
 
-def _request(allocation_id: str, **kwargs):
+def _request(capacity_reservation_id: str, **kwargs):
     return PhysicalSettlementRequest(
-        allocation_id=allocation_id,
-        agreement_id=kwargs.pop("agreement_id", "agreement-1"),
+        capacity_reservation_id=capacity_reservation_id,
         market="vms",
         **kwargs,
     )
 
 
-def test_unknown_allocation_is_rejected(services):
+def test_unknown_reservation_is_rejected(services):
     _, _, scheduler = services
     with pytest.raises(SettlementEntityNotFoundError):
         scheduler.select_resource(_request("missing"))
-
-
-def test_agreement_mismatch_is_rejected(services):
-    pools, ledger, scheduler = services
-    _pool(pools, "pool-a")
-    _resource(ledger, "r1", "pool-a")
-    allocation_id = _reserve(ledger)
-    with pytest.raises(SettlementRequestMismatchError):
-        scheduler.select_resource(_request(allocation_id, agreement_id="other"))
 
 
 def test_expired_reservation_is_rejected(services):
@@ -115,9 +121,9 @@ def test_retry_is_idempotent_and_does_not_rerun_policy(services):
     _pool(pools, "pool-b")
     _resource(ledger, "a1", "pool-a")
     _resource(ledger, "b1", "pool-b")
-    allocation_id = _reserve(ledger)
-    first = scheduler.select_resource(_request(allocation_id))
-    second = scheduler.select_resource(_request(allocation_id))
+    capacity_reservation_id = _reserve(ledger)
+    first = scheduler.select_resource(_request(capacity_reservation_id))
+    second = scheduler.select_resource(_request(capacity_reservation_id))
     assert first == second
 
 
@@ -129,8 +135,8 @@ def test_round_robin_is_deterministic_across_pools(services):
     _resource(ledger, "b1", "pool-b", units=10)
     ids = [_reserve(ledger, agreement=f"agreement-{i}") for i in range(1, 4)]
     selected = [
-        scheduler.select_resource(_request(aid, agreement_id=f"agreement-{i}" )).pool_id
-        for i, aid in enumerate(ids, 1)
+        scheduler.select_resource(_request(rid)).pool_id
+        for rid in ids
     ]
     assert selected == ["pool-a", "pool-b", "pool-a"]
 
@@ -142,8 +148,8 @@ def test_round_robin_is_deterministic_within_pool(services):
     _resource(ledger, "r2", "pool-a", units=10)
     ids = [_reserve(ledger, agreement=f"agreement-{i}") for i in range(1, 3)]
     selected = [
-        scheduler.select_resource(_request(aid, agreement_id=f"agreement-{i}")).settlement_resource_id
-        for i, aid in enumerate(ids, 1)
+        scheduler.select_resource(_request(rid)).settlement_resource_id
+        for rid in ids
     ]
     assert selected == ["r1", "r2"]
 
@@ -152,28 +158,39 @@ def test_explicit_resource_bypasses_policy_not_eligibility(services):
     pools, ledger, scheduler = services
     _pool(pools, "pool-a", enabled=False)
     _resource(ledger, "r1", "pool-a")
-    allocation_id = _reserve(ledger)
+    capacity_reservation_id = _reserve(ledger)
     with pytest.raises(NoEligibleSettlementResourceError):
-        scheduler.select_resource(_request(allocation_id, resource_id="r1"))
+        scheduler.select_resource(_request(capacity_reservation_id, resource_id="r1"))
 
 
 def test_resource_without_pool_is_not_schedulable(services):
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")
     ledger.register_resource(resource_id="orphan", total_units=4, attributes={})
-    allocation_id = _reserve(ledger)
+    capacity_reservation_id = _reserve(ledger)
     with pytest.raises(NoEligibleSettlementResourceError):
-        scheduler.select_resource(_request(allocation_id))
+        scheduler.select_resource(_request(capacity_reservation_id))
 
 
 def test_disabling_pool_does_not_depend_on_existing_assignment(services):
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")
     _resource(ledger, "r1", "pool-a")
-    allocation_id = _reserve(ledger)
-    scheduler.select_resource(_request(allocation_id))
+    capacity_reservation_id = _reserve(ledger)
+    scheduler.select_resource(_request(capacity_reservation_id))
     disabled = pools.disable_pool("pool-a")
     assert disabled.enabled is False
+
+
+def test_missing_resource_kind_raises_when_no_default_configured(services):
+    pools, ledger, _ = services
+    scheduler = PhysicalSettlementScheduler(pools, ledger)  # no default_resource_kind
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a")
+    capacity_reservation_id = _reserve(ledger)
+    with pytest.raises(MissingResourceKindError):
+        scheduler.select_resource(_request(capacity_reservation_id))
+
 
 # ----------------------------------------------------------------------
 # multidimensional eligibility
@@ -213,15 +230,15 @@ def test_scheduler_excludes_candidate_that_fits_gpu_but_not_memory(services):
         capacity={"gpu_count": 8, "vcpu_count": 32, "ram_gb": 16, "disk_gb": 1000},
     )
     dims = {"gpu_count": 1, "ram_gb": 64}
-    allocation_id = _reserve_with_dimensions(ledger, dims)
+    capacity_reservation_id = _reserve_with_dimensions(ledger, dims)
     # Pinning the RAM-short resource explicitly must fail eligibility,
     # checked before any assignment memoizes a different resource.
     with pytest.raises(NoEligibleSettlementResourceError):
         scheduler.select_resource(_request(
-            allocation_id, requirements={"dimensions": dims}, resource_id="ram-short",
+            capacity_reservation_id, requirements={"dimensions": dims}, resource_id="ram-short",
         ))
     resource = scheduler.select_resource(
-        _request(allocation_id, requirements={"dimensions": dims})
+        _request(capacity_reservation_id, requirements={"dimensions": dims})
     )
     assert resource.settlement_resource_id == "roomy"
 
@@ -234,9 +251,9 @@ def test_scheduler_selects_candidate_that_fits_every_dimension(services):
         capacity={"gpu_count": 8, "vcpu_count": 32, "ram_gb": 256, "disk_gb": 1000},
     )
     dims = {"gpu_count": 2, "vcpu_count": 8, "ram_gb": 64, "disk_gb": 200}
-    allocation_id = _reserve_with_dimensions(ledger, dims)
+    capacity_reservation_id = _reserve_with_dimensions(ledger, dims)
     resource = scheduler.select_resource(
-        _request(allocation_id, requirements={"dimensions": dims})
+        _request(capacity_reservation_id, requirements={"dimensions": dims})
     )
     assert resource.settlement_resource_id == "r1"
 
@@ -247,8 +264,8 @@ def test_scheduler_still_schedules_legacy_gpu_only_requests(services):
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")
     _resource(ledger, "r1", "pool-a", units=10)
-    allocation_id = _reserve(ledger)
-    resource = scheduler.select_resource(_request(allocation_id))
+    capacity_reservation_id = _reserve(ledger)
+    resource = scheduler.select_resource(_request(capacity_reservation_id))
     assert resource.settlement_resource_id == "r1"
 
 

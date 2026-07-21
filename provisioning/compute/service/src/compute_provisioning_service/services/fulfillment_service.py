@@ -23,7 +23,7 @@ from typing import Literal
 
 from market_resource_pools import FulfillmentValidationIssue, FulfillmentValidationResult
 
-from compute_provisioning import PhysicalSettlementRequest, SettlementResource
+from market_physical_settlement import PhysicalSettlementRequest, SettlementResource
 from market_resource_pools import (
     FulfillmentConflictError,
     FulfillmentRequestInvalidError,
@@ -51,16 +51,24 @@ def _is_equivalent(
     request: PhysicalSettlementRequest,
     resource: SettlementResource,
 ) -> bool:
-    """Scoped to agreement_id/market/requirements (from the request) and the entire
+    """Scoped to market/requirements (from the request) and the entire
     selected SettlementResource — explicitly NOT request.resource_id, which
     is an optional selection constraint on the request, not part of
     fulfillment identity. Both PhysicalSettlementRequest and
     SettlementResource are pydantic models with structural equality, so
     this is plain field comparison, not a custom fingerprint hash.
+
+    No longer scoped to agreement_id: PhysicalSettlementRequest dropped it
+    entirely (tasks.md 1.5) -- the provisioning boundary is
+    capacity-reservation-centric and MUST NOT carry storefront commercial
+    identities (design.md, "Cross-domain identities and terminology").
+    ``capacity_reservation_id`` is not compared here either, deliberately:
+    it is the dict key entries are already looked up by (see
+    ``FulfillmentService.create``/``validate_create``), so comparing it
+    again would be redundant with the lookup that got here.
     """
     return (
-        entry.request.agreement_id == request.agreement_id
-        and entry.request.market == request.market
+        entry.request.market == request.market
         and entry.request.requirements == request.requirements
         and entry.resource == resource
     )
@@ -87,9 +95,9 @@ class FulfillmentService:
                 validator(request, resource)
             except Exception as exc:
                 issues.append(FulfillmentValidationIssue(code="request_invalid", message=str(exc)))
-        existing = self._entries.get(request.allocation_id)
+        existing = self._entries.get(request.capacity_reservation_id)
         if existing is not None and not _is_equivalent(existing, request, resource):
-            issues.append(FulfillmentValidationIssue(code="fulfillment_conflict", message="allocation already has a different fulfillment"))
+            issues.append(FulfillmentValidationIssue(code="fulfillment_conflict", message="capacity reservation already has a different fulfillment"))
         return FulfillmentValidationResult(tuple(issues))
 
 
@@ -112,28 +120,34 @@ class FulfillmentService:
         validation = self.validate_create(request, resource)
         if not validation.valid:
             self._raise_validation_error(validation)
-        existing = self._entries.get(request.allocation_id)
+        existing = self._entries.get(request.capacity_reservation_id)
         if existing is not None:
             if _is_equivalent(existing, request, resource):
                 return existing.create_result
             raise FulfillmentConflictError(
-                f"allocation_id={request.allocation_id!r} already has a "
-                "fulfillment with a different agreement, market, requirements, or "
+                f"capacity_reservation_id={request.capacity_reservation_id!r} already has a "
+                "fulfillment with a different market, requirements, or "
                 "selected resource"
             )
 
         if self._capacity_ledger is not None:
+            # CapacityLedgerService.assign_settlement_resource's own
+            # parameter is still named allocation_id (kit/site's
+            # SiteAllocation/allocation_id rename is tasks.md Section 2,
+            # not this section) -- passing capacity_reservation_id
+            # through positionally-by-keyword to it is correct as long as
+            # the keyword name matches kit/site's current signature.
             assignment = self._capacity_ledger.assign_settlement_resource(
-                allocation_id=request.allocation_id,
+                allocation_id=request.capacity_reservation_id,
                 settlement_resource_id=resource.settlement_resource_id,
             )
             if assignment is None:
                 raise FulfillmentConflictError(
-                    f"allocation_id={request.allocation_id!r} does not exist"
+                    f"capacity_reservation_id={request.capacity_reservation_id!r} does not exist"
                 )
         provider = self._provider_registry.require(resource.provider)
         result = await provider.create(request, resource)
-        self._entries[request.allocation_id] = FulfillmentEntry(
+        self._entries[request.capacity_reservation_id] = FulfillmentEntry(
             request=request, resource=resource, create_result=result
         )
         return result

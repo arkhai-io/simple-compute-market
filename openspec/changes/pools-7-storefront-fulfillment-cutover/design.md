@@ -248,9 +248,10 @@ nothing forcing them to. Resolved direction: extract a single
 that both call sites use — reservation calls it to gate admission ("does
 at least one host qualify"), scheduling calls it to build the eligible
 set for policy selection. Exact home for this predicate (alongside
-`PhysicalSettlementScheduler` in `compute_provisioning`, or in
-`kit/site` where the resource rows themselves live) is not decided;
-resolve during planning.
+`PhysicalSettlementScheduler` in `kit/physical-settlement`, or in
+`kit/site` where the resource rows themselves live) is resolved in
+"Final planning decisions" → "Cross-domain identities and terminology,"
+below: `kit/site`, to keep the dependency direction acyclic.
 
 ### `PhysicalSettlementScheduler` and `DeterministicRoundRobinPolicy`: package destination — SUPERSEDED, see "Shared package boundary" below
 
@@ -343,6 +344,24 @@ normalization, units, and fairness) in order to unblock itself. Sequencing:
 reservation-admission and scheduling-eligibility work (including the
 shared `resource_satisfies_requirement` predicate above) consumes that
 result rather than working around its absence.
+
+**Resolved during implementation planning (2026-07-21):** `pools-6` pass
+1 (the `dimensions`/`available` JSON-map mechanism on `SiteResource`,
+`SiteAllocation`, and `CapacityEvent`, and the scheduler's per-dimension
+fit check against it) is landed and is what POOLS-7 builds on. Pass 2
+(real vCPU/memory/disk fields — `Host` still only carries `gpu_count`,
+so every dimension key other than `gpu_count` is architecturally
+supported but never actually populated) remains open `pools-6` scope,
+not resolved here. POOLS-7 proceeds against the existing pass-1 wiring
+as-is rather than blocking on pass 2 or quietly adding partial dimension
+fields itself — the prohibition above (no quiet partial answer) still
+holds; this is a decision to accept the current gpu_count-only ceiling
+for this change's scope, not to fill it in piecemeal. Admission and
+scheduling remain correct for every dimension actually populated today;
+they simply have nothing to check for dimensions no caller populates
+yet. Any future work that starts populating additional dimensions must
+still go through `pools-6` pass 2's design questions on normalization,
+units, and fairness before doing so.
 
 ## `SettlementRecord` shape (design review continued, 2026-07-17)
 
@@ -978,6 +997,43 @@ UUIDv7 after reviewing repository conventions; ownership remains explicit via
 review whether any site-plus-pool composite identity is needed for routing or
 integrity.
 
+**Resolved during implementation planning (2026-07-21):**
+
+- **ID format:** every existing ID in this codebase (`kit/site`,
+  `compute_provisioning_service`) uses plain `uuid.uuid4()`; Python's
+  stdlib `uuid` module does not gain native `uuid7()` support until 3.14,
+  and this repository is pinned to `>=3.12` with no appetite to move that
+  floor for this reason alone. `kit/physical-settlement` uses UUIDv7 via
+  the pure-Python `uuid6` package (`uuid6.uuid7()`) rather than stdlib
+  `uuid4`, for the index-locality benefit on the new high-write
+  settlement/fulfillment tables — accepted as the one deliberate
+  deviation from repository convention, isolated to this new package's
+  ID-generation call sites.
+- **Site-plus-pool composite identity:** not needed. Explicit `site_id`
+  plus a globally unique `pool_id` is sufficient for routing and
+  integrity; no separate composite reference type is introduced.
+- **Shared `resource_satisfies_requirement` predicate location (see
+  "Reservation-time admission and scheduling-time eligibility MUST share
+  one predicate," above): resolved to `kit/site`, not
+  `kit/physical-settlement`.** `kit/physical-settlement` already takes a
+  real runtime dependency on `kit/site` (`CapacityLedgerService`, for
+  `PhysicalSettlementScheduler`'s allocation/resource queries — see
+  "Shared package boundary," above). Putting the predicate in
+  `kit/physical-settlement` instead would require `kit/site`'s own
+  `_resource_matches`/`_find_candidate` (reservation-time admission) to
+  import it back, closing a real `kit/site` ↔ `kit/physical-settlement`
+  cycle — the same category of problem this file already ruled out once
+  for `kit/resource-pools` ("`PhysicalSettlementScheduler` ... package
+  destination"). Living next to the scheduler was a stated preference,
+  not a requirement, so it yields to the acyclic constraint:
+  `PhysicalSettlementScheduler._eligible_candidates`'s inline fit-check
+  becomes a call to `kit/site`'s exported `resource_satisfies_requirement(
+  resource, requirement) -> bool`, operating on the same plain
+  `resource_kind`/`available`-quantities/`attributes` shape it already
+  uses today (no `SiteResource` ORM object required at the call site),
+  and `kit/site`'s `_resource_matches` becomes a thin adapter that builds
+  that plain shape from a `SiteResource` row and calls the same function.
+
 ### Shared package boundary
 
 Create a new `kit/physical-settlement` package. This is intentionally separate
@@ -1157,3 +1213,42 @@ preserving ambiguous compatibility names indefinitely, including:
 - replacement of the old release path after backfilled settlement teardown is
   operational;
 - corresponding API/client/schema/fixture/test/architecture changes.
+
+## Section 1 implementation state (2026-07-21)
+
+Tasks 1.1–1.7 are implemented: `kit/physical-settlement` exists with the
+moved types/scheduler/policy, uuid7 IDs, the versioned envelope shape,
+and import-boundary tests (23 passing). `kit/site`'s two domain leaks
+identified above (`_UNIT_CLAIM_KEYS`, the scheduler's `resource_kind`
+fallback) are fixed as part of the move, not deferred.
+
+Every known runtime consumer of the moved/renamed types was updated in
+the same pass, even though most of that code (`FulfillmentService`,
+`AnsibleFulfillmentProvider`) is nominally Section 6 scope: neither has a
+production caller yet (verified — only tests construct them), so there
+was no live-traffic risk in updating them now, and leaving them on the
+old, about-to-be-deleted types would have left the whole
+`compute_provisioning_service` package uninstallable in the interim.
+Whoever picks up Section 6 will find `FulfillmentService`'s in-memory
+`_entries` map and `_is_equivalent` check already using
+`capacity_reservation_id` and already missing `agreement_id` — that
+in-memory mechanism itself is still exactly what Section 3's durable
+persistence replaces, unchanged by this note.
+
+**One known, deliberately deferred gap:** `kit/resource-pools/src/
+market_resource_pools/fulfillment.py`'s `FulfillmentProvider` ABC still
+carries a `TYPE_CHECKING`-only forward reference to
+`compute_provisioning.PhysicalSettlementRequest`/`SettlementResource`
+(the pre-move, now-tombstoned location). This causes no runtime failure
+(`TYPE_CHECKING` blocks never execute), only reduced static-type-checking
+fidelity for that one file. It was not fixed in Section 1 because
+`FulfillmentProvider`/`ProviderRegistry` staying in `kit/resource-pools`
+rather than moving to `kit/physical-settlement` was itself an
+un-revisited decision from `pools-3` (see "Shared package boundary,"
+above — the final decision only says VM-specific Ansible providers stay
+in the VM adapter and generic settlement lifecycle types move to
+`kit/physical-settlement`; it does not explicitly re-confirm
+`FulfillmentProvider`/`ProviderRegistry`'s own package). Whoever
+implements Section 6 (`FulfillmentProvider`'s prepare/dispatch split,
+tasks.md 6.3) should resolve this forward reference as part of touching
+that ABC anyway, rather than it being fixed piecemeal here.

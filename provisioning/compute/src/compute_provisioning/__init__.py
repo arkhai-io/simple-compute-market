@@ -44,19 +44,11 @@ from .app import (
     build_compute_provisioning_app,
 )
 from .lifecycle import cancel_background_tasks, create_background_task
-from .physical_settlement import (
-    CapacityReservationExpiredError,
-    CapacitySettlementAssignment,
-    NoEligibleSettlementResourceError,
-    PhysicalSettlementError,
-    PhysicalSettlementRequest,
-    SettlementCandidate,
-    SettlementEntityNotFoundError,
-    SettlementRequestMismatchError,
-    SettlementRequirement,
-    SettlementResource,
-)
-from .scheduling import SettlementSchedulingPolicy
+# PhysicalSettlementRequest, SettlementRequirement, SettlementCandidate,
+# SettlementResource, SettlementSchedulingPolicy, and the
+# PhysicalSettlement*/Settlement* error hierarchy moved to
+# market_physical_settlement (kit/physical-settlement) -- see the
+# tombstones at ./physical_settlement.py and ./scheduling.py.
 from market_resource_pools import (
     PoolConfigHandler,
     PoolConfigValidationProblem,
@@ -124,17 +116,6 @@ __all__ = [
     "PoolUpdate",
     "PoolValidateResponse",
     "PoolValidationProblem",
-    "PhysicalSettlementError",
-    "SettlementEntityNotFoundError",
-    "SettlementRequestMismatchError",
-    "CapacityReservationExpiredError",
-    "NoEligibleSettlementResourceError",
-    "PhysicalSettlementRequest",
-    "SettlementRequirement",
-    "SettlementCandidate",
-    "SettlementResource",
-    "CapacitySettlementAssignment",
-    "SettlementSchedulingPolicy",
     "ResultEnvelope",
     "UnsupportedExecutorActionError",
     "contract_major",

@@ -25,6 +25,13 @@ def _make_ledger(**kwargs) -> CapacityLedgerService:
         poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
+    # This suite exercises VM-flavored claim shapes ("gpu_count"-only
+    # allocations, "compute-kvm1-001"-style resource ids), so it opts into
+    # the "gpu_count" unit-claim alias explicitly the same way the VM
+    # composition root does — the ledger's own default is domain-neutral
+    # ("units",) (design.md, pools-7-storefront-fulfillment-cutover, "Two
+    # pre-existing domain leaks").
+    kwargs.setdefault("unit_claim_keys", ("units", "gpu_count"))
     return CapacityLedgerService(sessionmaker(bind=engine), **kwargs)
 
 

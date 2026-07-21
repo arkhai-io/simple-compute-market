@@ -1,4 +1,23 @@
-"""Executor-neutral contracts for capacity settlement scheduling."""
+"""Executor-neutral contracts for capacity settlement scheduling.
+
+Moved from ``provisioning/compute/src/compute_provisioning/physical_settlement.py``
+(design.md, pools-7-storefront-fulfillment-cutover, "Shared package
+boundary"; tasks.md 1.4). The original location remains only as a
+tombstone pointing here.
+
+Renamed per tasks.md 1.5 ("Remove provisioning commercial identity from
+shared contracts"): ``allocation_id`` -> ``capacity_reservation_id``
+throughout, and ``agreement_id`` is dropped entirely -- the provisioning
+boundary is capacity-reservation-centric and MUST NOT carry storefront
+commercial identities such as negotiation, buyer, deal, or agreement
+identifiers (design.md, "Cross-domain identities and terminology").
+``CapacitySettlementAssignment`` (the pre-move type that paired a resource
+with an ``agreement_id``) is not carried forward: it had no production
+caller and its only real content -- an allocation/reservation id plus a
+``SettlementResource`` -- is exactly what
+``PhysicalSettlementScheduler.select_resource`` already returns and
+records without needing a dedicated wrapper type.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +32,7 @@ class PhysicalSettlementError(Exception):
 
 
 class SettlementEntityNotFoundError(PhysicalSettlementError):
-    """A referenced allocation, agreement, pool, or resource does not exist."""
+    """A referenced capacity reservation, pool, or resource does not exist."""
 
 
 class SettlementRequestMismatchError(PhysicalSettlementError):
@@ -31,8 +50,9 @@ class NoEligibleSettlementResourceError(PhysicalSettlementError):
 class PhysicalSettlementRequest(BaseModel):
     """Request to create or retrieve one Capacity Settlement Assignment."""
 
-    allocation_id: str = Field(description="Capacity Reservation identifier and idempotency key.")
-    agreement_id: str = Field(description="Agreement served by this settlement.")
+    capacity_reservation_id: str = Field(
+        description="Capacity Reservation identifier and idempotency key."
+    )
     market: str = Field(description="Market domain identity, for example 'vms'.")
     requirements: dict[str, Any] = Field(default_factory=dict)
     resource_id: str | None = Field(
@@ -93,11 +113,3 @@ class SettlementResource(BaseModel):
     resource_kind: str
     provider: str
     attributes: dict[str, Any] = Field(default_factory=dict)
-
-
-class CapacitySettlementAssignment(BaseModel):
-    """Idempotent allocation-to-resource scheduling decision."""
-
-    allocation_id: str
-    agreement_id: str
-    resource: SettlementResource

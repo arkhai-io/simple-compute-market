@@ -1,12 +1,15 @@
-"""Deterministic round-robin policy for eligible settlement candidates."""
+"""Deterministic round-robin policy for eligible settlement candidates.
+
+Moved from ``provisioning/compute/service/src/compute_provisioning_service/
+services/deterministic_round_robin_policy.py`` (design.md,
+pools-7-storefront-fulfillment-cutover, "Shared package boundary";
+tasks.md 1.4). Verified to contain zero VM-specific logic -- it only sorts
+``pool_id``/``resource_id`` strings.
+"""
 
 from __future__ import annotations
 
-from compute_provisioning import (
-    NoEligibleSettlementResourceError,
-    SettlementCandidate,
-    SettlementRequirement,
-)
+from .settlement_types import NoEligibleSettlementResourceError, SettlementCandidate, SettlementRequirement
 
 
 class DeterministicRoundRobinPolicy:

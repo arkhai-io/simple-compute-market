@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from compute_provisioning import PhysicalSettlementRequest, SettlementResource
+from market_physical_settlement import PhysicalSettlementRequest, SettlementResource
 from market_resource_pools import (
     FulfillmentConflictError,
     FulfillmentProvider,
@@ -43,8 +43,7 @@ class _FakeProvider(FulfillmentProvider):
 
 def _request(**overrides) -> PhysicalSettlementRequest:
     defaults = dict(
-        allocation_id="alloc-1",
-        agreement_id="agreement-1",
+        capacity_reservation_id="alloc-1",
         market="vms",
         requirements={"units": 1},
     )
@@ -88,10 +87,15 @@ class TestCreateIdempotency:
         assert provider.create_calls == 1
         assert second is first
 
-    async def test_conflicting_agreement_raises_before_dispatch(self, service, provider):
+    async def test_conflicting_requirements_raises_before_dispatch(self, service, provider):
+        # agreement_id no longer exists on PhysicalSettlementRequest
+        # (tasks.md 1.5) -- requirements is the field this equivalence
+        # check now has left, besides market and the resource, to prove a
+        # same-capacity_reservation_id retry with a genuinely different
+        # request is rejected rather than silently treated as a retry.
         await service.create(_request(), _resource())
         with pytest.raises(FulfillmentConflictError):
-            await service.create(_request(agreement_id="agreement-2"), _resource())
+            await service.create(_request(requirements={"units": 2}), _resource())
         assert provider.create_calls == 1
 
     async def test_conflicting_resource_raises_before_dispatch(self, service, provider):

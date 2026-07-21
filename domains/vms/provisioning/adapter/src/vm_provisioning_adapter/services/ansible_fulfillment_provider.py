@@ -6,7 +6,7 @@ import dataclasses
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
-from compute_provisioning import PhysicalSettlementRequest, SettlementResource
+from market_physical_settlement import PhysicalSettlementRequest, SettlementResource
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 from vm_provisioning_adapter.models.fulfillment_model import AnsibleFulfillmentMetadata, VmFulfillmentRequirements
 from market_resource_pools import (
@@ -148,7 +148,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             vm_disk_size=req.vm_disk_size, vm_os_variant=req.vm_os_variant, ssh_pubkey=req.ssh_pubkey,
             gpu_provisioned=req.gpu_provisioned, vm_gpu_count=req.vm_gpu_count,
             vm_gpu_device=req.vm_gpu_device, vm_gpu_devices=req.vm_gpu_devices,
-            vm_gpu_partition_size=req.vm_gpu_partition_size, escrow_uid=request.allocation_id,
+            vm_gpu_partition_size=req.vm_gpu_partition_size, escrow_uid=request.capacity_reservation_id,
             playbook_path=pool_config.playbook_path,
         )
         self._validate_extra_vars(base_params, pool_config.extra_vars)

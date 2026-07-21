@@ -375,13 +375,17 @@ async def client_and_queue(
     )
 
     from market_site.ledger import CapacityLedgerService
-    capacity_ledger_service = CapacityLedgerService(session_factory=session_factory)
+    capacity_ledger_service = CapacityLedgerService(
+        session_factory=session_factory,
+        unit_claim_keys=("units", "gpu_count"),
+    )
 
-    from compute_provisioning_service.services.physical_settlement_scheduler import PhysicalSettlementScheduler
+    from market_physical_settlement import PhysicalSettlementScheduler
     physical_settlement_scheduler = PhysicalSettlementScheduler(
         pool_service=resource_pool_service,
         capacity_ledger=capacity_ledger_service,
         session_factory=session_factory,
+        default_resource_kind="compute.gpu",
     )
 
     from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog
