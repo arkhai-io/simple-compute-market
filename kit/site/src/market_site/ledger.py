@@ -126,9 +126,8 @@ def _windows_overlap(
 # Claim keys that request a unit count rather than matching an attribute.
 # "units" is the generic key. Domain-specific aliases (e.g. the VM
 # domain's "gpu_count") are supplied by the composition root via
-# CapacityLedgerService(unit_claim_keys=...) rather than hardcoded here —
-# this module has no VM-specific knowledge (design.md,
-# pools-7-storefront-fulfillment-cutover, "Two pre-existing domain leaks").
+# CapacityLedgerService(unit_claim_keys=...) rather than hardcoded here,
+# so this module carries no VM-specific knowledge.
 _DEFAULT_UNIT_CLAIM_KEYS: tuple[str, ...] = ("units",)
 _DIMENSIONS_CLAIM_KEY = "dimensions"
 
@@ -350,9 +349,7 @@ class CapacityLedgerService:
         Defaults to the domain-neutral ``("units",)``; the VM composition
         root passes ``("units", "gpu_count")`` explicitly to keep its
         existing claim shape working. Kept out of the ledger's own default
-        so this module carries no VM-specific knowledge (design.md,
-        pools-7-storefront-fulfillment-cutover, "Two pre-existing domain
-        leaks").
+        so this module carries no VM-specific knowledge.
         """
         self._session_factory = session_factory
         self._required_attributes = tuple(required_attributes)

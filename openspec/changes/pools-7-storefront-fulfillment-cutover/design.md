@@ -343,6 +343,21 @@ reservation-admission and scheduling-eligibility work (including the
 shared `resource_satisfies_requirement` predicate above) consumes that
 result rather than working around its absence.
 
+**Accepted scope for this change:** `pools-6` pass 1 — the
+`dimensions`/`available` JSON-map mechanism on `SiteResource`,
+`SiteAllocation`, and `CapacityEvent`, and the scheduler's per-dimension
+fit check against it — is landed and is what POOLS-7 builds on. Pass 2
+(real vCPU/memory/disk fields on `Host`, still carrying only `gpu_count`)
+remains open `pools-6` scope; POOLS-7 proceeds against the landed pass-1
+wiring rather than blocking on pass 2 or adding a partial dimension field
+itself. This does not relax the prohibition above: it is a decision to
+accept the current `gpu_count`-only ceiling for this change, not to fill
+that ceiling in piecemeal. Admission and scheduling remain correct for
+every dimension a caller actually populates; there is simply nothing to
+check yet for dimensions no caller populates. Work that starts
+populating additional dimensions still needs `pools-6` pass 2's design
+questions on normalization, units, and fairness first.
+
 ## `SettlementRecord` shape (design review continued, 2026-07-17)
 
 **Resolved: one row, one state machine** — not a separate

@@ -151,15 +151,14 @@ class PhysicalSettlementScheduler:
             )
         attributes = dict(request.requirements.get("attributes") or {})
         # dimensions is authoritative when the reservation carries one.
-        #  Otherwise fall back to the reservation's own dimensions which
-        # ledger.get_allocation() always populates.
-        # Even for a pre-migration reservation that only ever had "units"
+        # Otherwise fall back to the reservation's own dimensions, which
+        # ledger.get_allocation() always populates -- even for a
+        # pre-migration reservation that only ever had "units"
         # (CapacityLedgerService._allocation_dimensions applies that
         # fallback once, centrally, before this dict ever reaches the
-        # scheduler). Do NOT re-derive a "units" fallback here: it would
-        # be dead code today and, worse, a second copy of a rule that
-        # must only live in one place (found in code review, 2026-07-20;
-        # see test_scheduler_schedules_full-capacity_legacy_allocation).
+        # scheduler). Do not re-derive a "units" fallback here: it would be
+        # dead code today and, worse, a second copy of a rule that must
+        # only live in one place.
         dimensions = dict(
             request.requirements.get("dimensions") or reservation["dimensions"]
         )
@@ -189,11 +188,12 @@ class PhysicalSettlementScheduler:
             if payload.get("resource_type") != requirement.resource_kind:
                 continue
             available = dict(payload.get("available") or {})
-            # The current ledger reserves against a concrete line item before
-            # POOLS-2 scheduling. Credit this reservation's own held
-            # dimensions back during eligibility evaluation; POOLS-3
-            # persistence will move the concrete claim into the assignment
-            # transaction.
+            # The ledger reserves against a concrete line item before
+            # scheduling runs. Credit this reservation's own held
+            # dimensions back during eligibility evaluation so the
+            # resource it already holds capacity against can still be
+            # selected; durable assignment persistence will move this
+            # bookkeeping into the assignment transaction instead.
             if payload.get("resource_id") == reservation.get("resource_id"):
                 for key, amount in reservation_dimensions.items():
                     available[key] = available.get(key, 0) + amount
@@ -221,8 +221,3 @@ class PhysicalSettlementScheduler:
                 "no enabled pooled resource can satisfy the capacity reservation"
             )
         return candidates
-
-
-# Compatibility aliases for callers transitioning from the POOLS-2 draft.
-NoEligiblePoolError = NoEligibleSettlementResourceError
-ResourceNotFoundError = SettlementEntityNotFoundError
