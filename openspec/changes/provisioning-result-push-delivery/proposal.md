@@ -1,74 +1,47 @@
 ## Why
 
-Split out of `pools-7-storefront-fulfillment-cutover`'s planning phase
-(2026-07-21), not independently discovered. `pools-7` originally designed
-a push-based, durable-outbox `SettlementResult` delivery mechanism (the
-provisioning service pushes fulfillment results and credentials to the
-storefront, rather than the storefront polling for them) — motivated by
-wanting to avoid inter-service polling and by resilience concerns with a
-polling-based credential-retrieval pathway.
+POOLS-7 uses storefront-initiated pull status/result reconciliation as its correctness baseline. An existing provisioning→storefront callback delivers capacity-release events, but it uses process-local deduplication and broadly scoped URL/admin-key routing and cannot provide durable, authenticated, replayable Settlement Result delivery to several storefront owners.
 
-That design was not implementable as scoped inside `pools-7`, for a
-reason discovered only during planning: pushing anything from the
-provisioning service to the storefront requires an authenticated
-provisioning→storefront channel that does not exist anywhere in this
-codebase. Every existing trust relationship runs the other direction —
-one shared `admin_api_key` per site, storefront as the sole caller
-(`StorefrontAuthMiddleware`'s docstring: *"the provisioning service is an
-internal dependency of a single storefront"*). Designing that channel
-properly is nontrivial on its own: a storefront connects to potentially
-many provisioning services (`pools-8`'s `CapacityProjection` already
-establishes this is a real one-to-many relationship), so the storefront's
-receiver side must authenticate *N* distinct callers, not reuse a single
-symmetric secret. Building this inside `pools-7` risked scope creep onto
-an already large change, so `pools-7` ships a pull-based
-`get_fulfillment_status`/`get_fulfillment_result` design for v1 (over the
-existing, already-solved storefront→provisioning direction) and this
-change picks up the push design as a follow-on.
+## What Changes
 
-## What This Change Covers
+- Harden the existing lifecycle callback seam into an authenticated provisioning-to-storefront delivery channel with operator-trusted owner/site credential bindings.
+- Add a durable outbox written atomically with reportable POOLS-7 fulfillment-result transitions.
+- Deliver Settlement Results at least once with stable event/result identity, capped retry/backoff, replay, metrics, and audit state.
+- Persist receiver deduplication and apply transitions idempotently across storefront restart.
+- Use monotonic credential generations so stale delivery cannot replace newer access material.
+- Obtain sensitive credentials just in time and avoid durable plaintext credential storage in outbox or storefront lifecycle tables.
+- Retain pull status/result endpoints as the permanent reconciliation and recovery backstop.
+- State: **Deferred follow-on; blocked until POOLS-7 durable results land and trusted many-to-many ownership/authentication is selected.**
 
-- Design and implement an authenticated provisioning→storefront channel,
-  supporting one storefront authenticating pushes from multiple distinct
-  provisioning services (not a single shared secret reused symmetrically).
-- Add a push delivery transport for `SettlementResult` on top of
-  `pools-7`'s durable fulfillment/settlement persistence layer — durable
-  outbox insertion atomic with the fulfillment-state transition that
-  produces a reportable result, at-least-once delivery, idempotent
-  application at the storefront by stable `result_id`, retry with
-  capped exponential backoff and jitter while the fulfillment remains
-  active, monotonic `credential_generation` so a stale retry cannot
-  clobber a newer credential set, operator metrics/alerts/audit
-  history, and a manual replay mechanism.
-- Credentials remain never-persisted-at-rest in this design too: the
-  delivery worker obtains or refreshes credentials just-in-time,
-  transmits them once over the authenticated encrypted channel, and
-  discards them — same posture as `pools-7`'s pull-based fetch-on-read,
-  adapted to a background worker's schedule instead of a request handler.
+## Capabilities
 
-## Non-Goals
+### New Capabilities
 
-- Redesigning `pools-7`'s durable fulfillment/settlement persistence
-  layer. This change reads from and pushes notifications about state
-  that layer already makes durable; it does not change what's persisted
-  or when a fulfillment transition commits.
-- Removing `get_fulfillment_status`/`get_fulfillment_result`. Pull
-  remains a valid, permanent reconciliation backstop even after push
-  exists — useful for a storefront that lost or is restoring local state
-  and needs to actively ask rather than wait for a retry to arrive.
+None.
+
+### Modified Capabilities
+
+- `fulfillment`: Add durable optional push delivery over the pull-correct Settlement Result aggregate.
+- `physical-provisioning`: Authenticate and route lifecycle/result events using trusted owner/site bindings rather than process-global or opaque deal metadata.
+- `storefront-publication`: Persistently deduplicate and apply result notifications while retaining pull reconciliation.
 
 ## Dependencies and Related Changes
 
-- Requires `pools-7-storefront-fulfillment-cutover` to have landed —
-  needs the durable fulfillment/settlement aggregate and
-  `get_fulfillment_status`/`get_fulfillment_result` to already exist as
-  the thing this change adds push delivery on top of.
+- Hard-depends on `pools-7-storefront-fulfillment-cutover` durable Settlement Record, fulfillment result, and pull APIs.
+- Uses the many-to-many storefront/provisioner ownership model proven by `market-platform-compute-40-multi-domain-proof`, but Compute-40 does not block on push delivery.
+- May share one generic outbox/receiver transport with the existing capacity-release callback; event-specific state transitions remain capability-owned.
+
+## Non-Goals
+
+- Do not replace or weaken pull reconciliation.
+- Do not redesign POOLS-7 scheduling, assignment, provider dispatch, or result persistence.
+- Do not accept callback URL or credential material from buyer-controlled terms or opaque agreement/deal references as authority.
+- Do not store plaintext access credentials durably merely to make retries easy.
+- Do not add implementation tasks until authentication topology and credential lifecycle decisions are accepted.
 
 ## Impact
 
-Touches the VM provisioning service (new auth middleware/credential
-issuance for the reverse direction, delivery worker, outbox table) and
-the storefront (authenticated receiver endpoint, per-`result_id`
-deduplication and persistence). Detailed file-level impact is a
-planning-step output; this change has not yet been planned (no
-`tasks.md`).
+- Provisioning services gain trusted owner bindings, durable outbox/worker state, and operator replay/metrics.
+- Storefronts gain an authenticated receiver and durable event/result deduplication.
+- Deployment gains distinct scoped reverse-delivery credentials or identities for each authorized relationship.
+- Wire and persistence schemas remain design-gated until POOLS-7 result envelopes are final.

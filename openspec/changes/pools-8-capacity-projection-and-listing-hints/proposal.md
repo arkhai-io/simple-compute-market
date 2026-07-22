@@ -1,108 +1,48 @@
 ## Why
 
-Split out of `pools-7-storefront-fulfillment-cutover`'s design review
-(2026-07-17), not independently discovered. `pools-7` designed a
-storefront-side read-only mirror of every connected provisioning
-service's pool/capacity state (`CapacityProjection`), plus two operator
-hints that ride on top of it (`ResourcePool.policy_tags`'
-`listing_mode` and a reservation-hold TTL preference). All three are a
-materially separate subsystem from `pools-7`'s fulfillment-cutover
-mechanics — pull schedules, freshness, multi-site keys, publication
-reactions, their own storage and migrations — not inherently part of
-scheduling/dispatch/persistence. `pools-7` was already large; this was
-split out to keep both changes reviewable, migratable, and separately
-rollback-able, per outside design-review feedback (2026-07-17) that
-`pools-7` had accumulated too much unrelated scope, which on reflection
-was correct for this piece specifically.
+POOLS-7 has landed independent site resource-pool and capacity-bucket projections, pull endpoints, and in-memory storefront caches, but those projections do not yet drive durable commercial publication or claim construction. Storefront-local inventory still mixes market metadata with physical authority, and operator listing/hold preferences are not projected or consumed.
 
-**This split has a real consequence that must stay visible, not be
-quietly absorbed:** `pools-7`'s `site_resource_pools`/
-`PhysicalSettlementScheduler` fix makes the *provisioning service* side
-of the `pool_id`-namespace-collision bug (`pools-7`'s `design.md`,
-"`SiteResource` is retired") correct — pool identity is sourced from
-`hosts`/`resource_pools`, not guessed. But the *storefront's* own
-claim-building (`vm_job_spec_service.py`) still sources the `pool_id`/
-`resource_id` it sends from the storefront's local, independently
-authored inventory table until this change replaces it with
-`CapacityProjection`. `pools-7` alone fixes provisioning-side
-correctness (bad claims now fail cleanly at admission instead of
-silently matching the wrong thing); this change is required for the
-storefront to reliably send *valid* claims in the first place.
+## What Changes
 
-## What This Change Covers
+- Persist configured provisioning-site bindings and the last accepted identity/value for each independent projection family so storefront restart retains complete stale-marked generations.
+- Define explicit mapping between provisioning-owned projected resource identities and storefront-owned commercial inventory, pricing, settlement options, and listing identities.
+- Make listing publication and reservation claim construction consume mapped authoritative projection identity rather than independently authored physical host/pool fields.
+- Extend the resource-pool projection with the minimum pool metadata needed for domain-owned hints, including enabled state and opaque `policy_tags`.
+- Define a domain-neutral `listing_mode` policy-tag key while VM, bare-metal, and API-credit domains own accepted values and structural defaults.
+- Define an optional `max_reservation_hold_seconds` preference that cooperating storefronts cap against their own hold policy; it remains advisory rather than site-enforced.
+- Retire only storefront-local physical-authority columns, CSV paths, validators, and readers proven superseded; retain commercial and operational state.
+- State: **Planned after rebaseline; producer endpoints and in-memory cache mechanics are completed prerequisites, not implementation scope.**
 
-- **`CapacityProjection`**: a storefront-side, pull-based, read-only
-  mirror of every connected provisioning service's pool/capacity state,
-  replacing the storefront's local, independently-authored resource
-  inventory table (`resources`, hand-curated CSV import) as the source
-  of pool/resource identities used when building reservation claims and
-  publishing listings. Sourced from `GET /api/v1/pools` — already
-  exists, already reachable (the storefront already holds each
-  configured site's admin key). Keyed by `(site, pool_id)`, since pool
-  IDs are only unique per provisioning service. Explicitly
-  advisory/display-only for pricing and listing publication — never the
-  thing reservation admission checks against; the live, per-request
-  `AggregateCapacityClient` snapshot remains the routing/admission input,
-  unchanged.
-- **Operator-declared listing-mode hint**: `ResourcePool.policy_tags`
-  (`kit/resource-pools`) gains a `listing_mode` entry a pool operator can
-  set to declare whether their pool prefers pool-scoped or
-  specific-resource listing behavior. Non-binding — a storefront that
-  never reads it falls back to the existing structural default (single-
-  resource pool -> resource-pinned; real multi-member pool -> pool-
-  scoped), and `pools-2`'s "Explicit selection preserves eligibility"
-  requirement is unaffected either way (an explicit `resource_id`
-  request is honored regardless of a pool's declared mode).
-- **Pool-level reservation TTL hint**: a `policy_tags` entry
-  (`max_reservation_hold_seconds`) an operator can set to express a
-  preference for how long their resources should sit reserved-but-
-  unscheduled. Same non-binding posture — read and voluntarily respected
-  by a cooperating storefront choosing the `ttl_seconds` it passes to
-  `reserve()`; never provisioning-enforced.
-- **Extensibility for `apicredits`**: the `listing_mode` tag key is
-  domain-neutral (`kit/resource-pools` owns the key name only); each
-  domain owns its own enum of valid values and default rule. Verified,
-  not just asserted, against a concrete `apicredits` sketch during
-  `pools-7`'s design review — see `design.md`.
+## Capabilities
 
-## Non-Goals
+### New Capabilities
 
-- Reservation-admission correctness, scheduling, `SettlementRecord`
-  persistence, provider dispatch idempotency, and release-path wiring —
-  all `pools-7`.
-- Any change to how `PhysicalSettlementScheduler` or `CapacityLedgerService`
-  make admission/eligibility decisions. `CapacityProjection` is never
-  consulted for that; see "Why" above.
+None.
+
+### Modified Capabilities
+
+- `site-capacity`: Persist independently versioned projection generations and expose pool metadata needed for authoritative identity mapping without making projections admission authority.
+- `storefront-publication`: Reconcile site projections into commercial publication/claim data and consume domain-owned listing/hold hints.
+- `resource-pool-management`: Define domain-neutral policy-tag keys and projection metadata while leaving values and defaults to domains.
 
 ## Dependencies and Related Changes
 
-- Depends on `pools-4-storefront-capacity-boundary` (pool-shaped claims)
-  and benefits from, but does not strictly require, `pools-7` landing
-  first — the two can proceed in parallel, but `pools-7`'s `pool_id`-
-  correctness fix is not complete end-to-end until this change also
-  lands (see "Why" above).
-- Depends on `kit/resource-pools`' `GET /api/v1/pools` admin API
-  (already exists) for the pull source.
-- **`resource_capacity_validator.py` deletion (from `pools-6` pass 1,
-  design review 2026-07-20):** this module validates operator CSV
-  imports against the storefront's local `resources` table — the same
-  table this change retires in favor of `CapacityProjection`. It was
-  deliberately left as-is during `pools-6` pass 1 rather than migrated,
-  specifically so it could be deleted outright once this change removes
-  the table it operates on, instead of needing its own migration path.
-  Dimension vocabulary (`vcpu_count`/`ram_gb`/`disk_gb`) was converged
-  between it and the site ledger's admission-time capacity check in pass
-  1 for exactly this reason. When planning this change, confirm the
-  local `resources` table has no remaining readers before deleting
-  `resource_capacity_validator.py` and its call site in
-  `SQLiteClient.upsert_resource`.
+- Depends on completed POOLS-7 projection producer endpoints, independent revisions/digests, stale retention, and storefront cache foundations.
+- Coordinates with remaining POOLS-7 selected-site persistence so mapped identities route directly to the authority that produced them.
+- `market-platform-bare-metal-10-storefront-composition` consumes the same projection contract with bare-metal-specific listing semantics.
+- API credits may consume domain-owned hint values but does not use physical compute identities.
+
+## Non-Goals
+
+- Do not rebuild projection producer endpoints, revision tracking, polling, or in-memory cache replacement already landed in POOLS-7.
+- Do not use cached projections for authoritative reservation admission or fulfillment assignment.
+- Do not assume provisioning Resource Pools and storefront commercial capacity pools are the same object or namespace.
+- Do not delete the entire storefront `resources` table while pricing, accepted settlement mechanisms, operator metadata, or other commercial readers remain.
+- Do not let generic kits validate VM, bare-metal, or API-credit hint values.
 
 ## Impact
 
-Touches the VM storefront (new `CapacityProjection` cache tables and
-sync job, reconciler/listing-publication changes to consume
-`listing_mode`, replacement of the local `resources` table as claim-
-building's source of truth) and `kit/resource-pools` (`policy_tags`
-convention for the two new hint keys — additive, no schema change, it's
-already a free-form dict). Detailed file-level impact is a planning-step
-output; this change has not yet been planned (no `tasks.md`).
+- Storefront persistence gains configured-site/projection generation state and explicit commercial mapping/reconciliation.
+- Site projection payloads gain additive pool metadata with independent revision/digest changes.
+- VM, bare-metal, and API-credit publication adapters gain domain-owned hint resolvers where applicable.
+- Local inventory import, validator, publication, claim-building, migration, and operator paths require reader-by-reader disposition.

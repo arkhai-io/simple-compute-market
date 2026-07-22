@@ -1,3 +1,9 @@
+## Rebaseline — 2026-07-22
+
+Sections 1–2 of `tasks.md` have landed, including the shared fulfillment package, capacity-model cutover, feasibility predicate, projection producer endpoints, and in-memory storefront projection caches. References below that describe those pieces as future design are retained as rationale; remaining implementation starts with durable Settlement Record/fulfillment persistence and tasks 3–12. POOLS-8 has been narrowed to durable projection consumption, commercial mapping, and listing hints rather than rebuilding producer/cache mechanics.
+
+The current provisioning→storefront lifecycle callback is also acknowledged as an existing transport seam. It is not durable or sufficiently authenticated for Settlement Result delivery; the follow-on push change hardens that seam rather than inventing a first reverse channel.
+
 ## Context
 
 POOLS-7 cuts the storefront and provisioning services over from the current

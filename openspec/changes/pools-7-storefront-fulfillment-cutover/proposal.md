@@ -24,6 +24,12 @@ POOLS-7 reconciles these paths by cutting the storefront over to durable
 physical-resource scheduling and fulfillment managed by the provisioning
 service.
 
+## Current Rebaseline
+
+The shared fulfillment package, multidimensional capacity model, shared feasibility predicate, two provisioning projection families, pull projection endpoints, and storefront in-memory projection loading/polling are now implemented. The production cutover is not: scheduling and fulfillment state remain process-local, provider dispatch is not durably recoverable, the storefront still calls the VM executor path directly, credentials remain persisted, teardown bypasses the provider lifecycle, and pull fulfillment status/results do not exist.
+
+Implementation therefore resumes at the durable lifecycle/persistence work in tasks 3–12. Completed tasks remain recorded in `tasks.md`. Projection production and cache mechanics are no longer POOLS-8 scope; POOLS-8 owns residual durable projection consumption, commercial mapping, and listing hints.
+
 ## What This Change Covers
 
 - Change the storefront's ordinary reservation path from host-shaped
@@ -106,11 +112,7 @@ capacity-reservation-against-a-pooled-view reshape, not just VM.
 - `pools-6-multidimensional-fair-scheduling` — implemented prerequisite;
   multidimensional reservation and scheduler fit accounting landed before
   this change begins implementation.
-- `pools-8-capacity-projection-and-listing-hints` — related, not
-  blocking, but consequential: this change alone fixes
-  provisioning-service-side `pool_id` correctness; the storefront's own
-  claim-building isn't fixed until `pools-8` also lands. See `design.md`,
-  "Scope split: `CapacityProjection` and hints move to `pools-8`."
+- `pools-8-capacity-projection-and-listing-hints` — related and not blocking. POOLS-7 has already landed projection production, pull endpoints, and in-memory storefront caches; POOLS-8 now owns durable projection generations, explicit mapping into commercial publication/claim data, and listing/TTL hints.
 - `market-platform-compute-30-extract-service` — implemented related change;
   it was not a behavioral prerequisite, but was selected to land first, so
   this plan now targets the extracted service and adapter paths.
@@ -123,16 +125,7 @@ capacity-reservation-against-a-pooled-view reshape, not just VM.
 - Removing `SettlementRecord`/`settlement_claims` independence —
   `pools-3` resolved that boundary; this change should not reopen it
   without new evidence of an actual need to correlate them.
-- **Operator-declared listing-mode hints, and `CapacityProjection`
-  (the storefront's pool/capacity mirror they depend on), are fully out
-  of scope — moved to `pools-8-capacity-projection-and-listing-hints`.**
-  Originally this change's proposal required listing-mode hints be on
-  this change's design-review agenda before implementation; that review
-  happened, and its conclusion was to split this work out entirely
-  rather than design it here, given its size and separability from the
-  fulfillment-cutover mechanics. See `design.md`, "Scope split:
-  `CapacityProjection` and hints move to `pools-8`" for the consequence
-  this split has for this change's own `pool_id`-correctness fix.
+- Durable consumption of Capacity Projections for commercial publication and claim construction, plus operator-declared listing-mode and reservation-TTL hints, remains in `pools-8-capacity-projection-and-listing-hints`. Projection producer endpoints and in-memory cache mechanics already landed here are retained as completed prerequisite work.
 
 ## Capabilities
 
@@ -157,12 +150,9 @@ capacity-reservation-against-a-pooled-view reshape, not just VM.
 - Follows the implemented `market-platform-compute-30-extract-service`
   package layout. Compute-30 did not create `kit/fulfillment` or
   implement this change's durable lifecycle.
-- Related, not blocking, follow-on: `provisioning-result-push-delivery`
-  (not yet started) — adds a push transport for `SettlementResult`
-  alongside this change's pull-based `get_fulfillment_status`/
-  `get_fulfillment_result`, once a provisioning→storefront authenticated
-  channel is designed. Does not require redesigning this change's durable
-  persistence layer, only adds delivery on top of it.
+- Related, nonblocking follow-on: `provisioning-result-push-delivery` hardens the existing provisioning→storefront callback transport and adds durable result delivery on top of this change's pull-correct durable state.
+- `market-platform-bare-metal-10-storefront-composition` consumes the selected-site lifecycle after it lands; it does not block VM cutover.
+- `market-platform-compute-40-multi-domain-proof` is the post-cutover regression/topology gate for two storefronts and two provisioning authorities.
 
 ## Impact
 

@@ -12,7 +12,7 @@ Deterministic round-robin is predictable but does not account for unequal pool c
 - Add operator-safe policy explanations, metrics, and adversarial/concurrency/restart evidence.
 - Keep request, assignment, provider, and storefront contracts unchanged.
 
-This change is design-gated and is not implementation-ready until the open policy decisions are resolved.
+This change is design-gated and parked. Simulation and stakeholder decisions may proceed, but production implementation is blocked until POOLS-7 provides atomic durable assignment and transactional scheduling state.
 
 ## Capabilities
 
@@ -23,6 +23,12 @@ None.
 ### Modified Capabilities
 
 - `fulfillment`: Add requirements for a pluggable multidimensional policy, concrete-candidate fit before fairness, deterministic tie-breaking, durable policy state, and operator-safe explanations.
+
+## Dependencies and Related Changes
+
+- Archived POOLS-6 multidimensional admission provides hard-fit inputs and remains complete independently of this policy follow-on.
+- `pools-7-storefront-fulfillment-cutover` must provide durable Settlement Record, assignment, and transaction boundaries before a history-sensitive policy can be correct across restarts or replicas.
+- The selected fairness subject may require a request-contract change because the current physical settlement request does not carry buyer, organization, queue, or workload-class identity. That decision remains design-gated.
 
 ## Non-Goals
 
