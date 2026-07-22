@@ -104,7 +104,7 @@ class AnsibleJobService:
             if contract is not None:
                 existing = self._contract_job(
                     db,
-                    allocation_id=contract.allocation_id,
+                    capacity_reservation_id=contract.capacity_reservation_id,
                     action_kind=contract.action_kind,
                     idempotency_key=contract.idempotency_key,
                 )
@@ -119,7 +119,7 @@ class AnsibleJobService:
                 max_retries=max_retries,
                 next_retry_at=None,
                 contract_version=contract.contract_version if contract else None,
-                allocation_id=contract.allocation_id if contract else None,
+                capacity_reservation_id=contract.capacity_reservation_id if contract else None,
                 deal_ref=contract.deal_ref if contract else None,
                 executor_kind=contract.executor_kind if contract else params.executor_kind,
                 action_kind=contract.action_kind if contract else params.executor_action,
@@ -135,7 +135,7 @@ class AnsibleJobService:
                     raise
                 existing = self._contract_job(
                     db,
-                    allocation_id=contract.allocation_id,
+                    capacity_reservation_id=contract.capacity_reservation_id,
                     action_kind=contract.action_kind,
                     idempotency_key=contract.idempotency_key,
                 )
@@ -277,7 +277,7 @@ class AnsibleJobService:
                 "contract_version": job.contract_version,
                 "job_id": job.id,
                 "status": job.status,
-                "allocation_id": job.allocation_id,
+                "capacity_reservation_id": job.capacity_reservation_id,
                 "deal_ref": dict(job.deal_ref or {}),
                 "executor_kind": job.executor_kind,
                 "action_kind": job.action_kind,
@@ -397,14 +397,14 @@ class AnsibleJobService:
     def _contract_job(
         db: Session,
         *,
-        allocation_id: str,
+        capacity_reservation_id: str,
         action_kind: str,
         idempotency_key: str,
     ) -> AnsibleJob | None:
         return (
             db.query(AnsibleJob)
             .filter(
-                AnsibleJob.allocation_id == allocation_id,
+                AnsibleJob.capacity_reservation_id == capacity_reservation_id,
                 AnsibleJob.action_kind == action_kind,
                 AnsibleJob.idempotency_key == idempotency_key,
             )

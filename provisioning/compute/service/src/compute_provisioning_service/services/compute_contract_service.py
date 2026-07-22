@@ -17,7 +17,7 @@ from compute_provisioning import (
 from market_site.authority import SiteAuthorityPort
 
 
-class AllocationNotProvisionableError(ValueError):
+class ReservationNotProvisionableError(ValueError):
     pass
 
 
@@ -40,20 +40,20 @@ class ComputeContractService:
         self._adapters = adapters
 
     async def submit_action(self, envelope: ExecutorActionEnvelope) -> JobAccepted:
-        allocation = self._site_authority.get_allocation(envelope.allocation_id)
-        if allocation is None:
-            raise AllocationNotProvisionableError(
-                f"allocation {envelope.allocation_id!r} was not found"
+        reservation = self._site_authority.get_reservation(envelope.capacity_reservation_id)
+        if reservation is None:
+            raise ReservationNotProvisionableError(
+                f"reservation {envelope.capacity_reservation_id!r} was not found"
             )
-        if allocation.get("state") != "leased":
-            raise AllocationNotProvisionableError(
-                f"allocation {envelope.allocation_id!r} is "
-                f"{allocation.get('state')!r}, not 'leased'"
+        if reservation.get("state") != "leased":
+            raise ReservationNotProvisionableError(
+                f"reservation {envelope.capacity_reservation_id!r} is "
+                f"{reservation.get('state')!r}, not 'leased'"
             )
-        expected_executor = str(allocation.get("executor_kind") or "vm")
+        expected_executor = str(reservation.get("executor_kind") or "vm")
         if envelope.executor_kind != expected_executor:
             raise ExecutorMismatchError(
-                f"allocation executor is {expected_executor!r}, "
+                f"reservation executor is {expected_executor!r}, "
                 f"not {envelope.executor_kind!r}"
             )
         adapter = self._adapters.get(envelope.executor_kind)

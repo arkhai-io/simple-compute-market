@@ -11,79 +11,79 @@ from compute_provisioning.lease_lifecycle import (
 
 class FakeSiteAuthority:
     def __init__(self):
-        self.allocations = {
+        self.reservations = {
             "alloc-1": {
-                "allocation_id": "alloc-1",
+                "capacity_reservation_id": "alloc-1",
                 "state": "leased",
                 "lease_end_utc": datetime.now(timezone.utc).isoformat(),
             }
         }
         self.due = []
 
-    def get_allocation(self, allocation_id):
-        return self.allocations.get(allocation_id)
+    def get_reservation(self, capacity_reservation_id):
+        return self.reservations.get(capacity_reservation_id)
 
-    def get_allocation_by_escrow(self, escrow_uid):
+    def get_reservation_by_escrow(self, escrow_uid):
         return next(
-            (a for a in self.allocations.values() if a.get("escrow_uid") == escrow_uid),
+            (a for a in self.reservations.values() if a.get("escrow_uid") == escrow_uid),
             None,
         )
 
-    def list_allocations(self, *, state=None):
-        values = list(self.allocations.values())
+    def list_reservations(self, *, state=None):
+        values = list(self.reservations.values())
         return [a for a in values if state is None or a["state"] == state]
 
-    def list_time_bounded_allocations_due(self, now):
+    def list_time_bounded_reservations_due(self, now):
         return self.due
 
-    def attach_lease_allocation(self, **kwargs):
-        allocation = {"allocation_id": kwargs.get("allocation_id") or "alloc-new", **kwargs}
-        self.allocations[allocation["allocation_id"]] = allocation
-        return allocation
+    def attach_lease_reservation(self, **kwargs):
+        reservation = {"capacity_reservation_id": kwargs.get("capacity_reservation_id") or "alloc-new", **kwargs}
+        self.reservations[reservation["capacity_reservation_id"]] = reservation
+        return reservation
 
-    def update_allocation_fields(self, allocation_id, **kwargs):
-        allocation = self.allocations.get(allocation_id)
-        if allocation is None:
+    def update_reservation_fields(self, capacity_reservation_id, **kwargs):
+        reservation = self.reservations.get(capacity_reservation_id)
+        if reservation is None:
             return None
-        allocation.update({key: value for key, value in kwargs.items() if value is not None})
-        return allocation
+        reservation.update({key: value for key, value in kwargs.items() if value is not None})
+        return reservation
 
-    def begin_release(self, allocation_id, *, release_job_id):
-        allocation = self.allocations.get(allocation_id)
-        if allocation is None:
+    def begin_release(self, capacity_reservation_id, *, release_job_id):
+        reservation = self.reservations.get(capacity_reservation_id)
+        if reservation is None:
             return None
-        allocation.update(state="releasing", release_job_id=release_job_id)
-        return allocation
+        reservation.update(state="releasing", release_job_id=release_job_id)
+        return reservation
 
-    def record_release_failure(self, allocation_id, *, reason, message=None):
-        allocation = self.allocations.get(allocation_id)
-        if allocation is None:
+    def record_release_failure(self, capacity_reservation_id, *, reason, message=None):
+        reservation = self.reservations.get(capacity_reservation_id)
+        if reservation is None:
             return None
-        allocation.update(
+        reservation.update(
             state="release_failed", failure_reason=reason, failure_message=message
         )
-        return allocation
+        return reservation
 
     def record_release_success(
-        self, allocation_id, *, forced=False, reason=None, message=None
+        self, capacity_reservation_id, *, forced=False, reason=None, message=None
     ):
-        allocation = self.allocations.get(allocation_id)
-        if allocation is None:
+        reservation = self.reservations.get(capacity_reservation_id)
+        if reservation is None:
             return None
-        allocation.update(
+        reservation.update(
             state="force_released" if forced else "released",
             failure_reason=reason,
             failure_message=message,
             released_at=datetime.now(timezone.utc).isoformat(),
         )
-        return allocation
+        return reservation
 
-    def record_unmanaged(self, allocation_id, *, reason, message=None):
-        allocation = self.allocations.get(allocation_id)
-        if allocation is None:
+    def record_unmanaged(self, capacity_reservation_id, *, reason, message=None):
+        reservation = self.reservations.get(capacity_reservation_id)
+        if reservation is None:
             return None
-        allocation.update(state="unmanaged", failure_reason=reason, failure_message=message)
-        return allocation
+        reservation.update(state="unmanaged", failure_reason=reason, failure_message=message)
+        return reservation
 
 
 class StubExecutorRelease:
@@ -91,8 +91,8 @@ class StubExecutorRelease:
         self.job_id = job_id
         self.calls = []
 
-    async def submit_release(self, allocation):
-        self.calls.append(allocation["allocation_id"])
+    async def submit_release(self, reservation):
+        self.calls.append(reservation["capacity_reservation_id"])
         return self.job_id
 
 
@@ -115,7 +115,7 @@ async def test_terminate_lease_uses_injected_ports_and_keeps_capacity_held():
 @pytest.mark.asyncio
 async def test_terminate_lease_rejects_failed_state_until_retry_or_force():
     site = FakeSiteAuthority()
-    site.allocations["alloc-1"]["state"] = "release_failed"
+    site.reservations["alloc-1"]["state"] = "release_failed"
     service = LeaseLifecycleService(
         SimpleNamespace(), site, executor_release=StubExecutorRelease()
     )
@@ -129,14 +129,14 @@ async def test_terminate_lease_rejects_failed_state_until_retry_or_force():
 @pytest.mark.asyncio
 async def test_direct_release_commits_once_then_notifies_deal_sink():
     site = FakeSiteAuthority()
-    allocation = {
-        "allocation_id": "alloc-2",
+    reservation = {
+        "capacity_reservation_id": "alloc-2",
         "state": "releasing",
         "lease_end_utc": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
         "release_job_id": "direct-release",
         "deal_ref": {"listing_id": "deal-2"},
     }
-    site.allocations["alloc-2"] = allocation
+    site.reservations["alloc-2"] = reservation
     notifications = []
     service = LeaseLifecycleService(
         SimpleNamespace(lease_watchdog_grace_period_seconds=0),
@@ -150,16 +150,16 @@ async def test_direct_release_commits_once_then_notifies_deal_sink():
 
     assert first == {"checked": 0, "released": 1, "release_failed": 0, "skipped": 0}
     assert second == {"checked": 0, "released": 0, "release_failed": 0, "skipped": 0}
-    assert site.allocations["alloc-2"]["state"] == "released"
-    assert notifications == [site.allocations["alloc-2"]]
+    assert site.reservations["alloc-2"]["state"] == "released"
+    assert notifications == [site.reservations["alloc-2"]]
     assert notifications[0]["deal_ref"] == {"listing_id": "deal-2"}
 
 
 @pytest.mark.asyncio
 async def test_failed_executor_submission_holds_capacity_until_force_release():
     site = FakeSiteAuthority()
-    allocation = site.allocations["alloc-1"]
-    site.due = [allocation]
+    reservation = site.reservations["alloc-1"]
+    site.due = [reservation]
     service = LeaseLifecycleService(
         SimpleNamespace(), site, executor_release=StubExecutorRelease(job_id=None)
     )
@@ -167,8 +167,8 @@ async def test_failed_executor_submission_holds_capacity_until_force_release():
     result = await service.force_check_leases()
 
     assert result["release_failed"] == 1
-    assert allocation["state"] == "release_failed"
-    assert "released_at" not in allocation
+    assert reservation["state"] == "release_failed"
+    assert "released_at" not in reservation
 
     forced = await service.force_release(
         "alloc-1", SimpleNamespace(reason="executor unreachable", evidence="ticket-7")

@@ -57,20 +57,20 @@ _LEASE_STATUS = {
 }
 
 
-def _lease_view(allocation: dict[str, Any]) -> LeaseResponse:
+def _lease_view(reservation: dict[str, Any]) -> LeaseResponse:
     now = datetime.now(timezone.utc)
     return LeaseResponse(
-        id=str(allocation["allocation_id"]),
-        resource_id=str(allocation.get("resource_id") or ""),
-        allocation_id=str(allocation["allocation_id"]),
-        escrow_uid=str(allocation.get("escrow_uid") or ""),
-        vm_host=str(allocation.get("vm_host") or ""),
-        vm_target=str(allocation.get("vm_target") or ""),
-        lease_start_utc=_parse_utc(allocation.get("lease_start_utc")),
-        lease_end_utc=_parse_utc(allocation.get("lease_end_utc")) or now,
-        status=_LEASE_STATUS.get(str(allocation.get("state")), str(allocation.get("state"))),
-        create_job_id=allocation.get("create_job_id"),
-        vm_remove_job_id=allocation.get("vm_remove_job_id"),
+        id=str(reservation["capacity_reservation_id"]),
+        resource_id=str(reservation.get("resource_id") or ""),
+        capacity_reservation_id=str(reservation["capacity_reservation_id"]),
+        escrow_uid=str(reservation.get("escrow_uid") or ""),
+        vm_host=str(reservation.get("vm_host") or ""),
+        vm_target=str(reservation.get("vm_target") or ""),
+        lease_start_utc=_parse_utc(reservation.get("lease_start_utc")),
+        lease_end_utc=_parse_utc(reservation.get("lease_end_utc")) or now,
+        status=_LEASE_STATUS.get(str(reservation.get("state")), str(reservation.get("state"))),
+        create_job_id=reservation.get("create_job_id"),
+        vm_remove_job_id=reservation.get("vm_remove_job_id"),
         created_at=now,
         updated_at=now,
     )
@@ -118,13 +118,13 @@ class LeasesController:
         "/",
         response_model=LeaseResponse,
         status_code=201,
-        summary="Register a VM lease on its allocation",
+        summary="Register a VM lease on its reservation",
     )
     def create_lease(self, body: LeaseCreate) -> LeaseResponse:
         try:
             attached = self._leases.register_lease(
                 ExecutorLeaseRegistration(
-                    allocation_id=body.allocation_id,
+                    capacity_reservation_id=body.capacity_reservation_id,
                     escrow_uid=body.escrow_uid,
                     executor_kind=_VM_EXECUTOR_KIND,
                     executor_target=body.vm_target,
@@ -137,8 +137,8 @@ class LeasesController:
         except LeaseNotFoundError as exc:
             raise _http_error(exc) from exc
         logger.info(
-            "[LEASES] Attached lease to allocation %s (resource=%s escrow=%s)",
-            attached["allocation_id"], attached.get("resource_id"), body.escrow_uid,
+            "[LEASES] Attached lease to reservation %s (resource=%s escrow=%s)",
+            attached["capacity_reservation_id"], attached.get("resource_id"), body.escrow_uid,
         )
         return _lease_view(attached)
 
@@ -187,7 +187,7 @@ class LeasesController:
             )
         except LeaseLifecycleError as exc:
             raise _http_error(exc) from exc
-        logger.info("[LEASES] Updated fields on allocation %s", lease_id)
+        logger.info("[LEASES] Updated fields on reservation %s", lease_id)
         return _lease_view(updated)
 
     @router.post(
@@ -196,7 +196,7 @@ class LeasesController:
         summary="Terminate a market-managed lease",
         description=(
             "Submits the lease release operation for this provisioning service "
-            "based on the allocation's executor_kind and moves the lease to "
+            "based on the reservation's executor_kind and moves the lease to "
             "releasing. Capacity is released only after the delegated release "
             "job succeeds. Failed, cancelled, or timed-out teardown leaves the "
             "lease in release_failed."
@@ -206,19 +206,19 @@ class LeasesController:
         self, lease_id: str, body: LeaseTerminateRequest | None = None,
     ) -> LeaseResponse:
         try:
-            allocation = await self._leases.terminate_lease(
+            reservation = await self._leases.terminate_lease(
                 lease_id, body or LeaseTerminateRequest(),
             )
         except (LeaseNotFoundError, InvalidLeaseStateError) as exc:
             raise _http_error(exc) from exc
-        return _lease_view(allocation)
+        return _lease_view(reservation)
 
     @router.post(
         "/{lease_id}/release-oversight",
         response_model=LeaseResponse,
         summary="Release lifecycle oversight without releasing capacity",
         description=(
-            "Moves a leased allocation to unmanaged. This does not run the "
+            "Moves a leased reservation to unmanaged. This does not run the "
             "executor release operation and does not release capacity. An admin "
             "must later clean up the workload/access and force-release capacity."
         ),
@@ -227,10 +227,10 @@ class LeasesController:
         self, lease_id: str, body: LeaseReleaseOversightRequest,
     ) -> LeaseResponse:
         try:
-            allocation = self._leases.release_oversight(lease_id, body)
+            reservation = self._leases.release_oversight(lease_id, body)
         except (LeaseNotFoundError, InvalidLeaseStateError) as exc:
             raise _http_error(exc) from exc
-        return _lease_view(allocation)
+        return _lease_view(reservation)
 
     @classmethod
     def make_router(cls) -> APIRouter:
@@ -261,12 +261,12 @@ class AdminLeasesController:
         self, lease_id: str, body: LeaseRetryReleaseRequest | None = None,
     ) -> LeaseResponse:
         try:
-            allocation = await self._leases.retry_release(
+            reservation = await self._leases.retry_release(
                 lease_id, body or LeaseRetryReleaseRequest(),
             )
         except (LeaseNotFoundError, InvalidLeaseStateError) as exc:
             raise _http_error(exc) from exc
-        return _lease_view(allocation)
+        return _lease_view(reservation)
 
     @admin_router.post(
         "/{lease_id}/force-release",
@@ -282,10 +282,10 @@ class AdminLeasesController:
         self, lease_id: str, body: LeaseForceReleaseRequest,
     ) -> LeaseResponse:
         try:
-            allocation = await self._leases.force_release(lease_id, body)
+            reservation = await self._leases.force_release(lease_id, body)
         except (LeaseNotFoundError, InvalidLeaseStateError) as exc:
             raise _http_error(exc) from exc
-        return _lease_view(allocation)
+        return _lease_view(reservation)
 
     @classmethod
     def make_router(cls) -> APIRouter:

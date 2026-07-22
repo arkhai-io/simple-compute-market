@@ -27,7 +27,7 @@ DEFAULT_FAILURE_ACTIONS = ("release_capacity", "emit_event")
 
 @dataclass(frozen=True)
 class FulfillmentFailureContext:
-    allocation_id: str | None = None
+    capacity_reservation_id: str | None = None
     escrow_uid: str | None = None
     listing_id: str | None = None
     resource_id: str | None = None
@@ -38,7 +38,7 @@ class FulfillmentFailureContext:
 
 @dataclass
 class FulfillmentFailurePolicyResult:
-    allocation_id: str | None = None
+    capacity_reservation_id: str | None = None
     state: str | None = None
     resource_id: str | None = None
     reopened_listing_ids: list[str] = field(default_factory=list)
@@ -67,7 +67,7 @@ def _failure_payload(
     result: FulfillmentFailurePolicyResult,
 ) -> dict[str, Any]:
     return {
-        "allocation_id": ctx.allocation_id,
+        "capacity_reservation_id": ctx.capacity_reservation_id,
         "escrow_uid": ctx.escrow_uid,
         "listing_id": ctx.listing_id,
         "resource_id": result.resource_id or ctx.resource_id,
@@ -92,20 +92,20 @@ async def _release_capacity(
         reopen_token_listings_after_capacity_change,
     )
 
-    result = FulfillmentFailurePolicyResult(allocation_id=ctx.allocation_id)
+    result = FulfillmentFailurePolicyResult(capacity_reservation_id=ctx.capacity_reservation_id)
     if capacity is None:
         capacity = build_capacity_client(lambda: db)
 
-    allocation = await capacity.release(
-        allocation_id=ctx.allocation_id,
+    reservation = await capacity.release(
+        capacity_reservation_id=ctx.capacity_reservation_id,
         deal_ref={"escrow_uid": ctx.escrow_uid} if ctx.escrow_uid else None,
         failure_reason=ctx.reason,
         failure_message=ctx.message,
     )
-    if allocation is not None:
-        result.allocation_id = allocation.get("allocation_id")
+    if reservation is not None:
+        result.capacity_reservation_id = reservation.get("capacity_reservation_id")
         result.state = "released"
-        result.resource_id = allocation.get("resource_id")
+        result.resource_id = reservation.get("resource_id")
         result.reopened_listing_ids = (
             await reopen_token_listings_after_capacity_change(db, capacity)
         )
@@ -151,13 +151,13 @@ async def apply_fulfillment_failure_policy(
     capacity: Any | None = None,
 ) -> FulfillmentFailurePolicyResult:
     actions = configured_failure_actions()
-    result = FulfillmentFailurePolicyResult(allocation_id=ctx.allocation_id)
+    result = FulfillmentFailurePolicyResult(capacity_reservation_id=ctx.capacity_reservation_id)
 
     for action in actions:
         if action == "release_capacity":
             try:
                 released = await _release_capacity(db, ctx, capacity)
-                result.allocation_id = released.allocation_id
+                result.capacity_reservation_id = released.capacity_reservation_id
                 result.state = released.state
                 result.resource_id = released.resource_id
                 result.reopened_listing_ids = released.reopened_listing_ids

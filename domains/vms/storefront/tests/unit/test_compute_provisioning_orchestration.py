@@ -50,7 +50,7 @@ async def test_vm_orchestration_submits_versioned_correlated_envelope(monkeypatc
         timeout=10,
         poll_interval=0.01,
         vm_host="kvm1",
-        allocation_id="allocation-1",
+        capacity_reservation_id="reservation-1",
         deal_ref={"escrow_uid": "escrow-1", "listing_id": "listing-1"},
         parameters={"vm_target": "tenant-1", "ssh_pubkey": "ssh-ed25519 test"},
         on_job_submitted=record_submission,
@@ -58,11 +58,11 @@ async def test_vm_orchestration_submits_versioned_correlated_envelope(monkeypatc
 
     envelope = captured["envelope"]
     assert envelope.contract_version == "1.0"
-    assert envelope.allocation_id == "allocation-1"
+    assert envelope.capacity_reservation_id == "reservation-1"
     assert envelope.deal_ref["escrow_uid"] == "escrow-1"
     assert envelope.executor_kind == "vm"
     assert envelope.action_kind == "create"
-    assert envelope.idempotency_key == "allocation-1:create"
+    assert envelope.idempotency_key == "reservation-1:create"
     assert envelope.parameters["vm_target"] == "tenant-1"
     assert submitted == ["job-1"]
     assert result["authentication"]["tenant"]["username"] == "tenant"
@@ -104,12 +104,12 @@ async def test_vm_lease_registration_uses_common_compute_model(monkeypatch):
         vm_target="tenant-1",
         lease_start_utc="2026-07-13T12:00:00+00:00",
         lease_end_utc="2026-07-13 13:00",
-        allocation_id="allocation-1",
+        capacity_reservation_id="reservation-1",
     )
 
     registration = captured["registration"]
     assert registration.contract_version == "1.0"
-    assert registration.allocation_id == "allocation-1"
+    assert registration.capacity_reservation_id == "reservation-1"
     assert registration.deal_ref == {"escrow_uid": "escrow-1"}
     assert registration.executor_kind == "vm"
     assert registration.executor_target == "tenant-1"

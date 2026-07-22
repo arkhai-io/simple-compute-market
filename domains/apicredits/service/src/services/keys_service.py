@@ -124,7 +124,7 @@ class KeysService:
         buyer_id: str | None = None,
         owner_scheme: str | None = None,
         owner_id: str | None = None,
-        allocation_id: str | None = None,
+        capacity_reservation_id: str | None = None,
         resource_id: str | None = None,
     ) -> dict[str, Any]:
         """Fulfill one deal: quota commit + key + grant, idempotently.
@@ -185,10 +185,10 @@ class KeysService:
 
             # 2. Commit the quota hold (idempotent at the ledger); fall
             #    back to a plain atomic reserve when the hold lapsed.
-            committed_allocation = self._commit_quota(
+            committed_reservation = self._commit_quota(
                 escrow_uid=escrow_uid,
                 quantity=quantity,
-                allocation_id=allocation_id,
+                capacity_reservation_id=capacity_reservation_id,
                 resource_id=resource_id,
             )
 
@@ -206,7 +206,7 @@ class KeysService:
                 "secret": secret,
                 "quantity": int(quantity),
                 "balance": int(key.balance),
-                "allocation_id": committed_allocation,
+                "capacity_reservation_id": committed_reservation,
                 "already_issued": False,
             }
 
@@ -232,7 +232,7 @@ class KeysService:
             "secret": secret,
             "quantity": int(prior.quantity),
             "balance": int(key.balance or 0),
-            "allocation_id": None,
+            "capacity_reservation_id": None,
             "already_issued": True,
         }
 
@@ -241,28 +241,28 @@ class KeysService:
         *,
         escrow_uid: str,
         quantity: int,
-        allocation_id: str | None,
+        capacity_reservation_id: str | None,
         resource_id: str | None,
     ) -> str | None:
         """Commit the negotiation-time hold, or atomically reserve when
         no live hold exists (it lapsed, or holds are disabled)."""
-        allocation = None
-        if allocation_id:
-            allocation = self._ledger.get_allocation(allocation_id)
-        if allocation is None:
-            allocation = self._ledger.get_allocation_by_escrow(escrow_uid)
-        if allocation is not None:
+        reservation = None
+        if capacity_reservation_id:
+            reservation = self._ledger.get_reservation(capacity_reservation_id)
+        if reservation is None:
+            reservation = self._ledger.get_reservation_by_escrow(escrow_uid)
+        if reservation is not None:
             try:
                 committed = self._ledger.commit(
-                    resource_id=allocation["resource_id"],
-                    allocation_id=allocation["allocation_id"],
+                    resource_id=None,
+                    capacity_reservation_id=reservation["capacity_reservation_id"],
                     lease_end_utc=None,  # credits don't expire: no lease tail
                     idempotency_ref=escrow_uid,
                 )
             except CapacityConflictError:
                 committed = None  # hold lapsed/released; fall through to reserve
             if committed is not None:
-                return str(committed["allocation_id"])
+                return str(committed["capacity_reservation_id"])
 
         claim: dict[str, Any] = {"units": int(quantity)}
         if resource_id:
@@ -274,12 +274,12 @@ class KeysService:
                 f"no quota resource can cover {quantity} units",
             )
         committed = self._ledger.commit(
-            resource_id=reserved["resource_id"],
-            allocation_id=reserved["allocation_id"],
+            resource_id=None,
+            capacity_reservation_id=reserved["capacity_reservation_id"],
             lease_end_utc=None,
             idempotency_ref=escrow_uid,
         )
-        return str(committed["allocation_id"]) if committed else None
+        return str(committed["capacity_reservation_id"]) if committed else None
 
     # ------------------------------------------------------------------
     # Middleware-facing: consume / verify

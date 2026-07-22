@@ -230,7 +230,7 @@ def _migrate_vm_leases_allocation_id(engine: Engine) -> None:
 
 
 def _migrate_multidimensional_capacity(engine: Engine) -> None:
-    """Add POOLS-6 pass-1 multidimensional capacity columns.
+    """Add multidimensional capacity columns.
 
     Additive-only: ``site_resources.total_units`` and
     ``site_allocations.units`` are left in place as service-maintained
@@ -250,7 +250,7 @@ def _migrate_drop_vm_leases_table(engine: Engine) -> None:
     Confirmed dead: no code anywhere in this repository ever constructs a
     VmLease row (the ORM model backing this table has been removed —
     db/models.py). The live lease watchdog operates entirely through
-    SiteAllocation (market_site.db) instead. This is a genuine DROP, not a
+    CapacityReservation (market_site.db) instead. This is a genuine DROP, not a
     disable/soft-delete — there is no data to preserve (the table has
     always been empty in practice) and no application-level FK references
     it (VmLease.resource_id was always an unvalidated TEXT column, per its
@@ -258,6 +258,32 @@ def _migrate_drop_vm_leases_table(engine: Engine) -> None:
     """
     with engine.begin() as connection:
         connection.execute(text("DROP TABLE IF EXISTS vm_leases"))
+
+
+def _migrate_rename_site_allocations_to_capacity_reservations(engine: Engine) -> None:
+    """Rename legacy reservation and job identifier schema to current names."""
+    legacy_exists = _table_exists(engine, "site_allocations")
+    current_exists = _table_exists(engine, "capacity_reservations")
+    if legacy_exists and current_exists:
+        raise SchemaDriftError(
+            "both site_allocations and capacity_reservations exist; "
+            "refusing an ambiguous reservation-table migration"
+        )
+    if legacy_exists:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE site_allocations RENAME TO capacity_reservations")
+            )
+            connection.execute(text(
+                "ALTER TABLE capacity_reservations "
+                "RENAME COLUMN allocation_id TO capacity_reservation_id"
+            ))
+    if _column_exists(engine, "ansible_jobs", "allocation_id"):
+        with engine.begin() as connection:
+            connection.execute(text(
+                "ALTER TABLE ansible_jobs "
+                "RENAME COLUMN allocation_id TO capacity_reservation_id"
+            ))
 
 
 def _migrate_site_allocations_executor_fields(engine: Engine) -> None:
@@ -268,9 +294,20 @@ def _migrate_site_allocations_executor_fields(engine: Engine) -> None:
 
 
 def _migrate_ansible_jobs_contract_fields(engine: Engine) -> None:
+    # On a database created fresh from the current ORM model, create_all
+    # already named this column capacity_reservation_id -- this historical
+    # migration's job (ensure the column exists) is already done under
+    # that name, and must not add a second, stray allocation_id column
+    # that a later rename step would then collide with when it tries to
+    # rename allocation_id to a name that's already taken.
+    reservation_column = (
+        "capacity_reservation_id"
+        if _column_exists(engine, "ansible_jobs", "capacity_reservation_id")
+        else "allocation_id"
+    )
     for column_name, column_sql in (
         ("contract_version", "VARCHAR"),
-        ("allocation_id", "VARCHAR"),
+        (reservation_column, "VARCHAR"),
         ("deal_ref", "JSON"),
         ("executor_kind", "VARCHAR"),
         ("action_kind", "VARCHAR"),
@@ -281,14 +318,14 @@ def _migrate_ansible_jobs_contract_fields(engine: Engine) -> None:
         _create_index_if_missing(
             engine,
             "ix_ansible_jobs_allocation_id",
-            "CREATE INDEX IF NOT EXISTS ix_ansible_jobs_allocation_id "
-            "ON ansible_jobs (allocation_id)",
+            f"CREATE INDEX IF NOT EXISTS ix_ansible_jobs_allocation_id "
+            f"ON ansible_jobs ({reservation_column})",
         )
         _create_index_if_missing(
             engine,
             "uq_ansible_jobs_contract_idempotency",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_ansible_jobs_contract_idempotency "
-            "ON ansible_jobs (allocation_id, action_kind, idempotency_key)",
+            f"ON ansible_jobs ({reservation_column}, action_kind, idempotency_key)",
         )
 
 
@@ -359,6 +396,170 @@ def _migrate_resource_pools_and_hosts_pool_id(
     )
 
 
+def _migrate_capacity_reservations_settlement_resource_id(engine: Engine) -> None:
+    """Add ``capacity_reservations.settlement_resource_id``.
+
+    Purely additive (nullable, no backfill needed): existing rows predate
+    scheduling ever running against them in this codebase (no production
+    caller exists yet, so
+    NULL ("scheduling hasn't run for this row") is the correct value for
+    every pre-existing row, not just a safe default.
+    """
+    _add_column_if_missing(
+        engine, "capacity_reservations", "settlement_resource_id", "VARCHAR",
+    )
+    if _table_exists(engine, "capacity_reservations"):
+        _create_index_if_missing(
+            engine,
+            "ix_capacity_reservations_settlement_resource_id",
+            "CREATE INDEX IF NOT EXISTS "
+            "ix_capacity_reservations_settlement_resource_id "
+            "ON capacity_reservations (settlement_resource_id)",
+        )
+
+
+def _migrate_site_resources_pool_id(engine: Engine) -> None:
+    """Add ``site_resources.pool_id`` and backfill it from the existing
+    ``attributes`` JSON, where the storefront's old sync push put it.
+
+    Additive column, backfill-then-done (not ongoing): once this runs,
+    ``pool_id`` is a real column callers set explicitly going forward
+    (
+    enforced attribute rather than a storefront-authored guess"). Rows
+    whose attributes never had a pool_id stay NULL, correctly falling
+    back to the degenerate single-resource-pool case
+    (``market_site.ledger._resource_attribute_view``).
+    """
+    _add_column_if_missing(engine, "site_resources", "pool_id", "VARCHAR")
+    if not _table_exists(engine, "site_resources"):
+        return
+    with engine.begin() as connection:
+        if engine.dialect.name == "postgresql":
+            connection.execute(text(
+                "UPDATE site_resources SET pool_id = attributes->>'pool_id' "
+                "WHERE pool_id IS NULL "
+                "AND attributes IS NOT NULL "
+                "AND attributes->>'pool_id' IS NOT NULL"
+            ))
+        else:
+            connection.execute(text(
+                "UPDATE site_resources "
+                "SET pool_id = json_extract(attributes, '$.pool_id') "
+                "WHERE pool_id IS NULL "
+                "AND attributes IS NOT NULL "
+                "AND json_extract(attributes, '$.pool_id') IS NOT NULL"
+            ))
+    _create_index_if_missing(
+        engine,
+        "ix_site_resources_pool_id",
+        "CREATE INDEX IF NOT EXISTS ix_site_resources_pool_id "
+        "ON site_resources (pool_id)",
+    )
+
+
+def _migrate_capacity_buckets_and_current_debits(engine: Engine) -> None:
+    """Create private host-level accounting rows and backfill current debits.
+
+    The storefront reservation contract no longer exposes the selected
+    accounting row. Existing reservation/resource links are converted into
+    current debit rows before repositories begin using the new model.
+    """
+    from market_site.db import Base as SiteBase
+
+    SiteBase.metadata.tables["capacity_buckets"].create(bind=engine, checkfirst=True)
+    SiteBase.metadata.tables["capacity_reservation_debits"].create(
+        bind=engine, checkfirst=True
+    )
+    if not _table_exists(engine, "site_resources"):
+        return
+    has_legacy_reservation_resource = (
+        _table_exists(engine, "capacity_reservations")
+        and _column_exists(engine, "capacity_reservations", "resource_id")
+    )
+    with engine.begin() as connection:
+        connection.execute(text(
+            """
+            INSERT INTO capacity_buckets (
+                capacity_bucket_id, backing_resource_id, pool_id, resource_type,
+                resource_subtype, total_units, capacity, attributes, enabled
+            )
+            SELECT
+                'bucket:' || sr.resource_id,
+                sr.resource_id,
+                COALESCE(sr.pool_id, sr.resource_id),
+                sr.resource_type,
+                sr.resource_subtype,
+                sr.total_units,
+                COALESCE(sr.capacity, json_object('gpu_count', sr.total_units)),
+                COALESCE(sr.attributes, json_object()),
+                sr.enabled
+            FROM site_resources sr
+            WHERE NOT EXISTS (
+                SELECT 1 FROM capacity_buckets cb
+                WHERE cb.backing_resource_id = sr.resource_id
+            )
+            """
+        ))
+        if has_legacy_reservation_resource:
+            connection.execute(text(
+                """
+                INSERT INTO capacity_reservation_debits (
+                    capacity_reservation_id, capacity_bucket_id, dimensions
+                )
+                SELECT
+                    cr.capacity_reservation_id,
+                    cb.capacity_bucket_id,
+                    COALESCE(cr.dimensions, json_object('gpu_count', cr.units))
+                FROM capacity_reservations cr
+                JOIN capacity_buckets cb
+                  ON cb.backing_resource_id = cr.resource_id
+                WHERE cr.resource_id IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM capacity_reservation_debits d
+                    WHERE d.capacity_reservation_id = cr.capacity_reservation_id
+                  )
+                """
+            ))
+
+
+def _migrate_retire_site_resources(engine: Engine) -> None:
+    """Validate the replacement accounting model and retire site_resources."""
+    if not _table_exists(engine, "site_resources"):
+        return
+    with engine.begin() as connection:
+        missing_buckets = connection.execute(text(
+            "SELECT COUNT(*) FROM site_resources sr "
+            "LEFT JOIN capacity_buckets cb ON cb.backing_resource_id = sr.resource_id "
+            "WHERE cb.capacity_bucket_id IS NULL"
+        )).scalar_one()
+        if int(missing_buckets or 0):
+            raise SchemaDriftError(
+                f"cannot retire site_resources: {missing_buckets} rows have no capacity bucket"
+            )
+        if _table_exists(engine, "capacity_reservations"):
+            missing_debits = connection.execute(text(
+                "SELECT COUNT(*) FROM capacity_reservations cr "
+                "LEFT JOIN capacity_reservation_debits d "
+                "ON d.capacity_reservation_id = cr.capacity_reservation_id "
+                "WHERE cr.state IN ('reserved','provisioning','leased','releasing','release_failed','unmanaged') "
+                "AND d.capacity_reservation_id IS NULL"
+            )).scalar_one()
+            if int(missing_debits or 0):
+                raise SchemaDriftError(
+                    f"cannot retire site_resources: {missing_debits} held reservations have no current debit"
+                )
+        connection.execute(text("DROP TABLE site_resources"))
+
+
+def _migrate_pools7_capacity_model_cutover(engine: Engine) -> None:
+    """Apply the undeployed POOLS-7 reservation and capacity-model cutover."""
+    _migrate_rename_site_allocations_to_capacity_reservations(engine)
+    _migrate_capacity_reservations_settlement_resource_id(engine)
+    _migrate_site_resources_pool_id(engine)
+    _migrate_capacity_buckets_and_current_debits(engine)
+    _migrate_retire_site_resources(engine)
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -383,5 +584,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260720_001_multidimensional_capacity",
         _migrate_multidimensional_capacity,
+    ),
+    Migration(
+        "20260722_001_pools7_capacity_model_cutover",
+        _migrate_pools7_capacity_model_cutover,
     ),
 )

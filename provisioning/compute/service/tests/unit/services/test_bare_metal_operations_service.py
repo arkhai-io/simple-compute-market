@@ -68,7 +68,7 @@ async def test_grant_access_submits_node_grant_job():
 
 
 @pytest.mark.asyncio
-async def test_reclaim_access_submits_node_reclaim_job_from_allocation():
+async def test_reclaim_access_submits_node_reclaim_job_from_reservation():
     queue = object()
     job_service = MagicMock()
     job_service.submit = AsyncMock(
@@ -83,7 +83,7 @@ async def test_reclaim_access_submits_node_reclaim_job_from_allocation():
         ),
     )
 
-    job_id = await service.reclaim_access_for_allocation({
+    job_id = await service.reclaim_access_for_reservation({
         "escrow_uid": "0xbm",
         "executor_target": "bm-node-1",
         "executor_ref": bare_metal_executor_ref(
@@ -125,7 +125,7 @@ async def test_reclaim_access_without_machine_id_returns_none():
         job_queue_provider=lambda: object(),
     )
 
-    assert await service.reclaim_access_for_allocation({}) is None
+    assert await service.reclaim_access_for_reservation({}) is None
     job_service.submit.assert_not_awaited()
 
 
@@ -189,7 +189,7 @@ async def test_reclaim_access_for_unknown_machine_returns_none_without_submittin
         host_service=MagicMock(get_host=MagicMock(return_value=None)),
     )
 
-    result = await service.reclaim_access_for_allocation({
+    result = await service.reclaim_access_for_reservation({
         "executor_target": "missing-node",
         "executor_ref": {"physical_host_id": "host-physical-1"},
     })

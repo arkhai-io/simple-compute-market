@@ -32,7 +32,7 @@ class BareMetalProvisioningRuntime:
             ),
             release_executor=BareMetalReleaseExecutor(
                 release_delegate=(
-                    self.operations_service.reclaim_access_for_allocation
+                    self.operations_service.reclaim_access_for_reservation
                 ),
             ),
             readiness_check=self.readiness,

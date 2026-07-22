@@ -58,7 +58,7 @@ class LeaseState(str, Enum):
 
 
 class ExecutorActionEnvelope(VersionedContractModel):
-    allocation_id: str = Field(min_length=1)
+    capacity_reservation_id: str = Field(min_length=1)
     deal_ref: dict[str, Any]
     executor_kind: str = Field(min_length=1)
     action_kind: str = Field(min_length=1)
@@ -70,7 +70,7 @@ class ExecutorActionEnvelope(VersionedContractModel):
 class JobAccepted(VersionedContractModel):
     job_id: str
     status: JobState = JobState.QUEUED
-    allocation_id: str
+    capacity_reservation_id: str
     deal_ref: dict[str, Any]
     executor_kind: str
     action_kind: str
@@ -104,7 +104,7 @@ class ResultEnvelope(BaseModel):
 class ProvisioningJob(VersionedContractModel):
     job_id: str
     status: JobState
-    allocation_id: str
+    capacity_reservation_id: str
     deal_ref: dict[str, Any]
     executor_kind: str
     action_kind: str
@@ -120,7 +120,7 @@ class ProvisioningJob(VersionedContractModel):
 
 
 class LeaseRegistration(VersionedContractModel):
-    allocation_id: str
+    capacity_reservation_id: str
     deal_ref: dict[str, Any]
     executor_kind: str
     executor_target: str
@@ -153,7 +153,7 @@ class LeaseForceRelease(VersionedContractModel):
 
 class LifecycleEvent(VersionedContractModel):
     event_id: str = Field(min_length=1)
-    allocation_id: str = Field(min_length=1)
+    capacity_reservation_id: str = Field(min_length=1)
     deal_ref: dict[str, Any]
     executor_kind: str = Field(min_length=1)
     event_kind: str = Field(min_length=1)

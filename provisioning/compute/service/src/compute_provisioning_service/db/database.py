@@ -55,15 +55,25 @@ def run_migrations(
     # ansible_pool_configs (on Base) has a ForeignKey("resource_pools.id"),
     # and SQLAlchemy's cross-metadata FK resolution during create_all needs
     # the referenced table to already exist.
+    from sqlalchemy import inspect
     from market_resource_pools.db import Base as PoolsBase
+    from market_site.db import Base as SiteBase
+
     PoolsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
-    # Site-authority ledger tables ride the shared market_site
-    # metadata (db.models re-exports the classes).
-    from market_site.db import Base as SiteBase
-    SiteBase.metadata.create_all(bind=engine)
+
+    # Preserve the legacy reservation table name until the versioned rename
+    # migration has claimed the current name. Other site tables may be created
+    # before migrations because historical migrations depend on them existing.
+    existing = set(inspect(engine).get_table_names())
+    site_tables = list(SiteBase.metadata.sorted_tables)
+    if "site_allocations" in existing and "capacity_reservations" not in existing:
+        site_tables = [table for table in site_tables if table.name != "capacity_reservations"]
+    SiteBase.metadata.create_all(bind=engine, tables=site_tables)
+
     apply_schema_migrations(
         engine,
         default_playbook_path=default_playbook_path,
         default_inventory_group=default_inventory_group,
     )
+    SiteBase.metadata.create_all(bind=engine)

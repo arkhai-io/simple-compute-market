@@ -1,4 +1,4 @@
-.PHONY: help install test serve build clean
+.PHONY: help install reinit test serve build clean
 
 .DEFAULT_GOAL := help
 
@@ -11,7 +11,11 @@ install: ## Install dependencies using uv
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Install from https://docs.astral.sh/uv/"; exit 1; }
 	uv sync --dev --find-links $(DIST_DIR)
 
-test: ## Run the test suite
+reinit: ## Force-reinstall internal wheels without bumping versions. Run make dist-* from the monorepo root first.
+	uv sync --dev --find-links $(DIST_DIR) \
+		--upgrade-package arkhai-kit-site --reinstall-package arkhai-kit-site
+
+test: reinit ## Run the test suite
 	PYTHONPATH=src uv run --find-links $(DIST_DIR) pytest src/tests -q
 
 serve: ## Run the service locally (reload)

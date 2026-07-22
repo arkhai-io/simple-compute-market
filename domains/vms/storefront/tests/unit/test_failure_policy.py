@@ -24,7 +24,7 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
     )
 
     async def fake_webhook(payload):
-        assert payload["allocation_id"] == reserved["allocation_id"]
+        assert payload["capacity_reservation_id"] == reserved["capacity_reservation_id"]
         assert payload["reason"] == "provisioning_error"
         assert payload["state"] == "released"
         return {"action": "webhook", "status": "sent", "status_code": 204}
@@ -46,7 +46,7 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
         result = await apply_fulfillment_failure_policy(
             db,
             FulfillmentFailureContext(
-                allocation_id=reserved["allocation_id"],
+                capacity_reservation_id=reserved["capacity_reservation_id"],
                 escrow_uid="escrow-1",
                 reason="provisioning_error",
                 message="host rejected request",
@@ -63,9 +63,9 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
     webhook.assert_awaited_once()
 
     # The ledger holds the failure metadata; the capacity came back.
-    allocation = fake.allocations[reserved["allocation_id"]]
-    assert allocation["state"] == "released"
-    assert allocation["failure_reason"] == "provisioning_error"
+    reservation = fake.reservations[reserved["capacity_reservation_id"]]
+    assert reservation["state"] == "released"
+    assert reservation["failure_reason"] == "provisioning_error"
     assert fake._available("gpu-host-1") == 2
 
 

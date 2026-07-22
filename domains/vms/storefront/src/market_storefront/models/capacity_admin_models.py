@@ -25,7 +25,7 @@ class ReserveCapacityRequest(BaseModel):
 class ReserveCapacityResponse(BaseModel):
     """Response from POST /api/v1/admin/portfolio/reservations."""
 
-    allocation_id: str
+    capacity_reservation_id: str
     pool_id: str | None = None
     member_id: str | None = None
     resource_id: str
@@ -82,7 +82,7 @@ class ResourcePatchResponse(BaseModel):
 
 
 class FulfillmentStartedEventRequest(BaseModel):
-    allocation_id: str
+    capacity_reservation_id: str
     escrow_uid: str | None = None
     provider_id: str | None = None
     provider_job_id: str | None = None
@@ -91,7 +91,7 @@ class FulfillmentStartedEventRequest(BaseModel):
 
 
 class FulfillmentFailedEventRequest(BaseModel):
-    allocation_id: str
+    capacity_reservation_id: str
     escrow_uid: str | None = None
     provider_id: str | None = None
     provider_job_id: str | None = None
@@ -102,7 +102,7 @@ class FulfillmentFailedEventRequest(BaseModel):
 
 
 class UsageStartedEventRequest(BaseModel):
-    allocation_id: str
+    capacity_reservation_id: str
     escrow_uid: str | None = None
     provider_id: str | None = None
     provider_lease_id: str | None = None
@@ -114,20 +114,20 @@ class UsageStartedEventRequest(BaseModel):
 
 
 class ReleaseStartedEventRequest(BaseModel):
-    allocation_id: str
+    capacity_reservation_id: str
     provider_lease_id: str | None = None
     vm_remove_job_id: str | None = None
 
 
 class CapacityReleasedEventRequest(BaseModel):
-    allocation_id: str
+    capacity_reservation_id: str
     provider_lease_id: str | None = None
     resource_id: str | None = None
     released_at: str | None = None
 
 
 class FulfillmentEventResponse(BaseModel):
-    allocation_id: str
+    capacity_reservation_id: str
     state: str
     resource_id: str | None = None
     gpu_count: int | None = None
@@ -170,11 +170,11 @@ class InterruptDealRequest(BaseModel):
 class InterruptDealResponse(BaseModel):
     escrow_uid: str
     status: str
-    allocation_id: str | None = None
+    capacity_reservation_id: str | None = None
     listing_id: str | None = None
     interrupted_at_utc: str
     lease_truncated: bool = False
     settlement_action: str = "pending"
     seller_amount: int | None = None
     refund_amount: int | None = None
-    allocation: dict[str, Any] | None = None
+    reservation: dict[str, Any] | None = None

@@ -98,7 +98,7 @@ def _create_pre_migration_tables(engine):
                 attributes, enabled
             ) VALUES (
                 'pre-existing-gpu', 'compute.gpu', 'h200', 8,
-                '{"vm_host": "kvm1"}', 1
+                '{"vm_host": "kvm1", "pool_id": "legacy-pool"}', 1
             )
             """
         ))
@@ -174,44 +174,49 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         column["name"] for column in inspector.get_columns("ansible_jobs")
     }
     host_columns = {column["name"] for column in inspector.get_columns("hosts")}
-    allocation_columns = {
-        column["name"] for column in inspector.get_columns("site_allocations")
+    reservation_columns = {
+        column["name"] for column in inspector.get_columns("capacity_reservations")
     }
 
     assert "escrow_uid" in ansible_columns
     assert {
         "contract_version",
-        "allocation_id",
+        "capacity_reservation_id",
         "deal_ref",
         "executor_kind",
         "action_kind",
         "idempotency_key",
     }.issubset(ansible_columns)
     assert "public_host" in host_columns
-    # vm_leases is created by an early migration and dropped by the final
-    # one (20260718_001_drop_vm_leases_table) — dead table, superseded by
-    # site_allocations. Both migration steps stay in history (append-only)
-    # so replay against any pre-existing DB state is correct, but the
-    # end state after a full run has no vm_leases table.
+    # The final schema has no dead lease table or legacy reservation name.
     assert "vm_leases" not in inspector.get_table_names()
+    assert "site_allocations" not in inspector.get_table_names()
     assert {
         "executor_kind",
         "executor_target",
         "release_job_id",
         "executor_ref",
-    }.issubset(allocation_columns)
+    }.issubset(reservation_columns)
 
     # capacity/dimensions columns land on genuinely
     # pre-existing site-authority tables via the additive-column
     # migration path, not only via create_all() on a brand new table
-    resource_columns = {
-        column["name"] for column in inspector.get_columns("site_resources")
-    }
     event_columns = {
         column["name"] for column in inspector.get_columns("capacity_events")
     }
-    assert "capacity" in resource_columns
-    assert "dimensions" in allocation_columns
+    assert "site_resources" not in inspector.get_table_names()
+    assert "capacity_buckets" in inspector.get_table_names()
+    assert "capacity_reservation_debits" in inspector.get_table_names()
+    bucket_indexes = {index["name"] for index in inspector.get_indexes("capacity_buckets")}
+    debit_indexes = {index["name"] for index in inspector.get_indexes("capacity_reservation_debits")}
+    assert "ix_capacity_buckets_backing_resource_id" in bucket_indexes
+    assert "ix_capacity_buckets_pool_id" in bucket_indexes
+    assert "ix_capacity_reservation_debits_capacity_bucket_id" in debit_indexes
+    debit_foreign_keys = inspector.get_foreign_keys("capacity_reservation_debits")
+    assert {fk["referred_table"] for fk in debit_foreign_keys} == {
+        "capacity_reservations", "capacity_buckets"
+    }
+    assert "dimensions" in reservation_columns
     assert "dimensions" in event_columns
 
     # The pre-existing row (inserted before the migration ran, with
@@ -223,8 +228,12 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     pre_existing = snapshot["pre-existing-gpu"]
     assert pre_existing["capacity"] == {"gpu_count": 8}
     assert pre_existing["available"] == {"gpu_count": 5}  # 8 total - 3 held
-    allocation = ledger.get_allocation("pre-existing-alloc")
-    assert allocation["dimensions"] == {"gpu_count": 3}
+    # pool_id is backfilled from the pre-existing row's attributes JSON,
+    # where the storefront's old sync push put it -- not left NULL just
+    # because the row predates the real column.
+    assert pre_existing["pool_id"] == "legacy-pool"
+    reservation = ledger.get_reservation("pre-existing-alloc")
+    assert reservation["dimensions"] == {"gpu_count": 3}
 
     assert "resource_pools" in inspector.get_table_names()
     assert "ansible_pool_configs" in inspector.get_table_names()
@@ -274,6 +283,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260713_002_resource_pools_and_hosts_pool_id",
         "20260718_001_drop_vm_leases_table",
         "20260720_001_multidimensional_capacity",
+        "20260722_001_pools7_capacity_model_cutover",
     }
 
 
@@ -289,13 +299,13 @@ def test_run_migrations_is_idempotent():
         column["name"] for column in inspector.get_columns("ansible_jobs")
     ]
     host_columns = [column["name"] for column in inspector.get_columns("hosts")]
-    allocation_columns = [
-        column["name"] for column in inspector.get_columns("site_allocations")
+    reservation_columns = [
+        column["name"] for column in inspector.get_columns("capacity_reservations")
     ]
 
     assert ansible_columns.count("escrow_uid") == 1
     assert ansible_columns.count("contract_version") == 1
-    assert ansible_columns.count("allocation_id") == 1
+    assert ansible_columns.count("capacity_reservation_id") == 1
     assert ansible_columns.count("deal_ref") == 1
     assert ansible_columns.count("executor_kind") == 1
     assert ansible_columns.count("action_kind") == 1
@@ -303,18 +313,18 @@ def test_run_migrations_is_idempotent():
     assert host_columns.count("public_host") == 1
     assert host_columns.count("pool_id") == 1
     assert "vm_leases" not in inspector.get_table_names()
-    assert allocation_columns.count("executor_kind") == 1
-    assert allocation_columns.count("executor_target") == 1
-    assert allocation_columns.count("release_job_id") == 1
-    assert allocation_columns.count("executor_ref") == 1
-    assert allocation_columns.count("dimensions") == 1
-    resource_columns = [
-        column["name"] for column in inspector.get_columns("site_resources")
-    ]
+    assert "site_allocations" not in inspector.get_table_names()
+    assert reservation_columns.count("executor_kind") == 1
+    assert reservation_columns.count("executor_target") == 1
+    assert reservation_columns.count("release_job_id") == 1
+    assert reservation_columns.count("executor_ref") == 1
+    assert reservation_columns.count("dimensions") == 1
     event_columns = [
         column["name"] for column in inspector.get_columns("capacity_events")
     ]
-    assert resource_columns.count("capacity") == 1
+    assert "site_resources" not in inspector.get_table_names()
+    assert "capacity_buckets" in inspector.get_table_names()
+    assert "capacity_reservation_debits" in inspector.get_table_names()
     assert event_columns.count("dimensions") == 1
 
     with Session(engine) as session:
@@ -326,7 +336,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 9
+    assert migration_count == 10
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +362,21 @@ class TestCheckSchemaVersion:
         with engine.begin() as connection:
             connection.execute(text(
                 "DELETE FROM schema_migrations WHERE id = "
-                "'20260720_001_multidimensional_capacity'"
+                "'20260722_001_pools7_capacity_model_cutover'"
             ))
         with pytest.raises(SchemaDriftError):
             check_schema_version(engine)
+
+
+def test_fresh_current_schema_contains_only_capacity_bucket_model():
+    engine = _sqlite_memory_engine()
+    run_migrations(engine)
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    assert "site_resources" not in tables
+    assert "site_allocations" not in tables
+    assert {
+        "capacity_buckets",
+        "capacity_reservations",
+        "capacity_reservation_debits",
+    }.issubset(tables)

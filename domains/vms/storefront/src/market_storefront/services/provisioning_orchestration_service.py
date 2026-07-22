@@ -33,7 +33,7 @@ async def create_vm_and_wait_with_credentials(
     timeout: float,
     poll_interval: float,
     vm_host: str,
-    allocation_id: str,
+    capacity_reservation_id: str,
     deal_ref: dict[str, Any],
     parameters: dict[str, Any],
     on_job_submitted: Callable[[str], Awaitable[None]] | None = None,
@@ -50,11 +50,11 @@ async def create_vm_and_wait_with_credentials(
         timeout=timeout,
     ) as client:
         submit = await client.submit_action(ExecutorActionEnvelope(
-            allocation_id=allocation_id,
+            capacity_reservation_id=capacity_reservation_id,
             deal_ref=deal_ref,
             executor_kind="vm",
             action_kind="create",
-            idempotency_key=f"{allocation_id}:create",
+            idempotency_key=f"{capacity_reservation_id}:create",
             parameters=parameters,
         ))
         if on_job_submitted is not None:

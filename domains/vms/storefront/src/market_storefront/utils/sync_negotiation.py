@@ -250,7 +250,7 @@ async def _place_capacity_hold(
     await sqlite_client.save_capacity_hold(
         negotiation_id=negotiation_id,
         listing_id=listing_id,
-        allocation_id=str(held["allocation_id"]),
+        capacity_reservation_id=str(held["capacity_reservation_id"]),
         payload=held,
         expires_at=held.get("hold_expires_at"),
     )
@@ -258,7 +258,7 @@ async def _place_capacity_hold(
         "negotiation", "capacity_hold_placed",
         negotiation_id=negotiation_id,
         listing_id=listing_id,
-        allocation_id=held.get("allocation_id"),
+        capacity_reservation_id=held.get("capacity_reservation_id"),
         resource_id=held.get("resource_id"),
         site=held.get("site"),
         hold_expires_at=held.get("hold_expires_at"),

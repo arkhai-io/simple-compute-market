@@ -20,7 +20,7 @@ def test_bare_metal_executor_ref_keeps_physical_host_id_separate_from_target():
 
 
 def test_get_physical_host_id_reads_reserved_executor_ref_key():
-    allocation = {
+    reservation = {
         "executor_kind": "bare_metal",
         "executor_target": "bare-metal-node-7",
         "executor_ref": {
@@ -28,14 +28,14 @@ def test_get_physical_host_id_reads_reserved_executor_ref_key():
         },
     }
 
-    assert get_physical_host_id(allocation) == "host-kvm1"
+    assert get_physical_host_id(reservation) == "host-kvm1"
 
 
 def test_get_physical_host_id_treats_executor_target_as_executor_local():
-    allocation = {
+    reservation = {
         "executor_kind": "bare_metal",
         "executor_target": "host-kvm1",
         "executor_ref": {},
     }
 
-    assert get_physical_host_id(allocation) is None
+    assert get_physical_host_id(reservation) is None

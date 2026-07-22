@@ -2,7 +2,7 @@
 
 The single coupling joint between the design doc's two parts: the
 settlement lifecycle decides the deal is over, the capacity layer must
-learn it to release the allocation.
+learn it to release the reservation.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ async def test_truncates_the_ledger_lease_to_now(db):
         )
         await capacity.commit(
             resource_id=reserved["resource_id"],
-            allocation_id=reserved["allocation_id"],
+            capacity_reservation_id=reserved["capacity_reservation_id"],
             lease_start_utc="2099-01-01T00:00:00Z",
             lease_end_utc="2099-01-01 01:00",
         )
@@ -47,14 +47,14 @@ async def test_truncates_the_ledger_lease_to_now(db):
         )
 
     assert truncated is not None
-    row = fake.allocations[reserved["allocation_id"]]
+    row = fake.reservations[reserved["capacity_reservation_id"]]
     assert row["state"] == "leased"
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     assert str(row["lease_end_utc"]).startswith(today)
 
 
 @pytest.mark.asyncio
-async def test_no_live_allocation_is_a_quiet_noop(db):
+async def test_no_live_reservation_is_a_quiet_noop(db):
     with site_capacity(FakeSite()):
         assert await truncate_lease_for_abandoned_claim(
             db, escrow_uid="0xunknown",

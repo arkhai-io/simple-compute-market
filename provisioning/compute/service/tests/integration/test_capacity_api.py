@@ -48,11 +48,11 @@ class CapacityApi:
             body["ttl_seconds"] = ttl_seconds
         resp = await self._client.post("/api/v1/capacity/reservations", json=body)
         assert resp.status_code == 200, resp.text
-        return resp.json()["allocation"]
+        return resp.json()["reservation"]
 
     async def commit(
         self,
-        allocation_id: str,
+        capacity_reservation_id: str,
         *,
         resource_id: str,
         lease_start_utc: str | None = None,
@@ -64,24 +64,24 @@ class CapacityApi:
         if lease_end_utc is not None:
             body["lease_end_utc"] = lease_end_utc
         resp = await self._client.post(
-            f"/api/v1/capacity/allocations/{allocation_id}/commit",
+            f"/api/v1/capacity/reservations/{capacity_reservation_id}/commit",
             json=body,
         )
         assert resp.status_code == 200, resp.text
-        return resp.json()["allocation"]
+        return resp.json()["reservation"]
 
     async def release(self, **body: Any) -> dict | None:
         resp = await self._client.post("/api/v1/capacity/releases", json=body)
         assert resp.status_code == 200, resp.text
-        return resp.json()["allocation"]
+        return resp.json()["reservation"]
 
-    async def truncate(self, allocation_id: str, lease_end_utc: str) -> dict | None:
+    async def truncate(self, capacity_reservation_id: str, lease_end_utc: str) -> dict | None:
         resp = await self._client.post(
-            f"/api/v1/capacity/allocations/{allocation_id}/truncate-lease",
+            f"/api/v1/capacity/reservations/{capacity_reservation_id}/truncate-lease",
             json={"lease_end_utc": lease_end_utc},
         )
         assert resp.status_code == 200, resp.text
-        return resp.json()["allocation"]
+        return resp.json()["reservation"]
 
     async def events(self, after: int = 0) -> tuple[list[dict], int]:
         resp = await self._client.get(
@@ -121,14 +121,14 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
     assert (await capacity.snapshot())[0]["available_units"] == 5
 
     committed = await capacity.commit(
-        reserved["allocation_id"],
-        resource_id=reserved["resource_id"],
+        reserved["capacity_reservation_id"],
+        resource_id="compute-kvm1-001",
         lease_start_utc="2099-01-01T00:00:00Z",
         lease_end_utc="2099-01-01T01:00:00Z",
     )
     assert committed["state"] == "leased"
 
-    truncated = await capacity.truncate(reserved["allocation_id"], "2026-06-01 00:00")
+    truncated = await capacity.truncate(reserved["capacity_reservation_id"], "2026-06-01 00:00")
     assert truncated["lease_end_utc"] == "2026-06-01 00:00"
 
     released = await capacity.release(deal_ref={"escrow_uid": "0xesc"})
@@ -150,7 +150,7 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
 @pytest.mark.asyncio
 async def test_no_capacity_is_a_null_answer_not_an_error(capacity: CapacityApi):
     assert await capacity.reserve({"gpu_count": 1}, {}) is None
-    assert await capacity.release(allocation_id="missing") is None
+    assert await capacity.release(capacity_reservation_id="missing") is None
 
 
 @pytest.mark.asyncio
@@ -174,7 +174,7 @@ async def test_vm_and_bare_metal_claims_use_domain_attributes(capacity: Capacity
     )
 
     assert reserved is not None
-    assert reserved["resource_id"] == "bare-metal-node-1"
+    assert "resource_id" not in reserved
     assert reserved["vm_host"] is None
 
 
@@ -221,7 +221,7 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
         "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
     }) is None
 
-    released = await capacity.release(allocation_id=reserved["allocation_id"])
+    released = await capacity.release(capacity_reservation_id=reserved["capacity_reservation_id"])
     assert released is not None
     restored = {row["resource_id"]: row for row in await capacity.snapshot()}
     assert restored["compute-host-1"]["available_units"] == 8
@@ -229,8 +229,8 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
 
 
 @pytest.mark.asyncio
-async def test_register_lease_attaches_to_ledger_allocation(capacity: CapacityApi):
-    """POST /leases records the lease tail on the allocation row — the
+async def test_register_lease_attaches_to_ledger_reservation(capacity: CapacityApi):
+    """POST /leases records the lease tail on the reservation row — the
     leases surface is a view over the ledger."""
     from compute_provisioning_service import container as _container_module
 
@@ -245,8 +245,8 @@ async def test_register_lease_attaches_to_ledger_allocation(capacity: CapacityAp
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
         resp = await http.post("/api/v1/leases/", json={
-            "resource_id": reserved["resource_id"],
-            "allocation_id": reserved["allocation_id"],
+            "resource_id": "compute-kvm1-001",
+            "capacity_reservation_id": reserved["capacity_reservation_id"],
             "escrow_uid": "0xlease",
             "vm_host": "kvm1",
             "vm_target": "tenant-led1",
@@ -254,31 +254,31 @@ async def test_register_lease_attaches_to_ledger_allocation(capacity: CapacityAp
         })
         assert resp.status_code == 201, resp.text
         body = resp.json()
-        assert body["id"] == reserved["allocation_id"]
+        assert body["id"] == reserved["capacity_reservation_id"]
         assert body["status"] == "active"
 
         listing = await http.get("/api/v1/leases/")
         assert listing.json()["total"] == 1
-        assert listing.json()["leases"][0]["id"] == reserved["allocation_id"]
+        assert listing.json()["leases"][0]["id"] == reserved["capacity_reservation_id"]
 
     ledger = _container_module.resolved_capacity_ledger_service
-    row = ledger.get_allocation(reserved["allocation_id"])
+    row = ledger.get_reservation(reserved["capacity_reservation_id"])
     assert row["vm_target"] == "tenant-led1"
     assert row["state"] == "leased"
     assert row["lease_end_utc"] == "2099-01-01T00:00:00+00:00"
 
 
 @pytest.mark.asyncio
-async def test_register_lease_without_ledger_allocation_404s(
+async def test_register_lease_without_ledger_reservation_404s(
     capacity: CapacityApi,
 ):
-    """Every reservation lives in the ledger; an unknown allocation means
+    """Every reservation lives in the ledger; an unknown reservation means
     the hold lapsed or was already released — registration refuses."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
         resp = await http.post("/api/v1/leases/", json={
             "resource_id": "compute-legacy-001",
-            "allocation_id": "local-alloc-1",
+            "capacity_reservation_id": "local-alloc-1",
             "escrow_uid": "0xlegacy",
             "vm_host": "kvm1",
             "vm_target": "tenant-leg1",
@@ -288,11 +288,11 @@ async def test_register_lease_without_ledger_allocation_404s(
 
 
 @pytest.mark.asyncio
-async def test_commit_unknown_allocation_404s(capacity: CapacityApi):
+async def test_commit_unknown_reservation_404s(capacity: CapacityApi):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
         resp = await http.post(
-            "/api/v1/capacity/allocations/missing/commit",
+            "/api/v1/capacity/reservations/missing/commit",
             json={"resource_id": "r", "lease_end_utc": "2099-01-01 00:00"},
         )
         assert resp.status_code == 404

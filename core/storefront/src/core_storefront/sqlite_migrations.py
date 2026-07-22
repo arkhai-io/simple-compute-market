@@ -447,6 +447,24 @@ def _migrate_listing_resource_timestamps(conn: sqlite3.Connection) -> None:
             )
 
 
+def _migrate_capacity_holds_reservation_id(conn: sqlite3.Connection) -> None:
+    """Rename ``capacity_holds.allocation_id`` to ``capacity_holds.
+    capacity_reservation_id``.
+
+    ``capacity_holds`` is created unconditionally via ``CREATE TABLE IF
+    NOT EXISTS`` (SQLiteClient.init_db), not through this versioned
+    migration system, so an existing on-disk database still has the old
+    column name and needs this rename step; a fresh database already has
+    the current column from that CREATE TABLE statement, and
+    ``_column_exists`` below is what makes this a no-op in that case.
+    """
+    if _column_exists(conn, "capacity_holds", "allocation_id"):
+        conn.execute(
+            "ALTER TABLE capacity_holds "
+            "RENAME COLUMN allocation_id TO capacity_reservation_id"
+        )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_000_listing_resource_timestamps",
@@ -459,5 +477,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_005_escrows_and_listings",
         _migrate_escrows_and_listings,
+    ),
+    Migration(
+        "20260722_001_capacity_holds_reservation_id",
+        _migrate_capacity_holds_reservation_id,
     ),
 )

@@ -152,14 +152,14 @@ class BareMetalLeaseTestClient:
     async def register_lease(self, **body) -> dict:
         return await self._post("/api/v1/bare-metal/leases/", body)
 
-    async def terminate_market_lease(self, allocation_id: str) -> dict:
-        return await self._post(f"/api/v1/leases/{allocation_id}/terminate", {})
+    async def terminate_market_lease(self, capacity_reservation_id: str) -> dict:
+        return await self._post(f"/api/v1/leases/{capacity_reservation_id}/terminate", {})
 
     async def list_leases(self) -> list[dict]:
         return await self._get("/api/v1/bare-metal/leases/")  # type: ignore[return-value]
 
-    async def get_lease(self, allocation_id: str) -> dict:
-        return await self._get(f"/api/v1/bare-metal/leases/{allocation_id}")  # type: ignore[return-value]
+    async def get_lease(self, capacity_reservation_id: str) -> dict:
+        return await self._get(f"/api/v1/bare-metal/leases/{capacity_reservation_id}")  # type: ignore[return-value]
 
     async def get_lease_by_escrow(self, escrow_uid: str) -> dict:
         return await self._get(f"/api/v1/bare-metal/leases/by-escrow/{escrow_uid}")  # type: ignore[return-value]
@@ -179,7 +179,7 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
     reserved = _reserve_bare_metal("escrow-bm-api-1")
 
     lease = await bare_metal_client.register_lease(
-        allocation_id=reserved["allocation_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         escrow_uid="escrow-bm-api-1",
         machine_id="bm-node-1",
         physical_host_id="host-physical-1",
@@ -187,7 +187,7 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
         lease_end_utc=_future_dt(),
     )
 
-    assert lease["allocation_id"] == reserved["allocation_id"]
+    assert lease["capacity_reservation_id"] == reserved["capacity_reservation_id"]
     assert lease["escrow_uid"] == "escrow-bm-api-1"
     assert lease["machine_id"] == "bm-node-1"
     assert lease["physical_host_id"] == "host-physical-1"
@@ -195,19 +195,19 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
     assert lease["access_ref"] == {"ssh_user": "tenant-a"}
 
     ledger = _container_module.resolved_capacity_ledger_service
-    allocation = ledger.get_allocation(lease["allocation_id"])
-    assert allocation["executor_kind"] == "bare_metal"
-    assert allocation["executor_target"] == "bm-node-1"
-    assert allocation["executor_ref"] == {
+    reservation = ledger.get_reservation(lease["capacity_reservation_id"])
+    assert reservation["executor_kind"] == "bare_metal"
+    assert reservation["executor_target"] == "bm-node-1"
+    assert reservation["executor_ref"] == {
         "physical_host_id": "host-physical-1",
         "ssh_user": "tenant-a",
     }
-    assert allocation["create_job_id"]
-    assert allocation["vm_target"] is None
+    assert reservation["create_job_id"]
+    assert reservation["vm_target"] is None
 
     session_factory = _container_module.resolved_session_factory
     with session_factory() as db:
-        job = db.get(AnsibleJob, allocation["create_job_id"])
+        job = db.get(AnsibleJob, reservation["create_job_id"])
         assert job is not None
         assert job.params["vm_action"] == NODE_GRANT_ACCESS_ACTION
         assert job.params["vm_host"] == "bm-node-1"
@@ -223,7 +223,7 @@ async def test_list_and_get_bare_metal_leases_exclude_vm_leases(
     _ensure_bare_metal_host()
     reserved = _reserve_bare_metal("escrow-bm-api-2")
     lease = await bare_metal_client.register_lease(
-        allocation_id=reserved["allocation_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         escrow_uid="escrow-bm-api-2",
         machine_id="bm-node-1",
         physical_host_id="host-physical-1",
@@ -232,7 +232,7 @@ async def test_list_and_get_bare_metal_leases_exclude_vm_leases(
 
     leases = await bare_metal_client.list_leases()
     assert [item["escrow_uid"] for item in leases] == ["escrow-bm-api-2"]
-    assert await bare_metal_client.get_lease(lease["allocation_id"]) == lease
+    assert await bare_metal_client.get_lease(lease["capacity_reservation_id"]) == lease
     assert await bare_metal_client.get_lease_by_escrow("escrow-bm-api-2") == lease
 
 
@@ -251,7 +251,7 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
     _ensure_bare_metal_host()
     reserved = _reserve_bare_metal("escrow-bm-api-reclaim")
     lease = await bare_metal_client.register_lease(
-        allocation_id=reserved["allocation_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         escrow_uid="escrow-bm-api-reclaim",
         machine_id="bm-node-1",
         physical_host_id="host-physical-1",
@@ -260,22 +260,22 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
     )
 
     terminated = await bare_metal_client.terminate_market_lease(
-        lease["allocation_id"],
+        lease["capacity_reservation_id"],
     )
 
-    assert terminated["id"] == lease["allocation_id"]
+    assert terminated["id"] == lease["capacity_reservation_id"]
     assert terminated["status"] == "releasing"
 
     ledger = _container_module.resolved_capacity_ledger_service
-    allocation = ledger.get_allocation(lease["allocation_id"])
-    assert allocation["state"] == "releasing"
-    assert allocation["executor_kind"] == "bare_metal"
-    assert allocation["release_job_id"]
-    assert allocation["vm_remove_job_id"] is None
+    reservation = ledger.get_reservation(lease["capacity_reservation_id"])
+    assert reservation["state"] == "releasing"
+    assert reservation["executor_kind"] == "bare_metal"
+    assert reservation["release_job_id"]
+    assert reservation["vm_remove_job_id"] is None
 
     session_factory = _container_module.resolved_session_factory
     with session_factory() as db:
-        job = db.get(AnsibleJob, allocation["release_job_id"])
+        job = db.get(AnsibleJob, reservation["release_job_id"])
         assert job is not None
         assert job.params["vm_action"] == NODE_RECLAIM_ACCESS_ACTION
         assert job.params["vm_host"] == "bm-node-1"
@@ -300,7 +300,7 @@ async def test_bare_metal_grant_and_reclaim_jobs_succeed_with_executor_playbook(
 
         grant_dispatched = _make_event_seam(job_queue)
         lease = await bare_metal_client.register_lease(
-            allocation_id=reserved["allocation_id"],
+            capacity_reservation_id=reserved["capacity_reservation_id"],
             escrow_uid="escrow-bm-api-smoke",
             machine_id="bm-node-1",
             physical_host_id="host-physical-1",
@@ -311,8 +311,8 @@ async def test_bare_metal_grant_and_reclaim_jobs_succeed_with_executor_playbook(
             lease_end_utc=_future_dt(),
         )
         ledger = _container_module.resolved_capacity_ledger_service
-        allocation = ledger.get_allocation(lease["allocation_id"])
-        grant_job_id = allocation["create_job_id"]
+        reservation = ledger.get_reservation(lease["capacity_reservation_id"])
+        grant_job_id = reservation["create_job_id"]
         await asyncio.wait_for(grant_dispatched.wait(), timeout=5.0)
         grant_job = await provisioning_client.poll_until_complete(
             grant_job_id,
@@ -330,10 +330,10 @@ async def test_bare_metal_grant_and_reclaim_jobs_succeed_with_executor_playbook(
 
         reclaim_dispatched = _make_event_seam(job_queue)
         terminated = await bare_metal_client.terminate_market_lease(
-            lease["allocation_id"],
+            lease["capacity_reservation_id"],
         )
-        allocation = ledger.get_allocation(lease["allocation_id"])
-        release_job_id = allocation["release_job_id"]
+        reservation = ledger.get_reservation(lease["capacity_reservation_id"])
+        release_job_id = reservation["release_job_id"]
         await asyncio.wait_for(reclaim_dispatched.wait(), timeout=5.0)
         reclaim_job = await provisioning_client.poll_until_complete(
             release_job_id,
@@ -349,10 +349,10 @@ async def test_bare_metal_grant_and_reclaim_jobs_succeed_with_executor_playbook(
         assert second_playbook["playbook_path"].name == "bare-metal-node-access.yml"
         assert second_playbook["limit"] == "bm-node-1"
 
-        allocation = ledger.get_allocation(lease["allocation_id"])
-        assert allocation["state"] == "releasing"
-        assert allocation["create_job_id"] == grant_job_id
-        assert allocation["release_job_id"] == release_job_id
+        reservation = ledger.get_reservation(lease["capacity_reservation_id"])
+        assert reservation["state"] == "releasing"
+        assert reservation["create_job_id"] == grant_job_id
+        assert reservation["release_job_id"] == release_job_id
 
 
 async def test_register_bare_metal_lease_for_unknown_machine_does_not_queue_job(
@@ -365,7 +365,7 @@ async def test_register_bare_metal_lease_for_unknown_machine_does_not_queue_job(
 
     with pytest.raises(BareMetalApiError) as exc_info:
         await bare_metal_client.register_lease(
-            allocation_id=reserved["allocation_id"],
+            capacity_reservation_id=reserved["capacity_reservation_id"],
             escrow_uid="escrow-bm-api-unknown",
             machine_id="missing-bm-node",
             physical_host_id="host-physical-1",

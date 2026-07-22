@@ -112,7 +112,7 @@ class ApiCreditsReceipt(BaseModel):
     kind: Literal["api_credits.v1"] = API_CREDITS_SCHEMA_KIND
     status: str
     escrow_uid: str | None = None
-    allocation_id: str | None = None
+    capacity_reservation_id: str | None = None
     key_id: str | None = None
     fulfillment_uid: str | None = None
     credentials_ref: dict[str, Any] | None = None

@@ -146,7 +146,7 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
     # The VM exists and the lease was committed before the on-chain step
     # failed — the ledger keeps the capacity held.
     assert fake._available("pool-h200-1") == 0
-    states = {a["state"] for a in fake.allocations.values()}
+    states = {a["state"] for a in fake.reservations.values()}
     assert states == {"leased"}
 
 

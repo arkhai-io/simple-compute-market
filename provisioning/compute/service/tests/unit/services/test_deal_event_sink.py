@@ -7,13 +7,13 @@ from compute_provisioning_service.services.deal_event_sink import notify_storefr
 
 
 @pytest.mark.asyncio
-async def test_release_event_routes_to_allocation_recorded_storefront_owner():
+async def test_release_event_routes_to_reservation_recorded_storefront_owner():
     storefront = MagicMock()
     storefront.__aenter__ = AsyncMock(return_value=storefront)
     storefront.__aexit__ = AsyncMock(return_value=False)
     storefront.notify_capacity_released = AsyncMock(return_value={})
-    allocation = {
-        "allocation_id": "alloc-7",
+    reservation = {
+        "capacity_reservation_id": "alloc-7",
         "resource_id": "resource-2",
         "released_at": "2026-07-13T12:00:00+00:00",
         "deal_ref": {
@@ -29,7 +29,7 @@ async def test_release_event_routes_to_allocation_recorded_storefront_owner():
                 storefront_url="https://default.example",
                 storefront_admin_key="admin-key",
             ),
-            allocation,
+            reservation,
         )
 
     assert delivered is True
@@ -39,6 +39,5 @@ async def test_release_event_routes_to_allocation_recorded_storefront_owner():
     )
     storefront.notify_capacity_released.assert_awaited_once_with(
         "alloc-7",
-        resource_id="resource-2",
         released_at="2026-07-13T12:00:00+00:00",
     )

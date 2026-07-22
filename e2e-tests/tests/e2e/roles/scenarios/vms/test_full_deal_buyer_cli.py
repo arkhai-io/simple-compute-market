@@ -1072,7 +1072,7 @@ class TestStage09c_LeaseRegistered:
         )
 
         # DealLease resolves where this deal's lease lives: a site-ledger
-        # allocation (remote-capacity mode) or a vm_leases row (embedded).
+        # reservation (remote-capacity mode) or a vm_leases row (embedded).
         lease_view = DealLease(provisioning_client, deal_state.real_escrow_uid)
         lease = lease_view.refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid

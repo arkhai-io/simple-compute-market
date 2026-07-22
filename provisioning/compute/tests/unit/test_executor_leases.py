@@ -16,14 +16,14 @@ from compute_provisioning.lease_lifecycle import LeaseNotFoundError
 
 class FakeSiteResources:
     def __init__(self) -> None:
-        self.allocations = {
+        self.reservations = {
             "alloc-1": {
-                "allocation_id": "alloc-1",
+                "capacity_reservation_id": "alloc-1",
                 "escrow_uid": "0x1",
                 "state": "held",
             },
             "alloc-2": {
-                "allocation_id": "alloc-2",
+                "capacity_reservation_id": "alloc-2",
                 "escrow_uid": "0x2",
                 "state": "held",
                 "lease_end_utc": "2099-01-01T00:00:00+00:00",
@@ -31,40 +31,40 @@ class FakeSiteResources:
             },
         }
 
-    def list_allocations(self, *, state=None):
-        return list(self.allocations.values())
+    def list_reservations(self, *, state=None):
+        return list(self.reservations.values())
 
-    def get_allocation(self, allocation_id):
-        return self.allocations.get(allocation_id)
+    def get_reservation(self, capacity_reservation_id):
+        return self.reservations.get(capacity_reservation_id)
 
-    def get_allocation_by_escrow(self, escrow_uid):
-        for allocation in self.allocations.values():
-            if allocation.get("escrow_uid") == escrow_uid:
-                return allocation
+    def get_reservation_by_escrow(self, escrow_uid):
+        for reservation in self.reservations.values():
+            if reservation.get("escrow_uid") == escrow_uid:
+                return reservation
         return None
 
-    def attach_lease_allocation(self, **kwargs):
-        allocation_id = kwargs.get("allocation_id")
-        if allocation_id:
-            allocation = self.allocations.get(allocation_id)
+    def attach_lease_reservation(self, **kwargs):
+        capacity_reservation_id = kwargs.get("capacity_reservation_id")
+        if capacity_reservation_id:
+            reservation = self.reservations.get(capacity_reservation_id)
         else:
-            allocation = self.get_allocation_by_escrow(kwargs.get("escrow_uid"))
-        if allocation is None:
+            reservation = self.get_reservation_by_escrow(kwargs.get("escrow_uid"))
+        if reservation is None:
             return None
-        allocation.update(
+        reservation.update(
             {key: value for key, value in kwargs.items() if value is not None}
         )
-        allocation["state"] = "leased"
-        return allocation
+        reservation["state"] = "leased"
+        return reservation
 
-    def update_allocation_fields(self, allocation_id, **kwargs):
-        allocation = self.allocations.get(allocation_id)
-        if allocation is None:
+    def update_reservation_fields(self, capacity_reservation_id, **kwargs):
+        reservation = self.reservations.get(capacity_reservation_id)
+        if reservation is None:
             return None
-        allocation.update(
+        reservation.update(
             {key: value for key, value in kwargs.items() if value is not None}
         )
-        return allocation
+        return reservation
 
 
 def test_compute_lease_metadata_is_executor_neutral():
@@ -90,7 +90,7 @@ def test_register_executor_lease_attaches_metadata():
 
     lease = service.register_lease(
         ExecutorLeaseRegistration(
-            allocation_id="alloc-1",
+            capacity_reservation_id="alloc-1",
             escrow_uid="0x1",
             executor_kind="bare_metal",
             executor_target="machine-1",
@@ -119,7 +119,7 @@ def test_register_executor_lease_can_attach_by_escrow():
         )
     )
 
-    assert lease["allocation_id"] == "alloc-1"
+    assert lease["capacity_reservation_id"] == "alloc-1"
     assert lease["executor_kind"] == "bare_metal"
 
 
@@ -159,7 +159,7 @@ def test_update_executor_lease_preserves_not_found_and_kind_filter():
 def test_list_and_get_leases_filter_by_executor_kind():
     service = ExecutorLeaseService(FakeSiteResources(), executor_kind="vm")
 
-    assert [lease["allocation_id"] for lease in service.list_leases()] == ["alloc-2"]
+    assert [lease["capacity_reservation_id"] for lease in service.list_leases()] == ["alloc-2"]
     assert service.get_lease("alloc-2")["executor_kind"] == "vm"
 
     with pytest.raises(LeaseNotFoundError):

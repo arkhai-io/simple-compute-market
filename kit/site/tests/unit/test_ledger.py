@@ -26,7 +26,7 @@ def _make_ledger(**kwargs) -> CapacityLedgerService:
     )
     Base.metadata.create_all(bind=engine)
     # This suite exercises VM-flavored claim shapes ("gpu_count"-only
-    # allocations, "compute-kvm1-001"-style resource ids), so it opts into
+    # reservations, "compute-kvm1-001"-style resource ids), so it opts into
     # the "gpu_count" unit-claim alias explicitly the same way the VM
     # composition root does — the ledger's own default is domain-neutral
     # ("units",).
@@ -126,7 +126,7 @@ def test_dual_mode_host_snapshot_exposes_vm_and_bare_metal_when_free(
     )["resource_id"] == "bare-metal-host-1"
 
 
-def test_vm_slice_allocation_blocks_bare_metal_on_same_physical_host(
+def test_vm_slice_reservation_blocks_bare_metal_on_same_physical_host(
     ledger: CapacityLedgerService,
 ):
     _register_dual_mode_host(ledger)
@@ -156,7 +156,7 @@ def test_vm_slice_allocation_blocks_bare_metal_on_same_physical_host(
     assert second_vm["resource_id"] == "compute-host-1"
 
 
-def test_bare_metal_allocation_blocks_vm_slices_on_same_physical_host(
+def test_bare_metal_reservation_blocks_vm_slices_on_same_physical_host(
     ledger: CapacityLedgerService,
 ):
     _register_dual_mode_host(ledger)
@@ -177,7 +177,7 @@ def test_bare_metal_allocation_blocks_vm_slices_on_same_physical_host(
     assert ledger.probe(claim={"gpu_count": 1, "vm_host": "kvm1"}) is None
 
 
-def test_releasing_cross_mode_allocation_keeps_sibling_capacity_blocked(
+def test_releasing_cross_mode_reservation_keeps_sibling_capacity_blocked(
     ledger: CapacityLedgerService,
 ):
     _register_dual_mode_host(ledger)
@@ -189,7 +189,7 @@ def test_releasing_cross_mode_allocation_keeps_sibling_capacity_blocked(
         deal_ref={"escrow_uid": "0xbm"},
     )
 
-    ledger.update_allocation_state(bare_metal["allocation_id"], state="releasing")
+    ledger.update_reservation_state(bare_metal["capacity_reservation_id"], state="releasing")
 
     by_id = {row["resource_id"]: row for row in ledger.snapshot()}
     assert by_id["compute-host-1"]["available_units"] == 0
@@ -205,7 +205,7 @@ def test_release_restores_cross_mode_sibling_capacity(
         deal_ref={"escrow_uid": "0xvm"},
     )
 
-    ledger.release(allocation_id=vm["allocation_id"])
+    ledger.release(capacity_reservation_id=vm["capacity_reservation_id"])
 
     by_id = {row["resource_id"]: row for row in ledger.snapshot()}
     assert by_id["compute-host-1"]["available_units"] == 8
@@ -242,7 +242,7 @@ def test_generic_ledger_has_no_attribute_requirement():
     # Open-ended commit: leased with no lease tail, never watchdog-due.
     committed = generic.commit(
         resource_id=reserved["resource_id"],
-        allocation_id=reserved["allocation_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
     )
     assert committed["state"] == "leased"
     assert committed["lease_end_utc"] is None
@@ -272,7 +272,7 @@ def test_reserve_decrements_and_releases_restore(seeded: CapacityLedgerService):
     # Idempotent: duplicate release returns the authoritative terminal row
     # without advancing the anonymous capacity event version.
     _, version_before = seeded.events_after(0)
-    duplicate = seeded.release(allocation_id=reserved["allocation_id"])
+    duplicate = seeded.release(capacity_reservation_id=reserved["capacity_reservation_id"])
     _, version_after = seeded.events_after(0)
     assert duplicate == released
     assert version_after == version_before
@@ -311,7 +311,7 @@ def test_commit_marks_leased_and_sets_window(seeded: CapacityLedgerService):
     reserved = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xa"})
     committed = seeded.commit(
         resource_id=reserved["resource_id"],
-        allocation_id=reserved["allocation_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         lease_start_utc="2099-01-01T00:00:00Z",
         lease_end_utc="2099-01-01T01:00:00Z",
         idempotency_ref="0xa",
@@ -320,12 +320,12 @@ def test_commit_marks_leased_and_sets_window(seeded: CapacityLedgerService):
     assert committed["lease_start_utc"] == "2099-01-01T00:00:00+00:00"
     assert committed["lease_end_utc"] == "2099-01-01T01:00:00Z"
 
-    # Committing a released allocation conflicts.
-    seeded.release(allocation_id=reserved["allocation_id"])
+    # Committing a released reservation conflicts.
+    seeded.release(capacity_reservation_id=reserved["capacity_reservation_id"])
     with pytest.raises(CapacityConflictError):
         seeded.commit(
             resource_id=reserved["resource_id"],
-            allocation_id=reserved["allocation_id"],
+            capacity_reservation_id=reserved["capacity_reservation_id"],
             lease_end_utc="2099-01-01 00:00",
         )
 
@@ -338,16 +338,16 @@ def test_ttl_hold_expires_without_commit(seeded: CapacityLedgerService):
     assert seeded.reserve(claim={"gpu_count": 1}, deal_ref={}) is None
 
     # Backdate the hold past its TTL; the next read lapses it.
-    from market_site.db import SiteAllocation
+    from market_site.db import CapacityReservation
     with seeded._session_factory() as db:
-        row = db.get(SiteAllocation, reserved["allocation_id"])
+        row = db.get(CapacityReservation, reserved["capacity_reservation_id"])
         row.hold_expires_at = (
             datetime.now(timezone.utc) - timedelta(seconds=1)
         ).isoformat()
         db.commit()
 
     assert seeded.snapshot()[0]["available_units"] == 8
-    lapsed = seeded.get_allocation(reserved["allocation_id"])
+    lapsed = seeded.get_reservation(reserved["capacity_reservation_id"])
     assert lapsed["state"] == "released"
     assert lapsed["failure_reason"] == "hold_expired"
 
@@ -362,9 +362,9 @@ def test_expire_due_holds_reclaims_without_another_ledger_call(
     )
     assert reserved["hold_expires_at"] is not None
 
-    from market_site.db import SiteAllocation
+    from market_site.db import CapacityReservation
     with seeded._session_factory() as db:
-        row = db.get(SiteAllocation, reserved["allocation_id"])
+        row = db.get(CapacityReservation, reserved["capacity_reservation_id"])
         row.hold_expires_at = (
             datetime.now(timezone.utc) - timedelta(seconds=1)
         ).isoformat()
@@ -374,7 +374,7 @@ def test_expire_due_holds_reclaims_without_another_ledger_call(
     # sweep entry point a periodic watchdog would call.
     seeded.expire_due_holds()
 
-    lapsed = seeded.get_allocation(reserved["allocation_id"])
+    lapsed = seeded.get_reservation(reserved["capacity_reservation_id"])
     assert lapsed["state"] == "released"
     assert lapsed["failure_reason"] == "hold_expired"
 
@@ -385,10 +385,10 @@ def test_committed_hold_survives_ttl(seeded: CapacityLedgerService):
     )
     seeded.commit(
         resource_id=reserved["resource_id"],
-        allocation_id=reserved["allocation_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         lease_end_utc="2099-01-01 00:00",
     )
-    committed = seeded.get_allocation(reserved["allocation_id"])
+    committed = seeded.get_reservation(reserved["capacity_reservation_id"])
     assert committed["hold_expires_at"] is None
     assert seeded.snapshot()[0]["available_units"] == 6
 
@@ -397,17 +397,17 @@ def test_truncate_lease_rewrites_expiry(seeded: CapacityLedgerService):
     reserved = seeded.reserve(claim={}, deal_ref={"escrow_uid": "0xt"})
     seeded.commit(
         resource_id=reserved["resource_id"],
-        allocation_id=reserved["allocation_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         lease_end_utc="2099-01-01 00:00",
     )
     truncated = seeded.truncate_lease(
-        allocation_id=reserved["allocation_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         lease_end_utc="2026-01-01 00:00",
     )
     assert truncated["lease_end_utc"] == "2026-01-01 00:00"
     assert truncated["state"] == "leased"
     assert seeded.truncate_lease(
-        allocation_id="missing", lease_end_utc="2026-01-01 00:00",
+        capacity_reservation_id="missing", lease_end_utc="2026-01-01 00:00",
     ) is None
 
 
@@ -415,10 +415,10 @@ def test_event_feed_is_versioned_and_anonymous(seeded: CapacityLedgerService):
     reserved = seeded.reserve(claim={}, deal_ref={"escrow_uid": "0xsecret"})
     seeded.commit(
         resource_id=reserved["resource_id"],
-        allocation_id=reserved["allocation_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         lease_end_utc="2099-01-01 00:00",
     )
-    seeded.release(allocation_id=reserved["allocation_id"])
+    seeded.release(capacity_reservation_id=reserved["capacity_reservation_id"])
 
     events, latest = seeded.events_after(0)
     kinds = [e["kind"] for e in events]
@@ -436,10 +436,10 @@ def test_event_feed_is_versioned_and_anonymous(seeded: CapacityLedgerService):
     assert latest_again == latest
 
 
-def test_attach_lease_records_tail_on_allocation(seeded: CapacityLedgerService):
+def test_attach_lease_records_tail_on_reservation(seeded: CapacityLedgerService):
     reserved = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xl"})
     attached = seeded.attach_lease(
-        allocation_id=reserved["allocation_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         vm_host="kvm1",
         vm_target="tenant-abcd",
         lease_end_utc="2099-01-01 00:00",
@@ -455,25 +455,25 @@ def test_attach_lease_records_tail_on_allocation(seeded: CapacityLedgerService):
     events, _ = seeded.events_after(0)
     assert [e["kind"] for e in events] == ["released", "reserved"]
 
-    # Unknown / no-longer-held allocations fall back to the legacy table.
-    assert seeded.attach_lease(allocation_id="missing") is None
-    seeded.release(allocation_id=reserved["allocation_id"])
-    assert seeded.attach_lease(allocation_id=reserved["allocation_id"]) is None
+    # Unknown / no-longer-held reservations fall back to the legacy table.
+    assert seeded.attach_lease(capacity_reservation_id="missing") is None
+    seeded.release(capacity_reservation_id=reserved["capacity_reservation_id"])
+    assert seeded.attach_lease(capacity_reservation_id=reserved["capacity_reservation_id"]) is None
 
 
 def test_list_lease_due_and_begin_releasing(seeded: CapacityLedgerService):
     reserved = seeded.reserve(claim={}, deal_ref={"escrow_uid": "0xdue"})
     seeded.commit(
         resource_id=reserved["resource_id"],
-        allocation_id=reserved["allocation_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         lease_start_utc="2020-01-01T00:00:00Z",
         lease_end_utc="2020-01-01 00:00",
     )
     due = seeded.list_lease_due(datetime.now(timezone.utc))
-    assert [a["allocation_id"] for a in due] == [reserved["allocation_id"]]
+    assert [a["capacity_reservation_id"] for a in due] == [reserved["capacity_reservation_id"]]
 
     releasing = seeded.begin_releasing(
-        reserved["allocation_id"], vm_remove_job_id="check-1",
+        reserved["capacity_reservation_id"], vm_remove_job_id="check-1",
     )
     assert releasing["state"] == "releasing"
     assert releasing["vm_remove_job_id"] == "check-1"
@@ -486,7 +486,7 @@ def test_list_lease_due_and_begin_releasing(seeded: CapacityLedgerService):
     future = seeded.reserve(claim={}, deal_ref={})
     seeded.commit(
         resource_id=future["resource_id"],
-        allocation_id=future["allocation_id"],
+        capacity_reservation_id=future["capacity_reservation_id"],
         lease_start_utc="2099-01-01T00:00:00Z",
         lease_end_utc="2099-01-01 00:00",
     )
@@ -497,12 +497,12 @@ def test_release_failed_still_holds_capacity(seeded: CapacityLedgerService):
     reserved = seeded.reserve(claim={"gpu_count": 2}, deal_ref={})
     seeded.commit(
         resource_id=reserved["resource_id"],
-        allocation_id=reserved["allocation_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         lease_start_utc="2020-01-01T00:00:00Z",
         lease_end_utc="2020-01-01 00:00",
     )
-    seeded.update_allocation_state(
-        reserved["allocation_id"],
+    seeded.update_reservation_state(
+        reserved["capacity_reservation_id"],
         state="release_failed",
         failure_reason="vm_remove_failed",
     )
@@ -534,7 +534,7 @@ def _shared_host_ledger() -> CapacityLedgerService:
     return ledger
 
 
-def test_exclusive_bare_metal_claim_fails_after_vm_slice_allocation():
+def test_exclusive_bare_metal_claim_fails_after_vm_slice_reservation():
     ledger = _shared_host_ledger()
     vm = ledger.reserve(
         claim={"allocation_mode": ALLOCATION_MODE_SHAREABLE, "gpu_count": 2},
@@ -554,7 +554,7 @@ def test_exclusive_bare_metal_claim_fails_after_vm_slice_allocation():
     assert by_id["host-1-bare-metal"]["state"] == "leased"
 
 
-def test_vm_slice_claim_fails_after_exclusive_bare_metal_allocation():
+def test_vm_slice_claim_fails_after_exclusive_bare_metal_reservation():
     ledger = _shared_host_ledger()
     bare_metal = ledger.reserve(
         claim={"allocation_mode": ALLOCATION_MODE_EXCLUSIVE},
@@ -595,7 +595,7 @@ def test_compatible_vm_slice_claims_still_share_units():
     assert by_id["host-1-bare-metal"]["state"] == "leased"
 
 
-def test_released_shared_host_allocation_restores_cross_mode_availability():
+def test_released_shared_host_reservation_restores_cross_mode_availability():
     ledger = _shared_host_ledger()
     vm = ledger.reserve(
         claim={"allocation_mode": ALLOCATION_MODE_SHAREABLE, "gpu_count": 8},
@@ -606,7 +606,7 @@ def test_released_shared_host_allocation_restores_cross_mode_availability():
         deal_ref={"escrow_uid": "0xbm-blocked"},
     ) is None
 
-    ledger.release(allocation_id=vm["allocation_id"])
+    ledger.release(capacity_reservation_id=vm["capacity_reservation_id"])
 
     bare_metal = ledger.reserve(
         claim={"allocation_mode": ALLOCATION_MODE_EXCLUSIVE},
@@ -615,14 +615,14 @@ def test_released_shared_host_allocation_restores_cross_mode_availability():
     assert bare_metal is not None
 
 
-def test_release_failed_shared_host_allocation_blocks_cross_mode_claims():
+def test_release_failed_shared_host_reservation_blocks_cross_mode_claims():
     ledger = _shared_host_ledger()
     vm = ledger.reserve(
         claim={"allocation_mode": ALLOCATION_MODE_SHAREABLE, "gpu_count": 2},
         deal_ref={"escrow_uid": "0xvm"},
     )
-    ledger.update_allocation_state(
-        vm["allocation_id"],
+    ledger.update_reservation_state(
+        vm["capacity_reservation_id"],
         state="release_failed",
         failure_reason="release_submit_failed",
     )
@@ -638,8 +638,8 @@ def test_release_failed_shared_host_allocation_blocks_cross_mode_claims():
 
 def test_release_can_mark_force_released(seeded: CapacityLedgerService):
     reserved = seeded.reserve(claim={}, deal_ref={})
-    seeded.begin_releasing(reserved["allocation_id"])
-    forced = seeded.release(allocation_id=reserved["allocation_id"], state="force_released")
+    seeded.begin_releasing(reserved["capacity_reservation_id"])
+    forced = seeded.release(capacity_reservation_id=reserved["capacity_reservation_id"], state="force_released")
     assert forced["state"] == "force_released"
     assert seeded.snapshot()[0]["available_units"] == 8
 
@@ -789,7 +789,7 @@ def test_release_restores_every_dimension(multidim: CapacityLedgerService):
         claim={"dimensions": {"gpu_count": 2, "vcpu_count": 8, "ram_gb": 64, "disk_gb": 500}},
         deal_ref={"escrow_uid": "0xrelease"},
     )
-    multidim.release(allocation_id=reserved["allocation_id"])
+    multidim.release(capacity_reservation_id=reserved["capacity_reservation_id"])
     row = multidim.snapshot()[0]
     assert row["available"] == {"gpu_count": 8, "vcpu_count": 64, "ram_gb": 512, "disk_gb": 4000}
 
@@ -801,7 +801,7 @@ def test_capacity_events_carry_signed_per_dimension_deltas(
         claim={"dimensions": {"gpu_count": 2, "ram_gb": 64}},
         deal_ref={"escrow_uid": "0xevt"},
     )
-    multidim.release(allocation_id=reserved["allocation_id"])
+    multidim.release(capacity_reservation_id=reserved["capacity_reservation_id"])
     events, _ = multidim.events_after(0)
     by_kind = {e["kind"]: e for e in events}
     assert by_kind["reserved"]["dimensions"] == {"gpu_count": -2, "ram_gb": -64}
@@ -916,15 +916,66 @@ def test_disabling_alone_is_reserved_even_with_unchanged_capacity(
     assert kinds == ["released", "reserved"]
 
 
-def test_scheduler_credit_back_covers_full_capacity_legacy_allocation():
+def test_scheduler_credit_back_covers_full_capacity_legacy_reservation():
     """Ledger-level regression test for the scheduler-level one in
-    test_physical_settlement_scheduler.py: reserving *all* of a
+    kit/fulfillment/tests/unit/test_scheduler.py: reserving *all* of a
     resource's capacity via a legacy gpu_count-only claim must still
     report a fully-populated dimensions map, since the scheduler's
     credit-back logic depends on it never being empty for a
-    pre-migration-style allocation."""
+    pre-migration-style reservation."""
     ledger = _make_ledger()
     ledger.register_resource(resource_id="r1", total_units=4)
     reserved = ledger.reserve(claim={"gpu_count": 4}, deal_ref={})
-    allocation = ledger.get_allocation(reserved["allocation_id"])
-    assert allocation["dimensions"] == {"gpu_count": 4}
+    reservation = ledger.get_reservation(reserved["capacity_reservation_id"])
+    assert reservation["dimensions"] == {"gpu_count": 4}
+
+
+# ---------------------------------------------------------------------------
+# pool_id
+# ---------------------------------------------------------------------------
+
+def test_registered_resource_carries_the_real_pool_id():
+    ledger = _make_ledger()
+    resource = ledger.register_resource(resource_id="r1", total_units=4, pool_id="pool-a")
+    assert resource["pool_id"] == "pool-a"
+    assert ledger.list_resources()[0]["pool_id"] == "pool-a"
+
+
+def test_pool_id_defaults_to_none_when_not_supplied():
+    """apicredits' resources carry no pool concept -- pool_id stays None,
+    not a silently-invented value."""
+    ledger = _make_ledger()
+    resource = ledger.register_resource(resource_id="r1", total_units=4)
+    assert resource["pool_id"] is None
+
+
+def test_re_registering_updates_pool_id():
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="pool-a")
+    resource = ledger.register_resource(resource_id="r1", total_units=4, pool_id="pool-b")
+    assert resource["pool_id"] == "pool-b"
+
+
+def test_attribute_view_prefers_real_pool_id_over_attributes_json():
+    """During the transition before the storefront's attributes-JSON-only
+    push is retired, a row could in principle carry both -- the real
+    column must win."""
+    ledger = _make_ledger()
+    ledger.register_resource(
+        resource_id="r1", total_units=4, pool_id="pool-a",
+        attributes={"pool_id": "pool-stale-json-value"},
+    )
+    match = ledger.probe(claim={"pool_id": "pool-a", "gpu_count": 1})
+    assert match is not None
+    assert ledger.probe(claim={"pool_id": "pool-stale-json-value", "gpu_count": 1}) is None
+
+
+def test_attribute_view_falls_back_to_resource_id_when_pool_id_unset():
+    """The degenerate single-resource pool: a claim addressing the
+    resource by its own id as a pool still matches when pool_id is None."""
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", total_units=4)
+    match = ledger.probe(claim={"pool_id": "r1", "gpu_count": 1})
+    assert match is not None
+
+

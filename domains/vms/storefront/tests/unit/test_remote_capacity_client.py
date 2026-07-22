@@ -76,18 +76,18 @@ async def test_remote_client_speaks_the_capacity_wire_contract(
     reserved = await client.reserve(
         claim={"gpu_count": 3}, deal_ref={"escrow_uid": "0xesc"},
     )
-    assert reserved["allocation_id"]
+    assert reserved["capacity_reservation_id"]
     assert reserved["available_gpu_count"] == 8
 
     await client.commit(
         resource_id=reserved["resource_id"],
-        allocation_id=reserved["allocation_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         lease_start_utc="2099-01-01T00:00:00Z",
         lease_end_utc="2099-01-01 01:00",
         idempotency_ref="0xesc",
     )
     truncated = await client.truncate_lease(
-        allocation_id=reserved["allocation_id"], lease_end_utc="2026-06-01 00:00",
+        capacity_reservation_id=reserved["capacity_reservation_id"], lease_end_utc="2026-06-01 00:00",
     )
     assert truncated["lease_end_utc"] == "2026-06-01 00:00"
 
@@ -107,12 +107,12 @@ async def test_remote_client_speaks_the_capacity_wire_contract(
 
 
 @pytest.mark.asyncio
-async def test_commit_without_allocation_id_is_an_error(
+async def test_commit_without_capacity_reservation_id_is_an_error(
     client: cc.RemoteCapacityClient,
 ):
-    with pytest.raises(ValueError, match="allocation_id"):
+    with pytest.raises(ValueError, match="capacity_reservation_id"):
         await client.commit(
-            resource_id="r", allocation_id=None, lease_end_utc="2099-01-01 00:00",
+            resource_id="r", capacity_reservation_id=None, lease_end_utc="2099-01-01 00:00",
         )
 
 
@@ -127,129 +127,13 @@ async def test_member_availability_view_reflects_consumption(
 
 
 @pytest.mark.asyncio
-async def test_list_allocations_filters(client: cc.RemoteCapacityClient):
+async def test_list_reservations_filters(client: cc.RemoteCapacityClient):
     reserved = await client.reserve(
         claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xq"},
     )
-    rows = await client.list_allocations(escrow_uid="0xq")
-    assert [a["allocation_id"] for a in rows] == [reserved["allocation_id"]]
-    assert await client.list_allocations(state="released") == []
-
-
-@pytest.mark.asyncio
-async def test_sync_site_resources_preserves_shared_host_attributes(site: FakeSite):
-    rows = [
-        {
-            "resource_id": "compute-kvm1-001",
-            "resource_type": "compute.gpu",
-            "resource_subtype": "h200",
-            "value": 8,
-            "state": "available",
-            "attributes": {
-                "vm_host": "kvm1",
-                "physical_host_id": "host-physical-1",
-                "allocation_mode": "shareable",
-                "lease_end_utc": "2099-01-01 00:00",
-            },
-        },
-        {
-            "resource_id": "info-1",
-            "resource_type": "information.note",
-            "value": None,
-            "state": "available",
-            "attributes": {"topic": "market-overview"},
-        },
-        {
-            "resource_id": "bare-metal-1",
-            "resource_type": "compute.gpu",
-            "resource_subtype": "h200",
-            "value": 1,
-            "state": "available",
-            "attributes": {
-                "machine_id": "bm-node-1",
-                "physical_host_id": "host-physical-1",
-                "allocation_mode": "exclusive",
-            },
-        },
-    ]
-
-    class FakeDb:
-        async def list_resources(self):
-            return rows
-
-    real_remote = cc.RemoteCapacityClient
-
-    def fake_remote(base_url, admin_key):
-        return real_remote(
-            base_url,
-            admin_key,
-            transport=site.transport(),
-        )
-
-    with patch("market_storefront.utils.config.settings", _settings()):
-        with patch.object(cc, "RemoteCapacityClient", fake_remote):
-            synced = await cc.sync_site_resources(lambda: FakeDb())
-
-    assert synced == 2
-    attrs = site.resources["compute-kvm1-001"]["attributes"]
-    assert attrs["vm_host"] == "kvm1"
-    assert attrs["physical_host_id"] == "host-physical-1"
-    assert attrs["allocation_mode"] == "shareable"
-    assert "lease_end_utc" not in attrs
-    bare_metal_attrs = site.resources["bare-metal-1"]["attributes"]
-    assert bare_metal_attrs["machine_id"] == "bm-node-1"
-    assert bare_metal_attrs["physical_host_id"] == "host-physical-1"
-    assert bare_metal_attrs["allocation_mode"] == "exclusive"
-    assert "info-1" not in site.resources
-
-
-@pytest.mark.asyncio
-async def test_sync_site_resources_forwards_multidimensional_capacity(site: FakeSite):
-    """vcpu_count/ram_gb/disk_gb already sit in the local row's attributes.
-    Sync must forward them into the ledger's capacity map, not just gpu_count."""
-    rows = [
-        {
-            "resource_id": "compute-kvm1-002",
-            "resource_type": "compute.gpu",
-            "resource_subtype": "h200",
-            "value": 8,
-            "state": "available",
-            "attributes": {
-                "vm_host": "kvm2",
-                "vcpu_count": 64,
-                "ram_gb": 512,
-                "disk_gb": 4000,
-            },
-        },
-        {
-            # A listing without a declared shape (older listing) still
-            # syncs -- gpu_count only, nothing crashes on missing fields.
-            "resource_id": "compute-kvm1-003",
-            "resource_type": "compute.gpu",
-            "value": 4,
-            "state": "available",
-            "attributes": {"vm_host": "kvm3"},
-        },
-    ]
-
-    class FakeDb:
-        async def list_resources(self):
-            return rows
-
-    real_remote = cc.RemoteCapacityClient
-
-    def fake_remote(base_url, admin_key):
-        return real_remote(base_url, admin_key, transport=site.transport())
-
-    with patch("market_storefront.utils.config.settings", _settings()):
-        with patch.object(cc, "RemoteCapacityClient", fake_remote):
-            synced = await cc.sync_site_resources(lambda: FakeDb())
-
-    assert synced == 2
-    assert site.resources["compute-kvm1-002"]["capacity"] == {
-        "gpu_count": 8, "vcpu_count": 64, "ram_gb": 512, "disk_gb": 4000,
-    }
-    assert site.resources["compute-kvm1-003"]["capacity"] == {"gpu_count": 4}
+    rows = await client.list_reservations(escrow_uid="0xq")
+    assert [a["capacity_reservation_id"] for a in rows] == [reserved["capacity_reservation_id"]]
+    assert await client.list_reservations(state="released") == []
 
 
 def test_build_always_aggregates_site_authorities():
@@ -262,7 +146,7 @@ def test_build_always_aggregates_site_authorities():
 
 
 def test_build_is_a_config_keyed_singleton():
-    """The aggregator (and its allocation→site routing cache) survives
+    """The aggregator (and its reservation→site routing cache) survives
     across build calls until the site configuration changes."""
     with patch("market_storefront.utils.config.settings", _settings()):
         first = cc.build_capacity_client(lambda: None)

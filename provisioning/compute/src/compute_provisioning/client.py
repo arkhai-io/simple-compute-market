@@ -40,10 +40,10 @@ class ComputeProvisioningClientProtocol(Protocol):
     async def cancel_job(self, job_id: str) -> ProvisioningJob: ...
     async def get_job_credentials(self, job_id: str) -> list[CredentialEnvelope]: ...
     async def register_lease(self, registration: LeaseRegistration) -> LeaseView: ...
-    async def get_lease(self, allocation_id: str) -> LeaseView: ...
-    async def terminate_lease(self, allocation_id: str, request: LeaseTermination) -> LeaseView: ...
-    async def retry_lease_release(self, allocation_id: str, request: LeaseRetryRelease) -> LeaseView: ...
-    async def force_release_lease(self, allocation_id: str, request: LeaseForceRelease) -> LeaseView: ...
+    async def get_lease(self, capacity_reservation_id: str) -> LeaseView: ...
+    async def terminate_lease(self, capacity_reservation_id: str, request: LeaseTermination) -> LeaseView: ...
+    async def retry_lease_release(self, capacity_reservation_id: str, request: LeaseRetryRelease) -> LeaseView: ...
+    async def force_release_lease(self, capacity_reservation_id: str, request: LeaseForceRelease) -> LeaseView: ...
 
 
 class ComputeProvisioningClient:
@@ -122,14 +122,14 @@ class ComputeProvisioningClient:
     async def register_lease(self, registration: LeaseRegistration) -> LeaseView:
         return LeaseView.model_validate(await self._request("POST", "/api/v1/contract/leases", registration))
 
-    async def get_lease(self, allocation_id: str) -> LeaseView:
-        return LeaseView.model_validate(await self._request("GET", f"/api/v1/contract/leases/{allocation_id}"))
+    async def get_lease(self, capacity_reservation_id: str) -> LeaseView:
+        return LeaseView.model_validate(await self._request("GET", f"/api/v1/contract/leases/{capacity_reservation_id}"))
 
-    async def terminate_lease(self, allocation_id: str, request: LeaseTermination) -> LeaseView:
-        return LeaseView.model_validate(await self._request("POST", f"/api/v1/contract/leases/{allocation_id}/terminate", request))
+    async def terminate_lease(self, capacity_reservation_id: str, request: LeaseTermination) -> LeaseView:
+        return LeaseView.model_validate(await self._request("POST", f"/api/v1/contract/leases/{capacity_reservation_id}/terminate", request))
 
-    async def retry_lease_release(self, allocation_id: str, request: LeaseRetryRelease) -> LeaseView:
-        return LeaseView.model_validate(await self._request("POST", f"/api/v1/contract/leases/{allocation_id}/retry-release", request))
+    async def retry_lease_release(self, capacity_reservation_id: str, request: LeaseRetryRelease) -> LeaseView:
+        return LeaseView.model_validate(await self._request("POST", f"/api/v1/contract/leases/{capacity_reservation_id}/retry-release", request))
 
-    async def force_release_lease(self, allocation_id: str, request: LeaseForceRelease) -> LeaseView:
-        return LeaseView.model_validate(await self._request("POST", f"/api/v1/contract/leases/{allocation_id}/force-release", request))
+    async def force_release_lease(self, capacity_reservation_id: str, request: LeaseForceRelease) -> LeaseView:
+        return LeaseView.model_validate(await self._request("POST", f"/api/v1/contract/leases/{capacity_reservation_id}/force-release", request))

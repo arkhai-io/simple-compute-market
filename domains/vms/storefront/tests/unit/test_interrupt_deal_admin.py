@@ -48,10 +48,10 @@ class _FakeCapacity:
     def __init__(self) -> None:
         self.truncated: tuple[str, str] | None = None
 
-    async def truncate_lease(self, *, allocation_id: str, lease_end_utc: str):
-        self.truncated = (allocation_id, lease_end_utc)
+    async def truncate_lease(self, *, capacity_reservation_id: str, lease_end_utc: str):
+        self.truncated = (capacity_reservation_id, lease_end_utc)
         return {
-            "allocation_id": allocation_id,
+            "capacity_reservation_id": capacity_reservation_id,
             "state": "leased",
             "lease_end_utc": lease_end_utc,
         }
@@ -60,13 +60,13 @@ class _FakeCapacity:
 def _controller(db: _FakeDb, capacity: _FakeCapacity) -> AdminController:
     ctl = AdminController(db=db, _key=None)
     ctl._capacity = lambda: capacity  # type: ignore[method-assign]
-    ctl._find_live_allocation_for_escrow = _find_allocation  # type: ignore[method-assign]
+    ctl._find_live_reservation_for_escrow = _find_reservation  # type: ignore[method-assign]
     return ctl
 
 
-async def _find_allocation(_escrow_uid: str):
+async def _find_reservation(_escrow_uid: str):
     return {
-        "allocation_id": "alloc-1",
+        "capacity_reservation_id": "alloc-1",
         "state": "leased",
         "resource_id": "machine-1",
     }
@@ -88,7 +88,7 @@ async def test_interrupt_deal_dry_run_does_not_truncate() -> None:
 
     assert out.status == "dry_run"
     assert out.lease_truncated is False
-    assert out.allocation_id == "alloc-1"
+    assert out.capacity_reservation_id == "alloc-1"
     assert out.interrupted_at_utc == "2026-06-24 10:11"
     assert capacity.truncated is None
     assert db.reason is None

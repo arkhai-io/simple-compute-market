@@ -56,15 +56,15 @@ def test_register_bare_metal_lease_attaches_executor_metadata(
     )
     assert reserved is not None
     ledger.commit(
-        resource_id=reserved["resource_id"],
-        allocation_id=reserved["allocation_id"],
+        resource_id="bare-metal-1",
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         lease_end_utc="2099-01-01 00:00",
     )
     svc = BareMetalLeaseService(LedgerSiteAuthority(ledger))
 
     lease = svc.register_lease(
         BareMetalLeaseCreate(
-            allocation_id=reserved["allocation_id"],
+            capacity_reservation_id=reserved["capacity_reservation_id"],
             escrow_uid="0xbm",
             machine_id="bm-node-1",
             physical_host_id="host-physical-1",
@@ -87,7 +87,7 @@ def test_register_bare_metal_lease_attaches_executor_metadata(
     assert lease["create_job_id"] == "grant-1"
 
 
-def test_register_bare_metal_lease_by_escrow_when_allocation_id_omitted(
+def test_register_bare_metal_lease_by_escrow_when_capacity_reservation_id_omitted(
     ledger: CapacityLedgerService,
 ):
     reserved = ledger.reserve(
@@ -95,15 +95,15 @@ def test_register_bare_metal_lease_by_escrow_when_allocation_id_omitted(
         deal_ref={"escrow_uid": "0xbm"},
     )
     ledger.commit(
-        resource_id=reserved["resource_id"],
-        allocation_id=reserved["allocation_id"],
+        resource_id="bare-metal-1",
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         lease_end_utc="2099-01-01 00:00",
     )
     svc = BareMetalLeaseService(LedgerSiteAuthority(ledger))
 
     lease = svc.register_lease(
         BareMetalLeaseCreate(
-            allocation_id=None,
+            capacity_reservation_id=None,
             escrow_uid="0xbm",
             machine_id="bm-node-1",
             physical_host_id="host-physical-1",
@@ -111,12 +111,12 @@ def test_register_bare_metal_lease_by_escrow_when_allocation_id_omitted(
         ),
     )
 
-    assert lease["allocation_id"] == reserved["allocation_id"]
+    assert lease["capacity_reservation_id"] == reserved["capacity_reservation_id"]
     assert lease["executor_kind"] == "bare_metal"
     assert lease["executor_target"] == "bm-node-1"
 
 
-def test_register_bare_metal_lease_missing_allocation_raises(
+def test_register_bare_metal_lease_missing_reservation_raises(
     ledger: CapacityLedgerService,
 ):
     svc = BareMetalLeaseService(LedgerSiteAuthority(ledger))
@@ -124,7 +124,7 @@ def test_register_bare_metal_lease_missing_allocation_raises(
     with pytest.raises(LeaseNotFoundError):
         svc.register_lease(
             BareMetalLeaseCreate(
-                allocation_id="missing",
+                capacity_reservation_id="missing",
                 escrow_uid="0xmissing",
                 machine_id="bm-node-1",
                 physical_host_id="host-physical-1",

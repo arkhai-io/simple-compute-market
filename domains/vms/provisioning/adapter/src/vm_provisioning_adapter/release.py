@@ -1,4 +1,4 @@
-"""VM release adapter for leased site allocations."""
+"""VM release adapter for leased site reservations."""
 
 from __future__ import annotations
 
@@ -22,10 +22,10 @@ class VmReleaseExecutor:
         self._job_svc = job_service
         self._job_queue_provider = job_queue_provider
 
-    async def submit_release(self, allocation: dict[str, Any]) -> str | None:
+    async def submit_release(self, reservation: dict[str, Any]) -> str | None:
         return await self._submit_vm_remove_job(
-            vm_host=allocation.get("vm_host"),
-            vm_target=allocation.get("executor_target") or allocation.get("vm_target"),
+            vm_host=reservation.get("vm_host"),
+            vm_target=reservation.get("executor_target") or reservation.get("vm_target"),
         )
 
     async def _submit_vm_remove_job(self, *, vm_host, vm_target) -> str | None:

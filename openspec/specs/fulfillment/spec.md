@@ -94,6 +94,10 @@ A candidate is eligible only when it is enabled, satisfies pool and resource con
 
 A dimension absent from a candidate's availability is treated as zero. Passing GPU fit does not compensate for insufficient RAM, CPU, disk, or another requested dimension.
 
+This check is `market_site`'s exported `resource_satisfies_requirement`, not a separate implementation in the scheduler: reservation-time admission and scheduling-time eligibility evaluate the same predicate so they cannot independently drift on what "fits" means.
+
+A scheduling request MAY narrow the dimensions it asks for relative to what the capacity reservation holds, but MUST NOT exceed the reservation in any dimension the reservation itself declares. A dimension the reservation does not declare is not governed by it and is not subject to this check; whether a candidate has room for it is an ordinary eligibility question.
+
 #### Scenario: Secondary dimension does not fit
 
 - **WHEN** a candidate has sufficient GPU but insufficient RAM
@@ -103,6 +107,11 @@ A dimension absent from a candidate's availability is treated as zero. Passing G
 
 - **WHEN** a request declares only GPU units
 - **THEN** candidates are evaluated using that dimension without requiring unrelated dimensions
+
+#### Scenario: Scheduling request exceeds the reservation
+
+- **WHEN** a schedule request asks for more of a dimension than the capacity reservation holds for that same dimension
+- **THEN** scheduling rejects the request rather than silently admitting a shape reservation-time admission never verified fits anywhere
 
 ## Scheduling and assignment
 
@@ -211,3 +220,4 @@ The aggregate kit build/test flow MUST build prerequisite site and resource-pool
 - Envelope constraints and round trips: `kit/fulfillment/tests/unit/test_envelopes.py`.
 - Dependency boundaries: `kit/fulfillment/tests/unit/test_import_boundaries.py` and repository-level architecture tests as introduced.
 - Provider contracts and registry behavior: `kit/fulfillment/tests/unit/test_provider.py` and compute provisioning service tests.
+- Shared feasibility predicate: `kit/site/tests/unit/test_resource_satisfies_requirement.py`; scheduling-time exceeds-reservation rejection: `kit/fulfillment/tests/unit/test_scheduler.py`.

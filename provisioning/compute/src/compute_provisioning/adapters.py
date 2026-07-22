@@ -14,7 +14,7 @@ class UnsupportedExecutorActionError(LookupError):
 
 
 class ExecutorMismatchError(ValueError):
-    """The requested executor does not own the committed allocation."""
+    """The requested executor does not own the committed reservation."""
 
 
 class ExecutorAdapter(Protocol):

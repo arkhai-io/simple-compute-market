@@ -1,8 +1,15 @@
-"""Tests for deterministic settlement-resource scheduling.
+"""Unit tests for deterministic Capacity Settlement Assignment scheduling.
 
-The fixtures exercise both generic multidimensional requirements and the VM
-composition's ``gpu_count`` unit alias. The site ledger remains domain-neutral
-by default, so the fixture opts into that alias explicitly.
+Moved and adapted from ``provisioning/compute/service/tests/unit/services/
+test_physical_settlement_scheduler.py`` (tombstoned at its old location).
+Adaptations, both required by the fulfillment contract migration:
+
+- ``allocation_id``/``agreement_id`` request fields become
+  ``capacity_reservation_id`` only; the old agreement-mismatch test is
+  dropped (the scheduler no longer receives an agreement identity to
+  mismatch against -- see scheduler.py's module docstring).
+- The scheduler fixture now passes ``default_resource_kind="compute.gpu"``
+  explicitly, since ``_requirement`` no longer silently defaults it.
 """
 
 from __future__ import annotations
@@ -78,7 +85,7 @@ def _reserve(ledger, agreement="agreement-1", **deal):
     ref = {"agreement_id": agreement, "market": "vms", **deal}
     result = ledger.reserve(claim={"gpu_count": 1}, deal_ref=ref)
     assert result is not None
-    return result["allocation_id"]
+    return result["capacity_reservation_id"]
 
 
 def _request(capacity_reservation_id: str, **kwargs):
@@ -105,7 +112,7 @@ def test_expired_reservation_is_rejected(services):
         ttl_seconds=-1,
     )
     with pytest.raises((CapacityReservationExpiredError, SettlementRequestMismatchError)):
-        scheduler.select_resource(_request(result["allocation_id"]))
+        scheduler.select_resource(_request(result["capacity_reservation_id"]))
 
 
 def test_retry_is_idempotent_and_does_not_rerun_policy(services):
@@ -204,7 +211,7 @@ def _reserve_with_dimensions(ledger, dimensions: dict, agreement="agreement-1", 
     ref = {"agreement_id": agreement, "market": "vms", "requirements": {"dimensions": dimensions}, **deal}
     result = ledger.reserve(claim={"dimensions": dimensions}, deal_ref=ref)
     assert result is not None
-    return result["allocation_id"]
+    return result["capacity_reservation_id"]
 
 
 def test_scheduler_excludes_candidate_that_fits_gpu_but_not_memory(services):
@@ -262,11 +269,11 @@ def test_scheduler_still_schedules_legacy_gpu_only_requests(services):
     assert resource.settlement_resource_id == "r1"
 
 
-def test_scheduler_credit_back_covers_full_capacity_legacy_allocation(services):
-    """A legacy allocation reserving *all* of a resource's capacity must
-    still be schedulable: the eligibility scan credits the allocation's
+def test_scheduler_credit_back_covers_full_capacity_legacy_reservation(services):
+    """A legacy reservation reserving *all* of a resource's capacity must
+    still be schedulable: the eligibility scan credits the reservation's
     own held quantity back before checking fit, and that credit-back must
-    not silently become a no-op for an allocation whose claim never
+    not silently become a no-op for an reservation whose claim never
     mentioned "dimensions", but locking the invariant in with a test at
     the layer that actually depends on it)."""
     pools, ledger, scheduler = services
@@ -276,5 +283,81 @@ def test_scheduler_credit_back_covers_full_capacity_legacy_allocation(services):
         "agreement_id": "agreement-1", "market": "vms",
     })
     assert result is not None
-    resource = scheduler.select_resource(_request(result["allocation_id"]))
+    resource = scheduler.select_resource(_request(result["capacity_reservation_id"]))
+    assert resource.settlement_resource_id == "r1"
+
+
+# ----------------------------------------------------------------------
+# exceeds-reservation rejection
+# ----------------------------------------------------------------------
+
+def _reserve_multi(ledger, dimensions: dict, agreement="agreement-1"):
+    """Reserve specific multidimensional capacity without a deal_ref
+    requirements mirror, so _require_valid_reservation's separate
+    requirements-match check (an exact-equality check against whatever
+    the reservation declares) doesn't itself reject a deliberately
+    *different*, narrower schedule-time request before the exceeds-check
+    below ever runs."""
+    result = ledger.reserve(
+        claim={"dimensions": dimensions},
+        deal_ref={"agreement_id": agreement, "market": "vms"},
+    )
+    assert result is not None
+    return result["capacity_reservation_id"]
+
+
+def test_schedule_request_narrower_than_reservation_is_permitted(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource_with_capacity(
+        ledger, "r1", "pool-a", capacity={"gpu_count": 8, "ram_gb": 256},
+    )
+    capacity_reservation_id = _reserve_multi(ledger, {"gpu_count": 4, "ram_gb": 128})
+    resource = scheduler.select_resource(_request(
+        capacity_reservation_id,
+        requirements={"dimensions": {"gpu_count": 2, "ram_gb": 64}},
+    ))
+    assert resource.settlement_resource_id == "r1"
+
+
+def test_schedule_request_equal_to_reservation_is_permitted(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource_with_capacity(ledger, "r1", "pool-a", capacity={"gpu_count": 8})
+    capacity_reservation_id = _reserve_multi(ledger, {"gpu_count": 4})
+    resource = scheduler.select_resource(_request(
+        capacity_reservation_id, requirements={"dimensions": {"gpu_count": 4}},
+    ))
+    assert resource.settlement_resource_id == "r1"
+
+
+def test_schedule_request_exceeding_a_governed_dimension_is_rejected(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource_with_capacity(
+        ledger, "r1", "pool-a", capacity={"gpu_count": 8, "ram_gb": 256},
+    )
+    capacity_reservation_id = _reserve_multi(ledger, {"gpu_count": 4, "ram_gb": 128})
+    with pytest.raises(SettlementRequestMismatchError):
+        scheduler.select_resource(_request(
+            capacity_reservation_id,
+            requirements={"dimensions": {"gpu_count": 6, "ram_gb": 64}},
+        ))
+
+
+def test_schedule_request_adding_an_ungoverned_dimension_is_not_rejected(services):
+    """A dimension the reservation never mentions isn't governed by it, so
+    introducing one in the schedule request isn't an "exceeds" violation
+    -- it's a separate eligibility question, decided by whether some
+    resource actually has that dimension available."""
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource_with_capacity(
+        ledger, "r1", "pool-a", capacity={"gpu_count": 8, "vcpu_count": 32},
+    )
+    capacity_reservation_id = _reserve_multi(ledger, {"gpu_count": 4})
+    resource = scheduler.select_resource(_request(
+        capacity_reservation_id,
+        requirements={"dimensions": {"gpu_count": 2, "vcpu_count": 8}},
+    ))
     assert resource.settlement_resource_id == "r1"

@@ -987,10 +987,24 @@ reservation exists there is no cross-site fallback: an unknown reservation,
 pool, or resource identifier is rejected rather than reinterpreted or
 forwarded. Pool, resource, reservation, fulfillment, and provisioned-resource
 identifiers MUST be globally unique opaque identifiers. Planning may select
-UUIDv7 after reviewing repository conventions; ownership remains explicit via
-`site_id` rather than encoded into identifier strings. Requirements MUST also
-review whether any site-plus-pool composite identity is needed for routing or
-integrity.
+UUIDv7 after reviewing repository conventions; ownership is carried by
+explicit fields rather than encoded into identifier strings. Requirements MUST
+also review whether any site-plus-pool composite identity is needed for
+routing or integrity.
+
+**`site_id` is a storefront-only concern, not provisioning-service schema:**
+`site_id` is owned at the storefront aggregation boundary, bound to an
+operator-configured provisioning connection — never read from or trusted
+from a provisioning service's own report of itself, since a provisioning
+service is not a trustworthy authority over its own identity (a
+counterparty could otherwise spoof another site's identity). Provisioning
+services' own capacity persistence is already scoped by that service's
+database authority and does not duplicate the storefront-owned identity on
+every pool, resource, or reservation row. See
+`openspec/specs/storefront-publication/spec.md`, "Trusted provisioning-site
+identity," for the enforced requirement and scenario, and
+`docs/development/ARCHITECTURE.md`, "Site inventory, capacity accounting,
+and projections," for where this sits repository-wide.
 
 ### Shared package boundary and kit dependency layers
 
@@ -1212,6 +1226,71 @@ preserving ambiguous compatibility names indefinitely, including:
   operational;
 - corresponding API/client/schema/fixture/test/architecture changes.
 
+## Section 2 projection synchronization decisions (2026-07-22)
+
+The provisioning service owns the authoritative resource-pool and capacity
+projections consumed by the storefront. Section 2 establishes live pull-based
+synchronization; Section 3 adds durable storefront persistence and restart
+recovery for the accepted projection state. A later POOLS change may replace or
+augment polling with push invalidation or incremental synchronization.
+
+### Projection identity and drift detection
+
+Each canonical projection snapshot MUST carry a monotonically increasing
+`revision` and a deterministic whole-snapshot `digest`. The storefront compares
+this identity in constant time to decide whether a full resynchronization is
+required. A Merkle tree is intentionally deferred because Section 2 performs
+whole-snapshot replacement rather than branch-level reconciliation.
+
+Digest input MUST use canonical encoding: records and map keys are ordered by
+stable identifiers, numeric values are normalized, absent and null values have
+deliberate distinct meanings, and volatile fields are excluded unless they are
+part of the projection contract. The lightweight version response and full
+snapshot response MUST describe the same committed projection generation.
+
+The storefront MUST build and validate a replacement generation before
+atomically swapping it into active use. Requests MUST observe either the prior
+complete generation or the replacement complete generation, never a partially
+mutated cache. Failure to poll or refresh MUST NOT erase the last known
+projection; freshness and last-error state remain distinguishable from an
+authoritatively empty projection.
+
+Topology-sensitive reservation or scheduling failures MAY trigger one bounded,
+coalesced projection-identity check. A changed identity causes resynchronization.
+Arbitrary provider failures MUST NOT trigger refresh storms, and a state-changing
+authoritative request MUST NOT be retried automatically without an established
+idempotency contract.
+
+### Minimized Section 2 delivery boundary
+
+Section 2 MUST:
+
+- derive authoritative resource-pool and capacity projections from provisioning
+  inventory rather than storefront-authored synchronization;
+- expose canonical projection revision and digest identities;
+- load projections into the storefront at startup;
+- poll identities and atomically refresh changed projections;
+- perform bounded drift checks for topology-sensitive authoritative failures;
+- remove the storefront-to-provisioning host/resource push synchronization path.
+
+Section 3 owns durable storefront connection identity, persisted projection
+generations, restart restoration, and stale-state readiness behavior.
+
+### Distinct pool and capacity projections
+
+The storefront requires two related but non-equivalent views:
+
+- a resource-pool projection describing site-to-pool membership and the
+  underlying domain resources used by listing modes that publish concrete
+  resources such as hosts;
+- a capacity projection describing reservable multidimensional capacity used by
+  listing modes that publish fungible capacity rather than concrete resources.
+
+The remaining Section 2 design MUST preserve this distinction. A capacity-ledger
+entity MUST NOT replace the resource-pool projection, and a projected physical
+resource identifier MUST NOT be exposed on the storefront `CapacityReservation`
+unless it is durable and commercially meaningful.
+
 ## Design promotion record
 
 This record maps accepted durable decisions to current-state documentation. It is change history; the destination documents contain the normative present-tense contract.
@@ -1228,3 +1307,97 @@ This record maps accepted durable decisions to current-state documentation. It i
 | Cross-domain/durable generic payloads use immutable versioned envelopes | `openspec/specs/fulfillment/spec.md#versioned-envelopes` |
 | Internal dependencies are installed from `.dist`, not editable sibling paths | `openspec/specs/deployment-state/spec.md#internal-wheel-development-contract` |
 | Aggregate kit tests run every kit subproject suite | `openspec/specs/deployment-state/spec.md#internal-wheel-development-contract` |
+| Provisioning-private capacity buckets and current reservation debits back reservations without leaking placement identity | `openspec/specs/site-capacity/spec.md#requirement-capacity-accounting-is-private-to-the-site-authority` |
+| Physical inventory and vertically grouped capacity are independent pull projections | `openspec/specs/site-capacity/spec.md#requirement-physical-inventory-and-grouped-capacity-are-separate-projections` |
+| Storefront projection caches load at startup, poll independent identities, retain stale complete generations, and refresh reactively without automatic mutation retry | `openspec/specs/storefront-publication/spec.md#requirement-storefronts-cache-independent-site-projections` |
+| Repository-wide projection ownership and allocation boundary | `docs/development/ARCHITECTURE.md#site-inventory-and-capacity-projections` |
+
+### Section 2 projection naming and capacity aggregation decisions (2026-07-22)
+
+The storefront projection table mapping a storefront-owned `site_id` to the
+resource pools available through that site remains named `site_resource_pools`.
+The projection role is documented by the surrounding contract and ownership
+rules rather than encoded redundantly in the table name. Resource-pool records
+contain the physical inventory facts required by listing modes that publish
+individual resources.
+
+The capacity-oriented projection is named `site_capacity_buckets`. It is a
+storefront projection of currently advertisable multidimensional capacity and
+is distinct from both physical inventory and the provisioning service's
+internal reservation-accounting records.
+
+Resource-pool and capacity projections have fully independent revisions and
+digests. A change to one projection MUST NOT require advancing the identity of
+the other when its canonical content is unchanged. The storefront polls and
+refreshes each projection independently and atomically installs each complete
+replacement generation.
+
+The storefront-facing `CapacityReservation` MUST NOT expose the provisioning
+service's internal capacity-accounting identifier or an initially selected
+physical resource. Its durable public facts are the opaque
+`capacity_reservation_id`, lifecycle status, expiry, reserved dimensions, and
+other negotiation-relevant metadata. Physical placement remains non-durable
+until settlement assignment.
+
+The provisioning service uses one internal capacity bucket per host for the VM
+domain. The current model assumes each host belongs to one resource pool. A
+`CapacityReservationDebit` row associates a reservation with the internal
+capacity bucket and records the governed dimensions currently debited. Only the
+current debit mapping is required; Section 2 does not introduce append-only
+ledger semantics.
+
+The projected `site_capacity_buckets` view MAY vertically aggregate physical
+resources that currently have identical capacity and listing-relevant
+attributes. For example, sixteen equivalent hosts with eight available H100s
+may be represented as one projected bucket with `resource_count = 16`; after a
+reservation changes one host to seven available H100s, the projection becomes
+one bucket for fifteen hosts at eight and one bucket for one host at seven.
+
+Vertical aggregation MUST NOT discard the information required to create
+individual-resource listings. The resource-pool projection remains the source
+of per-resource identity and listing attributes. Each aggregated capacity
+bucket therefore carries a deterministic grouping key or equivalent matching
+criteria that can be joined to the matching members of `site_resource_pools`.
+The capacity projection does not need to expose internal capacity-bucket IDs.
+
+Section 3 owns durable persistence for both projection families and their
+independent accepted revisions. The Section 2 schema cutover uses the approved
+create-copy-validate-switch-retire strategy once the final internal capacity
+bucket and projection schemas are settled.
+
+### Final Section 2 capacity projection decisions (2026-07-22)
+
+Projected `site_capacity_buckets` rows use a deterministic digest-derived
+`capacity_group_key` computed from canonical grouping criteria and normalized
+capacity dimensions. The key identifies an equivalent capacity shape without
+embedding projection revision or physical-resource identity; projection
+revision and digest identify the snapshot in which the group appears.
+
+An aggregated capacity bucket contains only canonical grouping criteria,
+normalized capacity dimensions, and the count of matching physical resources.
+It MUST NOT duplicate the full list of matching physical-resource identifiers.
+Individual-resource listing modes enumerate matching inventory from
+`site_resource_pools` by applying the same canonical grouping vocabulary and
+normalization rules.
+
+The three capacity layers are distinct:
+
+1. authoritative physical inventory and pool membership;
+2. provisioning-private host-level `CapacityBucket` rows and current
+   `CapacityReservationDebit` mappings used for admission and rebinding;
+3. storefront `site_capacity_buckets` rows vertically aggregated for listing
+   and negotiation.
+
+Grouped projected capacity is never an allocation target. Reservation admission
+MUST select and debit an eligible internal host-level `CapacityBucket`.
+Scheduling MAY atomically rebind a reservation by validating a replacement
+bucket, replacing the current debit row, and assigning the settlement resource.
+The storefront remains unaware of both the initial and replacement internal
+bucket identities.
+
+The final Section 2 schema cutover uses create-copy-validate-switch-retire:
+create the replacement inventory projection, capacity-bucket, debit, and
+capacity-projection structures; derive authoritative rows; migrate active
+reservation debits; reconstruct and validate capacity invariants; switch the
+repositories; and retire `SiteResource` only after validation succeeds.
+

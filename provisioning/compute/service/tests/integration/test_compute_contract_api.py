@@ -18,7 +18,7 @@ from vm_provisioning_adapter.services.ansible_service import AnsibleError
 from vm_provisioning_operator.models import HostCreate
 
 
-def _leased_vm_allocation() -> dict:
+def _leased_vm_reservation() -> dict:
     ledger = _container_module.resolved_capacity_ledger_service
     ledger.register_resource(
         resource_id="contract-kvm1",
@@ -31,12 +31,12 @@ def _leased_vm_allocation() -> dict:
     )
     return ledger.commit(
         resource_id="contract-kvm1",
-        allocation_id=reserved["allocation_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         lease_end_utc=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
         idempotency_ref="escrow-contract",
     )
 
-def _leased_bare_metal_allocation() -> dict:
+def _leased_bare_metal_reservation() -> dict:
     ledger = _container_module.resolved_capacity_ledger_service
     ledger.register_resource(
         resource_id="contract-bare-metal-1",
@@ -57,12 +57,12 @@ def _leased_bare_metal_allocation() -> dict:
     )
     committed = ledger.commit(
         resource_id="contract-bare-metal-1",
-        allocation_id=reserved["allocation_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
         lease_end_utc=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
         idempotency_ref="escrow-bare-contract",
     )
-    return app.container.site_authority().update_allocation_fields(
-        allocation_id=committed["allocation_id"],
+    return app.container.site_authority().update_reservation_fields(
+        capacity_reservation_id=committed["capacity_reservation_id"],
         executor_kind="bare_metal",
         executor_target="bm-contract-1",
         executor_ref={"physical_host_id": "physical-contract-1"},
@@ -71,10 +71,10 @@ def _leased_bare_metal_allocation() -> dict:
 
 
 
-def _vm_action(allocation: dict, **overrides) -> ExecutorActionEnvelope:
+def _vm_action(reservation: dict, **overrides) -> ExecutorActionEnvelope:
     values = {
-        "allocation_id": allocation["allocation_id"],
-        "deal_ref": allocation["deal_ref"],
+        "capacity_reservation_id": reservation["capacity_reservation_id"],
+        "deal_ref": reservation["deal_ref"],
         "executor_kind": "vm",
         "action_kind": "create",
         "idempotency_key": "create-contract-vm",
@@ -94,18 +94,18 @@ async def test_contract_submission_is_idempotent_and_correlated(client_and_queue
         ssh_key_type="path",
         ssh_key_value="/tmp/test-key",
     ))
-    allocation = _leased_vm_allocation()
+    reservation = _leased_vm_reservation()
 
     async with ComputeProvisioningClient(
         "http://test", transport=ASGITransport(app=app)
     ) as client:
-        first = await client.submit_action(_vm_action(allocation))
-        duplicate = await client.submit_action(_vm_action(allocation))
+        first = await client.submit_action(_vm_action(reservation))
+        duplicate = await client.submit_action(_vm_action(reservation))
         job = await client.poll_until_complete(first.job_id, timeout=5, poll_interval=0.01)
         credentials = await client.get_job_credentials(first.job_id)
 
     assert duplicate.job_id == first.job_id
-    assert job.allocation_id == allocation["allocation_id"]
+    assert job.capacity_reservation_id == reservation["capacity_reservation_id"]
     assert job.deal_ref["escrow_uid"] == "escrow-contract"
     assert job.executor_kind == "vm"
     assert job.action_kind == "create"
@@ -123,10 +123,10 @@ async def test_bare_metal_uses_same_executor_neutral_client(client_and_queue):
         ssh_key_type="path",
         ssh_key_value="/tmp/test-key",
     ))
-    allocation = _leased_bare_metal_allocation()
+    reservation = _leased_bare_metal_reservation()
     action = ExecutorActionEnvelope(
-        allocation_id=allocation["allocation_id"],
-        deal_ref=allocation["deal_ref"],
+        capacity_reservation_id=reservation["capacity_reservation_id"],
+        deal_ref=reservation["deal_ref"],
         executor_kind="bare_metal",
         action_kind=NODE_GRANT_ACCESS_ACTION,
         idempotency_key="grant-contract-bare-metal",
@@ -141,7 +141,7 @@ async def test_bare_metal_uses_same_executor_neutral_client(client_and_queue):
             accepted.job_id, timeout=5, poll_interval=0.01
         )
 
-    assert job.allocation_id == allocation["allocation_id"]
+    assert job.capacity_reservation_id == reservation["capacity_reservation_id"]
     assert job.executor_kind == "bare_metal"
     assert job.action_kind == NODE_GRANT_ACCESS_ACTION
     assert job.result is not None
@@ -150,14 +150,14 @@ async def test_bare_metal_uses_same_executor_neutral_client(client_and_queue):
 
 @pytest.mark.asyncio
 async def test_executor_mismatch_fails_before_job_submission(client_and_queue):
-    allocation = _leased_vm_allocation()
+    reservation = _leased_vm_reservation()
     async with ComputeProvisioningClient(
         "http://test", transport=ASGITransport(app=app)
     ) as client:
         with pytest.raises(ComputeProvisioningError) as exc_info:
-            await client.submit_action(_vm_action(allocation, executor_kind="bare_metal"))
+            await client.submit_action(_vm_action(reservation, executor_kind="bare_metal"))
     assert exc_info.value.status_code == 409
-    assert "allocation executor is 'vm'" in str(exc_info.value)
+    assert "reservation executor is 'vm'" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -175,9 +175,9 @@ async def test_terminal_executor_error_uses_structured_contract_envelope(
     fake_ansible.wait_for_playbook.side_effect = AnsibleError(
         "executor exploded", "", ""
     )
-    allocation = _leased_vm_allocation()
+    reservation = _leased_vm_reservation()
     action = _vm_action(
-        allocation,
+        reservation,
         idempotency_key="terminal-error-contract",
         parameters={
             "vm_target": "tenant-error",
@@ -201,13 +201,13 @@ async def test_terminal_executor_error_uses_structured_contract_envelope(
 
 @pytest.mark.asyncio
 async def test_unsupported_contract_major_reports_supported_version(client_and_queue):
-    allocation = _leased_vm_allocation()
+    reservation = _leased_vm_reservation()
     transport = ASGITransport(app=app)
     async with __import__("httpx").AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
             "/api/v1/actions",
             json={
-                **_vm_action(allocation).model_dump(mode="json"),
+                **_vm_action(reservation).model_dump(mode="json"),
                 "contract_version": "2.0",
             },
         )

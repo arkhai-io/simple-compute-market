@@ -21,7 +21,7 @@ class FakeSite:
         self.resource_id = resource_id
         self.units = units
         self.broken = broken
-        self.allocations: dict[str, int] = {}
+        self.reservations: dict[str, int] = {}
         self.committed: list[str] = []
         self._seq = 0
 
@@ -31,7 +31,7 @@ class FakeSite:
 
     @property
     def available(self) -> int:
-        return self.units - sum(self.allocations.values())
+        return self.units - sum(self.reservations.values())
 
     async def snapshot(self) -> list[dict[str, Any]]:
         self._check()
@@ -70,34 +70,34 @@ class FakeSite:
         if self.available < requested:
             return None
         self._seq += 1
-        allocation_id = f"{self.resource_id}-a{self._seq}"
-        self.allocations[allocation_id] = requested
+        capacity_reservation_id = f"{self.resource_id}-a{self._seq}"
+        self.reservations[capacity_reservation_id] = requested
         return {
             "resource_id": self.resource_id,
-            "allocation_id": allocation_id,
+            "capacity_reservation_id": capacity_reservation_id,
             "allocated_gpu_count": requested,
         }
 
-    async def commit(self, *, resource_id, allocation_id=None,
+    async def commit(self, *, resource_id, capacity_reservation_id=None,
                      lease_start_utc=None, lease_duration_seconds=None,
                      lease_end_utc=None, idempotency_ref=None) -> None:
         self._check()
-        if allocation_id not in self.allocations:
-            raise LookupError(f"unknown allocation {allocation_id}")
-        self.committed.append(allocation_id)
+        if capacity_reservation_id not in self.reservations:
+            raise LookupError(f"unknown reservation {capacity_reservation_id}")
+        self.committed.append(capacity_reservation_id)
 
-    async def release(self, *, allocation_id=None, deal_ref=None, **extra):
+    async def release(self, *, capacity_reservation_id=None, deal_ref=None, **extra):
         self._check()
-        if allocation_id not in self.allocations:
+        if capacity_reservation_id not in self.reservations:
             return None
-        self.allocations.pop(allocation_id)
-        return {"allocation_id": allocation_id, "state": "released", **extra}
+        self.reservations.pop(capacity_reservation_id)
+        return {"capacity_reservation_id": capacity_reservation_id, "state": "released", **extra}
 
-    async def truncate_lease(self, *, allocation_id, lease_end_utc):
+    async def truncate_lease(self, *, capacity_reservation_id, lease_end_utc):
         self._check()
-        if allocation_id not in self.allocations:
+        if capacity_reservation_id not in self.reservations:
             return None
-        return {"allocation_id": allocation_id, "lease_end_utc": lease_end_utc}
+        return {"capacity_reservation_id": capacity_reservation_id, "lease_end_utc": lease_end_utc}
 
     def subscribe(self, subscriber):
         return lambda: None
@@ -173,42 +173,42 @@ async def test_most_available_spreads():
 async def test_writes_route_to_the_owning_site():
     client, a, b = _aggregate(placement=fill_first)
     reserved = await client.reserve(claim={"gpu_count": 2}, deal_ref={})
-    allocation_id = reserved["allocation_id"]
+    capacity_reservation_id = reserved["capacity_reservation_id"]
 
     await client.commit(
         resource_id=reserved["resource_id"],
-        allocation_id=allocation_id,
+        capacity_reservation_id=capacity_reservation_id,
         lease_start_utc="2099-01-01T00:00:00Z",
         lease_end_utc="2099-01-01 01:00",
     )
-    assert a.committed == [allocation_id]
+    assert a.committed == [capacity_reservation_id]
 
     truncated = await client.truncate_lease(
-        allocation_id=allocation_id, lease_end_utc="2026-01-01 00:00",
+        capacity_reservation_id=capacity_reservation_id, lease_end_utc="2026-01-01 00:00",
     )
     assert truncated["site"] == "dc-a"
 
-    released = await client.release(allocation_id=allocation_id)
+    released = await client.release(capacity_reservation_id=capacity_reservation_id)
     assert released["site"] == "dc-a"
     assert a.available == 4
 
 
 @pytest.mark.asyncio
 async def test_cold_cache_fans_out_to_find_the_owner():
-    """After a restart the allocation→site cache is empty; writes ask
+    """After a restart the reservation→site cache is empty; writes ask
     every site and the holder answers."""
     client, a, b = _aggregate()
     reserved = await client.reserve(claim={"gpu_count": 5}, deal_ref={})  # lands on b
     assert reserved["site"] == "dc-b"
 
     cold = AggregateCapacityClient({"dc-a": a, "dc-b": b})
-    released = await cold.release(allocation_id=reserved["allocation_id"])
+    released = await cold.release(capacity_reservation_id=reserved["capacity_reservation_id"])
     assert released["site"] == "dc-b"
 
     # And a commit that no site recognizes propagates the failure.
     with pytest.raises(LookupError):
         await cold.commit(
-            resource_id="res-a", allocation_id="ghost",
+            resource_id="res-a", capacity_reservation_id="ghost",
             lease_end_utc="2099-01-01 00:00",
         )
 

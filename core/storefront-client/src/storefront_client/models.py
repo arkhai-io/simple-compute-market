@@ -541,7 +541,7 @@ class ReleaseReservationsResponse:
 class ReserveCapacityResponse:
     """Response from POST /api/v1/admin/portfolio/reservations."""
 
-    allocation_id: str = ""
+    capacity_reservation_id: str = ""
     pool_id: str | None = None
     member_id: str | None = None
     resource_id: str = ""
@@ -553,7 +553,7 @@ class ReserveCapacityResponse:
     @classmethod
     def from_dict(cls, d: dict) -> "ReserveCapacityResponse":
         known = {
-            "allocation_id",
+            "capacity_reservation_id",
             "pool_id",
             "member_id",
             "resource_id",
@@ -562,7 +562,7 @@ class ReserveCapacityResponse:
             "closed_listing_ids",
         }
         return cls(
-            allocation_id=str(d.get("allocation_id") or ""),
+            capacity_reservation_id=str(d.get("capacity_reservation_id") or ""),
             pool_id=d.get("pool_id"),
             member_id=d.get("member_id"),
             resource_id=str(d.get("resource_id") or ""),

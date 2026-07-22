@@ -93,8 +93,8 @@ def _make_lease_lifecycle(
         release_jobs=job_service,
         default_executor_kind=DEFAULT_EXECUTOR_KIND,
         capacity_released_notifier=(
-            lambda allocation: notify_storefront_capacity_released(
-                cfg, allocation, sink=lifecycle_event_sink
+            lambda reservation: notify_storefront_capacity_released(
+                cfg, reservation, sink=lifecycle_event_sink
             )
         ),
     )

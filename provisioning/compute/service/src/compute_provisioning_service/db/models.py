@@ -26,7 +26,7 @@ class AnsibleJob(Base):
     __tablename__ = "ansible_jobs"
     __table_args__ = (
         UniqueConstraint(
-            "allocation_id",
+            "capacity_reservation_id",
             "action_kind",
             "idempotency_key",
             name="uq_ansible_jobs_contract_idempotency",
@@ -45,7 +45,7 @@ class AnsibleJob(Base):
     next_retry_at = Column(DateTime(timezone=True), nullable=True)  # Scheduled time for next retry
     escrow_uid = Column(String, nullable=True, index=True)  # On-chain escrow UID linking this job to a deal
     contract_version = Column(String, nullable=True)
-    allocation_id = Column(String, nullable=True, index=True)
+    capacity_reservation_id = Column(String, nullable=True, index=True)
     deal_ref = Column(JSON, nullable=True)
     executor_kind = Column(String, nullable=True)
     action_kind = Column(String, nullable=True)
@@ -163,15 +163,13 @@ class Host(Base):
     )
 
 
-# The site-authority ledger (AllocationState, SiteResource,
-# SiteAllocation, CapacityEvent) lives in the shared market_site
+# The site-authority ledger models live in the shared market_site
 # package; re-exported here because the service's modules and tests
 # reach all persistence models through db.models. The tables ride
 # market_site's own metadata — init_db creates both.
 from market_site.db import (  # noqa: F401
-    HELD_ALLOCATION_STATES,
-    AllocationState,
+    HELD_RESERVATION_STATES,
+    ReservationState,
     CapacityEvent,
-    SiteAllocation,
-    SiteResource,
+    CapacityReservation,
 )

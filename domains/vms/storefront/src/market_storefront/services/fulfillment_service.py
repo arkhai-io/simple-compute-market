@@ -33,7 +33,7 @@ async def _do_provision(
     vm_host: str,
     vm_target: str,
     on_job_submitted: Callable[[str], Awaitable[None]] | None = None,
-    allocation_id: str,
+    capacity_reservation_id: str,
     deal_ref: dict[str, Any],
 ) -> dict:
     """Submit a create VM job to the provisioning service and return the result.
@@ -60,7 +60,7 @@ async def _do_provision(
         timeout=timeout,
         poll_interval=poll_interval,
         vm_host=vm_host,
-        allocation_id=allocation_id,
+        capacity_reservation_id=capacity_reservation_id,
         deal_ref=deal_ref,
         parameters=params,
         on_job_submitted=on_job_submitted,
@@ -104,7 +104,7 @@ async def _build_provisioning_job_spec(
 
 async def _apply_fulfillment_failure_policy_adapter(
     *,
-    allocation_id: str | None,
+    capacity_reservation_id: str | None,
     escrow_uid: str,
     listing_id: str | None,
     resource_id: str | None,
@@ -120,7 +120,7 @@ async def _apply_fulfillment_failure_policy_adapter(
     await apply_fulfillment_failure_policy(
         get_sqlite_client(),
         FulfillmentFailureContext(
-            allocation_id=allocation_id,
+            capacity_reservation_id=capacity_reservation_id,
             escrow_uid=escrow_uid,
             listing_id=listing_id,
             resource_id=resource_id,
@@ -137,7 +137,7 @@ async def _apply_fulfillment_failure_policy_adapter(
 async def _register_vm_lease_with_settings(
     *,
     resource_id: str,
-    allocation_id: str | None,
+    capacity_reservation_id: str | None,
     escrow_uid: str,
     vm_host: str,
     vm_target: str,
@@ -153,7 +153,7 @@ async def _register_vm_lease_with_settings(
         timeout=10,
     ) as client:
         await client.register_lease(LeaseRegistration(
-            allocation_id=allocation_id or resource_id,
+            capacity_reservation_id=capacity_reservation_id or resource_id,
             deal_ref={"escrow_uid": escrow_uid},
             executor_kind="vm",
             executor_target=vm_target,
@@ -186,18 +186,18 @@ async def fulfill_compute_obligation(
 
     When the negotiation's acceptance placed a TTL capacity hold
     (two-phase reserve), it is consumed here: fulfillment commits the
-    held allocation instead of racing a fresh reserve.
+    held reservation instead of racing a fresh reserve.
 
     When fulfillment lands, pushes the fulfillment_uid to the registry's
     update endpoint.
     """
-    held_allocation: dict | None = None
+    held_reservation: dict | None = None
     if negotiation_id:
         db = get_sqlite_client()
         hold = await db.load_capacity_hold(negotiation_id=negotiation_id)
         if hold:
-            held_allocation = dict(hold.get("payload") or {})
-            held_allocation.setdefault("allocation_id", hold.get("allocation_id"))
+            held_reservation = dict(hold.get("payload") or {})
+            held_reservation.setdefault("capacity_reservation_id", hold.get("capacity_reservation_id"))
             # Consume-once: whether the commit lands or falls back to a
             # fresh reserve, this hold row's job is done.
             await db.delete_capacity_hold(negotiation_id=negotiation_id)
@@ -222,5 +222,5 @@ async def fulfill_compute_obligation(
         schedule_shutdown=_do_shutdown,
         register_lease=_register_vm_lease_with_settings,
         apply_failure_policy=_apply_fulfillment_failure_policy_adapter,
-        held_allocation=held_allocation,
+        held_reservation=held_reservation,
     )

@@ -586,7 +586,7 @@ class StorefrontClient(_StorefrontClientBase):
 
     async def notify_capacity_released(
         self,
-        allocation_id: str,
+        capacity_reservation_id: str,
         *,
         resource_id: "str | None" = None,
         provider_lease_id: "str | None" = None,
@@ -594,13 +594,13 @@ class StorefrontClient(_StorefrontClientBase):
     ) -> dict:
         """POST /api/v1/admin/fulfillment/events/capacity-released  (admin key required).
 
-        Deal-scoped event from the capacity side: the allocation's lease
+        Deal-scoped event from the capacity side: the reservation's lease
         ended and its capacity returned to the pool. The site authority's
         watchdog delivers this point-to-point to the deal's owning
         storefront — it replaces the legacy resource PATCH for
-        ledger-held allocations.
+        ledger-held reservations.
         """
-        body: dict = {"allocation_id": allocation_id}
+        body: dict = {"capacity_reservation_id": capacity_reservation_id}
         if resource_id is not None:
             body["resource_id"] = resource_id
         if provider_lease_id is not None:

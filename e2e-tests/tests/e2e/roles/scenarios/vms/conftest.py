@@ -99,7 +99,7 @@ class DealState:
     _lease_expiry_armed: bool = False
     remove_job_id: Optional[str] = None
     # Mode-agnostic lease view (DealLease) resolved in 09c: a vm_leases
-    # row in embedded-capacity mode, a site-ledger allocation in remote
+    # row in embedded-capacity mode, a site-ledger reservation in remote
     # mode. Phases 10-11 drive the expiry lifecycle through it.
     deal_lease: Optional[Any] = None
 
@@ -421,14 +421,14 @@ def wait_for_stage_event(
 
 
 # ---------------------------------------------------------------------------
-# Mode-agnostic deal-lease view (embedded vm_leases vs site-ledger allocation)
+# Mode-agnostic deal-lease view (embedded vm_leases vs site-ledger reservation)
 # ---------------------------------------------------------------------------
 
 class DealLease:
-    """One deal's lease: the temporal tail of its ledger allocation.
+    """One deal's lease: the temporal tail of its ledger reservation.
 
     The full-deal scenarios drive the expiry lifecycle through this
-    view — resolve the allocation by escrow, read it back in lease
+    view — resolve the reservation by escrow, read it back in lease
     vocabulary, back-date its end, and observe the watchdog release it
     in the ledger with a deal-scoped capacity-released event to the
     storefront.
@@ -443,22 +443,22 @@ class DealLease:
         self._client = provisioning_client
         self.escrow_uid = escrow_uid
         self.is_ledger = True
-        allocations = (
-            provisioning_client.list_capacity_allocations(escrow_uid=escrow_uid)
-            .get("allocations") or []
+        reservations = (
+            provisioning_client.list_capacity_reservations(escrow_uid=escrow_uid)
+            .get("reservations") or []
         )
-        live = [a for a in allocations if a.get("lease_end_utc")]
+        live = [a for a in reservations if a.get("lease_end_utc")]
         assert live, (
-            f"No ledger allocation with a lease tail for escrow "
+            f"No ledger reservation with a lease tail for escrow "
             f"{escrow_uid!r} — was the lease registered after fulfillment?"
         )
-        self.lease_id = str(live[0]["allocation_id"])
+        self.lease_id = str(live[0]["capacity_reservation_id"])
 
     def refresh(self) -> dict:
         """Current lease fields in lease vocabulary."""
-        row = self._client.get_capacity_allocation(self.lease_id)
+        row = self._client.get_capacity_reservation(self.lease_id)
         return {
-            "id": row.get("allocation_id"),
+            "id": row.get("capacity_reservation_id"),
             "escrow_uid": row.get("escrow_uid"),
             "resource_id": row.get("resource_id"),
             "vm_host": row.get("vm_host"),
@@ -474,7 +474,7 @@ class DealLease:
         """Move the lease end into the past so the next watchdog cycle fires.
 
         Uses PATCH /api/v1/leases/{id} (update_lease) to update the ledger
-        allocation's lease_end_utc directly.  Returns the refreshed normalized
+        reservation's lease_end_utc directly.  Returns the refreshed normalized
         lease view.
         """
         self._client.update_lease(self.lease_id, lease_end_utc=lease_end_utc)

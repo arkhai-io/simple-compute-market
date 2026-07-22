@@ -50,6 +50,7 @@ class RemoteCapacityClient:
         self._bus = bus or CapacityEventBus()
         self._timeout = timeout
         self._transport = transport  # test seam (httpx.MockTransport / ASGI)
+        self._topology_error_handler: Callable[[], Awaitable[None]] | None = None
 
     @property
     def base_url(self) -> str:
@@ -71,13 +72,34 @@ class RemoteCapacityClient:
 
     async def _post(self, path: str, body: dict[str, Any]) -> httpx.Response:
         async with self._http() as http:
-            return await http.post(
+            response = await http.post(
                 f"{self._base_url}{path}", json=body, headers=self._headers(),
             )
+        if response.status_code in {404, 409, 422} and self._topology_error_handler is not None:
+            await self._topology_error_handler()
+        return response
+
+    def set_topology_error_handler(
+        self, handler: Callable[[], Awaitable[None]] | None
+    ) -> None:
+        """Install a bounded drift check invoked after topology-sensitive failures."""
+        self._topology_error_handler = handler
 
     async def snapshot(self) -> list[dict[str, Any]]:
         data = await self._get("/api/v1/capacity/snapshot")
         return list(data.get("resources") or [])
+
+    async def resource_pool_projection_version(self) -> dict[str, Any]:
+        return await self._get("/api/v1/capacity/site-resource-pools/version")
+
+    async def resource_pool_projection(self) -> dict[str, Any]:
+        return await self._get("/api/v1/capacity/site-resource-pools")
+
+    async def capacity_bucket_projection_version(self) -> dict[str, Any]:
+        return await self._get("/api/v1/capacity/site-capacity-buckets/version")
+
+    async def capacity_bucket_projection(self) -> dict[str, Any]:
+        return await self._get("/api/v1/capacity/site-capacity-buckets")
 
     async def probe(
         self,
@@ -118,24 +140,24 @@ class RemoteCapacityClient:
             body["lease_duration_seconds"] = int(lease_duration_seconds)
         resp = await self._post("/api/v1/capacity/reservations", body)
         resp.raise_for_status()
-        return resp.json().get("allocation")
+        return resp.json().get("reservation")
 
     async def commit(
         self,
         *,
         resource_id: str,
-        allocation_id: str | None = None,
+        capacity_reservation_id: str | None = None,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
     ) -> None:
-        if not allocation_id:
+        if not capacity_reservation_id:
             raise ValueError(
-                "remote capacity commit requires the allocation_id the "
+                "remote capacity commit requires the capacity_reservation_id the "
                 "reserve returned (the site ledger has no aggregate path)",
             )
         resp = await self._post(
-            f"/api/v1/capacity/allocations/{allocation_id}/commit",
+            f"/api/v1/capacity/reservations/{capacity_reservation_id}/commit",
             {
                 "resource_id": resource_id,
                 "lease_start_utc": (
@@ -152,13 +174,13 @@ class RemoteCapacityClient:
     async def release(
         self,
         *,
-        allocation_id: str | None = None,
+        capacity_reservation_id: str | None = None,
         deal_ref: Mapping[str, Any] | None = None,
         failure_reason: str | None = None,
         failure_message: str | None = None,
     ) -> dict[str, Any] | None:
         body: dict[str, Any] = {
-            "allocation_id": allocation_id,
+            "capacity_reservation_id": capacity_reservation_id,
             "deal_ref": dict(deal_ref or {}),
         }
         if failure_reason is not None:
@@ -167,20 +189,20 @@ class RemoteCapacityClient:
             body["failure_message"] = failure_message
         resp = await self._post("/api/v1/capacity/releases", body)
         resp.raise_for_status()
-        return resp.json().get("allocation")
+        return resp.json().get("reservation")
 
     async def truncate_lease(
         self,
         *,
-        allocation_id: str,
+        capacity_reservation_id: str,
         lease_end_utc: str,
     ) -> dict[str, Any] | None:
         resp = await self._post(
-            f"/api/v1/capacity/allocations/{allocation_id}/truncate-lease",
+            f"/api/v1/capacity/reservations/{capacity_reservation_id}/truncate-lease",
             {"lease_end_utc": str(lease_end_utc)},
         )
         resp.raise_for_status()
-        return resp.json().get("allocation")
+        return resp.json().get("reservation")
 
     def subscribe(self, subscriber: CapacitySubscriber) -> Callable[[], None]:
         return self._bus.subscribe(subscriber)
@@ -188,7 +210,7 @@ class RemoteCapacityClient:
     # Beyond the protocol: the feed the poller tails and the registry
     # mirror used by inventory seeding.
 
-    async def list_allocations(
+    async def list_reservations(
         self,
         *,
         state: str | None = None,
@@ -199,8 +221,8 @@ class RemoteCapacityClient:
             params["state"] = state
         if escrow_uid is not None:
             params["escrow_uid"] = escrow_uid
-        data = await self._get("/api/v1/capacity/allocations", params=params)
-        return list(data.get("allocations") or [])
+        data = await self._get("/api/v1/capacity/reservations", params=params)
+        return list(data.get("reservations") or [])
 
     async def events_after(
         self, after_version: int, *, limit: int = 500,

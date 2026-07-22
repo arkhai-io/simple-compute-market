@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bare-metal/leases", tags=["bare-metal"])
 
 
-def _physical_host_id(allocation: dict[str, Any]) -> str:
-    executor_ref = allocation.get("executor_ref")
+def _physical_host_id(reservation: dict[str, Any]) -> str:
+    executor_ref = reservation.get("executor_ref")
     if isinstance(executor_ref, dict):
         value = executor_ref.get(PHYSICAL_HOST_ID_REF_KEY)
         if value:
@@ -38,18 +38,18 @@ def _physical_host_id(allocation: dict[str, Any]) -> str:
     return ""
 
 
-def _lease_view(allocation: dict[str, Any]) -> BareMetalLeaseView:
+def _lease_view(reservation: dict[str, Any]) -> BareMetalLeaseView:
     return BareMetalLeaseView(
-        allocation_id=str(allocation["allocation_id"]),
-        escrow_uid=allocation.get("escrow_uid"),
-        machine_id=str(allocation.get("executor_target") or ""),
-        physical_host_id=_physical_host_id(allocation),
-        lease_start_utc=allocation.get("lease_start_utc"),
-        lease_end_utc=allocation.get("lease_end_utc"),
-        state=str(allocation.get("state")),
-        release_job_id=allocation.get("release_job_id")
-        or allocation.get("vm_remove_job_id"),
-        access_ref=bare_metal_access_ref(allocation),
+        capacity_reservation_id=str(reservation["capacity_reservation_id"]),
+        escrow_uid=reservation.get("escrow_uid"),
+        machine_id=str(reservation.get("executor_target") or ""),
+        physical_host_id=_physical_host_id(reservation),
+        lease_start_utc=reservation.get("lease_start_utc"),
+        lease_end_utc=reservation.get("lease_end_utc"),
+        state=str(reservation.get("state")),
+        release_job_id=reservation.get("release_job_id")
+        or reservation.get("vm_remove_job_id"),
+        access_ref=bare_metal_access_ref(reservation),
     )
 
 
@@ -81,13 +81,13 @@ class BareMetalLeasesController:
         summary="List bare-metal leases",
     )
     def list_leases(self) -> list[BareMetalLeaseView]:
-        return [_lease_view(allocation) for allocation in self._leases.list_leases()]
+        return [_lease_view(reservation) for reservation in self._leases.list_leases()]
 
     @router.post(
         "/",
         response_model=BareMetalLeaseView,
         status_code=201,
-        summary="Register a bare-metal lease on its allocation",
+        summary="Register a bare-metal lease on its reservation",
     )
     async def create_lease(self, body: BareMetalLeaseCreate) -> BareMetalLeaseView:
         try:
@@ -98,8 +98,8 @@ class BareMetalLeasesController:
         except (LeaseNotFoundError, BareMetalHostValidationError) as exc:
             raise _http_error(exc) from exc
         logger.info(
-            "[BARE_METAL_LEASES] Attached lease to allocation %s (machine=%s escrow=%s)",
-            attached["allocation_id"],
+            "[BARE_METAL_LEASES] Attached lease to reservation %s (machine=%s escrow=%s)",
+            attached["capacity_reservation_id"],
             body.machine_id,
             body.escrow_uid,
         )
@@ -119,7 +119,7 @@ class BareMetalLeasesController:
     @router.get(
         "/{lease_id}",
         response_model=BareMetalLeaseView,
-        summary="Get bare-metal lease by allocation ID",
+        summary="Get bare-metal lease by reservation ID",
     )
     def get_lease(self, lease_id: str) -> BareMetalLeaseView:
         try:

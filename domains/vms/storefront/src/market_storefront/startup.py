@@ -221,16 +221,9 @@ def _start_claims_engine() -> None:
     )
 
 
-async def _sync_site_resources() -> None:
-    # Mirror inventory into the home site authority's ledger. Runs after the
-    # provisioning preflight because that process hosts the site authority.
-    from market_storefront.services.capacity_client import sync_site_resources
-
-    await sync_site_resources()
-
 
 def _start_capacity_events_poller() -> None:
-    # Tail every authority's capacity-event feed after the site sync step.
+    # Tail every authority's capacity-event feed after provisioning preflight.
     from market_storefront.services.capacity_client import capacity_events_poller_loop
 
     start_storefront_background_task(
@@ -241,6 +234,24 @@ def _start_capacity_events_poller() -> None:
         logger=logger,
     )
 
+
+
+async def _load_site_projections() -> None:
+    from market_storefront.services.site_projection_cache import load_site_projections
+
+    await load_site_projections()
+
+
+def _start_site_projection_poller() -> None:
+    from market_storefront.services.site_projection_cache import site_projection_poller_loop
+
+    start_storefront_background_task(
+        StorefrontBackgroundTask(
+            name="site_projection_poller",
+            task_factory=site_projection_poller_loop,
+        ),
+        logger=logger,
+    )
 
 async def _startup_tasks() -> None:
     """Initialize background tasks. Called from server.py lifespan."""
@@ -264,14 +275,13 @@ async def _startup_tasks() -> None:
             StorefrontStartupStep("claims_engine", _start_claims_engine),
             StorefrontStartupStep("preflight_provisioning", _preflight_provisioning),
             StorefrontStartupStep(
-                "sync_site_resources",
-                _sync_site_resources,
-                continue_on_error=True,
-                error_message=(
-                    "[STARTUP] Site-authority resource sync failed: %s — the ledger "
-                    "may be empty; reserves will not match until inventory is "
-                    "registered"
-                ),
+                "load_site_projections",
+                _load_site_projections,
+                error_message="[STARTUP] Site projection load failed: %s",
+            ),
+            StorefrontStartupStep(
+                "site_projection_poller",
+                _start_site_projection_poller,
             ),
             StorefrontStartupStep(
                 "capacity_events_poller",

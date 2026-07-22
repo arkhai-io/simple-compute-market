@@ -18,7 +18,7 @@ from compute_provisioning import (
 from market_site.authority import SiteAuthorityPort
 
 from compute_provisioning_service.services.compute_contract_service import (
-    AllocationNotProvisionableError,
+    ReservationNotProvisionableError,
 )
 from bare_metal_provisioning_adapter.services.bare_metal_operations_service import (
     BareMetalOperationsService,
@@ -50,19 +50,19 @@ class BareMetalComputeAdapter:
         envelope: ExecutorActionEnvelope,
         validated_parameters: dict[str, Any],
     ) -> str:
-        allocation = self._site_authority.get_allocation(envelope.allocation_id) or {}
+        reservation = self._site_authority.get_reservation(envelope.capacity_reservation_id) or {}
         deal_ref = dict(envelope.deal_ref)
-        executor_ref = dict(allocation.get("executor_ref") or {})
+        executor_ref = dict(reservation.get("executor_ref") or {})
         body = BareMetalLeaseCreate.model_validate(
             {
                 **validated_parameters,
-                "allocation_id": envelope.allocation_id,
+                "capacity_reservation_id": envelope.capacity_reservation_id,
                 "escrow_uid": deal_ref.get("escrow_uid")
-                or allocation.get("escrow_uid"),
-                "machine_id": allocation.get("executor_target"),
+                or reservation.get("escrow_uid"),
+                "machine_id": reservation.get("executor_target"),
                 "physical_host_id": executor_ref.get("physical_host_id"),
-                "lease_start_utc": allocation.get("lease_start_utc"),
-                "lease_end_utc": allocation.get("lease_end_utc"),
+                "lease_start_utc": reservation.get("lease_start_utc"),
+                "lease_end_utc": reservation.get("lease_end_utc"),
                 "access_ref": executor_ref.get("access_ref")
                 or validated_parameters.get("access_ref"),
             }
